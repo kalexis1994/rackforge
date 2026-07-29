@@ -4,3 +4,6 @@
 [submodule "firmware/vendor/doomgeneric"]
 	path = firmware/vendor/doomgeneric
 	url = https://github.com/ozkl/doomgeneric.git
+[submodule "raspberry/engines/nuked-sc55/vendor/Nuked-SC55"]
+	path = raspberry/engines/nuked-sc55/vendor/Nuked-SC55
+	url = https://github.com/nukeykt/Nuked-SC55.git

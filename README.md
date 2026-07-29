@@ -53,8 +53,10 @@ conexión, sincronización y diagnóstico viven en `raspberry/dev/`.
 - Raspberry Pi OS Lite / Debian 13 arm64, sin entorno gráfico.
 - Toolchain Rust, C/C++, CMake, Ninja, ALSA y udev instalado.
 - Comunicación de pantalla SysEx comprobada con el firmware Arturia actual.
+- Entrada Note on/off del KeyLab comprobada directamente en la Raspberry.
+- Nuked-SC55 compilado nativamente para ARM64; pendiente aportar ROMs propias.
 - Scaffold bare-metal seguro para el N32G455.
 - Port de DOOM conservado como banco de pruebas y función futura.
 
-La prioridad inmediata es terminar el protocolo Raspberry↔KeyLab y un daemon
-headless que detecte MIDI y audio antes de incorporar motores Roland.
+La prioridad inmediata es completar la primera ruta
+KeyLab→Nuked-SC55→Scarlett y luego integrarla en el daemon headless.

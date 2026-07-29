@@ -55,6 +55,11 @@ const CONTROL_BLOCKS: &[ControlBlock] = &[
         offset: 0x18f57b0,
         size: 0x93b00,
     },
+    ControlBlock {
+        name: "interpolation-coefficients.bin",
+        offset: 0x1a11b20,
+        size: 0x800,
+    },
 ];
 
 struct WaveGroup {

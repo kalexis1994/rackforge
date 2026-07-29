@@ -13,6 +13,8 @@ pub const WAVE_MAP_RECORD_SIZE: usize = 0x8c;
 pub const WAVE_MAP_RECORD_COUNT: usize = 1_175;
 pub const TONE_RECORD_SIZE: usize = 0x100;
 pub const TONE_RECORD_COUNT: usize = 2_363;
+pub const INTERPOLATION_PHASE_COUNT: usize = 128;
+pub const INTERPOLATION_TAP_COUNT: usize = 4;
 
 const KNOWN_112_HASHES: [&str; 4] = [
     "05a36e2e354611e667b643d619c9c1d2a2f0836bd585189e061b82f27b827385",
@@ -291,6 +293,11 @@ const TONE_SPEC: ControlSpec = ControlSpec {
     size: 0x93b00,
     sha256: "9a4f4ae5017f338c6bca2356e8236aa5a501c4388b4a490499e3765a04839104",
 };
+const INTERPOLATION_SPEC: ControlSpec = ControlSpec {
+    file_name: "interpolation-coefficients.bin",
+    size: INTERPOLATION_PHASE_COUNT * INTERPOLATION_TAP_COUNT * size_of::<f32>(),
+    sha256: "7fb7907e1d10d9f55b28eb150811e9d512ca46b2e8796506fc11f2e6a28cee81",
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PartialResolution {
@@ -382,6 +389,7 @@ pub struct ControlBankSet {
     samples: Box<[u8]>,
     wave_maps: Box<[u8]>,
     tones: Box<[u8]>,
+    interpolation: Box<[u8]>,
 }
 
 impl ControlBankSet {
@@ -391,7 +399,26 @@ impl ControlBankSet {
             samples: read_exact_control(directory, &SAMPLE_SPEC)?,
             wave_maps: read_exact_control(directory, &WAVE_MAP_SPEC)?,
             tones: read_exact_control(directory, &TONE_SPEC)?,
+            interpolation: read_exact_control(directory, &INTERPOLATION_SPEC)?,
         })
+    }
+
+    pub fn interpolation_coefficients(
+        &self,
+        phase: usize,
+    ) -> Option<[f32; INTERPOLATION_TAP_COUNT]> {
+        if phase >= INTERPOLATION_PHASE_COUNT {
+            return None;
+        }
+        let start = phase * INTERPOLATION_TAP_COUNT * size_of::<f32>();
+        Some(std::array::from_fn(|tap| {
+            let offset = start + tap * size_of::<f32>();
+            f32::from_le_bytes(
+                self.interpolation[offset..offset + size_of::<f32>()]
+                    .try_into()
+                    .unwrap(),
+            )
+        }))
     }
 
     pub fn resolve(&self, tone: usize, note: usize) -> Result<ToneResolution, BankError> {
@@ -778,6 +805,7 @@ mod tests {
             samples: samples.into_boxed_slice(),
             wave_maps: wave_maps.into_boxed_slice(),
             tones: tones.into_boxed_slice(),
+            interpolation: vec![0_u8; INTERPOLATION_SPEC.size].into_boxed_slice(),
         };
         let result = controls.resolve(0, 60).unwrap();
 
@@ -801,6 +829,7 @@ mod tests {
             samples: vec![0_u8; SAMPLE_SPEC.size].into_boxed_slice(),
             wave_maps: vec![0_u8; WAVE_MAP_SPEC.size].into_boxed_slice(),
             tones: vec![0_u8; TONE_SPEC.size].into_boxed_slice(),
+            interpolation: vec![0_u8; INTERPOLATION_SPEC.size].into_boxed_slice(),
         };
 
         assert!(matches!(

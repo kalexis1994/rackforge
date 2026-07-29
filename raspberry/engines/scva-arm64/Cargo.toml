@@ -11,6 +11,11 @@ hound = "3.5"
 sha2 = "0.10"
 thiserror = "2.0"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = "0.10"
+libc = "0.2"
+midir = "0.11"
+
 [lib]
 name = "artupy_scva_bank"
 path = "src/lib.rs"
@@ -18,3 +23,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "artupy-scva-bank"
 path = "src/main.rs"
+
+[[bin]]
+name = "artupy-scva-live"
+path = "src/bin/scva_live.rs"

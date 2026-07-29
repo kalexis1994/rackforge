@@ -33,7 +33,8 @@ Los bancos se instalan fuera de Git:
 └── control-v1/
     ├── sample-descriptors.bin
     ├── wave-maps.bin
-    └── tones.bin
+    ├── tones.bin
+    └── interpolation-coefficients.bin
 ```
 
 ## Compilación en la Raspberry

@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 #define RACKFORGE_ABI_VERSION_MAJOR 1u
-#define RACKFORGE_ABI_VERSION_MINOR 2u
+#define RACKFORGE_ABI_VERSION_MINOR 3u
 #define RACKFORGE_ABI_VERSION \
     ((RACKFORGE_ABI_VERSION_MAJOR << 16u) | RACKFORGE_ABI_VERSION_MINOR)
 
@@ -43,6 +43,11 @@ typedef size_t (*RackForgeHostGetAddonDataPathFnV1)(
     uint8_t *destination,
     size_t capacity
 );
+typedef int32_t (*RackForgeHostPublishPresetCatalogFnV1)(
+    void *context,
+    const uint8_t *source,
+    size_t length
+);
 
 typedef struct RackForgeHostApiV1 {
     uint32_t struct_size;
@@ -51,6 +56,7 @@ typedef struct RackForgeHostApiV1 {
     RackForgeHostLogFnV1 log;
     RackForgeHostGetResourcePathFnV1 get_resource_path;
     RackForgeHostGetAddonDataPathFnV1 get_addon_data_path;
+    RackForgeHostPublishPresetCatalogFnV1 publish_preset_catalog;
 } RackForgeHostApiV1;
 
 typedef struct RackForgeMidiEventV1 {

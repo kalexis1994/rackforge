@@ -4,7 +4,8 @@ use libloading::{Library, Symbol};
 use rackforge_plugin_api::abi::{
     ABI_VERSION, ENTRY_SYMBOL_V1, HostApiV1, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO,
     LOG_LEVEL_TRACE, LOG_LEVEL_WARN, MidiEventV1, ParameterEventV1, PluginApiV1, PluginEntryFnV1,
-    ProcessBlockV1, STATUS_OK, copy_to_host_buffer, is_compatible,
+    ProcessBlockV1, STATUS_INTERNAL_ERROR, STATUS_INVALID_ARGUMENT, STATUS_OK, copy_to_host_buffer,
+    is_compatible,
 };
 use rackforge_plugin_api::{
     Capability, ParameterSchema, PluginManifest, PresetCatalog, RuntimeDescriptor,
@@ -14,6 +15,7 @@ use std::ffi::c_void;
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::Mutex;
 
 const MAX_METADATA_BYTES: usize = 1024 * 1024;
 
@@ -124,6 +126,7 @@ impl LoadedPlugin {
         let mut host_context = Box::new(HostContext {
             resource_paths,
             addon_data_path,
+            dynamic_presets: Mutex::new(None),
         });
         let context = host_context.as_mut() as *mut HostContext as *mut c_void;
         let host_api = Box::new(HostApiV1::new(
@@ -131,6 +134,7 @@ impl LoadedPlugin {
             Some(host_log),
             Some(host_get_resource_path),
             Some(host_get_addon_data_path),
+            Some(host_publish_preset_catalog),
         ));
         Ok(Self {
             manifest: package.manifest().clone(),
@@ -178,6 +182,7 @@ impl LoadedPlugin {
 struct HostContext {
     resource_paths: BTreeMap<String, Vec<u8>>,
     addon_data_path: Option<Vec<u8>>,
+    dynamic_presets: Mutex<Option<PresetCatalog>>,
 }
 
 pub struct PluginInstance<'plugin> {
@@ -187,6 +192,19 @@ pub struct PluginInstance<'plugin> {
 }
 
 impl PluginInstance<'_> {
+    pub fn preset_catalog(&self) -> Result<PresetCatalog> {
+        let dynamic = self
+            .plugin
+            ._host_context
+            .dynamic_presets
+            .lock()
+            .map_err(|_| anyhow!("dynamic preset catalog lock is poisoned"))?;
+        Ok(dynamic
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| self.plugin.presets.clone()))
+    }
+
     pub fn activate(
         &mut self,
         sample_rate: f64,
@@ -265,13 +283,13 @@ impl PluginInstance<'_> {
     }
 
     pub fn load_preset(&mut self, preset_id: &str) -> Result<()> {
-        if !self
-            .plugin
-            .presets
+        let dynamic = self.preset_catalog()?;
+        let declared = dynamic
             .presets
             .iter()
-            .any(|preset| preset.id == preset_id)
-        {
+            .chain(self.plugin.presets.presets.iter())
+            .any(|preset| preset.id == preset_id);
+        if !declared {
             bail!("plugin does not declare preset {preset_id:?}");
         }
         let status = unsafe {
@@ -460,4 +478,31 @@ unsafe extern "C" fn host_get_addon_data_path(
     };
     // SAFETY: the plugin owns and describes the destination buffer.
     unsafe { copy_to_host_buffer(path, destination, capacity) }
+}
+
+unsafe extern "C" fn host_publish_preset_catalog(
+    context: *mut c_void,
+    source: *const u8,
+    length: usize,
+) -> i32 {
+    if context.is_null() || source.is_null() || length == 0 || length > MAX_METADATA_BYTES {
+        return STATUS_INVALID_ARGUMENT;
+    }
+    // SAFETY: the callback contract provides a valid HostContext and readable
+    // source bytes for this call.
+    let Some(host) = (unsafe { context.cast::<HostContext>().as_ref() }) else {
+        return STATUS_INVALID_ARGUMENT;
+    };
+    let bytes = unsafe { std::slice::from_raw_parts(source, length) };
+    let Ok(catalog) = serde_json::from_slice::<PresetCatalog>(bytes) else {
+        return STATUS_INVALID_ARGUMENT;
+    };
+    if catalog.validate().is_err() {
+        return STATUS_INVALID_ARGUMENT;
+    }
+    let Ok(mut dynamic) = host.dynamic_presets.lock() else {
+        return STATUS_INTERNAL_ERROR;
+    };
+    *dynamic = Some(catalog);
+    STATUS_OK
 }

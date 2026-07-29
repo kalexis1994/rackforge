@@ -183,16 +183,18 @@ fn smoke(
     );
 
     let mut instance = plugin.create_instance()?;
+    let presets = instance.preset_catalog()?;
+    println!("DYNAMIC_PRESETS count={}", presets.presets.len());
     let preset = match requested_preset {
         Some(id) => Some(
-            plugin
-                .presets()
+            presets
                 .presets
                 .iter()
+                .chain(plugin.presets().presets.iter())
                 .find(|preset| preset.id == id)
                 .with_context(|| format!("plugin does not declare preset {id:?}"))?,
         ),
-        None => plugin.presets().presets.first(),
+        None => presets.presets.first(),
     };
     if let Some(preset) = preset {
         instance.load_preset(&preset.id)?;

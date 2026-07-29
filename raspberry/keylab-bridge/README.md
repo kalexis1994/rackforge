@@ -28,17 +28,33 @@ sugieran control de píxeles mientras esa ruta no exista.
 SysEx. La jerarquía inicial es:
 
 - `HOME`: LIVE, PLAY y CONFIG;
-- `LIVE`: performances ordenadas para tocar;
-- `PLAY`: navegador directo de plugins;
-- `CONFIG`: instrumentos, setlists, audio y sistema;
-- `INSTRUMENTS`: selección del instrumento/rack que se va a configurar;
-- `ROLAND SCVA`: páginas propias del plugin, entre ellas su envolvente ADSR.
+- `LIVE`: modo superior de RackForge para performances y racks ordenados;
+- `PLAY`: navegador de addons que abre la sección de ejecución del elegido;
+- `CONFIG`: addons, setlists, audio y sistema;
+- `ADDONS`: selección del addon que se va a configurar;
+- `RF-DLS PLAY`: sonidos tocables que ofrece RF-DLS;
+- `RF-DLS CONFIG`: páginas propias del addon, entre ellas su envolvente ADSR.
 
-La envolvente no es una configuración global ni una hermana de Roland. La ruta
-es `CONFIG → INSTRUMENTS → ROLAND SCVA → ENVELOPE`; sus valores pertenecen a
-esa instancia del plugin. A medida que se conecte el menú con `rackforge-core`,
-cada plugin declarará sus páginas y parámetros mediante la Plugin API en lugar
-de agregarlos al árbol global.
+`LIVE` nunca pertenece a RF-DLS ni a otro addon: carga programas de RackForge
+que pueden combinar varias instancias y efectos. RF-DLS tiene dos rutas
+independientes: `PLAY → RF-DLS → RF-DLS PLAY` y
+`CONFIG → ADDONS → RF-DLS → RF-DLS CONFIG`.
+
+Los selectores PLAY y ADDONS contienen únicamente addons descubiertos como
+instalados. No muestran placeholders, opciones deshabilitadas ni estados
+`Installed`/`Not installed`. ADDONS tampoco usa subtítulo: el nombre de cada
+addon es información suficiente.
+
+En RF-DLS PLAY, nombres y posiciones provienen del catálogo dinámico publicado
+por el addon a Core. El bridge consulta `live-control.sock` mediante
+`rackforge-control-api` y envía una orden genérica `SelectSound` al confirmar
+con OK. Nunca abre el `.dls`, no conoce bancos MIDI y normaliza texto no ASCII
+a los 18 caracteres seguros del display.
+
+La envolvente no es una configuración global. Sus valores pertenecen a la
+instancia de RF-DLS abierta desde CONFIG. A medida que el menú se conecte con
+`rackforge-core`, cada addon declarará sus páginas y parámetros mediante la
+Plugin API en lugar de agregarlos al árbol global.
 
 El renderer produce header, dos líneas ASCII de hasta 18 caracteres y un footer
 contextual nativo. Las acciones abstractas `Previous`, `Next`, `Back` y
@@ -52,8 +68,9 @@ la línea 2 cuando necesiten una jerarquía visual real.
 
 El header superior es una región opcional. La navegación puede usarlo para
 `HOME`, `LIVE SET`, `PLAY` o `CONFIG`; una página declarada por un plugin puede
-pedirlo mediante la Plugin API. Roland usa `ROLAND SCVA` en su configuración y
-el editor inmersivo de envolvente puede ocultarlo para recuperar espacio.
+pedirlo mediante la Plugin API. RF-DLS distingue `RF-DLS PLAY` de
+`RF-DLS CONFIG`, y el editor inmersivo de envolvente puede ocultarlo para
+recuperar espacio.
 
 Las listas usan dos componentes sin vecinos visibles. El carrusel simple
 muestra la opción actual en la línea 1 y una descripción breve en la línea 2.

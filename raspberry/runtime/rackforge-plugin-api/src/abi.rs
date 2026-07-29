@@ -8,7 +8,7 @@ use std::mem::size_of;
 use std::ptr;
 
 pub const ABI_VERSION_MAJOR: u16 = 1;
-pub const ABI_VERSION_MINOR: u16 = 2;
+pub const ABI_VERSION_MINOR: u16 = 3;
 pub const ABI_VERSION: u32 = pack_version(ABI_VERSION_MAJOR, ABI_VERSION_MINOR);
 pub const ENTRY_SYMBOL_V1: &[u8] = b"rackforge_plugin_entry_v1\0";
 
@@ -47,6 +47,8 @@ pub type HostGetResourcePathFnV1 = unsafe extern "C" fn(
 ) -> usize;
 pub type HostGetAddonDataPathFnV1 =
     unsafe extern "C" fn(context: *mut c_void, destination: *mut u8, capacity: usize) -> usize;
+pub type HostPublishPresetCatalogFnV1 =
+    unsafe extern "C" fn(context: *mut c_void, source: *const u8, length: usize) -> i32;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -57,6 +59,7 @@ pub struct HostApiV1 {
     pub log: Option<HostLogFnV1>,
     pub get_resource_path: Option<HostGetResourcePathFnV1>,
     pub get_addon_data_path: Option<HostGetAddonDataPathFnV1>,
+    pub publish_preset_catalog: Option<HostPublishPresetCatalogFnV1>,
 }
 
 impl HostApiV1 {
@@ -65,6 +68,7 @@ impl HostApiV1 {
         log: Option<HostLogFnV1>,
         get_resource_path: Option<HostGetResourcePathFnV1>,
         get_addon_data_path: Option<HostGetAddonDataPathFnV1>,
+        publish_preset_catalog: Option<HostPublishPresetCatalogFnV1>,
     ) -> Self {
         Self {
             struct_size: size_of::<Self>() as u32,
@@ -73,6 +77,7 @@ impl HostApiV1 {
             log,
             get_resource_path,
             get_addon_data_path,
+            publish_preset_catalog,
         }
     }
 }
@@ -201,12 +206,13 @@ mod tests {
     #[test]
     fn packs_and_checks_api_versions() {
         assert_eq!(version_major(ABI_VERSION), 1);
-        assert_eq!(version_minor(ABI_VERSION), 2);
+        assert_eq!(version_minor(ABI_VERSION), 3);
         assert!(is_compatible(pack_version(1, 0)));
         assert!(is_compatible(pack_version(1, 1)));
         assert!(is_compatible(pack_version(1, 2)));
+        assert!(is_compatible(pack_version(1, 3)));
         assert!(!is_compatible(pack_version(2, 0)));
-        assert!(!is_compatible(pack_version(1, 3)));
+        assert!(!is_compatible(pack_version(1, 4)));
     }
 
     #[test]

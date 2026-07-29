@@ -5,11 +5,24 @@ use midir::{
     Ignore, MidiInput, MidiInputConnection, MidiInputPort, MidiOutput, MidiOutputConnection,
     MidiOutputPort,
 };
+#[cfg(target_os = "linux")]
+use rackforge_control_api::{
+    CONTROL_SOCKET_NAME, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES,
+    decode_response, encode_line,
+};
 use std::env;
 use std::error::Error;
 use std::fmt::Write as _;
 #[cfg(target_os = "linux")]
 use std::fs;
+#[cfg(target_os = "linux")]
+use std::io::{Read, Write};
+#[cfg(target_os = "linux")]
+use std::net::Shutdown;
+#[cfg(target_os = "linux")]
+use std::os::unix::net::UnixStream;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -649,6 +662,9 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
     }
 
     let mut menu = menu::Menu::default();
+    if let Err(error) = refresh_live_catalog(&mut menu) {
+        eprintln!("Catálogo LIVE todavía no disponible: {error}");
+    }
     println!("Esperando el KeyLab Essential mk3...");
     loop {
         let midi = MidiOutput::new("rackforge KeyLab Display")?;
@@ -761,6 +777,17 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                             }
                         }
                     }
+                    match apply_pending_menu_command(&mut menu) {
+                        Ok(true) => {
+                            messages = render_menu_messages(&menu)?;
+                            if let Err(error) = send_menu(&mut session, &messages) {
+                                eprintln!("No se pudo confirmar la selección: {error}");
+                                break;
+                            }
+                        }
+                        Ok(false) => {}
+                        Err(error) => eprintln!("No se pudo seleccionar el sonido: {error}"),
+                    }
                     println!("INPUT {event:?}");
                 }
                 Err(RecvTimeoutError::Timeout) => {}
@@ -778,6 +805,11 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 Ok(true) => {
                     missed_acks = 0;
                     println!("HEALTHY OLED_ACK");
+                    if let Err(error) = refresh_live_catalog(&mut menu) {
+                        eprintln!("No se pudo refrescar el catálogo LIVE: {error}");
+                    } else {
+                        messages = render_menu_messages(&menu)?;
+                    }
                     if let Err(error) = send_menu(&mut session, &messages) {
                         eprintln!("No se pudo reafirmar el menú: {error}");
                         break;
@@ -799,6 +831,110 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         }
         thread::sleep(Duration::from_millis(500));
     }
+}
+
+#[cfg(target_os = "linux")]
+fn control_socket_path() -> PathBuf {
+    env::var_os("RACKFORGE_CONTROL_SOCKET")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            let root = env::var_os("RACKFORGE_ROOT")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"));
+            root.join("state").join(CONTROL_SOCKET_NAME)
+        })
+}
+
+#[cfg(target_os = "linux")]
+fn control_request(request: &ControlRequest) -> Result<ControlResponse, String> {
+    let path = control_socket_path();
+    let mut stream =
+        UnixStream::connect(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(1)))
+        .map_err(|error| error.to_string())?;
+    let bytes = encode_line(request).map_err(|error| error.to_string())?;
+    stream
+        .write_all(&bytes)
+        .map_err(|error| error.to_string())?;
+    stream
+        .shutdown(Shutdown::Write)
+        .map_err(|error| error.to_string())?;
+    let mut response = Vec::new();
+    stream
+        .take((MAX_CONTROL_MESSAGE_BYTES + 1) as u64)
+        .read_to_end(&mut response)
+        .map_err(|error| error.to_string())?;
+    if response.is_empty() || response.len() > MAX_CONTROL_MESSAGE_BYTES {
+        return Err("respuesta de control vacía o demasiado grande".into());
+    }
+    decode_response(&response).map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
+    let response = control_request(&ControlRequest::Snapshot)?;
+    match response {
+        ControlResponse::Snapshot { snapshot } if snapshot.plugin_id == "org.rackforge.rf-dls" => {
+            let selected = snapshot.selected_sound_id.clone();
+            menu.set_play_sounds(
+                snapshot
+                    .sounds
+                    .into_iter()
+                    .map(|sound| {
+                        menu::PlaySound::new(
+                            sound.id,
+                            sound.name,
+                            sound.detail.unwrap_or_else(|| " ".into()),
+                        )
+                    })
+                    .collect(),
+                selected.as_deref(),
+            );
+            Ok(())
+        }
+        ControlResponse::Snapshot { snapshot } => Err(format!(
+            "el motor LIVE activo es {}, no RF-DLS",
+            snapshot.plugin_id
+        )),
+        ControlResponse::Error { message } => Err(message),
+        ControlResponse::Ok { .. } => Err("respuesta inesperada al pedir catálogo".into()),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn refresh_live_catalog(_menu: &mut menu::Menu) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
+    let Some(command) = menu.take_command() else {
+        return Ok(false);
+    };
+    match command {
+        menu::MenuCommand::SelectSound { id } => {
+            match control_request(&ControlRequest::SelectSound { id })? {
+                ControlResponse::Ok { selected_sound_id } => {
+                    refresh_live_catalog(menu)?;
+                    println!("SOUND_SELECTED id={selected_sound_id}");
+                    Ok(true)
+                }
+                ControlResponse::Error { message } => Err(message),
+                ControlResponse::Snapshot { .. } => {
+                    Err("respuesta inesperada al seleccionar sonido".into())
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
+    Ok(menu.take_command().is_some())
 }
 
 fn acquire_screen(

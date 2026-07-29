@@ -7,18 +7,19 @@ root="${RACKFORGE_ROOT:-/home/kalex/rackforge}"
 legacy_pid_file="$root/state/scva-live.pid"
 native_pid_file="$root/state/scva-native-live.pid"
 plugin_pid_file="$root/state/rackforge-core-live.pid"
-dls_pid_file="$root/state/dls-live.pid"
+rf_dls_pid_file="$root/state/rf-dls-live.pid"
 legacy_log="$root/logs/scva-live.log"
 native_log="$root/logs/scva-native-live.log"
 plugin_log="$root/logs/rackforge-core-live.log"
-dls_log="$root/logs/dls-live.log"
+rf_dls_log="$root/logs/rf-dls-live.log"
 
 legacy_binary="$root/bin/rackforge-scva-live"
 plugin_binary="$root/bin/rackforge-core"
-dls_binary="$root/bin/rackforge-dls-live"
+rf_dls_binary="$root/bin/rf-dls-live"
 plugin_package="$root/plugins/roland-scva"
+rf_dls_plugin_package="$root/plugins/rf-dls"
 rendered_bank="$root/share/rendered-piano-v1"
-dls_bank="$root/data/addons/rackforge-dls/banks/gm.dls"
+rf_dls_bank="$root/data/addons/rf-dls/banks/gm.dls"
 
 process_command() {
   local pid="$1"
@@ -78,6 +79,16 @@ start_plugin() {
   printf '%s\n' "$!" >"$plugin_pid_file"
 }
 
+start_rf_dls_plugin() {
+  : >"$plugin_log"
+  nohup "$plugin_binary" live "$rf_dls_plugin_package" \
+    --resource "dls-bank=$rf_dls_bank" \
+    --preset gm.piano-1 \
+    --data-root "$root/data" \
+    >"$plugin_log" 2>&1 </dev/null &
+  printf '%s\n' "$!" >"$plugin_pid_file"
+}
+
 start_native() {
   local tone="${1:-390}"
   : >"$native_log"
@@ -89,15 +100,15 @@ start_native() {
   printf '%s\n' "$!" >"$native_pid_file"
 }
 
-start_dls() {
+start_rf_dls() {
   local program="${1:-0}"
-  : >"$dls_log"
-  nohup "$dls_binary" \
+  : >"$rf_dls_log"
+  nohup "$rf_dls_binary" \
     --bank 0 \
     --program "$program" \
-    "$dls_bank" \
-    >"$dls_log" 2>&1 </dev/null &
-  printf '%s\n' "$!" >"$dls_pid_file"
+    "$rf_dls_bank" \
+    >"$rf_dls_log" 2>&1 </dev/null &
+  printf '%s\n' "$!" >"$rf_dls_pid_file"
 }
 
 wait_ready() {
@@ -130,7 +141,7 @@ case "$mode" in
     stop_verified "$plugin_pid_file" "$plugin_binary"
     stop_verified "$native_pid_file" "$legacy_binary"
     stop_verified "$legacy_pid_file" "$legacy_binary"
-    stop_verified "$dls_pid_file" "$dls_binary"
+    stop_verified "$rf_dls_pid_file" "$rf_dls_binary"
     if ! start_plugin "$preset" || ! wait_ready "$plugin_pid_file" "$plugin_log"; then
       stop_verified "$plugin_pid_file" "$plugin_binary" || true
       start_legacy
@@ -146,7 +157,7 @@ case "$mode" in
     stop_verified "$plugin_pid_file" "$plugin_binary"
     stop_verified "$native_pid_file" "$legacy_binary"
     stop_verified "$legacy_pid_file" "$legacy_binary"
-    stop_verified "$dls_pid_file" "$dls_binary"
+    stop_verified "$rf_dls_pid_file" "$rf_dls_binary"
     start_legacy
     wait_ready "$legacy_pid_file" "$legacy_log"
     printf 'LIVE_ENGINE_SELECTED engine=legacy pid=%s\n' \
@@ -160,7 +171,7 @@ case "$mode" in
     stop_verified "$plugin_pid_file" "$plugin_binary"
     stop_verified "$native_pid_file" "$legacy_binary"
     stop_verified "$legacy_pid_file" "$legacy_binary"
-    stop_verified "$dls_pid_file" "$dls_binary"
+    stop_verified "$rf_dls_pid_file" "$rf_dls_binary"
     if ! start_native "$tone" || ! wait_ready "$native_pid_file" "$native_log"; then
       stop_verified "$native_pid_file" "$legacy_binary" || true
       start_plugin scva.strings-1
@@ -171,26 +182,47 @@ case "$mode" in
     printf 'LIVE_ENGINE_SELECTED engine=native tone=%s pid=%s\n' \
       "$tone" "$(<"$native_pid_file")"
     ;;
-  dls)
+  rf-dls)
     program="${selection:-0}"
-    test -x "$dls_binary"
-    test -f "$dls_bank"
+    test -x "$rf_dls_binary"
+    test -f "$rf_dls_bank"
     stop_verified "$plugin_pid_file" "$plugin_binary"
     stop_verified "$native_pid_file" "$legacy_binary"
     stop_verified "$legacy_pid_file" "$legacy_binary"
-    stop_verified "$dls_pid_file" "$dls_binary"
-    if ! start_dls "$program" || ! wait_ready "$dls_pid_file" "$dls_log"; then
-      stop_verified "$dls_pid_file" "$dls_binary" || true
+    stop_verified "$rf_dls_pid_file" "$rf_dls_binary"
+    if ! start_rf_dls "$program" || ! wait_ready "$rf_dls_pid_file" "$rf_dls_log"; then
+      stop_verified "$rf_dls_pid_file" "$rf_dls_binary" || true
       start_native 390
       wait_ready "$native_pid_file" "$native_log"
-      printf 'DLS_START_FAILED rollback=native tone=390\n' >&2
+      printf 'RF_DLS_START_FAILED rollback=native tone=390\n' >&2
       exit 1
     fi
-    printf 'LIVE_ENGINE_SELECTED engine=dls program=%s pid=%s\n' \
-      "$program" "$(<"$dls_pid_file")"
+    printf 'LIVE_ENGINE_SELECTED engine=rf-dls program=%s pid=%s\n' \
+      "$program" "$(<"$rf_dls_pid_file")"
+    ;;
+  rf-dls-plugin)
+    test -x "$plugin_binary"
+    test -x "$rf_dls_binary"
+    test -f "$rf_dls_bank"
+    test -f "$rf_dls_plugin_package/rackforge-plugin.toml"
+    stop_verified "$plugin_pid_file" "$plugin_binary"
+    stop_verified "$native_pid_file" "$legacy_binary"
+    stop_verified "$legacy_pid_file" "$legacy_binary"
+    stop_verified "$rf_dls_pid_file" "$rf_dls_binary"
+    if ! start_rf_dls_plugin || ! wait_ready "$plugin_pid_file" "$plugin_log"; then
+      stop_verified "$plugin_pid_file" "$plugin_binary" || true
+      start_rf_dls
+      wait_ready "$rf_dls_pid_file" "$rf_dls_log"
+      printf 'RF_DLS_PLUGIN_START_FAILED rollback=rf-dls\n' >&2
+      exit 1
+    fi
+    printf 'LIVE_ENGINE_SELECTED engine=rf-dls-plugin preset=gm.piano-1 pid=%s\n' \
+      "$(<"$plugin_pid_file")"
     ;;
   *)
-    printf 'usage: %s plugin [preset]|native [tone]|legacy|dls [program]\n' "$0" >&2
+    printf \
+      'usage: %s plugin [preset]|native [tone]|legacy|rf-dls [program]|rf-dls-plugin\n' \
+      "$0" >&2
     exit 2
     ;;
 esac

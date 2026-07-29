@@ -1,6 +1,6 @@
 #[cfg(not(target_os = "linux"))]
 fn main() {
-    eprintln!("rackforge-dls-live is only available on Linux.");
+    eprintln!("rf-dls-live is only available on Linux.");
 }
 
 #[cfg(target_os = "linux")]
@@ -9,7 +9,7 @@ mod linux {
     use alsa::{Direction, ValueOr};
     use anyhow::{Context, Result, anyhow, bail};
     use midir::{Ignore, MidiInput};
-    use rackforge_dls::{DlsBank, Voice, voices_for_note};
+    use rf_dls::{DlsBank, Voice, voices_for_note};
     use std::collections::VecDeque;
     use std::env;
     use std::path::PathBuf;
@@ -77,7 +77,7 @@ mod linux {
         let mut meter_peak = 0.0_f32;
 
         eprintln!(
-            "READY_TO_PLAY engine=dls rate={} period={} buffer={} gain={:.3}",
+            "READY_TO_PLAY engine=rf-dls rate={} period={} buffer={} gain={:.3}",
             SAMPLE_RATE, PERIOD_FRAMES, BUFFER_FRAMES, options.gain
         );
 
@@ -210,12 +210,12 @@ mod linux {
     }
 
     fn print_usage() {
-        eprintln!("Usage: rackforge-dls-live [--bank N] [--program N] [--gain 0..1] BANK.dls");
+        eprintln!("Usage: rf-dls-live [--bank N] [--program N] [--gain 0..1] BANK.dls");
     }
 
     fn open_midi_input() -> Result<(Receiver<MidiEvent>, midir::MidiInputConnection<()>)> {
-        let mut midi_input = MidiInput::new("RackForge DLS MIDI input")
-            .context("could not initialize MIDI input")?;
+        let mut midi_input =
+            MidiInput::new("RF-DLS MIDI input").context("could not initialize MIDI input")?;
         midi_input.ignore(Ignore::None);
 
         let ports = midi_input.ports();
@@ -246,7 +246,7 @@ mod linux {
         let connection = midi_input
             .connect(
                 &port,
-                "rackforge-dls-keylab",
+                "rf-dls-keylab",
                 move |_timestamp, message, _| {
                     if message.len() < 3 {
                         return;

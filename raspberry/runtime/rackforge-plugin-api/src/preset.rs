@@ -65,6 +65,8 @@ pub struct BankDescriptor {
 pub struct PresetDescriptor {
     pub id: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub bank: Option<String>,
     #[serde(default)]
@@ -121,6 +123,7 @@ mod tests {
             presets: vec![PresetDescriptor {
                 id: "factory.piano-1".into(),
                 name: "Piano 1".into(),
+                description: None,
                 bank: Some("factory".into()),
                 category: Some("Piano".into()),
                 order: 0,

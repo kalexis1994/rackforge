@@ -1,0 +1,49 @@
+# Software Raspberry
+
+Este directorio contiene el cerebro headless de artupy.
+
+## Responsabilidades
+
+- detectar el KeyLab y la salida de audio;
+- mantener la conexión y el handshake con el firmware;
+- administrar motores, plugins, bancos, presets, splits y layers;
+- mezclar audio y enviarlo directamente mediante ALSA;
+- persistir performances y restaurar la última sesión;
+- supervisar fallos y recuperarse sin intervención gráfica.
+
+## Máquina objetivo
+
+```text
+Raspberry Pi 4B — 8 GiB
+Debian 13 (trixie) arm64
+Kernel Raspberry Pi PREEMPT
+Hostname: artupy
+Usuario de servicio/desarrollo: kalex
+```
+
+## Estructura remota
+
+```text
+/home/kalex/artupy/
+├── current/       software desplegado
+├── banks/         bancos de sonidos
+├── performances/  configuración musical
+├── state/         estado persistente
+└── logs/          logs acotados
+```
+
+## Desarrollo
+
+Desde Windows:
+
+```powershell
+.\raspberry\dev\health.ps1
+.\raspberry\dev\sync.ps1
+.\raspberry\dev\connect.ps1
+```
+
+`keylab-bridge/` es el puente SysEx actual. Será absorbido progresivamente por
+el daemon principal cuando el protocolo compañero esté estabilizado.
+
+La plantilla `systemd/artupy.service` todavía no se instala: se habilitará
+cuando exista un binario de daemon con comportamiento seguro ante fallos.

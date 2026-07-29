@@ -1,0 +1,6 @@
+[submodule "firmware/vendor/doom-source"]
+	path = firmware/vendor/doom-source
+	url = https://github.com/id-Software/DOOM.git
+[submodule "firmware/vendor/doomgeneric"]
+	path = firmware/vendor/doomgeneric
+	url = https://github.com/ozkl/doomgeneric.git

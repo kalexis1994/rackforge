@@ -292,10 +292,10 @@ mod linux {
             let source = (index + offset).clamp(0, decoded.len() as isize - 1) as usize;
             f64::from(decoded[source])
         };
-        sample(-1) * f64::from(coefficients[0])
-            + sample(0) * f64::from(coefficients[1])
-            + sample(1) * f64::from(coefficients[2])
-            + sample(2) * f64::from(coefficients[3])
+        sample(0) * f64::from(coefficients[0])
+            + sample(1) * f64::from(coefficients[1])
+            + sample(2) * f64::from(coefficients[2])
+            + sample(3) * f64::from(coefficients[3])
     }
 
     fn render_note(

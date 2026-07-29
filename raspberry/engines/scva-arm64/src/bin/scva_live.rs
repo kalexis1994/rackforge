@@ -10,6 +10,7 @@ mod linux {
     use alsa::{Direction, ValueOr};
     use anyhow::{Context, Result, bail};
     use artupy_scva_bank::{ControlBankSet, INTERPOLATION_PHASE_COUNT, WaveBankSet};
+    use hound::{SampleFormat, WavSpec, WavWriter};
     use midir::{Ignore, MidiInput, MidiInputConnection, MidiInputPort};
     use std::collections::BTreeMap;
     use std::env;
@@ -58,6 +59,7 @@ mod linux {
         control_directory: PathBuf,
         partial_mode: PartialMode,
         master_gain: f32,
+        dump_note: Option<(u8, PathBuf)>,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -94,6 +96,10 @@ mod linux {
             LAST_NOTE,
             cache.len()
         );
+        if let Some((note, path)) = config.dump_note {
+            write_debug_note(&cache, note, &path)?;
+            return Ok(());
+        }
 
         let (sender, receiver) = mpsc::channel();
         let (_midi_connection, midi_port_name) = connect_keylab(sender)?;
@@ -113,6 +119,7 @@ mod linux {
         let mut positional = Vec::new();
         let mut partial_mode = PartialMode::Both;
         let mut master_gain = DEFAULT_MASTER_GAIN;
+        let mut dump_note = None;
         while let Some(argument) = arguments.next() {
             if argument == "--partial" {
                 let value = arguments
@@ -133,6 +140,17 @@ mod linux {
                 if !(0.0..=1.0).contains(&master_gain) {
                     bail!("--gain must be between 0.0 and 1.0");
                 }
+            } else if argument == "--dump-note" {
+                let note = arguments
+                    .next()
+                    .context("--dump-note requires NOTE OUTPUT.wav")?
+                    .to_string_lossy()
+                    .parse::<u8>()
+                    .context("--dump-note NOTE must be in 0..=127")?;
+                let path = arguments
+                    .next()
+                    .context("--dump-note requires NOTE OUTPUT.wav")?;
+                dump_note = Some((note, PathBuf::from(path)));
             } else if argument.to_string_lossy().starts_with('-') {
                 bail!("unknown option: {}", argument.to_string_lossy());
             } else {
@@ -147,6 +165,7 @@ mod linux {
             [banks, controls] => (PathBuf::from(banks), PathBuf::from(controls)),
             _ => bail!(
                 "usage: artupy-scva-live [--partial both|1|2] [--gain 0.0..1.0] \
+                 [--dump-note NOTE OUTPUT.wav] \
                  [BANK_DIRECTORY CONTROL_DIRECTORY]"
             ),
         };
@@ -155,7 +174,32 @@ mod linux {
             control_directory,
             partial_mode,
             master_gain,
+            dump_note,
         })
+    }
+
+    fn write_debug_note(cache: &BTreeMap<u8, Arc<[f32]>>, note: u8, path: &PathBuf) -> Result<()> {
+        let samples = cache
+            .get(&note)
+            .with_context(|| format!("note {note} is outside the preloaded range"))?;
+        let specification = WavSpec {
+            channels: 1,
+            sample_rate: OUTPUT_RATE,
+            bits_per_sample: 32,
+            sample_format: SampleFormat::Float,
+        };
+        let mut writer = WavWriter::create(path, specification)
+            .with_context(|| format!("creating {}", path.display()))?;
+        for sample in samples.iter() {
+            writer.write_sample(*sample)?;
+        }
+        writer.finalize()?;
+        println!(
+            "NOTE_DUMPED note={note} frames={} output={}",
+            samples.len(),
+            path.display()
+        );
+        Ok(())
     }
 
     fn remove_baseline_and_fade(samples: &mut [f64], note: u8) {

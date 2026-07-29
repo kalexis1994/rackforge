@@ -1,0 +1,11 @@
+[package]
+name = "scva-render"
+version = "0.1.0"
+edition = "2024"
+description = "Offline SCCore API probe for legally owned Sound Canvas VA files"
+license = "GPL-2.0-or-later"
+
+[dependencies]
+anyhow = "1.0"
+hound = "3.5"
+libloading = "0.8"

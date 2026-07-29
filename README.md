@@ -55,6 +55,8 @@ conexión, sincronización y diagnóstico viven en `raspberry/dev/`.
 - Comunicación de pantalla SysEx comprobada con el firmware Arturia actual.
 - Entrada Note on/off del KeyLab comprobada directamente en la Raspberry.
 - Nuked-SC55 compilado nativamente para ARM64; pendiente aportar ROMs propias.
+- ABI de Sound Canvas VA 1.1.2 validado y bancos internos catalogados mediante
+  herramientas Rust; no son ROMs SC-55 compatibles directamente con Nuked.
 - Scaffold bare-metal seguro para el N32G455.
 - Port de DOOM conservado como banco de pruebas y función futura.
 

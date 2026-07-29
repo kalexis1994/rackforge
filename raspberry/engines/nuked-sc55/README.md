@@ -85,3 +85,14 @@ El perfil inicial usa:
 `artupy-nuked-probe` enumera las entradas RtMidi y las salidas que ve SDL. El
 daemon ArtuPy incorporará luego esta selección por identidad y supervisará las
 reconexiones.
+
+## Investigación de Sound Canvas VA
+
+`tools/scva-inspect` cataloga y, bajo una opción explícita, extrae candidatos
+de ondas de una copia legítima de Sound Canvas VA. `tools/scva-render` valida
+en Windows el ABI de `SCCore.dll` mediante un render offline.
+
+El análisis de la versión 1.1.2 confirmó bancos asociados a generaciones
+SC-88/SC-8820, pero ninguna coincidencia exacta con las ROMs SC-55mkII que
+espera Nuked-SC55. Los detalles reproducibles están en
+`tools/scva-inspect/RESEARCH.md`; ningún dato propietario se versiona.

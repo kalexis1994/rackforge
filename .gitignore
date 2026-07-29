@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+target/
+*.exe
+*.elf
+firmware/tmp/
+
+# Local credentials and machine-specific overrides
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.private
+credentials.*
+secrets.*
+
+# Runtime data belongs on the Raspberry, not in source control
+raspberry/local/
+raspberry/banks/
+raspberry/performances/
+raspberry/state/
+raspberry/logs/

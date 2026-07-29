@@ -1,0 +1,60 @@
+# artupy
+
+Artupy convierte un Arturia KeyLab Essential 61 mk3 y una Raspberry Pi 4B en
+un instrumento autónomo, sin escritorio, monitor ni DAW.
+
+El proyecto tiene dos subsistemas:
+
+| Área | Responsabilidad |
+|---|---|
+| `raspberry/` | Cerebro: motores de sonido, bancos, presets, mezcla y salida de audio. |
+| `firmware/` | Interfaz: teclado, pads, controles, pantalla y vínculo con la Raspberry. |
+
+## Flujo
+
+```text
+Teclas, pads y controles
+           │
+           ▼
+Firmware KeyLab
+  • detecta artupy
+  • envía intenciones
+  • presenta menús/estado
+           │ USB
+           ▼
+Software Raspberry
+  • fuente de verdad musical
+  • plugins y motores
+  • bancos y performances
+  • mezcla y audio
+           │
+           ▼
+      DAC USB / Scarlett
+```
+
+La Raspberry conserva el estado autoritativo de motores, bancos y
+performances. El firmware envía eventos físicos y renderiza el estado que
+recibe. Si uno de los dos reinicia, un handshake reconstruye toda la pantalla
+sin depender de estado implícito.
+
+## Desarrollo remoto
+
+La Raspberry se accede mediante una clave dedicada y un alias local:
+
+```powershell
+ssh artupy
+```
+
+No se guardan contraseñas en el repositorio. Las herramientas reproducibles de
+conexión, sincronización y diagnóstico viven en `raspberry/dev/`.
+
+## Estado
+
+- Raspberry Pi OS Lite / Debian 13 arm64, sin entorno gráfico.
+- Toolchain Rust, C/C++, CMake, Ninja, ALSA y udev instalado.
+- Comunicación de pantalla SysEx comprobada con el firmware Arturia actual.
+- Scaffold bare-metal seguro para el N32G455.
+- Port de DOOM conservado como banco de pruebas y función futura.
+
+La prioridad inmediata es terminar el protocolo Raspberry↔KeyLab y un daemon
+headless que detecte MIDI y audio antes de incorporar motores Roland.

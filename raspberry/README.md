@@ -51,5 +51,9 @@ de hardware que no reproduce sonido ni modifica el mezclador.
 `engines/nuked-sc55/` integra el emulador Roland Sound Canvas, sus herramientas
 de compilación ARM64 y su launcher headless. Las ROM permanecen fuera de Git.
 
+`engines/scva-arm64/` contiene el lector Rust nativo para los bancos extraídos
+de Sound Canvas VA. Sus datos propietarios viven en `share/scva`, fuera del
+despliegue y del repositorio.
+
 La plantilla `systemd/artupy.service` todavía no se instala: se habilitará
 cuando exista un binario de daemon con comportamiento seguro ante fallos.

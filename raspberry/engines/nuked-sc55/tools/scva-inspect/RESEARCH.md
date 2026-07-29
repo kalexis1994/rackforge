@@ -69,3 +69,31 @@ demuestra compatibilidad ARM64: la DLL contiene código x86-64 y depende de la
 API de Windows. Llevar este motor a la Raspberry exige una reimplementación
 nativa del DSP y de su lector de bancos, o una capa de traducción que habrá que
 medir antes de considerarla apta para baja latencia.
+
+## Decodificación nativa
+
+Cada segmento de 1 MiB contiene una tabla de escalas de `0x8000` bytes. Para
+una dirección de muestra `a`, el byte de escala está en `a >> 5`; el bit 4 de
+`a` selecciona su nibble bajo o alto. El byte de muestra es un delta con signo
+y el PCM se reconstruye acumulando:
+
+```text
+pcm[n] = pcm[n - 1] + (signed_byte[a] << scale_nibble[a])
+```
+
+Este esquema coincide con la documentación y utilidad pública de FCE-DPCM para
+ROMs Roland:
+
+<https://gist.github.com/giulioz/39e96282371ffb5059e112f6281efa60>
+
+`engines/scva-arm64` implementa esa lectura sin descrambling adicional, ya que
+los datos incluidos en `SCCore.dll` están ordenados. La salida de un rango de
+prueba fue idéntica en Windows x86-64 y Debian ARM64:
+
+```text
+grupo: sc88-rev200
+segmento: 0
+rango: 0x8000..0x18000
+peak: 302076
+WAV SHA-256: 52da487847336bb7839b82cfd9e349b49e9e1367015d3ded496c0013cc044958
+```

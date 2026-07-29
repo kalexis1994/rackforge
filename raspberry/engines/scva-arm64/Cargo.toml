@@ -1,0 +1,20 @@
+[package]
+name = "artupy-scva-bank"
+version = "0.1.0"
+edition = "2024"
+description = "Native ARM64 reader for legally owned Sound Canvas VA wave banks"
+license = "GPL-2.0-or-later"
+
+[dependencies]
+anyhow = "1.0"
+hound = "3.5"
+sha2 = "0.10"
+thiserror = "2.0"
+
+[lib]
+name = "artupy_scva_bank"
+path = "src/lib.rs"
+
+[[bin]]
+name = "artupy-scva-bank"
+path = "src/main.rs"

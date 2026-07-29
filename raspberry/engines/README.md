@@ -7,8 +7,10 @@ KeyLab; cada motor sólo recibirá MIDI y producirá audio.
 ## Prioridad actual
 
 1. `nuked-sc55`: emulación fiel del Roland SC-55; motor Roland principal.
-2. Backend de prueba nativo: permitirá comprobar el host de plugins sin ROMs.
-3. Otros instrumentos y efectos ARM64.
+2. `scva-arm64`: lector y futuro motor nativo de los bancos SC-88/SC-8820
+   encontrados en Sound Canvas VA.
+3. Backend de prueba nativo: permitirá comprobar el host de plugins sin ROMs.
+4. Otros instrumentos y efectos ARM64.
 
 [OpenAudio](https://github.com/webprofusion/OpenAudio) se usa como catálogo de
 proyectos, no como dependencia. Cada candidato requiere revisar por separado:

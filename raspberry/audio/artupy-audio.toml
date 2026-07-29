@@ -1,0 +1,11 @@
+[output]
+backend = "alsa"
+device = "hw:CARD=USB,DEV=0"
+usb_vendor_id = "1235"
+usb_product_id = "8211"
+usb_product = "Scarlett Solo USB"
+channels = 2
+sample_rate = 48000
+sample_format = "S32_LE"
+period_frames = 128
+buffer_frames = 384

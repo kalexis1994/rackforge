@@ -45,5 +45,8 @@ Desde Windows:
 `keylab-bridge/` es el puente SysEx actual. Será absorbido progresivamente por
 el daemon principal cuando el protocolo compañero esté estabilizado.
 
+`audio/` contiene el perfil ALSA inicial de la Scarlett Solo y un diagnóstico
+de hardware que no reproduce sonido ni modifica el mezclador.
+
 La plantilla `systemd/artupy.service` todavía no se instala: se habilitará
 cuando exista un binario de daemon con comportamiento seguro ante fallos.

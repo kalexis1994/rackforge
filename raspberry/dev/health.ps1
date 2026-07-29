@@ -23,6 +23,11 @@ printf '%s\n' '--- USB ---'
 lsusb
 printf '%s\n' '--- ALSA ---'
 aplay -l
+arecord -l
+if [ -r "$HOME/artupy/current/audio/probe.sh" ]; then
+    printf '%s\n' '--- ARTUPY AUDIO ---'
+    bash "$HOME/artupy/current/audio/probe.sh"
+fi
 '@
 $payload = [Convert]::ToBase64String(
     [Text.Encoding]::UTF8.GetBytes($script.Replace("`r", ""))

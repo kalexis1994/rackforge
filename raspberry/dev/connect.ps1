@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$HostAlias = "artupy"
+    [string]$HostAlias = "rackforge"
 )
 
 $ErrorActionPreference = "Stop"

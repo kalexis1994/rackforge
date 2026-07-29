@@ -1,0 +1,29 @@
+//! Stable contracts shared by the RackForge host and native plugins.
+//!
+//! Rust types in [`manifest`] and [`parameter`] are serialized contracts.
+//! The binary boundary in [`abi`] deliberately uses only C-compatible values.
+
+pub mod abi;
+pub mod manifest;
+pub mod parameter;
+pub mod preset;
+pub mod program;
+
+pub use manifest::{
+    ApiRequirement, Capability, PluginKind, PluginManifest, ResourceKind, ResourceRequirement,
+    RuntimeDescriptor,
+};
+pub use parameter::{
+    EnumChoice, PageDescriptor, ParameterDescriptor, ParameterFlags, ParameterKind,
+    ParameterSchema, SuggestedControl,
+};
+pub use preset::{BankDescriptor, PresetCatalog, PresetDescriptor};
+pub use program::{
+    ProgramDocument, ProgramError, validate_plugin_identifier, validate_program_identifier,
+};
+
+pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub const PARAMETER_SCHEMA_VERSION: u32 = 1;
+pub const PRESET_CATALOG_SCHEMA_VERSION: u32 = 1;
+pub const PROGRAM_SCHEMA_VERSION: u32 = 1;
+pub const RUNTIME_DESCRIPTOR_SCHEMA_VERSION: u32 = 1;

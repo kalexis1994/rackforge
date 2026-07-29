@@ -1,0 +1,23 @@
+schema_version = 1
+id = "org.rackforge.gain"
+name = "RackForge Gain"
+vendor = "RackForge"
+version = "0.1.0"
+kind = "effect"
+state_version = 1
+capabilities = [
+    "audio_input",
+    "audio_output",
+    "presets",
+    "state",
+    "sample_accurate_automation",
+]
+
+[api]
+major = 1
+minor = 0
+
+[binaries]
+linux-aarch64 = "lib/librackforge_gain.so"
+linux-x86_64 = "lib/librackforge_gain.so"
+windows-x86_64 = "lib/rackforge_gain.dll"

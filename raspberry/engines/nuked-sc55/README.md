@@ -1,6 +1,6 @@
 # Motor Roland: Nuked-SC55
 
-ArtuPy usa [Nuked-SC55](https://github.com/nukeykt/Nuked-SC55) como motor
+RackForge usa [Nuked-SC55](https://github.com/nukeykt/Nuked-SC55) como motor
 de emulación Roland Sound Canvas. Emula los MCU y el chip PCM del equipo; no
 es un SoundFont ni el plugin de Windows ejecutado mediante una capa de
 compatibilidad.
@@ -12,12 +12,12 @@ comercial.
 
 ## ROMs
 
-El emulador no incluye firmware ni ondas Roland. ArtuPy tampoco las descarga o
+El emulador no incluye firmware ni ondas Roland. RackForge tampoco las descarga o
 versiona. Deben proceder de hardware o software que el usuario pueda utilizar
 legítimamente y se guardan solamente en:
 
 ```text
-/home/kalex/artupy/share/nuked-sc55/
+/home/kalex/rackforge/share/nuked-sc55/
 ```
 
 Para SC-55mkII se requieren:
@@ -59,17 +59,17 @@ los deja con permisos privados y genera `SHA256SUMS` en la Raspberry.
 Después de desplegar `raspberry/`:
 
 ```bash
-cd /home/kalex/artupy/current/engines/nuked-sc55
+cd /home/kalex/rackforge/current/engines/nuked-sc55
 bash ./build.sh
 ```
 
-El resultado se instala en `/home/kalex/artupy/bin/nuked-sc55`; `back.data` se
+El resultado se instala en `/home/kalex/rackforge/bin/nuked-sc55`; `back.data` se
 instala junto a las ROMs en `share/nuked-sc55`.
 
 ## Arranque headless
 
 ```bash
-cd /home/kalex/artupy/current/engines/nuked-sc55
+cd /home/kalex/rackforge/current/engines/nuked-sc55
 bash ./run-headless.sh
 ```
 
@@ -82,8 +82,8 @@ El perfil inicial usa:
   convertirse a una admitida por la Scarlett;
 - ocho páginas de audio de 512 muestras como valor conservador inicial.
 
-`artupy-nuked-probe` enumera las entradas RtMidi y las salidas que ve SDL. El
-daemon ArtuPy incorporará luego esta selección por identidad y supervisará las
+`rackforge-nuked-probe` enumera las entradas RtMidi y las salidas que ve SDL. El
+daemon RackForge incorporará luego esta selección por identidad y supervisará las
 reconexiones.
 
 ## Investigación de Sound Canvas VA

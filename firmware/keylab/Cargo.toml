@@ -1,9 +1,9 @@
 [package]
-name = "artupy-firmware"
+name = "rackforge-firmware"
 version = "0.0.1"
 edition = "2024"
 publish = false
-description = "Offline-only bare-metal Rust scaffold for artupy firmware research"
+description = "Offline-only bare-metal Rust scaffold for rackforge firmware research"
 
 [profile.dev]
 panic = "abort"

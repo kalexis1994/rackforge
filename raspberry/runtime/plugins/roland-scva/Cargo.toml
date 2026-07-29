@@ -1,6 +1,6 @@
 [package]
-name = "artupy-roland-scva"
-description = "ArtuPy instrument plugin for legally rendered Sound Canvas VA banks"
+name = "rackforge-roland-scva"
+description = "RackForge instrument plugin for legally rendered Sound Canvas VA banks"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,9 +9,9 @@ license.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-artupy-plugin-api = { path = "../../artupy-plugin-api" }
+rackforge-plugin-api = { path = "../../rackforge-plugin-api" }
 hound.workspace = true
-
-[dev-dependencies]
+serde.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]

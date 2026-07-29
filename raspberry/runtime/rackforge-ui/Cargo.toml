@@ -1,0 +1,8 @@
+[package]
+name = "rackforge-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Transport-agnostic component framework for RackForge hardware interfaces"
+
+[dependencies]

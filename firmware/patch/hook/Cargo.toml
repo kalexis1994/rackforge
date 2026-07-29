@@ -1,0 +1,13 @@
+[package]
+name = "rackforge-display-hook"
+version = "0.0.1"
+edition = "2024"
+publish = false
+description = "Raw SysEx callback hook for KeyLab Essential mk3 firmware 1.2.1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = false

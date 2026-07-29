@@ -18,7 +18,7 @@ std::string folded(std::string value) {
 }
 
 int find_midi(const std::string& needle) {
-    RtMidiIn midi(RtMidi::UNSPECIFIED, "ArtuPy Nuked probe", 128);
+    RtMidiIn midi(RtMidi::UNSPECIFIED, "RackForge Nuked probe", 128);
     const auto wanted = folded(needle);
     std::vector<unsigned int> matches;
 
@@ -39,7 +39,7 @@ int find_midi(const std::string& needle) {
 }
 
 int list_devices() {
-    RtMidiIn midi(RtMidi::UNSPECIFIED, "ArtuPy Nuked probe", 128);
+    RtMidiIn midi(RtMidi::UNSPECIFIED, "RackForge Nuked probe", 128);
     std::cout << "MIDI inputs:\n";
     for (unsigned int index = 0; index < midi.getPortCount(); ++index) {
         std::cout << "  [" << index << "] " << midi.getPortName(index) << '\n';
@@ -68,7 +68,7 @@ int main(int argc, char* argv[]) {
             return find_midi(argv[2]);
         }
         if (argc != 1) {
-            std::cerr << "usage: artupy-nuked-probe [--find-midi NAME]\n";
+            std::cerr << "usage: rackforge-nuked-probe [--find-midi NAME]\n";
             return 2;
         }
         return list_devices();

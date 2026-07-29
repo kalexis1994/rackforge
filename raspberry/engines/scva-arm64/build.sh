@@ -2,16 +2,16 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-artupy_root=${ARTUPY_ROOT:-"$HOME/artupy"}
+rackforge_root=${RACKFORGE_ROOT:-"$HOME/rackforge"}
 
 cargo build \
     --locked \
     --release \
     --manifest-path "$root/Cargo.toml"
 
-install -d "$artupy_root/bin"
+install -d "$rackforge_root/bin"
 install -m 0755 \
-    "$root/target/release/artupy-scva-bank" \
-    "$artupy_root/bin/artupy-scva-bank"
+    "$root/target/release/rackforge-scva-bank" \
+    "$rackforge_root/bin/rackforge-scva-bank"
 
-printf 'installed=%s\n' "$artupy_root/bin/artupy-scva-bank"
+printf 'installed=%s\n' "$rackforge_root/bin/rackforge-scva-bank"

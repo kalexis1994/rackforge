@@ -34,18 +34,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "artupy-bridge"
-version = "0.1.0"
-dependencies = [
- "artupy-ui",
- "midir",
-]
-
-[[package]]
-name = "artupy-ui"
-version = "0.1.0"
-
-[[package]]
 name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -392,6 +380,18 @@ checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "rackforge-bridge"
+version = "0.1.0"
+dependencies = [
+ "midir",
+ "rackforge-ui",
+]
+
+[[package]]
+name = "rackforge-ui"
+version = "0.1.0"
 
 [[package]]
 name = "redox_syscall"

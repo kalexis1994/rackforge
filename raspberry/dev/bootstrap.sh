@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-target_hostname="${ARTUPY_HOSTNAME:-artupy}"
+target_hostname="${RACKFORGE_HOSTNAME:-rackforge}"
 current_hostname="$(hostnamectl --static)"
 
 if [[ "$current_hostname" != "$target_hostname" ]]; then
-  sudo cp -a /etc/hosts /etc/hosts.artupy-backup
+  sudo cp -a /etc/hosts /etc/hosts.rackforge-backup
   sudo hostnamectl set-hostname "$target_hostname"
   if grep -q '^127\.0\.1\.1' /etc/hosts; then
     sudo sed -Ei \
@@ -41,11 +41,11 @@ rustup default stable
 sudo systemctl enable --now ssh
 
 install -d \
-  "$HOME/artupy/current" \
-  "$HOME/artupy/bin" \
-  "$HOME/artupy/build" \
-  "$HOME/artupy/banks" \
-  "$HOME/artupy/performances" \
-  "$HOME/artupy/share/nuked-sc55" \
-  "$HOME/artupy/state" \
-  "$HOME/artupy/logs"
+  "$HOME/rackforge/current" \
+  "$HOME/rackforge/bin" \
+  "$HOME/rackforge/build" \
+  "$HOME/rackforge/banks" \
+  "$HOME/rackforge/performances" \
+  "$HOME/rackforge/share/nuked-sc55" \
+  "$HOME/rackforge/state" \
+  "$HOME/rackforge/logs"

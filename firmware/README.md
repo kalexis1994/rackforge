@@ -1,12 +1,12 @@
 # Firmware Arturia
 
 Este directorio contiene la investigación y el firmware del KeyLab Essential
-61 mk3 para artupy.
+61 mk3 para RackForge.
 
 ## Responsabilidades
 
 - escanear teclas, pads, botones, encoders y faders;
-- detectar el daemon artupy mediante handshake y heartbeat;
+- detectar el daemon de RackForge mediante handshake y heartbeat;
 - enviar eventos e intenciones, no decisiones sobre motores;
 - presentar bancos, presets, parámetros, splits y estado en la pantalla;
 - conservar un modo degradado claro cuando la Raspberry no esté disponible;

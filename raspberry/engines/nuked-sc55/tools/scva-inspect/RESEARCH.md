@@ -3,7 +3,7 @@
 Fecha del análisis: 2026-07-29.
 
 Estas notas describen una copia local legítima. Los binarios, bancos extraídos
-y WAV de prueba no forman parte de ArtuPy y no deben redistribuirse.
+y WAV de prueba no forman parte de RackForge y no deben redistribuirse.
 
 ## Binario analizado
 
@@ -139,7 +139,8 @@ El DSP reconstruye cada descriptor de `0x16` bytes de esta forma:
 - `byte 0`: segmento plano de Wave ROM (`0..23`);
 - `bytes 1..3`, `7..9` y `11..13`: tres direcciones de 20 bits, usando sólo
   el nibble bajo del primer byte;
-- `byte 10`: flags; bit 1 habilita loop y bit 2 invierte la disposición;
+- `byte 10`: flags; bit 1 marca una onda *one-shot* (si está limpio se usa
+  loop) y bit 2 invierte la disposición;
 - `u16 LE +4` y `byte +6`: afinación fina y tecla raíz.
 
 Los segmentos planos se corresponden con los grupos extraídos:
@@ -165,7 +166,7 @@ muestra 20:
   root=74 fine=1000 flags=0
 ```
 
-`artupy-scva-bank render-tone` sigue toda esta cadena, decodifica FCE-DPCM,
+`rackforge-scva-bank render-tone` sigue toda esta cadena, decodifica FCE-DPCM,
 aplica la afinación raíz y mezcla ambos parciales. El preview C4 fue idéntico
 en Windows x86-64 y Debian ARM64:
 
@@ -174,5 +175,132 @@ frames: 75054 a 32 kHz
 SHA-256: 286b5a34530c6b87ac77e72c62b41cc50ea34a60a5906b8168bf24d6d303106f
 ```
 
-La salida todavía no pretende replicar SCCore: faltan loops, envolventes,
-filtros, modulación y curvas de volumen.
+## Layout de reproducción del runtime
+
+La decodificación de un rango arbitrario y la reproducción de un descriptor no
+usan exactamente las mismas bases. La rutina que prepara una voz alinea la
+primera dirección a 32 bytes y SCCore conserva bases independientes:
+
+```text
+aligned_start = descriptor_start & ~0x1f
+data_base     = aligned_start - 0x20
+scale_base    = (aligned_start >> 5) - 0x20
+
+delta[n]      = segment[data_base + n]
+scale_byte[n] = segment[scale_base + (n >> 5)]
+```
+
+Es incorrecto calcular el exponente con
+`(data_base + n) >> 5`: selecciona otra zona de la tabla de escalas y produce
+el timbre áspero que se observó en las primeras pruebas nativas.
+
+La comprobación dinámica de `Strings 1`, parcial 2, en el bloque 16 dio:
+
+```text
+descriptor start: 0x1ff22
+aligned_start:    0x1ff20
+data_base:        0x1ff00
+scale_base:       0x0fd9
+posición:         278
+acumulador SCCore (antes de <<10): -7447
+acumulador RackForge:                 -7447
+```
+
+Los punteros de datos y escalas se volcaron por separado y sus primeros 32
+bytes se localizaron de forma única en el segmento de ROM. Los volcados y WAV
+derivados permanecen fuera de Git.
+
+## Cursor e interpolación
+
+El banco tiene una tasa nominal de 44,1 kHz. SCCore usa un acumulador de fase
+de 16 bits y las siete posiciones superiores de la fracción seleccionan una de
+128 fases FIR. Los cuatro coeficientes se aplican al historial:
+
+```text
+pcm[position - 3], pcm[position - 2], pcm[position - 1], pcm[position]
+```
+
+El decoder prepara cuatro muestras antes del primer frame, por lo que el cursor
+inicial del interpolador es 3. Para `Strings 1` (programa MIDI 48, tono interno
+390) y C4 se observaron estos incrementos a 44,1 kHz:
+
+```text
+parcial 1: 45774 / 65536 = 0.698455810546875
+parcial 2: 56467 / 65536 = 0.8616180419921875
+```
+
+Después de corregir el mapa ROM, un bloque de 32 frames de la parcial 2,
+quitando las ganancias TVA observadas, correlacionó con la implementación
+ARM64 en `0.9999999999999991`.
+
+## Continuidad de loops
+
+Las variantes loop del decoder conservan el acumulador DPCM y la fase FIR al
+volver desde `end` a `loop_start`. En `Strings 1/C4` la suma de deltas de cada
+ciclo cierra exactamente:
+
+```text
+parcial 1: accumulator(end) - accumulator(before_loop) = 0
+parcial 2: accumulator(end) - accumulator(before_loop) = 0
+```
+
+Por tanto no existe deriva de continua entre ciclos. El minicorte de la primera
+implementación ARM64 provenía de redondear `loop_start / increment` a un frame
+entero del cache a 48 kHz: el salto volvía con otra fase fraccional.
+
+Hasta que el decoder pase a ser completamente incremental por voz, el cache
+nativo usa un puente lineal de 192 frames (4 ms) en la unión y reinicia después
+del tramo de cabeza ya consumido por la mezcla. En C2, parcial 1 de Strings, la
+diferencia de la unión bajó de `5224` a `155` unidades PCM sin normalizar.
+
+## TVF
+
+El filtro para el modo normal es un low-pass de variable de estado. Para cada
+muestra y cada lane:
+
+```text
+s2 += cutoff * s1
+output = s2
+s1 += cutoff * (input - (resonance * s1 + s2))
+```
+
+En `Strings 1/C4` los coeficientes observados durante el bloque fueron
+`cutoff=1` y `resonance=1`, es decir, el TVF está abierto. El filtro no era la
+causa del audio roto; el problema estaba antes, en el mapa de datos/escalas y
+en la tasa de reproducción.
+
+## Reverb y repetición perceptible
+
+Una captura sostenida de siete segundos de `Strings 1/C4` mostró que el ataque
+de SCCore comienza prácticamente mono. Durante el sustain, la diferencia
+estéreo crece hasta aproximadamente un 8–17 % del nivel central y cambia a lo
+largo del tiempo. Por tanto, la unión de la muestra no es la única responsable
+de que el loop resulte perceptible: el motor original superpone una cola
+temporal decorrelacionada que evita repetir exactamente el mismo bloque.
+
+Las capturas de control confirmaron que esa cola pertenece principalmente a la
+reverb:
+
+```text
+CC91=0, CC93=0: salida prácticamente seca y mono
+CC91=0:         prácticamente idéntica a la anterior
+CC93=0:         conserva casi toda la apertura del render por defecto
+```
+
+En el sustain, la diferencia entre el render por defecto y el seco tuvo RMS
+`0.00187` a izquierda y `0.00372` a derecha, frente a un RMS seco aproximado
+de `0.0164`. `scva-render` admite ahora `--duration-ms`, `--note-off-ms` y
+múltiples pares `--cc NUMBER VALUE` para repetir estos experimentos.
+
+La primera etapa nativa de RackForge usa una red estéreo estable de combs y
+all-pass a 48 kHz con una devolución discreta. Es una implementación
+provisional y separada del decoder: permite verificar perceptualmente cuánto
+enmascara el ciclo, mientras se terminan de identificar la topología y los
+coeficientes exactos de SCCore.
+
+## Estado pendiente
+
+El lector ARM64 ya reproduce las ondas con el layout, interpolador, afinación
+y loops verificados. Todavía faltan las envolventes TVA/TVF exactas, curvas de
+velocidad/volumen, modulación, efectos y los demás modos de descriptor antes de
+considerarlo una réplica completa de SCCore.

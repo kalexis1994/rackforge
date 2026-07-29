@@ -1,10 +1,10 @@
 [package]
-name = "artupy-bridge"
+name = "rackforge-bridge"
 version = "0.1.0"
 edition = "2024"
-description = "Safe Artupy bridge for the Arturia KeyLab Essential mk3"
+description = "Safe RackForge bridge for the Arturia KeyLab Essential mk3"
 license = "GPL-2.0-or-later"
 
 [dependencies]
-artupy-ui = { path = "../runtime/artupy-ui" }
+rackforge-ui = { path = "../runtime/rackforge-ui" }
 midir = "0.11.0"

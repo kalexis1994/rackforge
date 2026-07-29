@@ -1,9 +1,12 @@
 use anyhow::{Context, Result, bail};
-use artupy_scva_bank::{ControlBankSet, GroupId, WaveBankSet};
 use hound::{SampleFormat, WavSpec, WavWriter};
+use rackforge_scva_bank::{ControlBankSet, GroupId, WaveBankSet};
 use std::env;
 use std::path::Path;
 use std::str::FromStr;
+
+const PREVIEW_RATE: u32 = 32_000;
+const ROM_RATE: f64 = 44_100.0;
 
 fn parse_number(value: &str) -> Result<usize> {
     if let Some(hex) = value.strip_prefix("0x") {
@@ -56,11 +59,19 @@ fn decode(
     segment_index: usize,
     start: usize,
     length: usize,
+    sccore_window: bool,
     output: &Path,
 ) -> Result<()> {
     let banks = WaveBankSet::open(directory)?;
     let segment = banks.group(group_id).segment(segment_index)?;
-    let decoded = segment.decode_fce_dpcm(start, length, 0)?;
+    let decoded = if sccore_window {
+        let end = start
+            .checked_add(length.saturating_sub(1))
+            .context("SCCore decode range overflow")?;
+        segment.decode_sccore_window(start, end)?
+    } else {
+        segment.decode_fce_dpcm(start, length, 0)?
+    };
     let peak = decoded
         .iter()
         .map(|sample| i64::from(*sample).abs())
@@ -84,8 +95,9 @@ fn decode(
     }
     writer.finalize()?;
     println!(
-        "DECODED group={group_id} segment={segment_index} start=0x{start:x} \
+        "DECODED mode={} group={group_id} segment={segment_index} start=0x{start:x} \
          length=0x{length:x} peak={peak} output={}",
+        if sccore_window { "sccore" } else { "direct" },
         output.display()
     );
     Ok(())
@@ -156,20 +168,17 @@ fn render_tone(
                 partial.partial
             );
         }
-        let length = location
-            .end
-            .checked_sub(location.start)
-            .context("sample end precedes sample start")?
-            + 1;
         let decoded = banks
             .group(location.group)
             .segment(location.group_segment)?
-            .decode_fce_dpcm(location.start, length, 0)?;
+            .decode_sccore_window(location.start, location.end)?;
         let target_pitch_milli = i32::from(partial.mapped_note) * 1_000;
-        let increment =
-            2_f64.powf(f64::from(target_pitch_milli - location.root_pitch_milli) / 12_000.0);
+        let increment = 2_f64
+            .powf(f64::from(target_pitch_milli - location.root_pitch_milli) / 12_000.0)
+            * ROM_RATE
+            / f64::from(PREVIEW_RATE);
         let output_length = ((decoded.len() as f64 / increment).ceil() as usize)
-            .min(32_000 * 10)
+            .min(PREVIEW_RATE as usize * 10)
             .max(1);
         let mut resampled = Vec::with_capacity(output_length);
         for output_index in 0..output_length {
@@ -216,7 +225,7 @@ fn render_tone(
     let scale = 0.90 / peak;
     let spec = WavSpec {
         channels: 1,
-        sample_rate: 32_000,
+        sample_rate: PREVIEW_RATE,
         bits_per_sample: 32,
         sample_format: SampleFormat::Float,
     };
@@ -239,10 +248,11 @@ fn render_tone(
 }
 
 fn usage() -> &'static str {
-    "usage:\n  artupy-scva-bank inspect BANK_DIRECTORY\n  \
-     artupy-scva-bank resolve CONTROL_DIRECTORY TONE MIDI_NOTE\n  \
-     artupy-scva-bank render-tone BANK_DIRECTORY CONTROL_DIRECTORY TONE MIDI_NOTE OUTPUT.wav\n  \
-     artupy-scva-bank decode BANK_DIRECTORY GROUP SEGMENT START LENGTH OUTPUT.wav\n\
+    "usage:\n  rackforge-scva-bank inspect BANK_DIRECTORY\n  \
+     rackforge-scva-bank resolve CONTROL_DIRECTORY TONE MIDI_NOTE\n  \
+     rackforge-scva-bank render-tone BANK_DIRECTORY CONTROL_DIRECTORY TONE MIDI_NOTE OUTPUT.wav\n  \
+     rackforge-scva-bank decode BANK_DIRECTORY GROUP SEGMENT START LENGTH OUTPUT.wav\n  \
+     rackforge-scva-bank decode-sccore BANK_DIRECTORY GROUP SEGMENT START LENGTH OUTPUT.wav\n\
      numbers may be decimal or 0x-prefixed hexadecimal"
 }
 
@@ -262,13 +272,16 @@ fn run() -> Result<()> {
             parse_number(note)?,
             Path::new(output),
         ),
-        [command, directory, group, segment, start, length, output] if command == "decode" => {
+        [command, directory, group, segment, start, length, output]
+            if command == "decode" || command == "decode-sccore" =>
+        {
             decode(
                 Path::new(directory),
                 GroupId::from_str(group).map_err(anyhow::Error::msg)?,
                 parse_number(segment)?,
                 parse_number(start)?,
                 parse_number(length)?,
+                command == "decode-sccore",
                 Path::new(output),
             )
         }

@@ -1,7 +1,7 @@
 # Lector SCVA nativo
 
-`artupy-scva-bank` es la primera capa nativa ARM64 del futuro motor SC-8820 de
-ArtuPy. Lee los candidatos de Wave ROM extraídos de una copia legítima de Sound
+`rackforge-scva-bank` es la primera capa nativa ARM64 del futuro motor SC-8820 de
+RackForge. Lee los candidatos de Wave ROM extraídos de una copia legítima de Sound
 Canvas VA 1.1.2; no carga ni ejecuta `SCCore.dll`.
 
 ## Alcance actual
@@ -14,18 +14,23 @@ Canvas VA 1.1.2; no carga ni ejecuta `SCCore.dll`.
 - decodifica rangos FCE-DPCM a PCM para investigación;
 - valida las tablas de control 1.1.2 por tamaño y SHA-256;
 - resuelve un tono y nota MIDI a sus dos parciales, mapas de onda y
-  descriptores de muestra.
+  descriptores de muestra;
+- reproduce parciales nativos con el mapa ROM, interpolador FIR, afinación y
+  loops observados en SCCore;
+- precarga las notas 36..96 y recibe MIDI directamente del KeyLab;
+- entrega audio S32_LE a 48 kHz por la Scarlett.
 
-Todavía no sintetiza una voz completa. La selección de muestras ya está
-implementada; falta decodificar los campos de dirección, loop y afinación de
-cada descriptor y reproducir las envolventes/filtros.
+Todavía no replica una voz completa de SCCore. Faltan sus envolventes TVF/TVA,
+modulación, curvas de velocidad/volumen, efectos y todos los modos de
+reproducción de descriptores. El motor nativo se mantiene separado del banco
+renderizado estable mientras continúa el RE.
 
 ## Archivos locales
 
 Los bancos se instalan fuera de Git:
 
 ```text
-/home/kalex/artupy/share/scva/
+/home/kalex/rackforge/share/scva/
 ├── wave_1994_ver200_8mib.bin
 ├── wave_1996_rom_make_a_8mib.bin
 ├── wave_1996_rom_make_b_4mib.bin
@@ -40,42 +45,48 @@ Los bancos se instalan fuera de Git:
 ## Compilación en la Raspberry
 
 ```bash
-cd /home/kalex/artupy/current/engines/scva-arm64
+cd /home/kalex/rackforge/current/engines/scva-arm64
 sh ./build.sh
-/home/kalex/artupy/bin/artupy-scva-bank \
-  inspect /home/kalex/artupy/share/scva
+/home/kalex/rackforge/bin/rackforge-scva-bank \
+  inspect /home/kalex/rackforge/share/scva
 ```
 
 Para resolver `Piano 1` (tono 0) y C4 (nota MIDI 60):
 
 ```bash
-artupy-scva-bank resolve \
-  /home/kalex/artupy/share/scva/control-v1 0 60
+rackforge-scva-bank resolve \
+  /home/kalex/rackforge/share/scva/control-v1 0 60
 ```
 
-El render offline sigue esa resolución, decodifica los rangos completos,
-aplica la afinación raíz observada en el descriptor, remuestrea linealmente y
-mezcla los parciales:
+El render offline sigue esa resolución, aplica el mapa ROM de SCCore,
+decodifica los rangos completos, afina y mezcla los parciales:
 
 ```bash
-artupy-scva-bank render-tone \
-  /home/kalex/artupy/share/scva \
-  /home/kalex/artupy/share/scva/control-v1 \
+rackforge-scva-bank render-tone \
+  /home/kalex/rackforge/share/scva \
+  /home/kalex/rackforge/share/scva/control-v1 \
   0 60 /tmp/piano1-c4-preview.wav
 ```
 
-Es un preview de investigación, no el sintetizador terminado: aún no reproduce
-loops, filtros, envolventes, modulación ni la curva de volumen de SCCore.
+Es un preview de investigación, no el sintetizador terminado.
 
 Para decodificar un rango conocido:
 
 ```bash
-artupy-scva-bank decode /home/kalex/artupy/share/scva \
+rackforge-scva-bank decode /home/kalex/rackforge/share/scva \
   sc88-rev200 0 0x8000 0x10000 /tmp/candidate.wav
 ```
 
-La salida WAV de diagnóstico se normaliza para escucharla; no implica que el
-rango corresponda a una muestra completa ni que 32 kHz sea su afinación real.
+Para aplicar el layout utilizado por el runtime de SCCore:
+
+```bash
+rackforge-scva-bank decode-sccore /home/kalex/rackforge/share/scva \
+  rom-make-a 1 0x1ff22 48286 /tmp/strings-partial.wav
+```
+
+La salida WAV de diagnóstico se normaliza para escucharla. La tasa nominal
+confirmada de reproducción de la ROM es 44,1 kHz; la cabecera de 32 kHz de
+algunos oráculos antiguos era sólo una etiqueta de laboratorio.
 
 ## Validación cruzada
 
@@ -87,8 +98,9 @@ SHA-256 52da487847336bb7839b82cfd9e349b49e9e1367015d3ded496c0013cc044958
 peak    302076
 ```
 
-Esto verifica la lectura y el algoritmo DPCM entre arquitecturas. No verifica
-todavía la selección de una muestra musical completa.
+Esto verifica la lectura y el algoritmo DPCM genérico entre arquitecturas. El
+layout musical del runtime se valida por separado contra estados internos de
+SCCore; está documentado en `tools/scva-inspect/RESEARCH.md`.
 
 ## Banco renderizado provisional
 
@@ -98,14 +110,14 @@ multimuestreado generado localmente por la instalación legítima:
 ```powershell
 .\raspberry\dev\render-scva-bank.ps1 `
   -SCCorePath "C:\ruta\SCCore.dll" `
-  -OutputDirectory "C:\ruta\artupy-rendered-piano"
+  -OutputDirectory "C:\ruta\rackforge-rendered-piano"
 ```
 
 En la Raspberry:
 
 ```bash
-artupy-scva-live \
-  --rendered-bank /home/kalex/artupy/share/rendered-piano \
+rackforge-scva-live \
+  --rendered-bank /home/kalex/rackforge/share/rendered-piano \
   --gain 1.0
 ```
 

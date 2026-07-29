@@ -1,4 +1,4 @@
-use artupy_plugin_api::abi::{
+use rackforge_plugin_api::abi::{
     HostApiV1, PluginApiV1, ProcessBlockV1, STATUS_INVALID_ARGUMENT, STATUS_INVALID_STATE,
     STATUS_OK, STATUS_UNKNOWN_PARAMETER, copy_to_host_buffer, pack_version,
 };
@@ -12,7 +12,7 @@ const BYPASS_PARAMETER: u32 = 1;
 
 const RUNTIME_DESCRIPTOR: &[u8] = br#"{
   "schema_version": 1,
-  "id": "org.artupy.gain",
+  "id": "org.rackforge.gain",
   "version": "0.1.0",
   "state_version": 1
 }"#;
@@ -388,19 +388,19 @@ static PLUGIN_API: PluginApiV1 = PluginApiV1 {
 };
 
 #[unsafe(no_mangle)]
-pub extern "C" fn artupy_plugin_entry_v1() -> *const PluginApiV1 {
+pub extern "C" fn rackforge_plugin_entry_v1() -> *const PluginApiV1 {
     ptr::addr_of!(PLUGIN_API)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use artupy_plugin_api::{ParameterSchema, PresetCatalog, RuntimeDescriptor};
+    use rackforge_plugin_api::{ParameterSchema, PresetCatalog, RuntimeDescriptor};
 
     #[test]
     fn exports_valid_declarative_metadata() {
         let descriptor: RuntimeDescriptor = serde_json::from_slice(RUNTIME_DESCRIPTOR).unwrap();
-        assert_eq!(descriptor.id, "org.artupy.gain");
+        assert_eq!(descriptor.id, "org.rackforge.gain");
         let schema: ParameterSchema = serde_json::from_slice(PARAMETER_SCHEMA).unwrap();
         assert_eq!(schema.validate(), Ok(()));
         let presets: PresetCatalog = serde_json::from_slice(PRESET_CATALOG).unwrap();

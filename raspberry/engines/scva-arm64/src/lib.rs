@@ -5,6 +5,8 @@ use std::path::Path;
 use std::str::FromStr;
 use thiserror::Error;
 
+pub mod reverb;
+
 pub const SEGMENT_SIZE: usize = 1024 * 1024;
 pub const SCALE_TABLE_SIZE: usize = SEGMENT_SIZE / 32;
 pub const SAMPLE_RECORD_SIZE: usize = 0x16;
@@ -15,6 +17,8 @@ pub const TONE_RECORD_SIZE: usize = 0x100;
 pub const TONE_RECORD_COUNT: usize = 2_363;
 pub const INTERPOLATION_PHASE_COUNT: usize = 128;
 pub const INTERPOLATION_TAP_COUNT: usize = 4;
+pub const SCCORE_DECODER_ALIGNMENT: usize = 32;
+pub const SCCORE_ROM_BASE_BIAS: usize = 32;
 
 const KNOWN_112_HASHES: [&str; 4] = [
     "05a36e2e354611e667b643d619c9c1d2a2f0836bd585189e061b82f27b827385",
@@ -349,7 +353,9 @@ impl SampleLocation {
         let middle = packed_address(descriptor, 7);
         let last = packed_address(descriptor, 11);
         let reverse = flags & 4 != 0;
-        let looped = flags & 2 != 0;
+        // Bit 1 marks a one-shot wave. Sustaining waves use the middle
+        // address as their loop start when this bit is clear.
+        let looped = flags & 2 == 0;
         let fine_tune_word = u16::from_le_bytes(descriptor[4..6].try_into().unwrap());
         let root_key = descriptor[6];
         let root_pitch_milli = i32::from(root_key) * 1_000 - i32::from(fine_tune_word) + 0x400;
@@ -690,6 +696,78 @@ impl<'a> WaveSegment<'a> {
         }
         Ok(decoded)
     }
+
+    /// Decodes one descriptor range using SCCore's runtime ROM mapping.
+    ///
+    /// Descriptor addresses are aligned down to 32 bytes. SCCore's data and
+    /// scale-table bases both point 32 bytes before the corresponding offsets
+    /// in the extracted segment. Keeping those bases independent is essential:
+    /// using `physical_data_address >> 5` selects the wrong scale nibbles.
+    pub fn decode_sccore_window(self, start: usize, end: usize) -> Result<Vec<i32>, BankError> {
+        let aligned_start = start & !(SCCORE_DECODER_ALIGNMENT - 1);
+        let data_base =
+            aligned_start
+                .checked_sub(SCCORE_ROM_BASE_BIAS)
+                .ok_or(BankError::InvalidDpcmRange {
+                    start: aligned_start,
+                    end,
+                    minimum: SCALE_TABLE_SIZE,
+                    maximum: SEGMENT_SIZE,
+                })?;
+        let scale_base = (aligned_start >> 5)
+            .checked_sub(SCCORE_ROM_BASE_BIAS)
+            .ok_or(BankError::InvalidDpcmRange {
+                start: aligned_start,
+                end,
+                minimum: SCALE_TABLE_SIZE,
+                maximum: SEGMENT_SIZE,
+            })?;
+        let length = end
+            .checked_sub(aligned_start)
+            .map(|value| value + 1)
+            .ok_or(BankError::InvalidDpcmRange {
+                start: aligned_start,
+                end,
+                minimum: SCALE_TABLE_SIZE,
+                maximum: SEGMENT_SIZE,
+            })?;
+        let data_end = data_base
+            .checked_add(length)
+            .ok_or(BankError::InvalidDpcmRange {
+                start: data_base,
+                end: usize::MAX,
+                minimum: SCALE_TABLE_SIZE,
+                maximum: SEGMENT_SIZE,
+            })?;
+        let minimum_data_base = SCALE_TABLE_SIZE - SCCORE_ROM_BASE_BIAS;
+        let last_scale = scale_base + ((length.saturating_sub(1)) >> 5);
+        if data_base < minimum_data_base || data_end > SEGMENT_SIZE || last_scale >= self.data.len()
+        {
+            return Err(BankError::InvalidDpcmRange {
+                start: data_base,
+                end: data_end,
+                minimum: minimum_data_base,
+                maximum: SEGMENT_SIZE,
+            });
+        }
+
+        let mut accumulator = 0_i64;
+        let mut decoded = Vec::with_capacity(length);
+        for position in 0..length {
+            let delta = i64::from(self.data[data_base + position] as i8);
+            let scale_byte = self.data[scale_base + (position >> 5)];
+            let exponent = if position & 0x10 == 0 {
+                scale_byte & 0x0f
+            } else {
+                scale_byte >> 4
+            };
+            accumulator += delta << exponent;
+            let value = i32::try_from(accumulator)
+                .map_err(|_| BankError::DpcmOverflow { sample: position })?;
+            decoded.push(value);
+        }
+        Ok(decoded)
+    }
 }
 
 fn validate_dpcm_range(start: usize, end: usize) -> Result<(), BankError> {
@@ -766,6 +844,31 @@ mod tests {
     }
 
     #[test]
+    fn decodes_sccore_data_and_scale_bases_with_their_independent_bias() {
+        let mut bytes = vec![0_u8; SEGMENT_SIZE];
+        let descriptor_start = 0x8442;
+        let aligned_start = 0x8440;
+        let data_base = aligned_start - SCCORE_ROM_BASE_BIAS;
+        let scale_base = (aligned_start >> 5) - SCCORE_ROM_BASE_BIAS;
+        bytes[scale_base] = 0x21;
+        bytes[data_base] = 2;
+        bytes[data_base + 1] = (-1_i8) as u8;
+        bytes[data_base + 0x10] = 3;
+        let segment = WaveSegment {
+            group: GroupId::Sc88Rev200,
+            index: 0,
+            data: &bytes,
+        };
+
+        assert_eq!(
+            segment
+                .decode_sccore_window(descriptor_start, aligned_start + 0x10)
+                .unwrap(),
+            [vec![4, 2], vec![2; 14], vec![14]].concat()
+        );
+    }
+
+    #[test]
     fn rejects_scale_table_as_sample_data() {
         let bytes = vec![0_u8; SEGMENT_SIZE];
         let segment = WaveSegment {
@@ -819,8 +922,22 @@ mod tests {
         assert_eq!(result.partials[0].sample_location.start, 0x74ee0);
         assert_eq!(result.partials[0].sample_location.loop_start, 0x7ed23);
         assert_eq!(result.partials[0].sample_location.end, 0x836de);
+        assert!(result.partials[0].sample_location.looped);
         assert_eq!(result.partials[0].sample_location.root_key, 0);
         assert_eq!(result.partials[0].sample_location.root_pitch_milli, 1024);
+    }
+
+    #[test]
+    fn sample_flag_bit_one_marks_a_one_shot_wave() {
+        let mut descriptor = [0_u8; SAMPLE_RECORD_SIZE];
+        descriptor[0] = 8;
+        descriptor[1..4].copy_from_slice(&[0x07, 0x4e, 0xe0]);
+        descriptor[7..10].copy_from_slice(&[0x07, 0xed, 0x23]);
+        descriptor[11..14].copy_from_slice(&[0x08, 0x36, 0xde]);
+        assert!(SampleLocation::parse(&descriptor).unwrap().looped);
+
+        descriptor[10] = 2;
+        assert!(!SampleLocation::parse(&descriptor).unwrap().looped);
     }
 
     #[test]

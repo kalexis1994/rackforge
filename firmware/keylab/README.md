@@ -1,4 +1,4 @@
-# artupy firmware Rust scaffold
+# rackforge firmware Rust scaffold
 
 This crate is an **offline linker experiment**, not installable firmware.
 

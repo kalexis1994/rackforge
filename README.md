@@ -1,6 +1,6 @@
-# artupy
+# RackForge
 
-Artupy convierte un Arturia KeyLab Essential 61 mk3 y una Raspberry Pi 4B en
+RackForge convierte un Arturia KeyLab Essential 61 mk3 y una Raspberry Pi 4B en
 un instrumento autónomo, sin escritorio, monitor ni DAW.
 
 El proyecto tiene dos subsistemas:
@@ -17,7 +17,7 @@ Teclas, pads y controles
            │
            ▼
 Firmware KeyLab
-  • detecta artupy
+  • detecta RackForge
   • envía intenciones
   • presenta menús/estado
            │ USB
@@ -42,7 +42,7 @@ sin depender de estado implícito.
 La Raspberry se accede mediante una clave dedicada y un alias local:
 
 ```powershell
-ssh artupy
+ssh rackforge
 ```
 
 No se guardan contraseñas en el repositorio. Las herramientas reproducibles de

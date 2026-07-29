@@ -18,9 +18,15 @@ struct ProbeConfig {
     note: u32,
     velocity: u32,
     patch_u32: Option<(usize, u32)>,
+    patch_u8: Option<(usize, u8)>,
     dump_rva: Option<(usize, usize, PathBuf)>,
+    dump_pointer_rva: Option<(usize, usize, PathBuf)>,
+    dump_block: usize,
     block_size: usize,
     trace_rva: Option<(usize, usize, PathBuf)>,
+    duration_ms: u32,
+    note_off_ms: u32,
+    controls: Vec<(u32, u32)>,
 }
 
 struct TemporaryDll {
@@ -82,7 +88,7 @@ fn make_patched_dll(source: &Path, offset: usize, value: u32) -> Result<Temporar
     let old_value = u32::from_le_bytes(target.try_into().unwrap());
     target.copy_from_slice(&value.to_le_bytes());
 
-    let file_name = format!(".artupy-sccore-probe-{}.dll", std::process::id());
+    let file_name = format!(".rackforge-sccore-probe-{}.dll", std::process::id());
     let path = source
         .parent()
         .context("SCCore.dll has no parent directory")?
@@ -93,6 +99,33 @@ fn make_patched_dll(source: &Path, offset: usize, value: u32) -> Result<Temporar
     fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
     println!(
         "PATCHED_COPY {} file_offset=0x{offset:x} old=0x{old_value:08x} new=0x{value:08x}",
+        path.display()
+    );
+    Ok(TemporaryDll { path })
+}
+
+fn make_patched_dll_u8(source: &Path, offset: usize, value: u8) -> Result<TemporaryDll> {
+    let mut bytes = fs::read(source).with_context(|| format!("reading {}", source.display()))?;
+    let old_value = *bytes.get(offset).with_context(|| {
+        format!(
+            "patch offset 0x{offset:x} is outside {} (size 0x{:x})",
+            source.display(),
+            bytes.len()
+        )
+    })?;
+    bytes[offset] = value;
+
+    let file_name = format!(".rackforge-sccore-probe-{}.dll", std::process::id());
+    let path = source
+        .parent()
+        .context("SCCore.dll has no parent directory")?
+        .join(file_name);
+    if path.exists() {
+        bail!("temporary probe path already exists: {}", path.display());
+    }
+    fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
+    println!(
+        "PATCHED_COPY {} file_offset=0x{offset:x} old=0x{old_value:02x} new=0x{value:02x}",
         path.display()
     );
     Ok(TemporaryDll { path })
@@ -134,10 +167,12 @@ fn write_mono_wav(path: &Path, samples: &[f32]) -> Result<()> {
 fn render(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Result<()> {
     let dll_path = absolute(dll_path)?;
     let output_path = absolute(output_path)?;
-    let patched = config
-        .patch_u32
-        .map(|(offset, value)| make_patched_dll(&dll_path, offset, value))
-        .transpose()?;
+    let patched = match (config.patch_u32, config.patch_u8) {
+        (Some((offset, value)), None) => Some(make_patched_dll(&dll_path, offset, value)?),
+        (None, Some((offset, value))) => Some(make_patched_dll_u8(&dll_path, offset, value)?),
+        (None, None) => None,
+        (Some(_), Some(_)) => bail!("only one binary patch may be applied per probe"),
+    };
     let load_path = patched
         .as_ref()
         .map_or(dll_path.as_path(), |temporary| temporary.path.as_path());
@@ -164,6 +199,7 @@ fn render_inner(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Re
     unsafe {
         let initialize: Symbol<Initialize> = library.get(b"TG_initialize\0")?;
         let image_base = *initialize as usize - TG_INITIALIZE_RVA;
+        println!("SCCORE_IMAGE_BASE 0x{image_base:x}");
         let activate: Symbol<Activate> = library.get(b"TG_activate\0")?;
         let deactivate: Symbol<Deactivate> = library.get(b"TG_deactivate\0")?;
         let set_sample_rate: Symbol<SetSampleRate> = library.get(b"TG_setSampleRate\0")?;
@@ -184,24 +220,34 @@ fn render_inner(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Re
         set_max_block_size(256);
         set_sample_rate(SAMPLE_RATE as f32);
         set_sample_rate(SAMPLE_RATE as f32);
-        set_max_block_size(config.block_size as u32);
+        // SCCore rejects a configured maximum below 64 even though TG_Process
+        // itself accepts 32-frame chunks (the internal SIMD quantum).
+        set_max_block_size(config.block_size.max(64) as u32);
         set_interrupt_thread();
 
         short_midi_in(midi3(0xC0, config.program, 0), 0);
+        for &(control, value) in &config.controls {
+            short_midi_in(midi3(0xB0, control, value), 0);
+        }
         short_midi_in(midi3(0x90, config.note, config.velocity), 0);
 
-        let total_frames = SAMPLE_RATE as usize * 4;
-        let note_off_frame = SAMPLE_RATE as usize;
+        let total_frames = SAMPLE_RATE as usize * config.duration_ms as usize / 1000;
+        let note_off_frame = SAMPLE_RATE as usize * config.note_off_ms as usize / 1000;
         let mut rendered = 0;
+        let mut note_off_sent = false;
         let mut left = Vec::with_capacity(total_frames);
         let mut right = Vec::with_capacity(total_frames);
         let mut traced = Vec::new();
 
         while rendered < total_frames {
-            if rendered == note_off_frame {
+            if !note_off_sent && rendered == note_off_frame {
                 short_midi_in(midi3(0x80, config.note, 0), 0);
+                note_off_sent = true;
             }
-            let count = config.block_size.min(total_frames - rendered);
+            let mut count = config.block_size.min(total_frames - rendered);
+            if !note_off_sent && rendered < note_off_frame {
+                count = count.min(note_off_frame - rendered);
+            }
             let mut block_left = vec![0.0_f32; count];
             let mut block_right = vec![0.0_f32; count];
             process(
@@ -209,7 +255,8 @@ fn render_inner(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Re
                 block_right.as_mut_ptr(),
                 count as u32,
             );
-            if rendered == 0
+            let block_index = rendered / config.block_size;
+            if block_index == config.dump_block
                 && let Some((rva, length, path)) = &config.dump_rva
             {
                 let bytes = std::slice::from_raw_parts((image_base + rva) as *const u8, *length);
@@ -217,6 +264,19 @@ fn render_inner(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Re
                     .with_context(|| format!("writing memory dump {}", path.display()))?;
                 println!(
                     "MEMORY_DUMP rva=0x{rva:x} length=0x{length:x} output={}",
+                    path.display()
+                );
+            }
+            if block_index == config.dump_block
+                && let Some((pointer_rva, length, path)) = &config.dump_pointer_rva
+            {
+                let pointer = *((image_base + pointer_rva) as *const usize);
+                let bytes = std::slice::from_raw_parts(pointer as *const u8, *length);
+                fs::write(path, bytes)
+                    .with_context(|| format!("writing pointer memory dump {}", path.display()))?;
+                println!(
+                    "POINTER_MEMORY_DUMP pointer_rva=0x{pointer_rva:x} \
+                     address=0x{pointer:x} length=0x{length:x} output={}",
                     path.display()
                 );
             }
@@ -285,9 +345,15 @@ fn run() -> Result<()> {
         note: NOTE,
         velocity: VELOCITY,
         patch_u32: None,
+        patch_u8: None,
         dump_rva: None,
+        dump_pointer_rva: None,
+        dump_block: 0,
         block_size: BLOCK_SIZE,
         trace_rva: None,
+        duration_ms: 4_000,
+        note_off_ms: 1_000,
+        controls: Vec::new(),
     };
     let mut positional: Vec<OsString> = Vec::new();
 
@@ -313,6 +379,18 @@ fn run() -> Result<()> {
                     parse_number(&value.to_string_lossy())?,
                 ));
             }
+            "--patch-u8" => {
+                let offset = args.next().context("--patch-u8 requires OFFSET VALUE")?;
+                let value = args.next().context("--patch-u8 requires OFFSET VALUE")?;
+                let value = parse_number(&value.to_string_lossy())?;
+                if value > u8::MAX.into() {
+                    bail!("--patch-u8 VALUE must fit in one byte");
+                }
+                config.patch_u8 = Some((
+                    parse_number(&offset.to_string_lossy())? as usize,
+                    value as u8,
+                ));
+            }
             "--dump-rva" => {
                 let rva = args
                     .next()
@@ -329,12 +407,48 @@ fn run() -> Result<()> {
                     PathBuf::from(output),
                 ));
             }
+            "--dump-pointer-rva" => {
+                let rva = args
+                    .next()
+                    .context("--dump-pointer-rva requires POINTER_RVA LENGTH OUTPUT")?;
+                let length = args
+                    .next()
+                    .context("--dump-pointer-rva requires POINTER_RVA LENGTH OUTPUT")?;
+                let output = args
+                    .next()
+                    .context("--dump-pointer-rva requires POINTER_RVA LENGTH OUTPUT")?;
+                config.dump_pointer_rva = Some((
+                    parse_number(&rva.to_string_lossy())? as usize,
+                    parse_number(&length.to_string_lossy())? as usize,
+                    PathBuf::from(output),
+                ));
+            }
             "--block-size" => {
                 let value = args.next().context("--block-size requires a value")?;
                 config.block_size = parse_number(&value.to_string_lossy())? as usize;
-                if !(64..=BLOCK_SIZE).contains(&config.block_size) {
-                    bail!("--block-size must be in 64..={BLOCK_SIZE}");
+                if !(32..=BLOCK_SIZE).contains(&config.block_size) {
+                    bail!("--block-size must be in 32..={BLOCK_SIZE}");
                 }
+            }
+            "--duration-ms" => {
+                let value = args.next().context("--duration-ms requires a value")?;
+                config.duration_ms = parse_number(&value.to_string_lossy())?;
+            }
+            "--note-off-ms" => {
+                let value = args.next().context("--note-off-ms requires a value")?;
+                config.note_off_ms = parse_number(&value.to_string_lossy())?;
+            }
+            "--cc" => {
+                let control = args.next().context("--cc requires NUMBER VALUE")?;
+                let value = args.next().context("--cc requires NUMBER VALUE")?;
+                config.controls.push((
+                    parse_number(&control.to_string_lossy())?,
+                    parse_number(&value.to_string_lossy())?,
+                ));
+            }
+            "--dump-block" => {
+                let value = args.next().context("--dump-block requires an index")?;
+                config.dump_block = parse_number(&value.to_string_lossy())? as usize;
             }
             "--trace-rva" => {
                 let rva = args
@@ -360,11 +474,26 @@ fn run() -> Result<()> {
     if config.program > 127 || config.note > 127 || config.velocity > 127 {
         bail!("program, note, and velocity must be MIDI values in 0..=127");
     }
+    if config
+        .controls
+        .iter()
+        .any(|&(control, value)| control > 127 || value > 127)
+    {
+        bail!("CC numbers and values must be MIDI values in 0..=127");
+    }
+    if config.duration_ms == 0 || config.note_off_ms > config.duration_ms {
+        bail!("duration must be positive and note-off must not exceed it");
+    }
     if positional.len() != 2 {
         bail!(
             "usage: scva-render [--program N] [--note N] [--velocity N] \
-             [--patch-u32 FILE_OFFSET VALUE] [--dump-rva RVA LENGTH OUTPUT] \
-             [--block-size N] [--trace-rva RVA FLOATS OUTPUT.wav] \
+             [--patch-u32 FILE_OFFSET VALUE] [--patch-u8 FILE_OFFSET VALUE] \
+             [--dump-rva RVA LENGTH OUTPUT] \
+             [--dump-pointer-rva POINTER_RVA LENGTH OUTPUT] \
+             [--dump-block INDEX] [--block-size N] \
+             [--duration-ms N] [--note-off-ms N] \
+             [--cc NUMBER VALUE]... \
+             [--trace-rva RVA FLOATS OUTPUT.wav] \
              SCCore.dll OUTPUT.wav"
         );
     }

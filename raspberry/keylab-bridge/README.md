@@ -1,6 +1,6 @@
-# artupy bridge (Rust)
+# rackforge bridge (Rust)
 
-Puente seguro entre artupy y el Arturia KeyLab Essential 61 mk3.
+Puente seguro entre rackforge y el Arturia KeyLab Essential 61 mk3.
 
 La primera etapa reproduce la prueba de pantalla con Rust y `midir`. Detecta
 automáticamente el endpoint terminado en `MIDI`, hace dry-run por defecto y
@@ -16,6 +16,12 @@ cargo +stable-x86_64-pc-windows-msvc run --manifest-path .\raspberry\keylab-brid
 No actualiza firmware ni escribe templates o memorias de usuario. El cambio al
 programa DAW solo dura durante la sesión.
 
+Los enums públicos `eBlankScreen`, `eWhiteScreen` y `eBorderedScreen` no son
+una API de framebuffer. En hardware, `eWhiteScreen` se comporta como
+`ClearScreen`: abandona la página de contenido y reaparece la plantilla DAW; no
+enciende todos los píxeles. El bridge no expone comandos con nombres que
+sugieran control de píxeles mientras esa ruta no exista.
+
 ## Modelo de menú
 
 `src/menu.rs` mantiene navegación y presentación separadas del transporte
@@ -25,18 +31,38 @@ SysEx. La jerarquía inicial es:
 - `LIVE`: performances ordenadas para tocar;
 - `PLAY`: navegador directo de plugins;
 - `CONFIG`: instrumentos, setlists, audio y sistema;
-- `INSTRUMENT`: rack y parámetros propios del instrumento.
+- `INSTRUMENTS`: selección del instrumento/rack que se va a configurar;
+- `ROLAND SCVA`: páginas propias del plugin, entre ellas su envolvente ADSR.
+
+La envolvente no es una configuración global ni una hermana de Roland. La ruta
+es `CONFIG → INSTRUMENTS → ROLAND SCVA → ENVELOPE`; sus valores pertenecen a
+esa instancia del plugin. A medida que se conecte el menú con `rackforge-core`,
+cada plugin declarará sus páginas y parámetros mediante la Plugin API en lugar
+de agregarlos al árbol global.
 
 El renderer produce header, dos líneas ASCII de hasta 18 caracteres y un footer
 contextual nativo. Las acciones abstractas `Previous`, `Next`, `Back` y
 `Select` permanecen separadas del transporte MIDI.
 
-El header superior pertenece al estado de navegación y muestra `HOME`, `LIVE
-SET`, `PLAY` o `CONFIG` y, cuando corresponde, su posición. Al entrar a un
-instrumento o editor inmersivo cambia explícitamente a modo fullscreen y oculta
-el header. Las dos líneas principales quedan reservadas para componentes: HOME
-usa botones grandes en dos filas y las acciones aparecen pequeñas en el footer
-oficial, alineadas con los botones físicos.
+El cuerpo no es tipográficamente homogéneo: en el teclado físico, la primera
+línea usa el texto grueso/principal del firmware y la segunda usa un texto más
+fino/secundario. No existe un selector de peso por carácter. Por eso los
+componentes deben poner el foco en la línea 1 y trasladar vecinos o contexto a
+la línea 2 cuando necesiten una jerarquía visual real.
+
+El header superior es una región opcional. La navegación puede usarlo para
+`HOME`, `LIVE SET`, `PLAY` o `CONFIG`; una página declarada por un plugin puede
+pedirlo mediante la Plugin API. Roland usa `ROLAND SCVA` en su configuración y
+el editor inmersivo de envolvente puede ocultarlo para recuperar espacio.
+
+Las listas usan dos componentes sin vecinos visibles. El carrusel simple
+muestra la opción actual en la línea 1 y una descripción breve en la línea 2.
+El carrusel de valores muestra el nombre del parámetro en la línea 1 y su valor
+en la línea 2; el foco baja al valor durante la edición y vuelve al nombre al
+confirmar o cancelar. Los desplazamientos reemplazan el contenido directamente,
+sin animación, vecinos ni indicadores `v/^`. El carrusel simple no agrega
+corchetes. El carrusel de valores sí los conserva para mostrar si el foco está
+en el nombre o en el valor editable.
 
 La interfaz física pública conserva siete entradas independientes:
 `Button1..Button4`, `EncoderLeft`, `EncoderRight` y `EncoderPress`. De izquierda
@@ -71,21 +97,23 @@ ruta ALSA anterior y recupera la pantalla con una sesión MIDI nueva al
 reconectarse. Esto evita depender de errores de escritura: ALSA puede aceptar
 mensajes destinados a una suscripción que ya desapareció.
 
-Después de cada detección, el bridge exige medio segundo de identidad USB
-estable. Luego pulsa el handshake DAW/OLED hasta recibir del propio KeyLab el
-SysEx que confirma `DAW Program`; no declara éxito sólo porque ALSA aceptó el
-envío. En estado activo revalida ese ACK cada seis segundos y vuelve a
-adquisición después de dos respuestas perdidas.
+Después de cada detección, el bridge exige cinco segundos continuos de identidad
+USB estable antes de abrir una sesión o enviar el primer byte. Esto evita tomar
+la pantalla mientras el firmware todavía inicializa USB y su UI. Luego pulsa el
+handshake DAW/OLED hasta recibir del propio KeyLab el SysEx que confirma
+`DAW Program`; los reintentos quedan separados por dos segundos y no declara
+éxito sólo porque ALSA aceptó el envío. En estado activo revalida ese ACK cada
+seis segundos y vuelve a adquisición después de dos respuestas perdidas.
 
-`systemd/artupy-display.service` lo inicia automáticamente con el sistema. Su
+`systemd/rackforge-display.service` lo inicia automáticamente con el sistema. Su
 `ExecStopPost` ejecuta `restore --execute`, por lo que un apagado o una detención
 normal del servicio devuelve el teclado al programa Arturia oficial.
 
 ```bash
-cd /home/kalex/artupy/current/keylab-bridge
-cargo build --release --bin artupy-bridge
+cd /home/kalex/rackforge/current/keylab-bridge
+cargo build --release --bin rackforge-bridge
 bash ./install.sh
-systemctl status artupy-display.service
+systemctl status rackforge-display.service
 ```
 
 En Windows se usa explícitamente el toolchain MSVC para evitar depender de

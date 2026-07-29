@@ -1,13 +1,13 @@
 [CmdletBinding()]
 param(
-    [string]$HostAlias = "artupy",
-    [string]$RemoteRoot = "/home/kalex/artupy"
+    [string]$HostAlias = "rackforge",
+    [string]$RemoteRoot = "/home/kalex/rackforge"
 )
 
 $ErrorActionPreference = "Stop"
 $source = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $archive = Join-Path ([System.IO.Path]::GetTempPath()) (
-    "artupy-raspberry-{0}.tar" -f [guid]::NewGuid().ToString("N")
+    "rackforge-raspberry-{0}.tar" -f [guid]::NewGuid().ToString("N")
 )
 
 try {
@@ -16,7 +16,7 @@ try {
         throw "No se pudo crear el paquete de despliegue."
     }
 
-    & scp $archive "${HostAlias}:/tmp/artupy-raspberry.tar"
+    & scp $archive "${HostAlias}:/tmp/rackforge-raspberry.tar"
     if ($LASTEXITCODE -ne 0) {
         throw "No se pudo copiar el paquete a la Raspberry."
     }
@@ -26,8 +26,8 @@ set -eu
 install -d '$RemoteRoot/current' '$RemoteRoot/banks' \
   '$RemoteRoot/bin' '$RemoteRoot/build' '$RemoteRoot/performances' \
   '$RemoteRoot/share/nuked-sc55' '$RemoteRoot/state' '$RemoteRoot/logs'
-tar -xf /tmp/artupy-raspberry.tar -C '$RemoteRoot/current'
-rm -f /tmp/artupy-raspberry.tar
+tar -xf /tmp/rackforge-raspberry.tar -C '$RemoteRoot/current'
+rm -f /tmp/rackforge-raspberry.tar
 printf 'deployed=%s\n' '$RemoteRoot/current'
 "@
     $payload = [Convert]::ToBase64String(

@@ -2,13 +2,13 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-artupy_root="${ARTUPY_ROOT:-$HOME/artupy}"
-binary="$artupy_root/bin/nuked-sc55"
-probe="$artupy_root/bin/artupy-nuked-probe"
-model="${ARTUPY_NUKED_MODEL:-mk2}"
-audio_device="${ARTUPY_AUDIO_DEVICE:-plughw:CARD=USB,DEV=0}"
-page_size="${ARTUPY_NUKED_PAGE_SIZE:-512}"
-page_count="${ARTUPY_NUKED_PAGE_COUNT:-8}"
+rackforge_root="${RACKFORGE_ROOT:-$HOME/rackforge}"
+binary="$rackforge_root/bin/nuked-sc55"
+probe="$rackforge_root/bin/rackforge-nuked-probe"
+model="${RACKFORGE_NUKED_MODEL:-mk2}"
+audio_device="${RACKFORGE_AUDIO_DEVICE:-plughw:CARD=USB,DEV=0}"
+page_size="${RACKFORGE_NUKED_PAGE_SIZE:-512}"
+page_count="${RACKFORGE_NUKED_PAGE_COUNT:-8}"
 
 if [[ ! -x "$binary" ]]; then
   printf 'No existe %s. Ejecutá build.sh primero.\n' "$binary" >&2
@@ -32,7 +32,7 @@ if ! aconnect -i | grep -Fq 'KL Essential 61 mk3 MIDI'; then
   exit 1
 fi
 
-midi_port="${ARTUPY_NUKED_MIDI_PORT:-$(
+midi_port="${RACKFORGE_NUKED_MIDI_PORT:-$(
   "$probe" --find-midi 'KL Essential 61 mk3 MIDI'
 )}"
 

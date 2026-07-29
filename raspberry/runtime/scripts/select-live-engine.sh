@@ -2,16 +2,23 @@
 set -euo pipefail
 
 mode="${1:-plugin}"
-root="${ARTUPY_ROOT:-/home/kalex/artupy}"
+selection="${2:-}"
+root="${RACKFORGE_ROOT:-/home/kalex/rackforge}"
 legacy_pid_file="$root/state/scva-live.pid"
-plugin_pid_file="$root/state/artupy-core-live.pid"
+native_pid_file="$root/state/scva-native-live.pid"
+plugin_pid_file="$root/state/rackforge-core-live.pid"
+dls_pid_file="$root/state/dls-live.pid"
 legacy_log="$root/logs/scva-live.log"
-plugin_log="$root/logs/artupy-core-live.log"
+native_log="$root/logs/scva-native-live.log"
+plugin_log="$root/logs/rackforge-core-live.log"
+dls_log="$root/logs/dls-live.log"
 
-legacy_binary="$root/bin/artupy-scva-live"
-plugin_binary="$root/bin/artupy-core"
+legacy_binary="$root/bin/rackforge-scva-live"
+plugin_binary="$root/bin/rackforge-core"
+dls_binary="$root/bin/rackforge-dls-live"
 plugin_package="$root/plugins/roland-scva"
 rendered_bank="$root/share/rendered-piano-v1"
+dls_bank="$root/data/addons/rackforge-dls/banks/gm.dls"
 
 process_command() {
   local pid="$1"
@@ -61,12 +68,36 @@ start_legacy() {
 }
 
 start_plugin() {
+  local preset="${1:-scva.piano-1}"
   : >"$plugin_log"
   nohup "$plugin_binary" live "$plugin_package" \
     --resource "rendered-bank=$rendered_bank" \
-    --preset scva.piano-1 \
+    --preset "$preset" \
+    --data-root "$root/data" \
     >"$plugin_log" 2>&1 </dev/null &
   printf '%s\n' "$!" >"$plugin_pid_file"
+}
+
+start_native() {
+  local tone="${1:-390}"
+  : >"$native_log"
+  nohup "$legacy_binary" \
+    --tone "$tone" \
+    "$root/share/scva" \
+    "$root/share/scva/control-v1" \
+    >"$native_log" 2>&1 </dev/null &
+  printf '%s\n' "$!" >"$native_pid_file"
+}
+
+start_dls() {
+  local program="${1:-0}"
+  : >"$dls_log"
+  nohup "$dls_binary" \
+    --bank 0 \
+    --program "$program" \
+    "$dls_bank" \
+    >"$dls_log" 2>&1 </dev/null &
+  printf '%s\n' "$!" >"$dls_pid_file"
 }
 
 wait_ready() {
@@ -79,7 +110,7 @@ wait_ready() {
       tail -n 30 "$log_file" >&2 || true
       return 1
     fi
-    if grep -q '^READY_TO_PLAY$' "$log_file"; then
+    if grep -q '^READY_TO_PLAY' "$log_file"; then
       return 0
     fi
     sleep 0.25
@@ -91,33 +122,75 @@ wait_ready() {
 
 case "$mode" in
   plugin)
+    preset="${selection:-scva.piano-1}"
     test -x "$legacy_binary"
     test -x "$plugin_binary"
     test -d "$rendered_bank"
-    test -f "$plugin_package/artupy-plugin.toml"
+    test -f "$plugin_package/rackforge-plugin.toml"
     stop_verified "$plugin_pid_file" "$plugin_binary"
+    stop_verified "$native_pid_file" "$legacy_binary"
     stop_verified "$legacy_pid_file" "$legacy_binary"
-    if ! start_plugin || ! wait_ready "$plugin_pid_file" "$plugin_log"; then
+    stop_verified "$dls_pid_file" "$dls_binary"
+    if ! start_plugin "$preset" || ! wait_ready "$plugin_pid_file" "$plugin_log"; then
       stop_verified "$plugin_pid_file" "$plugin_binary" || true
       start_legacy
       wait_ready "$legacy_pid_file" "$legacy_log"
       printf 'PLUGIN_START_FAILED rollback=legacy\n' >&2
       exit 1
     fi
-    printf 'LIVE_ENGINE_SELECTED engine=plugin pid=%s\n' \
-      "$(<"$plugin_pid_file")"
+    printf 'LIVE_ENGINE_SELECTED engine=plugin preset=%s pid=%s\n' \
+      "$preset" "$(<"$plugin_pid_file")"
     ;;
   legacy)
     test -x "$legacy_binary"
     stop_verified "$plugin_pid_file" "$plugin_binary"
+    stop_verified "$native_pid_file" "$legacy_binary"
     stop_verified "$legacy_pid_file" "$legacy_binary"
+    stop_verified "$dls_pid_file" "$dls_binary"
     start_legacy
     wait_ready "$legacy_pid_file" "$legacy_log"
     printf 'LIVE_ENGINE_SELECTED engine=legacy pid=%s\n' \
       "$(<"$legacy_pid_file")"
     ;;
+  native)
+    tone="${selection:-390}"
+    test -x "$legacy_binary"
+    test -d "$root/share/scva"
+    test -d "$root/share/scva/control-v1"
+    stop_verified "$plugin_pid_file" "$plugin_binary"
+    stop_verified "$native_pid_file" "$legacy_binary"
+    stop_verified "$legacy_pid_file" "$legacy_binary"
+    stop_verified "$dls_pid_file" "$dls_binary"
+    if ! start_native "$tone" || ! wait_ready "$native_pid_file" "$native_log"; then
+      stop_verified "$native_pid_file" "$legacy_binary" || true
+      start_plugin scva.strings-1
+      wait_ready "$plugin_pid_file" "$plugin_log"
+      printf 'NATIVE_START_FAILED rollback=plugin preset=scva.strings-1\n' >&2
+      exit 1
+    fi
+    printf 'LIVE_ENGINE_SELECTED engine=native tone=%s pid=%s\n' \
+      "$tone" "$(<"$native_pid_file")"
+    ;;
+  dls)
+    program="${selection:-0}"
+    test -x "$dls_binary"
+    test -f "$dls_bank"
+    stop_verified "$plugin_pid_file" "$plugin_binary"
+    stop_verified "$native_pid_file" "$legacy_binary"
+    stop_verified "$legacy_pid_file" "$legacy_binary"
+    stop_verified "$dls_pid_file" "$dls_binary"
+    if ! start_dls "$program" || ! wait_ready "$dls_pid_file" "$dls_log"; then
+      stop_verified "$dls_pid_file" "$dls_binary" || true
+      start_native 390
+      wait_ready "$native_pid_file" "$native_log"
+      printf 'DLS_START_FAILED rollback=native tone=390\n' >&2
+      exit 1
+    fi
+    printf 'LIVE_ENGINE_SELECTED engine=dls program=%s pid=%s\n' \
+      "$program" "$(<"$dls_pid_file")"
+    ;;
   *)
-    printf 'usage: %s plugin|legacy\n' "$0" >&2
+    printf 'usage: %s plugin [preset]|native [tone]|legacy|dls [program]\n' "$0" >&2
     exit 2
     ;;
 esac

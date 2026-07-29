@@ -346,8 +346,8 @@ fn run_demo(
     execute: bool,
 ) -> Result<(), Box<dyn Error>> {
     let daw = select_preset(1)?;
-    let title = header("KEYLAB 61 MK3")?;
-    let screen = two_lines("DOOM", "RUST BRIDGE")?;
+    let title = header("ARTUPY")?;
+    let screen = two_lines("ARTUPY", "PI CONNECTED")?;
     let arturia = select_preset(0)?;
 
     println!("Puerto: [{}] {}", port.index, port.name);

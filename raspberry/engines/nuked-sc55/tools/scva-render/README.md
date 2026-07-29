@@ -54,3 +54,20 @@ cargo run --release --bin scva-decode-oracle -- `
 
 El proceso usa como directorio de trabajo la carpeta de la DLL, para que el
 motor pueda encontrar los archivos auxiliares de la instalación.
+
+Para capturar un rango de memoria interna después del primer bloque de audio:
+
+```powershell
+cargo run --release --bin scva-render -- `
+  --dump-rva 0x1a1b860 0x800 "C:\temp\stage.bin" `
+  "C:\ruta\SCCore.dll" "C:\temp\render.wav"
+```
+
+Para convertir un buffer interno en un WAV continuo, se procesa SCCore en
+bloques del mismo tamaño que el rango capturado:
+
+```powershell
+cargo run --release --bin scva-render -- `
+  --block-size 64 --trace-rva 0x1a1b860 32 "C:\temp\decoder-stage.wav" `
+  "C:\ruta\SCCore.dll" "C:\temp\render.wav"
+```

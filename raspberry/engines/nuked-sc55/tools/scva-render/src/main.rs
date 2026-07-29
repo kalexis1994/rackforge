@@ -10,6 +10,7 @@ const SAMPLE_RATE: u32 = 44_100;
 const BLOCK_SIZE: usize = 512;
 const NOTE: u32 = 60;
 const VELOCITY: u32 = 100;
+const TG_INITIALIZE_RVA: usize = 0x8e160;
 
 #[derive(Debug)]
 struct ProbeConfig {
@@ -17,6 +18,9 @@ struct ProbeConfig {
     note: u32,
     velocity: u32,
     patch_u32: Option<(usize, u32)>,
+    dump_rva: Option<(usize, usize, PathBuf)>,
+    block_size: usize,
+    trace_rva: Option<(usize, usize, PathBuf)>,
 }
 
 struct TemporaryDll {
@@ -111,6 +115,22 @@ fn write_wav(path: &Path, left: &[f32], right: &[f32]) -> Result<()> {
     Ok(())
 }
 
+fn write_mono_wav(path: &Path, samples: &[f32]) -> Result<()> {
+    let spec = WavSpec {
+        channels: 1,
+        sample_rate: SAMPLE_RATE,
+        bits_per_sample: 32,
+        sample_format: SampleFormat::Float,
+    };
+    let mut writer =
+        WavWriter::create(path, spec).with_context(|| format!("creating {}", path.display()))?;
+    for sample in samples {
+        writer.write_sample(*sample)?;
+    }
+    writer.finalize()?;
+    Ok(())
+}
+
 fn render(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Result<()> {
     let dll_path = absolute(dll_path)?;
     let output_path = absolute(output_path)?;
@@ -143,6 +163,7 @@ fn render_inner(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Re
 
     unsafe {
         let initialize: Symbol<Initialize> = library.get(b"TG_initialize\0")?;
+        let image_base = *initialize as usize - TG_INITIALIZE_RVA;
         let activate: Symbol<Activate> = library.get(b"TG_activate\0")?;
         let deactivate: Symbol<Deactivate> = library.get(b"TG_deactivate\0")?;
         let set_sample_rate: Symbol<SetSampleRate> = library.get(b"TG_setSampleRate\0")?;
@@ -163,7 +184,7 @@ fn render_inner(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Re
         set_max_block_size(256);
         set_sample_rate(SAMPLE_RATE as f32);
         set_sample_rate(SAMPLE_RATE as f32);
-        set_max_block_size(BLOCK_SIZE as u32);
+        set_max_block_size(config.block_size as u32);
         set_interrupt_thread();
 
         short_midi_in(midi3(0xC0, config.program, 0), 0);
@@ -174,12 +195,13 @@ fn render_inner(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Re
         let mut rendered = 0;
         let mut left = Vec::with_capacity(total_frames);
         let mut right = Vec::with_capacity(total_frames);
+        let mut traced = Vec::new();
 
         while rendered < total_frames {
             if rendered == note_off_frame {
                 short_midi_in(midi3(0x80, config.note, 0), 0);
             }
-            let count = BLOCK_SIZE.min(total_frames - rendered);
+            let count = config.block_size.min(total_frames - rendered);
             let mut block_left = vec![0.0_f32; count];
             let mut block_right = vec![0.0_f32; count];
             process(
@@ -187,6 +209,22 @@ fn render_inner(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Re
                 block_right.as_mut_ptr(),
                 count as u32,
             );
+            if rendered == 0
+                && let Some((rva, length, path)) = &config.dump_rva
+            {
+                let bytes = std::slice::from_raw_parts((image_base + rva) as *const u8, *length);
+                fs::write(path, bytes)
+                    .with_context(|| format!("writing memory dump {}", path.display()))?;
+                println!(
+                    "MEMORY_DUMP rva=0x{rva:x} length=0x{length:x} output={}",
+                    path.display()
+                );
+            }
+            if let Some((rva, float_count, _)) = &config.trace_rva {
+                let values =
+                    std::slice::from_raw_parts((image_base + rva) as *const f32, *float_count);
+                traced.extend_from_slice(values);
+            }
             left.extend_from_slice(&block_left);
             right.extend_from_slice(&block_right);
             rendered += count;
@@ -207,6 +245,15 @@ fn render_inner(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Re
         let rms = (sum_squares / (left.len() + right.len()) as f64).sqrt();
 
         write_wav(output_path, &left, &right)?;
+        if let Some((rva, float_count, path)) = &config.trace_rva {
+            write_mono_wav(path, &traced)?;
+            println!(
+                "MEMORY_TRACE rva=0x{rva:x} floats_per_block={float_count} \
+                 frames={} output={}",
+                traced.len(),
+                path.display()
+            );
+        }
         println!(
             "RENDERED {} program={} note={} velocity={} frames={} \
              peak={peak:.8} rms={rms:.8} voices_after_tail={voices}",
@@ -238,6 +285,9 @@ fn run() -> Result<()> {
         note: NOTE,
         velocity: VELOCITY,
         patch_u32: None,
+        dump_rva: None,
+        block_size: BLOCK_SIZE,
+        trace_rva: None,
     };
     let mut positional: Vec<OsString> = Vec::new();
 
@@ -263,6 +313,45 @@ fn run() -> Result<()> {
                     parse_number(&value.to_string_lossy())?,
                 ));
             }
+            "--dump-rva" => {
+                let rva = args
+                    .next()
+                    .context("--dump-rva requires RVA LENGTH OUTPUT")?;
+                let length = args
+                    .next()
+                    .context("--dump-rva requires RVA LENGTH OUTPUT")?;
+                let output = args
+                    .next()
+                    .context("--dump-rva requires RVA LENGTH OUTPUT")?;
+                config.dump_rva = Some((
+                    parse_number(&rva.to_string_lossy())? as usize,
+                    parse_number(&length.to_string_lossy())? as usize,
+                    PathBuf::from(output),
+                ));
+            }
+            "--block-size" => {
+                let value = args.next().context("--block-size requires a value")?;
+                config.block_size = parse_number(&value.to_string_lossy())? as usize;
+                if !(64..=BLOCK_SIZE).contains(&config.block_size) {
+                    bail!("--block-size must be in 64..={BLOCK_SIZE}");
+                }
+            }
+            "--trace-rva" => {
+                let rva = args
+                    .next()
+                    .context("--trace-rva requires RVA FLOATS OUTPUT.wav")?;
+                let count = args
+                    .next()
+                    .context("--trace-rva requires RVA FLOATS OUTPUT.wav")?;
+                let output = args
+                    .next()
+                    .context("--trace-rva requires RVA FLOATS OUTPUT.wav")?;
+                config.trace_rva = Some((
+                    parse_number(&rva.to_string_lossy())? as usize,
+                    parse_number(&count.to_string_lossy())? as usize,
+                    PathBuf::from(output),
+                ));
+            }
             option if option.starts_with('-') => bail!("unknown option: {option}"),
             _ => positional.push(argument),
         }
@@ -274,7 +363,9 @@ fn run() -> Result<()> {
     if positional.len() != 2 {
         bail!(
             "usage: scva-render [--program N] [--note N] [--velocity N] \
-             [--patch-u32 FILE_OFFSET VALUE] SCCore.dll OUTPUT.wav"
+             [--patch-u32 FILE_OFFSET VALUE] [--dump-rva RVA LENGTH OUTPUT] \
+             [--block-size N] [--trace-rva RVA FLOATS OUTPUT.wav] \
+             SCCore.dll OUTPUT.wav"
         );
     }
     render(

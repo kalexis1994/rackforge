@@ -1,0 +1,19 @@
+[Unit]
+Description=ArtuPy persistent KeyLab OLED controller
+After=local-fs.target
+
+[Service]
+Type=simple
+User=kalex
+Group=kalex
+ExecStart=/home/kalex/artupy/bin/artupy-bridge serve --execute
+ExecStopPost=-/home/kalex/artupy/bin/artupy-bridge restore --execute
+Restart=always
+RestartSec=1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

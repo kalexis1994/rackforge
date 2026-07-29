@@ -8,7 +8,7 @@ El ejecutable es sólo una sonda de investigación para Windows x64. No conviert
 la DLL a ARM ni redistribuye código o bancos propietarios.
 
 ```powershell
-cargo run --release -- `
+cargo run --release --bin scva-render -- `
   "C:\ruta\SCCore.dll" `
   "C:\ruta\scva-c4.wav"
 ```
@@ -16,7 +16,7 @@ cargo run --release -- `
 Para crear oráculos reproducibles de distintos programas y notas:
 
 ```powershell
-cargo run --release -- `
+cargo run --release --bin scva-render -- `
   --program 0 --note 60 --velocity 100 `
   "C:\ruta\SCCore.dll" `
   "C:\ruta\piano-c4.wav"
@@ -28,10 +28,19 @@ cargarla y elimina la copia al terminar. Sirve para comprobar qué campos de las
 tablas estáticas afectan al render:
 
 ```powershell
-cargo run --release -- `
+cargo run --release --bin scva-render -- `
   --patch-u32 0x18f57bc 0x753 `
   "C:\ruta\SCCore.dll" `
   "C:\ruta\probe.wav"
+```
+
+Para comparar los primeros cuatro acumuladores DPCM con la rutina interna de
+SCCore 1.1.2 sin reproducir audio:
+
+```powershell
+cargo run --release --bin scva-decode-oracle -- `
+  "C:\ruta\SCCore.dll" "C:\ruta\wave_bank.bin" `
+  2 0x290a0 0x2e8db 0x311df
 ```
 
 El proceso usa como directorio de trabajo la carpeta de la DLL, para que el

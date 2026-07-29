@@ -25,7 +25,7 @@ mod linux {
     const FIRST_NOTE: u8 = 36;
     const LAST_NOTE: u8 = 96;
     const MAX_VOICES: usize = 16;
-    const MASTER_GAIN: f32 = 0.42;
+    const DEFAULT_MASTER_GAIN: f32 = 0.18;
     const RELEASE_FRAMES: usize = 2_400;
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -57,6 +57,7 @@ mod linux {
         bank_directory: PathBuf,
         control_directory: PathBuf,
         partial_mode: PartialMode,
+        master_gain: f32,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -82,6 +83,7 @@ mod linux {
             config.control_directory.display(),
             config.partial_mode.as_str()
         );
+        println!("MIX_CONFIG master_gain={:.3}", config.master_gain);
 
         let banks = WaveBankSet::open(&config.bank_directory)?;
         let controls = ControlBankSet::open(&config.control_directory)?;
@@ -103,13 +105,14 @@ mod linux {
              channels={CHANNELS} format=S32_LE"
         );
         println!("READY_TO_PLAY");
-        audio_loop(&pcm, &receiver, &cache)
+        audio_loop(&pcm, &receiver, &cache, config.master_gain)
     }
 
     fn config_from_args() -> Result<Config> {
         let mut arguments = env::args_os().skip(1);
         let mut positional = Vec::new();
         let mut partial_mode = PartialMode::Both;
+        let mut master_gain = DEFAULT_MASTER_GAIN;
         while let Some(argument) = arguments.next() {
             if argument == "--partial" {
                 let value = arguments
@@ -121,6 +124,15 @@ mod linux {
                     "2" => PartialMode::Two,
                     _ => bail!("--partial requires both, 1, or 2"),
                 };
+            } else if argument == "--gain" {
+                let value = arguments.next().context("--gain requires a value")?;
+                master_gain = value
+                    .to_string_lossy()
+                    .parse()
+                    .context("--gain must be a number")?;
+                if !(0.0..=1.0).contains(&master_gain) {
+                    bail!("--gain must be between 0.0 and 1.0");
+                }
             } else if argument.to_string_lossy().starts_with('-') {
                 bail!("unknown option: {}", argument.to_string_lossy());
             } else {
@@ -134,7 +146,7 @@ mod linux {
             ),
             [banks, controls] => (PathBuf::from(banks), PathBuf::from(controls)),
             _ => bail!(
-                "usage: artupy-scva-live [--partial both|1|2] \
+                "usage: artupy-scva-live [--partial both|1|2] [--gain 0.0..1.0] \
                  [BANK_DIRECTORY CONTROL_DIRECTORY]"
             ),
         };
@@ -142,6 +154,7 @@ mod linux {
             bank_directory,
             control_directory,
             partial_mode,
+            master_gain,
         })
     }
 
@@ -393,10 +406,14 @@ mod linux {
         pcm: &PCM,
         receiver: &Receiver<MidiEvent>,
         cache: &BTreeMap<u8, Arc<[f32]>>,
+        master_gain: f32,
     ) -> Result<()> {
         let io = pcm.io_i32()?;
         let mut voices: Vec<Voice> = Vec::with_capacity(MAX_VOICES);
         let mut output = vec![0_i32; PERIOD_FRAMES * CHANNELS];
+        let mut meter_frames = 0_usize;
+        let mut meter_peak = 0_f32;
+        let mut meter_clipped = 0_usize;
 
         loop {
             while let Ok(event) = receiver.try_recv() {
@@ -418,12 +435,12 @@ mod linux {
                             note,
                             samples: Arc::clone(samples),
                             position: 0,
-                            gain: MASTER_GAIN * velocity_gain,
+                            gain: master_gain * velocity_gain,
                             release_remaining: None,
                         });
                         println!(
                             "NOTE_ON note={note} velocity={velocity} gain={:.3} voices={}",
-                            MASTER_GAIN * velocity_gain,
+                            master_gain * velocity_gain,
                             voices.len()
                         );
                     }
@@ -451,6 +468,9 @@ mod linux {
                         }
                     }
                 }
+                meter_peak = meter_peak.max(mixed.abs());
+                meter_clipped += usize::from(mixed.abs() > 0.95);
+                meter_frames += 1;
                 let sample = (mixed.clamp(-0.95, 0.95) * i32::MAX as f32) as i32;
                 output[frame * 2] = sample;
                 output[frame * 2 + 1] = sample;
@@ -458,6 +478,15 @@ mod linux {
             voices.retain(|voice| {
                 voice.position < voice.samples.len() && voice.release_remaining != Some(0)
             });
+            if meter_frames >= OUTPUT_RATE as usize {
+                println!(
+                    "AUDIO_METER peak={meter_peak:.3} clipped={meter_clipped} voices={}",
+                    voices.len()
+                );
+                meter_frames = 0;
+                meter_peak = 0.0;
+                meter_clipped = 0;
+            }
 
             match io.writei(&output) {
                 Ok(_) => {}

@@ -8,7 +8,10 @@ pub mod manifest;
 pub mod parameter;
 pub mod preset;
 
-pub use manifest::{ApiRequirement, Capability, PluginKind, PluginManifest, RuntimeDescriptor};
+pub use manifest::{
+    ApiRequirement, Capability, PluginKind, PluginManifest, ResourceKind, ResourceRequirement,
+    RuntimeDescriptor,
+};
 pub use parameter::{
     EnumChoice, PageDescriptor, ParameterDescriptor, ParameterFlags, ParameterKind,
     ParameterSchema, SuggestedControl,

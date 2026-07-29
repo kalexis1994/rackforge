@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 #define ARTUPY_ABI_VERSION_MAJOR 1u
-#define ARTUPY_ABI_VERSION_MINOR 0u
+#define ARTUPY_ABI_VERSION_MINOR 1u
 #define ARTUPY_ABI_VERSION \
     ((ARTUPY_ABI_VERSION_MAJOR << 16u) | ARTUPY_ABI_VERSION_MINOR)
 
@@ -31,12 +31,20 @@ typedef void (*ArtupyHostLogFnV1)(
     const uint8_t *text,
     size_t length
 );
+typedef size_t (*ArtupyHostGetResourcePathFnV1)(
+    void *context,
+    const uint8_t *resource_id,
+    size_t resource_id_length,
+    uint8_t *destination,
+    size_t capacity
+);
 
 typedef struct ArtupyHostApiV1 {
     uint32_t struct_size;
     uint32_t api_version;
     void *context;
     ArtupyHostLogFnV1 log;
+    ArtupyHostGetResourcePathFnV1 get_resource_path;
 } ArtupyHostApiV1;
 
 typedef struct ArtupyMidiEventV1 {

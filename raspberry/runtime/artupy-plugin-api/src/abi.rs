@@ -8,7 +8,7 @@ use std::mem::size_of;
 use std::ptr;
 
 pub const ABI_VERSION_MAJOR: u16 = 1;
-pub const ABI_VERSION_MINOR: u16 = 0;
+pub const ABI_VERSION_MINOR: u16 = 1;
 pub const ABI_VERSION: u32 = pack_version(ABI_VERSION_MAJOR, ABI_VERSION_MINOR);
 pub const ENTRY_SYMBOL_V1: &[u8] = b"artupy_plugin_entry_v1\0";
 
@@ -38,6 +38,13 @@ pub const LOG_LEVEL_ERROR: u32 = 4;
 
 pub type HostLogFnV1 =
     unsafe extern "C" fn(context: *mut c_void, level: u32, text: *const u8, length: usize);
+pub type HostGetResourcePathFnV1 = unsafe extern "C" fn(
+    context: *mut c_void,
+    resource_id: *const u8,
+    resource_id_length: usize,
+    destination: *mut u8,
+    capacity: usize,
+) -> usize;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -46,15 +53,21 @@ pub struct HostApiV1 {
     pub api_version: u32,
     pub context: *mut c_void,
     pub log: Option<HostLogFnV1>,
+    pub get_resource_path: Option<HostGetResourcePathFnV1>,
 }
 
 impl HostApiV1 {
-    pub const fn new(context: *mut c_void, log: Option<HostLogFnV1>) -> Self {
+    pub const fn new(
+        context: *mut c_void,
+        log: Option<HostLogFnV1>,
+        get_resource_path: Option<HostGetResourcePathFnV1>,
+    ) -> Self {
         Self {
             struct_size: size_of::<Self>() as u32,
             api_version: ABI_VERSION,
             context,
             log,
+            get_resource_path,
         }
     }
 }
@@ -183,10 +196,11 @@ mod tests {
     #[test]
     fn packs_and_checks_api_versions() {
         assert_eq!(version_major(ABI_VERSION), 1);
-        assert_eq!(version_minor(ABI_VERSION), 0);
+        assert_eq!(version_minor(ABI_VERSION), 1);
         assert!(is_compatible(pack_version(1, 0)));
+        assert!(is_compatible(pack_version(1, 1)));
         assert!(!is_compatible(pack_version(2, 0)));
-        assert!(!is_compatible(pack_version(1, 1)));
+        assert!(!is_compatible(pack_version(1, 2)));
     }
 
     #[test]

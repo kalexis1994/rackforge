@@ -1,0 +1,17 @@
+[package]
+name = "artupy-roland-scva"
+description = "ArtuPy instrument plugin for legally rendered Sound Canvas VA banks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+artupy-plugin-api = { path = "../../artupy-plugin-api" }
+hound.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+

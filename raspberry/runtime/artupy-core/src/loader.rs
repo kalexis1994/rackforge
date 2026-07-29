@@ -3,15 +3,16 @@ use anyhow::{Context, Result, anyhow, bail};
 use artupy_plugin_api::abi::{
     ABI_VERSION, ENTRY_SYMBOL_V1, HostApiV1, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO,
     LOG_LEVEL_TRACE, LOG_LEVEL_WARN, MidiEventV1, ParameterEventV1, PluginApiV1, PluginEntryFnV1,
-    ProcessBlockV1, STATUS_OK, is_compatible,
+    ProcessBlockV1, STATUS_OK, copy_to_host_buffer, is_compatible,
 };
 use artupy_plugin_api::{
     Capability, ParameterSchema, PluginManifest, PresetCatalog, RuntimeDescriptor,
 };
 use libloading::{Library, Symbol};
+use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::mem::size_of;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr;
 
 const MAX_METADATA_BYTES: usize = 1024 * 1024;
@@ -22,6 +23,7 @@ pub struct LoadedPlugin {
     parameters: ParameterSchema,
     presets: PresetCatalog,
     api: &'static PluginApiV1,
+    _host_context: Box<HostContext>,
     host_api: Box<HostApiV1>,
     _library: Library,
 }
@@ -33,7 +35,21 @@ impl LoadedPlugin {
     ///
     /// The selected dynamic library executes native code in the host process.
     /// Callers must only load trusted ArtuPy packages.
-    pub unsafe fn load(package: &PluginPackage, binary_override: Option<&Path>) -> Result<Self> {
+    pub unsafe fn load(
+        package: &PluginPackage,
+        binary_override: Option<&Path>,
+        resource_overrides: &BTreeMap<String, PathBuf>,
+    ) -> Result<Self> {
+        let resources = package.resolve_resources(resource_overrides)?;
+        let resource_paths = resources
+            .into_iter()
+            .map(|(id, path)| {
+                let text = path
+                    .to_str()
+                    .with_context(|| format!("resource path is not UTF-8: {}", path.display()))?;
+                Ok((id, text.as_bytes().to_vec()))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
         let binary = match binary_override {
             Some(path) => path.to_path_buf(),
             None => package.binary_path()?,
@@ -95,13 +111,20 @@ impl LoadedPlugin {
             );
         }
 
-        let host_api = Box::new(HostApiV1::new(ptr::null_mut(), Some(host_log)));
+        let mut host_context = Box::new(HostContext { resource_paths });
+        let context = host_context.as_mut() as *mut HostContext as *mut c_void;
+        let host_api = Box::new(HostApiV1::new(
+            context,
+            Some(host_log),
+            Some(host_get_resource_path),
+        ));
         Ok(Self {
             manifest: package.manifest().clone(),
             descriptor,
             parameters,
             presets,
             api,
+            _host_context: host_context,
             host_api,
             _library: library,
         })
@@ -136,6 +159,10 @@ impl LoadedPlugin {
             active: false,
         })
     }
+}
+
+struct HostContext {
+    resource_paths: BTreeMap<String, Vec<u8>>,
 }
 
 pub struct PluginInstance<'plugin> {
@@ -372,4 +399,30 @@ unsafe extern "C" fn host_log(_context: *mut c_void, level: u32, text: *const u8
         _ => "unknown",
     };
     eprintln!("[plugin {label}] {message}");
+}
+
+unsafe extern "C" fn host_get_resource_path(
+    context: *mut c_void,
+    resource_id: *const u8,
+    resource_id_length: usize,
+    destination: *mut u8,
+    capacity: usize,
+) -> usize {
+    if context.is_null() || resource_id.is_null() || resource_id_length == 0 {
+        return 0;
+    }
+    // SAFETY: the callback contract provides a valid HostContext and readable
+    // resource identifier for the duration of this call.
+    let Some(host) = (unsafe { context.cast::<HostContext>().as_ref() }) else {
+        return 0;
+    };
+    let id_bytes = unsafe { std::slice::from_raw_parts(resource_id, resource_id_length) };
+    let Ok(id) = std::str::from_utf8(id_bytes) else {
+        return 0;
+    };
+    let Some(path) = host.resource_paths.get(id) else {
+        return 0;
+    };
+    // SAFETY: the host caller owns and describes the destination buffer.
+    unsafe { copy_to_host_buffer(path, destination, capacity) }
 }

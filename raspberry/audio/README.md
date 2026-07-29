@@ -26,7 +26,7 @@ número de serie del hardware en Git.
 
 ## Perfil inicial
 
-`artupy-audio.toml` fija 48 kHz, estéreo y `S32_LE`. Un stream de silencio se
+`rackforge-audio.toml` fija 48 kHz, estéreo y `S32_LE`. Un stream de silencio se
 mantuvo abierto con 128 frames por período y 384 frames de buffer sin errores
 ni subtensión. Es el punto de partida de baja latencia; el daemon deberá
 detectar xruns y poder degradar a 256/768 frames.
@@ -36,7 +36,7 @@ detectar xruns y poder degradar a 256/768 frames.
 Después de desplegar `raspberry/`:
 
 ```bash
-cd /home/kalex/artupy/current
+cd /home/kalex/rackforge/current
 bash ./audio/probe.sh
 ```
 

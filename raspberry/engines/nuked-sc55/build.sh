@@ -3,8 +3,8 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source_dir="$script_dir/vendor/Nuked-SC55"
-artupy_root="${ARTUPY_ROOT:-$HOME/artupy}"
-build_dir="$artupy_root/build/nuked-sc55"
+rackforge_root="${RACKFORGE_ROOT:-$HOME/rackforge}"
+build_dir="$rackforge_root/build/nuked-sc55"
 
 if [[ ! -f "$source_dir/CMakeLists.txt" ]]; then
   printf '%s\n' \
@@ -24,7 +24,7 @@ cmake \
   -B "$build_dir" \
   -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX="$artupy_root"
+  -DCMAKE_INSTALL_PREFIX="$rackforge_root"
 
 cmake --build "$build_dir" --parallel
 cmake --install "$build_dir"
@@ -40,9 +40,9 @@ c++ \
   $(sdl2-config --libs) \
   -lasound \
   -lpthread \
-  -o "$artupy_root/bin/artupy-nuked-probe"
+  -o "$rackforge_root/bin/rackforge-nuked-probe"
 
-printf 'binary=%s\n' "$artupy_root/bin/nuked-sc55"
-file "$artupy_root/bin/nuked-sc55"
-printf 'probe=%s\n' "$artupy_root/bin/artupy-nuked-probe"
-file "$artupy_root/bin/artupy-nuked-probe"
+printf 'binary=%s\n' "$rackforge_root/bin/nuked-sc55"
+file "$rackforge_root/bin/nuked-sc55"
+printf 'probe=%s\n' "$rackforge_root/bin/rackforge-nuked-probe"
+file "$rackforge_root/bin/rackforge-nuked-probe"

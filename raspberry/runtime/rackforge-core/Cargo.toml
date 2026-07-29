@@ -1,0 +1,18 @@
+[package]
+name = "rackforge-core"
+description = "Headless RackForge host runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+rackforge-plugin-api = { path = "../rackforge-plugin-api" }
+libloading.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = "0.10"
+libc = "0.2"
+midir = "0.11"

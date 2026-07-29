@@ -1,6 +1,6 @@
 # Acceso y despliegue
 
-El repositorio local es la única fuente de verdad. `/home/kalex/artupy/current`
+El repositorio local es la única fuente de verdad. `/home/kalex/rackforge/current`
 en la Raspberry es una copia desplegada y puede reconstruirse en cualquier
 momento.
 
@@ -9,13 +9,13 @@ momento.
 La clave privada permanece fuera del repositorio:
 
 ```text
-C:\Users\kalex\.ssh\artupy_ed25519
+C:\Users\kalex\.ssh\rackforge_ed25519
 ```
 
 Copiar `ssh_config.example` a la configuración SSH local permite usar:
 
 ```powershell
-ssh artupy
+ssh rackforge
 ```
 
 La autenticación por contraseña permanece como vía de recuperación del usuario,

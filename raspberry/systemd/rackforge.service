@@ -1,0 +1,20 @@
+[Unit]
+Description=rackforge headless instrument engine
+After=local-fs.target sound.target
+Wants=sound.target
+
+[Service]
+Type=simple
+User=kalex
+Group=kalex
+WorkingDirectory=/home/kalex/rackforge/current
+ExecStart=/home/kalex/rackforge/current/target/release/rackforge-daemon
+Restart=on-failure
+RestartSec=1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/kalex/rackforge
+
+[Install]
+WantedBy=multi-user.target

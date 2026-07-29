@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-rom_dir="${ARTUPY_NUKED_ROM_DIR:-$HOME/artupy/share/nuked-sc55}"
+rom_dir="${RACKFORGE_NUKED_ROM_DIR:-$HOME/rackforge/share/nuked-sc55}"
 model="${1:-mk2}"
 
 case "$model" in

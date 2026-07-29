@@ -1,5 +1,5 @@
 [package]
-name = "artupy-scva-bank"
+name = "rackforge-scva-bank"
 version = "0.1.0"
 edition = "2024"
 description = "Native ARM64 reader for legally owned Sound Canvas VA wave banks"
@@ -17,13 +17,13 @@ libc = "0.2"
 midir = "0.11"
 
 [lib]
-name = "artupy_scva_bank"
+name = "rackforge_scva_bank"
 path = "src/lib.rs"
 
 [[bin]]
-name = "artupy-scva-bank"
+name = "rackforge-scva-bank"
 path = "src/main.rs"
 
 [[bin]]
-name = "artupy-scva-live"
+name = "rackforge-scva-live"
 path = "src/bin/scva_live.rs"

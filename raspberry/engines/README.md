@@ -1,6 +1,6 @@
 # Motores de sonido
 
-Los motores se integran detrás del futuro daemon ArtuPy. El daemon será dueño
+Los motores se integran detrás del futuro daemon RackForge. El daemon será dueño
 de la selección de dispositivo, ciclo de vida, presets y estado mostrado en el
 KeyLab; cada motor sólo recibirá MIDI y producirá audio.
 

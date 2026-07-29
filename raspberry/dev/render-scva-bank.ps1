@@ -60,7 +60,7 @@ foreach ($note in $FirstNote..$LastNote) {
 }
 
 $metadata = [ordered]@{
-    format = "artupy-rendered-bank-v1"
+    format = "rackforge-rendered-bank-v1"
     source = [IO.Path]::GetFileName($dll)
     program = $Program
     velocity = $Velocity

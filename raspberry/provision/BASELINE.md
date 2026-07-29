@@ -7,7 +7,7 @@ Hardware: Raspberry Pi 4B, 8 GiB
 Arquitectura: aarch64
 Sistema: Debian 13 (trixie)
 Kernel: Raspberry Pi PREEMPT
-Hostname: artupy
+Hostname: rackforge
 Usuario: kalex
 Root filesystem: ext4 en microSD de 64 GB
 Acceso: SSH mediante clave dedicada
@@ -22,8 +22,8 @@ Paquetes de desarrollo instalados por `../dev/bootstrap.sh`:
 - Rustup y Rust estable;
 - tmux, jq, curl y certificados.
 
-El servicio `artupy.service` es solamente una plantilla y aún no está instalado
-ni habilitado. El software se despliega en `/home/kalex/artupy/current`.
+El servicio `rackforge.service` es solamente una plantilla y aún no está instalado
+ni habilitado. El software se despliega en `/home/kalex/rackforge/current`.
 
 ## Periféricos comprobados
 

@@ -1,7 +1,7 @@
-Host artupy
+Host rackforge
     HostName 192.168.1.17
     User kalex
-    IdentityFile C:/Users/kalex/.ssh/artupy_ed25519
+    IdentityFile C:/Users/kalex/.ssh/rackforge_ed25519
     IdentitiesOnly yes
     StrictHostKeyChecking yes
     ServerAliveInterval 15

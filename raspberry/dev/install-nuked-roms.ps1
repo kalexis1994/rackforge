@@ -6,12 +6,12 @@ param(
     [ValidateSet("mk1", "mk2")]
     [string]$Model = "mk2",
 
-    [string]$HostAlias = "artupy"
+    [string]$HostAlias = "rackforge"
 )
 
 $ErrorActionPreference = "Stop"
 $source = (Resolve-Path -LiteralPath $SourceDirectory).Path
-$remoteDirectory = "/home/kalex/artupy/share/nuked-sc55"
+$remoteDirectory = "/home/kalex/rackforge/share/nuked-sc55"
 
 $sets = @{
     mk2 = @(

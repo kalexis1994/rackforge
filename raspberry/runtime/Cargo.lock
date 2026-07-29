@@ -40,51 +40,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
-name = "artupy-core"
-version = "0.1.0"
-dependencies = [
- "alsa",
- "anyhow",
- "artupy-plugin-api",
- "libc",
- "libloading 0.8.9",
- "midir",
- "serde_json",
- "toml",
-]
-
-[[package]]
-name = "artupy-gain"
-version = "0.1.0"
-dependencies = [
- "artupy-plugin-api",
- "serde_json",
-]
-
-[[package]]
-name = "artupy-plugin-api"
-version = "0.1.0"
-dependencies = [
- "semver",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "artupy-roland-scva"
-version = "0.1.0"
-dependencies = [
- "artupy-plugin-api",
- "hound",
- "serde_json",
-]
-
-[[package]]
-name = "artupy-ui"
-version = "0.1.0"
-
-[[package]]
 name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -475,6 +430,52 @@ checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "rackforge-core"
+version = "0.1.0"
+dependencies = [
+ "alsa",
+ "anyhow",
+ "libc",
+ "libloading 0.8.9",
+ "midir",
+ "rackforge-plugin-api",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
+name = "rackforge-gain"
+version = "0.1.0"
+dependencies = [
+ "rackforge-plugin-api",
+ "serde_json",
+]
+
+[[package]]
+name = "rackforge-plugin-api"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "rackforge-roland-scva"
+version = "0.1.0"
+dependencies = [
+ "hound",
+ "rackforge-plugin-api",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rackforge-ui"
+version = "0.1.0"
 
 [[package]]
 name = "redox_syscall"

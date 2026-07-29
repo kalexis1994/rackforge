@@ -23,3 +23,4 @@ raspberry/performances/
 raspberry/state/
 raspberry/logs/
 raspberry/roms/
+*.dls

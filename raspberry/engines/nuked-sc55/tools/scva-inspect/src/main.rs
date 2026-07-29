@@ -982,7 +982,7 @@ fn dump_control(source: &Path, output: &Path) -> Result<()> {
     prepare_empty_output(output)?;
 
     let mut manifest = String::new();
-    writeln!(&mut manifest, "format=artupy-scva-control-v1")?;
+    writeln!(&mut manifest, "format=rackforge-scva-control-v1")?;
     writeln!(&mut manifest, "source={}", source.display())?;
     writeln!(&mut manifest, "source_size={}", bytes.len())?;
     writeln!(&mut manifest, "source_sha256={}", sha256_hex(&bytes))?;

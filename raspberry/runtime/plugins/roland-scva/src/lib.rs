@@ -1,9 +1,9 @@
-use artupy_plugin_api::abi::{
+use hound::{SampleFormat, WavReader};
+use rackforge_plugin_api::abi::{
     HostApiV1, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, MidiEventV1, ParameterEventV1, PluginApiV1,
     ProcessBlockV1, STATUS_INVALID_ARGUMENT, STATUS_INVALID_STATE, STATUS_OK,
     STATUS_UNKNOWN_PARAMETER, copy_to_host_buffer, pack_version, version_major, version_minor,
 };
-use hound::{SampleFormat, WavReader};
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::mem::size_of;
@@ -12,26 +12,32 @@ use std::ptr;
 use std::slice;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
+pub mod program;
+
 const FIRST_NOTE: u8 = 36;
 const LAST_NOTE: u8 = 96;
 const MAX_VOICES: usize = 16;
 const RESOURCE_ID: &[u8] = b"rendered-bank";
+const PIANO_SOUND_ID: &str = "scva.piano-1";
+const STRINGS_SOUND_ID: &str = "scva.strings-1";
 const MASTER_GAIN_PARAMETER: u32 = 0;
 const ATTACK_PARAMETER: u32 = 1;
 const RELEASE_PARAMETER: u32 = 2;
+const DECAY_PARAMETER: u32 = 3;
+const SUSTAIN_PARAMETER: u32 = 4;
 
 const RUNTIME_DESCRIPTOR: &[u8] = br#"{
   "schema_version": 1,
-  "id": "org.artupy.roland-scva",
+  "id": "org.rackforge.roland-scva",
   "version": "0.1.0",
-  "state_version": 1
+  "state_version": 2
 }"#;
 
 const PARAMETER_SCHEMA: &[u8] = br#"{
   "schema_version": 1,
   "pages": [
-    { "id": "sound", "name": "Sound", "order": 0 },
-    { "id": "envelope", "name": "Envelope", "order": 1 }
+    { "id": "sound", "name": "Sound", "order": 0, "header": "ROLAND SCVA" },
+    { "id": "envelope", "name": "Envelope", "order": 1, "header": "ROLAND SCVA" }
   ],
   "parameters": [
     {
@@ -83,7 +89,7 @@ const PARAMETER_SCHEMA: &[u8] = br#"{
       "id": "envelope.release",
       "name": "Release",
       "page": "envelope",
-      "order": 1,
+      "order": 3,
       "kind": {
         "type": "float",
         "minimum": 0.005,
@@ -91,6 +97,50 @@ const PARAMETER_SCHEMA: &[u8] = br#"{
         "default": 0.05,
         "step": 0.005,
         "unit": "s"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": true,
+        "read_only": false,
+        "advanced": false
+      },
+      "suggested_control": "knob"
+    },
+    {
+      "index": 3,
+      "id": "envelope.decay",
+      "name": "Decay",
+      "page": "envelope",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": 0.0,
+        "step": 0.01,
+        "unit": "s"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": true,
+        "read_only": false,
+        "advanced": false
+      },
+      "suggested_control": "knob"
+    },
+    {
+      "index": 4,
+      "id": "envelope.sustain",
+      "name": "Sustain",
+      "page": "envelope",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0,
+        "step": 0.01,
+        "unit": "x"
       },
       "flags": {
         "automatable": true,
@@ -116,6 +166,14 @@ const PRESET_CATALOG: &[u8] = br#"{
       "category": "Piano",
       "order": 0,
       "tags": ["acoustic", "gm"]
+    },
+    {
+      "id": "scva.strings-1",
+      "name": "Strings 1",
+      "bank": "scva",
+      "category": "Strings",
+      "order": 1,
+      "tags": ["ensemble", "gm"]
     }
   ]
 }"#;
@@ -136,7 +194,8 @@ struct Voice {
     step: f64,
     velocity_gain: f32,
     age_frames: u64,
-    release_gain: f32,
+    release_start_gain: f32,
+    release_age_frames: u64,
     releasing: bool,
     deferred_release: bool,
     serial: u64,
@@ -144,6 +203,7 @@ struct Voice {
 
 struct RolandScva {
     bank: Arc<SampleBank>,
+    banks: BTreeMap<String, Arc<SampleBank>>,
     voices: Vec<Voice>,
     sample_rate: f64,
     maximum_frames: u32,
@@ -153,13 +213,18 @@ struct RolandScva {
     serial: u64,
     master_gain: f32,
     attack_seconds: f32,
+    decay_seconds: f32,
+    sustain_level: f32,
     release_seconds: f32,
+    _addon_data_root: Option<PathBuf>,
 }
 
 impl RolandScva {
-    fn new(bank: Arc<SampleBank>) -> Self {
+    fn new(bank: Arc<SampleBank>, addon_data_root: Option<PathBuf>) -> Self {
+        let banks = BTreeMap::from([(PIANO_SOUND_ID.to_owned(), Arc::clone(&bank))]);
         Self {
             bank,
+            banks,
             voices: Vec::with_capacity(MAX_VOICES),
             sample_rate: 48_000.0,
             maximum_frames: 0,
@@ -169,8 +234,24 @@ impl RolandScva {
             serial: 0,
             master_gain: 1.0,
             attack_seconds: 0.0,
+            decay_seconds: 0.0,
+            sustain_level: 1.0,
             release_seconds: 0.05,
+            _addon_data_root: addon_data_root,
         }
+    }
+
+    fn register_bank(&mut self, sound_id: &str, bank: Arc<SampleBank>) {
+        self.banks.insert(sound_id.to_owned(), bank);
+    }
+
+    fn select_bank(&mut self, sound_id: &str) -> bool {
+        let Some(bank) = self.banks.get(sound_id).cloned() else {
+            return false;
+        };
+        self.bank = bank;
+        self.reset();
+        true
     }
 
     fn set_parameter(&mut self, index: u32, value: f64) -> i32 {
@@ -184,10 +265,20 @@ impl RolandScva {
             ATTACK_PARAMETER if (0.0..=5.0).contains(&value) => {
                 self.attack_seconds = value as f32;
             }
+            DECAY_PARAMETER if (0.0..=5.0).contains(&value) => {
+                self.decay_seconds = value as f32;
+            }
+            SUSTAIN_PARAMETER if (0.0..=1.0).contains(&value) => {
+                self.sustain_level = value as f32;
+            }
             RELEASE_PARAMETER if (0.005..=10.0).contains(&value) => {
                 self.release_seconds = value as f32;
             }
-            MASTER_GAIN_PARAMETER | ATTACK_PARAMETER | RELEASE_PARAMETER => {
+            MASTER_GAIN_PARAMETER
+            | ATTACK_PARAMETER
+            | RELEASE_PARAMETER
+            | DECAY_PARAMETER
+            | SUSTAIN_PARAMETER => {
                 return STATUS_INVALID_ARGUMENT;
             }
             _ => return STATUS_UNKNOWN_PARAMETER,
@@ -217,7 +308,8 @@ impl RolandScva {
             position: 0.0,
             velocity_gain: (f32::from(velocity) / 127.0).powf(0.7),
             age_frames: 0,
-            release_gain: 1.0,
+            release_start_gain: 1.0,
+            release_age_frames: 0,
             releasing: false,
             deferred_release: false,
             serial: self.serial,
@@ -225,6 +317,10 @@ impl RolandScva {
     }
 
     fn note_off(&mut self, note: u8) {
+        let sample_rate = self.sample_rate;
+        let attack_seconds = self.attack_seconds;
+        let decay_seconds = self.decay_seconds;
+        let sustain_level = self.sustain_level;
         if let Some(voice) = self
             .voices
             .iter_mut()
@@ -234,7 +330,13 @@ impl RolandScva {
             if self.sustain {
                 voice.deferred_release = true;
             } else {
-                voice.releasing = true;
+                begin_release(
+                    voice,
+                    sample_rate,
+                    attack_seconds,
+                    decay_seconds,
+                    sustain_level,
+                );
             }
         }
     }
@@ -242,10 +344,20 @@ impl RolandScva {
     fn set_sustain(&mut self, enabled: bool) {
         self.sustain = enabled;
         if !enabled {
+            let sample_rate = self.sample_rate;
+            let attack_seconds = self.attack_seconds;
+            let decay_seconds = self.decay_seconds;
+            let sustain_level = self.sustain_level;
             for voice in &mut self.voices {
                 if voice.deferred_release {
                     voice.deferred_release = false;
-                    voice.releasing = true;
+                    begin_release(
+                        voice,
+                        sample_rate,
+                        attack_seconds,
+                        decay_seconds,
+                        sustain_level,
+                    );
                 }
             }
         }
@@ -274,8 +386,9 @@ impl RolandScva {
     }
 
     fn render_frame(&mut self) -> f32 {
-        let attack_frames = f64::from(self.attack_seconds) * self.sample_rate;
-        let release_frames = (f64::from(self.release_seconds) * self.sample_rate).max(1.0) as f32;
+        let release_frames = (f64::from(self.release_seconds) * self.sample_rate)
+            .round()
+            .max(1.0) as u64;
         let mut mixed = 0.0_f32;
         let mut index = 0;
         while index < self.voices.len() {
@@ -289,18 +402,24 @@ impl RolandScva {
             let second = *voice.sample.frames.get(source_index + 1).unwrap_or(&first);
             let fraction = (voice.position - source_index as f64) as f32;
             let sample = first + (second - first) * fraction;
-            let attack_gain = if attack_frames <= 1.0 {
-                1.0
+            let envelope_gain = if voice.releasing {
+                let progress = voice.release_age_frames as f64 / release_frames as f64;
+                voice.release_start_gain * (1.0 - progress.min(1.0) as f32)
             } else {
-                ((voice.age_frames as f64 + 1.0) / attack_frames).min(1.0) as f32
+                held_envelope_gain(
+                    voice.age_frames,
+                    self.sample_rate,
+                    self.attack_seconds,
+                    self.decay_seconds,
+                    self.sustain_level,
+                )
             };
-            mixed +=
-                sample * voice.velocity_gain * attack_gain * voice.release_gain * self.master_gain;
+            mixed += sample * voice.velocity_gain * envelope_gain * self.master_gain;
             voice.position += voice.step;
             voice.age_frames = voice.age_frames.saturating_add(1);
             if voice.releasing {
-                voice.release_gain -= 1.0 / release_frames;
-                if voice.release_gain <= 0.0 {
+                voice.release_age_frames = voice.release_age_frames.saturating_add(1);
+                if voice.release_age_frames >= release_frames {
                     self.voices.swap_remove(index);
                     continue;
                 }
@@ -314,6 +433,46 @@ impl RolandScva {
         self.voices.clear();
         self.sustain = false;
     }
+}
+
+fn held_envelope_gain(
+    age_frames: u64,
+    sample_rate: f64,
+    attack_seconds: f32,
+    decay_seconds: f32,
+    sustain_level: f32,
+) -> f32 {
+    let attack_frames = f64::from(attack_seconds) * sample_rate;
+    let age = age_frames as f64;
+    if attack_frames > 1.0 && age < attack_frames {
+        return ((age + 1.0) / attack_frames).min(1.0) as f32;
+    }
+
+    let decay_frames = f64::from(decay_seconds) * sample_rate;
+    let decay_age = (age - attack_frames).max(0.0);
+    if decay_frames > 1.0 && decay_age < decay_frames {
+        let progress = (decay_age / decay_frames) as f32;
+        return 1.0 + (sustain_level - 1.0) * progress;
+    }
+    sustain_level
+}
+
+fn begin_release(
+    voice: &mut Voice,
+    sample_rate: f64,
+    attack_seconds: f32,
+    decay_seconds: f32,
+    sustain_level: f32,
+) {
+    voice.release_start_gain = held_envelope_gain(
+        voice.age_frames,
+        sample_rate,
+        attack_seconds,
+        decay_seconds,
+        sustain_level,
+    );
+    voice.release_age_frames = 0;
+    voice.releasing = true;
 }
 
 static BANK_CACHE: OnceLock<Mutex<BTreeMap<PathBuf, Weak<SampleBank>>>> = OnceLock::new();
@@ -394,7 +553,7 @@ fn resource_path(host: &HostApiV1) -> Result<PathBuf, String> {
         || version_minor(host.api_version) < 1
         || host.struct_size < size_of::<HostApiV1>() as u32
     {
-        return Err("host does not provide ArtuPy resource API 1.1".into());
+        return Err("host does not provide RackForge resource API 1.1".into());
     }
     let callback = host
         .get_resource_path
@@ -431,6 +590,48 @@ fn resource_path(host: &HostApiV1) -> Result<PathBuf, String> {
     Ok(PathBuf::from(text))
 }
 
+fn addon_data_path(host: &HostApiV1) -> Result<Option<PathBuf>, String> {
+    if version_major(host.api_version) != 1 || version_minor(host.api_version) < 2 {
+        return Ok(None);
+    }
+    if host.struct_size < size_of::<HostApiV1>() as u32 {
+        return Err("host API 1.2 table is truncated".into());
+    }
+    let Some(callback) = host.get_addon_data_path else {
+        return Ok(None);
+    };
+    // SAFETY: a null destination queries the required path size.
+    let required = unsafe { callback(host.context, ptr::null_mut(), 0) };
+    if required == 0 {
+        return Ok(None);
+    }
+    if required > 32 * 1024 {
+        return Err("addon data path is unreasonably large".into());
+    }
+    let mut bytes = vec![0_u8; required];
+    // SAFETY: the buffer remains valid and writable for the callback.
+    let reported = unsafe { callback(host.context, bytes.as_mut_ptr(), bytes.len()) };
+    if reported != required {
+        return Err("addon data path changed while being read".into());
+    }
+    let text = String::from_utf8(bytes).map_err(|_| "addon data path is not UTF-8".to_owned())?;
+    Ok(Some(PathBuf::from(text)))
+}
+
+fn optional_addon_bank(
+    data_root: Option<&Path>,
+    sound_id: &str,
+) -> Result<Option<Arc<SampleBank>>, String> {
+    let Some(data_root) = data_root else {
+        return Ok(None);
+    };
+    let directory = data_root.join("banks").join(sound_id);
+    if !directory.is_dir() {
+        return Ok(None);
+    }
+    cached_bank(&directory).map(Some)
+}
+
 unsafe extern "C" fn write_runtime_descriptor(destination: *mut u8, capacity: usize) -> usize {
     unsafe { copy_to_host_buffer(RUNTIME_DESCRIPTOR, destination, capacity) }
 }
@@ -447,11 +648,25 @@ unsafe extern "C" fn create(host: *const HostApiV1) -> *mut c_void {
     let Some(host) = (unsafe { host.as_ref() }) else {
         return ptr::null_mut();
     };
-    let result = resource_path(host).and_then(|path| cached_bank(&path));
+    let result = resource_path(host)
+        .and_then(|path| cached_bank(&path))
+        .and_then(|bank| addon_data_path(host).map(|data_root| (bank, data_root)))
+        .and_then(|(bank, data_root)| {
+            optional_addon_bank(data_root.as_deref(), STRINGS_SOUND_ID)
+                .map(|strings| (bank, data_root, strings))
+        });
     match result {
-        Ok(bank) => {
+        Ok((bank, data_root, strings)) => {
             log_host(host, LOG_LEVEL_INFO, "Roland SCVA rendered bank loaded");
-            Box::into_raw(Box::new(RolandScva::new(bank))).cast()
+            if data_root.is_some() {
+                log_host(host, LOG_LEVEL_INFO, "Roland SCVA addon data root ready");
+            }
+            let mut plugin = RolandScva::new(bank, data_root);
+            if let Some(strings) = strings {
+                plugin.register_bank(STRINGS_SOUND_ID, strings);
+                log_host(host, LOG_LEVEL_INFO, "Roland SCVA Strings 1 bank loaded");
+            }
+            Box::into_raw(Box::new(plugin)).cast()
         }
         Err(error) => {
             log_host(host, LOG_LEVEL_ERROR, &error);
@@ -535,17 +750,21 @@ unsafe extern "C" fn get_parameter(
         MASTER_GAIN_PARAMETER => f64::from(plugin.master_gain),
         ATTACK_PARAMETER => f64::from(plugin.attack_seconds),
         RELEASE_PARAMETER => f64::from(plugin.release_seconds),
+        DECAY_PARAMETER => f64::from(plugin.decay_seconds),
+        SUSTAIN_PARAMETER => f64::from(plugin.sustain_level),
         _ => return STATUS_UNKNOWN_PARAMETER,
     };
     STATUS_OK
 }
 
-fn state_bytes(plugin: &RolandScva) -> [u8; 16] {
-    let mut state = [0_u8; 16];
-    state[..4].copy_from_slice(b"RSV1");
+fn state_bytes(plugin: &RolandScva) -> [u8; 24] {
+    let mut state = [0_u8; 24];
+    state[..4].copy_from_slice(b"RSV2");
     state[4..8].copy_from_slice(&plugin.master_gain.to_le_bytes());
     state[8..12].copy_from_slice(&plugin.attack_seconds.to_le_bytes());
     state[12..16].copy_from_slice(&plugin.release_seconds.to_le_bytes());
+    state[16..20].copy_from_slice(&plugin.decay_seconds.to_le_bytes());
+    state[20..24].copy_from_slice(&plugin.sustain_level.to_le_bytes());
     state
 }
 
@@ -565,20 +784,46 @@ unsafe extern "C" fn load_state(instance: *mut c_void, source: *const u8, length
     let Some(plugin) = (unsafe { instance.cast::<RolandScva>().as_mut() }) else {
         return STATUS_INVALID_ARGUMENT;
     };
-    if source.is_null() || length != 16 {
+    if source.is_null() || !matches!(length, 16 | 24) {
         return STATUS_INVALID_ARGUMENT;
     }
     let bytes = unsafe { slice::from_raw_parts(source, length) };
-    if &bytes[..4] != b"RSV1" {
+    let legacy = &bytes[..4] == b"RSV1" && length == 16;
+    if !legacy && (&bytes[..4] != b"RSV2" || length != 24) {
         return STATUS_INVALID_ARGUMENT;
     }
-    let values = [
-        f32::from_le_bytes(bytes[4..8].try_into().expect("fixed slice")),
-        f32::from_le_bytes(bytes[8..12].try_into().expect("fixed slice")),
-        f32::from_le_bytes(bytes[12..16].try_into().expect("fixed slice")),
+    if legacy {
+        plugin.decay_seconds = 0.0;
+        plugin.sustain_level = 1.0;
+    }
+    let mut values = vec![
+        (
+            MASTER_GAIN_PARAMETER,
+            f32::from_le_bytes(bytes[4..8].try_into().expect("fixed slice")),
+        ),
+        (
+            ATTACK_PARAMETER,
+            f32::from_le_bytes(bytes[8..12].try_into().expect("fixed slice")),
+        ),
+        (
+            RELEASE_PARAMETER,
+            f32::from_le_bytes(bytes[12..16].try_into().expect("fixed slice")),
+        ),
     ];
-    for (index, value) in values.into_iter().enumerate() {
-        let status = plugin.set_parameter(index as u32, f64::from(value));
+    if !legacy {
+        values.extend([
+            (
+                DECAY_PARAMETER,
+                f32::from_le_bytes(bytes[16..20].try_into().expect("fixed slice")),
+            ),
+            (
+                SUSTAIN_PARAMETER,
+                f32::from_le_bytes(bytes[20..24].try_into().expect("fixed slice")),
+            ),
+        ]);
+    }
+    for (index, value) in values {
+        let status = plugin.set_parameter(index, f64::from(value));
         if status != STATUS_OK {
             return status;
         }
@@ -598,13 +843,20 @@ unsafe extern "C" fn load_preset(
         return STATUS_INVALID_ARGUMENT;
     }
     let id = unsafe { slice::from_raw_parts(preset_id, length) };
-    if id != b"scva.piano-1" {
+    let Ok(id) = std::str::from_utf8(id) else {
         return STATUS_INVALID_ARGUMENT;
+    };
+    if !matches!(id, PIANO_SOUND_ID | STRINGS_SOUND_ID) {
+        return STATUS_INVALID_ARGUMENT;
+    }
+    if !plugin.select_bank(id) {
+        return STATUS_INVALID_STATE;
     }
     plugin.master_gain = 1.0;
     plugin.attack_seconds = 0.0;
+    plugin.decay_seconds = 0.0;
+    plugin.sustain_level = 1.0;
     plugin.release_seconds = 0.05;
-    plugin.reset();
     STATUS_OK
 }
 
@@ -699,7 +951,7 @@ where
 
 static PLUGIN_API: PluginApiV1 = PluginApiV1 {
     struct_size: size_of::<PluginApiV1>() as u32,
-    api_version: pack_version(1, 1),
+    api_version: pack_version(1, 2),
     runtime_descriptor_json: write_runtime_descriptor,
     parameter_schema_json: write_parameter_schema,
     preset_catalog_json: write_preset_catalog,
@@ -717,29 +969,32 @@ static PLUGIN_API: PluginApiV1 = PluginApiV1 {
 };
 
 #[unsafe(no_mangle)]
-pub extern "C" fn artupy_plugin_entry_v1() -> *const PluginApiV1 {
+pub extern "C" fn rackforge_plugin_entry_v1() -> *const PluginApiV1 {
     ptr::addr_of!(PLUGIN_API)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use artupy_plugin_api::{ParameterSchema, PresetCatalog, RuntimeDescriptor};
+    use rackforge_plugin_api::{ParameterSchema, PresetCatalog, RuntimeDescriptor};
 
     fn synthetic_plugin() -> RolandScva {
         let sample = Arc::new(Sample {
-            sample_rate: 48_000.0,
-            frames: Arc::from(vec![0.5_f32; 32]),
+            sample_rate: 100.0,
+            frames: Arc::from(vec![0.5_f32; 512]),
         });
-        RolandScva::new(Arc::new(SampleBank {
-            notes: BTreeMap::from([(60, sample)]),
-        }))
+        RolandScva::new(
+            Arc::new(SampleBank {
+                notes: BTreeMap::from([(60, sample)]),
+            }),
+            None,
+        )
     }
 
     #[test]
     fn exports_valid_metadata() {
         let descriptor: RuntimeDescriptor = serde_json::from_slice(RUNTIME_DESCRIPTOR).unwrap();
-        assert_eq!(descriptor.id, "org.artupy.roland-scva");
+        assert_eq!(descriptor.id, "org.rackforge.roland-scva");
         let parameters: ParameterSchema = serde_json::from_slice(PARAMETER_SCHEMA).unwrap();
         assert_eq!(parameters.validate(), Ok(()));
         let presets: PresetCatalog = serde_json::from_slice(PRESET_CATALOG).unwrap();
@@ -769,5 +1024,70 @@ mod tests {
         plugin.set_sustain(false);
         assert!(!plugin.voices[0].deferred_release);
         assert!(plugin.voices[0].releasing);
+    }
+
+    #[test]
+    fn adsr_reaches_peak_then_decay_and_sustain() {
+        let mut plugin = synthetic_plugin();
+        plugin.sample_rate = 100.0;
+        plugin.attack_seconds = 0.1;
+        plugin.decay_seconds = 0.1;
+        plugin.sustain_level = 0.4;
+        plugin.note_on(60, 127);
+
+        assert!((plugin.render_frame() - 0.05).abs() < 0.0001);
+        for _ in 1..10 {
+            plugin.render_frame();
+        }
+        assert!((plugin.render_frame() - 0.5).abs() < 0.0001);
+        for _ in 0..10 {
+            plugin.render_frame();
+        }
+        assert!((plugin.render_frame() - 0.2).abs() < 0.0001);
+    }
+
+    #[test]
+    fn release_begins_at_the_current_attack_level() {
+        let mut plugin = synthetic_plugin();
+        plugin.sample_rate = 100.0;
+        plugin.attack_seconds = 1.0;
+        plugin.release_seconds = 0.1;
+        plugin.note_on(60, 127);
+        for _ in 0..10 {
+            plugin.render_frame();
+        }
+
+        let expected_start = held_envelope_gain(10, 100.0, 1.0, 0.0, 1.0);
+        plugin.note_off(60);
+        assert!((plugin.voices[0].release_start_gain - expected_start).abs() < f32::EPSILON);
+        assert!((plugin.render_frame() - 0.5 * expected_start).abs() < 0.0001);
+
+        for _ in 1..10 {
+            plugin.render_frame();
+        }
+        assert!(plugin.voices.is_empty());
+    }
+
+    #[test]
+    fn legacy_state_loads_with_neutral_decay_and_sustain() {
+        let mut plugin = synthetic_plugin();
+        plugin.decay_seconds = 2.0;
+        plugin.sustain_level = 0.2;
+        let mut state = [0_u8; 16];
+        state[..4].copy_from_slice(b"RSV1");
+        state[4..8].copy_from_slice(&0.8_f32.to_le_bytes());
+        state[8..12].copy_from_slice(&0.1_f32.to_le_bytes());
+        state[12..16].copy_from_slice(&0.5_f32.to_le_bytes());
+
+        let status = unsafe {
+            load_state(
+                (&mut plugin as *mut RolandScva).cast(),
+                state.as_ptr(),
+                state.len(),
+            )
+        };
+        assert_eq!(status, STATUS_OK);
+        assert_eq!(plugin.decay_seconds, 0.0);
+        assert_eq!(plugin.sustain_level, 1.0);
     }
 }

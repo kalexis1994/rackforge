@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$HostAlias = "artupy"
+    [string]$HostAlias = "rackforge"
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,9 +24,9 @@ lsusb
 printf '%s\n' '--- ALSA ---'
 aplay -l
 arecord -l
-if [ -r "$HOME/artupy/current/audio/probe.sh" ]; then
-    printf '%s\n' '--- ARTUPY AUDIO ---'
-    bash "$HOME/artupy/current/audio/probe.sh"
+if [ -r "$HOME/rackforge/current/audio/probe.sh" ]; then
+    printf '%s\n' '--- RACKFORGE AUDIO ---'
+    bash "$HOME/rackforge/current/audio/probe.sh"
 fi
 '@
 $payload = [Convert]::ToBase64String(

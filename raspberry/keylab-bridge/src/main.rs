@@ -1,3 +1,4 @@
+mod framebuffer;
 mod menu;
 
 use midir::{
@@ -21,8 +22,10 @@ const DISCONNECT: &[u8] = &[
     0xF0, 0x00, 0x20, 0x6B, 0x7F, 0x42, 0x02, 0x0F, 0x40, 0x5A, 0x00, 0xF7,
 ];
 const CLEAR_SCREEN: &[u8] = &[
-    0xF0, 0x00, 0x20, 0x6B, 0x7F, 0x42, 0x04, 0x01, 0x60, 0x61, 0xF7,
+    0xF0, 0x00, 0x20, 0x6B, 0x7F, 0x42, 0x04, 0x01, 0x60, 0x61, 0x00, 0xF7,
 ];
+const USB_BOOT_STABILITY: Duration = Duration::from_secs(5);
+const ACQUIRE_RETRY_DELAY: Duration = Duration::from_secs(2);
 
 #[derive(Debug)]
 struct Cli {
@@ -38,6 +41,11 @@ enum Command {
         execute: bool,
     },
     MenuDemo {
+        selector: Option<String>,
+        seconds: u64,
+        execute: bool,
+    },
+    FramebufferDemo {
         selector: Option<String>,
         seconds: u64,
         execute: bool,
@@ -65,7 +73,7 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let cli = parse_args(env::args().skip(1))?;
-    let midi = MidiOutput::new("artupy KeyLab Bridge")?;
+    let midi = MidiOutput::new("rackforge KeyLab Bridge")?;
     let ports = enumerate_ports(&midi)?;
 
     match cli.command {
@@ -85,6 +93,14 @@ fn run() -> Result<(), Box<dyn Error>> {
         } => {
             let selected = select_port(&ports, selector.as_deref())?;
             run_menu_demo(midi, selected, seconds, execute)?;
+        }
+        Command::FramebufferDemo {
+            selector,
+            seconds,
+            execute,
+        } => {
+            let selected = select_port(&ports, selector.as_deref())?;
+            run_framebuffer_demo(midi, selected, seconds, execute)?;
         }
         Command::Serve { selector, execute } => {
             run_serve(selector.as_deref(), execute)?;
@@ -111,7 +127,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Cli, String> {
     let command = args.first().map(String::as_str);
     if !matches!(
         command,
-        Some("demo" | "menu-demo" | "serve" | "restore" | "led-demo")
+        Some("demo" | "menu-demo" | "framebuffer-demo" | "serve" | "restore" | "led-demo")
     ) {
         return Err(usage("Comando desconocido"));
     }
@@ -130,7 +146,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Cli, String> {
                         .clone(),
                 );
             }
-            "--seconds" if matches!(command, Some("demo" | "menu-demo")) => {
+            "--seconds" if matches!(command, Some("demo" | "menu-demo" | "framebuffer-demo")) => {
                 index += 1;
                 seconds = args
                     .get(index)
@@ -152,6 +168,11 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Cli, String> {
             seconds,
             execute,
         },
+        Some("framebuffer-demo") => Command::FramebufferDemo {
+            selector,
+            seconds,
+            execute,
+        },
         Some("serve") => Command::Serve { selector, execute },
         Some("restore") => Command::Restore { selector, execute },
         Some("led-demo") => Command::LedDemo { selector, execute },
@@ -168,12 +189,13 @@ fn usage(reason: &str) -> String {
     format!(
         "{reason}\n\
          Uso:\n\
-           artupy-bridge list\n\
-           artupy-bridge demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
-           artupy-bridge menu-demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
-           artupy-bridge serve [--port ID|NOMBRE] [--execute]\n\
-           artupy-bridge restore [--port ID|NOMBRE] [--execute]\n\
-           artupy-bridge led-demo [--port ID|NOMBRE] [--execute]"
+           rackforge-bridge list\n\
+           rackforge-bridge demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
+           rackforge-bridge menu-demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
+           rackforge-bridge framebuffer-demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
+           rackforge-bridge serve [--port ID|NOMBRE] [--execute]\n\
+           rackforge-bridge restore [--port ID|NOMBRE] [--execute]\n\
+           rackforge-bridge led-demo [--port ID|NOMBRE] [--execute]"
     )
 }
 
@@ -397,10 +419,10 @@ fn footer(buttons: &[menu::FooterButton; 4]) -> Result<Vec<u8>, String> {
             );
         }
         let frame = match button.state {
-            artupy_ui::VisualState::Normal => 0x00,
-            artupy_ui::VisualState::Focused => 0x02,
-            artupy_ui::VisualState::Pressed => 0x03,
-            artupy_ui::VisualState::Disabled => 0x00,
+            rackforge_ui::VisualState::Normal => 0x00,
+            rackforge_ui::VisualState::Focused => 0x02,
+            rackforge_ui::VisualState::Pressed => 0x03,
+            rackforge_ui::VisualState::Disabled => 0x00,
         };
         payload.push(0x10 + (index as u8 * 0x10));
         payload.extend_from_slice(&[frame, 0x00]);
@@ -426,7 +448,7 @@ impl KeyLabSession {
             )
             .into());
         }
-        let connection = midi.connect(&port.handle, "artupy KeyLab SysEx")?;
+        let connection = midi.connect(&port.handle, "rackforge KeyLab SysEx")?;
         Ok(Self {
             connection,
             switched_to_daw: false,
@@ -506,8 +528,8 @@ fn run_demo(
     execute: bool,
 ) -> Result<(), Box<dyn Error>> {
     let daw = select_preset(1)?;
-    let title = header("ARTUPY")?;
-    let screen = two_lines("ARTUPY", "PI CONNECTED")?;
+    let title = header("RACKFORGE")?;
+    let screen = two_lines("RACKFORGE", "PI CONNECTED")?;
     let arturia = select_preset(0)?;
 
     println!("Puerto: [{}] {}", port.index, port.name);
@@ -588,6 +610,37 @@ fn run_menu_demo(
     Ok(())
 }
 
+fn run_framebuffer_demo(
+    midi: MidiOutput,
+    port: &PortInfo,
+    seconds: u64,
+    execute: bool,
+) -> Result<(), Box<dyn Error>> {
+    let messages = framebuffer::solid_upload(true);
+    println!(
+        "Puerto: [{}] {}\nFrame completo: {} mensajes acotados",
+        port.index,
+        port.name,
+        messages.len()
+    );
+    if !execute {
+        println!("DRY-RUN: no se enviará el framebuffer.");
+        return Ok(());
+    }
+
+    let mut session = KeyLabSession::open(midi, port)?;
+    session.start()?;
+    for message in &messages {
+        session.send(message)?;
+        thread::sleep(Duration::from_millis(2));
+    }
+    println!("Framebuffer sólido activo durante {seconds} segundos...");
+    thread::sleep(Duration::from_secs(seconds));
+    session.restore()?;
+    println!("Prueba de framebuffer finalizada; programa Arturia restaurado.");
+    Ok(())
+}
+
 fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>> {
     if !execute {
         println!("DRY-RUN: el servicio esperaría al KeyLab y mantendría HOME en la OLED.");
@@ -598,7 +651,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
     let mut menu = menu::Menu::default();
     println!("Esperando el KeyLab Essential mk3...");
     loop {
-        let midi = MidiOutput::new("artupy KeyLab Display")?;
+        let midi = MidiOutput::new("rackforge KeyLab Display")?;
         let ports = enumerate_ports(&midi)?;
         let port = match select_port(&ports, selector) {
             Ok(port) => port,
@@ -610,7 +663,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let usb_generation = keylab_usb_generation();
         if let Some(generation) = usb_generation.as_deref() {
             println!("KeyLab USB detectado ({generation}); esperando arranque estable...");
-            if !wait_for_keylab_usb(generation, Duration::from_millis(500)) {
+            if !wait_for_keylab_usb(generation, USB_BOOT_STABILITY) {
                 eprintln!("El KeyLab cambió durante el arranque; reintentando...");
                 continue;
             }
@@ -652,7 +705,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
             }
         }
 
-        println!("OLED bajo control de ArtuPy: {port_name}");
+        println!("OLED bajo control de RackForge: {port_name}");
         let mut next_heartbeat = Instant::now() + Duration::from_secs(6);
         let mut missed_acks = 0_u8;
         loop {
@@ -675,11 +728,15 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                                     break;
                                 }
                             }
-                            menu.apply_input(event.input);
-                            messages = render_menu_messages(&menu)?;
-                            if let Err(error) = send_menu(&mut session, &messages) {
-                                eprintln!("No se pudo actualizar el menú: {error}");
-                                break;
+                            match send_menu_frames(
+                                &mut session,
+                                vec![menu.apply_input_and_render(event.input)],
+                            ) {
+                                Ok(rendered) => messages = rendered,
+                                Err(error) => {
+                                    eprintln!("No se pudo actualizar el menú: {error}");
+                                    break;
+                                }
                             }
                         }
                         InputPhase::Release => {
@@ -692,11 +749,15 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                             }
                         }
                         InputPhase::Turn => {
-                            menu.apply_input(event.input);
-                            messages = render_menu_messages(&menu)?;
-                            if let Err(error) = send_menu(&mut session, &messages) {
-                                eprintln!("No se pudo actualizar el menú: {error}");
-                                break;
+                            match send_menu_frames(
+                                &mut session,
+                                vec![menu.apply_input_and_render(event.input)],
+                            ) {
+                                Ok(rendered) => messages = rendered,
+                                Err(error) => {
+                                    eprintln!("No se pudo actualizar el menú: {error}");
+                                    break;
+                                }
                             }
                         }
                     }
@@ -762,6 +823,7 @@ fn acquire_screen(
             }
             Err(RecvTimeoutError::Timeout) => {
                 eprintln!("Pulso OLED {attempt} sin ACK; reintentando...");
+                thread::sleep(ACQUIRE_RETRY_DELAY);
             }
             Err(RecvTimeoutError::Disconnected) => {
                 return Err("Se cerró el canal de confirmación MIDI".into());
@@ -771,7 +833,7 @@ fn acquire_screen(
 }
 
 fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Error>> {
-    let mut midi = MidiInput::new("artupy KeyLab Display ACK")?;
+    let mut midi = MidiInput::new("rackforge KeyLab Display ACK")?;
     midi.ignore(Ignore::None);
     let ports = enumerate_input_ports(&midi)?;
     let port = select_input_port(&ports, selector)?;
@@ -779,7 +841,7 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
     let (input_sender, input_receiver) = mpsc::channel();
     let connection = midi.connect(
         &port.handle,
-        "artupy KeyLab DAW ACK",
+        "rackforge KeyLab DAW ACK",
         move |_timestamp, message, _context| {
             if is_daw_preset_ack(message) {
                 let _ = ack_sender.send(());
@@ -829,7 +891,10 @@ struct MenuMessages {
 }
 
 fn render_menu_messages(menu: &menu::Menu) -> Result<MenuMessages, String> {
-    let screen = menu.render();
+    render_screen_messages(&menu.render())
+}
+
+fn render_screen_messages(screen: &menu::Screen) -> Result<MenuMessages, String> {
     Ok(MenuMessages {
         header: screen_header_message(&screen.header)?,
         body: two_lines(&screen.line_1, &screen.line_2)?,
@@ -850,6 +915,23 @@ fn send_menu(session: &mut KeyLabSession, messages: &MenuMessages) -> Result<(),
     session.send(&messages.header)?;
     thread::sleep(Duration::from_millis(20));
     session.send(&messages.footer)
+}
+
+fn send_menu_frames(
+    session: &mut KeyLabSession,
+    screens: Vec<menu::Screen>,
+) -> Result<MenuMessages, Box<dyn Error>> {
+    let frame_count = screens.len();
+    let mut last = None;
+    for (index, screen) in screens.into_iter().enumerate() {
+        let messages = render_screen_messages(&screen)?;
+        send_menu(session, &messages)?;
+        if index + 1 < frame_count {
+            thread::sleep(Duration::from_millis(55));
+        }
+        last = Some(messages);
+    }
+    last.ok_or_else(|| "La transición del menú no produjo frames".into())
 }
 
 fn is_daw_preset_ack(message: &[u8]) -> bool {
@@ -940,7 +1022,7 @@ fn run_led_demo(midi: MidiOutput, port: &PortInfo, execute: bool) -> Result<(), 
         return Err("El puerto seleccionado no es el MIDI principal del KeyLab".into());
     }
 
-    let mut connection = midi.connect(&port.handle, "artupy KeyLab LED probe")?;
+    let mut connection = midi.connect(&port.handle, "rackforge KeyLab LED probe")?;
     let result = (|| -> Result<(), Box<dyn Error>> {
         for controller in 44..=47 {
             connection.send(&[0xB0, controller, 0])?;

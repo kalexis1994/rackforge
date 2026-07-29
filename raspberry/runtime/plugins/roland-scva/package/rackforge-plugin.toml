@@ -1,0 +1,29 @@
+schema_version = 1
+id = "org.rackforge.roland-scva"
+name = "Roland Sound Canvas VA"
+vendor = "RackForge"
+version = "0.1.0"
+kind = "instrument"
+state_version = 2
+capabilities = [
+    "audio_output",
+    "midi_input",
+    "presets",
+    "state",
+    "sample_accurate_automation",
+]
+
+[api]
+major = 1
+minor = 2
+
+[[resources]]
+id = "rendered-bank"
+name = "Rendered SCVA Bank"
+kind = "directory"
+required = true
+
+[binaries]
+linux-aarch64 = "lib/librackforge_roland_scva.so"
+linux-x86_64 = "lib/librackforge_roland_scva.so"
+windows-x86_64 = "lib/rackforge_roland_scva.dll"

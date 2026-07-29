@@ -72,8 +72,14 @@ fn run() -> Result<()> {
     }
     let segment_bytes = &wave_bank[segment * SEGMENT_SIZE..(segment + 1) * SEGMENT_SIZE];
     let aligned_start = start & !0x1f;
-    let data = &segment_bytes[aligned_start..];
-    let scales = &segment_bytes[aligned_start >> 5..];
+    let data_start = aligned_start
+        .checked_sub(0x20)
+        .context("SCCore data-base bias underflow")?;
+    let scale_start = (aligned_start >> 5)
+        .checked_sub(0x20)
+        .context("SCCore scale-base bias underflow")?;
+    let data = &segment_bytes[data_start..];
+    let scales = &segment_bytes[scale_start..];
 
     let library = unsafe { Library::new(Path::new(dll_path)) }
         .with_context(|| format!("loading {}", dll_path))?;
@@ -91,20 +97,22 @@ fn run() -> Result<()> {
             (loop_start - aligned_start) as u32,
             (end - aligned_start) as u32,
             scales.as_ptr(),
-            (start - aligned_start) as u32,
+            0,
         );
     }
 
     let mut accumulator = 0_i32;
     println!(
         "DECODER_ORACLE image_base=0x{image_base:x} segment={segment} \
-         start=0x{start:x} aligned=0x{aligned_start:x}"
+         start=0x{start:x} aligned=0x{aligned_start:x} \
+         data_base=0x{data_start:x} scale_base=0x{scale_start:x}"
     );
     for sample in 0..4 {
-        let address = start + sample;
+        let position = sample;
+        let address = data_start + position;
         let delta = i32::from(segment_bytes[address] as i8);
-        let scale_byte = segment_bytes[address >> 5];
-        let exponent = if address & 0x10 == 0 {
+        let scale_byte = segment_bytes[scale_start + (position >> 5)];
+        let exponent = if position & 0x10 == 0 {
             scale_byte & 0x0f
         } else {
             scale_byte >> 4

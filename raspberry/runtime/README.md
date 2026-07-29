@@ -1,16 +1,16 @@
-# ArtuPy Runtime
+# RackForge Runtime
 
 Este workspace contiene el host headless y el contrato de plugins nativos de
-ArtuPy. Está aislado de los motores experimentales actuales para poder
+RackForge. Está aislado de los motores experimentales actuales para poder
 estabilizar la API sin interrumpir el instrumento que ya funciona.
 
 ## Componentes
 
 | Directorio | Responsabilidad |
 |---|---|
-| `artupy-plugin-api/` | ABI C versionada, manifiestos y esquema declarativo de parámetros. |
-| `artupy-core/` | Descubrimiento, validación, carga dinámica e instancias. |
-| `artupy-ui/` | Componentes, foco, layout y estilos independientes del hardware. |
+| `rackforge-plugin-api/` | ABI C versionada, manifiestos y esquema declarativo de parámetros. |
+| `rackforge-core/` | Descubrimiento, validación, carga dinámica e instancias. |
+| `rackforge-ui/` | Componentes, foco, layout y estilos independientes del hardware. |
 | `plugins/gain/` | Plugin de referencia que prueba audio, parámetros y estado. |
 | `plugins/roland-scva/` | Primer instrumento real, alimentado por un banco privado externo. |
 
@@ -18,9 +18,9 @@ estabilizar la API sin interrumpir el instrumento que ya funciona.
 
 - Ningún `String`, `Vec`, trait object ni asignador de Rust cruza el límite
   binario.
-- `artupy-plugin-api/include/artupy_plugin.h` permite implementar plugins en
+- `rackforge-plugin-api/include/rackforge_plugin.h` permite implementar plugins en
   C o C++ sin depender de Rust.
-- La biblioteca exporta solamente `artupy_plugin_entry_v1`.
+- La biblioteca exporta solamente `rackforge_plugin_entry_v1`.
 - Las estructuras ABI incluyen `struct_size` y `api_version`.
 - El host acepta plugins con el mismo major y un minor no mayor al suyo.
 - Los metadatos variables viajan como JSON UTF-8 hacia buffers propiedad del
@@ -28,13 +28,15 @@ estabilizar la API sin interrumpir el instrumento que ya funciona.
 - El manifiesto, el descriptor de runtime y el esquema de parámetros tienen
   versiones independientes.
 - El hilo de audio no realiza asignaciones, E/S, logs ni bloqueos.
-- El estado pertenece al plugin; ArtuPy lo guarda como bytes opacos.
+- El estado pertenece al plugin; RackForge lo guarda como bytes opacos.
+- Los plugins no dependen de módulos privados de `rackforge-core`; esta frontera
+  permite moverlos a repositorios independientes cuando la ABI se estabilice.
 
 Un paquete instalado tiene esta forma:
 
 ```text
-plugin.artupy/
-├── artupy-plugin.toml
+plugin.rackforge/
+├── rackforge-plugin.toml
 ├── lib/
 │   └── libplugin.so
 ├── presets/
@@ -65,6 +67,54 @@ Git y permite que la misma biblioteca funcione en distintas instalaciones.
 La extensión es compatible hacia atrás: el plugin Gain continúa declarando
 API 1.0 y se carga sin utilizar el callback agregado en 1.1.
 
+## Datos privados de addons
+
+API 1.2 agrega una raíz de datos privada por addon:
+
+```text
+<data-root>/
+└── addons/
+    └── org.rackforge.roland-scva/
+```
+
+RackForge crea, valida y aísla únicamente esa raíz. No crea carpetas internas ni
+impone nombres como `programs`, `resources` o `banks`. Cada addon decide toda
+su estructura interna y puede cambiarla mediante sus propias migraciones.
+
+El host ofrece operaciones de rutas relativas y escritura atómica: rechaza
+`..`, rutas absolutas y enlaces simbólicos que escapen del namespace. La
+biblioteca nativa recibe la ruta mediante `get_addon_data_path`; sigue siendo
+código confiable dentro del proceso hasta que exista aislamiento opcional.
+
+Los recursos declarados y los datos del addon son conceptos distintos:
+
+- un recurso es una dependencia externa seleccionada por RackForge, como una ROM
+  o un banco renderizado;
+- la raíz privada contiene todo lo que el addon decida crear o guardar.
+
+Para crear la raíz o guardar un documento desde tooling:
+
+```bash
+rackforge-core addon-init /home/kalex/rackforge/data org.rackforge.roland-scva
+rackforge-core program-save /home/kalex/rackforge/data \
+  programs/factory/piano-1.json \
+  plugins/roland-scva/programs/factory.piano-1.json
+```
+
+La ruta `programs/factory/piano-1.json` es una decisión del addon Roland, no
+una convención obligatoria de RackForge.
+
+## Modelo de programas
+
+RackForge define sólo el sobre común de un programa: identidad, nombre, plugin
+propietario, versiones, categoría, tags y un `payload` JSON. El plugin posee,
+valida y migra el contenido del payload. Así Core puede catalogar un programa
+sin asumir que todos los instrumentos tienen capas, osciladores o FX iguales.
+
+Roland define inicialmente un payload de una o dos capas. Cada capa referencia
+un `sound_id` y posee gain, pan, octava, transposición, afinación fina, rangos
+MIDI y ADSR. El programa de fábrica Piano 1 comienza con una sola capa `A`.
+
 ## Parámetros y pantalla
 
 Cada plugin expone páginas y parámetros. El host genera su interfaz sin
@@ -72,24 +122,42 @@ conocer nombres propios del motor:
 
 ```json
 {
-  "index": 0,
-  "id": "gain",
-  "name": "Gain",
-  "page": "level",
-  "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "default": 1.0,
-    "step": 0.01,
-    "unit": "x"
-  },
-  "suggested_control": "knob"
+  "schema_version": 1,
+  "pages": [
+    {
+      "id": "envelope",
+      "name": "Envelope",
+      "order": 0,
+      "header": "ROLAND SCVA"
+    }
+  ],
+  "parameters": [
+    {
+      "index": 1,
+      "id": "envelope.attack",
+      "name": "Attack",
+      "page": "envelope",
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": 0.0,
+        "step": 0.01,
+        "unit": "s"
+      },
+      "suggested_control": "knob"
+    }
+  ]
 }
 ```
 
 `index` es la dirección numérica eficiente usada en tiempo real. `id` es la
 identidad estable usada por estados, mappings y migraciones.
+
+`header` es opcional por página. Si el plugin lo declara, el backend puede usar
+la región superior disponible; si lo omite, el layout conserva la libertad de
+ocultarla y utilizar más espacio. Es una preferencia declarativa: ningún plugin
+conoce los bytes SysEx ni las dimensiones del KeyLab.
 
 Los tipos iniciales son:
 
@@ -125,31 +193,31 @@ En Windows con la toolchain GNU instalada:
 $env:Path = "C:\msys64\ucrt64\bin;$env:Path"
 cd raspberry\runtime
 cargo test --workspace
-cargo build -p artupy-gain
-cargo run -p artupy-core -- `
+cargo build -p rackforge-gain
+cargo run -p rackforge-core -- `
   smoke plugins/gain/package `
-  --library target/debug/artupy_gain.dll
+  --library target/debug/rackforge_gain.dll
 ```
 
 Resultado esperado:
 
 ```text
-PLUGIN_LOADED id=org.artupy.gain parameters=2 pages=1 presets=3
+PLUGIN_LOADED id=org.rackforge.gain parameters=2 pages=1 presets=3
 PRESET_LOADED id=factory.unity name="Unity"
 PARAMETER_ROUNDTRIP id=gain value=0.500000
 PLUGIN_SMOKE_OK peak=0.125000 state_bytes=9
 ```
 
-En Linux ARM64 se usa `target/debug/libartupy_gain.so`.
+En Linux ARM64 se usa `target/debug/librackforge_gain.so`.
 
 ## Runtime LIVE
 
-En Linux, `artupy-core live` conecta un plugin de instrumento al puerto MIDI
+En Linux, `rackforge-core live` conecta un plugin de instrumento al puerto MIDI
 principal del KeyLab y a la Scarlett:
 
 ```bash
-artupy-core live /home/kalex/artupy/plugins/roland-scva \
-  --resource rendered-bank=/home/kalex/artupy/share/rendered-piano-v1 \
+rackforge-core live /home/kalex/rackforge/plugins/roland-scva \
+  --resource rendered-bank=/home/kalex/rackforge/share/rendered-piano-v1 \
   --preset scva.piano-1
 ```
 
@@ -162,7 +230,7 @@ de audio y salida ALSA.
 el daemon provisional, verifica cada PID antes de detenerlo y revierte al
 motor anterior si el nuevo no alcanza `READY_TO_PLAY`.
 
-## Alcance de API v1.1
+## Alcance de API v1.2
 
 Incluye:
 
@@ -175,6 +243,8 @@ Incluye:
 - estado opaco versionado por el plugin;
 - carga dinámica nativa.
 - recursos externos declarados por el plugin.
+- raíz de datos privada por addon, sin estructura interna impuesta;
+- documento común de programas con payload versionado por el plugin.
 
 Quedan para extensiones compatibles:
 

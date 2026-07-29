@@ -1,0 +1,11 @@
+[package]
+name = "scva-inspect"
+version = "0.1.0"
+edition = "2024"
+description = "Read-only static inspector for legally owned Sound Canvas VA files"
+license = "GPL-2.0-or-later"
+
+[dependencies]
+anyhow = "1.0"
+goblin = "0.10"
+sha2 = "0.10"

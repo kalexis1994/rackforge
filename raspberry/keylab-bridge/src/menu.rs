@@ -26,6 +26,28 @@ pub struct Screen {
     pub footer: [FooterButton; 4],
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlaySound {
+    pub id: String,
+    pub name: String,
+    pub detail: String,
+}
+
+impl PlaySound {
+    pub fn new(id: impl Into<String>, name: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: normalized_display_text(&name.into(), "UNNAMED").to_ascii_uppercase(),
+            detail: normalized_display_text(&detail.into(), " "),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MenuCommand {
+    SelectSound { id: String },
+}
+
 impl Screen {
     fn with_header(
         header: impl Into<String>,
@@ -98,9 +120,10 @@ enum Page {
     Live,
     Play,
     Config,
-    Instruments,
-    Roland,
-    RolandEnvelope,
+    Addons,
+    RfDlsPlay,
+    RfDlsConfig,
+    RfDlsEnvelope,
 }
 
 #[derive(Debug)]
@@ -110,29 +133,38 @@ pub struct Menu {
     live_index: usize,
     play_index: usize,
     config_index: usize,
-    instrument_index: usize,
-    roland_index: usize,
+    addon_index: usize,
+    rf_dls_play_index: usize,
+    rf_dls_config_index: usize,
+    rf_dls_sounds: Vec<PlaySound>,
+    rf_dls_active_sound_id: Option<String>,
     envelope: ValueCarousel,
     pressed_button: Option<usize>,
+    pending_command: Option<MenuCommand>,
 }
 
 const HOME_ITEMS: [&str; 3] = ["LIVE", "PLAY", "CONFIG"];
 const HOME_HEADER: &str = "RACK FORGE";
-const LIVE_ITEMS: [&str; 4] = ["PIANO 1", "WARM PAD", "SC-55", "M1 HOUSE"];
-const LIVE_DETAILS: [&str; 4] = ["SCVA piano", "Layered pad", "Sound Canvas", "Korg M1"];
-const PLAY_ITEMS: [&str; 2] = ["ROLAND SCVA", "KORG M1"];
-const PLAY_DETAILS: [&str; 2] = ["Sound Canvas", "Legacy synth"];
-const CONFIG_ITEMS: [&str; 4] = ["INSTRUMENTS", "SETLISTS", "AUDIO", "SYSTEM"];
+const LIVE_ITEMS: [&str; 4] = ["PIANO 1", "WARM PAD", "DLS STRINGS", "M1 HOUSE"];
+const LIVE_DETAILS: [&str; 4] = ["DLS piano", "Layered pad", "RF-DLS bank", "Korg M1"];
+const PLAY_ITEMS: [&str; 1] = ["RF-DLS"];
+const PLAY_DETAILS: [&str; 1] = ["DLS banks"];
+const CONFIG_ITEMS: [&str; 4] = ["ADDONS", "SETLISTS", "AUDIO", "SYSTEM"];
 const CONFIG_DETAILS: [&str; 4] = [
-    "Plugin racks",
+    "Addon settings",
     "Performance order",
     "Scarlett Solo",
     "RackForge settings",
 ];
-const INSTRUMENT_ITEMS: [&str; 2] = ["ROLAND SCVA", "KORG M1"];
-const INSTRUMENT_DETAILS: [&str; 2] = ["Current plugin", "Not installed"];
-const ROLAND_ITEMS: [&str; 3] = ["ENVELOPE", "VOLUME", "EFFECTS"];
-const ROLAND_DETAILS: [&str; 3] = ["Shape each voice", "Master output", "Chorus and reverb"];
+const ADDON_ITEMS: [&str; 1] = ["RF-DLS"];
+const ADDON_DETAILS: [&str; 1] = [" "];
+const RF_DLS_CONFIG_ITEMS: [&str; 4] = ["ENVELOPE", "VOLUME", "BANK", "EFFECTS"];
+const RF_DLS_CONFIG_DETAILS: [&str; 4] = [
+    "DLS voice shape",
+    "Master output",
+    "gm.dls resource",
+    "Chorus / reverb",
+];
 
 impl Default for Menu {
     fn default() -> Self {
@@ -142,15 +174,51 @@ impl Default for Menu {
             live_index: 0,
             play_index: 0,
             config_index: 0,
-            instrument_index: 0,
-            roland_index: 0,
+            addon_index: 0,
+            rf_dls_play_index: 0,
+            rf_dls_config_index: 0,
+            rf_dls_sounds: vec![PlaySound::new(
+                "dls.b00000000.p00000000",
+                "PIANO 1",
+                "B000 P000",
+            )],
+            rf_dls_active_sound_id: Some("dls.b00000000.p00000000".into()),
             envelope: envelope_carousel(),
             pressed_button: None,
+            pending_command: None,
         }
     }
 }
 
 impl Menu {
+    pub fn set_play_sounds(&mut self, sounds: Vec<PlaySound>, selected_sound_id: Option<&str>) {
+        let browsed_sound_id = self
+            .rf_dls_sounds
+            .get(self.rf_dls_play_index)
+            .map(|sound| sound.id.clone());
+        self.rf_dls_sounds = sounds;
+        self.rf_dls_active_sound_id = selected_sound_id.map(str::to_owned);
+        self.rf_dls_play_index = browsed_sound_id
+            .as_deref()
+            .and_then(|browsed| {
+                self.rf_dls_sounds
+                    .iter()
+                    .position(|sound| sound.id == browsed)
+            })
+            .or_else(|| {
+                selected_sound_id.and_then(|selected| {
+                    self.rf_dls_sounds
+                        .iter()
+                        .position(|sound| sound.id == selected)
+                })
+            })
+            .unwrap_or(0);
+    }
+
+    pub fn take_command(&mut self) -> Option<MenuCommand> {
+        self.pending_command.take()
+    }
+
     pub fn set_button_pressed(&mut self, input: Input, pressed: bool) -> bool {
         let index = match input {
             Input::Button1 => 0,
@@ -172,7 +240,7 @@ impl Menu {
     }
 
     pub fn apply_input(&mut self, input: Input) {
-        if self.page == Page::RolandEnvelope {
+        if self.page == Page::RfDlsEnvelope {
             self.apply_envelope_input(input);
         } else {
             self.apply(input.default_navigation());
@@ -185,7 +253,7 @@ impl Menu {
     }
 
     pub fn apply(&mut self, action: Action) {
-        if self.page == Page::RolandEnvelope {
+        if self.page == Page::RfDlsEnvelope {
             let input = match action {
                 Action::Previous => Input::Button2,
                 Action::Next => Input::Button3,
@@ -200,22 +268,32 @@ impl Menu {
             Action::Next => self.move_selection(1),
             Action::Back => {
                 self.page = match self.page {
-                    Page::Roland => Page::Instruments,
-                    Page::Instruments => Page::Config,
+                    Page::RfDlsPlay => Page::Play,
+                    Page::RfDlsConfig => Page::Addons,
+                    Page::Addons => Page::Config,
                     Page::Home => Page::Home,
                     _ => Page::Home,
                 };
             }
             Action::Select => {
+                if self.page == Page::RfDlsPlay {
+                    if let Some(sound) = self.rf_dls_sounds.get(self.rf_dls_play_index) {
+                        self.pending_command = Some(MenuCommand::SelectSound {
+                            id: sound.id.clone(),
+                        });
+                    }
+                    return;
+                }
                 self.page = match self.page {
                     Page::Home => match self.home_index {
                         0 => Page::Live,
                         1 => Page::Play,
                         _ => Page::Config,
                     },
-                    Page::Config if self.config_index == 0 => Page::Instruments,
-                    Page::Instruments if self.instrument_index == 0 => Page::Roland,
-                    Page::Roland if self.roland_index == 0 => Page::RolandEnvelope,
+                    Page::Play if self.play_index == 0 => Page::RfDlsPlay,
+                    Page::Config if self.config_index == 0 => Page::Addons,
+                    Page::Addons if self.addon_index == 0 => Page::RfDlsConfig,
+                    Page::RfDlsConfig if self.rf_dls_config_index == 0 => Page::RfDlsEnvelope,
                     page => page,
                 };
             }
@@ -246,19 +324,24 @@ impl Menu {
                 &CONFIG_DETAILS,
                 self.config_index,
             ),
-            Page::Instruments => simple_screen(
-                indexed_title("INSTRUMENTS", self.instrument_index, INSTRUMENT_ITEMS.len()),
-                &INSTRUMENT_ITEMS,
-                &INSTRUMENT_DETAILS,
-                self.instrument_index,
+            Page::Addons => simple_screen(
+                indexed_title("ADDONS", self.addon_index, ADDON_ITEMS.len()),
+                &ADDON_ITEMS,
+                &ADDON_DETAILS,
+                self.addon_index,
             ),
-            Page::Roland => simple_screen(
-                "ROLAND SCVA",
-                &ROLAND_ITEMS,
-                &ROLAND_DETAILS,
-                self.roland_index,
+            Page::RfDlsPlay => self.render_rf_dls_play(),
+            Page::RfDlsConfig => simple_screen(
+                indexed_title(
+                    "RF-DLS CONFIG",
+                    self.rf_dls_config_index,
+                    RF_DLS_CONFIG_ITEMS.len(),
+                ),
+                &RF_DLS_CONFIG_ITEMS,
+                &RF_DLS_CONFIG_DETAILS,
+                self.rf_dls_config_index,
             ),
-            Page::RolandEnvelope => {
+            Page::RfDlsEnvelope => {
                 let [line_1, line_2] = component_lines(&self.envelope, true);
                 Screen::fullscreen(line_1, line_2)
             }
@@ -273,9 +356,11 @@ impl Menu {
             Page::Live => (&mut self.live_index, LIVE_ITEMS.len()),
             Page::Play => (&mut self.play_index, PLAY_ITEMS.len()),
             Page::Config => (&mut self.config_index, CONFIG_ITEMS.len()),
-            Page::Instruments => (&mut self.instrument_index, INSTRUMENT_ITEMS.len()),
-            Page::Roland => (&mut self.roland_index, ROLAND_ITEMS.len()),
-            Page::RolandEnvelope => return,
+            Page::Addons => (&mut self.addon_index, ADDON_ITEMS.len()),
+            Page::RfDlsPlay if self.rf_dls_sounds.is_empty() => return,
+            Page::RfDlsPlay => (&mut self.rf_dls_play_index, self.rf_dls_sounds.len()),
+            Page::RfDlsConfig => (&mut self.rf_dls_config_index, RF_DLS_CONFIG_ITEMS.len()),
+            Page::RfDlsEnvelope => return,
         };
         *selection = ((*selection as isize + delta).rem_euclid(len as isize)) as usize;
     }
@@ -285,9 +370,56 @@ impl Menu {
             self.envelope.handle(input),
             ComponentEvent::ExitRequested(_)
         ) {
-            self.page = Page::Roland;
+            self.page = Page::RfDlsConfig;
         }
     }
+
+    fn render_rf_dls_play(&self) -> Screen {
+        if self.rf_dls_sounds.is_empty() {
+            return Screen::with_header("RF-DLS PLAY", "NO SOUNDS", " ");
+        }
+        let mut carousel = SimpleCarousel::new(
+            "rf-dls-sounds",
+            self.rf_dls_sounds.iter().map(|sound| {
+                let name = if self.rf_dls_active_sound_id.as_deref() == Some(sound.id.as_str()) {
+                    let bounded = sound
+                        .name
+                        .chars()
+                        .take(DISPLAY_COLUMNS - 2)
+                        .collect::<String>();
+                    format!("[{bounded}]")
+                } else {
+                    sound.name.clone()
+                };
+                CarouselItem::new(name, &sound.detail)
+            }),
+        );
+        carousel.set_selected(self.rf_dls_play_index);
+        carousel.set_focused(true);
+        let [line_1, line_2] = component_lines(&carousel, false);
+        Screen::with_header(
+            indexed_title(
+                "RF-DLS PLAY",
+                self.rf_dls_play_index,
+                self.rf_dls_sounds.len(),
+            ),
+            line_1,
+            line_2,
+        )
+    }
+}
+
+fn normalized_display_text(value: &str, fallback: &str) -> String {
+    let mut normalized = value
+        .chars()
+        .filter(|character| !character.is_control())
+        .map(|character| if character.is_ascii() { character } else { '?' })
+        .take(DISPLAY_COLUMNS)
+        .collect::<String>();
+    if normalized.trim().is_empty() {
+        normalized = fallback.into();
+    }
+    normalized
 }
 
 fn render_home(selected: usize) -> [String; 2] {
@@ -349,7 +481,7 @@ fn component_lines(component: &impl Component, mark_focus: bool) -> [String; 2] 
 
 fn envelope_carousel() -> ValueCarousel {
     let mut carousel = ValueCarousel::new(
-        "roland-envelope",
+        "rf-dls-envelope",
         [
             ValueItem::new(
                 "envelope.attack",
@@ -443,22 +575,26 @@ mod tests {
     }
 
     #[test]
-    fn envelope_is_owned_by_the_roland_plugin() {
+    fn envelope_is_owned_by_the_rf_dls_addon() {
         let mut menu = Menu::default();
         menu.apply(Action::Previous);
         menu.apply(Action::Select);
         menu.apply(Action::Select);
         assert_eq!(
             menu.render().header,
-            Header::Visible("INSTRUMENTS    1/2".into())
+            Header::Visible("ADDONS         1/1".into())
         );
-        assert!(menu.render().line_1.contains("ROLAND SCVA"));
+        assert!(menu.render().line_1.contains("RF-DLS"));
+        assert!(menu.render().line_2.trim().is_empty());
         assert!(!menu.render().line_1.contains(" v"));
 
         menu.apply(Action::Select);
-        assert_eq!(menu.render().header, Header::Visible("ROLAND SCVA".into()));
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("RF-DLS CONFIG  1/4".into())
+        );
         assert!(menu.render().line_1.contains("ENVELOPE"));
-        assert_eq!(menu.render().line_2.trim(), "Shape each voice");
+        assert_eq!(menu.render().line_2.trim(), "DLS voice shape");
 
         menu.apply(Action::Select);
         assert_eq!(menu.render().header, Header::Hidden);
@@ -466,11 +602,14 @@ mod tests {
         assert_eq!(menu.render().line_2.trim(), "0.00 s");
 
         menu.apply(Action::Back);
-        assert_eq!(menu.render().header, Header::Visible("ROLAND SCVA".into()));
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("RF-DLS CONFIG  1/4".into())
+        );
         menu.apply(Action::Back);
         assert_eq!(
             menu.render().header,
-            Header::Visible("INSTRUMENTS    1/2".into())
+            Header::Visible("ADDONS         1/1".into())
         );
         menu.apply(Action::Back);
         assert_eq!(
@@ -499,8 +638,98 @@ mod tests {
         menu.apply_input(Input::EncoderPress);
         assert_eq!(
             menu.render().header,
-            Header::Visible("PLAY           1/2".into())
+            Header::Visible("PLAY           1/1".into())
         );
+    }
+
+    #[test]
+    fn rf_dls_play_and_config_are_distinct_addon_sections() {
+        let mut menu = Menu::default();
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("PLAY           1/1".into())
+        );
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("RF-DLS PLAY    1/1".into())
+        );
+        assert!(menu.render().line_1.contains("[PIANO 1]"));
+        assert_eq!(menu.render().line_2.trim(), "B000 P000");
+        menu.apply(Action::Back);
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("PLAY           1/1".into())
+        );
+
+        menu.apply(Action::Back);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        menu.apply(Action::Select);
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("RF-DLS CONFIG  1/4".into())
+        );
+    }
+
+    #[test]
+    fn rf_dls_play_uses_the_runtime_catalog_and_emits_selection() {
+        let mut menu = Menu::default();
+        menu.set_play_sounds(
+            vec![
+                PlaySound::new("sound.piano", "Piano 1", "B000 P000"),
+                PlaySound::new("sound.strings", "Stríngs 1", "B000 P048"),
+            ],
+            Some("sound.piano"),
+        );
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        assert!(menu.render().line_1.contains("STR?NGS 1"));
+        assert!(!menu.render().line_1.contains('['));
+        assert_eq!(menu.render().line_2.trim(), "B000 P048");
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SelectSound {
+                id: "sound.strings".into()
+            })
+        );
+        assert_eq!(menu.take_command(), None);
+
+        menu.set_play_sounds(
+            vec![
+                PlaySound::new("sound.piano", "Piano 1", "B000 P000"),
+                PlaySound::new("sound.strings", "Strings 1", "B000 P048"),
+            ],
+            Some("sound.piano"),
+        );
+        assert!(menu.render().line_1.contains("STRINGS 1"));
+        assert!(!menu.render().line_1.contains('['));
+
+        menu.set_play_sounds(
+            vec![
+                PlaySound::new("sound.piano", "Piano 1", "B000 P000"),
+                PlaySound::new("sound.strings", "Strings 1", "B000 P048"),
+            ],
+            Some("sound.strings"),
+        );
+        assert!(menu.render().line_1.contains("[STRINGS 1]"));
+    }
+
+    #[test]
+    fn live_remains_a_rackforge_mode_above_addons() {
+        let mut menu = Menu::default();
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("LIVE SET       1/4".into())
+        );
+        assert!(!menu.render().header.eq(&Header::Visible("RF-DLS".into())));
     }
 
     #[test]
@@ -546,7 +775,10 @@ mod tests {
         assert!(menu.render().line_1.starts_with('['));
 
         menu.apply_input(Input::Button4);
-        assert_eq!(menu.render().header, Header::Visible("ROLAND SCVA".into()));
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("RF-DLS CONFIG  1/4".into())
+        );
     }
 
     #[test]

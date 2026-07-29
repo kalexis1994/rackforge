@@ -8,10 +8,12 @@ estabilizar la API sin interrumpir el instrumento que ya funciona.
 
 | Directorio | Responsabilidad |
 |---|---|
+| `rackforge-control-api/` | Protocolo local versionado entre Core y superficies de control. |
 | `rackforge-plugin-api/` | ABI C versionada, manifiestos y esquema declarativo de parámetros. |
 | `rackforge-core/` | Descubrimiento, validación, carga dinámica e instancias. |
 | `rackforge-ui/` | Componentes, foco, layout y estilos independientes del hardware. |
 | `plugins/gain/` | Plugin de referencia que prueba audio, parámetros y estado. |
+| `plugins/rf-dls/` | Instrumento DLS nativo que usa bancos externos aportados por el usuario. |
 | `plugins/roland-scva/` | Primer instrumento real, alimentado por un banco privado externo. |
 
 ## Principios del contrato
@@ -32,10 +34,24 @@ estabilizar la API sin interrumpir el instrumento que ya funciona.
 - Los plugins no dependen de módulos privados de `rackforge-core`; esta frontera
   permite moverlos a repositorios independientes cuando la ABI se estabilice.
 
-Un paquete instalado tiene esta forma:
+El formato distribuible de un addon usa la extensión `.rfaddon`:
 
 ```text
-plugin.rackforge/
+rf-dls-0.1.0.rfaddon
+└── plugin/
+    ├── rackforge-plugin.toml
+    ├── lib/
+    │   └── libplugin.so
+    ├── presets/
+    └── assets/
+```
+
+RackForge valida y expande ese archivo mediante una instalación atómica. La
+forma materializada interna conserva la misma estructura, pero no es el
+artefacto que se distribuye:
+
+```text
+plugins/rf-dls/
 ├── rackforge-plugin.toml
 ├── lib/
 │   └── libplugin.so
@@ -44,7 +60,9 @@ plugin.rackforge/
 ```
 
 Las rutas declaradas en el manifiesto deben ser relativas y no pueden escapar
-del paquete.
+del paquete. El host no ejecuta bibliotecas directamente desde `.rfaddon`;
+primero las materializa para que el cargador nativo pueda abrirlas y para
+permitir verificación, actualización y rollback.
 
 ## Recursos externos
 
@@ -91,6 +109,28 @@ Los recursos declarados y los datos del addon son conceptos distintos:
 - un recurso es una dependencia externa seleccionada por RackForge, como una ROM
   o un banco renderizado;
 - la raíz privada contiene todo lo que el addon decida crear o guardar.
+
+## Catálogos dinámicos
+
+API 1.3 permite que un addon publique su catálogo después de crear la instancia
+y abrir sus recursos. Esto resuelve bancos externos cuyo contenido no se conoce
+al compilar el plugin. La publicación usa JSON validado por Core y una extensión
+compatible de `HostApiV1`; la tabla exportada por plugins 1.0–1.2 no cambia.
+
+RF-DLS usa esta capacidad para convertir cada instrumento encontrado en el DLS
+en un preset dinámico con ID opaco y estable, nombre y detalle. Core conserva la
+selección activa y las superficies de control nunca leen ni interpretan DLS.
+
+El proceso LIVE expone una foto del catálogo y órdenes `SelectSound` mediante
+un socket Unix local versionado:
+
+```text
+addon → HostApi 1.3 → Core LIVE → rackforge-control-api → KeyLab bridge
+```
+
+La selección se aplica al comienzo de un bloque de audio. El servidor de
+control usa mensajes JSON acotados, valida IDs contra el catálogo publicado y
+no realiza E/S dentro del callback de procesamiento del plugin.
 
 Para crear la raíz o guardar un documento desde tooling:
 
@@ -213,7 +253,16 @@ En Linux ARM64 se usa `target/debug/librackforge_gain.so`.
 ## Runtime LIVE
 
 En Linux, `rackforge-core live` conecta un plugin de instrumento al puerto MIDI
-principal del KeyLab y a la Scarlett:
+principal del KeyLab y a la Scarlett. RF-DLS usa el `.dls` como recurso externo:
+
+```bash
+rackforge-core live /home/kalex/rackforge/plugins/rf-dls \
+  --resource dls-bank=/home/kalex/rackforge/data/addons/rf-dls/banks/gm.dls \
+  --preset gm.piano-1
+```
+
+El plugin anterior de bancos renderizados continúa disponible durante la
+migración:
 
 ```bash
 rackforge-core live /home/kalex/rackforge/plugins/roland-scva \
@@ -225,12 +274,13 @@ El host permanece genérico: selección de muestras, voces, sustain y
 parámetros pertenecen al plugin. El host solo administra carga, MIDI, bloques
 de audio y salida ALSA.
 
-`scripts/install.sh` instala binario y plugin mediante reemplazos atómicos.
-`scripts/select-live-engine.sh plugin|legacy` cambia entre el runtime nuevo y
-el daemon provisional, verifica cada PID antes de detenerlo y revierte al
-motor anterior si el nuevo no alcanza `READY_TO_PLAY`.
+`scripts/install.sh` instala binario y plugins mediante reemplazos atómicos.
+`scripts/select-live-engine.sh rf-dls-plugin` activa RF-DLS mediante Plugin API;
+`rf-dls` conserva temporalmente el daemon provisional como rollback. El selector
+verifica cada PID antes de detenerlo y restaura el motor anterior si el nuevo no
+alcanza `READY_TO_PLAY`.
 
-## Alcance de API v1.2
+## Alcance de API v1.3
 
 Incluye:
 
@@ -245,6 +295,8 @@ Incluye:
 - recursos externos declarados por el plugin.
 - raíz de datos privada por addon, sin estructura interna impuesta;
 - documento común de programas con payload versionado por el plugin.
+- catálogos de presets dinámicos dependientes de recursos externos;
+- protocolo local genérico para consultar LIVE y seleccionar sonidos.
 
 Quedan para extensiones compatibles:
 

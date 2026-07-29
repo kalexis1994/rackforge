@@ -5,10 +5,16 @@ use thiserror::Error;
 
 const DLS_DRUM_BANK: u32 = 0x8000_0000;
 const CONN_SRC_NONE: u16 = 0x0000;
+const CONN_SRC_EG2: u16 = 0x0005;
+const CONN_DST_PITCH: u16 = 0x0003;
 const CONN_DST_EG1_ATTACKTIME: u16 = 0x0206;
 const CONN_DST_EG1_DECAYTIME: u16 = 0x0207;
 const CONN_DST_EG1_RELEASETIME: u16 = 0x0209;
 const CONN_DST_EG1_SUSTAINLEVEL: u16 = 0x020a;
+const CONN_DST_EG2_ATTACKTIME: u16 = 0x030a;
+const CONN_DST_EG2_DECAYTIME: u16 = 0x030b;
+const CONN_DST_EG2_RELEASETIME: u16 = 0x030d;
+const CONN_DST_EG2_SUSTAINLEVEL: u16 = 0x030e;
 
 #[derive(Debug, Error)]
 pub enum DlsError {
@@ -230,10 +236,36 @@ pub struct EnvelopeSpec {
 impl Default for EnvelopeSpec {
     fn default() -> Self {
         Self {
-            attack_seconds: 0.005,
+            attack_seconds: 0.0,
             decay_seconds: 1_000.0,
             sustain_level: 1.0,
-            release_seconds: 0.2,
+            release_seconds: 0.0,
+        }
+    }
+}
+
+impl EnvelopeSpec {
+    fn pitch_default() -> Self {
+        Self {
+            attack_seconds: 0.0,
+            decay_seconds: 1_000.0,
+            sustain_level: 1.0,
+            release_seconds: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PitchEnvelopeSpec {
+    pub envelope: EnvelopeSpec,
+    pub depth_cents: f32,
+}
+
+impl Default for PitchEnvelopeSpec {
+    fn default() -> Self {
+        Self {
+            envelope: EnvelopeSpec::pitch_default(),
+            depth_cents: 0.0,
         }
     }
 }
@@ -247,16 +279,62 @@ fn timecents_to_seconds(raw: i32) -> f32 {
     }
 }
 
-fn parse_envelope(container: &Chunk, bytes: &[u8]) -> Result<EnvelopeSpec, DlsError> {
-    let mut envelope = EnvelopeSpec::default();
+fn sustain_level(raw: i32) -> f32 {
+    (raw as f32 / 65_536.0 / 1_000.0).clamp(0.0, 1.0)
+}
+
+fn apply_articulation_connection(
+    amplitude: &mut EnvelopeSpec,
+    pitch: &mut PitchEnvelopeSpec,
+    source: u16,
+    control: u16,
+    destination: u16,
+    scale: i32,
+) {
+    match (source, control, destination) {
+        (CONN_SRC_NONE, 0, CONN_DST_EG1_ATTACKTIME) => {
+            amplitude.attack_seconds = timecents_to_seconds(scale)
+        }
+        (CONN_SRC_NONE, 0, CONN_DST_EG1_DECAYTIME) => {
+            amplitude.decay_seconds = timecents_to_seconds(scale)
+        }
+        (CONN_SRC_NONE, 0, CONN_DST_EG1_RELEASETIME) => {
+            amplitude.release_seconds = timecents_to_seconds(scale)
+        }
+        (CONN_SRC_NONE, 0, CONN_DST_EG1_SUSTAINLEVEL) => {
+            amplitude.sustain_level = sustain_level(scale)
+        }
+        (CONN_SRC_NONE, 0, CONN_DST_EG2_ATTACKTIME) => {
+            pitch.envelope.attack_seconds = timecents_to_seconds(scale)
+        }
+        (CONN_SRC_NONE, 0, CONN_DST_EG2_DECAYTIME) => {
+            pitch.envelope.decay_seconds = timecents_to_seconds(scale)
+        }
+        (CONN_SRC_NONE, 0, CONN_DST_EG2_RELEASETIME) => {
+            pitch.envelope.release_seconds = timecents_to_seconds(scale)
+        }
+        (CONN_SRC_NONE, 0, CONN_DST_EG2_SUSTAINLEVEL) => {
+            pitch.envelope.sustain_level = sustain_level(scale)
+        }
+        (CONN_SRC_EG2, 0, CONN_DST_PITCH) => pitch.depth_cents = scale as f32 / 65_536.0,
+        _ => {}
+    }
+}
+
+fn parse_articulation(
+    container: &Chunk,
+    bytes: &[u8],
+) -> Result<(EnvelopeSpec, PitchEnvelopeSpec), DlsError> {
+    let mut amplitude = EnvelopeSpec::default();
+    let mut pitch = PitchEnvelopeSpec::default();
     let Some(articulators) = container.list(b"lar2").or_else(|| container.list(b"lart")) else {
-        return Ok(envelope);
+        return Ok((amplitude, pitch));
     };
     let Some(art) = articulators
         .child(b"art2")
         .or_else(|| articulators.child(b"art1"))
     else {
-        return Ok(envelope);
+        return Ok((amplitude, pitch));
     };
     let data = art.data(bytes);
     require_size(data, 8, "articulator")?;
@@ -276,20 +354,16 @@ fn parse_envelope(container: &Chunk, bytes: &[u8]) -> Result<EnvelopeSpec, DlsEr
         let control = u16_at(data, offset + 2);
         let destination = u16_at(data, offset + 4);
         let scale = i32_at(data, offset + 8);
-        if source != CONN_SRC_NONE || control != 0 {
-            continue;
-        }
-        match destination {
-            CONN_DST_EG1_ATTACKTIME => envelope.attack_seconds = timecents_to_seconds(scale),
-            CONN_DST_EG1_DECAYTIME => envelope.decay_seconds = timecents_to_seconds(scale),
-            CONN_DST_EG1_RELEASETIME => envelope.release_seconds = timecents_to_seconds(scale),
-            CONN_DST_EG1_SUSTAINLEVEL => {
-                envelope.sustain_level = (scale as f32 / 65_536.0 / 1_000.0).clamp(0.0, 1.0)
-            }
-            _ => {}
-        }
+        apply_articulation_connection(
+            &mut amplitude,
+            &mut pitch,
+            source,
+            control,
+            destination,
+            scale,
+        );
     }
-    Ok(envelope)
+    Ok((amplitude, pitch))
 }
 
 #[derive(Clone, Debug)]
@@ -310,6 +384,7 @@ pub struct Instrument {
     pub program: u32,
     pub regions: Vec<Region>,
     pub envelope: EnvelopeSpec,
+    pub pitch_envelope: PitchEnvelopeSpec,
 }
 
 impl Instrument {
@@ -507,12 +582,14 @@ fn parse_instrument(
             regions.len()
         )));
     }
+    let (envelope, pitch_envelope) = parse_articulation(chunk, bytes)?;
     Ok(Instrument {
         name: info_name(chunk, bytes),
         bank,
         program,
         regions,
-        envelope: parse_envelope(chunk, bytes)?,
+        envelope,
+        pitch_envelope,
     })
 }
 
@@ -626,15 +703,139 @@ impl Envelope {
     }
 }
 
+const AMPLITUDE_SILENCE_CENTIBELS: f32 = 960.0;
+
+#[derive(Clone, Debug)]
+struct AmplitudeEnvelope {
+    spec: EnvelopeSpec,
+    phase: EnvelopePhase,
+    phase_frame: usize,
+    phase_frames: usize,
+    attenuation_centibels: f32,
+    release_start_centibels: f32,
+    sample_rate: f32,
+}
+
+impl AmplitudeEnvelope {
+    fn new(spec: EnvelopeSpec, sample_rate: u32) -> Self {
+        let mut envelope = Self {
+            spec,
+            phase: EnvelopePhase::Attack,
+            phase_frame: 0,
+            phase_frames: 0,
+            attenuation_centibels: AMPLITUDE_SILENCE_CENTIBELS,
+            release_start_centibels: AMPLITUDE_SILENCE_CENTIBELS,
+            sample_rate: sample_rate as f32,
+        };
+        envelope.enter_attack();
+        envelope
+    }
+
+    fn frames(&self, seconds: f32) -> usize {
+        (seconds * self.sample_rate).max(0.0).round() as usize
+    }
+
+    fn enter_attack(&mut self) {
+        self.phase_frames = self.frames(self.spec.attack_seconds);
+        if self.phase_frames == 0 {
+            self.attenuation_centibels = 0.0;
+            self.enter_decay();
+        }
+    }
+
+    fn enter_decay(&mut self) {
+        self.phase = EnvelopePhase::Decay;
+        self.phase_frame = 0;
+        let sustain = self.sustain_centibels();
+        self.phase_frames =
+            self.frames(self.spec.decay_seconds * sustain / AMPLITUDE_SILENCE_CENTIBELS);
+        if self.phase_frames == 0 || sustain == 0.0 {
+            self.attenuation_centibels = sustain;
+            self.phase = EnvelopePhase::Sustain;
+        }
+    }
+
+    fn sustain_centibels(&self) -> f32 {
+        ((1.0 - self.spec.sustain_level) * 1_000.0).clamp(0.0, AMPLITUDE_SILENCE_CENTIBELS)
+    }
+
+    fn note_off(&mut self) {
+        if self.phase == EnvelopePhase::Finished || self.phase == EnvelopePhase::Release {
+            return;
+        }
+        self.release_start_centibels = self.attenuation_centibels;
+        let remaining = (AMPLITUDE_SILENCE_CENTIBELS - self.release_start_centibels).max(0.0);
+        self.phase_frames =
+            self.frames(self.spec.release_seconds * remaining / AMPLITUDE_SILENCE_CENTIBELS);
+        self.phase_frame = 0;
+        self.phase = if self.phase_frames == 0 {
+            EnvelopePhase::Finished
+        } else {
+            EnvelopePhase::Release
+        };
+    }
+
+    fn is_finished(&self) -> bool {
+        self.phase == EnvelopePhase::Finished
+    }
+
+    fn next_gain(&mut self) -> f32 {
+        match self.phase {
+            EnvelopePhase::Attack => {
+                self.phase_frame += 1;
+                let gain = (self.phase_frame as f32 / self.phase_frames as f32).min(1.0);
+                self.attenuation_centibels = if gain <= 0.0 {
+                    AMPLITUDE_SILENCE_CENTIBELS
+                } else {
+                    (-200.0 * gain.log10()).clamp(0.0, AMPLITUDE_SILENCE_CENTIBELS)
+                };
+                if self.phase_frame >= self.phase_frames {
+                    self.attenuation_centibels = 0.0;
+                    self.enter_decay();
+                }
+                return gain;
+            }
+            EnvelopePhase::Decay => {
+                self.phase_frame += 1;
+                let progress = (self.phase_frame as f32 / self.phase_frames as f32).min(1.0);
+                self.attenuation_centibels = self.sustain_centibels() * progress;
+                if self.phase_frame >= self.phase_frames {
+                    self.attenuation_centibels = self.sustain_centibels();
+                    self.phase = EnvelopePhase::Sustain;
+                }
+            }
+            EnvelopePhase::Sustain => {
+                self.attenuation_centibels = self.sustain_centibels();
+            }
+            EnvelopePhase::Release => {
+                self.phase_frame += 1;
+                let progress = (self.phase_frame as f32 / self.phase_frames as f32).min(1.0);
+                self.attenuation_centibels = self.release_start_centibels
+                    + (AMPLITUDE_SILENCE_CENTIBELS - self.release_start_centibels) * progress;
+                if self.phase_frame >= self.phase_frames {
+                    self.attenuation_centibels = AMPLITUDE_SILENCE_CENTIBELS;
+                    self.phase = EnvelopePhase::Finished;
+                }
+            }
+            EnvelopePhase::Finished => {
+                return 0.0;
+            }
+        }
+        10.0_f32.powf(-self.attenuation_centibels / 200.0)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Voice {
     pub note: u8,
     samples: Arc<[f32]>,
     position: f64,
-    increment: f64,
+    base_increment: f64,
     sample_loop: Option<SampleLoop>,
     gain: f32,
-    envelope: Envelope,
+    envelope: AmplitudeEnvelope,
+    pitch_envelope: Envelope,
+    pitch_depth_cents: f32,
     finished: bool,
 }
 
@@ -671,29 +872,33 @@ impl Voice {
                 wave.samples.len()
             )));
         }
-        let root = params.unity_note as f64 + params.fine_tune as f64 / 100.0;
-        let pitch = 2.0_f64.powf((f64::from(note) - root) / 12.0);
-        let increment = f64::from(wave.sample_rate) / f64::from(output_rate) * pitch;
+        let pitch_cents =
+            (f64::from(note) - f64::from(params.unity_note)) * 100.0 + f64::from(params.fine_tune);
+        let pitch = 2.0_f64.powf(pitch_cents / 1_200.0);
+        let base_increment = f64::from(wave.sample_rate) / f64::from(output_rate) * pitch;
         let attenuation = 10.0_f32.powf(params.attenuation_db / 20.0);
         let velocity_gain = (f32::from(velocity) / 127.0).powf(0.7);
         Ok(Self {
             note,
             samples: Arc::clone(&wave.samples),
             position: 0.0,
-            increment,
+            base_increment,
             sample_loop: params.sample_loop,
             gain: attenuation * velocity_gain,
-            envelope: Envelope::new(instrument.envelope, output_rate),
+            envelope: AmplitudeEnvelope::new(instrument.envelope, output_rate),
+            pitch_envelope: Envelope::new(instrument.pitch_envelope.envelope, output_rate),
+            pitch_depth_cents: instrument.pitch_envelope.depth_cents,
             finished: false,
         })
     }
 
     pub fn note_off(&mut self) {
         self.envelope.note_off();
+        self.pitch_envelope.note_off();
     }
 
     pub fn is_finished(&self) -> bool {
-        self.finished || self.envelope.phase == EnvelopePhase::Finished
+        self.finished || self.envelope.is_finished()
     }
 
     pub fn next_sample(&mut self) -> f32 {
@@ -721,7 +926,9 @@ impl Voice {
             self.sample_loop.map_or(index, |looping| looping.start)
         };
         let sample = self.samples[index] + (self.samples[next] - self.samples[index]) * fraction;
-        self.position += self.increment;
+        let pitch_cents = self.pitch_depth_cents * self.pitch_envelope.next_gain();
+        let pitch_ratio = 2.0_f64.powf(f64::from(pitch_cents) / 1_200.0);
+        self.position += self.base_increment * pitch_ratio;
         sample * self.gain * self.envelope.next_gain()
     }
 }
@@ -761,5 +968,119 @@ mod tests {
             assert!(envelope.next_gain().is_finite());
         }
         assert_eq!(envelope.phase, EnvelopePhase::Finished);
+    }
+
+    #[test]
+    fn parses_eg2_pitch_depth_in_cents() {
+        let mut amplitude = EnvelopeSpec::default();
+        let mut pitch = PitchEnvelopeSpec::default();
+        apply_articulation_connection(
+            &mut amplitude,
+            &mut pitch,
+            CONN_SRC_EG2,
+            CONN_SRC_NONE,
+            CONN_DST_PITCH,
+            102 * 65_536,
+        );
+        assert_eq!(pitch.depth_cents, 102.0);
+    }
+
+    #[test]
+    fn pitch_envelope_modulates_voice_playback_rate() {
+        let bank = DlsBank {
+            instruments: vec![Instrument {
+                name: "Pitch envelope".into(),
+                bank: 0,
+                program: 0,
+                regions: vec![Region {
+                    key_low: 0,
+                    key_high: 127,
+                    velocity_low: 0,
+                    velocity_high: 127,
+                    wave_index: 0,
+                    key_group: 0,
+                    sample_params: Some(SampleParams {
+                        unity_note: 60,
+                        fine_tune: 0,
+                        attenuation_db: 0.0,
+                        sample_loop: None,
+                    }),
+                }],
+                envelope: EnvelopeSpec::default(),
+                pitch_envelope: PitchEnvelopeSpec {
+                    envelope: EnvelopeSpec::pitch_default(),
+                    depth_cents: 1_200.0,
+                },
+            }],
+            waves: vec![Wave {
+                name: "Synthetic".into(),
+                sample_rate: 48_000,
+                samples: Arc::from(vec![0.0; 32]),
+                sample_params: None,
+            }],
+        };
+        let instrument = &bank.instruments[0];
+        let mut voice =
+            Voice::new(&bank, instrument, &instrument.regions[0], 60, 127, 48_000).unwrap();
+        voice.next_sample();
+        assert!((voice.position - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn positive_sample_fine_tune_raises_playback_rate() {
+        let bank = DlsBank {
+            instruments: vec![Instrument {
+                name: "Fine tune".into(),
+                bank: 0,
+                program: 0,
+                regions: vec![Region {
+                    key_low: 0,
+                    key_high: 127,
+                    velocity_low: 0,
+                    velocity_high: 127,
+                    wave_index: 0,
+                    key_group: 0,
+                    sample_params: Some(SampleParams {
+                        unity_note: 60,
+                        fine_tune: 100,
+                        attenuation_db: 0.0,
+                        sample_loop: None,
+                    }),
+                }],
+                envelope: EnvelopeSpec::default(),
+                pitch_envelope: PitchEnvelopeSpec::default(),
+            }],
+            waves: vec![Wave {
+                name: "Synthetic".into(),
+                sample_rate: 48_000,
+                samples: Arc::from(vec![0.0; 32]),
+                sample_params: None,
+            }],
+        };
+        let instrument = &bank.instruments[0];
+        let mut voice =
+            Voice::new(&bank, instrument, &instrument.regions[0], 60, 127, 48_000).unwrap();
+        voice.next_sample();
+        assert!((voice.position - 2.0_f64.powf(1.0 / 12.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn amplitude_release_falls_linearly_in_centibels() {
+        let mut envelope = AmplitudeEnvelope::new(
+            EnvelopeSpec {
+                attack_seconds: 0.0,
+                decay_seconds: 0.0,
+                sustain_level: 1.0,
+                release_seconds: 1.0,
+            },
+            100,
+        );
+        assert_eq!(envelope.next_gain(), 1.0);
+        envelope.note_off();
+        let mut halfway_gain = 1.0;
+        for _ in 0..50 {
+            halfway_gain = envelope.next_gain();
+        }
+        assert!((halfway_gain - 10.0_f32.powf(-2.4)).abs() < 1e-5);
     }
 }

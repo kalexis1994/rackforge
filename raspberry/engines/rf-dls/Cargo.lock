@@ -394,7 +394,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "rackforge-dls"
+name = "redox_syscall"
+version = "0.5.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
+name = "rf-dls"
 version = "0.1.0"
 dependencies = [
  "alsa",
@@ -403,15 +412,6 @@ dependencies = [
  "libc",
  "midir",
  "thiserror 2.0.19",
-]
-
-[[package]]
-name = "redox_syscall"
-version = "0.5.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
-dependencies = [
- "bitflags",
 ]
 
 [[package]]

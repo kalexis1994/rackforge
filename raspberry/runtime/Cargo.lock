@@ -432,6 +432,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-control-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rackforge-core"
 version = "0.1.0"
 dependencies = [
@@ -440,6 +448,7 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
  "midir",
+ "rackforge-control-api",
  "rackforge-plugin-api",
  "serde_json",
  "toml",
@@ -464,6 +473,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-rf-dls"
+version = "0.1.0"
+dependencies = [
+ "rackforge-plugin-api",
+ "rf-dls",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rackforge-roland-scva"
 version = "0.1.0"
 dependencies = [
@@ -484,6 +503,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "rf-dls"
+version = "0.1.0"
+dependencies = [
+ "alsa",
+ "anyhow",
+ "hound",
+ "libc",
+ "midir",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

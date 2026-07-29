@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use hound::{SampleFormat, WavSpec, WavWriter};
-use rackforge_dls::{DlsBank, voices_for_note};
+use rf_dls::{DlsBank, voices_for_note};
 use std::env;
 use std::path::Path;
 
@@ -96,8 +96,8 @@ fn run() -> Result<()> {
             )
         }
         _ => bail!(
-            "usage:\n  rackforge-dls inspect BANK.dls\n  \
-             rackforge-dls render BANK.dls BANK PROGRAM NOTE OUTPUT.wav"
+            "usage:\n  rf-dls inspect BANK.dls\n  \
+             rf-dls render BANK.dls BANK PROGRAM NOTE OUTPUT.wav"
         ),
     }
 }

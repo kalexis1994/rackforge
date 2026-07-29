@@ -1,13 +1,19 @@
+use crate::control::{self, ControlCommand};
 use crate::{LoadedPlugin, PluginInstance, PluginPackage};
 use alsa::pcm::{Access, Format, HwParams, PCM};
 use alsa::{Direction, ValueOr};
 use anyhow::{Context, Result, bail};
 use midir::{Ignore, MidiInput, MidiInputConnection, MidiInputPort};
+use rackforge_control_api::{
+    CONTROL_SCHEMA_VERSION, CONTROL_SOCKET_NAME, LiveSnapshot, SoundSummary,
+};
 use rackforge_plugin_api::PluginKind;
 use rackforge_plugin_api::abi::MidiEventV1;
 use std::collections::BTreeMap;
+use std::env;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 
 const OUTPUT_DEVICE: &str = "hw:CARD=USB,DEV=0";
 const OUTPUT_RATE: u32 = 48_000;
@@ -49,16 +55,17 @@ pub fn run(config: LiveConfig) -> Result<()> {
         plugin.presets().presets.len()
     );
     let mut instance = plugin.create_instance()?;
+    let presets = instance.preset_catalog()?;
     let preset = match config.preset.as_deref() {
         Some(id) => Some(
-            plugin
-                .presets()
+            presets
                 .presets
                 .iter()
+                .chain(plugin.presets().presets.iter())
                 .find(|preset| preset.id == id)
                 .with_context(|| format!("plugin does not declare preset {id:?}"))?,
         ),
-        None => plugin.presets().presets.first(),
+        None => presets.presets.first(),
     };
     if let Some(preset) = preset {
         instance.load_preset(&preset.id)?;
@@ -79,8 +86,50 @@ pub fn run(config: LiveConfig) -> Result<()> {
         "AUDIO_READY device={OUTPUT_DEVICE:?} rate={OUTPUT_RATE} channels={CHANNELS} \
          format=S32_LE period={PERIOD_FRAMES} buffer={BUFFER_FRAMES}"
     );
+    let selected_sound_id = preset
+        .and_then(|selected| {
+            presets
+                .presets
+                .iter()
+                .find(|candidate| candidate.id == selected.id)
+        })
+        .map(|selected| selected.id.clone())
+        .or_else(|| presets.presets.first().map(|preset| preset.id.clone()));
+    let snapshot = Arc::new(Mutex::new(LiveSnapshot {
+        schema_version: CONTROL_SCHEMA_VERSION,
+        plugin_id: plugin.manifest().id.clone(),
+        plugin_name: plugin.manifest().name.clone(),
+        sounds: presets
+            .presets
+            .iter()
+            .map(|preset| SoundSummary {
+                id: preset.id.clone(),
+                name: preset.name.clone(),
+                detail: preset
+                    .description
+                    .clone()
+                    .or_else(|| preset.category.clone()),
+            })
+            .collect(),
+        selected_sound_id,
+    }));
+    let (control_sender, control_receiver) = mpsc::channel();
+    let control_path = control_socket_path();
+    let _control_server = control::start(&control_path, Arc::clone(&snapshot), control_sender)?;
+    println!("CONTROL_READY socket={}", control_path.display());
     println!("READY_TO_PLAY");
-    audio_loop(&pcm, &receiver, &mut instance)
+    audio_loop(&pcm, &receiver, &control_receiver, &snapshot, &mut instance)
+}
+
+fn control_socket_path() -> PathBuf {
+    env::var_os("RACKFORGE_CONTROL_SOCKET")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            let root = env::var_os("RACKFORGE_ROOT")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"));
+            root.join("state").join(CONTROL_SOCKET_NAME)
+        })
 }
 
 fn is_keylab_midi(name: &str) -> bool {
@@ -174,6 +223,8 @@ fn open_scarlett() -> Result<PCM> {
 fn audio_loop(
     pcm: &PCM,
     receiver: &Receiver<MidiEventV1>,
+    control_receiver: &Receiver<ControlCommand>,
+    snapshot: &Arc<Mutex<LiveSnapshot>>,
     instance: &mut PluginInstance<'_>,
 ) -> Result<()> {
     let io = pcm.io_i32()?;
@@ -187,6 +238,20 @@ fn audio_loop(
     let mut dropped_events = 0_usize;
 
     loop {
+        while let Ok(command) = control_receiver.try_recv() {
+            match command {
+                ControlCommand::SelectSound { id, reply } => {
+                    let result = instance.load_preset(&id).map(|()| {
+                        if let Ok(mut snapshot) = snapshot.lock() {
+                            snapshot.selected_sound_id = Some(id.clone());
+                        }
+                        println!("LIVE_SOUND_SELECTED id={id}");
+                        id
+                    });
+                    let _ = reply.send(result.map_err(|error| error.to_string()));
+                }
+            }
+        }
         events.clear();
         while let Ok(event) = receiver.try_recv() {
             if events.len() < MAX_EVENTS_PER_BLOCK {

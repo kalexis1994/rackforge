@@ -2,9 +2,11 @@
 resolver = "3"
 members = [
     "rackforge-core",
+    "rackforge-control-api",
     "rackforge-plugin-api",
     "rackforge-ui",
     "plugins/gain",
+    "plugins/rf-dls",
     "plugins/roland-scva",
 ]
 

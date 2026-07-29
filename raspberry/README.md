@@ -48,5 +48,8 @@ el daemon principal cuando el protocolo compañero esté estabilizado.
 `audio/` contiene el perfil ALSA inicial de la Scarlett Solo y un diagnóstico
 de hardware que no reproduce sonido ni modifica el mezclador.
 
+`engines/nuked-sc55/` integra el emulador Roland Sound Canvas, sus herramientas
+de compilación ARM64 y su launcher headless. Las ROM permanecen fuera de Git.
+
 La plantilla `systemd/artupy.service` todavía no se instala: se habilitará
 cuando exista un binario de daemon con comportamiento seguro ante fallos.

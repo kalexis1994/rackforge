@@ -20,14 +20,18 @@ fi
 sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   --no-install-recommends \
+  alsa-utils \
+  build-essential \
   ca-certificates \
   cmake \
   curl \
   git \
   jq \
   libasound2-dev \
+  libsdl2-dev \
   libudev-dev \
   ninja-build \
+  patch \
   pkg-config \
   rustup \
   tmux
@@ -38,7 +42,10 @@ sudo systemctl enable --now ssh
 
 install -d \
   "$HOME/artupy/current" \
+  "$HOME/artupy/bin" \
+  "$HOME/artupy/build" \
   "$HOME/artupy/banks" \
   "$HOME/artupy/performances" \
+  "$HOME/artupy/share/nuked-sc55" \
   "$HOME/artupy/state" \
   "$HOME/artupy/logs"

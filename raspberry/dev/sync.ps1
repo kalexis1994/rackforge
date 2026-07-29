@@ -24,7 +24,8 @@ try {
 $remote = @"
 set -eu
 install -d '$RemoteRoot/current' '$RemoteRoot/banks' \
-  '$RemoteRoot/performances' '$RemoteRoot/state' '$RemoteRoot/logs'
+  '$RemoteRoot/bin' '$RemoteRoot/build' '$RemoteRoot/performances' \
+  '$RemoteRoot/share/nuked-sc55' '$RemoteRoot/state' '$RemoteRoot/logs'
 tar -xf /tmp/artupy-raspberry.tar -C '$RemoteRoot/current'
 rm -f /tmp/artupy-raspberry.tar
 printf 'deployed=%s\n' '$RemoteRoot/current'

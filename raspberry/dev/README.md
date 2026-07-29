@@ -27,6 +27,7 @@ clave.
 - `connect.ps1`: abre una terminal remota.
 - `health.ps1`: muestra salud, temperatura, throttling, USB y ALSA.
 - `sync.ps1`: empaqueta solamente `raspberry/` y lo despliega en `current/`.
+- `install-nuked-roms.ps1`: valida y transfiere ROMs propias fuera de Git.
 - `bootstrap.sh`: reproduce hostname, paquetes, Rust y directorios base.
 
 Ninguna herramienta copia claves, contraseñas, bancos o estado runtime al

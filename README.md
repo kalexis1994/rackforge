@@ -57,6 +57,8 @@ conexión, sincronización y diagnóstico viven en `raspberry/dev/`.
 - Nuked-SC55 compilado nativamente para ARM64; pendiente aportar ROMs propias.
 - ABI de Sound Canvas VA 1.1.2 validado y bancos internos catalogados mediante
   herramientas Rust; no son ROMs SC-55 compatibles directamente con Nuked.
+- Lector de Wave ROM y decodificador FCE-DPCM compilado y validado nativamente
+  en ARM64 con salida idéntica a Windows.
 - Scaffold bare-metal seguro para el N32G455.
 - Port de DOOM conservado como banco de pruebas y función futura.
 

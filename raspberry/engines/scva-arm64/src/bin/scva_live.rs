@@ -145,14 +145,31 @@ mod linux {
         })
     }
 
-    fn remove_dc_and_fade(samples: &mut [f64]) {
+    fn remove_baseline_and_fade(samples: &mut [f64], note: u8) {
         if samples.is_empty() {
             return;
         }
-        let dc = samples.iter().sum::<f64>() / samples.len() as f64;
-        for sample in samples.iter_mut() {
-            *sample -= dc;
+
+        // FCE-DPCM reconstructs PCM with an accumulator. SCCore removes the
+        // accumulator's slow baseline wander in its filter stage; subtracting
+        // one average cannot remove a baseline that changes during the note.
+        // Two gentle, key-tracked DC blockers reject only content well below
+        // the played fundamental.
+        let fundamental = 440.0 * 2_f64.powf((f64::from(note) - 69.0) / 12.0);
+        let cutoff = (fundamental * 0.30).clamp(15.0, 700.0);
+        let pole = (-2.0 * std::f64::consts::PI * cutoff / f64::from(OUTPUT_RATE)).exp();
+        for _ in 0..2 {
+            let mut previous_input = 0.0;
+            let mut previous_output = 0.0;
+            for sample in samples.iter_mut() {
+                let input = *sample;
+                let output = input - previous_input + pole * previous_output;
+                *sample = output;
+                previous_input = input;
+                previous_output = output;
+            }
         }
+
         let fade_frames = samples.len().min(240);
         for index in 0..fade_frames {
             let gain = index as f64 / fade_frames as f64;
@@ -272,7 +289,7 @@ mod linux {
                         * (f64::from(partial.map_value) / 127.0),
                 );
             }
-            remove_dc_and_fade(&mut resampled);
+            remove_baseline_and_fade(&mut resampled, note);
             rendered_partials.push(resampled);
         }
 

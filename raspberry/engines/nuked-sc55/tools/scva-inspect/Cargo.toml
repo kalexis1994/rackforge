@@ -8,4 +8,5 @@ license = "GPL-2.0-or-later"
 [dependencies]
 anyhow = "1.0"
 goblin = "0.10"
+iced-x86 = "1.21"
 sha2 = "0.10"

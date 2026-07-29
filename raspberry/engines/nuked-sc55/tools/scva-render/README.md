@@ -1,8 +1,8 @@
 # scva-render
 
 Prueba aislada del ABI exportado por `SCCore.dll`. Carga la DLL de una copia
-legítima de Sound Canvas VA, envía Program Change 0 y una nota C4, renderiza
-cuatro segundos estéreo a 44,1 kHz y escribe un WAV float de 32 bits.
+legítima de Sound Canvas VA, envía un Program Change y una nota configurables,
+renderiza cuatro segundos estéreo a 44,1 kHz y escribe un WAV float de 32 bits.
 
 El ejecutable es sólo una sonda de investigación para Windows x64. No convierte
 la DLL a ARM ni redistribuye código o bancos propietarios.
@@ -11,6 +11,27 @@ la DLL a ARM ni redistribuye código o bancos propietarios.
 cargo run --release -- `
   "C:\ruta\SCCore.dll" `
   "C:\ruta\scva-c4.wav"
+```
+
+Para crear oráculos reproducibles de distintos programas y notas:
+
+```powershell
+cargo run --release -- `
+  --program 0 --note 60 --velocity 100 `
+  "C:\ruta\SCCore.dll" `
+  "C:\ruta\piano-c4.wav"
+```
+
+El modo de investigación `--patch-u32 OFFSET VALUE` nunca modifica el binario
+original: crea una copia temporal junto a la DLL, cambia cuatro bytes antes de
+cargarla y elimina la copia al terminar. Sirve para comprobar qué campos de las
+tablas estáticas afectan al render:
+
+```powershell
+cargo run --release -- `
+  --patch-u32 0x18f57bc 0x753 `
+  "C:\ruta\SCCore.dll" `
+  "C:\ruta\probe.wav"
 ```
 
 El proceso usa como directorio de trabajo la carpeta de la DLL, para que el

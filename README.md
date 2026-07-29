@@ -59,6 +59,8 @@ conexión, sincronización y diagnóstico viven en `raspberry/dev/`.
   herramientas Rust; no son ROMs SC-55 compatibles directamente con Nuked.
 - Lector de Wave ROM y decodificador FCE-DPCM compilado y validado nativamente
   en ARM64 con salida idéntica a Windows.
+- Resolvedor nativo de tonos, mapas y descriptores de muestra de SCVA 1.1.2;
+  `Piano 1/C4` ya produce un preview reproducible por la Scarlett.
 - Scaffold bare-metal seguro para el N32G455.
 - Port de DOOM conservado como banco de pruebas y función futura.
 

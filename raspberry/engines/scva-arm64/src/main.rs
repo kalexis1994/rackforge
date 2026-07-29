@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use artupy_scva_bank::{GroupId, WaveBankSet};
+use artupy_scva_bank::{ControlBankSet, GroupId, WaveBankSet};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use std::env;
 use std::path::Path;
@@ -91,8 +91,157 @@ fn decode(
     Ok(())
 }
 
+fn resolve(control_directory: &Path, tone: usize, note: usize) -> Result<()> {
+    let controls = ControlBankSet::open(control_directory)?;
+    let resolution = controls.resolve(tone, note)?;
+    println!(
+        "TONE index={} name={:?} note={} partial_mask=0x{:02x}",
+        resolution.tone, resolution.tone_name, resolution.note, resolution.partial_mask
+    );
+    for partial in resolution.partials {
+        let descriptor = partial
+            .descriptor
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<Vec<_>>()
+            .join("");
+        println!(
+            "  partial={} map={} map_name={:?} key_bias={} mapped_note={} slot={} \
+             upper_note={} map_value={} sample={} descriptor={descriptor} \
+             group={} segment={} start=0x{:x} loop_start=0x{:x} end=0x{:x} \
+             looped={} reverse={} selector=0x{:x} root_key={} \
+             fine_tune={} root_pitch_milli={}",
+            partial.partial,
+            partial.wave_map,
+            partial.wave_map_name,
+            partial.key_bias,
+            partial.mapped_note,
+            partial.slot,
+            partial.upper_note,
+            partial.map_value,
+            partial.sample,
+            partial.sample_location.group,
+            partial.sample_location.group_segment,
+            partial.sample_location.start,
+            partial.sample_location.loop_start,
+            partial.sample_location.end,
+            partial.sample_location.looped,
+            partial.sample_location.reverse,
+            partial.sample_location.wave_selector,
+            partial.sample_location.root_key,
+            partial.sample_location.fine_tune_word,
+            partial.sample_location.root_pitch_milli
+        );
+    }
+    Ok(())
+}
+
+fn render_tone(
+    bank_directory: &Path,
+    control_directory: &Path,
+    tone: usize,
+    note: usize,
+    output: &Path,
+) -> Result<()> {
+    let banks = WaveBankSet::open(bank_directory)?;
+    let controls = ControlBankSet::open(control_directory)?;
+    let resolution = controls.resolve(tone, note)?;
+    let mut rendered_partials: Vec<Vec<f64>> = Vec::new();
+
+    for partial in &resolution.partials {
+        let location = partial.sample_location;
+        if location.reverse {
+            bail!(
+                "tone {tone} partial {} uses reverse playback, not supported by the preview renderer",
+                partial.partial
+            );
+        }
+        let length = location
+            .end
+            .checked_sub(location.start)
+            .context("sample end precedes sample start")?
+            + 1;
+        let decoded = banks
+            .group(location.group)
+            .segment(location.group_segment)?
+            .decode_fce_dpcm(location.start, length, 0)?;
+        let target_pitch_milli = i32::from(partial.mapped_note) * 1_000;
+        let increment =
+            2_f64.powf(f64::from(target_pitch_milli - location.root_pitch_milli) / 12_000.0);
+        let output_length = ((decoded.len() as f64 / increment).ceil() as usize)
+            .min(32_000 * 10)
+            .max(1);
+        let mut resampled = Vec::with_capacity(output_length);
+        for output_index in 0..output_length {
+            let position = output_index as f64 * increment;
+            let index = position.floor() as usize;
+            if index >= decoded.len() {
+                break;
+            }
+            let fraction = position - index as f64;
+            let first = f64::from(decoded[index]);
+            let second = f64::from(*decoded.get(index + 1).unwrap_or(&decoded[index]));
+            resampled.push(first + (second - first) * fraction);
+        }
+        println!(
+            "PARTIAL_RENDER partial={} sample={} group={} segment={} source_frames={} \
+             increment={increment:.8} output_frames={}",
+            partial.partial,
+            partial.sample,
+            location.group,
+            location.group_segment,
+            decoded.len(),
+            resampled.len()
+        );
+        rendered_partials.push(resampled);
+    }
+
+    let frame_count = rendered_partials
+        .iter()
+        .map(Vec::len)
+        .max()
+        .context("tone has no enabled partials")?;
+    let mut mixed = vec![0_f64; frame_count];
+    for partial in &rendered_partials {
+        for (target, sample) in mixed.iter_mut().zip(partial) {
+            *target += *sample;
+        }
+    }
+    let peak = mixed
+        .iter()
+        .fold(0_f64, |maximum, sample| maximum.max(sample.abs()));
+    if peak == 0.0 {
+        bail!("rendered tone is digital silence");
+    }
+    let scale = 0.90 / peak;
+    let spec = WavSpec {
+        channels: 1,
+        sample_rate: 32_000,
+        bits_per_sample: 32,
+        sample_format: SampleFormat::Float,
+    };
+    let mut writer = WavWriter::create(output, spec)
+        .with_context(|| format!("creating {}", output.display()))?;
+    for sample in mixed {
+        writer.write_sample((sample * scale) as f32)?;
+    }
+    writer.finalize()?;
+    println!(
+        "TONE_RENDERED tone={} name={:?} note={} partials={} frames={} peak={peak:.3} output={}",
+        resolution.tone,
+        resolution.tone_name,
+        resolution.note,
+        rendered_partials.len(),
+        frame_count,
+        output.display()
+    );
+    Ok(())
+}
+
 fn usage() -> &'static str {
     "usage:\n  artupy-scva-bank inspect BANK_DIRECTORY\n  \
+     artupy-scva-bank resolve CONTROL_DIRECTORY TONE MIDI_NOTE\n  \
+     artupy-scva-bank render-tone BANK_DIRECTORY CONTROL_DIRECTORY TONE MIDI_NOTE OUTPUT.wav\n  \
      artupy-scva-bank decode BANK_DIRECTORY GROUP SEGMENT START LENGTH OUTPUT.wav\n\
      numbers may be decimal or 0x-prefixed hexadecimal"
 }
@@ -101,6 +250,18 @@ fn run() -> Result<()> {
     let args: Vec<_> = env::args().skip(1).collect();
     match args.as_slice() {
         [command, directory] if command == "inspect" => inspect(Path::new(directory)),
+        [command, directory, tone, note] if command == "resolve" => resolve(
+            Path::new(directory),
+            parse_number(tone)?,
+            parse_number(note)?,
+        ),
+        [command, banks, controls, tone, note, output] if command == "render-tone" => render_tone(
+            Path::new(banks),
+            Path::new(controls),
+            parse_number(tone)?,
+            parse_number(note)?,
+            Path::new(output),
+        ),
         [command, directory, group, segment, start, length, output] if command == "decode" => {
             decode(
                 Path::new(directory),

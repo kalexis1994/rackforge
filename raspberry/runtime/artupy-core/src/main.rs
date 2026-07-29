@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
 use artupy_core::{LoadedPlugin, PluginPackage};
+use artupy_plugin_api::abi::MidiEventV1;
 use artupy_plugin_api::{ParameterKind, PluginKind};
+use std::collections::BTreeMap;
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -17,21 +19,24 @@ fn run() -> Result<()> {
     match command {
         "inspect" if arguments.len() == 2 => inspect(Path::new(&arguments[1])),
         "smoke" => {
-            let (package, binary) = parse_smoke_arguments(&arguments[1..])?;
-            smoke(&package, binary.as_deref())
+            let (package, binary, resources) = parse_smoke_arguments(&arguments[1..])?;
+            smoke(&package, binary.as_deref(), &resources)
         }
         _ => bail!(
             "usage:\n  artupy-core inspect PACKAGE\n  \
-             artupy-core smoke PACKAGE [--library FILE]"
+             artupy-core smoke PACKAGE [--library FILE] [--resource ID=PATH]..."
         ),
     }
 }
 
-fn parse_smoke_arguments(arguments: &[String]) -> Result<(PathBuf, Option<PathBuf>)> {
+fn parse_smoke_arguments(
+    arguments: &[String],
+) -> Result<(PathBuf, Option<PathBuf>, BTreeMap<String, PathBuf>)> {
     let package = arguments
         .first()
         .context("smoke requires a plugin package")?;
     let mut binary = None;
+    let mut resources = BTreeMap::new();
     let mut index = 1;
     while index < arguments.len() {
         match arguments[index].as_str() {
@@ -41,11 +46,29 @@ fn parse_smoke_arguments(arguments: &[String]) -> Result<(PathBuf, Option<PathBu
                     arguments.get(index).context("--library requires a file")?,
                 ));
             }
+            "--resource" => {
+                index += 1;
+                let assignment = arguments
+                    .get(index)
+                    .context("--resource requires ID=PATH")?;
+                let (id, path) = assignment
+                    .split_once('=')
+                    .context("--resource requires ID=PATH")?;
+                if id.is_empty() || path.is_empty() {
+                    bail!("--resource requires non-empty ID=PATH");
+                }
+                if resources
+                    .insert(id.to_owned(), PathBuf::from(path))
+                    .is_some()
+                {
+                    bail!("resource {id:?} was supplied more than once");
+                }
+            }
             option => bail!("unknown smoke option {option}"),
         }
         index += 1;
     }
-    Ok((PathBuf::from(package), binary))
+    Ok((PathBuf::from(package), binary, resources))
 }
 
 fn inspect(path: &Path) -> Result<()> {
@@ -63,13 +86,23 @@ fn inspect(path: &Path) -> Result<()> {
     for (platform, binary) in &manifest.binaries {
         println!("BINARY platform={platform} path={binary}");
     }
+    for resource in &manifest.resources {
+        println!(
+            "RESOURCE id={} kind={:?} required={} name={:?}",
+            resource.id, resource.kind, resource.required, resource.name
+        );
+    }
     Ok(())
 }
 
-fn smoke(package_path: &Path, binary: Option<&Path>) -> Result<()> {
+fn smoke(
+    package_path: &Path,
+    binary: Option<&Path>,
+    resources: &BTreeMap<String, PathBuf>,
+) -> Result<()> {
     let package = PluginPackage::open(package_path)?;
     // SAFETY: smoke is an explicit native plugin execution command.
-    let plugin = unsafe { LoadedPlugin::load(&package, binary) }?;
+    let plugin = unsafe { LoadedPlugin::load(&package, binary, resources) }?;
     println!(
         "PLUGIN_LOADED id={} parameters={} pages={} presets={}",
         plugin.descriptor().id,
@@ -117,21 +150,35 @@ fn smoke(package_path: &Path, binary: Option<&Path>) -> Result<()> {
         );
     }
 
-    let frames = 32_u32;
+    let frames = 128_u32;
     let input = vec![0.25_f32; frames as usize * input_channels as usize];
     let mut output = vec![0.0_f32; frames as usize * output_channels as usize];
-    instance.process_interleaved(
-        &input,
-        &mut output,
-        frames,
-        input_channels,
-        output_channels,
-        &[],
-        &[],
-    )?;
-    let peak = output
-        .iter()
-        .fold(0.0_f32, |maximum, sample| maximum.max(sample.abs()));
+    let note_on = [MidiEventV1 {
+        frame: 0,
+        length: 3,
+        data: [0x90, 60, 100],
+    }];
+    let mut peak = 0.0_f32;
+    for block in 0..16 {
+        output.fill(0.0);
+        let midi = if block == 0 && plugin.manifest().kind == PluginKind::Instrument {
+            note_on.as_slice()
+        } else {
+            &[]
+        };
+        instance.process_interleaved(
+            &input,
+            &mut output,
+            frames,
+            input_channels,
+            output_channels,
+            midi,
+            &[],
+        )?;
+        peak = output
+            .iter()
+            .fold(peak, |maximum, sample| maximum.max(sample.abs()));
+    }
     let state = instance.save_state()?;
     instance.load_state(&state)?;
     instance.deactivate()?;

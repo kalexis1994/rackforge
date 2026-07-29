@@ -11,6 +11,7 @@ estabilizar la API sin interrumpir el instrumento que ya funciona.
 | `artupy-plugin-api/` | ABI C versionada, manifiestos y esquema declarativo de parámetros. |
 | `artupy-core/` | Descubrimiento, validación, carga dinámica e instancias. |
 | `plugins/gain/` | Plugin de referencia que prueba audio, parámetros y estado. |
+| `plugins/roland-scva/` | Primer instrumento real, alimentado por un banco privado externo. |
 
 ## Principios del contrato
 
@@ -41,6 +42,27 @@ plugin.artupy/
 
 Las rutas declaradas en el manifiesto deben ser relativas y no pueden escapar
 del paquete.
+
+## Recursos externos
+
+API 1.1 permite declarar archivos y directorios que no forman parte del
+paquete:
+
+```toml
+[[resources]]
+id = "rendered-bank"
+name = "Rendered SCVA Bank"
+kind = "directory"
+required = true
+```
+
+El host resuelve y valida cada recurso antes de cargar la biblioteca. El plugin
+solo solicita su ruta mediante `get_resource_path`; no conoce ubicaciones
+específicas de la Raspberry. Esto mantiene bancos, ROMs y muestras fuera de
+Git y permite que la misma biblioteca funcione en distintas instalaciones.
+
+La extensión es compatible hacia atrás: el plugin Gain continúa declarando
+API 1.0 y se carga sin utilizar el callback agregado en 1.1.
 
 ## Parámetros y pantalla
 
@@ -119,7 +141,7 @@ PLUGIN_SMOKE_OK peak=0.125000 state_bytes=9
 
 En Linux ARM64 se usa `target/debug/libartupy_gain.so`.
 
-## Alcance de API v1.0
+## Alcance de API v1.1
 
 Incluye:
 
@@ -131,6 +153,7 @@ Incluye:
 - bancos y presets con identificadores estables;
 - estado opaco versionado por el plugin;
 - carga dinámica nativa.
+- recursos externos declarados por el plugin.
 
 Quedan para extensiones compatibles:
 

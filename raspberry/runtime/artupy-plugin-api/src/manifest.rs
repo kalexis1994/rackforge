@@ -30,6 +30,23 @@ pub enum Capability {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceKind {
+    File,
+    Directory,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceRequirement {
+    pub id: String,
+    pub name: String,
+    pub kind: ResourceKind,
+    #[serde(default)]
+    pub required: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApiRequirement {
     pub major: u16,
@@ -49,6 +66,8 @@ pub struct PluginManifest {
     pub state_version: u32,
     #[serde(default)]
     pub capabilities: Vec<Capability>,
+    #[serde(default)]
+    pub resources: Vec<ResourceRequirement>,
     pub binaries: BTreeMap<String, String>,
 }
 
@@ -79,6 +98,17 @@ impl PluginManifest {
         }
         if self.binaries.is_empty() {
             return Err(ManifestError::NoBinaries);
+        }
+        let mut resource_ids = BTreeSet::new();
+        for resource in &self.resources {
+            validate_identifier(&resource.id, false)
+                .map_err(|_| ManifestError::InvalidResourceId(resource.id.clone()))?;
+            if resource.name.trim().is_empty() {
+                return Err(ManifestError::EmptyResourceName(resource.id.clone()));
+            }
+            if !resource_ids.insert(resource.id.as_str()) {
+                return Err(ManifestError::DuplicateResource(resource.id.clone()));
+            }
         }
         for (platform, path) in &self.binaries {
             validate_identifier(platform, false)
@@ -167,6 +197,12 @@ pub enum ManifestError {
     DuplicateCapability,
     #[error("manifest declares no binaries")]
     NoBinaries,
+    #[error("invalid resource id {0:?}")]
+    InvalidResourceId(String),
+    #[error("resource {0} has an empty display name")]
+    EmptyResourceName(String),
+    #[error("duplicate resource {0}")]
+    DuplicateResource(String),
     #[error("invalid platform identifier {0:?}")]
     InvalidPlatform(String),
     #[error("binary path must be a safe relative path: {0:?}")]
@@ -192,6 +228,7 @@ mod tests {
             kind: PluginKind::Effect,
             state_version: 1,
             capabilities: vec![Capability::AudioInput, Capability::AudioOutput],
+            resources: Vec::new(),
             binaries: BTreeMap::from([("linux-aarch64".into(), "lib/libartupy_gain.so".into())]),
         }
     }

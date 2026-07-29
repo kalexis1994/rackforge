@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
-use artupy_plugin_api::PluginManifest;
+use artupy_plugin_api::{PluginManifest, ResourceKind};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -45,6 +46,52 @@ impl PluginPackage {
         let platform = platform_key()?;
         let relative = self.manifest.binary_for(platform)?;
         Ok(self.root.join(relative))
+    }
+
+    pub fn resolve_resources(
+        &self,
+        overrides: &BTreeMap<String, PathBuf>,
+    ) -> Result<BTreeMap<String, PathBuf>> {
+        let declared: BTreeSet<_> = self
+            .manifest
+            .resources
+            .iter()
+            .map(|resource| resource.id.as_str())
+            .collect();
+        for id in overrides.keys() {
+            if !declared.contains(id.as_str()) {
+                bail!("plugin does not declare resource {id:?}");
+            }
+        }
+
+        let mut resolved = BTreeMap::new();
+        for requirement in &self.manifest.resources {
+            let Some(path) = overrides.get(&requirement.id) else {
+                if requirement.required {
+                    bail!(
+                        "plugin requires resource {:?} ({})",
+                        requirement.id,
+                        requirement.name
+                    );
+                }
+                continue;
+            };
+            let canonical = fs::canonicalize(path)
+                .with_context(|| format!("resolving resource {}", path.display()))?;
+            let valid_kind = match requirement.kind {
+                ResourceKind::File => canonical.is_file(),
+                ResourceKind::Directory => canonical.is_dir(),
+            };
+            if !valid_kind {
+                bail!(
+                    "resource {:?} has the wrong kind at {}",
+                    requirement.id,
+                    canonical.display()
+                );
+            }
+            resolved.insert(requirement.id.clone(), canonical);
+        }
+        Ok(resolved)
     }
 }
 

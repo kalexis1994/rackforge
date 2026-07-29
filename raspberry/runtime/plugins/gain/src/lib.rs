@@ -1,6 +1,6 @@
 use artupy_plugin_api::abi::{
-    ABI_VERSION, HostApiV1, PluginApiV1, ProcessBlockV1, STATUS_INVALID_ARGUMENT,
-    STATUS_INVALID_STATE, STATUS_OK, STATUS_UNKNOWN_PARAMETER, copy_to_host_buffer,
+    HostApiV1, PluginApiV1, ProcessBlockV1, STATUS_INVALID_ARGUMENT, STATUS_INVALID_STATE,
+    STATUS_OK, STATUS_UNKNOWN_PARAMETER, copy_to_host_buffer, pack_version,
 };
 use std::ffi::c_void;
 use std::mem::size_of;
@@ -370,7 +370,7 @@ unsafe extern "C" fn process(instance: *mut c_void, block: *const ProcessBlockV1
 
 static PLUGIN_API: PluginApiV1 = PluginApiV1 {
     struct_size: size_of::<PluginApiV1>() as u32,
-    api_version: ABI_VERSION,
+    api_version: pack_version(1, 0),
     runtime_descriptor_json: write_runtime_descriptor,
     parameter_schema_json: write_parameter_schema,
     preset_catalog_json: write_preset_catalog,

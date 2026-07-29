@@ -48,6 +48,10 @@ el daemon principal cuando el protocolo compañero esté estabilizado.
 `audio/` contiene el perfil ALSA inicial de la Scarlett Solo y un diagnóstico
 de hardware que no reproduce sonido ni modifica el mezclador.
 
+`runtime/` contiene `artupy-core`, la API binaria versionada para plugins y los
+esquemas declarativos con los que cada plugin aporta sus propias páginas de
+configuración sin introducir pantallas específicas en el host.
+
 `engines/nuked-sc55/` integra el emulador Roland Sound Canvas, sus herramientas
 de compilación ARM64 y su launcher headless. Las ROM permanecen fuera de Git.
 

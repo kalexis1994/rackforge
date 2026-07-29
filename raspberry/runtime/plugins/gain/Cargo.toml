@@ -1,0 +1,15 @@
+[package]
+name = "artupy-gain"
+description = "Reference ArtuPy gain plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+artupy-plugin-api = { path = "../../artupy-plugin-api" }
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -1,0 +1,14 @@
+[package]
+name = "artupy-core"
+description = "Headless ArtuPy host runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+artupy-plugin-api = { path = "../artupy-plugin-api" }
+libloading.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+

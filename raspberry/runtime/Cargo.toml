@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = [
+    "artupy-core",
+    "artupy-plugin-api",
+    "plugins/gain",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-2.0-or-later"
+
+[workspace.dependencies]
+anyhow = "1.0"
+libloading = "0.8"
+semver = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+toml = "0.9"
+

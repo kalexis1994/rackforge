@@ -2,12 +2,37 @@ use anyhow::{Context, Result, bail};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use libloading::{Library, Symbol};
 use std::env;
+use std::ffi::OsString;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 const SAMPLE_RATE: u32 = 44_100;
 const BLOCK_SIZE: usize = 512;
 const NOTE: u32 = 60;
 const VELOCITY: u32 = 100;
+
+#[derive(Debug)]
+struct ProbeConfig {
+    program: u32,
+    note: u32,
+    velocity: u32,
+    patch_u32: Option<(usize, u32)>,
+}
+
+struct TemporaryDll {
+    path: PathBuf,
+}
+
+impl Drop for TemporaryDll {
+    fn drop(&mut self) {
+        if let Err(error) = fs::remove_file(&self.path) {
+            eprintln!(
+                "WARNING: could not remove temporary probe DLL {}: {error}",
+                self.path.display()
+            );
+        }
+    }
+}
 
 type Initialize = unsafe extern "C" fn(i32) -> i32;
 type Activate = unsafe extern "C" fn(f32, i32);
@@ -31,6 +56,44 @@ fn absolute(path: &Path) -> Result<PathBuf> {
     }
 }
 
+fn parse_number(value: &str) -> Result<u32> {
+    let parsed = if let Some(hex) = value.strip_prefix("0x") {
+        u32::from_str_radix(hex, 16)
+    } else {
+        value.parse()
+    };
+    parsed.with_context(|| format!("invalid number {value:?}"))
+}
+
+fn make_patched_dll(source: &Path, offset: usize, value: u32) -> Result<TemporaryDll> {
+    let mut bytes = fs::read(source).with_context(|| format!("reading {}", source.display()))?;
+    let end = offset.checked_add(4).context("patch offset overflow")?;
+    let file_size = bytes.len();
+    let target = bytes.get_mut(offset..end).with_context(|| {
+        format!(
+            "patch 0x{offset:x}..0x{end:x} is outside {} (size 0x{file_size:x})",
+            source.display()
+        )
+    })?;
+    let old_value = u32::from_le_bytes(target.try_into().unwrap());
+    target.copy_from_slice(&value.to_le_bytes());
+
+    let file_name = format!(".artupy-sccore-probe-{}.dll", std::process::id());
+    let path = source
+        .parent()
+        .context("SCCore.dll has no parent directory")?
+        .join(file_name);
+    if path.exists() {
+        bail!("temporary probe path already exists: {}", path.display());
+    }
+    fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
+    println!(
+        "PATCHED_COPY {} file_offset=0x{offset:x} old=0x{old_value:08x} new=0x{value:08x}",
+        path.display()
+    );
+    Ok(TemporaryDll { path })
+}
+
 fn write_wav(path: &Path, left: &[f32], right: &[f32]) -> Result<()> {
     let spec = WavSpec {
         channels: 2,
@@ -48,9 +111,16 @@ fn write_wav(path: &Path, left: &[f32], right: &[f32]) -> Result<()> {
     Ok(())
 }
 
-fn render(dll_path: &Path, output_path: &Path) -> Result<()> {
+fn render(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Result<()> {
     let dll_path = absolute(dll_path)?;
     let output_path = absolute(output_path)?;
+    let patched = config
+        .patch_u32
+        .map(|(offset, value)| make_patched_dll(&dll_path, offset, value))
+        .transpose()?;
+    let load_path = patched
+        .as_ref()
+        .map_or(dll_path.as_path(), |temporary| temporary.path.as_path());
     let dll_directory = dll_path
         .parent()
         .context("SCCore.dll has no parent directory")?;
@@ -58,13 +128,14 @@ fn render(dll_path: &Path, output_path: &Path) -> Result<()> {
     env::set_current_dir(dll_directory)
         .with_context(|| format!("changing directory to {}", dll_directory.display()))?;
 
-    let result = render_inner(&dll_path, &output_path);
+    let result = render_inner(load_path, &output_path, config);
     env::set_current_dir(&old_directory)
         .with_context(|| format!("restoring directory to {}", old_directory.display()))?;
+    drop(patched);
     result
 }
 
-fn render_inner(dll_path: &Path, output_path: &Path) -> Result<()> {
+fn render_inner(dll_path: &Path, output_path: &Path, config: &ProbeConfig) -> Result<()> {
     // SCCore is loaded only in this disposable command-line probe. All ABI signatures below
     // were independently documented by kode54's SCCore host and are checked by symbol name.
     let library = unsafe { Library::new(dll_path) }
@@ -95,9 +166,8 @@ fn render_inner(dll_path: &Path, output_path: &Path) -> Result<()> {
         set_max_block_size(BLOCK_SIZE as u32);
         set_interrupt_thread();
 
-        // Program 0 (Piano 1), middle C, then note-off after one second.
-        short_midi_in(0xC0, 0);
-        short_midi_in(midi3(0x90, NOTE, VELOCITY), 0);
+        short_midi_in(midi3(0xC0, config.program, 0), 0);
+        short_midi_in(midi3(0x90, config.note, config.velocity), 0);
 
         let total_frames = SAMPLE_RATE as usize * 4;
         let note_off_frame = SAMPLE_RATE as usize;
@@ -107,7 +177,7 @@ fn render_inner(dll_path: &Path, output_path: &Path) -> Result<()> {
 
         while rendered < total_frames {
             if rendered == note_off_frame {
-                short_midi_in(midi3(0x80, NOTE, 0), 0);
+                short_midi_in(midi3(0x80, config.note, 0), 0);
             }
             let count = BLOCK_SIZE.min(total_frames - rendered);
             let mut block_left = vec![0.0_f32; count];
@@ -138,8 +208,12 @@ fn render_inner(dll_path: &Path, output_path: &Path) -> Result<()> {
 
         write_wav(output_path, &left, &right)?;
         println!(
-            "RENDERED {} frames={} peak={peak:.8} rms={rms:.8} voices_after_tail={voices}",
+            "RENDERED {} program={} note={} velocity={} frames={} \
+             peak={peak:.8} rms={rms:.8} voices_after_tail={voices}",
             output_path.display(),
+            config.program,
+            config.note,
+            config.velocity,
             left.len()
         );
         if peak == 0.0 {
@@ -158,9 +232,54 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let args: Vec<_> = env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        bail!("usage: scva-render SCCore.dll OUTPUT.wav");
+    let mut args = env::args_os().skip(1);
+    let mut config = ProbeConfig {
+        program: 0,
+        note: NOTE,
+        velocity: VELOCITY,
+        patch_u32: None,
+    };
+    let mut positional: Vec<OsString> = Vec::new();
+
+    while let Some(argument) = args.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--program" => {
+                let value = args.next().context("--program requires a value")?;
+                config.program = parse_number(&value.to_string_lossy())?;
+            }
+            "--note" => {
+                let value = args.next().context("--note requires a value")?;
+                config.note = parse_number(&value.to_string_lossy())?;
+            }
+            "--velocity" => {
+                let value = args.next().context("--velocity requires a value")?;
+                config.velocity = parse_number(&value.to_string_lossy())?;
+            }
+            "--patch-u32" => {
+                let offset = args.next().context("--patch-u32 requires OFFSET VALUE")?;
+                let value = args.next().context("--patch-u32 requires OFFSET VALUE")?;
+                config.patch_u32 = Some((
+                    parse_number(&offset.to_string_lossy())? as usize,
+                    parse_number(&value.to_string_lossy())?,
+                ));
+            }
+            option if option.starts_with('-') => bail!("unknown option: {option}"),
+            _ => positional.push(argument),
+        }
     }
-    render(Path::new(&args[0]), Path::new(&args[1]))
+
+    if config.program > 127 || config.note > 127 || config.velocity > 127 {
+        bail!("program, note, and velocity must be MIDI values in 0..=127");
+    }
+    if positional.len() != 2 {
+        bail!(
+            "usage: scva-render [--program N] [--note N] [--velocity N] \
+             [--patch-u32 FILE_OFFSET VALUE] SCCore.dll OUTPUT.wav"
+        );
+    }
+    render(
+        Path::new(&positional[0]),
+        Path::new(&positional[1]),
+        &config,
+    )
 }

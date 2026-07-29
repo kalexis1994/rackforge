@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use goblin::Object;
+use iced_x86::{Decoder, DecoderOptions, FlowControl, Formatter, IntelFormatter};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::env;
@@ -8,6 +9,53 @@ use std::fs;
 use std::path::Path;
 
 const MIB: usize = 1024 * 1024;
+const SCCORE_1_1_2_SHA256: &str =
+    "0635cc2bfced7876694f362f29719bae58e4539d576af9321673f6ffc31f6735";
+const SAMPLE_RECORD_SIZE: usize = 0x16;
+const SAMPLE_RECORD_COUNT: usize = 4_259;
+const WAVE_MAP_RECORD_SIZE: usize = 0x8c;
+const WAVE_MAP_RECORD_COUNT: usize = 1_175;
+const TONE_RECORD_SIZE: usize = 0x100;
+const TONE_RECORD_COUNT: usize = 2_363;
+
+struct ControlBlock {
+    name: &'static str,
+    offset: usize,
+    size: usize,
+}
+
+const CONTROL_BLOCKS: &[ControlBlock] = &[
+    ControlBlock {
+        name: "system.bin",
+        offset: 0x189a5d0,
+        size: 0x58,
+    },
+    ControlBlock {
+        name: "named-addresses.bin",
+        offset: 0x189a630,
+        size: 0x4b0,
+    },
+    ControlBlock {
+        name: "sample-descriptors.bin",
+        offset: 0x189aae0,
+        size: 0x16e04,
+    },
+    ControlBlock {
+        name: "drum-kits.bin",
+        offset: 0x18b18f0,
+        size: 0x1bc20,
+    },
+    ControlBlock {
+        name: "wave-maps.bin",
+        offset: 0x18cd510,
+        size: 0x28294,
+    },
+    ControlBlock {
+        name: "tones.bin",
+        offset: 0x18f57b0,
+        size: 0x93b00,
+    },
+];
 
 struct WaveGroup {
     name: &'static str,
@@ -377,6 +425,458 @@ fn inspect(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn parse_number(value: &str) -> Result<usize> {
+    if let Some(hex) = value.strip_prefix("0x") {
+        usize::from_str_radix(hex, 16).with_context(|| format!("invalid hex number {value:?}"))
+    } else {
+        value
+            .parse()
+            .with_context(|| format!("invalid decimal number {value:?}"))
+    }
+}
+
+fn exact_sccore_1_1_2(path: &Path) -> Result<Vec<u8>> {
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let hash = sha256_hex(&bytes);
+    if hash != SCCORE_1_1_2_SHA256 {
+        bail!(
+            "{} has unsupported SHA-256 {hash}; expected Sound Canvas VA 1.1.2 {}",
+            path.display(),
+            SCCORE_1_1_2_SHA256
+        );
+    }
+    for block in CONTROL_BLOCKS {
+        let end = block
+            .offset
+            .checked_add(block.size)
+            .context("control block range overflow")?;
+        if end > bytes.len() {
+            bail!(
+                "{} ends at 0x{end:x}, past file size 0x{:x}",
+                block.name,
+                bytes.len()
+            );
+        }
+    }
+    Ok(bytes)
+}
+
+fn fixed_name(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .trim_end_matches([' ', '\0'])
+        .to_owned()
+}
+
+fn le_u16(bytes: &[u8], offset: usize) -> Result<u16> {
+    let value = bytes
+        .get(offset..offset + 2)
+        .with_context(|| format!("reading u16 at 0x{offset:x}"))?;
+    Ok(u16::from_le_bytes(value.try_into().unwrap()))
+}
+
+fn resolve_tone(path: &Path, tone_index: usize, note: usize) -> Result<()> {
+    if tone_index >= TONE_RECORD_COUNT {
+        bail!(
+            "tone index {tone_index} is outside 0..{}",
+            TONE_RECORD_COUNT - 1
+        );
+    }
+    if note > 127 {
+        bail!("MIDI note must be in 0..=127");
+    }
+    let bytes = exact_sccore_1_1_2(path)?;
+    let tone_block = CONTROL_BLOCKS
+        .iter()
+        .find(|block| block.name == "tones.bin")
+        .unwrap();
+    let map_block = CONTROL_BLOCKS
+        .iter()
+        .find(|block| block.name == "wave-maps.bin")
+        .unwrap();
+    let sample_block = CONTROL_BLOCKS
+        .iter()
+        .find(|block| block.name == "sample-descriptors.bin")
+        .unwrap();
+    let tone_offset = tone_block.offset + tone_index * TONE_RECORD_SIZE;
+    let tone = &bytes[tone_offset..tone_offset + TONE_RECORD_SIZE];
+    let name = fixed_name(&tone[..12]);
+    let partial_mask = tone[0x16];
+
+    println!(
+        "TONE index={tone_index} name={name:?} note={note} file_offset=0x{tone_offset:x} \
+         partial_mask=0x{partial_mask:02x}"
+    );
+    for partial in 0..2 {
+        if partial_mask & (1 << partial) == 0 {
+            println!("  partial={} disabled", partial + 1);
+            continue;
+        }
+        let partial_offset = 0x24 + partial * 0x6e;
+        let map_index = usize::from(le_u16(tone, partial_offset + 2)?);
+        if map_index >= WAVE_MAP_RECORD_COUNT {
+            bail!(
+                "partial {} references wave map {map_index}, outside 0..{}",
+                partial + 1,
+                WAVE_MAP_RECORD_COUNT - 1
+            );
+        }
+        let key_bias = usize::from(tone[partial_offset + 4]);
+        let mapped_note = note.saturating_add(0x40).saturating_sub(key_bias).min(127);
+        let map_offset = map_block.offset + map_index * WAVE_MAP_RECORD_SIZE;
+        let map = &bytes[map_offset..map_offset + WAVE_MAP_RECORD_SIZE];
+        let map_name = fixed_name(&map[..12]);
+        let slot = map[0x0c..0x2c]
+            .iter()
+            .position(|upper| usize::from(*upper) >= mapped_note)
+            .context("wave map has no key range for the requested note")?;
+        let upper_note = map[0x0c + slot];
+        let sample_index = usize::from(le_u16(map, 0x2c + slot * 2)?);
+        if sample_index >= SAMPLE_RECORD_COUNT {
+            bail!(
+                "partial {} map {} slot {} references sample {sample_index}, outside 0..{}",
+                partial + 1,
+                map_index,
+                slot,
+                SAMPLE_RECORD_COUNT - 1
+            );
+        }
+        let map_value = map[0x6c + slot];
+        let sample_offset = sample_block.offset + sample_index * SAMPLE_RECORD_SIZE;
+        let sample = &bytes[sample_offset..sample_offset + SAMPLE_RECORD_SIZE];
+        let descriptor = sample
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<Vec<_>>()
+            .join("");
+        println!(
+            "  partial={} map={} map_name={map_name:?} key_bias={} mapped_note={} \
+             slot={} upper_note={} map_value={} sample={} sample_file=0x{sample_offset:x} \
+             descriptor={descriptor}",
+            partial + 1,
+            map_index,
+            key_bias,
+            mapped_note,
+            slot,
+            upper_note,
+            map_value,
+            sample_index
+        );
+    }
+    Ok(())
+}
+
+fn file_offset_to_rva(pe: &goblin::pe::PE<'_>, offset: usize) -> Option<u64> {
+    pe.sections.iter().find_map(|section| {
+        let start = section.pointer_to_raw_data as usize;
+        let end = start.checked_add(section.size_of_raw_data as usize)?;
+        (start..end)
+            .contains(&offset)
+            .then_some(u64::from(section.virtual_address) + u64::try_from(offset - start).ok()?)
+    })
+}
+
+fn rva_to_file_offset(pe: &goblin::pe::PE<'_>, rva: u64) -> Option<usize> {
+    pe.sections.iter().find_map(|section| {
+        let start = u64::from(section.virtual_address);
+        let size = u64::from(section.virtual_size.max(section.size_of_raw_data));
+        let end = start.checked_add(size)?;
+        (start..end)
+            .contains(&rva)
+            .then_some(section.pointer_to_raw_data as usize + usize::try_from(rva - start).ok()?)
+    })
+}
+
+fn xrefs(path: &Path, target_offset: usize, target_length: usize) -> Result<()> {
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let Object::PE(pe) = Object::parse(&bytes).context("parsing PE file")? else {
+        bail!("xrefs mode supports PE files only");
+    };
+    if !pe.is_64 {
+        bail!("xrefs mode currently supports PE32+ x86-64 only");
+    }
+    let target_end = target_offset
+        .checked_add(target_length)
+        .context("target range overflow")?;
+    let target_rva = file_offset_to_rva(&pe, target_offset)
+        .with_context(|| format!("file offset 0x{target_offset:x} is outside PE sections"))?;
+    let target_end_rva = file_offset_to_rva(&pe, target_end.saturating_sub(1))
+        .with_context(|| format!("target end 0x{target_end:x} is outside PE sections"))?
+        + 1;
+
+    let text = pe
+        .sections
+        .iter()
+        .find(|section| section.name().ok() == Some(".text"))
+        .context("PE has no .text section")?;
+    let text_offset = text.pointer_to_raw_data as usize;
+    let text_end = text_offset
+        .checked_add(text.size_of_raw_data as usize)
+        .context(".text range overflow")?
+        .min(bytes.len());
+    let text_bytes = &bytes[text_offset..text_end];
+    let text_ip = pe.image_base + u64::from(text.virtual_address);
+    let mut decoder = Decoder::with_ip(64, text_bytes, text_ip, DecoderOptions::NONE);
+    let mut formatter = IntelFormatter::new();
+    formatter.options_mut().set_rip_relative_addresses(false);
+    let mut formatted = String::new();
+    let mut count = 0_usize;
+
+    println!(
+        "XREFS file={} target_file=0x{target_offset:x}..0x{target_end:x} \
+         target_rva=0x{target_rva:x}..0x{target_end_rva:x}",
+        path.display()
+    );
+    while decoder.can_decode() {
+        let instruction = decoder.decode();
+        if !instruction.is_ip_rel_memory_operand() {
+            continue;
+        }
+        let address = instruction.ip_rel_memory_address();
+        let Some(rva) = address.checked_sub(pe.image_base) else {
+            continue;
+        };
+        if !(target_rva..target_end_rva).contains(&rva) {
+            continue;
+        }
+
+        formatted.clear();
+        formatter.format(&instruction, &mut formatted);
+        let instruction_rva = instruction.ip() - pe.image_base;
+        let instruction_offset = rva_to_file_offset(&pe, instruction_rva).unwrap_or(usize::MAX);
+        let referenced_offset = rva_to_file_offset(&pe, rva).unwrap_or(usize::MAX);
+        println!(
+            "  code_rva=0x{instruction_rva:x} code_file=0x{instruction_offset:x} \
+             target_rva=0x{rva:x} target_file=0x{referenced_offset:x} {formatted}"
+        );
+        count += 1;
+    }
+    println!("XREF_COUNT {count}");
+    Ok(())
+}
+
+fn xrefs_rva(path: &Path, target_rva: usize, target_length: usize) -> Result<()> {
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let Object::PE(pe) = Object::parse(&bytes).context("parsing PE file")? else {
+        bail!("xrefs-rva mode supports PE files only");
+    };
+    if !pe.is_64 {
+        bail!("xrefs-rva mode currently supports PE32+ x86-64 only");
+    }
+    let target_rva = target_rva as u64;
+    let target_end_rva = target_rva
+        .checked_add(target_length as u64)
+        .context("target RVA range overflow")?;
+
+    let text = pe
+        .sections
+        .iter()
+        .find(|section| section.name().ok() == Some(".text"))
+        .context("PE has no .text section")?;
+    let text_offset = text.pointer_to_raw_data as usize;
+    let text_end = text_offset
+        .checked_add(text.size_of_raw_data as usize)
+        .context(".text range overflow")?
+        .min(bytes.len());
+    let text_bytes = &bytes[text_offset..text_end];
+    let text_ip = pe.image_base + u64::from(text.virtual_address);
+    let mut decoder = Decoder::with_ip(64, text_bytes, text_ip, DecoderOptions::NONE);
+    let mut formatter = IntelFormatter::new();
+    formatter.options_mut().set_rip_relative_addresses(false);
+    let mut formatted = String::new();
+    let mut count = 0_usize;
+
+    println!(
+        "XREFS_RVA file={} target_rva=0x{target_rva:x}..0x{target_end_rva:x}",
+        path.display()
+    );
+    while decoder.can_decode() {
+        let instruction = decoder.decode();
+        if !instruction.is_ip_rel_memory_operand() {
+            continue;
+        }
+        let address = instruction.ip_rel_memory_address();
+        let Some(rva) = address.checked_sub(pe.image_base) else {
+            continue;
+        };
+        if !(target_rva..target_end_rva).contains(&rva) {
+            continue;
+        }
+
+        formatted.clear();
+        formatter.format(&instruction, &mut formatted);
+        let instruction_rva = instruction.ip() - pe.image_base;
+        let instruction_offset = rva_to_file_offset(&pe, instruction_rva).unwrap_or(usize::MAX);
+        println!(
+            "  code_rva=0x{instruction_rva:x} code_file=0x{instruction_offset:x} \
+             target_rva=0x{rva:x} {formatted}"
+        );
+        count += 1;
+    }
+    println!("XREF_COUNT {count}");
+    Ok(())
+}
+
+fn callers_rva(path: &Path, target_rva: usize) -> Result<()> {
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let Object::PE(pe) = Object::parse(&bytes).context("parsing PE file")? else {
+        bail!("callers-rva mode supports PE files only");
+    };
+    if !pe.is_64 {
+        bail!("callers-rva mode currently supports PE32+ x86-64 only");
+    }
+
+    let text = pe
+        .sections
+        .iter()
+        .find(|section| section.name().ok() == Some(".text"))
+        .context("PE has no .text section")?;
+    let text_offset = text.pointer_to_raw_data as usize;
+    let text_end = text_offset
+        .checked_add(text.size_of_raw_data as usize)
+        .context(".text range overflow")?
+        .min(bytes.len());
+    let text_ip = pe.image_base + u64::from(text.virtual_address);
+    let mut decoder = Decoder::with_ip(
+        64,
+        &bytes[text_offset..text_end],
+        text_ip,
+        DecoderOptions::NONE,
+    );
+    let mut formatter = IntelFormatter::new();
+    let mut formatted = String::new();
+    let target_va = pe.image_base + target_rva as u64;
+    let mut count = 0_usize;
+
+    println!(
+        "CALLERS_RVA file={} target_rva=0x{target_rva:x}",
+        path.display()
+    );
+    while decoder.can_decode() {
+        let instruction = decoder.decode();
+        if !matches!(
+            instruction.flow_control(),
+            FlowControl::Call | FlowControl::UnconditionalBranch
+        ) || instruction.near_branch_target() != target_va
+        {
+            continue;
+        }
+        formatted.clear();
+        formatter.format(&instruction, &mut formatted);
+        let instruction_rva = instruction.ip() - pe.image_base;
+        println!(
+            "  code_rva=0x{instruction_rva:x} code_file=0x{:x} {formatted}",
+            rva_to_file_offset(&pe, instruction_rva).unwrap_or(usize::MAX)
+        );
+        count += 1;
+    }
+    println!("CALLER_COUNT {count}");
+    Ok(())
+}
+
+fn pointers_to(path: &Path, target_offset: usize, target_length: usize) -> Result<()> {
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let Object::PE(pe) = Object::parse(&bytes).context("parsing PE file")? else {
+        bail!("pointers mode supports PE files only");
+    };
+    let target_end = target_offset
+        .checked_add(target_length)
+        .context("target range overflow")?;
+    let target_rva = file_offset_to_rva(&pe, target_offset)
+        .with_context(|| format!("file offset 0x{target_offset:x} is outside PE sections"))?;
+    let target_end_rva = file_offset_to_rva(&pe, target_end.saturating_sub(1))
+        .with_context(|| format!("target end 0x{target_end:x} is outside PE sections"))?
+        + 1;
+    let target_va = pe.image_base + target_rva;
+    let target_end_va = pe.image_base + target_end_rva;
+    let mut va_count = 0_usize;
+    let mut rva_count = 0_usize;
+
+    println!(
+        "POINTERS file={} target_file=0x{target_offset:x}..0x{target_end:x} \
+         target_rva=0x{target_rva:x}..0x{target_end_rva:x}",
+        path.display()
+    );
+    for section in &pe.sections {
+        let section_name = section.name().unwrap_or("<invalid>");
+        if section_name == ".text" {
+            continue;
+        }
+        let start = section.pointer_to_raw_data as usize;
+        let end = start
+            .saturating_add(section.size_of_raw_data as usize)
+            .min(bytes.len());
+        let data = &bytes[start..end];
+
+        for (relative, window) in data.windows(8).enumerate() {
+            let value = u64::from_le_bytes(window.try_into().unwrap());
+            if (target_va..target_end_va).contains(&value) {
+                let source = start + relative;
+                println!(
+                    "  kind=va64 section={section_name} source_file=0x{source:x} \
+                     target_file=0x{:x}",
+                    rva_to_file_offset(&pe, value - pe.image_base).unwrap_or(usize::MAX)
+                );
+                va_count += 1;
+            }
+        }
+        for (relative, window) in data.windows(4).enumerate() {
+            let value = u64::from(u32::from_le_bytes(window.try_into().unwrap()));
+            if (target_rva..target_end_rva).contains(&value) {
+                let source = start + relative;
+                println!(
+                    "  kind=rva32 section={section_name} source_file=0x{source:x} \
+                     target_file=0x{:x}",
+                    rva_to_file_offset(&pe, value).unwrap_or(usize::MAX)
+                );
+                rva_count += 1;
+            }
+        }
+    }
+    println!("POINTER_COUNT va64={va_count} rva32={rva_count}");
+    Ok(())
+}
+
+fn disassemble(path: &Path, start_rva: usize, length: usize) -> Result<()> {
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let Object::PE(pe) = Object::parse(&bytes).context("parsing PE file")? else {
+        bail!("disassembly mode supports PE files only");
+    };
+    if !pe.is_64 {
+        bail!("disassembly mode currently supports PE32+ x86-64 only");
+    }
+    let start_offset = rva_to_file_offset(&pe, start_rva as u64)
+        .with_context(|| format!("RVA 0x{start_rva:x} is outside PE sections"))?;
+    let end_offset = start_offset
+        .checked_add(length)
+        .context("disassembly range overflow")?
+        .min(bytes.len());
+    let mut decoder = Decoder::with_ip(
+        64,
+        &bytes[start_offset..end_offset],
+        pe.image_base + start_rva as u64,
+        DecoderOptions::NONE,
+    );
+    let mut formatter = IntelFormatter::new();
+    formatter.options_mut().set_rip_relative_addresses(false);
+    let mut formatted = String::new();
+    println!(
+        "DISASSEMBLY file={} rva=0x{start_rva:x} file_offset=0x{start_offset:x} \
+         length=0x{length:x}",
+        path.display()
+    );
+    while decoder.can_decode() {
+        let instruction = decoder.decode();
+        formatted.clear();
+        formatter.format(&instruction, &mut formatted);
+        println!(
+            "  rva=0x{:x} file=0x{:x} {formatted}",
+            instruction.ip() - pe.image_base,
+            start_offset + decoder.position() - instruction.len()
+        );
+    }
+    Ok(())
+}
+
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     let file_name = path
         .file_name()
@@ -456,6 +956,68 @@ fn dump_waves(source: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 
+fn prepare_empty_output(output: &Path) -> Result<()> {
+    if output.exists() {
+        let mut entries =
+            fs::read_dir(output).with_context(|| format!("reading {}", output.display()))?;
+        if entries.next().is_some() {
+            bail!(
+                "refusing to write into non-empty directory {}",
+                output.display()
+            );
+        }
+    } else {
+        fs::create_dir_all(output).with_context(|| format!("creating {}", output.display()))?;
+    }
+    Ok(())
+}
+
+fn dump_control(source: &Path, output: &Path) -> Result<()> {
+    let bytes = exact_sccore_1_1_2(source)?;
+    prepare_empty_output(output)?;
+
+    let mut manifest = String::new();
+    writeln!(&mut manifest, "format=artupy-scva-control-v1")?;
+    writeln!(&mut manifest, "source={}", source.display())?;
+    writeln!(&mut manifest, "source_size={}", bytes.len())?;
+    writeln!(&mut manifest, "source_sha256={}", sha256_hex(&bytes))?;
+    writeln!(&mut manifest, "sample_record_size=0x{SAMPLE_RECORD_SIZE:x}")?;
+    writeln!(&mut manifest, "sample_record_count={SAMPLE_RECORD_COUNT}")?;
+    writeln!(
+        &mut manifest,
+        "wave_map_record_size=0x{WAVE_MAP_RECORD_SIZE:x}"
+    )?;
+    writeln!(
+        &mut manifest,
+        "wave_map_record_count={WAVE_MAP_RECORD_COUNT}"
+    )?;
+    writeln!(&mut manifest, "tone_record_size=0x{TONE_RECORD_SIZE:x}")?;
+    writeln!(&mut manifest, "tone_record_count={TONE_RECORD_COUNT}")?;
+    writeln!(&mut manifest, "files=name\\toffset\\tsize\\tsha256")?;
+
+    for block in CONTROL_BLOCKS {
+        let data = &bytes[block.offset..block.offset + block.size];
+        let path = output.join(block.name);
+        atomic_write(&path, data)?;
+        let hash = sha256_hex(data);
+        writeln!(
+            &mut manifest,
+            "{}\t0x{:x}\t0x{:x}\t{hash}",
+            block.name, block.offset, block.size
+        )?;
+        println!(
+            "DUMPED {} offset=0x{:x} size=0x{:x} sha256={hash}",
+            path.display(),
+            block.offset,
+            block.size
+        );
+    }
+    let manifest_path = output.join("manifest.txt");
+    atomic_write(&manifest_path, manifest.as_bytes())?;
+    println!("MANIFEST {}", manifest_path.display());
+    Ok(())
+}
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("ERROR: {error:#}");
@@ -465,13 +1027,64 @@ fn main() {
 
 fn run() -> Result<()> {
     let args: Vec<_> = env::args_os().skip(1).collect();
+    if args.len() == 4 && args[0].to_string_lossy() == "--disasm-rva" {
+        return disassemble(
+            Path::new(&args[3]),
+            parse_number(&args[1].to_string_lossy())?,
+            parse_number(&args[2].to_string_lossy())?,
+        );
+    }
+    if args.len() == 4 && args[0].to_string_lossy() == "--pointers-to" {
+        return pointers_to(
+            Path::new(&args[3]),
+            parse_number(&args[1].to_string_lossy())?,
+            parse_number(&args[2].to_string_lossy())?,
+        );
+    }
+    if args.len() == 4 && args[0].to_string_lossy() == "--xrefs" {
+        return xrefs(
+            Path::new(&args[3]),
+            parse_number(&args[1].to_string_lossy())?,
+            parse_number(&args[2].to_string_lossy())?,
+        );
+    }
+    if args.len() == 4 && args[0].to_string_lossy() == "--xrefs-rva" {
+        return xrefs_rva(
+            Path::new(&args[3]),
+            parse_number(&args[1].to_string_lossy())?,
+            parse_number(&args[2].to_string_lossy())?,
+        );
+    }
+    if args.len() == 3 && args[0].to_string_lossy() == "--callers-rva" {
+        return callers_rva(
+            Path::new(&args[2]),
+            parse_number(&args[1].to_string_lossy())?,
+        );
+    }
     if args.len() == 3 && args[0].to_string_lossy() == "--dump-waves" {
         return dump_waves(Path::new(&args[2]), Path::new(&args[1]));
+    }
+    if args.len() == 3 && args[0].to_string_lossy() == "--dump-control" {
+        return dump_control(Path::new(&args[2]), Path::new(&args[1]));
+    }
+    if args.len() == 4 && args[0].to_string_lossy() == "--resolve-tone" {
+        return resolve_tone(
+            Path::new(&args[3]),
+            parse_number(&args[1].to_string_lossy())?,
+            parse_number(&args[2].to_string_lossy())?,
+        );
     }
     if args.is_empty() {
         bail!(
             "usage:\n  scva-inspect FILE [FILE...]\n  \
-             scva-inspect --dump-waves OUTPUT_DIRECTORY SCCore.dll"
+             scva-inspect --dump-waves OUTPUT_DIRECTORY SCCore.dll\n  \
+             scva-inspect --dump-control OUTPUT_DIRECTORY SCCore.dll\n  \
+             scva-inspect --resolve-tone TONE_INDEX MIDI_NOTE SCCore.dll\n  \
+             scva-inspect --xrefs FILE_OFFSET LENGTH SCCore.dll\n  \
+             scva-inspect --xrefs-rva RVA LENGTH SCCore.dll\n  \
+             scva-inspect --callers-rva RVA SCCore.dll\n  \
+             scva-inspect --pointers-to FILE_OFFSET LENGTH SCCore.dll\n  \
+             scva-inspect --disasm-rva RVA LENGTH SCCore.dll"
         );
     }
     if args

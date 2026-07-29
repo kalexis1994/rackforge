@@ -10,7 +10,7 @@ mod linux {
     use alsa::{Direction, ValueOr};
     use anyhow::{Context, Result, bail};
     use artupy_scva_bank::{ControlBankSet, INTERPOLATION_PHASE_COUNT, WaveBankSet};
-    use hound::{SampleFormat, WavSpec, WavWriter};
+    use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
     use midir::{Ignore, MidiInput, MidiInputConnection, MidiInputPort};
     use std::collections::BTreeMap;
     use std::env;
@@ -60,6 +60,7 @@ mod linux {
         partial_mode: PartialMode,
         master_gain: f32,
         dump_note: Option<(u8, PathBuf)>,
+        rendered_bank: Option<PathBuf>,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -87,9 +88,13 @@ mod linux {
         );
         println!("MIX_CONFIG master_gain={:.3}", config.master_gain);
 
-        let banks = WaveBankSet::open(&config.bank_directory)?;
-        let controls = ControlBankSet::open(&config.control_directory)?;
-        let cache = preload_keyboard(&banks, &controls, config.partial_mode)?;
+        let cache = if let Some(directory) = &config.rendered_bank {
+            load_rendered_keyboard(directory)?
+        } else {
+            let banks = WaveBankSet::open(&config.bank_directory)?;
+            let controls = ControlBankSet::open(&config.control_directory)?;
+            preload_keyboard(&banks, &controls, config.partial_mode)?
+        };
         println!(
             "CACHE_READY tone=0 notes={}..={} count={}",
             FIRST_NOTE,
@@ -120,6 +125,7 @@ mod linux {
         let mut partial_mode = PartialMode::Both;
         let mut master_gain = DEFAULT_MASTER_GAIN;
         let mut dump_note = None;
+        let mut rendered_bank = None;
         while let Some(argument) = arguments.next() {
             if argument == "--partial" {
                 let value = arguments
@@ -151,6 +157,11 @@ mod linux {
                     .next()
                     .context("--dump-note requires NOTE OUTPUT.wav")?;
                 dump_note = Some((note, PathBuf::from(path)));
+            } else if argument == "--rendered-bank" {
+                let path = arguments
+                    .next()
+                    .context("--rendered-bank requires a directory")?;
+                rendered_bank = Some(PathBuf::from(path));
             } else if argument.to_string_lossy().starts_with('-') {
                 bail!("unknown option: {}", argument.to_string_lossy());
             } else {
@@ -166,6 +177,7 @@ mod linux {
             _ => bail!(
                 "usage: artupy-scva-live [--partial both|1|2] [--gain 0.0..1.0] \
                  [--dump-note NOTE OUTPUT.wav] \
+                 [--rendered-bank DIRECTORY] \
                  [BANK_DIRECTORY CONTROL_DIRECTORY]"
             ),
         };
@@ -175,7 +187,77 @@ mod linux {
             partial_mode,
             master_gain,
             dump_note,
+            rendered_bank,
         })
+    }
+
+    fn load_rendered_keyboard(directory: &PathBuf) -> Result<BTreeMap<u8, Arc<[f32]>>> {
+        let mut cache = BTreeMap::new();
+        for note in FIRST_NOTE..=LAST_NOTE {
+            let path = directory.join(format!("note-{note:03}.wav"));
+            let mut reader =
+                WavReader::open(&path).with_context(|| format!("opening {}", path.display()))?;
+            let specification = reader.spec();
+            let channels = usize::from(specification.channels);
+            if channels == 0 {
+                bail!("{} declares zero channels", path.display());
+            }
+            let interleaved: Vec<f32> =
+                match (specification.sample_format, specification.bits_per_sample) {
+                    (SampleFormat::Float, 32) => reader
+                        .samples::<f32>()
+                        .collect::<std::result::Result<Vec<_>, _>>()?,
+                    (SampleFormat::Int, 16) => reader
+                        .samples::<i16>()
+                        .map(|sample| sample.map(|value| f32::from(value) / f32::from(i16::MAX)))
+                        .collect::<std::result::Result<Vec<_>, _>>()?,
+                    _ => bail!(
+                        "{} must be float32 or PCM16 WAV, found {:?}/{} bits",
+                        path.display(),
+                        specification.sample_format,
+                        specification.bits_per_sample
+                    ),
+                };
+            let mono: Vec<f32> = interleaved
+                .chunks_exact(channels)
+                .map(|frame| frame.iter().copied().sum::<f32>() / channels as f32)
+                .collect();
+            if mono.is_empty() {
+                bail!("{} contains no complete audio frames", path.display());
+            }
+            let step = f64::from(specification.sample_rate) / f64::from(OUTPUT_RATE);
+            let output_frames = ((mono.len() as f64 / step).ceil() as usize).max(1);
+            let mut resampled = Vec::with_capacity(output_frames);
+            for output in 0..output_frames {
+                let position = output as f64 * step;
+                let index = position.floor() as usize;
+                if index >= mono.len() {
+                    break;
+                }
+                let fraction = (position - index as f64) as f32;
+                let first = mono[index];
+                let second = *mono.get(index + 1).unwrap_or(&first);
+                resampled.push(first + (second - first) * fraction);
+            }
+            let peak = resampled
+                .iter()
+                .fold(0.0_f32, |maximum, sample| maximum.max(sample.abs()));
+            let samples: Arc<[f32]> = Arc::from(resampled);
+            cache.insert(note, samples);
+            if note % 12 == 0 || note == LAST_NOTE {
+                println!(
+                    "RENDERED_CACHE note={note} source_rate={} frames={} peak={peak:.6}",
+                    specification.sample_rate,
+                    cache[&note].len()
+                );
+            }
+        }
+        println!(
+            "RENDERED_BANK_READY directory={} notes={}",
+            directory.display(),
+            cache.len()
+        );
+        Ok(cache)
     }
 
     fn write_debug_note(cache: &BTreeMap<u8, Arc<[f32]>>, note: u8, path: &PathBuf) -> Result<()> {

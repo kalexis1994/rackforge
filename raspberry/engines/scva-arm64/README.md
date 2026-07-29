@@ -89,3 +89,24 @@ peak    302076
 
 Esto verifica la lectura y el algoritmo DPCM entre arquitecturas. No verifica
 todavía la selección de una muestra musical completa.
+
+## Banco renderizado provisional
+
+Mientras se porta el DSP completo de SCCore, el motor puede cargar un banco
+multimuestreado generado localmente por la instalación legítima:
+
+```powershell
+.\raspberry\dev\render-scva-bank.ps1 `
+  -SCCorePath "C:\ruta\SCCore.dll" `
+  -OutputDirectory "C:\ruta\artupy-rendered-piano"
+```
+
+En la Raspberry:
+
+```bash
+artupy-scva-live \
+  --rendered-bank /home/kalex/artupy/share/rendered-piano \
+  --gain 1.0
+```
+
+Los WAV derivados son privados y no se guardan en Git.

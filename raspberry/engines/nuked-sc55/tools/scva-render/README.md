@@ -43,5 +43,14 @@ cargo run --release --bin scva-decode-oracle -- `
   2 0x290a0 0x2e8db 0x311df
 ```
 
+Se pueden agregar una cantidad de frames y un WAV de salida para ejecutar
+también el avance y el interpolador internos:
+
+```powershell
+cargo run --release --bin scva-decode-oracle -- `
+  "C:\ruta\SCCore.dll" "C:\ruta\wave_bank.bin" `
+  0 0x74ee0 0x7ed23 0x836de 32768 "C:\temp\native-sample-7.wav"
+```
+
 El proceso usa como directorio de trabajo la carpeta de la DLL, para que el
 motor pueda encontrar los archivos auxiliares de la instalación.

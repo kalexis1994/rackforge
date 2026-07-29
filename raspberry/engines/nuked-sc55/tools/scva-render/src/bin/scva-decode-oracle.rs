@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use hound::{SampleFormat, WavSpec, WavWriter};
 use libloading::{Library, Symbol};
 use std::env;
 use std::fs;
@@ -8,10 +9,13 @@ use std::path::Path;
 const SEGMENT_SIZE: usize = 1024 * 1024;
 const TG_INITIALIZE_RVA: usize = 0x8e160;
 const DECODER_INITIALIZE_RVA: usize = 0x43c40;
+const DECODER_RENDER_RVA: usize = 0x43dc0;
 
 type Initialize = unsafe extern "C" fn(i32) -> i32;
 type DecoderInitialize =
     unsafe extern "system" fn(*mut DecoderState, *const u8, u32, u32, *const u8, u32);
+type DecoderRender =
+    unsafe extern "system" fn(*mut DecoderState, *mut f32, *const u32, *const f32, *const f32);
 
 #[repr(C, align(16))]
 struct DecoderState([u8; 0x50]);
@@ -36,9 +40,20 @@ fn read_f32(bytes: &[u8], offset: usize) -> f32 {
 
 fn run() -> Result<()> {
     let arguments: Vec<_> = env::args().skip(1).collect();
-    let [dll_path, wave_path, segment, start, loop_start, end] = arguments.as_slice() else {
-        bail!("usage: scva-decode-oracle SCCore.dll WAVE_BANK SEGMENT START LOOP_START END");
+    let (required, render_request) = match arguments.as_slice() {
+        [dll, wave, segment, start, loop_start, end] => {
+            ([dll, wave, segment, start, loop_start, end], None)
+        }
+        [dll, wave, segment, start, loop_start, end, frames, output] => (
+            [dll, wave, segment, start, loop_start, end],
+            Some((parse_number(frames)?, output.as_str())),
+        ),
+        _ => bail!(
+            "usage: scva-decode-oracle SCCore.dll WAVE_BANK SEGMENT START LOOP_START END \
+             [FRAMES OUTPUT.wav]"
+        ),
     };
+    let [dll_path, wave_path, segment, start, loop_start, end] = required;
     let segment = parse_number(segment)?;
     let start = parse_number(start)?;
     let loop_start = parse_number(loop_start)?;
@@ -65,7 +80,9 @@ fn run() -> Result<()> {
     let initialize: Symbol<Initialize> = unsafe { library.get(b"TG_initialize\0")? };
     let image_base = *initialize as usize - TG_INITIALIZE_RVA;
     let decoder: DecoderInitialize = unsafe { mem::transmute(image_base + DECODER_INITIALIZE_RVA) };
+    let render: DecoderRender = unsafe { mem::transmute(image_base + DECODER_RENDER_RVA) };
     let mut state = DecoderState([0_u8; 0x50]);
+    state.0[0x48] = 2;
 
     unsafe {
         decoder(
@@ -106,6 +123,47 @@ fn run() -> Result<()> {
         state.0[0x49],
         state.0[0x48]
     );
+
+    if let Some((frame_count, output)) = render_request {
+        let increments = [0x1_0000_u32; 4];
+        let inner_gains = [1.0_f32; 16];
+        let outer_gains = [1.0_f32; 4];
+        let mut rendered = Vec::with_capacity(frame_count);
+        while rendered.len() < frame_count {
+            let mut lanes = [0.0_f32; 128];
+            unsafe {
+                render(
+                    &mut state,
+                    lanes.as_mut_ptr(),
+                    increments.as_ptr(),
+                    inner_gains.as_ptr(),
+                    outer_gains.as_ptr(),
+                );
+            }
+            rendered.extend(lanes.iter().step_by(4).copied());
+        }
+        rendered.truncate(frame_count);
+
+        let specification = WavSpec {
+            channels: 1,
+            sample_rate: 32_000,
+            bits_per_sample: 32,
+            sample_format: SampleFormat::Float,
+        };
+        let mut writer = WavWriter::create(output, specification)
+            .with_context(|| format!("creating {output}"))?;
+        for sample in &rendered {
+            writer.write_sample(*sample)?;
+        }
+        writer.finalize()?;
+        let peak = rendered
+            .iter()
+            .fold(0.0_f32, |maximum, sample| maximum.max(sample.abs()));
+        println!(
+            "NATIVE_DECODE_RENDERED frames={} peak={peak:.9} output={output}",
+            rendered.len()
+        );
+    }
     Ok(())
 }
 

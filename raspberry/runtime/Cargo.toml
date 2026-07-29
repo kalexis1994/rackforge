@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "artupy-core",
     "artupy-plugin-api",
+    "artupy-ui",
     "plugins/gain",
     "plugins/roland-scva",
 ]

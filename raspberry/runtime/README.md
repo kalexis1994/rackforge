@@ -10,6 +10,7 @@ estabilizar la API sin interrumpir el instrumento que ya funciona.
 |---|---|
 | `artupy-plugin-api/` | ABI C versionada, manifiestos y esquema declarativo de parámetros. |
 | `artupy-core/` | Descubrimiento, validación, carga dinámica e instancias. |
+| `artupy-ui/` | Componentes, foco, layout y estilos independientes del hardware. |
 | `plugins/gain/` | Plugin de referencia que prueba audio, parámetros y estado. |
 | `plugins/roland-scva/` | Primer instrumento real, alimentado por un banco privado externo. |
 
@@ -140,6 +141,26 @@ PLUGIN_SMOKE_OK peak=0.125000 state_bytes=9
 ```
 
 En Linux ARM64 se usa `target/debug/libartupy_gain.so`.
+
+## Runtime LIVE
+
+En Linux, `artupy-core live` conecta un plugin de instrumento al puerto MIDI
+principal del KeyLab y a la Scarlett:
+
+```bash
+artupy-core live /home/kalex/artupy/plugins/roland-scva \
+  --resource rendered-bank=/home/kalex/artupy/share/rendered-piano-v1 \
+  --preset scva.piano-1
+```
+
+El host permanece genérico: selección de muestras, voces, sustain y
+parámetros pertenecen al plugin. El host solo administra carga, MIDI, bloques
+de audio y salida ALSA.
+
+`scripts/install.sh` instala binario y plugin mediante reemplazos atómicos.
+`scripts/select-live-engine.sh plugin|legacy` cambia entre el runtime nuevo y
+el daemon provisional, verifica cada PID antes de detenerlo y revierte al
+motor anterior si el nuevo no alcanza `READY_TO_PLAY`.
 
 ## Alcance de API v1.1
 

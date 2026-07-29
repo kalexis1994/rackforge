@@ -37,8 +37,13 @@ dependencies = [
 name = "artupy-bridge"
 version = "0.1.0"
 dependencies = [
+ "artupy-ui",
  "midir",
 ]
+
+[[package]]
+name = "artupy-ui"
+version = "0.1.0"
 
 [[package]]
 name = "bitflags"

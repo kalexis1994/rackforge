@@ -19,24 +19,35 @@ fn run() -> Result<()> {
     match command {
         "inspect" if arguments.len() == 2 => inspect(Path::new(&arguments[1])),
         "smoke" => {
-            let (package, binary, resources) = parse_smoke_arguments(&arguments[1..])?;
-            smoke(&package, binary.as_deref(), &resources)
+            let (package, binary, resources, preset) =
+                parse_plugin_arguments("smoke", &arguments[1..])?;
+            smoke(&package, binary.as_deref(), &resources, preset.as_deref())
         }
+        "live" => run_live(&arguments[1..]),
         _ => bail!(
             "usage:\n  artupy-core inspect PACKAGE\n  \
-             artupy-core smoke PACKAGE [--library FILE] [--resource ID=PATH]..."
+             artupy-core smoke PACKAGE [--library FILE] [--resource ID=PATH]... \
+             [--preset ID]\n  \
+             artupy-core live PACKAGE [--library FILE] [--resource ID=PATH]... \
+             [--preset ID]"
         ),
     }
 }
 
-fn parse_smoke_arguments(
-    arguments: &[String],
-) -> Result<(PathBuf, Option<PathBuf>, BTreeMap<String, PathBuf>)> {
+type PluginArguments = (
+    PathBuf,
+    Option<PathBuf>,
+    BTreeMap<String, PathBuf>,
+    Option<String>,
+);
+
+fn parse_plugin_arguments(command: &str, arguments: &[String]) -> Result<PluginArguments> {
     let package = arguments
         .first()
-        .context("smoke requires a plugin package")?;
+        .with_context(|| format!("{command} requires a plugin package"))?;
     let mut binary = None;
     let mut resources = BTreeMap::new();
+    let mut preset = None;
     let mut index = 1;
     while index < arguments.len() {
         match arguments[index].as_str() {
@@ -64,11 +75,20 @@ fn parse_smoke_arguments(
                     bail!("resource {id:?} was supplied more than once");
                 }
             }
-            option => bail!("unknown smoke option {option}"),
+            "--preset" => {
+                index += 1;
+                preset = Some(
+                    arguments
+                        .get(index)
+                        .context("--preset requires an ID")?
+                        .clone(),
+                );
+            }
+            option => bail!("unknown {command} option {option}"),
         }
         index += 1;
     }
-    Ok((PathBuf::from(package), binary, resources))
+    Ok((PathBuf::from(package), binary, resources, preset))
 }
 
 fn inspect(path: &Path) -> Result<()> {
@@ -99,6 +119,7 @@ fn smoke(
     package_path: &Path,
     binary: Option<&Path>,
     resources: &BTreeMap<String, PathBuf>,
+    requested_preset: Option<&str>,
 ) -> Result<()> {
     let package = PluginPackage::open(package_path)?;
     // SAFETY: smoke is an explicit native plugin execution command.
@@ -112,7 +133,18 @@ fn smoke(
     );
 
     let mut instance = plugin.create_instance()?;
-    if let Some(preset) = plugin.presets().presets.first() {
+    let preset = match requested_preset {
+        Some(id) => Some(
+            plugin
+                .presets()
+                .presets
+                .iter()
+                .find(|preset| preset.id == id)
+                .with_context(|| format!("plugin does not declare preset {id:?}"))?,
+        ),
+        None => plugin.presets().presets.first(),
+    };
+    if let Some(preset) = preset {
         instance.load_preset(&preset.id)?;
         println!("PRESET_LOADED id={} name={:?}", preset.id, preset.name);
     }
@@ -184,4 +216,20 @@ fn smoke(
     instance.deactivate()?;
     println!("PLUGIN_SMOKE_OK peak={peak:.6} state_bytes={}", state.len());
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn run_live(arguments: &[String]) -> Result<()> {
+    let (package, binary, resources, preset) = parse_plugin_arguments("live", arguments)?;
+    artupy_core::live::run(artupy_core::live::LiveConfig {
+        package,
+        binary,
+        resources,
+        preset,
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_live(_arguments: &[String]) -> Result<()> {
+    bail!("artupy-core live is available on Linux only")
 }

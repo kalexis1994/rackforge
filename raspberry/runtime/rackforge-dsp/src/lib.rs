@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
 mod chorus;
+mod exciter;
 mod reverb;
 
 pub use chorus::{Chorus, ChorusParameters, PrepareError};
+pub use exciter::{Exciter, ExciterParameters};
 pub use reverb::{Reverb, ReverbParameters};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

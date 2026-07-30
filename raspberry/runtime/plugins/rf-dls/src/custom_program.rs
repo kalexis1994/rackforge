@@ -8,7 +8,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const PLUGIN_ID: &str = "org.rackforge.rf-dls";
-pub const PAYLOAD_VERSION: u32 = 4;
+pub const PAYLOAD_VERSION: u32 = 6;
+pub const EXCITER_PAYLOAD_VERSION: u32 = 5;
+pub const REVERB_PAYLOAD_VERSION: u32 = 4;
 pub const CHORUS_PAYLOAD_VERSION: u32 = 3;
 pub const LAYER_PAYLOAD_VERSION: u32 = 2;
 pub const LEGACY_PAYLOAD_VERSION: u32 = 1;
@@ -59,7 +61,16 @@ impl CustomProgram {
                     SharedEffects::default(),
                 )
             }
-            LAYER_PAYLOAD_VERSION | CHORUS_PAYLOAD_VERSION | PAYLOAD_VERSION => {
+            EXCITER_PAYLOAD_VERSION => {
+                let payload: V5CustomProgramPayload = serde_json::from_value(document.payload)
+                    .map_err(|error| format!("parsing RF-DLS v5 payload: {error}"))?;
+                let payload = payload.migrate()?;
+                (payload.slot, payload.gain, payload.layers, payload.effects)
+            }
+            LAYER_PAYLOAD_VERSION
+            | CHORUS_PAYLOAD_VERSION
+            | REVERB_PAYLOAD_VERSION
+            | PAYLOAD_VERSION => {
                 let payload: CustomProgramPayload = serde_json::from_value(document.payload)
                     .map_err(|error| {
                         format!(
@@ -160,6 +171,93 @@ pub struct CustomProgramPayload {
     pub effects: SharedEffects,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V5CustomProgramPayload {
+    slot: u16,
+    #[serde(default = "default_gain")]
+    gain: f32,
+    layers: Vec<ProgramLayer>,
+    #[serde(default)]
+    effects: V5SharedEffects,
+}
+
+impl V5CustomProgramPayload {
+    fn migrate(self) -> Result<CustomProgramPayload, String> {
+        self.effects.exciter.validate()?;
+        Ok(CustomProgramPayload {
+            slot: self.slot,
+            gain: self.gain,
+            layers: self.layers,
+            effects: SharedEffects {
+                exciter: self.effects.exciter.migrate(),
+                chorus: self.effects.chorus,
+                reverb: self.effects.reverb,
+            },
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct V5SharedEffects {
+    exciter: V5ExciterEffectSettings,
+    chorus: ChorusEffectSettings,
+    reverb: ReverbEffectSettings,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct V5ExciterEffectSettings {
+    enabled: bool,
+    frequency_hz: f32,
+    drive: f32,
+    amount: f32,
+}
+
+impl Default for V5ExciterEffectSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            frequency_hz: 3_500.0,
+            drive: 4.0,
+            amount: 0.20,
+        }
+    }
+}
+
+impl V5ExciterEffectSettings {
+    fn validate(&self) -> Result<(), String> {
+        finite_range(self.frequency_hz, 200.0, 12_000.0, "v5 exciter frequency")?;
+        finite_range(self.drive, 1.0, 12.0, "v5 exciter drive")?;
+        finite_range(self.amount, 0.0, 1.0, "v5 exciter amount")
+    }
+
+    fn migrate(self) -> ExciterEffectSettings {
+        const POINTS: [f32; 10] = [
+            600.0, 800.0, 1_100.0, 1_500.0, 2_200.0, 3_000.0, 4_200.0, 5_800.0, 8_000.0, 11_000.0,
+        ];
+        let emphatic_point = POINTS
+            .iter()
+            .enumerate()
+            .min_by(|(_, left), (_, right)| {
+                (*left - self.frequency_hz)
+                    .abs()
+                    .total_cmp(&(*right - self.frequency_hz).abs())
+            })
+            .map(|(index, _)| index as u8 + 1)
+            .unwrap_or(5);
+        ExciterEffectSettings {
+            enabled: self.enabled,
+            blend: 1.0,
+            emphatic_point,
+            eq_low_db: 0.0,
+            eq_high_db: 0.0,
+            mix: self.amount,
+        }
+    }
+}
+
 impl CustomProgramPayload {
     fn validate(&self) -> Result<(), String> {
         CustomProgram {
@@ -178,14 +276,61 @@ impl CustomProgramPayload {
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SharedEffects {
+    pub exciter: ExciterEffectSettings,
     pub chorus: ChorusEffectSettings,
     pub reverb: ReverbEffectSettings,
 }
 
 impl SharedEffects {
     fn validate(&self) -> Result<(), String> {
+        self.exciter.validate()?;
         self.chorus.validate()?;
         self.reverb.validate()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ExciterEffectSettings {
+    pub enabled: bool,
+    pub blend: f32,
+    pub emphatic_point: u8,
+    pub eq_low_db: f32,
+    pub eq_high_db: f32,
+    pub mix: f32,
+}
+
+impl Default for ExciterEffectSettings {
+    fn default() -> Self {
+        let defaults = rackforge_dsp::ExciterParameters::default();
+        Self {
+            enabled: defaults.enabled,
+            blend: defaults.blend,
+            emphatic_point: defaults.emphatic_point,
+            eq_low_db: defaults.eq_low_db,
+            eq_high_db: defaults.eq_high_db,
+            mix: defaults.mix,
+        }
+    }
+}
+
+impl ExciterEffectSettings {
+    pub fn parameters(self) -> rackforge_dsp::ExciterParameters {
+        rackforge_dsp::ExciterParameters {
+            enabled: self.enabled,
+            blend: self.blend,
+            emphatic_point: self.emphatic_point,
+            eq_low_db: self.eq_low_db,
+            eq_high_db: self.eq_high_db,
+            mix: self.mix,
+        }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        self.parameters()
+            .validate()
+            .map(|_| ())
+            .map_err(|field| format!("{field} is outside its supported range"))
     }
 }
 
@@ -864,6 +1009,55 @@ mod tests {
     }
 
     #[test]
+    fn v4_programs_migrate_to_disabled_exciter() {
+        let mut v4 = CustomProgram::from_document(document())
+            .unwrap()
+            .to_document()
+            .unwrap();
+        v4.payload_version = REVERB_PAYLOAD_VERSION;
+        v4.payload["effects"]
+            .as_object_mut()
+            .unwrap()
+            .remove("exciter")
+            .unwrap();
+
+        let migrated = CustomProgram::from_document(v4).unwrap();
+        assert!(!migrated.effects.exciter.enabled);
+        assert_eq!(migrated.effects.exciter, ExciterEffectSettings::default());
+        assert_eq!(
+            migrated.to_document().unwrap().payload_version,
+            PAYLOAD_VERSION
+        );
+    }
+
+    #[test]
+    fn v5_exciter_migrates_to_the_classic_parameter_model() {
+        let mut v5 = CustomProgram::from_document(document())
+            .unwrap()
+            .to_document()
+            .unwrap();
+        v5.payload_version = EXCITER_PAYLOAD_VERSION;
+        v5.payload["effects"]["exciter"] = json!({
+            "enabled": true,
+            "frequency_hz": 3500.0,
+            "drive": 4.0,
+            "amount": 0.2
+        });
+
+        let migrated = CustomProgram::from_document(v5).unwrap();
+        assert!(migrated.effects.exciter.enabled);
+        assert_eq!(migrated.effects.exciter.blend, 1.0);
+        assert_eq!(migrated.effects.exciter.emphatic_point, 6);
+        assert_eq!(migrated.effects.exciter.eq_low_db, 0.0);
+        assert_eq!(migrated.effects.exciter.eq_high_db, 0.0);
+        assert_eq!(migrated.effects.exciter.mix, 0.2);
+        assert_eq!(
+            migrated.to_document().unwrap().payload_version,
+            PAYLOAD_VERSION
+        );
+    }
+
+    #[test]
     fn rejects_invalid_source_and_ranges() {
         let mut invalid_source = document();
         invalid_source.payload["source"]["resource_id"] = json!("something-else");
@@ -886,6 +1080,13 @@ mod tests {
             .unwrap();
         invalid_reverb.payload["effects"]["reverb"]["decay_seconds"] = json!(99.0);
         assert!(CustomProgram::from_document(invalid_reverb).is_err());
+
+        let mut invalid_exciter = CustomProgram::from_document(document())
+            .unwrap()
+            .to_document()
+            .unwrap();
+        invalid_exciter.payload["effects"]["exciter"]["emphatic_point"] = json!(11);
+        assert!(CustomProgram::from_document(invalid_exciter).is_err());
     }
 
     #[test]
@@ -906,6 +1107,11 @@ mod tests {
         program.effects.chorus.mix = 0.4;
         program.effects.reverb.enabled = true;
         program.effects.reverb.decay_seconds = 3.5;
+        program.effects.exciter.enabled = true;
+        program.effects.exciter.blend = 0.5;
+        program.effects.exciter.emphatic_point = 7;
+        program.effects.exciter.eq_high_db = 3.0;
+        program.effects.exciter.mix = 0.35;
 
         let document = program.to_document().unwrap();
         assert_eq!(document.payload_version, PAYLOAD_VERSION);
@@ -917,6 +1123,11 @@ mod tests {
         assert_eq!(decoded.effects.chorus.mix, 0.4);
         assert!(decoded.effects.reverb.enabled);
         assert_eq!(decoded.effects.reverb.decay_seconds, 3.5);
+        assert!(decoded.effects.exciter.enabled);
+        assert_eq!(decoded.effects.exciter.blend, 0.5);
+        assert_eq!(decoded.effects.exciter.emphatic_point, 7);
+        assert_eq!(decoded.effects.exciter.eq_high_db, 3.0);
+        assert_eq!(decoded.effects.exciter.mix, 0.35);
     }
 
     #[test]

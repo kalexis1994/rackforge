@@ -68,11 +68,15 @@ The first chain is deliberately small and ordered:
 
 ```text
 Layer A ─┐
-         ├─ mix ─ chorus ─ reverb ─ program output
+         ├─ mix ─ exciter ─ chorus ─ reverb ─ program output
 Layer B ─┘
 ```
 
 Chorus parameters were introduced in payload version 3 and reverb parameters
-in version 4. Payload versions 1 and 2 migrate with both effects disabled;
-version 3 migrates with reverb disabled. Existing programs therefore remain
-sonically unchanged until an effect is explicitly enabled.
+in version 4. Payload version 5 added the first exciter model. Version 6
+replaces its frequency/drive/amount surface with the classic parallel model:
+blend, emphatic point, low/high EQ and dry/effect balance. Version 5 migrates
+its frequency to the nearest emphatic point and its amount to dry/effect
+balance. Payload versions 1 through 4 still migrate with exciter disabled.
+Existing programs therefore remain sonically unchanged until the effect is
+explicitly enabled.

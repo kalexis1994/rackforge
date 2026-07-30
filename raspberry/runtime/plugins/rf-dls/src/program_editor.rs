@@ -32,6 +32,85 @@ pub fn view(program: &CustomProgram) -> ProgramEditorView {
         fields: Vec::new(),
         pages: vec![
             page(
+                "fx.exciter",
+                "EXCITER",
+                "Harmonic brightness",
+                vec![
+                    toggle(
+                        "fx.exciter.enabled",
+                        "ENABLED",
+                        "Enable shared exciter",
+                        program.effects.exciter.enabled,
+                        true,
+                    ),
+                    number(
+                        "fx.exciter.blend",
+                        "BLEND",
+                        "Dry to excited balance",
+                        Some(scaled(program.effects.exciter.blend, 99.0)),
+                        -99,
+                        99,
+                        1,
+                        0,
+                        None,
+                        false,
+                        true,
+                    ),
+                    number(
+                        "fx.exciter.emphatic-point",
+                        "EMPH POINT",
+                        "Emphasized frequency 1-10",
+                        Some(i64::from(program.effects.exciter.emphatic_point)),
+                        1,
+                        10,
+                        1,
+                        0,
+                        None,
+                        false,
+                        true,
+                    ),
+                    number(
+                        "fx.exciter.eq-low",
+                        "EQ LOW",
+                        "Low range gain",
+                        Some(scaled(program.effects.exciter.eq_low_db, 1.0)),
+                        -12,
+                        12,
+                        1,
+                        0,
+                        Some("dB"),
+                        false,
+                        true,
+                    ),
+                    number(
+                        "fx.exciter.eq-high",
+                        "EQ HIGH",
+                        "High range gain",
+                        Some(scaled(program.effects.exciter.eq_high_db, 1.0)),
+                        -12,
+                        12,
+                        1,
+                        0,
+                        Some("dB"),
+                        false,
+                        true,
+                    ),
+                    number(
+                        "fx.exciter.mix",
+                        "DRY/WET",
+                        "0 DRY - 100 WET",
+                        Some(scaled(program.effects.exciter.mix, 100.0)),
+                        0,
+                        100,
+                        1,
+                        0,
+                        Some("%"),
+                        false,
+                        true,
+                    ),
+                ],
+            ),
+            page(
                 "fx.chorus",
                 "CHORUS",
                 "Stereo modulation",
@@ -641,6 +720,19 @@ pub fn apply(
             "width" => chorus.width = required_number(value, field_id)? as f32 / 100.0,
             "mix" => chorus.mix = required_number(value, field_id)? as f32 / 100.0,
             _ => return Err(format!("unknown RF-DLS chorus field {field_id:?}")),
+        }
+        return Ok(());
+    }
+    if let Some(parameter) = field_id.strip_prefix("fx.exciter.") {
+        let exciter = &mut program.effects.exciter;
+        match parameter {
+            "enabled" => exciter.enabled = required_boolean(value, field_id)?,
+            "blend" => exciter.blend = required_number(value, field_id)? as f32 / 99.0,
+            "emphatic-point" => exciter.emphatic_point = checked_u8(value, field_id)?,
+            "eq-low" => exciter.eq_low_db = required_number(value, field_id)? as f32,
+            "eq-high" => exciter.eq_high_db = required_number(value, field_id)? as f32,
+            "mix" => exciter.mix = required_number(value, field_id)? as f32 / 100.0,
+            _ => return Err(format!("unknown RF-DLS exciter field {field_id:?}")),
         }
         return Ok(());
     }

@@ -1,3 +1,4 @@
+mod controller;
 mod framebuffer;
 mod menu;
 
@@ -10,6 +11,8 @@ use rackforge_control_api::{
     CONTROL_SOCKET_NAME, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES,
     decode_response, encode_line,
 };
+#[cfg(target_os = "linux")]
+use rackforge_controller_api::LITTLE_V1;
 use std::env;
 use std::error::Error;
 use std::fmt::Write as _;
@@ -274,37 +277,15 @@ fn enumerate_input_ports(midi: &MidiInput) -> Result<Vec<InputPortInfo>, Box<dyn
 }
 
 fn is_keylab_midi(name: &str) -> bool {
-    let trimmed = name.trim();
-    let endpoint = trimmed
-        .rsplit_once(' ')
-        .filter(|(_, suffix)| is_alsa_address(suffix))
-        .map_or(trimmed, |(prefix, _)| prefix);
-    let folded = endpoint.to_ascii_lowercase();
-    (folded.contains("kl essential") || folded.contains("keylab"))
-        && folded.trim_end().ends_with("midi")
-        && !folded.contains("mcu")
-        && !folded.contains("hui")
-        && !folded.contains("dinthru")
-        && !folded.contains(" alv")
-}
-
-fn is_alsa_address(value: &str) -> bool {
-    value.split_once(':').is_some_and(|(client, port)| {
-        !client.is_empty()
-            && !port.is_empty()
-            && client.bytes().all(|byte| byte.is_ascii_digit())
-            && port.bytes().all(|byte| byte.is_ascii_digit())
-    })
+    controller::display_driver(name).is_some()
 }
 
 fn print_ports(ports: &[PortInfo]) {
     println!("Puertos MIDI de salida:");
     for port in ports {
-        let marker = if is_keylab_midi(&port.name) {
-            "  <KeyLab recomendado>"
-        } else {
-            ""
-        };
+        let marker = controller::display_driver(&port.name)
+            .map(|driver| format!("  <{} / {}>", driver.profile().name, "little@1"))
+            .unwrap_or_default();
         println!("  [{}] {}{}", port.index, port.name, marker);
     }
 }
@@ -323,7 +304,7 @@ fn select_port<'a>(ports: &'a [PortInfo], selector: Option<&str>) -> Result<&'a 
     } else {
         ports
             .iter()
-            .filter(|port| is_keylab_midi(&port.name))
+            .filter(|port| controller::display_driver(&port.name).is_some())
             .collect()
     };
 
@@ -358,7 +339,7 @@ fn select_input_port<'a>(
     } else {
         ports
             .iter()
-            .filter(|port| is_keylab_midi(&port.name))
+            .filter(|port| controller::surface_input_driver(&port.name).is_some())
             .collect()
     };
 
@@ -454,13 +435,14 @@ struct KeyLabSession {
 
 impl KeyLabSession {
     fn open(midi: MidiOutput, port: &PortInfo) -> Result<Self, Box<dyn Error>> {
-        if !is_keylab_midi(&port.name) {
+        let Some(driver) = controller::little_driver(&port.name) else {
             return Err(format!(
-                "El puerto [{}] {} no es el endpoint MIDI seguro del KeyLab",
+                "El puerto [{}] {} no tiene un driver LITTLE certificado; no se enviará SysEx",
                 port.index, port.name
             )
             .into());
-        }
+        };
+        driver.profile().validate()?;
         let connection = midi.connect(&port.handle, "rackforge KeyLab SysEx")?;
         Ok(Self {
             connection,
@@ -805,6 +787,15 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 Ok(true) => {
                     missed_acks = 0;
                     println!("HEALTHY OLED_ACK");
+                    if let Some(lease_id) = menu.audition_lease_id() {
+                        match keep_audition_alive(lease_id) {
+                            Ok(()) => {}
+                            Err(message) => {
+                                eprintln!("Se perdió el foco de audition: {message}");
+                                menu.audition_ended();
+                            }
+                        }
+                    }
                     if let Err(error) = refresh_live_catalog(&mut menu) {
                         eprintln!("No se pudo refrescar el catálogo LIVE: {error}");
                     } else {
@@ -879,6 +870,12 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
     let response = control_request(&ControlRequest::Snapshot)?;
     match response {
         ControlResponse::Snapshot { snapshot } if snapshot.plugin_id == "org.rackforge.rf-dls" => {
+            if !snapshot.ui_layouts.iter().any(|layout| layout == LITTLE_V1) {
+                return Err(format!(
+                    "{} no declara una vista compatible con {LITTLE_V1}",
+                    snapshot.plugin_name
+                ));
+            }
             let selected = snapshot.selected_sound_id.clone();
             menu.set_play_sounds(
                 snapshot
@@ -888,6 +885,7 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
                         menu::PlaySound::new(
                             sound.id,
                             sound.name,
+                            sound.bank.unwrap_or_else(|| "dls".into()),
                             sound.detail.unwrap_or_else(|| " ".into()),
                         )
                     })
@@ -901,12 +899,28 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
             snapshot.plugin_id
         )),
         ControlResponse::Error { message } => Err(message),
-        ControlResponse::Ok { .. } => Err("respuesta inesperada al pedir catálogo".into()),
+        _ => Err("respuesta inesperada al pedir catálogo".into()),
     }
 }
 
 #[cfg(not(target_os = "linux"))]
 fn refresh_live_catalog(_menu: &mut menu::Menu) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn keep_audition_alive(lease_id: u64) -> Result<(), String> {
+    match control_request(&ControlRequest::KeepAuditionAlive { lease_id })? {
+        ControlResponse::AuditionKeptAlive {
+            lease_id: confirmed,
+        } if confirmed == lease_id => Ok(()),
+        ControlResponse::Error { message } => Err(message),
+        _ => Err("respuesta inesperada al renovar audition".into()),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn keep_audition_alive(_lease_id: u64) -> Result<(), String> {
     Ok(())
 }
 
@@ -924,9 +938,55 @@ fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
                     Ok(true)
                 }
                 ControlResponse::Error { message } => Err(message),
-                ControlResponse::Snapshot { .. } => {
-                    Err("respuesta inesperada al seleccionar sonido".into())
+                _ => Err("respuesta inesperada al seleccionar sonido".into()),
+            }
+        }
+        menu::MenuCommand::BeginAudition {
+            preview_sound_id,
+            draft_name,
+            program_id,
+        } => {
+            let lease_id = match control_request(&ControlRequest::BeginAudition {
+                plugin_id: "org.rackforge.rf-dls".into(),
+            })? {
+                ControlResponse::AuditionGranted { lease_id } => lease_id,
+                ControlResponse::Error { message } => return Err(message),
+                _ => return Err("respuesta inesperada al pedir audition".into()),
+            };
+            match control_request(&ControlRequest::SelectSound {
+                id: preview_sound_id,
+            })? {
+                ControlResponse::Ok { .. } => {
+                    if !menu.audition_started(lease_id) {
+                        let _ = control_request(&ControlRequest::EndAudition { lease_id });
+                        return Err("el menú perdió el draft de audition".into());
+                    }
+                    println!(
+                        "AUDITION_STARTED lease={lease_id} program={:?} name={draft_name:?}",
+                        program_id
+                    );
+                    Ok(true)
                 }
+                ControlResponse::Error { message } => {
+                    let _ = control_request(&ControlRequest::EndAudition { lease_id });
+                    Err(message)
+                }
+                _ => {
+                    let _ = control_request(&ControlRequest::EndAudition { lease_id });
+                    Err("respuesta inesperada al preparar audition".into())
+                }
+            }
+        }
+        menu::MenuCommand::EndAudition { lease_id } => {
+            match control_request(&ControlRequest::EndAudition { lease_id })? {
+                ControlResponse::AuditionEnded => {
+                    menu.audition_ended();
+                    refresh_live_catalog(menu)?;
+                    println!("AUDITION_ENDED lease={lease_id}");
+                    Ok(true)
+                }
+                ControlResponse::Error { message } => Err(message),
+                _ => Err("respuesta inesperada al terminar audition".into()),
             }
         }
     }
@@ -934,7 +994,15 @@ fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
 
 #[cfg(not(target_os = "linux"))]
 fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
-    Ok(menu.take_command().is_some())
+    match menu.take_command() {
+        Some(menu::MenuCommand::BeginAudition { .. }) => Ok(menu.audition_started(1)),
+        Some(menu::MenuCommand::EndAudition { .. }) => {
+            menu.audition_ended();
+            Ok(true)
+        }
+        Some(menu::MenuCommand::SelectSound { .. }) => Ok(true),
+        None => Ok(false),
+    }
 }
 
 fn acquire_screen(
@@ -1251,13 +1319,6 @@ mod tests {
             "KL Essential 61 mk3:KL Essential 61 mk3 MCU/HUI 28:2"
         ));
         assert!(!is_keylab_midi("KL Essential 61 mk3 ALV"));
-    }
-
-    #[test]
-    fn recognizes_only_numeric_alsa_suffixes() {
-        assert!(is_alsa_address("28:0"));
-        assert!(!is_alsa_address("MIDI"));
-        assert!(!is_alsa_address("28:MIDI"));
     }
 
     #[test]

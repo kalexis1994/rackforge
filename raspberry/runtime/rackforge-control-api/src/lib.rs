@@ -10,6 +10,8 @@ pub struct SoundSummary {
     pub id: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bank: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
 
@@ -19,6 +21,8 @@ pub struct LiveSnapshot {
     pub schema_version: u32,
     pub plugin_id: String,
     pub plugin_name: String,
+    #[serde(default)]
+    pub ui_layouts: Vec<String>,
     pub sounds: Vec<SoundSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_sound_id: Option<String>,
@@ -29,6 +33,9 @@ pub struct LiveSnapshot {
 pub enum ControlRequest {
     Snapshot,
     SelectSound { id: String },
+    BeginAudition { plugin_id: String },
+    KeepAuditionAlive { lease_id: u64 },
+    EndAudition { lease_id: u64 },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -36,6 +43,9 @@ pub enum ControlRequest {
 pub enum ControlResponse {
     Snapshot { snapshot: LiveSnapshot },
     Ok { selected_sound_id: String },
+    AuditionGranted { lease_id: u64 },
+    AuditionKeptAlive { lease_id: u64 },
+    AuditionEnded,
     Error { message: String },
 }
 
@@ -75,9 +85,11 @@ mod tests {
                 schema_version: CONTROL_SCHEMA_VERSION,
                 plugin_id: "org.rackforge.rf-dls".into(),
                 plugin_name: "RF-DLS".into(),
+                ui_layouts: vec!["little@1".into()],
                 sounds: vec![SoundSummary {
                     id: "dls.b00000000.p00000000".into(),
                     name: "Piano 1".into(),
+                    bank: Some("dls".into()),
                     detail: Some("B000 P000".into()),
                 }],
                 selected_sound_id: Some("dls.b00000000.p00000000".into()),
@@ -87,5 +99,21 @@ mod tests {
             decode_response(&encode_line(&response).unwrap()).unwrap(),
             response
         );
+    }
+
+    #[test]
+    fn audition_lease_requests_round_trip() {
+        for request in [
+            ControlRequest::BeginAudition {
+                plugin_id: "org.rackforge.rf-dls".into(),
+            },
+            ControlRequest::KeepAuditionAlive { lease_id: 42 },
+            ControlRequest::EndAudition { lease_id: 42 },
+        ] {
+            assert_eq!(
+                decode_request(&encode_line(&request).unwrap()).unwrap(),
+                request
+            );
+        }
     }
 }

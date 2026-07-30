@@ -5,8 +5,13 @@ use thiserror::Error;
 
 const DLS_DRUM_BANK: u32 = 0x8000_0000;
 const CONN_SRC_NONE: u16 = 0x0000;
+const CONN_SRC_LFO: u16 = 0x0001;
 const CONN_SRC_EG2: u16 = 0x0005;
+const CONN_SRC_CC1: u16 = 0x0081;
+const CONN_DST_ATTENUATION: u16 = 0x0001;
 const CONN_DST_PITCH: u16 = 0x0003;
+const CONN_DST_LFO_FREQUENCY: u16 = 0x0104;
+const CONN_DST_LFO_STARTDELAY: u16 = 0x0105;
 const CONN_DST_EG1_ATTACKTIME: u16 = 0x0206;
 const CONN_DST_EG1_DECAYTIME: u16 = 0x0207;
 const CONN_DST_EG1_RELEASETIME: u16 = 0x0209;
@@ -270,6 +275,29 @@ impl Default for PitchEnvelopeSpec {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct LfoSpec {
+    pub frequency_hz: f32,
+    pub delay_seconds: f32,
+    pub pitch_depth_cents: f32,
+    pub mod_wheel_pitch_depth_cents: f32,
+    pub attenuation_depth_centibels: f32,
+    pub mod_wheel_attenuation_depth_centibels: f32,
+}
+
+impl Default for LfoSpec {
+    fn default() -> Self {
+        Self {
+            frequency_hz: 5.0,
+            delay_seconds: 0.01,
+            pitch_depth_cents: 0.0,
+            mod_wheel_pitch_depth_cents: 0.0,
+            attenuation_depth_centibels: 0.0,
+            mod_wheel_attenuation_depth_centibels: 0.0,
+        }
+    }
+}
+
 fn timecents_to_seconds(raw: i32) -> f32 {
     if raw == i32::MIN {
         0.0
@@ -279,6 +307,11 @@ fn timecents_to_seconds(raw: i32) -> f32 {
     }
 }
 
+fn absolute_pitch_cents_to_hz(raw: i32) -> f32 {
+    let cents = raw as f32 / 65_536.0;
+    440.0 * 2.0_f32.powf((cents - 6_900.0) / 1_200.0)
+}
+
 fn sustain_level(raw: i32) -> f32 {
     (raw as f32 / 65_536.0 / 1_000.0).clamp(0.0, 1.0)
 }
@@ -286,6 +319,7 @@ fn sustain_level(raw: i32) -> f32 {
 fn apply_articulation_connection(
     amplitude: &mut EnvelopeSpec,
     pitch: &mut PitchEnvelopeSpec,
+    lfo: &mut LfoSpec,
     source: u16,
     control: u16,
     destination: u16,
@@ -317,6 +351,22 @@ fn apply_articulation_connection(
             pitch.envelope.sustain_level = sustain_level(scale)
         }
         (CONN_SRC_EG2, 0, CONN_DST_PITCH) => pitch.depth_cents = scale as f32 / 65_536.0,
+        (CONN_SRC_NONE, 0, CONN_DST_LFO_FREQUENCY) => {
+            lfo.frequency_hz = absolute_pitch_cents_to_hz(scale)
+        }
+        (CONN_SRC_NONE, 0, CONN_DST_LFO_STARTDELAY) => {
+            lfo.delay_seconds = timecents_to_seconds(scale)
+        }
+        (CONN_SRC_LFO, 0, CONN_DST_PITCH) => lfo.pitch_depth_cents = scale as f32 / 65_536.0,
+        (CONN_SRC_LFO, CONN_SRC_CC1, CONN_DST_PITCH) => {
+            lfo.mod_wheel_pitch_depth_cents = scale as f32 / 65_536.0
+        }
+        (CONN_SRC_LFO, 0, CONN_DST_ATTENUATION) => {
+            lfo.attenuation_depth_centibels = scale as f32 / 65_536.0
+        }
+        (CONN_SRC_LFO, CONN_SRC_CC1, CONN_DST_ATTENUATION) => {
+            lfo.mod_wheel_attenuation_depth_centibels = scale as f32 / 65_536.0
+        }
         _ => {}
     }
 }
@@ -324,17 +374,18 @@ fn apply_articulation_connection(
 fn parse_articulation(
     container: &Chunk,
     bytes: &[u8],
-) -> Result<(EnvelopeSpec, PitchEnvelopeSpec), DlsError> {
+) -> Result<(EnvelopeSpec, PitchEnvelopeSpec, LfoSpec), DlsError> {
     let mut amplitude = EnvelopeSpec::default();
     let mut pitch = PitchEnvelopeSpec::default();
+    let mut lfo = LfoSpec::default();
     let Some(articulators) = container.list(b"lar2").or_else(|| container.list(b"lart")) else {
-        return Ok((amplitude, pitch));
+        return Ok((amplitude, pitch, lfo));
     };
     let Some(art) = articulators
         .child(b"art2")
         .or_else(|| articulators.child(b"art1"))
     else {
-        return Ok((amplitude, pitch));
+        return Ok((amplitude, pitch, lfo));
     };
     let data = art.data(bytes);
     require_size(data, 8, "articulator")?;
@@ -357,13 +408,14 @@ fn parse_articulation(
         apply_articulation_connection(
             &mut amplitude,
             &mut pitch,
+            &mut lfo,
             source,
             control,
             destination,
             scale,
         );
     }
-    Ok((amplitude, pitch))
+    Ok((amplitude, pitch, lfo))
 }
 
 #[derive(Clone, Debug)]
@@ -385,6 +437,7 @@ pub struct Instrument {
     pub regions: Vec<Region>,
     pub envelope: EnvelopeSpec,
     pub pitch_envelope: PitchEnvelopeSpec,
+    pub lfo: LfoSpec,
 }
 
 impl Instrument {
@@ -582,7 +635,7 @@ fn parse_instrument(
             regions.len()
         )));
     }
-    let (envelope, pitch_envelope) = parse_articulation(chunk, bytes)?;
+    let (envelope, pitch_envelope, lfo) = parse_articulation(chunk, bytes)?;
     Ok(Instrument {
         name: info_name(chunk, bytes),
         bank,
@@ -590,6 +643,7 @@ fn parse_instrument(
         regions,
         envelope,
         pitch_envelope,
+        lfo,
     })
 }
 
@@ -836,6 +890,10 @@ pub struct Voice {
     envelope: AmplitudeEnvelope,
     pitch_envelope: Envelope,
     pitch_depth_cents: f32,
+    lfo: LfoSpec,
+    lfo_phase: f32,
+    lfo_delay_frames: usize,
+    output_rate: f32,
     finished: bool,
 }
 
@@ -847,6 +905,26 @@ impl Voice {
         note: u8,
         velocity: u8,
         output_rate: u32,
+    ) -> Result<Self, DlsError> {
+        Self::new_with_envelope(
+            bank,
+            instrument,
+            region,
+            note,
+            velocity,
+            output_rate,
+            instrument.envelope,
+        )
+    }
+
+    pub fn new_with_envelope(
+        bank: &DlsBank,
+        instrument: &Instrument,
+        region: &Region,
+        note: u8,
+        velocity: u8,
+        output_rate: u32,
+        envelope: EnvelopeSpec,
     ) -> Result<Self, DlsError> {
         let wave = &bank.waves[region.wave_index];
         let params = region.sample_params.or(wave.sample_params).ok_or_else(|| {
@@ -885,9 +963,15 @@ impl Voice {
             base_increment,
             sample_loop: params.sample_loop,
             gain: attenuation * velocity_gain,
-            envelope: AmplitudeEnvelope::new(instrument.envelope, output_rate),
+            envelope: AmplitudeEnvelope::new(envelope, output_rate),
             pitch_envelope: Envelope::new(instrument.pitch_envelope.envelope, output_rate),
             pitch_depth_cents: instrument.pitch_envelope.depth_cents,
+            lfo: instrument.lfo,
+            lfo_phase: 0.0,
+            lfo_delay_frames: (instrument.lfo.delay_seconds * output_rate as f32)
+                .max(0.0)
+                .round() as usize,
+            output_rate: output_rate as f32,
             finished: false,
         })
     }
@@ -902,6 +986,10 @@ impl Voice {
     }
 
     pub fn next_sample(&mut self) -> f32 {
+        self.next_sample_modulated(0.0, 0.0)
+    }
+
+    pub fn next_sample_modulated(&mut self, pitch_bend_cents: f32, modulation_wheel: f32) -> f32 {
         if self.is_finished() {
             return 0.0;
         }
@@ -926,10 +1014,26 @@ impl Voice {
             self.sample_loop.map_or(index, |looping| looping.start)
         };
         let sample = self.samples[index] + (self.samples[next] - self.samples[index]) * fraction;
-        let pitch_cents = self.pitch_depth_cents * self.pitch_envelope.next_gain();
+        let mut pitch_cents =
+            pitch_bend_cents + self.pitch_depth_cents * self.pitch_envelope.next_gain();
+        let mut lfo_attenuation_centibels = 0.0;
+        if self.lfo_delay_frames > 0 {
+            self.lfo_delay_frames -= 1;
+        } else {
+            let lfo_value = 1.0 - 4.0 * (self.lfo_phase - 0.5).abs();
+            self.lfo_phase = (self.lfo_phase + self.lfo.frequency_hz / self.output_rate).fract();
+            let modulation_wheel = modulation_wheel.clamp(0.0, 1.0);
+            pitch_cents += lfo_value
+                * (self.lfo.pitch_depth_cents
+                    + modulation_wheel * self.lfo.mod_wheel_pitch_depth_cents);
+            lfo_attenuation_centibels = -lfo_value
+                * (self.lfo.attenuation_depth_centibels
+                    + modulation_wheel * self.lfo.mod_wheel_attenuation_depth_centibels);
+        }
         let pitch_ratio = 2.0_f64.powf(f64::from(pitch_cents) / 1_200.0);
         self.position += self.base_increment * pitch_ratio;
-        sample * self.gain * self.envelope.next_gain()
+        let lfo_gain = 10.0_f32.powf(-lfo_attenuation_centibels / 200.0);
+        sample * self.gain * self.envelope.next_gain() * lfo_gain
     }
 }
 
@@ -974,15 +1078,34 @@ mod tests {
     fn parses_eg2_pitch_depth_in_cents() {
         let mut amplitude = EnvelopeSpec::default();
         let mut pitch = PitchEnvelopeSpec::default();
+        let mut lfo = LfoSpec::default();
         apply_articulation_connection(
             &mut amplitude,
             &mut pitch,
+            &mut lfo,
             CONN_SRC_EG2,
             CONN_SRC_NONE,
             CONN_DST_PITCH,
             102 * 65_536,
         );
         assert_eq!(pitch.depth_cents, 102.0);
+    }
+
+    #[test]
+    fn parses_mod_wheel_lfo_pitch_depth() {
+        let mut amplitude = EnvelopeSpec::default();
+        let mut pitch = PitchEnvelopeSpec::default();
+        let mut lfo = LfoSpec::default();
+        apply_articulation_connection(
+            &mut amplitude,
+            &mut pitch,
+            &mut lfo,
+            CONN_SRC_LFO,
+            CONN_SRC_CC1,
+            CONN_DST_PITCH,
+            50 * 65_536,
+        );
+        assert_eq!(lfo.mod_wheel_pitch_depth_cents, 50.0);
     }
 
     #[test]
@@ -1011,6 +1134,7 @@ mod tests {
                     envelope: EnvelopeSpec::pitch_default(),
                     depth_cents: 1_200.0,
                 },
+                lfo: LfoSpec::default(),
             }],
             waves: vec![Wave {
                 name: "Synthetic".into(),
@@ -1049,6 +1173,7 @@ mod tests {
                 }],
                 envelope: EnvelopeSpec::default(),
                 pitch_envelope: PitchEnvelopeSpec::default(),
+                lfo: LfoSpec::default(),
             }],
             waves: vec![Wave {
                 name: "Synthetic".into(),
@@ -1062,6 +1187,91 @@ mod tests {
             Voice::new(&bank, instrument, &instrument.regions[0], 60, 127, 48_000).unwrap();
         voice.next_sample();
         assert!((voice.position - 2.0_f64.powf(1.0 / 12.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn live_pitch_bend_modulates_an_existing_voice() {
+        let bank = DlsBank {
+            instruments: vec![Instrument {
+                name: "Pitch bend".into(),
+                bank: 0,
+                program: 0,
+                regions: vec![Region {
+                    key_low: 0,
+                    key_high: 127,
+                    velocity_low: 0,
+                    velocity_high: 127,
+                    wave_index: 0,
+                    key_group: 0,
+                    sample_params: Some(SampleParams {
+                        unity_note: 60,
+                        fine_tune: 0,
+                        attenuation_db: 0.0,
+                        sample_loop: None,
+                    }),
+                }],
+                envelope: EnvelopeSpec::default(),
+                pitch_envelope: PitchEnvelopeSpec::default(),
+                lfo: LfoSpec::default(),
+            }],
+            waves: vec![Wave {
+                name: "Synthetic".into(),
+                sample_rate: 48_000,
+                samples: Arc::from(vec![0.0; 32]),
+                sample_params: None,
+            }],
+        };
+        let instrument = &bank.instruments[0];
+        let mut voice =
+            Voice::new(&bank, instrument, &instrument.regions[0], 60, 127, 48_000).unwrap();
+        voice.next_sample_modulated(1_200.0, 0.0);
+        assert!((voice.position - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mod_wheel_scales_dls_lfo_pitch_depth() {
+        let bank = DlsBank {
+            instruments: vec![Instrument {
+                name: "Mod wheel".into(),
+                bank: 0,
+                program: 0,
+                regions: vec![Region {
+                    key_low: 0,
+                    key_high: 127,
+                    velocity_low: 0,
+                    velocity_high: 127,
+                    wave_index: 0,
+                    key_group: 0,
+                    sample_params: Some(SampleParams {
+                        unity_note: 60,
+                        fine_tune: 0,
+                        attenuation_db: 0.0,
+                        sample_loop: None,
+                    }),
+                }],
+                envelope: EnvelopeSpec::default(),
+                pitch_envelope: PitchEnvelopeSpec::default(),
+                lfo: LfoSpec {
+                    frequency_hz: 0.0,
+                    delay_seconds: 0.0,
+                    pitch_depth_cents: 0.0,
+                    mod_wheel_pitch_depth_cents: 1_200.0,
+                    attenuation_depth_centibels: 0.0,
+                    mod_wheel_attenuation_depth_centibels: 0.0,
+                },
+            }],
+            waves: vec![Wave {
+                name: "Synthetic".into(),
+                sample_rate: 48_000,
+                samples: Arc::from(vec![0.0; 32]),
+                sample_params: None,
+            }],
+        };
+        let instrument = &bank.instruments[0];
+        let mut voice =
+            Voice::new(&bank, instrument, &instrument.regions[0], 60, 127, 48_000).unwrap();
+        voice.next_sample_modulated(0.0, 1.0);
+        assert!((voice.position - 0.5).abs() < 1e-6);
     }
 
     #[test]

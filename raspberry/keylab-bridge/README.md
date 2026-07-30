@@ -2,6 +2,12 @@
 
 Puente seguro entre rackforge y el Arturia KeyLab Essential 61 mk3.
 
+El bridge contiene el primer `ControllerDriver` certificado. El perfil
+`arturia.keylab-essential-mk3` ofrece exclusivamente `little@1`; la apertura de
+la sesión SysEx vuelve a validar driver y layout incluso cuando el usuario
+indica un puerto manualmente. Un endpoint desconocido nunca recibe comandos de
+pantalla.
+
 La primera etapa reproduce la prueba de pantalla con Rust y `midir`. Detecta
 automáticamente el endpoint terminado en `MIDI`, hace dry-run por defecto y
 restaura la pantalla y el programa Arturia al finalizar.
@@ -32,8 +38,10 @@ SysEx. La jerarquía inicial es:
 - `PLAY`: navegador de addons que abre la sección de ejecución del elegido;
 - `CONFIG`: addons, setlists, audio y sistema;
 - `ADDONS`: selección del addon que se va a configurar;
-- `RF-DLS PLAY`: sonidos tocables que ofrece RF-DLS;
-- `RF-DLS CONFIG`: páginas propias del addon, entre ellas su envolvente ADSR.
+- `RF-DLS PLAY`: selector de colección `DLS` o `CUSTOM`, seguido por sus
+  programas tocables;
+- `RF-DLS CONFIG`: `ADD NEW`, los CUSTOM existentes y las secciones `TIMBRE`,
+  `EXPRESSION`, `ENVELOPE`, `TUNING`, `FX` y `OUTPUT`.
 
 `LIVE` nunca pertenece a RF-DLS ni a otro addon: carga programas de RackForge
 que pueden combinar varias instancias y efectos. RF-DLS tiene dos rutas
@@ -51,8 +59,14 @@ por el addon a Core. El bridge consulta `live-control.sock` mediante
 con OK. Nunca abre el `.dls`, no conoce bancos MIDI y normaliza texto no ASCII
 a los 18 caracteres seguros del display.
 
-La envolvente no es una configuración global. Sus valores pertenecen a la
-instancia de RF-DLS abierta desde CONFIG. A medida que el menú se conecte con
+La entrada al editor adquiere una lease exclusiva de audition. En `ADD NEW` el
+nombre provisional se genera como `CUSTOM NNN` y se preselecciona el primer
+timbre DLS; así el draft nunca carece de los dos requisitos mínimos de guardado.
+El bridge renueva la lease con su heartbeat. `BACK`, una desconexión o el
+timeout del motor devuelven el foco y restauran el sonido anterior.
+
+La envolvente no es una configuración global. Sus valores pertenecen al
+programa CUSTOM abierto desde CONFIG. A medida que el menú se conecte con
 `rackforge-core`, cada addon declarará sus páginas y parámetros mediante la
 Plugin API en lugar de agregarlos al árbol global.
 

@@ -1,10 +1,11 @@
+use rackforge_controller_api::LITTLE_TEXT_COLUMNS;
 pub use rackforge_ui::Input;
 use rackforge_ui::{
     Component, ComponentEvent, Frame, NavigationAction as Action, Rect, TextFallback, VisualState,
     components::{Button, CarouselItem, EditableValue, SimpleCarousel, ValueCarousel, ValueItem},
 };
 
-pub const DISPLAY_COLUMNS: usize = 18;
+pub const DISPLAY_COLUMNS: usize = LITTLE_TEXT_COLUMNS;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Header {
@@ -30,14 +31,21 @@ pub struct Screen {
 pub struct PlaySound {
     pub id: String,
     pub name: String,
+    pub bank: String,
     pub detail: String,
 }
 
 impl PlaySound {
-    pub fn new(id: impl Into<String>, name: impl Into<String>, detail: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        bank: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             name: normalized_display_text(&name.into(), "UNNAMED").to_ascii_uppercase(),
+            bank: bank.into(),
             detail: normalized_display_text(&detail.into(), " "),
         }
     }
@@ -45,7 +53,17 @@ impl PlaySound {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MenuCommand {
-    SelectSound { id: String },
+    SelectSound {
+        id: String,
+    },
+    BeginAudition {
+        preview_sound_id: String,
+        draft_name: String,
+        program_id: Option<String>,
+    },
+    EndAudition {
+        lease_id: u64,
+    },
 }
 
 impl Screen {
@@ -121,9 +139,23 @@ enum Page {
     Play,
     Config,
     Addons,
+    RfDlsLibrary,
     RfDlsPlay,
-    RfDlsConfig,
+    RfDlsCustomPrograms,
+    RfDlsProgramSections,
+    RfDlsTimbre,
+    RfDlsExpression,
     RfDlsEnvelope,
+    RfDlsTuning,
+    RfDlsFx,
+    RfDlsOutput,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ProgramDraft {
+    program_id: Option<String>,
+    name: String,
+    base_sound_id: String,
 }
 
 #[derive(Debug)]
@@ -134,10 +166,16 @@ pub struct Menu {
     play_index: usize,
     config_index: usize,
     addon_index: usize,
+    rf_dls_library_index: usize,
     rf_dls_play_index: usize,
-    rf_dls_config_index: usize,
+    rf_dls_custom_index: usize,
+    rf_dls_section_index: usize,
+    rf_dls_timbre_index: usize,
     rf_dls_sounds: Vec<PlaySound>,
     rf_dls_active_sound_id: Option<String>,
+    audition_lease_id: Option<u64>,
+    pending_draft: Option<ProgramDraft>,
+    program_draft: Option<ProgramDraft>,
     envelope: ValueCarousel,
     pressed_button: Option<usize>,
     pending_command: Option<MenuCommand>,
@@ -158,12 +196,16 @@ const CONFIG_DETAILS: [&str; 4] = [
 ];
 const ADDON_ITEMS: [&str; 1] = ["RF-DLS"];
 const ADDON_DETAILS: [&str; 1] = [" "];
-const RF_DLS_CONFIG_ITEMS: [&str; 4] = ["ENVELOPE", "VOLUME", "BANK", "EFFECTS"];
-const RF_DLS_CONFIG_DETAILS: [&str; 4] = [
-    "DLS voice shape",
-    "Master output",
-    "gm.dls resource",
+const RF_DLS_LIBRARIES: [&str; 2] = ["DLS", "CUSTOM"];
+const RF_DLS_PROGRAM_SECTIONS: [&str; 6] =
+    ["TIMBRE", "EXPRESSION", "ENVELOPE", "TUNING", "FX", "OUTPUT"];
+const RF_DLS_SECTION_DETAILS: [&str; 6] = [
+    "Base DLS sound",
+    "Wheel and pedals",
+    "ADSR override",
+    "Pitch and octave",
     "Chorus / reverb",
+    "Level and pan",
 ];
 
 impl Default for Menu {
@@ -175,14 +217,21 @@ impl Default for Menu {
             play_index: 0,
             config_index: 0,
             addon_index: 0,
+            rf_dls_library_index: 0,
             rf_dls_play_index: 0,
-            rf_dls_config_index: 0,
+            rf_dls_custom_index: 0,
+            rf_dls_section_index: 0,
+            rf_dls_timbre_index: 0,
             rf_dls_sounds: vec![PlaySound::new(
                 "dls.b00000000.p00000000",
                 "PIANO 1",
+                "dls",
                 "B000 P000",
             )],
             rf_dls_active_sound_id: Some("dls.b00000000.p00000000".into()),
+            audition_lease_id: None,
+            pending_draft: None,
+            program_draft: None,
             envelope: envelope_carousel(),
             pressed_button: None,
             pending_command: None,
@@ -193,30 +242,53 @@ impl Default for Menu {
 impl Menu {
     pub fn set_play_sounds(&mut self, sounds: Vec<PlaySound>, selected_sound_id: Option<&str>) {
         let browsed_sound_id = self
-            .rf_dls_sounds
+            .filtered_sounds()
             .get(self.rf_dls_play_index)
             .map(|sound| sound.id.clone());
         self.rf_dls_sounds = sounds;
         self.rf_dls_active_sound_id = selected_sound_id.map(str::to_owned);
-        self.rf_dls_play_index = browsed_sound_id
-            .as_deref()
-            .and_then(|browsed| {
-                self.rf_dls_sounds
+        let focus_id = browsed_sound_id.as_deref().or(selected_sound_id);
+        if let Some(sound) =
+            focus_id.and_then(|id| self.rf_dls_sounds.iter().find(|sound| sound.id == id))
+        {
+            self.rf_dls_library_index = library_index(&sound.bank).unwrap_or(0);
+        }
+        self.rf_dls_play_index = focus_id
+            .and_then(|id| {
+                self.filtered_sounds()
                     .iter()
-                    .position(|sound| sound.id == browsed)
-            })
-            .or_else(|| {
-                selected_sound_id.and_then(|selected| {
-                    self.rf_dls_sounds
-                        .iter()
-                        .position(|sound| sound.id == selected)
-                })
+                    .position(|sound| sound.id == id)
             })
             .unwrap_or(0);
     }
 
     pub fn take_command(&mut self) -> Option<MenuCommand> {
         self.pending_command.take()
+    }
+
+    pub fn audition_lease_id(&self) -> Option<u64> {
+        self.audition_lease_id
+    }
+
+    pub fn audition_started(&mut self, lease_id: u64) -> bool {
+        let Some(draft) = self.pending_draft.take() else {
+            return false;
+        };
+        if draft.name.trim().is_empty() || draft.base_sound_id.is_empty() {
+            return false;
+        }
+        self.audition_lease_id = Some(lease_id);
+        self.program_draft = Some(draft);
+        self.rf_dls_section_index = 0;
+        self.page = Page::RfDlsProgramSections;
+        true
+    }
+
+    pub fn audition_ended(&mut self) {
+        self.audition_lease_id = None;
+        self.pending_draft = None;
+        self.program_draft = None;
+        self.page = Page::RfDlsCustomPrograms;
     }
 
     pub fn set_button_pressed(&mut self, input: Input, pressed: bool) -> bool {
@@ -247,6 +319,36 @@ impl Menu {
         }
     }
 
+    fn begin_program_edit(&mut self) {
+        let dls_sounds = self.dls_sounds();
+        let Some(first_dls) = dls_sounds.first() else {
+            return;
+        };
+        let custom_sounds = self.custom_sounds();
+        let draft = if self.rf_dls_custom_index == 0 {
+            ProgramDraft {
+                program_id: None,
+                name: format!("CUSTOM {:03}", custom_sounds.len() + 1),
+                base_sound_id: first_dls.id.clone(),
+            }
+        } else {
+            let Some(program) = custom_sounds.get(self.rf_dls_custom_index - 1) else {
+                return;
+            };
+            ProgramDraft {
+                program_id: Some(program.id.clone()),
+                name: program.name.clone(),
+                base_sound_id: program.id.clone(),
+            }
+        };
+        self.pending_command = Some(MenuCommand::BeginAudition {
+            preview_sound_id: draft.base_sound_id.clone(),
+            draft_name: draft.name.clone(),
+            program_id: draft.program_id.clone(),
+        });
+        self.pending_draft = Some(draft);
+    }
+
     pub fn apply_input_and_render(&mut self, input: Input) -> Screen {
         self.apply_input(input);
         self.render()
@@ -268,8 +370,22 @@ impl Menu {
             Action::Next => self.move_selection(1),
             Action::Back => {
                 self.page = match self.page {
-                    Page::RfDlsPlay => Page::Play,
-                    Page::RfDlsConfig => Page::Addons,
+                    Page::RfDlsPlay => Page::RfDlsLibrary,
+                    Page::RfDlsLibrary => Page::Play,
+                    Page::RfDlsCustomPrograms => Page::Addons,
+                    Page::RfDlsTimbre
+                    | Page::RfDlsExpression
+                    | Page::RfDlsEnvelope
+                    | Page::RfDlsTuning
+                    | Page::RfDlsFx
+                    | Page::RfDlsOutput => Page::RfDlsProgramSections,
+                    Page::RfDlsProgramSections => {
+                        if let Some(lease_id) = self.audition_lease_id {
+                            self.pending_command = Some(MenuCommand::EndAudition { lease_id });
+                            return;
+                        }
+                        Page::RfDlsCustomPrograms
+                    }
                     Page::Addons => Page::Config,
                     Page::Home => Page::Home,
                     _ => Page::Home,
@@ -277,7 +393,7 @@ impl Menu {
             }
             Action::Select => {
                 if self.page == Page::RfDlsPlay {
-                    if let Some(sound) = self.rf_dls_sounds.get(self.rf_dls_play_index) {
+                    if let Some(sound) = self.filtered_sounds().get(self.rf_dls_play_index) {
                         self.pending_command = Some(MenuCommand::SelectSound {
                             id: sound.id.clone(),
                         });
@@ -290,10 +406,38 @@ impl Menu {
                         1 => Page::Play,
                         _ => Page::Config,
                     },
-                    Page::Play if self.play_index == 0 => Page::RfDlsPlay,
+                    Page::Play if self.play_index == 0 => Page::RfDlsLibrary,
+                    Page::RfDlsLibrary => {
+                        self.rf_dls_play_index = 0;
+                        Page::RfDlsPlay
+                    }
                     Page::Config if self.config_index == 0 => Page::Addons,
-                    Page::Addons if self.addon_index == 0 => Page::RfDlsConfig,
-                    Page::RfDlsConfig if self.rf_dls_config_index == 0 => Page::RfDlsEnvelope,
+                    Page::Addons if self.addon_index == 0 => Page::RfDlsCustomPrograms,
+                    Page::RfDlsCustomPrograms => {
+                        self.begin_program_edit();
+                        Page::RfDlsCustomPrograms
+                    }
+                    Page::RfDlsProgramSections => match self.rf_dls_section_index {
+                        0 => Page::RfDlsTimbre,
+                        1 => Page::RfDlsExpression,
+                        2 => Page::RfDlsEnvelope,
+                        3 => Page::RfDlsTuning,
+                        4 => Page::RfDlsFx,
+                        _ => Page::RfDlsOutput,
+                    },
+                    Page::RfDlsTimbre => {
+                        let sound_id = self
+                            .dls_sounds()
+                            .get(self.rf_dls_timbre_index)
+                            .map(|sound| sound.id.clone());
+                        if let Some(sound_id) = sound_id {
+                            if let Some(draft) = self.program_draft.as_mut() {
+                                draft.base_sound_id = sound_id.clone();
+                            }
+                            self.pending_command = Some(MenuCommand::SelectSound { id: sound_id });
+                        }
+                        Page::RfDlsTimbre
+                    }
                     page => page,
                 };
             }
@@ -330,21 +474,30 @@ impl Menu {
                 &ADDON_DETAILS,
                 self.addon_index,
             ),
+            Page::RfDlsLibrary => self.render_rf_dls_library(),
             Page::RfDlsPlay => self.render_rf_dls_play(),
-            Page::RfDlsConfig => simple_screen(
+            Page::RfDlsCustomPrograms => self.render_custom_programs(),
+            Page::RfDlsProgramSections => simple_screen(
                 indexed_title(
-                    "RF-DLS CONFIG",
-                    self.rf_dls_config_index,
-                    RF_DLS_CONFIG_ITEMS.len(),
+                    self.program_draft
+                        .as_ref()
+                        .map_or("PROGRAM", |draft| draft.name.as_str()),
+                    self.rf_dls_section_index,
+                    RF_DLS_PROGRAM_SECTIONS.len(),
                 ),
-                &RF_DLS_CONFIG_ITEMS,
-                &RF_DLS_CONFIG_DETAILS,
-                self.rf_dls_config_index,
+                &RF_DLS_PROGRAM_SECTIONS,
+                &RF_DLS_SECTION_DETAILS,
+                self.rf_dls_section_index,
             ),
+            Page::RfDlsTimbre => self.render_timbre(),
+            Page::RfDlsExpression => Screen::with_header("EXPRESSION", "MOD WHEEL", "DEPTH 100%"),
             Page::RfDlsEnvelope => {
                 let [line_1, line_2] = component_lines(&self.envelope, true);
                 Screen::fullscreen(line_1, line_2)
             }
+            Page::RfDlsTuning => Screen::with_header("TUNING", "TRANSPOSE", "0 st"),
+            Page::RfDlsFx => Screen::with_header("FX", "REVERB", "0%"),
+            Page::RfDlsOutput => Screen::with_header("OUTPUT", "LEVEL", "100%"),
         };
         screen.footer = standard_footer(self.pressed_button);
         screen
@@ -357,9 +510,26 @@ impl Menu {
             Page::Play => (&mut self.play_index, PLAY_ITEMS.len()),
             Page::Config => (&mut self.config_index, CONFIG_ITEMS.len()),
             Page::Addons => (&mut self.addon_index, ADDON_ITEMS.len()),
-            Page::RfDlsPlay if self.rf_dls_sounds.is_empty() => return,
-            Page::RfDlsPlay => (&mut self.rf_dls_play_index, self.rf_dls_sounds.len()),
-            Page::RfDlsConfig => (&mut self.rf_dls_config_index, RF_DLS_CONFIG_ITEMS.len()),
+            Page::RfDlsLibrary => (&mut self.rf_dls_library_index, RF_DLS_LIBRARIES.len()),
+            Page::RfDlsPlay if self.filtered_sounds().is_empty() => return,
+            Page::RfDlsPlay => {
+                let len = self.filtered_sounds().len();
+                (&mut self.rf_dls_play_index, len)
+            }
+            Page::RfDlsCustomPrograms => {
+                let len = self.custom_sounds().len() + 1;
+                (&mut self.rf_dls_custom_index, len)
+            }
+            Page::RfDlsProgramSections => (
+                &mut self.rf_dls_section_index,
+                RF_DLS_PROGRAM_SECTIONS.len(),
+            ),
+            Page::RfDlsTimbre if self.dls_sounds().is_empty() => return,
+            Page::RfDlsTimbre => {
+                let len = self.dls_sounds().len();
+                (&mut self.rf_dls_timbre_index, len)
+            }
+            Page::RfDlsExpression | Page::RfDlsTuning | Page::RfDlsFx | Page::RfDlsOutput => return,
             Page::RfDlsEnvelope => return,
         };
         *selection = ((*selection as isize + delta).rem_euclid(len as isize)) as usize;
@@ -370,17 +540,19 @@ impl Menu {
             self.envelope.handle(input),
             ComponentEvent::ExitRequested(_)
         ) {
-            self.page = Page::RfDlsConfig;
+            self.page = Page::RfDlsProgramSections;
         }
     }
 
     fn render_rf_dls_play(&self) -> Screen {
-        if self.rf_dls_sounds.is_empty() {
-            return Screen::with_header("RF-DLS PLAY", "NO SOUNDS", " ");
+        let sounds = self.filtered_sounds();
+        let library = RF_DLS_LIBRARIES[self.rf_dls_library_index];
+        if sounds.is_empty() {
+            return Screen::with_header(library, "NO PROGRAMS", " ");
         }
         let mut carousel = SimpleCarousel::new(
             "rf-dls-sounds",
-            self.rf_dls_sounds.iter().map(|sound| {
+            sounds.iter().map(|sound| {
                 let name = if self.rf_dls_active_sound_id.as_deref() == Some(sound.id.as_str()) {
                     let bounded = sound
                         .name
@@ -398,15 +570,116 @@ impl Menu {
         carousel.set_focused(true);
         let [line_1, line_2] = component_lines(&carousel, false);
         Screen::with_header(
-            indexed_title(
-                "RF-DLS PLAY",
-                self.rf_dls_play_index,
-                self.rf_dls_sounds.len(),
-            ),
+            indexed_title(library, self.rf_dls_play_index, sounds.len()),
             line_1,
             line_2,
         )
     }
+
+    fn render_rf_dls_library(&self) -> Screen {
+        let counts = RF_DLS_LIBRARIES.map(|library| {
+            let bank = library.to_ascii_lowercase();
+            format!(
+                "{} PROGRAMS",
+                self.rf_dls_sounds
+                    .iter()
+                    .filter(|sound| sound.bank == bank)
+                    .count()
+            )
+        });
+        let details = counts.iter().map(String::as_str).collect::<Vec<_>>();
+        simple_screen(
+            indexed_title(
+                "RF-DLS PLAY",
+                self.rf_dls_library_index,
+                RF_DLS_LIBRARIES.len(),
+            ),
+            &RF_DLS_LIBRARIES,
+            &details,
+            self.rf_dls_library_index,
+        )
+    }
+
+    fn render_custom_programs(&self) -> Screen {
+        let custom = self.custom_sounds();
+        let mut names = vec!["ADD NEW".to_owned()];
+        let mut details = vec!["Create program".to_owned()];
+        for program in custom {
+            names.push(program.name.clone());
+            details.push(program.detail.clone());
+        }
+        let name_refs = names.iter().map(String::as_str).collect::<Vec<_>>();
+        let detail_refs = details.iter().map(String::as_str).collect::<Vec<_>>();
+        simple_screen(
+            indexed_title("CUSTOM PROGRAMS", self.rf_dls_custom_index, names.len()),
+            &name_refs,
+            &detail_refs,
+            self.rf_dls_custom_index,
+        )
+    }
+
+    fn render_timbre(&self) -> Screen {
+        let sounds = self.dls_sounds();
+        if sounds.is_empty() {
+            return Screen::with_header("TIMBRE", "NO DLS SOUNDS", " ");
+        }
+        let selected_id = self
+            .program_draft
+            .as_ref()
+            .map(|draft| draft.base_sound_id.as_str());
+        let mut carousel = SimpleCarousel::new(
+            "rf-dls-timbre",
+            sounds.iter().map(|sound| {
+                let name = if selected_id == Some(sound.id.as_str()) {
+                    let bounded = sound
+                        .name
+                        .chars()
+                        .take(DISPLAY_COLUMNS - 2)
+                        .collect::<String>();
+                    format!("[{bounded}]")
+                } else {
+                    sound.name.clone()
+                };
+                CarouselItem::new(name, &sound.detail)
+            }),
+        );
+        carousel.set_selected(self.rf_dls_timbre_index);
+        carousel.set_focused(true);
+        let [line_1, line_2] = component_lines(&carousel, false);
+        Screen::with_header(
+            indexed_title("TIMBRE", self.rf_dls_timbre_index, sounds.len()),
+            line_1,
+            line_2,
+        )
+    }
+
+    fn filtered_sounds(&self) -> Vec<&PlaySound> {
+        let bank = RF_DLS_LIBRARIES[self.rf_dls_library_index].to_ascii_lowercase();
+        self.rf_dls_sounds
+            .iter()
+            .filter(|sound| sound.bank == bank)
+            .collect()
+    }
+
+    fn dls_sounds(&self) -> Vec<&PlaySound> {
+        self.rf_dls_sounds
+            .iter()
+            .filter(|sound| sound.bank == "dls")
+            .collect()
+    }
+
+    fn custom_sounds(&self) -> Vec<&PlaySound> {
+        self.rf_dls_sounds
+            .iter()
+            .filter(|sound| sound.bank == "custom")
+            .collect()
+    }
+}
+
+fn library_index(bank: &str) -> Option<usize> {
+    RF_DLS_LIBRARIES
+        .iter()
+        .position(|library| library.eq_ignore_ascii_case(bank))
 }
 
 fn normalized_display_text(value: &str, fallback: &str) -> String {
@@ -444,6 +717,8 @@ fn render_home(selected: usize) -> [String; 2] {
 
 fn indexed_title(title: &str, index: usize, len: usize) -> String {
     let counter = format!("{}/{}", index + 1, len);
+    let maximum_title = DISPLAY_COLUMNS.saturating_sub(counter.len() + 1);
+    let title = title.chars().take(maximum_title).collect::<String>();
     let spacing = DISPLAY_COLUMNS.saturating_sub(title.len() + counter.len());
     format!("{title}{}{counter}", " ".repeat(spacing))
 }
@@ -540,6 +815,23 @@ pub fn demo_frames() -> Vec<Screen> {
 mod tests {
     use super::*;
 
+    fn open_new_program_editor(menu: &mut Menu) {
+        menu.apply(Action::Previous);
+        menu.apply(Action::Select);
+        menu.apply(Action::Select);
+        menu.apply(Action::Select);
+        assert!(menu.render().line_1.contains("ADD NEW"));
+        menu.apply(Action::Select);
+        assert!(matches!(
+            menu.take_command(),
+            Some(MenuCommand::BeginAudition {
+                program_id: None,
+                ..
+            })
+        ));
+        assert!(menu.audition_started(7));
+    }
+
     #[test]
     fn every_demo_frame_fits_the_stock_oled() {
         for screen in demo_frames() {
@@ -589,32 +881,36 @@ mod tests {
         assert!(!menu.render().line_1.contains(" v"));
 
         menu.apply(Action::Select);
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("RF-DLS CONFIG  1/4".into())
-        );
+        assert!(menu.render().line_1.contains("ADD NEW"));
+        menu.apply(Action::Select);
+        let _ = menu.take_command();
+        assert!(menu.audition_started(7));
+        assert!(menu.render().line_1.contains("TIMBRE"));
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
         assert!(menu.render().line_1.contains("ENVELOPE"));
-        assert_eq!(menu.render().line_2.trim(), "DLS voice shape");
-
+        assert_eq!(menu.render().line_2.trim(), "ADSR override");
         menu.apply(Action::Select);
         assert_eq!(menu.render().header, Header::Hidden);
         assert!(menu.render().line_1.contains("ATTACK"));
         assert_eq!(menu.render().line_2.trim(), "0.00 s");
 
         menu.apply(Action::Back);
+        assert!(menu.render().line_1.contains("ENVELOPE"));
+        menu.apply(Action::Back);
+        assert!(matches!(
+            menu.take_command(),
+            Some(MenuCommand::EndAudition { lease_id: 7 })
+        ));
+        menu.audition_ended();
         assert_eq!(
             menu.render().header,
-            Header::Visible("RF-DLS CONFIG  1/4".into())
+            Header::Visible("CUSTOM PROGRAM 1/1".into())
         );
         menu.apply(Action::Back);
         assert_eq!(
             menu.render().header,
             Header::Visible("ADDONS         1/1".into())
-        );
-        menu.apply(Action::Back);
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("CONFIG         1/4".into())
         );
     }
 
@@ -654,10 +950,21 @@ mod tests {
         menu.apply(Action::Select);
         assert_eq!(
             menu.render().header,
-            Header::Visible("RF-DLS PLAY    1/1".into())
+            Header::Visible("RF-DLS PLAY    1/2".into())
+        );
+        assert!(menu.render().line_1.contains("DLS"));
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("DLS            1/1".into())
         );
         assert!(menu.render().line_1.contains("[PIANO 1]"));
         assert_eq!(menu.render().line_2.trim(), "B000 P000");
+        menu.apply(Action::Back);
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("RF-DLS PLAY    1/2".into())
+        );
         menu.apply(Action::Back);
         assert_eq!(
             menu.render().header,
@@ -671,8 +978,9 @@ mod tests {
         menu.apply(Action::Select);
         assert_eq!(
             menu.render().header,
-            Header::Visible("RF-DLS CONFIG  1/4".into())
+            Header::Visible("CUSTOM PROGRAM 1/1".into())
         );
+        assert!(menu.render().line_1.contains("ADD NEW"));
     }
 
     #[test]
@@ -680,12 +988,13 @@ mod tests {
         let mut menu = Menu::default();
         menu.set_play_sounds(
             vec![
-                PlaySound::new("sound.piano", "Piano 1", "B000 P000"),
-                PlaySound::new("sound.strings", "Stríngs 1", "B000 P048"),
+                PlaySound::new("sound.piano", "Piano 1", "dls", "B000 P000"),
+                PlaySound::new("sound.strings", "Stríngs 1", "dls", "B000 P048"),
             ],
             Some("sound.piano"),
         );
         menu.apply(Action::Next);
+        menu.apply(Action::Select);
         menu.apply(Action::Select);
         menu.apply(Action::Select);
         menu.apply(Action::Next);
@@ -703,8 +1012,8 @@ mod tests {
 
         menu.set_play_sounds(
             vec![
-                PlaySound::new("sound.piano", "Piano 1", "B000 P000"),
-                PlaySound::new("sound.strings", "Strings 1", "B000 P048"),
+                PlaySound::new("sound.piano", "Piano 1", "dls", "B000 P000"),
+                PlaySound::new("sound.strings", "Strings 1", "dls", "B000 P048"),
             ],
             Some("sound.piano"),
         );
@@ -713,12 +1022,43 @@ mod tests {
 
         menu.set_play_sounds(
             vec![
-                PlaySound::new("sound.piano", "Piano 1", "B000 P000"),
-                PlaySound::new("sound.strings", "Strings 1", "B000 P048"),
+                PlaySound::new("sound.piano", "Piano 1", "dls", "B000 P000"),
+                PlaySound::new("sound.strings", "Strings 1", "dls", "B000 P048"),
             ],
             Some("sound.strings"),
         );
         assert!(menu.render().line_1.contains("[STRINGS 1]"));
+    }
+
+    #[test]
+    fn rf_dls_keeps_dls_and_custom_in_separate_collections() {
+        let mut menu = Menu::default();
+        menu.set_play_sounds(
+            vec![
+                PlaySound::new("dls.piano", "Piano 1", "dls", "B000 P000"),
+                PlaySound::new(
+                    "custom.user.warm-piano",
+                    "Warm Piano",
+                    "custom",
+                    "CUSTOM 001",
+                ),
+            ],
+            Some("dls.piano"),
+        );
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        menu.apply(Action::Select);
+        assert!(menu.render().line_1.contains("DLS"));
+        assert_eq!(menu.render().line_2.trim(), "1 PROGRAMS");
+        menu.apply(Action::Next);
+        assert!(menu.render().line_1.contains("CUSTOM"));
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("CUSTOM         1/1".into())
+        );
+        assert!(menu.render().line_1.contains("WARM PIANO"));
+        assert_eq!(menu.render().line_2.trim(), "CUSTOM 001");
     }
 
     #[test]
@@ -747,10 +1087,9 @@ mod tests {
     #[test]
     fn envelope_value_editor_commits_or_cancels_before_back_exits() {
         let mut menu = Menu::default();
-        menu.apply(Action::Previous);
-        menu.apply(Action::Select);
-        menu.apply(Action::Select);
-        menu.apply(Action::Select);
+        open_new_program_editor(&mut menu);
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
         menu.apply(Action::Select);
 
         assert!(menu.render().line_1.contains("ATTACK"));
@@ -775,10 +1114,7 @@ mod tests {
         assert!(menu.render().line_1.starts_with('['));
 
         menu.apply_input(Input::Button4);
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("RF-DLS CONFIG  1/4".into())
-        );
+        assert!(menu.render().line_1.contains("ENVELOPE"));
     }
 
     #[test]

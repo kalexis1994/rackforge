@@ -1,6 +1,9 @@
-# rackforge bridge (Rust)
+# RackForge Arturia controller driver
 
-Puente seguro entre rackforge y el Arturia KeyLab Essential 61 mk3.
+Driver empaquetable y seguro entre RackForge y el Arturia KeyLab Essential 61
+mk3. El binario pertenece al paquete
+`org.rackforge.arturia-keylab-essential-mk3.rfcontroller`; el host genérico no
+contiene identificación ni protocolo Arturia.
 
 El bridge contiene el primer `ControllerDriver` certificado. El perfil
 `arturia.keylab-essential-mk3` ofrece exclusivamente `little@1`; la apertura de
@@ -189,15 +192,18 @@ handshake DAW/OLED hasta recibir del propio KeyLab el SysEx que confirma
 éxito sólo porque ALSA aceptó el envío. En estado activo revalida ese ACK cada
 seis segundos y vuelve a adquisición después de dos respuestas perdidas.
 
-`systemd/rackforge-display.service` lo inicia automáticamente con el sistema. Su
-`ExecStopPost` ejecuta `restore --execute`, por lo que un apagado o una detención
-normal del servicio devuelve el teclado al programa Arturia oficial.
+`systemd/rackforge-controller-host.service` inicia el host genérico. El host
+descubre este paquete desde el store versionado, supervisa su proceso y ejecuta
+`restore` durante el cierre, devolviendo el teclado al programa Arturia oficial.
 
 ```bash
 cd /home/kalex/rackforge/current/keylab-bridge
-cargo build --release --bin rackforge-bridge
+cargo build --release --bin rackforge-arturia-keylab-essential-mk3-driver
+cd ../runtime
+cargo build --release --bin rackforge-controller-host
+cd ../controllers
 bash ./install.sh
-systemctl status rackforge-display.service
+systemctl status rackforge-controller-host.service
 ```
 
 En Windows se usa explícitamente el toolchain MSVC para evitar depender de

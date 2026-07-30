@@ -244,6 +244,21 @@ Solo un `ControllerDriver` registrado puede:
 - interpretar botones de navegación;
 - declarar implementaciones certificadas de layouts.
 
+### Paquetes instalables de controlador
+
+La compatibilidad física se distribuye fuera de Core como `.rfcontroller`.
+Cada paquete incluye un manifest versionado, matchers USB/endpoints,
+implementaciones de layout, permisos y artefactos por plataforma.
+
+El store conserva versiones inmutables y un registro activo separado. El nivel
+de confianza (`official`, `certified`, `community`, `local`) lo asigna la
+instalación y nunca el propio paquete. El host valida SHA-256 y la identidad
+reportada por el driver antes de ejecutarlo.
+
+`process-v1` permite iniciar la modularización usando procesos aislados por el
+sistema operativo. `wasm-v1` será la frontera portable definitiva: RackForge
+abrirá MIDI/USB y el módulo recibirá únicamente capabilities autorizadas.
+
 ## Superficie WEB
 
 ### Propiedad del shell
@@ -467,6 +482,12 @@ Estado: **en curso**
 - [x] Crear contratos versionados de controlador/layout.
 - [x] Registrar KeyLab Essential mk3 como `little@1`.
 - [x] Hacer que RF-DLS declare `little@1`.
+- [x] Crear manifests, store versionado y host genérico para `.rfcontroller`.
+- [x] Instalar versiones inmutables y permitir activación/rollback atómico.
+- [x] Extraer el KeyLab como primer paquete instalable con conformance suite.
+- [x] Extraer el estado LITTLE a un Surface Runtime sin MIDI/SysEx.
+- [ ] Mover el cliente de sesión restante fuera del proceso Arturia.
+- [ ] Implementar el runtime `wasm-v1` con capabilities reales.
 - [ ] Consolidar nombres: addon, instancia, programa, recurso, superficie,
       driver, comando, evento y sesión.
 - [ ] Documentar invariantes de tiempo real y ownership.

@@ -1,0 +1,12 @@
+[package]
+name = "rackforge-surface-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Controller-independent RackForge hardware surface state and navigation"
+
+[dependencies]
+rackforge-controller-api = { path = "../rackforge-controller-api" }
+rackforge-session-api = { path = "../rackforge-session-api" }
+rackforge-ui = { path = "../rackforge-ui" }
+serde_json.workspace = true

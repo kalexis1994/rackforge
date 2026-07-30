@@ -1,3 +1,7 @@
+//! RackForge-owned LITTLE surface state and addon navigation.
+//!
+//! This crate has no MIDI, SysEx, USB or controller-model knowledge.
+
 use rackforge_controller_api::LITTLE_TEXT_COLUMNS;
 use rackforge_session_api::ProgramDraftState;
 pub use rackforge_ui::Input;

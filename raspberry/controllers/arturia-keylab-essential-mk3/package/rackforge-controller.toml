@@ -1,0 +1,55 @@
+schema_version = 1
+kind = "controller"
+id = "org.rackforge.arturia-keylab-essential-mk3"
+name = "Arturia KeyLab Essential 61 mk3"
+version = "0.1.1"
+controller_api = "^1.0"
+
+[runtime]
+kind = "process-v1"
+
+[runtime.entrypoints]
+linux-aarch64 = "bin/linux-aarch64/rackforge-arturia-keylab-essential-mk3-driver"
+
+[permissions]
+midi_input = true
+midi_output = true
+sysex = true
+usb_metadata = true
+raw_usb = false
+firmware_write = false
+filesystem = false
+network = false
+
+[[devices]]
+id = "arturia.keylab-essential-mk3"
+usb_vendor_id = 0x1c75
+usb_product_ids = [0x028c]
+product_names = ["KeyLab Essential 61 mk3"]
+
+[[devices.endpoints]]
+role = "surface_input"
+name_contains_any = ["keylab", "kl essential"]
+name_ends_with = "midi"
+exclude_contains = ["mcu", "hui", "dinthru", "alv"]
+
+[[devices.endpoints]]
+role = "display_output"
+name_contains_any = ["keylab", "kl essential"]
+name_ends_with = "midi"
+exclude_contains = ["mcu", "hui", "dinthru", "alv"]
+
+[[devices.endpoints]]
+role = "performance_input"
+name_contains_any = ["keylab", "kl essential"]
+name_ends_with = "midi"
+exclude_contains = ["mcu", "hui", "dinthru", "alv"]
+
+[[surfaces]]
+layout_id = "little@1"
+quality = "native"
+priority = 0
+
+[surfaces.gestures]
+soft_key_long_press = true
+emergency_home_chord = true

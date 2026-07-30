@@ -1,0 +1,22 @@
+[Unit]
+Description=RackForge modular controller host
+After=local-fs.target
+
+[Service]
+Type=simple
+User=kalex
+Group=kalex
+Environment=RACKFORGE_ROOT=/home/kalex/rackforge
+ExecStart=/home/kalex/rackforge/bin/rackforge-controller-host serve --root /home/kalex/rackforge/controllers
+ExecStopPost=-/home/kalex/rackforge/bin/rackforge-controller-host restore-all --root /home/kalex/rackforge/controllers
+Restart=always
+RestartSec=1
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

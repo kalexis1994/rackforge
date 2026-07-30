@@ -1,6 +1,5 @@
 mod controller;
 mod framebuffer;
-mod menu;
 
 use midir::{
     Ignore, MidiInput, MidiInputConnection, MidiInputPort, MidiOutput, MidiOutputConnection,
@@ -13,12 +12,15 @@ use rackforge_control_api::{
 };
 #[cfg(target_os = "linux")]
 use rackforge_controller_api::LITTLE_V1;
+use rackforge_controller_package::{
+    CONTROLLER_DRIVER_API_VERSION, PROCESS_DRIVER_PROTOCOL_VERSION, ProcessDriverInfo,
+};
 #[cfg(target_os = "linux")]
 use rackforge_session_api::{
     AddonInstanceState, ClientId, CommandEnvelope, EventEnvelope, InstanceId, SessionCommand,
     SessionEvent, SessionState, SurfaceActivationRequest, SurfaceMode,
 };
-#[cfg(target_os = "linux")]
+use rackforge_surface_runtime as menu;
 use serde_json::Value;
 use std::env;
 use std::error::Error;
@@ -63,6 +65,8 @@ struct Cli {
 
 #[derive(Debug)]
 enum Command {
+    DriverInfo,
+    SelfTest,
     List,
     Demo {
         selector: Option<String>,
@@ -102,10 +106,35 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let cli = parse_args(env::args().skip(1))?;
+    match &cli.command {
+        Command::DriverInfo => {
+            let profile = controller::package_profile();
+            println!(
+                "{}",
+                serde_json::to_string(&ProcessDriverInfo {
+                    protocol_version: PROCESS_DRIVER_PROTOCOL_VERSION,
+                    id: profile.driver_id.clone(),
+                    controller_api: CONTROLLER_DRIVER_API_VERSION.into(),
+                    layouts: profile
+                        .surfaces
+                        .iter()
+                        .map(|surface| surface.layout_id.clone())
+                        .collect(),
+                })?
+            );
+            return Ok(());
+        }
+        Command::SelfTest => {
+            run_driver_self_test()?;
+            return Ok(());
+        }
+        _ => {}
+    }
     let midi = MidiOutput::new("rackforge KeyLab Bridge")?;
     let ports = enumerate_ports(&midi)?;
 
     match cli.command {
+        Command::DriverInfo | Command::SelfTest => unreachable!("handled before opening MIDI"),
         Command::List => print_ports(&ports),
         Command::Demo {
             selector,
@@ -154,6 +183,16 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Cli, String> {
         });
     }
     let command = args.first().map(String::as_str);
+    if args == ["driver-info"] {
+        return Ok(Cli {
+            command: Command::DriverInfo,
+        });
+    }
+    if args == ["self-test"] {
+        return Ok(Cli {
+            command: Command::SelfTest,
+        });
+    }
     if !matches!(
         command,
         Some("demo" | "menu-demo" | "framebuffer-demo" | "serve" | "restore" | "led-demo")
@@ -218,14 +257,63 @@ fn usage(reason: &str) -> String {
     format!(
         "{reason}\n\
          Uso:\n\
-           rackforge-bridge list\n\
-           rackforge-bridge demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
-           rackforge-bridge menu-demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
-           rackforge-bridge framebuffer-demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
-           rackforge-bridge serve [--port ID|NOMBRE] [--execute]\n\
-           rackforge-bridge restore [--port ID|NOMBRE] [--execute]\n\
-           rackforge-bridge led-demo [--port ID|NOMBRE] [--execute]"
+           rackforge-arturia-keylab-essential-mk3-driver driver-info\n\
+           rackforge-arturia-keylab-essential-mk3-driver self-test\n\
+           rackforge-arturia-keylab-essential-mk3-driver list\n\
+           rackforge-arturia-keylab-essential-mk3-driver demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
+           rackforge-arturia-keylab-essential-mk3-driver menu-demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
+           rackforge-arturia-keylab-essential-mk3-driver framebuffer-demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
+           rackforge-arturia-keylab-essential-mk3-driver serve [--port ID|NOMBRE] [--execute]\n\
+           rackforge-arturia-keylab-essential-mk3-driver restore [--port ID|NOMBRE] [--execute]\n\
+           rackforge-arturia-keylab-essential-mk3-driver led-demo [--port ID|NOMBRE] [--execute]"
     )
+}
+
+fn run_driver_self_test() -> Result<(), Box<dyn Error>> {
+    controller::package_profile().validate()?;
+    let daw = select_preset(1)?;
+    let arturia = select_preset(0)?;
+    let title = header("RACKFORGE")?;
+    let body = two_lines("DRIVER SELF TEST", "PROTOCOL OK")?;
+    let fixtures: Value = serde_json::from_str(include_str!("../fixtures/protocol-v1.json"))?;
+    let expected_daw = fixtures
+        .get("daw_preset_ack")
+        .and_then(Value::as_str)
+        .ok_or("fixture daw_preset_ack is missing")?;
+    let expected_arturia = fixtures
+        .get("arturia_preset")
+        .and_then(Value::as_str)
+        .ok_or("fixture arturia_preset is missing")?;
+    let physical_messages = fixtures
+        .get("physical_input_messages")
+        .and_then(Value::as_array)
+        .ok_or("fixture physical_input_messages is missing")?;
+    let inputs_are_known = physical_messages.iter().all(|fixture| {
+        fixture
+            .as_array()
+            .and_then(|bytes| {
+                bytes
+                    .iter()
+                    .map(|byte| byte.as_u64().and_then(|byte| u8::try_from(byte).ok()))
+                    .collect::<Option<Vec<_>>>()
+            })
+            .is_some_and(|message| parse_physical_input(&message).is_some())
+    });
+    if hex(&daw) != expected_daw
+        || hex(&arturia) != expected_arturia
+        || !is_daw_preset_ack(&daw)
+        || is_daw_preset_ack(&arturia)
+        || !title.starts_with(PREFIX)
+        || !body.starts_with(PREFIX)
+        || !inputs_are_known
+    {
+        return Err("falló la conformidad interna del protocolo KeyLab".into());
+    }
+    println!(
+        "CONTROLLER_SELF_TEST_OK id={}",
+        controller::package_profile().driver_id
+    );
+    Ok(())
 }
 
 #[derive(Clone)]

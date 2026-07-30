@@ -1,4 +1,4 @@
-use rackforge_controller_api::{ControllerProfile, SurfaceImplementation};
+use rackforge_controller_api::{ControllerProfile, HostControlBinding, SurfaceImplementation};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -209,6 +209,8 @@ pub struct ControllerPackageManifest {
     pub devices: Vec<DeviceMatcher>,
     pub surfaces: Vec<SurfaceImplementation>,
     #[serde(default)]
+    pub host_controls: Vec<HostControlBinding>,
+    #[serde(default)]
     pub integrity: Option<ArtifactIntegrity>,
 }
 
@@ -219,6 +221,8 @@ pub struct ProcessDriverInfo {
     pub id: String,
     pub controller_api: String,
     pub layouts: Vec<String>,
+    #[serde(default)]
+    pub host_controls: Vec<HostControlBinding>,
 }
 
 impl ProcessDriverInfo {
@@ -263,6 +267,11 @@ impl ProcessDriverInfo {
         if self.layouts.is_empty() || expected != actual {
             return Err(PackageError::DriverContract(
                 "driver layouts do not match the manifest".into(),
+            ));
+        }
+        if self.host_controls != manifest.host_controls {
+            return Err(PackageError::DriverContract(
+                "driver reserved host controls do not match the manifest".into(),
             ));
         }
         Ok(())
@@ -325,6 +334,7 @@ impl ControllerPackageManifest {
             name: self.name.clone(),
             driver_id: self.id.clone(),
             surfaces: self.surfaces.clone(),
+            host_controls: self.host_controls.clone(),
         }
         .validate()
         .map_err(PackageError::InvalidManifest)?;
@@ -351,6 +361,7 @@ impl ControllerPackageManifest {
             name: self.name.clone(),
             driver_id: self.id.clone(),
             surfaces: self.surfaces.clone(),
+            host_controls: self.host_controls.clone(),
         }
     }
 
@@ -863,6 +874,7 @@ mod tests {
                     emergency_home_chord: true,
                 },
             }],
+            host_controls: Vec::new(),
             integrity: None,
         }
     }
@@ -994,6 +1006,7 @@ mod tests {
             id: package_manifest.id.clone(),
             controller_api: CONTROLLER_DRIVER_API_VERSION.into(),
             layouts: vec!["little@1".into()],
+            host_controls: Vec::new(),
         };
         info.validate_against(&package_manifest).unwrap();
 

@@ -1,5 +1,6 @@
 use crate::control::{self, AudioControlCommand};
 use crate::session::SessionStore;
+use crate::session_checkpoint::SessionCheckpointStore;
 use crate::{LoadedPlugin, PluginInstance, PluginPackage};
 use alsa::pcm::{Access, Format, HwParams, PCM};
 use alsa::{Direction, ValueOr};
@@ -9,8 +10,9 @@ use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_plugin_api::PluginKind;
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_session_api::{
-    DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, InstanceId, PluginInstanceState, Revision,
-    SESSION_SCHEMA_VERSION, SessionId, SessionState, SoundSummary,
+    DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, HostControlBinding, InstanceId, MasterLevel,
+    MasterPan, PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionId, SessionState,
+    SoundSummary, SurfaceMode,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -27,6 +29,117 @@ const MIDI_QUEUE_CAPACITY: usize = 2_048;
 const AUDIO_CONTROL_QUEUE_CAPACITY: usize = 64;
 const MIDI_CHANNELS: usize = 16;
 const CONTINUOUS_CONTROLLERS: usize = 120;
+const MASTER_LEVEL_SMOOTHING_FRAMES: u32 = 480;
+
+struct MasterGain {
+    current: f32,
+    target: f32,
+    step: f32,
+    remaining: u32,
+}
+
+impl MasterGain {
+    fn new(level: MasterLevel) -> Self {
+        let gain = level.amplitude();
+        Self {
+            current: gain,
+            target: gain,
+            step: 0.0,
+            remaining: 0,
+        }
+    }
+
+    fn set_level(&mut self, level: MasterLevel) {
+        self.target = level.amplitude();
+        self.remaining = MASTER_LEVEL_SMOOTHING_FRAMES;
+        self.step = (self.target - self.current) / self.remaining as f32;
+    }
+
+    fn next_gain(&mut self) -> f32 {
+        if self.remaining > 0 {
+            self.current += self.step;
+            self.remaining -= 1;
+            if self.remaining == 0 {
+                self.current = self.target;
+            }
+        }
+        self.current
+    }
+}
+
+struct MasterBalance {
+    current_left: f32,
+    current_right: f32,
+    target_left: f32,
+    target_right: f32,
+    step_left: f32,
+    step_right: f32,
+    remaining: u32,
+}
+
+impl MasterBalance {
+    fn new(pan: MasterPan) -> Self {
+        let (left, right) = pan.balance();
+        Self {
+            current_left: left,
+            current_right: right,
+            target_left: left,
+            target_right: right,
+            step_left: 0.0,
+            step_right: 0.0,
+            remaining: 0,
+        }
+    }
+
+    fn set_pan(&mut self, pan: MasterPan) {
+        (self.target_left, self.target_right) = pan.balance();
+        self.remaining = MASTER_LEVEL_SMOOTHING_FRAMES;
+        self.step_left = (self.target_left - self.current_left) / self.remaining as f32;
+        self.step_right = (self.target_right - self.current_right) / self.remaining as f32;
+    }
+
+    fn next_balance(&mut self) -> (f32, f32) {
+        if self.remaining > 0 {
+            self.current_left += self.step_left;
+            self.current_right += self.step_right;
+            self.remaining -= 1;
+            if self.remaining == 0 {
+                self.current_left = self.target_left;
+                self.current_right = self.target_right;
+            }
+        }
+        (self.current_left, self.current_right)
+    }
+}
+
+struct ReservedMidiControls {
+    control_changes: [[bool; 120]; MIDI_CHANNELS],
+}
+
+impl Default for ReservedMidiControls {
+    fn default() -> Self {
+        Self {
+            control_changes: [[false; 120]; MIDI_CHANNELS],
+        }
+    }
+}
+
+impl ReservedMidiControls {
+    fn replace(&mut self, bindings: &[HostControlBinding]) {
+        self.control_changes = [[false; CONTINUOUS_CONTROLLERS]; MIDI_CHANNELS];
+        for binding in bindings {
+            self.control_changes[binding.midi_cc.channel as usize]
+                [binding.midi_cc.controller as usize] = true;
+        }
+    }
+
+    fn contains(&self, event: MidiEventV1) -> bool {
+        if event.length != 3 || event.data[0] & 0xf0 != 0xb0 || event.data[1] > 119 {
+            return false;
+        }
+        self.control_changes[(event.data[0] & 0x0f) as usize][event.data[1] as usize]
+    }
+}
 
 struct AuditionLease {
     id: u64,
@@ -146,6 +259,41 @@ pub struct LiveConfig {
 }
 
 pub fn run(config: LiveConfig) -> Result<()> {
+    let session_id =
+        SessionId::new(DEFAULT_LIVE_SESSION_ID).map_err(|message| anyhow::anyhow!(message))?;
+    let checkpoint = config
+        .data_root
+        .as_deref()
+        .map(SessionCheckpointStore::live);
+    let (persisted_mode, persisted_sound_id, persisted_master_level, persisted_master_pan) =
+        match checkpoint.as_ref() {
+            Some(store) => match (
+                store.active_mode(&session_id),
+                store.selected_sound(&session_id, DEFAULT_LIVE_INSTANCE_ID),
+                store.master_level(&session_id),
+                store.master_pan(&session_id),
+            ) {
+                (Ok(mode), Ok(sound_id), Ok(master_level), Ok(master_pan)) => {
+                    (mode, sound_id, master_level, master_pan)
+                }
+                (mode, sound_id, master_level, master_pan) => {
+                    if let Err(error) = mode {
+                        eprintln!("SESSION_CHECKPOINT_IGNORED {error:#}");
+                    }
+                    if let Err(error) = sound_id {
+                        eprintln!("SESSION_CHECKPOINT_IGNORED {error:#}");
+                    }
+                    if let Err(error) = master_level {
+                        eprintln!("SESSION_CHECKPOINT_IGNORED {error:#}");
+                    }
+                    if let Err(error) = master_pan {
+                        eprintln!("SESSION_CHECKPOINT_IGNORED {error:#}");
+                    }
+                    (None, None, None, None)
+                }
+            },
+            None => (None, None, None, None),
+        };
     let package = PluginPackage::open(&config.package)?;
     if package.manifest().kind != PluginKind::Instrument {
         bail!(
@@ -171,7 +319,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
     );
     let mut instance = plugin.create_instance()?;
     let presets = instance.preset_catalog()?;
-    let preset = match config.preset.as_deref() {
+    let configured_preset = match config.preset.as_deref() {
         Some(id) => Some(
             presets
                 .presets
@@ -181,6 +329,21 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 .with_context(|| format!("plugin does not declare preset {id:?}"))?,
         ),
         None => presets.presets.first(),
+    };
+    let preset = match persisted_sound_id.as_deref() {
+        Some(id) => match presets
+            .presets
+            .iter()
+            .chain(plugin.presets().presets.iter())
+            .find(|preset| preset.id == id)
+        {
+            Some(preset) => Some(preset),
+            None => {
+                eprintln!("SESSION_CHECKPOINT_SOUND_MISSING id={id:?}; using configured fallback");
+                configured_preset
+            }
+        },
+        None => configured_preset,
     };
     if let Some(preset) = preset {
         instance.load_preset(&preset.id)?;
@@ -214,9 +377,11 @@ pub fn run(config: LiveConfig) -> Result<()> {
         InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).map_err(|message| anyhow::anyhow!(message))?;
     let session = SessionState {
         schema_version: SESSION_SCHEMA_VERSION,
-        session_id: SessionId::new(DEFAULT_LIVE_SESSION_ID)
-            .map_err(|message| anyhow::anyhow!(message))?,
+        session_id,
         revision: Revision::ZERO,
+        active_mode: persisted_mode.unwrap_or(SurfaceMode::Live),
+        master_level: persisted_master_level.unwrap_or(MasterLevel::UNITY),
+        master_pan: persisted_master_pan.unwrap_or(MasterPan::CENTER),
         active_instance_id: Some(instance_id.clone()),
         instances: vec![PluginInstanceState {
             instance_id,
@@ -241,6 +406,13 @@ pub fn run(config: LiveConfig) -> Result<()> {
         audition: None,
         program_draft: None,
     };
+    if let Some(checkpoint) = &checkpoint {
+        checkpoint
+            .save(&session)
+            .context("saving initial LIVE session checkpoint")?;
+    }
+    let initial_master_level = session.master_level;
+    let initial_master_pan = session.master_pan;
     let session_store = SessionStore::shared(session)?;
     let (control_sender, control_receiver) = mpsc::sync_channel(AUDIO_CONTROL_QUEUE_CAPACITY);
     let control_path = control_socket_path();
@@ -253,10 +425,18 @@ pub fn run(config: LiveConfig) -> Result<()> {
         session_store,
         control_sender,
         control_storage,
+        checkpoint,
     )?;
     println!("CONTROL_READY socket={}", control_path.display());
     println!("READY_TO_PLAY");
-    audio_loop(&pcm, &receiver, &control_receiver, &mut instance)
+    audio_loop(
+        &pcm,
+        &receiver,
+        &control_receiver,
+        &mut instance,
+        initial_master_level,
+        initial_master_pan,
+    )
 }
 
 fn control_socket_path() -> PathBuf {
@@ -369,6 +549,8 @@ fn audio_loop(
     receiver: &Receiver<MidiEventV1>,
     control_receiver: &Receiver<AudioControlCommand>,
     instance: &mut PluginInstance<'_>,
+    initial_master_level: MasterLevel,
+    initial_master_pan: MasterPan,
 ) -> Result<()> {
     let io = pcm.io_i32()?;
     let input = Vec::new();
@@ -383,10 +565,33 @@ fn audio_loop(
     let mut next_audition_id = 1_u64;
     let mut controller_state = MidiControllerState::default();
     let mut replay_controller_state = false;
+    let mut master_gain = MasterGain::new(initial_master_level);
+    let mut master_balance = MasterBalance::new(initial_master_pan);
+    let mut reserved_midi_controls = ReservedMidiControls::default();
 
     loop {
         while let Ok(command) = control_receiver.try_recv() {
             match command {
+                AudioControlCommand::RegisterHostControls {
+                    controller_id,
+                    bindings,
+                    reply,
+                } => {
+                    reserved_midi_controls.replace(&bindings);
+                    println!(
+                        "HOST_CONTROLS_REGISTERED controller={controller_id} count={}",
+                        bindings.len()
+                    );
+                    let _ = reply.send(Ok(()));
+                }
+                AudioControlCommand::SetMasterLevel { level, reply } => {
+                    master_gain.set_level(level);
+                    let _ = reply.send(Ok(()));
+                }
+                AudioControlCommand::SetMasterPan { pan, reply } => {
+                    master_balance.set_pan(pan);
+                    let _ = reply.send(Ok(()));
+                }
                 AudioControlCommand::SelectSound {
                     instance_id,
                     sound_id,
@@ -589,6 +794,9 @@ fn audio_loop(
             replay_controller_state = false;
         }
         while let Ok(event) = receiver.try_recv() {
+            if reserved_midi_controls.contains(event) {
+                continue;
+            }
             controller_state.observe(event);
             if events.len() < MAX_EVENTS_PER_BLOCK {
                 events.push(event);
@@ -607,10 +815,23 @@ fn audio_loop(
             &events,
             &[],
         )?;
-        for (target, sample) in device_output.iter_mut().zip(&plugin_output) {
-            meter_peak = meter_peak.max(sample.abs());
-            meter_clipped += usize::from(sample.abs() > 0.95);
-            *target = (sample.clamp(-0.95, 0.95) * i32::MAX as f32) as i32;
+        for (source_frame, target_frame) in plugin_output
+            .chunks_exact(CHANNELS)
+            .zip(device_output.chunks_exact_mut(CHANNELS))
+        {
+            let gain = master_gain.next_gain();
+            let (left_balance, right_balance) = master_balance.next_balance();
+            for (channel, (sample, target)) in source_frame.iter().zip(target_frame).enumerate() {
+                let balance = if channel == 0 {
+                    left_balance
+                } else {
+                    right_balance
+                };
+                let mastered = sample * gain * balance;
+                meter_peak = meter_peak.max(mastered.abs());
+                meter_clipped += usize::from(mastered.abs() > 0.95);
+                *target = (mastered.clamp(-0.95, 0.95) * i32::MAX as f32) as i32;
+            }
         }
         meter_frames += PERIOD_FRAMES;
         write_period(pcm, &io, &device_output)?;
@@ -657,6 +878,7 @@ fn write_period(pcm: &PCM, io: &alsa::pcm::IO<'_, i32>, output: &[i32]) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackforge_session_api::{HostControlTarget, MidiControlChangeBinding};
 
     fn midi(length: u8, data: [u8; 3]) -> MidiEventV1 {
         MidiEventV1 {
@@ -725,5 +947,58 @@ mod tests {
         let mut second = Vec::new();
         assert_eq!(state.replay_into(&mut second, 2), 0);
         assert_eq!(second.len(), 2);
+    }
+
+    #[test]
+    fn master_gain_is_tapered_and_reaches_new_level_without_a_step() {
+        let half = MasterLevel::new(500).unwrap();
+        assert!((half.amplitude() - 0.25).abs() < f32::EPSILON);
+        let mut gain = MasterGain::new(MasterLevel::UNITY);
+        gain.set_level(MasterLevel::SILENT);
+
+        let first = gain.next_gain();
+        assert!(first < 1.0 && first > 0.0);
+        for _ in 1..MASTER_LEVEL_SMOOTHING_FRAMES {
+            gain.next_gain();
+        }
+        assert_eq!(gain.current, 0.0);
+        assert_eq!(gain.remaining, 0);
+    }
+
+    #[test]
+    fn master_balance_is_neutral_at_center_and_smoothed_to_the_side() {
+        let mut balance = MasterBalance::new(MasterPan::CENTER);
+        assert_eq!(balance.next_balance(), (1.0, 1.0));
+        balance.set_pan(MasterPan::LEFT);
+
+        let first = balance.next_balance();
+        assert_eq!(first.0, 1.0);
+        assert!(first.1 < 1.0 && first.1 > 0.0);
+        for _ in 1..MASTER_LEVEL_SMOOTHING_FRAMES {
+            balance.next_balance();
+        }
+        assert_eq!(balance.current_left, 1.0);
+        assert_eq!(balance.current_right, 0.0);
+        assert_eq!(balance.remaining, 0);
+    }
+
+    #[test]
+    fn reserved_host_control_never_reaches_plugin_midi() {
+        let mut reserved = ReservedMidiControls::default();
+        reserved.replace(&[HostControlBinding {
+            target: HostControlTarget::MasterLevel,
+            midi_cc: MidiControlChangeBinding {
+                channel: 0,
+                controller: 82,
+            },
+        }]);
+
+        assert!(reserved.contains(midi(3, [0xb0, 82, 64])));
+        assert!(!reserved.contains(midi(3, [0xb0, 83, 64])));
+        assert!(!reserved.contains(midi(3, [0xb1, 82, 64])));
+        assert!(!reserved.contains(midi(3, [0x90, 82, 64])));
+
+        reserved.replace(&[]);
+        assert!(!reserved.contains(midi(3, [0xb0, 82, 64])));
     }
 }

@@ -147,9 +147,11 @@ esas acciones contextualmente sin modificar el lector MIDI.
 Los cuatro botones también producen gestos lógicos de pulsación corta y larga.
 El umbral de pulsación larga es 650 ms: la acción corta se resuelve al soltar y
 nunca se dispara después de una acción larga. `BACK` sostenido pertenece al
-host y vuelve al modo activo (`LIVE` o `PLAY`); el plugin recibe después una
-notificación de activación y puede sugerir qué elemento centrar, pero no puede
-bloquear ni reemplazar la navegación.
+host y vuelve al modo activo (`LIVE` o `PLAY`). Ese modo es estado autoritativo
+de la sesión en Core, se persiste y vuelve a sincronizarse al recrear el driver;
+no depende del valor inicial del menú. El plugin recibe después una notificación
+de activación y puede sugerir qué elemento centrar, pero no puede bloquear ni
+reemplazar la navegación.
 
 `OK` + `BACK`, presionados con una diferencia máxima de 250 ms y sostenidos
 650 ms, forman el escape de emergencia. Tiene prioridad sobre las pulsaciones
@@ -169,6 +171,27 @@ El mapeo capturado en hardware real es:
 Los valores cero de los botones son liberaciones: no generan una segunda
 acción, pero se conservan para retirar feedback visual al soltar. El valor 64
 del encoder relativo es neutral.
+
+El Fader 9 es un control aparte y queda reservado para `master_level`. En
+`DAW Program`, requerido por la sesión OLED, envía CC 113 por el canal MIDI 1.
+El driver lo traduce a la escala estable 0–1000 de la sesión y Core aplica una
+ganancia con curva de audio después del plugin, suavizada durante 10 ms para
+evitar clicks. El binding se registra antes de abrir el input MIDI, se renueva
+si cambia el socket de Core y el CC original no se entrega a ningún plugin.
+
+El Encoder 9 situado encima queda reservado para `master_pan` y envía CC 104
+por el mismo canal. El driver convierte su rango absoluto a -1000…1000; los
+valores MIDI 60…68 encastran exactamente en el centro para que volver al balance
+neutral no requiera precisión mecánica. El balance también pertenece a la
+sesión, se persiste, se restaura y se suaviza durante 10 ms. En el centro ambos
+canales permanecen a ganancia unitaria.
+
+El paquete 0.2.1 muestra feedback transitorio en el header negro: `MASTER VOL`
+con porcentaje o `MASTER PAN` con `L`, `R` o `CENTER`. El último valor permanece
+1,5 segundos y cada nuevo evento reinicia el plazo. Al expirar se restaura el
+header más reciente del menú, incluso si la navegación cambió mientras el
+feedback estaba visible. Las ráfagas MIDI se compactan por control para que la
+pantalla no agregue retraso, sin perder el último valor de volumen ni de pan.
 
 Los comandos, límites y resultados observados en hardware se registran en
 [`PROTOCOL.md`](PROTOCOL.md). En particular, `BAR (01)` dibuja una línea

@@ -140,12 +140,32 @@ snapshots, historial acotado de eventos y comandos tipados:
 plugin → HostApi 1.4 → SessionState → rackforge-control-api → superficies
 ```
 
-El esquema de sesión v3 publica `plugin_id`, `plugin_name`,
-`PluginInstanceState` y el árbol declarativo del editor dentro del draft
-activo. El lector conserva aliases de vocabulario para campos de instancia v1,
-pero todo estado nuevo se serializa únicamente con el vocabulario `plugin`.
+El esquema de sesión v6 publica `plugin_id`, `plugin_name`,
+`PluginInstanceState`, el modo superior activo (`LIVE` o `PLAY`), el
+`master_level`, el `master_pan` de RackForge y el árbol declarativo del editor
+dentro del draft activo. El lector conserva aliases de vocabulario para campos
+de instancia v1 y acepta snapshots sin estos campos como `LIVE`, nivel unidad y
+pan centrado, pero todo estado nuevo se serializa únicamente con el vocabulario
+`plugin`.
 
-LITTLE ya utiliza `SessionCommand::SelectSound`, `BeginAudition`,
+Core persiste el contexto estable de la sesión LIVE en
+`data/sessions/live.main.json`: modo activo, nivel y pan maestros, y sonido
+seleccionado por instancia. La escritura usa un archivo temporal, `fsync` y
+reemplazo atómico. Audition, drafts y revisiones son deliberadamente
+transitorios. Al reiniciar, un sonido persistido válido tiene precedencia sobre
+el preset de arranque; si ya no está en el catálogo, Core informa el problema y
+usa el fallback configurado.
+
+La ganancia maestra pertenece al host y se aplica después del procesamiento del
+plugin. Usa una curva de fader de audio, nivel unidad como compatibilidad para
+sesiones antiguas y una rampa corta para evitar clicks. Los paquetes de
+controlador pueden declarar `host_controls` reservados para `master_level` y
+`master_pan`; Core los filtra antes de entregar MIDI al plugin, por lo que esos
+controles físicos no pueden reutilizarse como CC del instrumento. El balance
+maestro mantiene ambos canales a unidad en el centro, atenúa sólo el lado
+opuesto y también usa una rampa corta para evitar discontinuidades.
+
+LITTLE ya utiliza `SessionCommand::SetActiveMode`, `SelectSound`, `BeginAudition`,
 `KeepAuditionAlive` y `EndAudition`. Core valida la instancia y el catálogo,
 envía la operación mediante una cola acotada y publica un `SessionEvent` solo
 después de que el motor la aplica. La selección ocurre al comienzo de un bloque

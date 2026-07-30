@@ -1,6 +1,7 @@
 use rackforge_controller_api::{
-    ControllerDriver, ControllerProfile, GestureCapabilities, LITTLE_V1, SurfaceImplementation,
-    SurfaceQuality, negotiate_surface,
+    ControllerDriver, ControllerProfile, GestureCapabilities, HostControlBinding,
+    HostControlTarget, LITTLE_V1, MidiControlChangeBinding, SurfaceImplementation, SurfaceQuality,
+    negotiate_surface,
 };
 use std::sync::OnceLock;
 
@@ -22,6 +23,22 @@ impl ControllerDriver for KeyLabEssentialMk3 {
                     emergency_home_chord: true,
                 },
             }],
+            host_controls: vec![
+                HostControlBinding {
+                    target: HostControlTarget::MasterLevel,
+                    midi_cc: MidiControlChangeBinding {
+                        channel: 0,
+                        controller: 113,
+                    },
+                },
+                HostControlBinding {
+                    target: HostControlTarget::MasterPan,
+                    midi_cc: MidiControlChangeBinding {
+                        channel: 0,
+                        controller: 104,
+                    },
+                },
+            ],
         })
     }
 
@@ -103,6 +120,25 @@ mod tests {
         assert_eq!(driver.profile().surfaces[0].quality, SurfaceQuality::Native);
         assert!(driver.profile().surfaces[0].gestures.soft_key_long_press);
         assert!(driver.profile().surfaces[0].gestures.emergency_home_chord);
+        assert_eq!(
+            driver.profile().host_controls,
+            vec![
+                HostControlBinding {
+                    target: HostControlTarget::MasterLevel,
+                    midi_cc: MidiControlChangeBinding {
+                        channel: 0,
+                        controller: 113,
+                    },
+                },
+                HostControlBinding {
+                    target: HostControlTarget::MasterPan,
+                    midi_cc: MidiControlChangeBinding {
+                        channel: 0,
+                        controller: 104,
+                    },
+                },
+            ]
+        );
     }
 
     #[test]

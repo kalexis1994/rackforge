@@ -43,6 +43,8 @@ Un paquete de controlador puede:
 - traducir inputs físicos;
 - implementar handshake, display, LEDs, heartbeat y restauración;
 - declarar layouts explícitos como `little@1`.
+- declarar controles físicos reservados para funciones globales tipadas del
+  host, como el nivel maestro.
 
 No puede definir instrumentos, programas, bancos ni lógica propia de un plugin.
 Los layouts y eventos lógicos son la frontera entre el hardware y RackForge.
@@ -73,10 +75,11 @@ self-test
 ```
 
 `driver-info` devuelve un único objeto JSON con `protocol_version`, `id`,
-`controller_api` y `layouts`. El host contrasta esa identidad con el manifest y
-evita que un binario suplante otro paquete. `self-test` valida codecs, mappings
-y mensajes conocidos usando fixtures locales. El comando `conformance` ejecuta
-ambos antes de habilitar el servicio:
+`controller_api`, `layouts` y `host_controls`. El host contrasta esa identidad
+completa con el manifest y evita que un binario suplante otro paquete o reserve
+un CC no declarado. `self-test` valida codecs, mappings y mensajes conocidos
+usando fixtures locales. El comando `conformance` ejecuta ambos antes de
+habilitar el servicio:
 
 ```bash
 rackforge-controller-host conformance org.rackforge.example

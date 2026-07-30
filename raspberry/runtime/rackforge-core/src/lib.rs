@@ -5,6 +5,8 @@ pub mod live;
 pub mod loader;
 pub mod package;
 pub mod session;
+#[cfg(target_os = "linux")]
+pub mod session_checkpoint;
 pub mod storage;
 
 pub use loader::{LoadedPlugin, PluginInstance};

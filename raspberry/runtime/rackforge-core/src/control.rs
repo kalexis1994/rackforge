@@ -1,5 +1,6 @@
 use crate::PluginStorage;
 use crate::session::SharedSessionStore;
+use crate::session_checkpoint::SessionCheckpointStore;
 use anyhow::{Context, Result, bail};
 use rackforge_control_api::{
     ControlErrorCode, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES, decode_request,
@@ -10,8 +11,9 @@ use rackforge_plugin_api::{
     ProgramFieldEditRequest, SurfaceActivationRequest, SurfaceActivationResponse,
 };
 use rackforge_session_api::{
-    AuditionEndReason, CommandEnvelope, CommandRef, InstanceId, ProgramDraftState, Revision,
-    SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SoundSummary,
+    AuditionEndReason, ClientId, CommandEnvelope, CommandRef, HostControlBinding, InstanceId,
+    MasterLevel, MasterPan, ProgramDraftState, Revision, SESSION_SCHEMA_VERSION, SessionCommand,
+    SessionEvent, SoundSummary,
 };
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -29,6 +31,19 @@ const AUDITION_LEASE_TIMEOUT: Duration = Duration::from_secs(15);
 const AUDITION_WATCHDOG_PERIOD: Duration = Duration::from_millis(250);
 
 pub enum AudioControlCommand {
+    RegisterHostControls {
+        controller_id: String,
+        bindings: Vec<HostControlBinding>,
+        reply: SyncSender<Result<(), String>>,
+    },
+    SetMasterLevel {
+        level: MasterLevel,
+        reply: SyncSender<Result<(), String>>,
+    },
+    SetMasterPan {
+        pan: MasterPan,
+        reply: SyncSender<Result<(), String>>,
+    },
     SelectSound {
         instance_id: InstanceId,
         sound_id: String,
@@ -96,6 +111,7 @@ struct ControlContext {
     store: SharedSessionStore,
     audio_sender: SyncSender<AudioControlCommand>,
     storage: Option<PluginStorage>,
+    checkpoint: Option<SessionCheckpointStore>,
     dispatch_lock: Mutex<()>,
     lease_deadline: Mutex<Option<LeaseDeadline>>,
     next_draft_id: AtomicU64,
@@ -111,6 +127,7 @@ pub fn start(
     store: SharedSessionStore,
     audio_sender: SyncSender<AudioControlCommand>,
     storage: Option<PluginStorage>,
+    checkpoint: Option<SessionCheckpointStore>,
 ) -> Result<ControlServer> {
     if let Some(parent) = socket_path.parent() {
         fs::create_dir_all(parent)
@@ -148,6 +165,7 @@ pub fn start(
         store,
         audio_sender,
         storage,
+        checkpoint,
         dispatch_lock: Mutex::new(()),
         lease_deadline: Mutex::new(None),
         next_draft_id: AtomicU64::new(1),
@@ -287,6 +305,82 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
     };
 
     match envelope.command {
+        SessionCommand::RegisterHostControls {
+            controller_id,
+            bindings,
+        } => {
+            if ClientId::new(&controller_id).is_err()
+                || bindings
+                    .iter()
+                    .any(|binding| binding.midi_cc.validate().is_err())
+            {
+                return error_response(
+                    ControlErrorCode::InvalidRequest,
+                    "invalid reserved host-control registration",
+                    Some(snapshot.revision),
+                );
+            }
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::RegisterHostControls {
+                    controller_id,
+                    bindings,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "register reserved host controls") {
+                Ok(()) => command_applied_without_events(context, command_ref),
+                Err(failure) => failure.into_response(),
+            }
+        }
+        SessionCommand::SetMasterLevel { level } => {
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::SetMasterLevel {
+                    level,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "apply master level") {
+                Ok(()) => record_command_event(
+                    context,
+                    command_ref,
+                    SessionEvent::MasterLevelChanged { level },
+                ),
+                Err(failure) => failure.into_response(),
+            }
+        }
+        SessionCommand::SetMasterPan { pan } => {
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::SetMasterPan {
+                    pan,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "apply master pan") {
+                Ok(()) => record_command_event(
+                    context,
+                    command_ref,
+                    SessionEvent::MasterPanChanged { pan },
+                ),
+                Err(failure) => failure.into_response(),
+            }
+        }
+        SessionCommand::SetActiveMode { mode } => record_command_event(
+            context,
+            command_ref,
+            SessionEvent::ActiveModeChanged { mode },
+        ),
         SessionCommand::SelectSound {
             instance_id,
             sound_id,
@@ -1224,20 +1318,42 @@ fn record_command_events(
     command: CommandRef,
     events: Vec<SessionEvent>,
 ) -> ControlResponse {
-    match context.store.lock() {
+    let should_checkpoint = events.iter().any(|event| {
+        matches!(
+            event,
+            SessionEvent::MasterLevelChanged { .. }
+                | SessionEvent::MasterPanChanged { .. }
+                | SessionEvent::ActiveModeChanged { .. }
+                | SessionEvent::SoundSelected { .. }
+                | SessionEvent::ProgramSaved { .. }
+        )
+    });
+    let (events, revision, checkpoint_state) = match context.store.lock() {
         Ok(mut store) => match store.record_many(Some(command.clone()), events) {
-            Ok(events) => ControlResponse::CommandApplied {
-                client_id: command.client_id,
-                command_id: command.command_id,
-                revision: events
+            Ok(events) => {
+                let revision = events
                     .last()
                     .map(|event| event.revision)
-                    .unwrap_or(store.state().revision),
-                events,
-            },
-            Err(error) => internal_error(error.to_string(), Some(store.state().revision)),
+                    .unwrap_or(store.state().revision);
+                let checkpoint_state = should_checkpoint.then(|| store.snapshot());
+                (events, revision, checkpoint_state)
+            }
+            Err(error) => {
+                return internal_error(error.to_string(), Some(store.state().revision));
+            }
         },
-        Err(_) => internal_error("session store lock is poisoned", None),
+        Err(_) => return internal_error("session store lock is poisoned", None),
+    };
+    if let (Some(checkpoint), Some(state)) = (&context.checkpoint, checkpoint_state.as_ref())
+        && let Err(error) = checkpoint.save(state)
+    {
+        eprintln!("SESSION_CHECKPOINT_ERROR {error:#}");
+    }
+    ControlResponse::CommandApplied {
+        client_id: command.client_id,
+        command_id: command.command_id,
+        revision,
+        events,
     }
 }
 
@@ -1405,8 +1521,8 @@ mod tests {
     use super::*;
     use crate::session::SessionStore;
     use rackforge_session_api::{
-        ClientId, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, PluginInstanceState,
-        SessionId, SessionState, SoundSummary,
+        ClientId, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, EventEnvelope,
+        PluginInstanceState, SessionId, SessionState, SoundSummary,
     };
     use std::sync::mpsc::sync_channel;
 
@@ -1416,6 +1532,9 @@ mod tests {
             schema_version: SESSION_SCHEMA_VERSION,
             session_id: SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             revision: Revision::ZERO,
+            active_mode: rackforge_session_api::SurfaceMode::Live,
+            master_level: rackforge_session_api::MasterLevel::UNITY,
+            master_pan: rackforge_session_api::MasterPan::CENTER,
             active_instance_id: Some(instance_id.clone()),
             instances: vec![PluginInstanceState {
                 instance_id,
@@ -1439,6 +1558,7 @@ mod tests {
                 store: SessionStore::shared(state).unwrap(),
                 audio_sender: sender,
                 storage: None,
+                checkpoint: None,
                 dispatch_lock: Mutex::new(()),
                 lease_deadline: Mutex::new(None),
                 next_draft_id: AtomicU64::new(1),
@@ -1472,6 +1592,161 @@ mod tests {
             }
         ));
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn changes_active_mode_without_touching_the_audio_thread() {
+        let (context, receiver) = context();
+        let response = dispatch_command(
+            &context,
+            CommandEnvelope::new(
+                ClientId::new("test.surface").unwrap(),
+                2,
+                SessionCommand::SetActiveMode {
+                    mode: rackforge_session_api::SurfaceMode::Play,
+                },
+            ),
+        );
+
+        assert!(matches!(
+            response,
+            ControlResponse::CommandApplied { ref events, .. }
+                if matches!(
+                    events.as_slice(),
+                    [EventEnvelope {
+                        event: SessionEvent::ActiveModeChanged {
+                            mode: rackforge_session_api::SurfaceMode::Play
+                        },
+                        ..
+                    }]
+                )
+        ));
+        assert_eq!(
+            context.store.lock().unwrap().state().active_mode,
+            rackforge_session_api::SurfaceMode::Play
+        );
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn registers_reserved_controls_without_advancing_session_state() {
+        let (context, receiver) = context();
+        let binding = HostControlBinding {
+            target: rackforge_session_api::HostControlTarget::MasterLevel,
+            midi_cc: rackforge_session_api::MidiControlChangeBinding {
+                channel: 0,
+                controller: 82,
+            },
+        };
+        let audio = thread::spawn(move || match receiver.recv().unwrap() {
+            AudioControlCommand::RegisterHostControls {
+                controller_id,
+                bindings,
+                reply,
+            } => {
+                assert_eq!(controller_id, "org.rackforge.test-controller");
+                assert_eq!(bindings, vec![binding]);
+                reply.send(Ok(())).unwrap();
+            }
+            _ => panic!("unexpected audio command"),
+        });
+        let response = dispatch_command(
+            &context,
+            CommandEnvelope::new(
+                ClientId::new("test.controller").unwrap(),
+                4,
+                SessionCommand::RegisterHostControls {
+                    controller_id: "org.rackforge.test-controller".into(),
+                    bindings: vec![binding],
+                },
+            ),
+        );
+
+        assert!(matches!(
+            response,
+            ControlResponse::CommandApplied {
+                revision: Revision::ZERO,
+                ref events,
+                ..
+            } if events.is_empty()
+        ));
+        audio.join().unwrap();
+    }
+
+    #[test]
+    fn applies_master_level_to_audio_before_publishing_state() {
+        let (context, receiver) = context();
+        let level = MasterLevel::new(640).unwrap();
+        let audio = thread::spawn(move || match receiver.recv().unwrap() {
+            AudioControlCommand::SetMasterLevel {
+                level: received,
+                reply,
+            } => {
+                assert_eq!(received, level);
+                reply.send(Ok(())).unwrap();
+            }
+            _ => panic!("unexpected audio command"),
+        });
+        let response = dispatch_command(
+            &context,
+            CommandEnvelope::new(
+                ClientId::new("test.master").unwrap(),
+                3,
+                SessionCommand::SetMasterLevel { level },
+            ),
+        );
+
+        assert!(matches!(
+            response,
+            ControlResponse::CommandApplied { ref events, .. }
+                if matches!(
+                    events.as_slice(),
+                    [EventEnvelope {
+                        event: SessionEvent::MasterLevelChanged { level: changed },
+                        ..
+                    }] if *changed == level
+                )
+        ));
+        assert_eq!(context.store.lock().unwrap().state().master_level, level);
+        audio.join().unwrap();
+    }
+
+    #[test]
+    fn applies_master_pan_to_audio_before_publishing_state() {
+        let (context, receiver) = context();
+        let pan = MasterPan::new(-375).unwrap();
+        let audio = thread::spawn(move || match receiver.recv().unwrap() {
+            AudioControlCommand::SetMasterPan {
+                pan: received,
+                reply,
+            } => {
+                assert_eq!(received, pan);
+                reply.send(Ok(())).unwrap();
+            }
+            _ => panic!("unexpected audio command"),
+        });
+        let response = dispatch_command(
+            &context,
+            CommandEnvelope::new(
+                ClientId::new("test.master-pan").unwrap(),
+                4,
+                SessionCommand::SetMasterPan { pan },
+            ),
+        );
+
+        assert!(matches!(
+            response,
+            ControlResponse::CommandApplied { ref events, .. }
+                if matches!(
+                    events.as_slice(),
+                    [EventEnvelope {
+                        event: SessionEvent::MasterPanChanged { pan: changed },
+                        ..
+                    }] if *changed == pan
+                )
+        ));
+        assert_eq!(context.store.lock().unwrap().state().master_pan, pan);
+        audio.join().unwrap();
     }
 
     #[test]

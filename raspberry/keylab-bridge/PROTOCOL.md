@@ -336,13 +336,45 @@ larga una vez alcanzados 650 ms. Ambos gestos son mutuamente excluyentes.
 
 - `BACK` sostenido vuelve al modo activo de RackForge. En `PLAY` regresa al
   plugin seleccionado y le permite sugerir el programa que debe quedar centrado;
-  en `LIVE` vuelve al rack o instrumento seleccionado.
+  en `LIVE` vuelve al rack o instrumento seleccionado. El modo se lee del
+  estado de sesión persistido por Core y se resincroniza después de reiniciar o
+  reconectar el driver.
 - `OK` + `BACK`, iniciados con una diferencia máxima de 250 ms y sostenidos
   durante 650 ms, fuerzan `HOME`.
 - El acorde de emergencia tiene prioridad: no genera además `OK LONG` ni
   `BACK LONG`.
 - Estas dos rutas son propiedad del host. Un plugin puede ser notificado después
   de la navegación, pero no puede consumirlas, cancelarlas ni impedirlas.
+
+### Fader y encoder reservados por el host
+
+La definición de una memoria User instalada por MIDI Control Center asigna por
+defecto el Fader 9 a CC 85. Sin embargo, RackForge adquiere la superficie en
+`DAW Program`; el script de integración Ableton para este modo identifica el
+Fader 9 como CC 113 por el puerto MIDI principal.[^ableton-fader] El paquete 0.1.9 declara
+`channel = 0`, `controller = 113` —el canal se expresa en base cero en la API—
+como `master_level`.
+
+Desde el paquete 0.2.0, el Encoder 9 situado encima del fader se declara como
+`master_pan` con `channel = 0`, `controller = 104`. Es un encoder absoluto:
+RackForge convierte 0…127 a -1000…1000 y trata 60…68 como centro exacto. Esta
+zona de encastre virtual facilita recuperar el centro sin depender de que el
+control físico entregue exactamente 64.
+
+El paquete 0.2.1 superpone el último valor recibido en el header durante 1,5
+segundos: `MASTER VOL n%`, `MASTER PAN L n%`, `MASTER PAN R n%` o
+`MASTER PAN CENTER`. El temporizador se renueva con cada movimiento. Al expirar,
+el driver restaura el header actual del menú; cuerpo y footer permanecen
+intactos durante toda la notificación.
+
+Estos mensajes no son navegación ni MIDI de plugin. El driver los envía al Core
+como un comando tipado y Core descarta el CC original antes de procesar el
+instrumento. La registración ocurre antes de abrir el input y se repite cuando
+cambia la instancia del socket de control. Tanto `master_level` como
+`master_pan` son estado persistente y autoritativo de la sesión.
+
+[^ableton-fader]: Implementación inspeccionada:
+    [`elements.py`, revisión `ccfad86`](https://github.com/MrMatch246/KeyLab_Essential_mk3_TGE/blob/ccfad86570a66f419f323a080d6cd20ad1c76f6c/elements.py#L143-L145).
 
 El editor de texto reutilizable asigna `OK` corto a entrar o confirmar el texto,
 `<` y `>` cortos a cambiar el carácter, y sus pulsaciones largas a mover el

@@ -20,6 +20,7 @@ use rackforge_session_api::{
     ClientId, CommandEnvelope, EventEnvelope, InstanceId, PluginInstanceState, SessionCommand,
     SessionEvent, SessionState, SurfaceActivationRequest, SurfaceMode,
 };
+use rackforge_session_api::{HostControlBinding, HostControlTarget, MasterLevel, MasterPan};
 use rackforge_surface_runtime as menu;
 use serde_json::Value;
 use std::env;
@@ -31,6 +32,8 @@ use std::fs;
 use std::io::{Read, Write};
 #[cfg(target_os = "linux")]
 use std::net::Shutdown;
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::MetadataExt;
 #[cfg(target_os = "linux")]
 use std::os::unix::net::UnixStream;
 #[cfg(target_os = "linux")]
@@ -55,6 +58,7 @@ const USB_BOOT_STABILITY: Duration = Duration::from_secs(5);
 const ACQUIRE_RETRY_DELAY: Duration = Duration::from_secs(2);
 const LONG_PRESS_THRESHOLD: Duration = Duration::from_millis(650);
 const HOME_CHORD_SIMULTANEITY: Duration = Duration::from_millis(250);
+const HOST_CONTROL_HEADER_TIMEOUT: Duration = Duration::from_millis(1_500);
 #[cfg(target_os = "linux")]
 static NEXT_CONTROL_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -120,6 +124,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                         .iter()
                         .map(|surface| surface.layout_id.clone())
                         .collect(),
+                    host_controls: profile.host_controls.clone(),
                 })?
             );
             return Ok(());
@@ -334,6 +339,7 @@ struct KeyLabInput {
     _connection: MidiInputConnection<()>,
     ack_receiver: Receiver<()>,
     input_receiver: Receiver<PhysicalInputEvent>,
+    host_control_receiver: Receiver<HostControlEvent>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -347,6 +353,77 @@ enum InputPhase {
 struct PhysicalInputEvent {
     input: menu::Input,
     phase: InputPhase,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HostControlEvent {
+    target: HostControlTarget,
+    value: u8,
+}
+
+impl HostControlEvent {
+    fn header_text(self) -> String {
+        match self.target {
+            HostControlTarget::MasterLevel => {
+                let level = MasterLevel::from_midi(self.value);
+                let percent = (u32::from(level.get()) + 5) / 10;
+                format!("MASTER VOL {:>7}", format!("{percent}%"))
+            }
+            HostControlTarget::MasterPan => {
+                let pan = MasterPan::from_midi_with_center_snap(self.value);
+                let value = pan.get();
+                let label = if value == 0 {
+                    "CENTER".to_owned()
+                } else {
+                    let side = if value < 0 { 'L' } else { 'R' };
+                    let percent = (u32::from(value.unsigned_abs()) + 5) / 10;
+                    format!("{side} {percent}%")
+                };
+                format!("MASTER PAN {:>7}", label)
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ActiveTransientHeader {
+    message: Vec<u8>,
+    expires_at: Instant,
+}
+
+#[derive(Debug, Default)]
+struct TransientHeader {
+    active: Option<ActiveTransientHeader>,
+}
+
+impl TransientHeader {
+    fn show(&mut self, text: &str, now: Instant) -> Result<&[u8], String> {
+        self.active = Some(ActiveTransientHeader {
+            message: header(text)?,
+            expires_at: now + HOST_CONTROL_HEADER_TIMEOUT,
+        });
+        Ok(&self.active.as_ref().expect("header was just set").message)
+    }
+
+    fn visible_message(&self, now: Instant) -> Option<&[u8]> {
+        self.active
+            .as_ref()
+            .filter(|active| now < active.expires_at)
+            .map(|active| active.message.as_slice())
+    }
+
+    fn expire(&mut self, now: Instant) -> bool {
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| now >= active.expires_at)
+        {
+            self.active = None;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -851,12 +928,22 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
             }
         };
         let usb_generation = keylab_usb_generation();
+        if let Err(error) = register_host_controls() {
+            eprintln!("Core todavía no acepta el perfil del controlador: {error}");
+            thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+        let control_generation = control_socket_generation();
         if let Some(generation) = usb_generation.as_deref() {
             println!("KeyLab USB detectado ({generation}); esperando arranque estable...");
             if !wait_for_keylab_usb(generation, USB_BOOT_STABILITY) {
                 eprintln!("El KeyLab cambió durante el arranque; reintentando...");
                 continue;
             }
+        }
+        if control_socket_generation() != control_generation {
+            eprintln!("Core cambió durante la espera USB; renovando el perfil...");
+            continue;
         }
         let input = match open_keylab_input(selector) {
             Ok(channel) => channel,
@@ -899,16 +986,46 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let mut next_heartbeat = Instant::now() + Duration::from_secs(6);
         let mut missed_acks = 0_u8;
         let mut button_gestures = ButtonGestureTracker::default();
+        let mut transient_header = TransientHeader::default();
         'surface: loop {
+            if control_socket_generation() != control_generation {
+                eprintln!("Core cambió; cerrando MIDI para renovar los controles reservados...");
+                break;
+            }
             if usb_generation.is_some() && keylab_usb_generation() != usb_generation {
                 eprintln!("Cambió la instancia USB del KeyLab; creando una sesión MIDI nueva...");
                 break;
             }
 
-            match input
-                .input_receiver
-                .recv_timeout(Duration::from_millis(100))
-            {
+            let host_control_events =
+                coalesce_host_control_events(input.host_control_receiver.try_iter());
+            let mut latest_feedback = None;
+            for event in host_control_events {
+                match apply_host_control(event) {
+                    Ok(()) => {
+                        latest_feedback = Some(event.header_text());
+                        println!("HOST_CONTROL {event:?}");
+                    }
+                    Err(error) => {
+                        eprintln!("No se pudo aplicar el control reservado del host: {error}")
+                    }
+                }
+            }
+            if let Some(feedback) = latest_feedback {
+                match transient_header.show(&feedback, Instant::now()) {
+                    Ok(message) => {
+                        if let Err(error) = session.send(message) {
+                            eprintln!("No se pudo mostrar el control maestro: {error}");
+                            break 'surface;
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("No se pudo componer el control maestro: {error}");
+                    }
+                }
+            }
+
+            match input.input_receiver.recv_timeout(Duration::from_millis(20)) {
                 Ok(event) => {
                     let mut navigation_input = None;
                     match event.phase {
@@ -942,6 +1059,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                         match send_menu_frames(
                             &mut session,
                             vec![menu.apply_input_and_render(navigation_input)],
+                            transient_header.visible_message(Instant::now()),
                         ) {
                             Ok(rendered) => messages = rendered,
                             Err(error) => {
@@ -953,7 +1071,11 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                     match apply_pending_menu_command(&mut menu) {
                         Ok(true) => {
                             messages = render_menu_messages(&menu)?;
-                            if let Err(error) = send_menu(&mut session, &messages) {
+                            if let Err(error) = send_menu_with_header_override(
+                                &mut session,
+                                &messages,
+                                transient_header.visible_message(Instant::now()),
+                            ) {
                                 eprintln!("No se pudo confirmar la selección: {error}");
                                 break;
                             }
@@ -971,8 +1093,11 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
             }
 
             for long_input in button_gestures.poll(Instant::now()) {
-                match send_menu_frames(&mut session, vec![menu.apply_input_and_render(long_input)])
-                {
+                match send_menu_frames(
+                    &mut session,
+                    vec![menu.apply_input_and_render(long_input)],
+                    transient_header.visible_message(Instant::now()),
+                ) {
                     Ok(rendered) => messages = rendered,
                     Err(error) => {
                         eprintln!("No se pudo aplicar la pulsación prolongada: {error}");
@@ -982,7 +1107,11 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 match apply_pending_menu_command(&mut menu) {
                     Ok(true) => {
                         messages = render_menu_messages(&menu)?;
-                        if let Err(error) = send_menu(&mut session, &messages) {
+                        if let Err(error) = send_menu_with_header_override(
+                            &mut session,
+                            &messages,
+                            transient_header.visible_message(Instant::now()),
+                        ) {
                             eprintln!("No se pudo confirmar la pulsación prolongada: {error}");
                             break 'surface;
                         }
@@ -995,7 +1124,15 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 println!("INPUT_LONG {long_input:?}");
             }
 
-            if Instant::now() < next_heartbeat {
+            let now = Instant::now();
+            if transient_header.expire(now) {
+                if let Err(error) = session.send(&messages.header) {
+                    eprintln!("No se pudo restaurar el header del menú: {error}");
+                    break;
+                }
+            }
+
+            if now < next_heartbeat {
                 continue;
             }
             next_heartbeat = Instant::now() + Duration::from_secs(6);
@@ -1017,7 +1154,11 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                     } else {
                         messages = render_menu_messages(&menu)?;
                     }
-                    if let Err(error) = send_menu(&mut session, &messages) {
+                    if let Err(error) = send_menu_with_header_override(
+                        &mut session,
+                        &messages,
+                        transient_header.visible_message(Instant::now()),
+                    ) {
                         eprintln!("No se pudo reafirmar el menú: {error}");
                         break;
                     }
@@ -1050,6 +1191,23 @@ fn control_socket_path() -> PathBuf {
                 .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"));
             root.join("state").join(CONTROL_SOCKET_NAME)
         })
+}
+
+#[cfg(target_os = "linux")]
+fn control_socket_generation() -> Option<(u64, u64, i64, i64)> {
+    fs::metadata(control_socket_path()).ok().map(|metadata| {
+        (
+            metadata.dev(),
+            metadata.ino(),
+            metadata.ctime(),
+            metadata.ctime_nsec(),
+        )
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn control_socket_generation() -> Option<(u64, u64, i64, i64)> {
+    None
 }
 
 #[cfg(target_os = "linux")]
@@ -1140,8 +1298,94 @@ fn dispatch_session_command(command: SessionCommand) -> Result<Vec<EventEnvelope
 }
 
 #[cfg(target_os = "linux")]
+fn register_host_controls() -> Result<(), String> {
+    let profile = controller::package_profile();
+    dispatch_session_command(SessionCommand::RegisterHostControls {
+        controller_id: profile.driver_id.clone(),
+        bindings: profile.host_controls.clone(),
+    })?;
+    println!(
+        "HOST_CONTROLS_RESERVED controller={} count={}",
+        profile.driver_id,
+        profile.host_controls.len()
+    );
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn register_host_controls() -> Result<(), String> {
+    Ok(())
+}
+
+fn coalesce_host_control_events(
+    events: impl IntoIterator<Item = HostControlEvent>,
+) -> Vec<HostControlEvent> {
+    let mut latest_level = None;
+    let mut latest_pan = None;
+    let mut last_target = None;
+    for event in events {
+        match event.target {
+            HostControlTarget::MasterLevel => latest_level = Some(event),
+            HostControlTarget::MasterPan => latest_pan = Some(event),
+        }
+        last_target = Some(event.target);
+    }
+
+    let mut coalesced = Vec::with_capacity(2);
+    match last_target {
+        Some(HostControlTarget::MasterLevel) => {
+            coalesced.extend(latest_pan);
+            coalesced.extend(latest_level);
+        }
+        Some(HostControlTarget::MasterPan) => {
+            coalesced.extend(latest_level);
+            coalesced.extend(latest_pan);
+        }
+        None => {}
+    }
+    coalesced
+}
+
+#[cfg(target_os = "linux")]
+fn apply_host_control(event: HostControlEvent) -> Result<(), String> {
+    match event.target {
+        HostControlTarget::MasterLevel => {
+            let level = MasterLevel::from_midi(event.value);
+            dispatch_session_command(SessionCommand::SetMasterLevel { level })?;
+            println!(
+                "MASTER_LEVEL value={} normalized={}/{}",
+                event.value,
+                level.get(),
+                MasterLevel::MAX
+            );
+            Ok(())
+        }
+        HostControlTarget::MasterPan => {
+            let pan = MasterPan::from_midi_with_center_snap(event.value);
+            dispatch_session_command(SessionCommand::SetMasterPan { pan })?;
+            println!(
+                "MASTER_PAN value={} normalized={}/{}",
+                event.value,
+                pan.get(),
+                MasterPan::MAX
+            );
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn apply_host_control(_event: HostControlEvent) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
     let snapshot = live_snapshot()?;
+    menu.sync_active_mode(match snapshot.active_mode {
+        SurfaceMode::Live => menu::ActiveMode::Live,
+        SurfaceMode::Play => menu::ActiveMode::Play,
+    });
     let instance = active_rf_dls_instance(&snapshot)?;
     let selected = instance.selected_sound_id.clone();
     let audition_lease_id = snapshot
@@ -1194,6 +1438,16 @@ fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
         return Ok(false);
     };
     match command {
+        menu::MenuCommand::SetActiveMode { mode } => {
+            dispatch_session_command(SessionCommand::SetActiveMode {
+                mode: match mode {
+                    menu::ActiveMode::Live => SurfaceMode::Live,
+                    menu::ActiveMode::Play => SurfaceMode::Play,
+                },
+            })?;
+            println!("ACTIVE_MODE_SET mode={mode:?}");
+            Ok(true)
+        }
         menu::MenuCommand::SelectSound { id } => {
             let instance_id = active_rf_dls_instance_id()?;
             dispatch_session_command(SessionCommand::SelectSound {
@@ -1412,6 +1666,8 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
     let port = select_input_port(&ports, selector)?;
     let (ack_sender, ack_receiver) = mpsc::channel();
     let (input_sender, input_receiver) = mpsc::channel();
+    let (host_control_sender, host_control_receiver) = mpsc::channel();
+    let host_controls = controller::package_profile().host_controls.clone();
     let connection = midi.connect(
         &port.handle,
         "rackforge KeyLab DAW ACK",
@@ -1422,6 +1678,9 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
             if let Some(input) = parse_physical_input(message) {
                 let _ = input_sender.send(input);
             }
+            if let Some(input) = parse_host_control(message, &host_controls) {
+                let _ = host_control_sender.send(input);
+            }
         },
         (),
     )?;
@@ -1429,6 +1688,19 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
         _connection: connection,
         ack_receiver,
         input_receiver,
+        host_control_receiver,
+    })
+}
+
+fn parse_host_control(message: &[u8], bindings: &[HostControlBinding]) -> Option<HostControlEvent> {
+    bindings.iter().find_map(|binding| {
+        binding
+            .midi_cc
+            .value(message)
+            .map(|value| HostControlEvent {
+                target: binding.target,
+                value,
+            })
     })
 }
 
@@ -1483,9 +1755,17 @@ fn screen_header_message(header_mode: &menu::Header) -> Result<Vec<u8>, String> 
 }
 
 fn send_menu(session: &mut KeyLabSession, messages: &MenuMessages) -> Result<(), Box<dyn Error>> {
+    send_menu_with_header_override(session, messages, None)
+}
+
+fn send_menu_with_header_override(
+    session: &mut KeyLabSession,
+    messages: &MenuMessages,
+    header_override: Option<&[u8]>,
+) -> Result<(), Box<dyn Error>> {
     session.send(&messages.body)?;
     thread::sleep(Duration::from_millis(20));
-    session.send(&messages.header)?;
+    session.send(header_override.unwrap_or(&messages.header))?;
     thread::sleep(Duration::from_millis(20));
     session.send(&messages.footer)
 }
@@ -1493,12 +1773,13 @@ fn send_menu(session: &mut KeyLabSession, messages: &MenuMessages) -> Result<(),
 fn send_menu_frames(
     session: &mut KeyLabSession,
     screens: Vec<menu::Screen>,
+    header_override: Option<&[u8]>,
 ) -> Result<MenuMessages, Box<dyn Error>> {
     let frame_count = screens.len();
     let mut last = None;
     for (index, screen) in screens.into_iter().enumerate() {
         let messages = render_screen_messages(&screen)?;
-        send_menu(session, &messages)?;
+        send_menu_with_header_override(session, &messages, header_override)?;
         if index + 1 < frame_count {
             thread::sleep(Duration::from_millis(55));
         }
@@ -1802,5 +2083,142 @@ mod tests {
         );
         assert_eq!(parse_physical_input(&[0xB0, 116, 64]), None);
         assert_eq!(parse_physical_input(&[0x90, 60, 100]), None);
+    }
+
+    #[test]
+    fn reserved_host_control_is_separate_from_surface_navigation() {
+        let bindings = [
+            HostControlBinding {
+                target: HostControlTarget::MasterLevel,
+                midi_cc: rackforge_session_api::MidiControlChangeBinding {
+                    channel: 0,
+                    controller: 82,
+                },
+            },
+            HostControlBinding {
+                target: HostControlTarget::MasterPan,
+                midi_cc: rackforge_session_api::MidiControlChangeBinding {
+                    channel: 0,
+                    controller: 104,
+                },
+            },
+        ];
+        assert_eq!(
+            parse_host_control(&[0xb0, 82, 91], &bindings),
+            Some(HostControlEvent {
+                target: HostControlTarget::MasterLevel,
+                value: 91,
+            })
+        );
+        assert_eq!(
+            parse_host_control(&[0xb0, 104, 64], &bindings),
+            Some(HostControlEvent {
+                target: HostControlTarget::MasterPan,
+                value: 64,
+            })
+        );
+        assert_eq!(parse_host_control(&[0xb0, 83, 91], &bindings), None);
+        assert_eq!(parse_physical_input(&[0xb0, 82, 91]), None);
+    }
+
+    #[test]
+    fn host_control_feedback_fits_the_native_header_and_snaps_pan_to_center() {
+        assert_eq!(
+            HostControlEvent {
+                target: HostControlTarget::MasterLevel,
+                value: 0,
+            }
+            .header_text(),
+            "MASTER VOL      0%"
+        );
+        assert_eq!(
+            HostControlEvent {
+                target: HostControlTarget::MasterLevel,
+                value: 127,
+            }
+            .header_text(),
+            "MASTER VOL    100%"
+        );
+        assert_eq!(
+            HostControlEvent {
+                target: HostControlTarget::MasterPan,
+                value: 64,
+            }
+            .header_text(),
+            "MASTER PAN  CENTER"
+        );
+        assert_eq!(
+            HostControlEvent {
+                target: HostControlTarget::MasterPan,
+                value: 0,
+            }
+            .header_text(),
+            "MASTER PAN  L 100%"
+        );
+        assert_eq!(
+            HostControlEvent {
+                target: HostControlTarget::MasterPan,
+                value: 127,
+            }
+            .header_text(),
+            "MASTER PAN  R 100%"
+        );
+    }
+
+    #[test]
+    fn transient_header_refreshes_its_deadline_and_restores_after_inactivity() {
+        let start = Instant::now();
+        let mut transient = TransientHeader::default();
+        let first = header("MASTER VOL     50%").unwrap();
+        transient.show("MASTER VOL     50%", start).unwrap();
+        assert_eq!(
+            transient.visible_message(start + Duration::from_millis(1_499)),
+            Some(first.as_slice())
+        );
+
+        let refreshed_at = start + Duration::from_millis(1_000);
+        let second = header("MASTER PAN  CENTER").unwrap();
+        transient.show("MASTER PAN  CENTER", refreshed_at).unwrap();
+        assert!(!transient.expire(start + Duration::from_millis(1_501)));
+        assert_eq!(
+            transient.visible_message(refreshed_at + Duration::from_millis(1_499)),
+            Some(second.as_slice())
+        );
+        assert!(transient.expire(refreshed_at + HOST_CONTROL_HEADER_TIMEOUT));
+        assert_eq!(
+            transient.visible_message(refreshed_at + HOST_CONTROL_HEADER_TIMEOUT),
+            None
+        );
+    }
+
+    #[test]
+    fn rapid_host_controls_keep_the_latest_value_of_each_target() {
+        let events = [
+            HostControlEvent {
+                target: HostControlTarget::MasterLevel,
+                value: 10,
+            },
+            HostControlEvent {
+                target: HostControlTarget::MasterPan,
+                value: 20,
+            },
+            HostControlEvent {
+                target: HostControlTarget::MasterLevel,
+                value: 30,
+            },
+        ];
+        assert_eq!(
+            coalesce_host_control_events(events),
+            vec![
+                HostControlEvent {
+                    target: HostControlTarget::MasterPan,
+                    value: 20,
+                },
+                HostControlEvent {
+                    target: HostControlTarget::MasterLevel,
+                    value: 30,
+                },
+            ]
+        );
     }
 }

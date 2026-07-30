@@ -130,6 +130,9 @@ mod tests {
             schema_version: SESSION_SCHEMA_VERSION,
             session_id: SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             revision: Revision::ZERO,
+            active_mode: rackforge_session_api::SurfaceMode::Live,
+            master_level: rackforge_session_api::MasterLevel::UNITY,
+            master_pan: rackforge_session_api::MasterPan::CENTER,
             active_instance_id: Some(instance_id.clone()),
             instances: vec![PluginInstanceState {
                 instance_id,

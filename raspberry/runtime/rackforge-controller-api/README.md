@@ -9,6 +9,10 @@ control.
 - Los layouts nunca se infieren por resolución o cantidad de controles.
 - La negociación considera únicamente implementaciones declaradas por el
   controlador y vistas declaradas por el plugin.
+- Un perfil puede declarar controles físicos reservados del host. Cada binding
+  identifica su mensaje MIDI exacto y un destino tipado, como
+  `master_level` o `master_pan`; el host lo consume y nunca lo expone al
+  plugin.
 
 `little@1` garantiza 18 columnas seguras, header, dos filas de cuerpo, cuatro
 soft keys y las acciones Previous, Next, Confirm y Back.

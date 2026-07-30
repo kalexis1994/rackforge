@@ -249,6 +249,13 @@ Solo un `ControllerDriver` registrado puede:
 - interpretar botones de navegación;
 - declarar implementaciones certificadas de layouts.
 
+También puede declarar inputs reservados para funciones globales del host.
+RackForge valida esos bindings contra el manifest, los registra de forma
+transitoria para el controlador activo y los retira del flujo MIDI antes de los
+plugins. Los primeros destinos implementados son `master_level` y
+`master_pan`; otros destinos deberán agregarse como capacidades tipadas, no
+como strings arbitrarios.
+
 ### Paquetes instalables de controlador
 
 La compatibilidad física se distribuye fuera de Core como `.rfcontroller`.

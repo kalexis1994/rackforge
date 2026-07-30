@@ -1,12 +1,19 @@
 use rackforge_program_api::{ProgramEditorValue, ProgramEditorView};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
+pub use rackforge_controller_api::{
+    HostControlBinding, HostControlTarget, MidiControlChangeBinding,
+};
 pub use rackforge_surface_api::{
     SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const SESSION_SCHEMA_VERSION: u32 = 3;
+pub const SESSION_SCHEMA_VERSION: u32 = 6;
+
+fn default_surface_mode() -> SurfaceMode {
+    SurfaceMode::Live
+}
 pub const DEFAULT_LIVE_SESSION_ID: &str = "live.main";
 pub const DEFAULT_LIVE_INSTANCE_ID: &str = "live.main.instrument.1";
 
@@ -39,6 +46,122 @@ macro_rules! string_id {
 string_id!(SessionId);
 string_id!(InstanceId);
 string_id!(ClientId);
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct MasterLevel(u16);
+
+impl MasterLevel {
+    pub const MAX: u16 = 1_000;
+    pub const SILENT: Self = Self(0);
+    pub const UNITY: Self = Self(Self::MAX);
+
+    pub fn new(value: u16) -> Result<Self, String> {
+        if value > Self::MAX {
+            return Err(format!(
+                "master level {value} exceeds maximum {}",
+                Self::MAX
+            ));
+        }
+        Ok(Self(value))
+    }
+
+    pub const fn get(self) -> u16 {
+        self.0
+    }
+
+    pub fn from_midi(value: u8) -> Self {
+        Self((u32::from(value) * u32::from(Self::MAX) / 127) as u16)
+    }
+
+    pub fn amplitude(self) -> f32 {
+        let normalized = f32::from(self.0) / f32::from(Self::MAX);
+        normalized * normalized
+    }
+}
+
+impl Default for MasterLevel {
+    fn default() -> Self {
+        Self::UNITY
+    }
+}
+
+impl<'de> Deserialize<'de> for MasterLevel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u16::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct MasterPan(i16);
+
+impl MasterPan {
+    pub const MAX: i16 = 1_000;
+    pub const LEFT: Self = Self(-Self::MAX);
+    pub const CENTER: Self = Self(0);
+    pub const RIGHT: Self = Self(Self::MAX);
+    pub const MIDI_SNAP_LOW: u8 = 60;
+    pub const MIDI_SNAP_HIGH: u8 = 68;
+
+    pub fn new(value: i16) -> Result<Self, String> {
+        if !(-Self::MAX..=Self::MAX).contains(&value) {
+            return Err(format!(
+                "master pan {value} is outside -{}..={}",
+                Self::MAX,
+                Self::MAX
+            ));
+        }
+        Ok(Self(value))
+    }
+
+    pub const fn get(self) -> i16 {
+        self.0
+    }
+
+    pub fn from_midi_with_center_snap(value: u8) -> Self {
+        if value < Self::MIDI_SNAP_LOW {
+            let distance = i32::from(Self::MIDI_SNAP_LOW - value);
+            let range = i32::from(Self::MIDI_SNAP_LOW);
+            return Self((-(distance * i32::from(Self::MAX) / range)) as i16);
+        }
+        if value > Self::MIDI_SNAP_HIGH {
+            let distance = i32::from(value - Self::MIDI_SNAP_HIGH);
+            let range = i32::from(127 - Self::MIDI_SNAP_HIGH);
+            return Self((distance * i32::from(Self::MAX) / range) as i16);
+        }
+        Self::CENTER
+    }
+
+    pub fn balance(self) -> (f32, f32) {
+        let normalized = f32::from(self.0) / f32::from(Self::MAX);
+        if normalized < 0.0 {
+            (1.0, 1.0 + normalized)
+        } else {
+            (1.0 - normalized, 1.0)
+        }
+    }
+}
+
+impl Default for MasterPan {
+    fn default() -> Self {
+        Self::CENTER
+    }
+}
+
+impl<'de> Deserialize<'de> for MasterPan {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = i16::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -120,6 +243,12 @@ pub struct SessionState {
     pub schema_version: u32,
     pub session_id: SessionId,
     pub revision: Revision,
+    #[serde(default = "default_surface_mode")]
+    pub active_mode: SurfaceMode,
+    #[serde(default)]
+    pub master_level: MasterLevel,
+    #[serde(default)]
+    pub master_pan: MasterPan,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_instance_id: Option<InstanceId>,
     #[serde(default)]
@@ -136,6 +265,9 @@ impl SessionState {
             schema_version: SESSION_SCHEMA_VERSION,
             session_id,
             revision: Revision::ZERO,
+            active_mode: SurfaceMode::Live,
+            master_level: MasterLevel::UNITY,
+            master_pan: MasterPan::CENTER,
             active_instance_id: None,
             instances: Vec::new(),
             audition: None,
@@ -172,6 +304,15 @@ impl SessionState {
         }
 
         match &envelope.event {
+            SessionEvent::MasterLevelChanged { level } => {
+                self.master_level = *level;
+            }
+            SessionEvent::MasterPanChanged { pan } => {
+                self.master_pan = *pan;
+            }
+            SessionEvent::ActiveModeChanged { mode } => {
+                self.active_mode = *mode;
+            }
             SessionEvent::SoundSelected {
                 instance_id,
                 sound_id,
@@ -349,6 +490,19 @@ impl SessionState {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionCommand {
+    RegisterHostControls {
+        controller_id: String,
+        bindings: Vec<HostControlBinding>,
+    },
+    SetMasterLevel {
+        level: MasterLevel,
+    },
+    SetMasterPan {
+        pan: MasterPan,
+    },
+    SetActiveMode {
+        mode: SurfaceMode,
+    },
     SelectSound {
         instance_id: InstanceId,
         sound_id: String,
@@ -438,6 +592,15 @@ pub enum AuditionEndReason {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionEvent {
+    MasterLevelChanged {
+        level: MasterLevel,
+    },
+    MasterPanChanged {
+        pan: MasterPan,
+    },
+    ActiveModeChanged {
+        mode: SurfaceMode,
+    },
     SoundSelected {
         instance_id: InstanceId,
         sound_id: String,
@@ -511,6 +674,9 @@ mod tests {
             schema_version: SESSION_SCHEMA_VERSION,
             session_id: SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             revision: Revision::ZERO,
+            active_mode: SurfaceMode::Live,
+            master_level: MasterLevel::UNITY,
+            master_pan: MasterPan::CENTER,
             active_instance_id: Some(instance_id.clone()),
             instances: vec![PluginInstanceState {
                 instance_id,
@@ -606,6 +772,70 @@ mod tests {
                 ))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn active_mode_is_event_driven_and_legacy_snapshots_default_to_live() {
+        let mut state = session();
+        state
+            .apply(&event(
+                1,
+                SessionEvent::ActiveModeChanged {
+                    mode: SurfaceMode::Play,
+                },
+            ))
+            .unwrap();
+        assert_eq!(state.active_mode, SurfaceMode::Play);
+
+        let mut legacy = serde_json::to_value(session()).unwrap();
+        legacy.as_object_mut().unwrap().remove("active_mode");
+        legacy.as_object_mut().unwrap().remove("master_level");
+        legacy.as_object_mut().unwrap().remove("master_pan");
+        let restored: SessionState = serde_json::from_value(legacy).unwrap();
+        assert_eq!(restored.active_mode, SurfaceMode::Live);
+        assert_eq!(restored.master_level, MasterLevel::UNITY);
+        assert_eq!(restored.master_pan, MasterPan::CENTER);
+    }
+
+    #[test]
+    fn master_level_is_bounded_and_event_driven() {
+        assert!(MasterLevel::new(MasterLevel::MAX + 1).is_err());
+        assert!(serde_json::from_str::<MasterLevel>("1001").is_err());
+        assert_eq!(MasterLevel::from_midi(0), MasterLevel::SILENT);
+        assert_eq!(MasterLevel::from_midi(127), MasterLevel::UNITY);
+
+        let mut state = session();
+        let level = MasterLevel::new(625).unwrap();
+        state
+            .apply(&event(1, SessionEvent::MasterLevelChanged { level }))
+            .unwrap();
+        assert_eq!(state.master_level, level);
+    }
+
+    #[test]
+    fn master_pan_snaps_to_center_and_is_event_driven() {
+        assert!(MasterPan::new(MasterPan::MAX + 1).is_err());
+        assert!(MasterPan::new(-MasterPan::MAX - 1).is_err());
+        assert_eq!(MasterPan::from_midi_with_center_snap(0), MasterPan::LEFT);
+        assert_eq!(MasterPan::from_midi_with_center_snap(127), MasterPan::RIGHT);
+        for value in MasterPan::MIDI_SNAP_LOW..=MasterPan::MIDI_SNAP_HIGH {
+            assert_eq!(
+                MasterPan::from_midi_with_center_snap(value),
+                MasterPan::CENTER
+            );
+        }
+        assert!(MasterPan::from_midi_with_center_snap(59).get() < 0);
+        assert!(MasterPan::from_midi_with_center_snap(69).get() > 0);
+        assert_eq!(MasterPan::LEFT.balance(), (1.0, 0.0));
+        assert_eq!(MasterPan::CENTER.balance(), (1.0, 1.0));
+        assert_eq!(MasterPan::RIGHT.balance(), (0.0, 1.0));
+
+        let mut state = session();
+        let pan = MasterPan::new(-375).unwrap();
+        state
+            .apply(&event(1, SessionEvent::MasterPanChanged { pan }))
+            .unwrap();
+        assert_eq!(state.master_pan, pan);
     }
 
     #[test]

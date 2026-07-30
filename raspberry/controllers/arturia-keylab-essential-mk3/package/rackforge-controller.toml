@@ -2,7 +2,7 @@ schema_version = 1
 kind = "controller"
 id = "org.rackforge.arturia-keylab-essential-mk3"
 name = "Arturia KeyLab Essential 61 mk3"
-version = "0.1.4"
+version = "0.2.1"
 controller_api = "^1.0"
 
 [runtime]
@@ -20,6 +20,20 @@ raw_usb = false
 firmware_write = false
 filesystem = false
 network = false
+
+[[host_controls]]
+target = "master_level"
+
+[host_controls.midi_cc]
+channel = 0
+controller = 113
+
+[[host_controls]]
+target = "master_pan"
+
+[host_controls.midi_cc]
+channel = 0
+controller = 104
 
 [[devices]]
 id = "arturia.keylab-essential-mk3"

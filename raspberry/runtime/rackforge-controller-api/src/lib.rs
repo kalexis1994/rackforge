@@ -6,6 +6,49 @@ pub const LITTLE_TEXT_COLUMNS: usize = 18;
 pub const LITTLE_BODY_ROWS: usize = 2;
 pub const LITTLE_SOFT_KEYS: usize = 4;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostControlTarget {
+    MasterLevel,
+    MasterPan,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MidiControlChangeBinding {
+    pub channel: u8,
+    pub controller: u8,
+}
+
+impl MidiControlChangeBinding {
+    pub fn validate(self) -> Result<(), String> {
+        if self.channel > 15 {
+            return Err(format!("MIDI channel {} is outside 0..15", self.channel));
+        }
+        if self.controller > 119 {
+            return Err(format!(
+                "MIDI CC {} is a channel-mode message, not a continuous control",
+                self.controller
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn value(self, message: &[u8]) -> Option<u8> {
+        let [status, controller, value] = message else {
+            return None;
+        };
+        (*status == (0xb0 | self.channel) && *controller == self.controller).then_some(*value)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostControlBinding {
+    pub target: HostControlTarget,
+    pub midi_cc: MidiControlChangeBinding,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SurfaceContract {
@@ -102,6 +145,8 @@ pub struct ControllerProfile {
     pub name: String,
     pub driver_id: String,
     pub surfaces: Vec<SurfaceImplementation>,
+    #[serde(default)]
+    pub host_controls: Vec<HostControlBinding>,
 }
 
 impl ControllerProfile {
@@ -121,6 +166,23 @@ impl ControllerProfile {
             }
             if !priorities.insert(surface.priority) {
                 return Err(format!("duplicate surface priority {}", surface.priority));
+            }
+        }
+        let mut targets = BTreeSet::new();
+        let mut midi_bindings = BTreeSet::new();
+        for binding in &self.host_controls {
+            binding.midi_cc.validate()?;
+            if !targets.insert(binding.target as u8) {
+                return Err(format!(
+                    "duplicate reserved host control {:?}",
+                    binding.target
+                ));
+            }
+            if !midi_bindings.insert((binding.midi_cc.channel, binding.midi_cc.controller)) {
+                return Err(format!(
+                    "duplicate reserved MIDI binding ch={} cc={}",
+                    binding.midi_cc.channel, binding.midi_cc.controller
+                ));
             }
         }
         Ok(())
@@ -206,6 +268,7 @@ mod tests {
             name: "Example Medium".into(),
             driver_id: "org.rackforge.example-medium".into(),
             surfaces,
+            host_controls: Vec::new(),
         }
     }
 
@@ -236,6 +299,33 @@ mod tests {
                 layout_id: "medium@1".into(),
                 quality: SurfaceQuality::Native,
             })
+        );
+    }
+
+    #[test]
+    fn reserved_host_control_matches_only_its_exact_midi_cc() {
+        let binding = MidiControlChangeBinding {
+            channel: 0,
+            controller: 82,
+        };
+        assert_eq!(binding.value(&[0xb0, 82, 91]), Some(91));
+        assert_eq!(binding.value(&[0xb1, 82, 91]), None);
+        assert_eq!(binding.value(&[0xb0, 83, 91]), None);
+        assert!(
+            MidiControlChangeBinding {
+                channel: 16,
+                controller: 82
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            MidiControlChangeBinding {
+                channel: 0,
+                controller: 123
+            }
+            .validate()
+            .is_err()
         );
     }
 }

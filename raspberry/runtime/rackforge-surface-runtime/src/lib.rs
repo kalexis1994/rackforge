@@ -85,6 +85,9 @@ pub enum ProgramExitDecision {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MenuCommand {
+    SetActiveMode {
+        mode: ActiveMode,
+    },
     SelectSound {
         id: String,
     },
@@ -357,6 +360,10 @@ impl Default for Menu {
 }
 
 impl Menu {
+    pub fn sync_active_mode(&mut self, mode: ActiveMode) {
+        self.active_mode = mode;
+    }
+
     pub fn set_play_sounds(&mut self, sounds: Vec<PlaySound>, selected_sound_id: Option<&str>) {
         let browsed_sound_id = self
             .filtered_sounds()
@@ -625,10 +632,16 @@ impl Menu {
                     Page::Home => match self.home_index {
                         0 => {
                             self.active_mode = ActiveMode::Live;
+                            self.pending_command = Some(MenuCommand::SetActiveMode {
+                                mode: ActiveMode::Live,
+                            });
                             Page::Live
                         }
                         1 => {
                             self.active_mode = ActiveMode::Play;
+                            self.pending_command = Some(MenuCommand::SetActiveMode {
+                                mode: ActiveMode::Play,
+                            });
                             Page::Play
                         }
                         _ => Page::Config,
@@ -3422,6 +3435,38 @@ mod tests {
             Header::Visible("CUSTOM         1/1".into())
         );
         assert!(menu.render().line_1.contains("[WARM PIANO]"));
+    }
+
+    #[test]
+    fn restored_mode_controls_long_back_after_a_fresh_menu_start() {
+        for mode in [ActiveMode::Live, ActiveMode::Play] {
+            let mut menu = Menu::default();
+            menu.sync_active_mode(mode);
+
+            menu.apply_input(Input::Button4Long);
+
+            assert!(matches!(
+                menu.take_command(),
+                Some(MenuCommand::ReturnToActiveMode {
+                    mode: returned_mode,
+                    ..
+                }) if returned_mode == mode
+            ));
+        }
+    }
+
+    #[test]
+    fn choosing_play_publishes_the_new_active_mode() {
+        let mut menu = Menu::default();
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetActiveMode {
+                mode: ActiveMode::Play
+            })
+        );
     }
 
     #[test]

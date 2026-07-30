@@ -140,9 +140,10 @@ snapshots, historial acotado de eventos y comandos tipados:
 plugin → HostApi 1.4 → SessionState → rackforge-control-api → superficies
 ```
 
-El esquema de sesión v2 publica `plugin_id`, `plugin_name` y
-`PluginInstanceState`. El lector conserva aliases para snapshots v1, pero todo
-estado nuevo se serializa únicamente con el vocabulario `plugin`.
+El esquema de sesión v3 publica `plugin_id`, `plugin_name`,
+`PluginInstanceState` y el árbol declarativo del editor dentro del draft
+activo. El lector conserva aliases de vocabulario para campos de instancia v1,
+pero todo estado nuevo se serializa únicamente con el vocabulario `plugin`.
 
 LITTLE ya utiliza `SessionCommand::SelectSound`, `BeginAudition`,
 `KeepAuditionAlive` y `EndAudition`. Core valida la instancia y el catálogo,
@@ -150,12 +151,14 @@ envía la operación mediante una cola acotada y publica un `SessionEvent` solo
 después de que el motor la aplica. La selección ocurre al comienzo de un bloque
 de audio. El callback no toca el store de sesión ni realiza E/S.
 
-La edición auditiva usa `PreviewProgramDraft` y
-`RestoreProgramDraftPreview`. Preview valida el documento completo y lo entrega
-al callback del plugin, pero no cambia el snapshot, no avanza la revisión y no
-marca el draft como dirty. `ReplaceProgramDraft` continúa siendo el único
-commit. Así una superficie puede preescuchar cada paso del encoder, confirmar
-con `OK` o restaurar el documento confirmado con `BACK`.
+La edición declarativa usa `EditProgramDraftField`. La superficie entrega un
+`field_id` opaco, un valor tipado y el indicador `preview`; Core nunca interpreta
+ni modifica el payload. El plugin aplica la mutación, valida el documento
+completo y devuelve el documento y el árbol de editor canónicos. Un preview no
+cambia el snapshot, no avanza la revisión y no marca el draft como dirty.
+`RestoreProgramDraftPreview` restaura el último documento confirmado al
+cancelar con `BACK`. `ReplaceProgramDraft` se conserva para tooling y edición
+del sobre común, como el nombre del programa.
 
 Los clientes pueden declarar `expected_revision` para rechazar ediciones
 obsoletas. Si pierden eventos, solicitan un snapshot completo y reconstruyen su
@@ -187,9 +190,11 @@ heredan los articuladores del DLS. Los payloads v1 se migran a una sola capa
 `A` al leerlos y se escriben como v2 al siguiente guardado.
 
 La extensión binaria de programas 1.1 agrega un callback opcional de preview.
-Core sigue cargando extensiones 1.0 por su prefijo de estructura y, si no
-ofrecen preview completo, cae en la selección del sonido base. RF-DLS 1.1
-preescucha el documento validado completo sin instalarlo ni persistirlo.
+La versión 1.2 agrega `editor_view` y `apply_edit`: el plugin publica páginas y
+campos tipados y conserva la propiedad exclusiva de las mutaciones del payload.
+Core sigue cargando 1.0 y 1.1 por sus prefijos de estructura; sólo los plugins
+1.2 pueden abrir el editor declarativo. RF-DLS publica 1.2 y preescucha el
+documento validado completo sin instalarlo ni persistirlo.
 
 ## Parámetros y pantalla
 

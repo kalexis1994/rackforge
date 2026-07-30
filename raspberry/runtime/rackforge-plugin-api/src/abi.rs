@@ -12,7 +12,7 @@ pub const ABI_VERSION_MINOR: u16 = 4;
 pub const ABI_VERSION: u32 = pack_version(ABI_VERSION_MAJOR, ABI_VERSION_MINOR);
 pub const ENTRY_SYMBOL_V1: &[u8] = b"rackforge_plugin_entry_v1\0";
 pub const PROGRAM_EXTENSION_VERSION_MAJOR: u16 = 1;
-pub const PROGRAM_EXTENSION_VERSION_MINOR: u16 = 1;
+pub const PROGRAM_EXTENSION_VERSION_MINOR: u16 = 2;
 pub const PROGRAM_EXTENSION_VERSION: u32 = pack_version(
     PROGRAM_EXTENSION_VERSION_MAJOR,
     PROGRAM_EXTENSION_VERSION_MINOR,
@@ -208,10 +208,15 @@ pub struct ProgramExtensionApiV1 {
     pub prepare_save: ProgramExchangeJsonFnV1,
     pub install: ProgramInstallFnV1,
     pub preview: Option<ProgramInstallFnV1>,
+    pub editor_view: Option<ProgramExchangeJsonFnV1>,
+    pub apply_edit: Option<ProgramExchangeJsonFnV1>,
 }
 
 pub const PROGRAM_EXTENSION_V1_0_SIZE: u32 =
     std::mem::offset_of!(ProgramExtensionApiV1, preview) as u32;
+pub const PROGRAM_EXTENSION_V1_1_SIZE: u32 =
+    std::mem::offset_of!(ProgramExtensionApiV1, editor_view) as u32;
+pub const PROGRAM_EXTENSION_V1_2_SIZE: u32 = size_of::<ProgramExtensionApiV1>() as u32;
 
 pub type ProgramExtensionEntryFnV1 = unsafe extern "C" fn() -> *const ProgramExtensionApiV1;
 
@@ -274,7 +279,8 @@ mod tests {
         assert!(!is_compatible(pack_version(1, 5)));
         assert!(is_program_extension_compatible(pack_version(1, 0)));
         assert!(is_program_extension_compatible(pack_version(1, 1)));
-        assert!(!is_program_extension_compatible(pack_version(1, 2)));
+        assert!(is_program_extension_compatible(pack_version(1, 2)));
+        assert!(!is_program_extension_compatible(pack_version(1, 3)));
         assert!(!is_program_extension_compatible(pack_version(2, 0)));
         assert!(is_surface_extension_compatible(pack_version(1, 0)));
         assert!(!is_surface_extension_compatible(pack_version(1, 1)));

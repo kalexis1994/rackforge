@@ -462,6 +462,9 @@ fn audio_loop(
                         let prepared = instance
                             .begin_program_edit(&request)
                             .map_err(|error| error.to_string())?;
+                        let editor = instance
+                            .program_editor_view(&prepared.document)
+                            .map_err(|error| error.to_string())?;
                         instance.reset().map_err(|error| error.to_string())?;
                         if !instance
                             .preview_program(&prepared)
@@ -481,7 +484,7 @@ fn audio_loop(
                         println!(
                             "PROGRAM_EDIT_AUDIO_READY lease={lease_id} instance={instance_id}"
                         );
-                        Ok((lease_id, prepared))
+                        Ok((lease_id, prepared, editor))
                     })();
                     replay_controller_state |= result.is_ok();
                     let _ = reply.send(result);
@@ -495,6 +498,9 @@ fn audio_loop(
                         let prepared = instance
                             .prepare_program_save(&document)
                             .map_err(|error| error.to_string())?;
+                        let editor = instance
+                            .program_editor_view(&prepared.document)
+                            .map_err(|error| error.to_string())?;
                         if !instance
                             .preview_program(&prepared)
                             .map_err(|error| error.to_string())?
@@ -504,7 +510,36 @@ fn audio_loop(
                                 .map_err(|error| error.to_string())?;
                         }
                         println!("PROGRAM_DRAFT_AUDIO_READY instance={instance_id}");
-                        Ok(prepared)
+                        Ok((prepared, editor))
+                    })();
+                    replay_controller_state |= result.is_ok();
+                    let _ = reply.send(result);
+                }
+                AudioControlCommand::EditProgramDraftField {
+                    instance_id,
+                    request,
+                    reply,
+                } => {
+                    let result = (|| -> Result<_, String> {
+                        let prepared = instance
+                            .apply_program_edit(&request)
+                            .map_err(|error| error.to_string())?;
+                        let editor = instance
+                            .program_editor_view(&prepared.document)
+                            .map_err(|error| error.to_string())?;
+                        if !instance
+                            .preview_program(&prepared)
+                            .map_err(|error| error.to_string())?
+                        {
+                            instance
+                                .load_preset(&prepared.preview_sound_id)
+                                .map_err(|error| error.to_string())?;
+                        }
+                        println!(
+                            "PROGRAM_FIELD_AUDIO_READY instance={instance_id} field={}",
+                            request.field_id
+                        );
+                        Ok((prepared, editor))
                     })();
                     replay_controller_state |= result.is_ok();
                     let _ = reply.send(result);

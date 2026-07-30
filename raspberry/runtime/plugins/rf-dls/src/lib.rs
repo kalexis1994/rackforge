@@ -1,4 +1,5 @@
 mod custom_program;
+mod program_editor;
 
 use custom_program::{CustomProgram, DlsSource, ProgramLayer};
 use rackforge_plugin_api::abi::{
@@ -10,7 +11,8 @@ use rackforge_plugin_api::abi::{
 };
 use rackforge_plugin_api::{
     BankDescriptor, PreparedProgram, PresetCatalog, PresetDescriptor, ProgramDocument,
-    ProgramEditRequest, SurfaceActivationRequest, SurfaceActivationResponse,
+    ProgramEditRequest, ProgramEditorView, ProgramFieldEditRequest, SurfaceActivationRequest,
+    SurfaceActivationResponse,
 };
 use rf_dls::{DlsBank, Voice};
 use std::collections::BTreeSet;
@@ -335,6 +337,23 @@ impl RfDls {
             return Err(format!("CUSTOM slot {} is already in use", program.slot));
         }
         program.prepared()
+    }
+
+    fn program_editor_view(&self, document: ProgramDocument) -> Result<ProgramEditorView, String> {
+        let program = CustomProgram::from_document(document)?;
+        let view = program_editor::view(&program);
+        view.validate().map_err(|error| error.to_string())?;
+        Ok(view)
+    }
+
+    fn apply_program_edit(
+        &self,
+        request: ProgramFieldEditRequest,
+    ) -> Result<PreparedProgram, String> {
+        request.validate().map_err(|error| error.to_string())?;
+        let mut program = CustomProgram::from_document(request.document)?;
+        program_editor::apply(&mut program, &request.field_id, request.value)?;
+        self.prepare_program_save(program.to_document()?)
     }
 
     fn install_program(&mut self, prepared: PreparedProgram) -> Result<(), String> {
@@ -1080,6 +1099,58 @@ unsafe extern "C" fn prepare_program_save_json(
     }
 }
 
+unsafe extern "C" fn program_editor_view_json(
+    instance: *mut c_void,
+    source: *const u8,
+    source_length: usize,
+    destination: *mut u8,
+    capacity: usize,
+) -> usize {
+    let Some(plugin) = (unsafe { instance.cast::<RfDls>().as_ref() }) else {
+        return 0;
+    };
+    let Some(bytes) = (unsafe { read_extension_source(source, source_length) }) else {
+        return 0;
+    };
+    let view = serde_json::from_slice::<ProgramDocument>(bytes)
+        .map_err(|error| error.to_string())
+        .and_then(|document| plugin.program_editor_view(document))
+        .and_then(|view| serde_json::to_vec(&view).map_err(|error| error.to_string()));
+    match view {
+        Ok(bytes) => unsafe { copy_to_host_buffer(&bytes, destination, capacity) },
+        Err(error) => {
+            log_host(&plugin.host, LOG_LEVEL_WARN, &error);
+            0
+        }
+    }
+}
+
+unsafe extern "C" fn apply_program_edit_json(
+    instance: *mut c_void,
+    source: *const u8,
+    source_length: usize,
+    destination: *mut u8,
+    capacity: usize,
+) -> usize {
+    let Some(plugin) = (unsafe { instance.cast::<RfDls>().as_ref() }) else {
+        return 0;
+    };
+    let Some(bytes) = (unsafe { read_extension_source(source, source_length) }) else {
+        return 0;
+    };
+    let prepared = serde_json::from_slice::<ProgramFieldEditRequest>(bytes)
+        .map_err(|error| error.to_string())
+        .and_then(|request| plugin.apply_program_edit(request))
+        .and_then(|prepared| serde_json::to_vec(&prepared).map_err(|error| error.to_string()));
+    match prepared {
+        Ok(bytes) => unsafe { copy_to_host_buffer(&bytes, destination, capacity) },
+        Err(error) => {
+            log_host(&plugin.host, LOG_LEVEL_WARN, &error);
+            0
+        }
+    }
+}
+
 unsafe extern "C" fn install_program_json(
     instance: *mut c_void,
     source: *const u8,
@@ -1185,6 +1256,8 @@ static PROGRAM_EXTENSION_API: ProgramExtensionApiV1 = ProgramExtensionApiV1 {
     prepare_save: prepare_program_save_json,
     install: install_program_json,
     preview: Some(preview_program_json),
+    editor_view: Some(program_editor_view_json),
+    apply_edit: Some(apply_program_edit_json),
 };
 
 static SURFACE_EXTENSION_API: SurfaceExtensionApiV1 = SurfaceExtensionApiV1 {
@@ -1382,6 +1455,50 @@ mod tests {
             .unwrap();
         assert_eq!(reopened.document.id, "user.warm-piano");
         assert_eq!(reopened.preview_sound_id, "dls.b00000000.p00000000");
+    }
+
+    #[test]
+    fn declarative_editor_owns_rf_dls_payload_mutations() {
+        let plugin = synthetic_plugin();
+        let created = plugin
+            .begin_program_edit(&ProgramEditRequest::new(None))
+            .unwrap();
+        let view = plugin
+            .program_editor_view(created.document.clone())
+            .unwrap();
+        assert_eq!(view.validate(), Ok(()));
+        assert_eq!(view.title, "RF-DLS");
+        assert_eq!(
+            view.pages
+                .iter()
+                .map(|page| page.label.as_str())
+                .collect::<Vec<_>>(),
+            ["LAYER A", "LAYER B", "FX", "OUTPUT"]
+        );
+
+        let enabled = plugin
+            .apply_program_edit(ProgramFieldEditRequest {
+                schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+                document: created.document,
+                field_id: "layer.b.enabled".into(),
+                value: rackforge_plugin_api::ProgramEditorValue::Boolean(true),
+            })
+            .unwrap();
+        let program = CustomProgram::from_document(enabled.document.clone()).unwrap();
+        assert_eq!(program.layers.len(), 2);
+        assert!(program.layers[1].enabled);
+
+        let quieter = plugin
+            .apply_program_edit(ProgramFieldEditRequest {
+                schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+                document: enabled.document,
+                field_id: "layer.b.gain".into(),
+                value: rackforge_plugin_api::ProgramEditorValue::Integer(75),
+            })
+            .unwrap();
+        let program = CustomProgram::from_document(quieter.document).unwrap();
+        assert_eq!(program.layers[0].parameters.gain, 1.0);
+        assert_eq!(program.layers[1].parameters.gain, 0.75);
     }
 
     #[test]

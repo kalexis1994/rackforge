@@ -3,6 +3,9 @@
 //! This crate has no MIDI, SysEx, USB or controller-model knowledge.
 
 use rackforge_controller_api::LITTLE_TEXT_COLUMNS;
+use rackforge_program_api::{
+    ProgramEditorField, ProgramEditorFieldKind, ProgramEditorPage, ProgramEditorValue,
+};
 use rackforge_session_api::ProgramDraftState;
 pub use rackforge_ui::Input;
 use rackforge_ui::{
@@ -88,35 +91,11 @@ pub enum MenuCommand {
     BeginProgramEdit {
         program_id: Option<String>,
     },
-    SetProgramDraftSound {
+    EditProgramDraftField {
         draft_id: u64,
-        layer_index: usize,
-        sound_id: String,
-    },
-    AddProgramDraftLayer {
-        draft_id: u64,
-    },
-    SetProgramDraftLayerParameter {
-        draft_id: u64,
-        layer_index: usize,
-        parameter: String,
-        value: ProgramParameterValue,
-    },
-    PreviewProgramDraftLayerParameter {
-        draft_id: u64,
-        layer_index: usize,
-        parameter: String,
-        value: ProgramParameterValue,
-    },
-    SetProgramDraftParameter {
-        draft_id: u64,
-        parameter: String,
-        value: ProgramParameterValue,
-    },
-    PreviewProgramDraftParameter {
-        draft_id: u64,
-        parameter: String,
-        value: ProgramParameterValue,
+        field_id: String,
+        value: ProgramEditorValue,
+        preview: bool,
     },
     RestoreProgramDraftPreview {
         draft_id: u64,
@@ -144,13 +123,6 @@ pub enum MenuCommand {
     ForceHome {
         cancel_draft_id: Option<u64>,
     },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ProgramParameterValue {
-    Number(Option<f64>),
-    Integer(i64),
-    Boolean(Option<bool>),
 }
 
 impl Screen {
@@ -242,6 +214,10 @@ enum Page {
     RfDlsSharedFx,
     RfDlsProgramOutput,
     RfDlsUnsavedChanges,
+    ProgramEditorRoot,
+    ProgramEditorPage,
+    ProgramEditorField,
+    ProgramEditorSound,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -281,6 +257,10 @@ pub struct Menu {
     program_output: ValueCarousel,
     unsaved_changes: ConfirmationDialog,
     pending_program_exit: Option<PendingProgramExit>,
+    editor_path: Vec<usize>,
+    editor_selections: Vec<usize>,
+    editor_field: Option<ValueCarousel>,
+    editor_field_id: Option<String>,
     pressed_button: Option<usize>,
     pending_command: Option<MenuCommand>,
 }
@@ -366,6 +346,10 @@ impl Default for Menu {
             program_output: program_output_carousel(1.0),
             unsaved_changes: unsaved_changes_dialog(),
             pending_program_exit: None,
+            editor_path: Vec::new(),
+            editor_selections: vec![0],
+            editor_field: None,
+            editor_field_id: None,
             pressed_button: None,
             pending_command: None,
         }
@@ -434,8 +418,12 @@ impl Menu {
                 self.program_name.set_value(name);
             }
             if previous_draft_id != Some(draft_id) {
-                self.rf_dls_section_index = 0;
-                self.page = Page::RfDlsProgramSections;
+                self.editor_path.clear();
+                self.editor_selections.clear();
+                self.editor_selections.push(0);
+                self.editor_field = None;
+                self.editor_field_id = None;
+                self.page = Page::ProgramEditorRoot;
             }
         } else if edit_was_visible {
             self.pending_program_exit = None;
@@ -487,7 +475,17 @@ impl Menu {
             });
             return;
         }
-        if self.page == Page::RfDlsUnsavedChanges {
+        if self.page == Page::ProgramEditorField {
+            self.apply_generic_editor_field_input(input);
+        } else if self.page == Page::ProgramEditorSound {
+            if let Some(action) = input.default_navigation() {
+                self.apply_generic_editor_action(action);
+            }
+        } else if matches!(self.page, Page::ProgramEditorRoot | Page::ProgramEditorPage) {
+            if let Some(action) = input.default_navigation() {
+                self.apply_generic_editor_action(action);
+            }
+        } else if self.page == Page::RfDlsUnsavedChanges {
             self.apply_unsaved_changes_input(input);
         } else if self.page == Page::RfDlsName {
             self.apply_program_name_input(input);
@@ -519,6 +517,23 @@ impl Menu {
     }
 
     pub fn apply(&mut self, action: Action) {
+        if matches!(
+            self.page,
+            Page::ProgramEditorRoot | Page::ProgramEditorPage | Page::ProgramEditorSound
+        ) {
+            self.apply_generic_editor_action(action);
+            return;
+        }
+        if self.page == Page::ProgramEditorField {
+            let input = match action {
+                Action::Previous => Input::Button2,
+                Action::Next => Input::Button3,
+                Action::Back => Input::Button4,
+                Action::Select => Input::Button1,
+            };
+            self.apply_generic_editor_field_input(input);
+            return;
+        }
         if self.page == Page::RfDlsUnsavedChanges {
             let input = match action {
                 Action::Previous => Input::Button2,
@@ -687,10 +702,18 @@ impl Menu {
                             && let Some(draft_id) =
                                 self.program_draft.as_ref().map(|draft| draft.draft_id)
                         {
-                            self.pending_command = Some(MenuCommand::SetProgramDraftSound {
+                            self.pending_command = Some(MenuCommand::EditProgramDraftField {
                                 draft_id,
-                                layer_index: self.rf_dls_layer_index,
-                                sound_id,
+                                field_id: format!(
+                                    "layer.{}.sound",
+                                    if self.rf_dls_layer_index == 0 {
+                                        "a"
+                                    } else {
+                                        "b"
+                                    }
+                                ),
+                                value: ProgramEditorValue::SoundId(sound_id),
+                                preview: false,
                             });
                         }
                         Page::RfDlsTimbre
@@ -812,6 +835,10 @@ impl Menu {
                 let [line_1, line_2] = component_lines(&self.unsaved_changes, true);
                 Screen::with_header("RF-DLS", line_1, line_2)
             }
+            Page::ProgramEditorRoot => self.render_generic_editor_root(),
+            Page::ProgramEditorPage => self.render_generic_editor_page(),
+            Page::ProgramEditorField => self.render_generic_editor_field(),
+            Page::ProgramEditorSound => self.render_generic_editor_sound(),
         };
         screen.footer = standard_footer(self.pressed_button);
         screen
@@ -856,9 +883,282 @@ impl Menu {
             | Page::RfDlsRange
             | Page::RfDlsLfo
             | Page::RfDlsEnvelope
-            | Page::RfDlsUnsavedChanges => return,
+            | Page::RfDlsUnsavedChanges
+            | Page::ProgramEditorRoot
+            | Page::ProgramEditorPage
+            | Page::ProgramEditorField
+            | Page::ProgramEditorSound => return,
         };
         *selection = ((*selection as isize + delta).rem_euclid(len as isize)) as usize;
+    }
+
+    fn apply_generic_editor_action(&mut self, action: Action) {
+        match self.page {
+            Page::ProgramEditorSound => match action {
+                Action::Previous => self.move_editor_sound(-1),
+                Action::Next => self.move_editor_sound(1),
+                Action::Back => self.page = Page::ProgramEditorPage,
+                Action::Select => self.select_editor_sound(),
+            },
+            Page::ProgramEditorRoot | Page::ProgramEditorPage => match action {
+                Action::Previous => self.move_editor_selection(-1),
+                Action::Next => self.move_editor_selection(1),
+                Action::Back => self.back_from_generic_editor(),
+                Action::Select => self.select_generic_editor_item(),
+            },
+            _ => {}
+        }
+    }
+
+    fn move_editor_selection(&mut self, delta: isize) {
+        let len = self.generic_editor_item_count();
+        if len == 0 {
+            return;
+        }
+        let depth = self.editor_path.len();
+        if self.editor_selections.len() <= depth {
+            self.editor_selections.resize(depth + 1, 0);
+        }
+        let selected = &mut self.editor_selections[depth];
+        *selected = ((*selected as isize + delta).rem_euclid(len as isize)) as usize;
+    }
+
+    fn generic_editor_item_count(&self) -> usize {
+        if self.page == Page::ProgramEditorRoot {
+            return self
+                .program_draft
+                .as_ref()
+                .map_or(0, |draft| draft.editor.pages.len() + 2);
+        }
+        self.current_editor_page().map_or(0, |page| {
+            page.fields.len() + if page.enabled { page.pages.len() } else { 0 }
+        })
+    }
+
+    fn current_editor_selection(&self) -> usize {
+        self.editor_selections
+            .get(self.editor_path.len())
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn current_editor_page(&self) -> Option<&ProgramEditorPage> {
+        let draft = self.program_draft.as_ref()?;
+        let mut pages = draft.editor.pages.as_slice();
+        let mut current = None;
+        for index in &self.editor_path {
+            let page = pages.get(*index)?;
+            current = Some(page);
+            pages = page.pages.as_slice();
+        }
+        current
+    }
+
+    fn select_generic_editor_item(&mut self) {
+        if self.page == Page::ProgramEditorRoot {
+            let Some(draft) = self.program_draft.as_ref() else {
+                return;
+            };
+            let selected = self.current_editor_selection();
+            if selected == 0 {
+                self.program_name.set_value(&draft.name);
+                self.page = Page::RfDlsName;
+            } else if selected == draft.editor.pages.len() + 1 {
+                self.pending_command = Some(MenuCommand::SaveProgramDraft {
+                    draft_id: draft.draft_id,
+                });
+            } else {
+                let page = draft.editor.pages[selected - 1].clone();
+                self.editor_path.clear();
+                self.editor_path.push(selected - 1);
+                self.editor_selections.resize(2, 0);
+                self.editor_selections[1] = 0;
+                self.page = Page::ProgramEditorPage;
+                if page.enabled && page.pages.is_empty() && page.fields.len() == 1 {
+                    self.open_generic_editor_field(page.fields[0].clone(), false);
+                }
+            }
+            return;
+        }
+
+        let selected = self.current_editor_selection();
+        let Some(page) = self.current_editor_page().cloned() else {
+            return;
+        };
+        if let Some(field) = page.fields.get(selected) {
+            if !page.enabled && !matches!(field.kind, ProgramEditorFieldKind::Toggle) {
+                return;
+            }
+            self.open_generic_editor_field(field.clone(), true);
+            return;
+        }
+        if !page.enabled {
+            return;
+        }
+        let child_index = selected.saturating_sub(page.fields.len());
+        if child_index < page.pages.len() {
+            let child = page.pages[child_index].clone();
+            self.editor_path.push(child_index);
+            let depth = self.editor_path.len();
+            self.editor_selections.resize(depth + 1, 0);
+            self.editor_selections[depth] = 0;
+            self.page = Page::ProgramEditorPage;
+            if child.pages.is_empty() && child.fields.len() == 1 {
+                self.open_generic_editor_field(child.fields[0].clone(), false);
+            }
+        }
+    }
+
+    fn open_generic_editor_field(&mut self, field: ProgramEditorField, begin_edit: bool) {
+        match (&field.kind, &field.value) {
+            (ProgramEditorFieldKind::Toggle, ProgramEditorValue::Boolean(value)) => {
+                self.emit_generic_editor_field(
+                    field.id,
+                    ProgramEditorValue::Boolean(!value),
+                    false,
+                );
+            }
+            (ProgramEditorFieldKind::Sound { bank }, ProgramEditorValue::SoundId(sound_id)) => {
+                self.editor_field_id = Some(field.id);
+                let matching = self
+                    .rf_dls_sounds
+                    .iter()
+                    .filter(|sound| bank.as_ref().is_none_or(|bank| sound.bank == *bank))
+                    .collect::<Vec<_>>();
+                self.rf_dls_timbre_index = matching
+                    .iter()
+                    .position(|sound| sound.id == *sound_id)
+                    .unwrap_or(0);
+                self.page = Page::ProgramEditorSound;
+            }
+            (ProgramEditorFieldKind::Number { .. }, _)
+            | (ProgramEditorFieldKind::Choice { .. }, _) => {
+                self.editor_field_id = Some(field.id.clone());
+                self.editor_field = editor_field_carousel(&field);
+                if self.editor_field.is_some() {
+                    self.page = Page::ProgramEditorField;
+                    if begin_edit && let Some(editor) = self.editor_field.as_mut() {
+                        let _ = editor.handle(Input::Button1);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_generic_editor_field_input(&mut self, input: Input) {
+        let Some(editor) = self.editor_field.as_mut() else {
+            self.page = Page::ProgramEditorPage;
+            return;
+        };
+        let event = editor.handle(input);
+        match event {
+            ComponentEvent::Changed(_) if editor.is_editing() => {
+                if self
+                    .active_editor_field()
+                    .is_some_and(|field| field.live_preview)
+                {
+                    self.emit_current_generic_editor_value(true);
+                }
+            }
+            ComponentEvent::EditCommitted(_) => self.emit_current_generic_editor_value(false),
+            ComponentEvent::EditCancelled(_) => self.restore_program_preview(),
+            ComponentEvent::ExitRequested(_) => {
+                self.editor_field = None;
+                self.editor_field_id = None;
+                self.page = Page::ProgramEditorPage;
+            }
+            _ => {}
+        }
+    }
+
+    fn active_editor_field(&self) -> Option<&ProgramEditorField> {
+        let id = self.editor_field_id.as_deref()?;
+        self.program_draft
+            .as_ref()?
+            .editor
+            .pages
+            .iter()
+            .find_map(|page| find_editor_field(page, id))
+    }
+
+    fn emit_current_generic_editor_value(&mut self, preview: bool) {
+        let Some(field) = self.active_editor_field().cloned() else {
+            return;
+        };
+        let Some(item) = self.editor_field.as_ref().map(ValueCarousel::selected_item) else {
+            return;
+        };
+        let Some(value) = editor_value_from_item(&field, item) else {
+            return;
+        };
+        self.emit_generic_editor_field(field.id, value, preview);
+    }
+
+    fn emit_generic_editor_field(
+        &mut self,
+        field_id: String,
+        value: ProgramEditorValue,
+        preview: bool,
+    ) {
+        if let Some(draft_id) = self.program_draft.as_ref().map(|draft| draft.draft_id) {
+            self.pending_command = Some(MenuCommand::EditProgramDraftField {
+                draft_id,
+                field_id,
+                value,
+                preview,
+            });
+        }
+    }
+
+    fn back_from_generic_editor(&mut self) {
+        if self.page == Page::ProgramEditorRoot {
+            if self.program_draft.as_ref().is_some_and(|draft| draft.dirty) {
+                self.open_unsaved_changes(ProgramExitDestination::CustomPrograms);
+            } else if let Some(draft_id) = self.program_draft.as_ref().map(|draft| draft.draft_id) {
+                self.pending_command = Some(MenuCommand::CancelProgramEdit { draft_id });
+            }
+            return;
+        }
+        self.editor_path.pop();
+        self.editor_selections
+            .truncate(self.editor_path.len().saturating_add(1));
+        self.page = if self.editor_path.is_empty() {
+            Page::ProgramEditorRoot
+        } else {
+            Page::ProgramEditorPage
+        };
+    }
+
+    fn editor_sound_choices(&self) -> Vec<&PlaySound> {
+        let bank = self
+            .active_editor_field()
+            .and_then(|field| match &field.kind {
+                ProgramEditorFieldKind::Sound { bank } => bank.as_deref(),
+                _ => None,
+            });
+        self.rf_dls_sounds
+            .iter()
+            .filter(|sound| bank.is_none_or(|bank| sound.bank == bank))
+            .collect()
+    }
+
+    fn move_editor_sound(&mut self, delta: isize) {
+        let len = self.editor_sound_choices().len();
+        if len > 0 {
+            self.rf_dls_timbre_index =
+                ((self.rf_dls_timbre_index as isize + delta).rem_euclid(len as isize)) as usize;
+        }
+    }
+
+    fn select_editor_sound(&mut self) {
+        let sound_id = self
+            .editor_sound_choices()
+            .get(self.rf_dls_timbre_index)
+            .map(|sound| sound.id.clone());
+        if let (Some(field_id), Some(sound_id)) = (self.editor_field_id.clone(), sound_id) {
+            self.emit_generic_editor_field(field_id, ProgramEditorValue::SoundId(sound_id), false);
+        }
     }
 
     fn apply_layer_parameter_input(&mut self, input: Input) {
@@ -887,16 +1187,12 @@ impl Menu {
             return;
         };
         let enabled = self.program_layer_enabled(1);
-        if self.program_layer_count() < 2 {
-            self.pending_command = Some(MenuCommand::AddProgramDraftLayer { draft_id });
-        } else {
-            self.pending_command = Some(MenuCommand::SetProgramDraftLayerParameter {
-                draft_id,
-                layer_index: 1,
-                parameter: "enabled".into(),
-                value: ProgramParameterValue::Boolean(Some(!enabled)),
-            });
-        }
+        self.pending_command = Some(MenuCommand::EditProgramDraftField {
+            draft_id,
+            field_id: "layer.b.enabled".into(),
+            value: ProgramEditorValue::Boolean(!enabled),
+            preview: false,
+        });
     }
 
     fn emit_layer_parameter(&mut self, preview: bool) {
@@ -910,36 +1206,29 @@ impl Menu {
             _ => return,
         };
         let value = if item.id() == "lfo.enabled" {
-            ProgramParameterValue::Boolean(match item.value().choice_index() {
-                Some(0) => None,
-                Some(1) => Some(true),
-                Some(2) => Some(false),
+            ProgramEditorValue::Choice(match item.value().choice_index() {
+                Some(0) => "inherit".into(),
+                Some(1) => "on".into(),
+                Some(2) => "off".into(),
                 _ => return,
             })
         } else if let Some(value) = item.value().as_optional_f64() {
-            ProgramParameterValue::Number(value)
+            value.map_or(ProgramEditorValue::Inherited, |value| {
+                ProgramEditorValue::Integer(editor_scaled_value(item.id(), value))
+            })
         } else if let Some(value) = item.value().as_i64() {
-            ProgramParameterValue::Integer(value)
+            ProgramEditorValue::Integer(editor_scaled_value(item.id(), value as f64))
         } else if let Some(value) = item.value().as_f64() {
-            ProgramParameterValue::Number(Some(value))
+            ProgramEditorValue::Integer(editor_scaled_value(item.id(), value))
         } else {
             return;
         };
         if let Some(draft_id) = self.program_draft.as_ref().map(|draft| draft.draft_id) {
-            self.pending_command = Some(if preview {
-                MenuCommand::PreviewProgramDraftLayerParameter {
-                    draft_id,
-                    layer_index: self.rf_dls_layer_index,
-                    parameter: item.id().to_owned(),
-                    value,
-                }
-            } else {
-                MenuCommand::SetProgramDraftLayerParameter {
-                    draft_id,
-                    layer_index: self.rf_dls_layer_index,
-                    parameter: item.id().to_owned(),
-                    value,
-                }
+            self.pending_command = Some(MenuCommand::EditProgramDraftField {
+                draft_id,
+                field_id: editor_layer_field_id(self.rf_dls_layer_index, item.id()),
+                value,
+                preview,
             });
         }
     }
@@ -993,18 +1282,11 @@ impl Menu {
             return;
         };
         if let Some(draft_id) = self.program_draft.as_ref().map(|draft| draft.draft_id) {
-            self.pending_command = Some(if preview {
-                MenuCommand::PreviewProgramDraftParameter {
-                    draft_id,
-                    parameter: "gain".into(),
-                    value: ProgramParameterValue::Number(Some(value)),
-                }
-            } else {
-                MenuCommand::SetProgramDraftParameter {
-                    draft_id,
-                    parameter: "gain".into(),
-                    value: ProgramParameterValue::Number(Some(value)),
-                }
+            self.pending_command = Some(MenuCommand::EditProgramDraftField {
+                draft_id,
+                field_id: "program.gain".into(),
+                value: ProgramEditorValue::Integer((value * 100.0).round() as i64),
+                preview,
             });
         }
     }
@@ -1020,7 +1302,7 @@ impl Menu {
                 }
             }
             ComponentEvent::ExitRequested(_) => {
-                self.page = Page::RfDlsProgramSections;
+                self.page = Page::ProgramEditorRoot;
             }
             _ => {}
         }
@@ -1072,6 +1354,114 @@ impl Menu {
             }
             _ => {}
         }
+    }
+
+    fn render_generic_editor_root(&self) -> Screen {
+        let Some(draft) = self.program_draft.as_ref() else {
+            return Screen::with_header("PROGRAM", "NO DRAFT", " ");
+        };
+        let mut names = vec!["NAME".to_owned()];
+        let mut details = vec!["Program name".to_owned()];
+        names.extend(draft.editor.pages.iter().map(|page| page.label.clone()));
+        details.extend(draft.editor.pages.iter().map(|page| page.detail.clone()));
+        names.push("SAVE".into());
+        details.push("Store program".into());
+        let selected = self.current_editor_selection().min(names.len() - 1);
+        let name_refs = names.iter().map(String::as_str).collect::<Vec<_>>();
+        let detail_refs = details.iter().map(String::as_str).collect::<Vec<_>>();
+        simple_screen(
+            indexed_title(&draft.editor.title, selected, names.len()),
+            &name_refs,
+            &detail_refs,
+            selected,
+        )
+    }
+
+    fn render_generic_editor_page(&self) -> Screen {
+        let Some(page) = self.current_editor_page() else {
+            return Screen::with_header("PROGRAM", "INVALID PAGE", " ");
+        };
+        let mut names = page
+            .fields
+            .iter()
+            .map(|field| field.label.clone())
+            .collect::<Vec<_>>();
+        let mut details = page
+            .fields
+            .iter()
+            .map(editor_field_summary)
+            .collect::<Vec<_>>();
+        if page.enabled {
+            names.extend(page.pages.iter().map(|page| page.label.clone()));
+            details.extend(page.pages.iter().map(|page| page.detail.clone()));
+        }
+        if names.is_empty() {
+            return Screen::with_header(&page.label, "NO OPTIONS", " ");
+        }
+        let selected = self.current_editor_selection().min(names.len() - 1);
+        let name_refs = names.iter().map(String::as_str).collect::<Vec<_>>();
+        let detail_refs = details.iter().map(String::as_str).collect::<Vec<_>>();
+        simple_screen(
+            indexed_title(&page.label, selected, names.len()),
+            &name_refs,
+            &detail_refs,
+            selected,
+        )
+    }
+
+    fn render_generic_editor_field(&self) -> Screen {
+        let Some(field) = self.active_editor_field() else {
+            return Screen::with_header("PROGRAM", "INVALID FIELD", " ");
+        };
+        let Some(editor) = self.editor_field.as_ref() else {
+            return Screen::with_header(&field.label, "NO EDITOR", " ");
+        };
+        let [line_1, line_2] = component_lines(editor, true);
+        Screen::with_header(&field.label, line_1, line_2)
+    }
+
+    fn render_generic_editor_sound(&self) -> Screen {
+        let sounds = self.editor_sound_choices();
+        let Some(field) = self.active_editor_field() else {
+            return Screen::with_header("TIMBRE", "INVALID FIELD", " ");
+        };
+        if sounds.is_empty() {
+            return Screen::with_header(&field.label, "NO SOUNDS", " ");
+        }
+        let selected_id = match &field.value {
+            ProgramEditorValue::SoundId(id) => Some(id.as_str()),
+            _ => None,
+        };
+        let mut carousel = SimpleCarousel::new(
+            "program-editor-sound",
+            sounds.iter().map(|sound| {
+                let name = if selected_id == Some(sound.id.as_str()) {
+                    format!(
+                        "[{}]",
+                        sound
+                            .name
+                            .chars()
+                            .take(DISPLAY_COLUMNS - 2)
+                            .collect::<String>()
+                    )
+                } else {
+                    sound.name.clone()
+                };
+                CarouselItem::new(name, &sound.detail)
+            }),
+        );
+        carousel.set_selected(self.rf_dls_timbre_index.min(sounds.len() - 1));
+        carousel.set_focused(true);
+        let [line_1, line_2] = component_lines(&carousel, false);
+        Screen::with_header(
+            indexed_title(
+                &field.label,
+                self.rf_dls_timbre_index.min(sounds.len() - 1),
+                sounds.len(),
+            ),
+            line_1,
+            line_2,
+        )
     }
 
     fn render_rf_dls_play(&self) -> Screen {
@@ -1350,6 +1740,10 @@ impl Menu {
                 | Page::RfDlsSharedFx
                 | Page::RfDlsProgramOutput
                 | Page::RfDlsUnsavedChanges
+                | Page::ProgramEditorRoot
+                | Page::ProgramEditorPage
+                | Page::ProgramEditorField
+                | Page::ProgramEditorSound
         )
     }
 }
@@ -1358,6 +1752,203 @@ fn library_index(bank: &str) -> Option<usize> {
     RF_DLS_LIBRARIES
         .iter()
         .position(|library| library.eq_ignore_ascii_case(bank))
+}
+
+fn editor_layer_field_id(layer_index: usize, legacy_parameter: &str) -> String {
+    let layer = if layer_index == 0 { "a" } else { "b" };
+    let parameter = match legacy_parameter {
+        "amplitude_envelope.attack_seconds" => "amp.attack",
+        "amplitude_envelope.decay_seconds" => "amp.decay",
+        "amplitude_envelope.sustain_level" => "amp.sustain",
+        "amplitude_envelope.release_seconds" => "amp.release",
+        "pitch_envelope.attack_seconds" => "pitch.attack",
+        "pitch_envelope.decay_seconds" => "pitch.decay",
+        "pitch_envelope.sustain_level" => "pitch.sustain",
+        "pitch_envelope.release_seconds" => "pitch.release",
+        "pitch_envelope.depth_cents" => "pitch.depth",
+        "lfo.enabled" => "lfo.enabled",
+        "lfo.frequency_hz" => "lfo.frequency",
+        "lfo.delay_seconds" => "lfo.delay",
+        "lfo.pitch_depth_cents" => "lfo.pitch",
+        "lfo.mod_wheel_pitch_depth_cents" => "lfo.mod-pitch",
+        "lfo.attenuation_depth_centibels" => "lfo.amp",
+        "lfo.mod_wheel_attenuation_depth_centibels" => "lfo.mod-amp",
+        "transpose_semitones" => "transpose",
+        "fine_tune_cents" => "fine",
+        "pitch_bend_range_semitones" => "bend",
+        "modulation_depth" => "mod-depth",
+        "key_range.low" => "key-low",
+        "key_range.high" => "key-high",
+        "velocity_range.low" => "vel-low",
+        "velocity_range.high" => "vel-high",
+        "gain" => "gain",
+        other => other,
+    };
+    format!("layer.{layer}.{parameter}")
+}
+
+fn editor_scaled_value(parameter: &str, value: f64) -> i64 {
+    let scale = match parameter {
+        "amplitude_envelope.attack_seconds"
+        | "amplitude_envelope.decay_seconds"
+        | "amplitude_envelope.sustain_level"
+        | "amplitude_envelope.release_seconds"
+        | "pitch_envelope.attack_seconds"
+        | "pitch_envelope.decay_seconds"
+        | "pitch_envelope.sustain_level"
+        | "pitch_envelope.release_seconds"
+        | "lfo.frequency_hz"
+        | "lfo.delay_seconds"
+        | "gain"
+        | "modulation_depth" => 100.0,
+        "pitch_bend_range_semitones" => 10.0,
+        _ => 1.0,
+    };
+    (value * scale).round() as i64
+}
+
+fn find_editor_field<'a>(
+    page: &'a ProgramEditorPage,
+    field_id: &str,
+) -> Option<&'a ProgramEditorField> {
+    page.fields
+        .iter()
+        .find(|field| field.id == field_id)
+        .or_else(|| {
+            page.pages
+                .iter()
+                .find_map(|page| find_editor_field(page, field_id))
+        })
+}
+
+fn editor_field_carousel(field: &ProgramEditorField) -> Option<ValueCarousel> {
+    let value = match (&field.kind, &field.value) {
+        (
+            ProgramEditorFieldKind::Number {
+                minimum,
+                maximum,
+                step,
+                decimals,
+                unit,
+                allow_inherited,
+            },
+            value,
+        ) => {
+            let scale = 10_f64.powi(i32::from(*decimals));
+            let unit = unit.as_deref().unwrap_or("");
+            if *allow_inherited {
+                let current = match value {
+                    ProgramEditorValue::Inherited => None,
+                    ProgramEditorValue::Integer(value) => Some(*value as f64 / scale),
+                    _ => return None,
+                };
+                EditableValue::optional_number(
+                    current,
+                    (*step as f64 / scale).clamp(*minimum as f64 / scale, *maximum as f64 / scale),
+                    *minimum as f64 / scale,
+                    *maximum as f64 / scale,
+                    *step as f64 / scale,
+                    usize::from(*decimals),
+                    unit,
+                )
+            } else {
+                let ProgramEditorValue::Integer(current) = value else {
+                    return None;
+                };
+                if *decimals == 0 {
+                    EditableValue::integer(*current, *minimum, *maximum, *step, unit)
+                } else {
+                    EditableValue::number(
+                        *current as f64 / scale,
+                        *minimum as f64 / scale,
+                        *maximum as f64 / scale,
+                        *step as f64 / scale,
+                        usize::from(*decimals),
+                        unit,
+                    )
+                }
+            }
+        }
+        (ProgramEditorFieldKind::Choice { options }, ProgramEditorValue::Choice(current)) => {
+            let selected = options
+                .iter()
+                .position(|option| option.value == *current)
+                .unwrap_or(0);
+            EditableValue::choice(selected, options.iter().map(|option| option.label.clone()))
+        }
+        _ => return None,
+    };
+    Some(focused_values(
+        &format!("program-editor-{}", field.id),
+        [ValueItem::new(&field.id, &field.label, value)],
+    ))
+}
+
+fn editor_value_from_item(
+    field: &ProgramEditorField,
+    item: &ValueItem,
+) -> Option<ProgramEditorValue> {
+    match &field.kind {
+        ProgramEditorFieldKind::Number {
+            decimals,
+            allow_inherited,
+            ..
+        } => {
+            let scale = 10_f64.powi(i32::from(*decimals));
+            if *allow_inherited {
+                item.value().as_optional_f64().map(|value| {
+                    value.map_or(ProgramEditorValue::Inherited, |value| {
+                        ProgramEditorValue::Integer((value * scale).round() as i64)
+                    })
+                })
+            } else if *decimals == 0 {
+                item.value().as_i64().map(ProgramEditorValue::Integer)
+            } else {
+                item.value()
+                    .as_f64()
+                    .map(|value| ProgramEditorValue::Integer((value * scale).round() as i64))
+            }
+        }
+        ProgramEditorFieldKind::Choice { options } => item
+            .value()
+            .choice_index()
+            .and_then(|index| options.get(index))
+            .map(|option| ProgramEditorValue::Choice(option.value.clone())),
+        _ => None,
+    }
+}
+
+fn editor_field_summary(field: &ProgramEditorField) -> String {
+    match (&field.kind, &field.value) {
+        (ProgramEditorFieldKind::Toggle, ProgramEditorValue::Boolean(value)) => {
+            if *value {
+                "ON".into()
+            } else {
+                "OFF".into()
+            }
+        }
+        (ProgramEditorFieldKind::Choice { options }, ProgramEditorValue::Choice(value)) => options
+            .iter()
+            .find(|option| option.value == *value)
+            .map_or_else(|| field.detail.clone(), |option| option.label.clone()),
+        (ProgramEditorFieldKind::Sound { .. }, _) => field.detail.clone(),
+        (ProgramEditorFieldKind::Number { .. }, ProgramEditorValue::Inherited) => "INHERIT".into(),
+        (
+            ProgramEditorFieldKind::Number { decimals, unit, .. },
+            ProgramEditorValue::Integer(value),
+        ) => {
+            let scale = 10_f64.powi(i32::from(*decimals));
+            format!(
+                "{:.*} {}",
+                usize::from(*decimals),
+                *value as f64 / scale,
+                unit.as_deref().unwrap_or("")
+            )
+            .trim_end()
+            .to_owned()
+        }
+        _ => field.detail.clone(),
+    }
 }
 
 fn normalized_display_text(value: &str, fallback: &str) -> String {
@@ -1849,6 +2440,215 @@ mod tests {
     use super::*;
     use rackforge_session_api::InstanceId;
 
+    fn test_number(id: &str, label: &str, value: Option<i64>, decimals: u8) -> ProgramEditorField {
+        ProgramEditorField {
+            id: id.into(),
+            label: label.into(),
+            detail: format!("{label} value"),
+            value: value.map_or(ProgramEditorValue::Inherited, ProgramEditorValue::Integer),
+            kind: ProgramEditorFieldKind::Number {
+                minimum: if id.contains("depth") { -10_000 } else { 0 },
+                maximum: 10_000,
+                step: 1,
+                decimals,
+                unit: (id.contains("attack")
+                    || id.contains("decay")
+                    || id.contains("release")
+                    || id.contains("delay"))
+                .then(|| "s".into()),
+                allow_inherited: value.is_none(),
+            },
+            live_preview: true,
+        }
+    }
+
+    fn test_page(
+        id: &str,
+        label: &str,
+        detail: &str,
+        fields: Vec<ProgramEditorField>,
+    ) -> ProgramEditorPage {
+        ProgramEditorPage {
+            id: id.into(),
+            label: label.into(),
+            detail: detail.into(),
+            enabled: true,
+            pages: Vec::new(),
+            fields,
+        }
+    }
+
+    fn test_layer(id: &str, enabled: bool, optional: bool) -> ProgramEditorPage {
+        let prefix = format!("layer.{id}");
+        let mut fields = Vec::new();
+        if optional {
+            fields.push(ProgramEditorField {
+                id: format!("{prefix}.enabled"),
+                label: "ENABLED".into(),
+                detail: "Enable layer B".into(),
+                value: ProgramEditorValue::Boolean(enabled),
+                kind: ProgramEditorFieldKind::Toggle,
+                live_preview: false,
+            });
+        }
+        ProgramEditorPage {
+            id: format!("layer-{id}"),
+            label: format!("LAYER {}", id.to_ascii_uppercase()),
+            detail: if optional {
+                "Optional layer".into()
+            } else {
+                "Required layer".into()
+            },
+            enabled: !optional || enabled,
+            fields,
+            pages: vec![
+                test_page(
+                    &format!("{prefix}.timbre"),
+                    "TIMBRE",
+                    "DLS source",
+                    vec![ProgramEditorField {
+                        id: format!("{prefix}.sound"),
+                        label: "TIMBRE".into(),
+                        detail: "DLS source".into(),
+                        value: ProgramEditorValue::SoundId("dls.b00000000.p00000000".into()),
+                        kind: ProgramEditorFieldKind::Sound {
+                            bank: Some("dls".into()),
+                        },
+                        live_preview: true,
+                    }],
+                ),
+                test_page(
+                    &format!("{prefix}.amp-env"),
+                    "AMP ENV",
+                    "Amplitude ADSR",
+                    vec![
+                        test_number(&format!("{prefix}.amp.attack"), "ATTACK", None, 2),
+                        test_number(&format!("{prefix}.amp.decay"), "DECAY", None, 2),
+                        test_number(&format!("{prefix}.amp.sustain"), "SUSTAIN", None, 2),
+                        test_number(&format!("{prefix}.amp.release"), "RELEASE", None, 2),
+                    ],
+                ),
+                test_page(
+                    &format!("{prefix}.pitch-env"),
+                    "PITCH ENV",
+                    "Pitch EG override",
+                    vec![test_number(
+                        &format!("{prefix}.pitch.attack"),
+                        "ATTACK",
+                        None,
+                        2,
+                    )],
+                ),
+                test_page(
+                    &format!("{prefix}.lfo"),
+                    "LFO",
+                    "Rate delay depth",
+                    vec![
+                        ProgramEditorField {
+                            id: format!("{prefix}.lfo.enabled"),
+                            label: "MODE".into(),
+                            detail: "LFO override".into(),
+                            value: ProgramEditorValue::Choice("inherit".into()),
+                            kind: ProgramEditorFieldKind::Choice {
+                                options: vec![
+                                    rackforge_program_api::ProgramEditorChoice {
+                                        value: "inherit".into(),
+                                        label: "INHERIT".into(),
+                                        detail: None,
+                                    },
+                                    rackforge_program_api::ProgramEditorChoice {
+                                        value: "on".into(),
+                                        label: "ON".into(),
+                                        detail: None,
+                                    },
+                                    rackforge_program_api::ProgramEditorChoice {
+                                        value: "off".into(),
+                                        label: "OFF".into(),
+                                        detail: None,
+                                    },
+                                ],
+                            },
+                            live_preview: true,
+                        },
+                        test_number(&format!("{prefix}.lfo.frequency"), "RATE", None, 2),
+                        test_number(&format!("{prefix}.lfo.delay"), "DELAY", None, 2),
+                    ],
+                ),
+                test_page(
+                    &format!("{prefix}.tuning"),
+                    "TUNING",
+                    "Pitch and expression",
+                    vec![test_number(
+                        &format!("{prefix}.transpose"),
+                        "TRANSPOSE",
+                        Some(0),
+                        0,
+                    )],
+                ),
+                test_page(
+                    &format!("{prefix}.range"),
+                    "RANGE",
+                    "Key and velocity",
+                    vec![test_number(
+                        &format!("{prefix}.key-low"),
+                        "KEY LOW",
+                        Some(0),
+                        0,
+                    )],
+                ),
+                test_page(
+                    &format!("{prefix}.volume"),
+                    "VOLUME",
+                    "Layer mix gain",
+                    vec![test_number(
+                        &format!("{prefix}.gain"),
+                        "VOLUME",
+                        Some(100),
+                        2,
+                    )],
+                ),
+            ],
+        }
+    }
+
+    fn test_editor(layer_b_enabled: bool) -> rackforge_program_api::ProgramEditorView {
+        rackforge_program_api::ProgramEditorView {
+            schema_version: rackforge_program_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+            title: "RF-DLS".into(),
+            pages: vec![
+                test_layer("a", true, false),
+                test_layer("b", layer_b_enabled, true),
+                ProgramEditorPage {
+                    id: "fx".into(),
+                    label: "FX".into(),
+                    detail: "Shared FX chain".into(),
+                    enabled: false,
+                    pages: Vec::new(),
+                    fields: vec![ProgramEditorField {
+                        id: "fx.status".into(),
+                        label: "STATUS".into(),
+                        detail: "Chain is empty".into(),
+                        value: ProgramEditorValue::Choice("none".into()),
+                        kind: ProgramEditorFieldKind::Choice {
+                            options: vec![rackforge_program_api::ProgramEditorChoice {
+                                value: "none".into(),
+                                label: "NO FX".into(),
+                                detail: None,
+                            }],
+                        },
+                        live_preview: false,
+                    }],
+                },
+                test_page(
+                    "output",
+                    "OUTPUT",
+                    "Final program gain",
+                    vec![test_number("program.gain", "GAIN", Some(100), 2)],
+                ),
+            ],
+        }
+    }
+
     fn draft(draft_id: u64, preview_sound_id: &str) -> ProgramDraftState {
         ProgramDraftState {
             draft_id,
@@ -1892,6 +2692,7 @@ mod tests {
                 }
             }"#
             .into(),
+            editor: test_editor(false),
             dirty: false,
         }
     }
@@ -1908,6 +2709,7 @@ mod tests {
         layer_b["enabled"] = serde_json::Value::from(enabled);
         layers.push(layer_b);
         draft.document_json = serde_json::to_string(&document).unwrap();
+        draft.editor = test_editor(enabled);
         draft
     }
 
@@ -1985,7 +2787,10 @@ mod tests {
         assert!(menu.render().line_1.contains("AMP ENV"));
         assert_eq!(menu.render().line_2.trim(), "Amplitude ADSR");
         menu.apply(Action::Select);
-        assert_eq!(menu.render().header, Header::Hidden);
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("AMP ENV        1/4".into())
+        );
         assert!(menu.render().line_1.contains("ATTACK"));
         assert_eq!(menu.render().line_2.trim(), "INHERIT");
 
@@ -2199,7 +3004,11 @@ mod tests {
 
         assert!(menu.render().line_1.contains("ATTACK"));
         menu.apply_input(Input::Button1);
-        assert!(menu.envelope.is_editing());
+        assert!(
+            menu.editor_field
+                .as_ref()
+                .is_some_and(ValueCarousel::is_editing)
+        );
         assert!(menu.render().line_2.starts_with('['));
         menu.apply_input(Input::EncoderRight);
         assert_eq!(
@@ -2208,11 +3017,11 @@ mod tests {
         );
         assert_eq!(
             menu.take_command(),
-            Some(MenuCommand::PreviewProgramDraftLayerParameter {
+            Some(MenuCommand::EditProgramDraftField {
                 draft_id: 17,
-                layer_index: 0,
-                parameter: "amplitude_envelope.attack_seconds".into(),
-                value: ProgramParameterValue::Number(Some(0.01)),
+                field_id: "layer.a.amp.attack".into(),
+                value: ProgramEditorValue::Integer(1),
+                preview: true,
             })
         );
         menu.apply_input(Input::Button4);
@@ -2221,25 +3030,37 @@ mod tests {
             Some(MenuCommand::RestoreProgramDraftPreview { draft_id: 17 })
         );
         assert_eq!(menu.render().line_2.trim(), "INHERIT");
-        assert!(!menu.envelope.is_editing());
+        assert!(
+            !menu
+                .editor_field
+                .as_ref()
+                .is_some_and(ValueCarousel::is_editing)
+        );
         assert!(menu.render().line_1.starts_with('['));
 
         menu.apply_input(Input::Button1);
         menu.apply_input(Input::EncoderRight);
         menu.apply_input(Input::Button1);
         assert_eq!(menu.render().line_2.trim(), "0.01 s");
-        assert!(!menu.envelope.is_editing());
+        assert!(
+            !menu
+                .editor_field
+                .as_ref()
+                .is_some_and(ValueCarousel::is_editing)
+        );
         assert!(menu.render().line_1.starts_with('['));
         assert_eq!(
             menu.take_command(),
-            Some(MenuCommand::SetProgramDraftLayerParameter {
+            Some(MenuCommand::EditProgramDraftField {
                 draft_id: 17,
-                layer_index: 0,
-                parameter: "amplitude_envelope.attack_seconds".into(),
-                value: ProgramParameterValue::Number(Some(0.01)),
+                field_id: "layer.a.amp.attack".into(),
+                value: ProgramEditorValue::Integer(1),
+                preview: false,
             })
         );
 
+        menu.apply_input(Input::Button4);
+        assert!(menu.render().line_1.contains("ATTACK"));
         menu.apply_input(Input::Button4);
         assert!(menu.render().line_1.contains("AMP ENV"));
     }
@@ -2264,10 +3085,11 @@ mod tests {
 
         assert_eq!(
             menu.take_command(),
-            Some(MenuCommand::SetProgramDraftSound {
+            Some(MenuCommand::EditProgramDraftField {
                 draft_id: 17,
-                layer_index: 0,
-                sound_id: "dls.b00000000.p00000030".into(),
+                field_id: "layer.a.sound".into(),
+                value: ProgramEditorValue::SoundId("dls.b00000000.p00000030".into()),
+                preview: false,
             })
         );
     }
@@ -2287,7 +3109,12 @@ mod tests {
         menu.apply(Action::Select);
         assert_eq!(
             menu.take_command(),
-            Some(MenuCommand::AddProgramDraftLayer { draft_id: 17 })
+            Some(MenuCommand::EditProgramDraftField {
+                draft_id: 17,
+                field_id: "layer.b.enabled".into(),
+                value: ProgramEditorValue::Boolean(true),
+                preview: false,
+            })
         );
         menu.sync_program_edit(Some(draft_with_layer_b(17, true)), Some(7));
         assert!(menu.render().line_1.contains("ENABLED"));
@@ -2298,7 +3125,7 @@ mod tests {
         menu.apply(Action::Select);
         assert_eq!(
             menu.render().header,
-            Header::Visible("LAYER B TIMBRE 1/1".into())
+            Header::Visible("TIMBRE         1/1".into())
         );
     }
 
@@ -2314,11 +3141,11 @@ mod tests {
 
         assert_eq!(
             menu.take_command(),
-            Some(MenuCommand::SetProgramDraftLayerParameter {
+            Some(MenuCommand::EditProgramDraftField {
                 draft_id: 17,
-                layer_index: 1,
-                parameter: "enabled".into(),
-                value: ProgramParameterValue::Boolean(Some(false)),
+                field_id: "layer.b.enabled".into(),
+                value: ProgramEditorValue::Boolean(false),
+                preview: false,
             })
         );
     }
@@ -2360,20 +3187,17 @@ mod tests {
         assert_eq!(menu.render().line_2.trim(), "Layer mix gain");
 
         menu.apply(Action::Select);
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("LAYER A VOLUME".into())
-        );
+        assert_eq!(menu.render().header, Header::Visible("VOLUME".into()));
         assert!(menu.render().line_1.contains("VOLUME"));
         menu.apply_input(Input::Button1);
         menu.apply_input(Input::Button2);
         assert_eq!(
             menu.take_command(),
-            Some(MenuCommand::PreviewProgramDraftLayerParameter {
+            Some(MenuCommand::EditProgramDraftField {
                 draft_id: 17,
-                layer_index: 0,
-                parameter: "gain".into(),
-                value: ProgramParameterValue::Number(Some(0.99)),
+                field_id: "layer.a.gain".into(),
+                value: ProgramEditorValue::Integer(99),
+                preview: true,
             })
         );
     }
@@ -2397,11 +3221,11 @@ mod tests {
         menu.apply_input(Input::Button1);
         assert_eq!(
             menu.take_command(),
-            Some(MenuCommand::SetProgramDraftLayerParameter {
+            Some(MenuCommand::EditProgramDraftField {
                 draft_id: 17,
-                layer_index: 0,
-                parameter: "lfo.delay_seconds".into(),
-                value: ProgramParameterValue::Number(Some(0.0)),
+                field_id: "layer.a.lfo.delay".into(),
+                value: ProgramEditorValue::Integer(1),
+                preview: false,
             })
         );
     }
@@ -2432,8 +3256,12 @@ mod tests {
         assert!(menu.render().line_1.contains("FX"));
         assert_eq!(menu.render().line_2.trim(), "Shared FX chain");
         menu.apply(Action::Select);
-        assert_eq!(menu.render().header, Header::Visible("SHARED FX".into()));
-        assert_eq!(menu.render().line_1.trim(), "NO FX");
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("FX             1/1".into())
+        );
+        assert_eq!(menu.render().line_1.trim(), "STATUS");
+        assert_eq!(menu.render().line_2.trim(), "NO FX");
         menu.apply(Action::Back);
 
         menu.apply(Action::Next);
@@ -2444,19 +3272,21 @@ mod tests {
         menu.apply_input(Input::Button2);
         assert_eq!(
             menu.take_command(),
-            Some(MenuCommand::PreviewProgramDraftParameter {
+            Some(MenuCommand::EditProgramDraftField {
                 draft_id: 17,
-                parameter: "gain".into(),
-                value: ProgramParameterValue::Number(Some(0.99)),
+                field_id: "program.gain".into(),
+                value: ProgramEditorValue::Integer(99),
+                preview: true,
             })
         );
         menu.apply_input(Input::Button1);
         assert_eq!(
             menu.take_command(),
-            Some(MenuCommand::SetProgramDraftParameter {
+            Some(MenuCommand::EditProgramDraftField {
                 draft_id: 17,
-                parameter: "gain".into(),
-                value: ProgramParameterValue::Number(Some(0.99)),
+                field_id: "program.gain".into(),
+                value: ProgramEditorValue::Integer(99),
+                preview: false,
             })
         );
     }

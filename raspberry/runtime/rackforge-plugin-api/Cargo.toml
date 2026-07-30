@@ -6,8 +6,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+rackforge-program-api = { path = "../rackforge-program-api" }
+rackforge-surface-api = { path = "../rackforge-surface-api" }
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-

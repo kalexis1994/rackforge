@@ -1,6 +1,6 @@
 use rackforge_controller_api::{
-    ControllerDriver, ControllerProfile, LITTLE_V1, SurfaceImplementation, SurfaceQuality,
-    negotiate_surface,
+    ControllerDriver, ControllerProfile, GestureCapabilities, LITTLE_V1, SurfaceImplementation,
+    SurfaceQuality, negotiate_surface,
 };
 use std::sync::OnceLock;
 
@@ -17,6 +17,10 @@ impl ControllerDriver for KeyLabEssentialMk3 {
                 layout_id: LITTLE_V1.into(),
                 quality: SurfaceQuality::Native,
                 priority: 0,
+                gestures: GestureCapabilities {
+                    soft_key_long_press: true,
+                    emergency_home_chord: true,
+                },
             }],
         })
     }
@@ -93,6 +97,8 @@ mod tests {
         let driver = little_driver("KL Essential 61 mk3 MIDI 28:0").unwrap();
         assert_eq!(driver.profile().surfaces[0].layout_id, LITTLE_V1);
         assert_eq!(driver.profile().surfaces[0].quality, SurfaceQuality::Native);
+        assert!(driver.profile().surfaces[0].gestures.soft_key_long_press);
+        assert!(driver.profile().surfaces[0].gestures.emergency_home_chord);
     }
 
     #[test]

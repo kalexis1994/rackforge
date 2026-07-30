@@ -475,6 +475,18 @@ dependencies = [
 name = "rackforge-plugin-api"
 version = "0.1.0"
 dependencies = [
+ "rackforge-program-api",
+ "rackforge-surface-api",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "rackforge-program-api"
+version = "0.1.0"
+dependencies = [
  "semver",
  "serde",
  "serde_json",
@@ -505,7 +517,16 @@ dependencies = [
 name = "rackforge-session-api"
 version = "0.1.0"
 dependencies = [
+ "rackforge-surface-api",
  "serde",
+]
+
+[[package]]
+name = "rackforge-surface-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

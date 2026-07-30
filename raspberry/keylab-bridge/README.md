@@ -40,8 +40,8 @@ SysEx. La jerarquía inicial es:
 - `ADDONS`: selección del addon que se va a configurar;
 - `RF-DLS PLAY`: selector de colección `DLS` o `CUSTOM`, seguido por sus
   programas tocables;
-- `RF-DLS CONFIG`: `ADD NEW`, los CUSTOM existentes y las secciones `TIMBRE`,
-  `EXPRESSION`, `ENVELOPE`, `TUNING`, `FX` y `OUTPUT`.
+- `RF-DLS CONFIG`: `ADD NEW`, los CUSTOM existentes y las secciones `NAME`,
+  `TIMBRE`, `EXPRESSION`, `ENVELOPE`, `TUNING`, `FX`, `OUTPUT` y `SAVE`.
 
 `LIVE` nunca pertenece a RF-DLS ni a otro addon: carga programas de RackForge
 que pueden combinar varias instancias y efectos. RF-DLS tiene dos rutas
@@ -64,6 +64,13 @@ nombre provisional se genera como `CUSTOM NNN` y se preselecciona el primer
 timbre DLS; así el draft nunca carece de los dos requisitos mínimos de guardado.
 El bridge renueva la lease con su heartbeat. `BACK`, una desconexión o el
 timeout del motor devuelven el foco y restauran el sonido anterior.
+
+Core conserva el estado `dirty` publicado para el draft del addon. Al intentar
+abandonar un programa modificado, tanto con `BACK` desde sus secciones como con
+`BACK` sostenido, el bridge muestra `SAVE CHANGES?` y permite elegir `SAVE` o
+`DISCARD`; `BACK` cierra el diálogo y continúa editando. El acorde de emergencia
+`OK` + `BACK` es la única excepción deliberada: fuerza `HOME` y libera el draft
+de forma best-effort para que un addon defectuoso no pueda atrapar al usuario.
 
 La envolvente no es una configuración global. Sus valores pertenecen al
 programa CUSTOM abierto desde CONFIG. A medida que el menú se conecte con
@@ -100,6 +107,19 @@ La interfaz física pública conserva siete entradas independientes:
 a derecha, la navegación base asigna los botones a `OK`, `<`, `>` y `BACK`,
 mientras la rueda navega y confirma. Una pantalla o un plugin podrá reemplazar
 esas acciones contextualmente sin modificar el lector MIDI.
+
+Los cuatro botones también producen gestos lógicos de pulsación corta y larga.
+El umbral de pulsación larga es 650 ms: la acción corta se resuelve al soltar y
+nunca se dispara después de una acción larga. `BACK` sostenido pertenece al
+host y vuelve al modo activo (`LIVE` o `PLAY`); el addon recibe después una
+notificación de activación y puede sugerir qué elemento centrar, pero no puede
+bloquear ni reemplazar la navegación.
+
+`OK` + `BACK`, presionados con una diferencia máxima de 250 ms y sostenidos
+650 ms, forman el escape de emergencia. Tiene prioridad sobre las pulsaciones
+largas individuales, lleva inmediatamente a `HOME` y solicita la cancelación
+del draft activo de forma best-effort. La pantalla vuelve a ser controlada por
+RackForge incluso si el addon no responde.
 
 El mapeo capturado en hardware real es:
 

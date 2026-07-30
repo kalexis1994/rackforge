@@ -134,11 +134,21 @@ pub fn run(config: LiveConfig) -> Result<()> {
             selected_sound_id,
         }],
         audition: None,
+        program_draft: None,
     };
     let session_store = SessionStore::shared(session)?;
     let (control_sender, control_receiver) = mpsc::sync_channel(AUDIO_CONTROL_QUEUE_CAPACITY);
     let control_path = control_socket_path();
-    let _control_server = control::start(&control_path, session_store, control_sender)?;
+    let control_storage = config
+        .data_root
+        .as_ref()
+        .map(|root| crate::AddonStorage::new(root.clone()));
+    let _control_server = control::start(
+        &control_path,
+        session_store,
+        control_sender,
+        control_storage,
+    )?;
     println!("CONTROL_READY socket={}", control_path.display());
     println!("READY_TO_PLAY");
     audio_loop(&pcm, &receiver, &control_receiver, &mut instance)
@@ -327,6 +337,87 @@ fn audio_loop(
                         }
                         None => Err("audition lease is missing or no longer valid".into()),
                     };
+                    let _ = reply.send(result);
+                }
+                AudioControlCommand::BeginProgramEdit {
+                    instance_id,
+                    request,
+                    previous_sound_id,
+                    reply,
+                } => {
+                    let result = (|| -> Result<_, String> {
+                        if audition.is_some() {
+                            return Err("audition focus is already leased".into());
+                        }
+                        let prepared = instance
+                            .begin_program_edit(&request)
+                            .map_err(|error| error.to_string())?;
+                        instance.reset().map_err(|error| error.to_string())?;
+                        instance
+                            .load_preset(&prepared.preview_sound_id)
+                            .map_err(|error| error.to_string())?;
+                        let lease_id = next_audition_id;
+                        next_audition_id = next_audition_id.wrapping_add(1).max(1);
+                        audition = Some(AuditionLease {
+                            id: lease_id,
+                            instance_id: instance_id.clone(),
+                            previous_sound_id,
+                        });
+                        println!(
+                            "PROGRAM_EDIT_AUDIO_READY lease={lease_id} instance={instance_id}"
+                        );
+                        Ok((lease_id, prepared))
+                    })();
+                    let _ = reply.send(result);
+                }
+                AudioControlCommand::ReplaceProgramDraft {
+                    instance_id,
+                    document,
+                    reply,
+                } => {
+                    let result = (|| -> Result<_, String> {
+                        let prepared = instance
+                            .prepare_program_save(&document)
+                            .map_err(|error| error.to_string())?;
+                        instance
+                            .load_preset(&prepared.preview_sound_id)
+                            .map_err(|error| error.to_string())?;
+                        println!("PROGRAM_DRAFT_AUDIO_READY instance={instance_id}");
+                        Ok(prepared)
+                    })();
+                    let _ = reply.send(result);
+                }
+                AudioControlCommand::InstallProgram {
+                    instance_id,
+                    prepared,
+                    reply,
+                } => {
+                    let result = instance
+                        .install_program(&prepared)
+                        .and_then(|()| instance.preset_catalog())
+                        .map_err(|error| error.to_string())
+                        .inspect(|_| {
+                            println!(
+                                "PROGRAM_INSTALLED instance={instance_id} id={}",
+                                prepared.document.id
+                            );
+                        });
+                    let _ = reply.send(result);
+                }
+                AudioControlCommand::ActivateSurface {
+                    instance_id,
+                    request,
+                    reply,
+                } => {
+                    let result = instance
+                        .activate_surface(&request)
+                        .map_err(|error| error.to_string())
+                        .inspect(|response| {
+                            println!(
+                                "SURFACE_ACTIVATED instance={instance_id} mode={:?} focus={:?}",
+                                request.mode, response.focus_item_id
+                            );
+                        });
                     let _ = reply.send(result);
                 }
             }

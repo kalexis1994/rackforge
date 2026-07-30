@@ -1,0 +1,12 @@
+[package]
+name = "rackforge-program-api"
+description = "Platform-neutral RackForge program documents and edit contracts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

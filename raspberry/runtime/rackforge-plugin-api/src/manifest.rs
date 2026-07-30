@@ -68,6 +68,8 @@ pub struct PluginManifest {
     pub capabilities: Vec<Capability>,
     #[serde(default)]
     pub resources: Vec<ResourceRequirement>,
+    #[serde(default)]
+    pub ui_layouts: Vec<String>,
     pub binaries: BTreeMap<String, String>,
 }
 
@@ -98,6 +100,20 @@ impl PluginManifest {
         }
         if self.binaries.is_empty() {
             return Err(ManifestError::NoBinaries);
+        }
+        let mut layouts = BTreeSet::new();
+        for layout in &self.ui_layouts {
+            let Some((id, version)) = layout.rsplit_once('@') else {
+                return Err(ManifestError::InvalidUiLayout(layout.clone()));
+            };
+            validate_identifier(id, false)
+                .map_err(|_| ManifestError::InvalidUiLayout(layout.clone()))?;
+            if version.is_empty()
+                || !version.bytes().all(|byte| byte.is_ascii_digit())
+                || !layouts.insert(layout.as_str())
+            {
+                return Err(ManifestError::InvalidUiLayout(layout.clone()));
+            }
         }
         let mut resource_ids = BTreeSet::new();
         for resource in &self.resources {
@@ -203,6 +219,8 @@ pub enum ManifestError {
     EmptyResourceName(String),
     #[error("duplicate resource {0}")]
     DuplicateResource(String),
+    #[error("invalid or duplicate UI layout {0:?}")]
+    InvalidUiLayout(String),
     #[error("invalid platform identifier {0:?}")]
     InvalidPlatform(String),
     #[error("binary path must be a safe relative path: {0:?}")]
@@ -229,6 +247,7 @@ mod tests {
             state_version: 1,
             capabilities: vec![Capability::AudioInput, Capability::AudioOutput],
             resources: Vec::new(),
+            ui_layouts: Vec::new(),
             binaries: BTreeMap::from([("linux-aarch64".into(), "lib/librackforge_gain.so".into())]),
         }
     }

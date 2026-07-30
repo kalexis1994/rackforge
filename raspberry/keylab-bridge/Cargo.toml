@@ -8,4 +8,5 @@ license = "GPL-2.0-or-later"
 [dependencies]
 rackforge-ui = { path = "../runtime/rackforge-ui" }
 rackforge-control-api = { path = "../runtime/rackforge-control-api" }
+rackforge-controller-api = { path = "../runtime/rackforge-controller-api" }
 midir = "0.11.0"

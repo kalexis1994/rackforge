@@ -440,6 +440,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-controller-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "rackforge-core"
 version = "0.1.0"
 dependencies = [

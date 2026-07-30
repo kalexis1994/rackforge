@@ -18,6 +18,18 @@ pub enum ControlCommand {
         id: String,
         reply: SyncSender<Result<String, String>>,
     },
+    BeginAudition {
+        plugin_id: String,
+        reply: SyncSender<Result<u64, String>>,
+    },
+    KeepAuditionAlive {
+        lease_id: u64,
+        reply: SyncSender<Result<u64, String>>,
+    },
+    EndAudition {
+        lease_id: u64,
+        reply: SyncSender<Result<(), String>>,
+    },
 }
 
 pub struct ControlServer {
@@ -148,8 +160,74 @@ fn handle_connection(
                 selection_response(reply_receiver)
             }
         }
+        ControlRequest::BeginAudition { plugin_id } => {
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if command_sender
+                .send(ControlCommand::BeginAudition {
+                    plugin_id,
+                    reply: reply_sender,
+                })
+                .is_err()
+            {
+                unavailable_response()
+            } else {
+                match reply_receiver.recv_timeout(Duration::from_secs(1)) {
+                    Ok(Ok(lease_id)) => ControlResponse::AuditionGranted { lease_id },
+                    Ok(Err(message)) => ControlResponse::Error { message },
+                    Err(_) => ControlResponse::Error {
+                        message: "LIVE did not grant audition focus in time".into(),
+                    },
+                }
+            }
+        }
+        ControlRequest::KeepAuditionAlive { lease_id } => {
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if command_sender
+                .send(ControlCommand::KeepAuditionAlive {
+                    lease_id,
+                    reply: reply_sender,
+                })
+                .is_err()
+            {
+                unavailable_response()
+            } else {
+                match reply_receiver.recv_timeout(Duration::from_secs(1)) {
+                    Ok(Ok(lease_id)) => ControlResponse::AuditionKeptAlive { lease_id },
+                    Ok(Err(message)) => ControlResponse::Error { message },
+                    Err(_) => ControlResponse::Error {
+                        message: "LIVE did not renew audition focus in time".into(),
+                    },
+                }
+            }
+        }
+        ControlRequest::EndAudition { lease_id } => {
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if command_sender
+                .send(ControlCommand::EndAudition {
+                    lease_id,
+                    reply: reply_sender,
+                })
+                .is_err()
+            {
+                unavailable_response()
+            } else {
+                match reply_receiver.recv_timeout(Duration::from_secs(1)) {
+                    Ok(Ok(())) => ControlResponse::AuditionEnded,
+                    Ok(Err(message)) => ControlResponse::Error { message },
+                    Err(_) => ControlResponse::Error {
+                        message: "LIVE did not release audition focus in time".into(),
+                    },
+                }
+            }
+        }
     };
     write_response(&mut stream, &response)
+}
+
+fn unavailable_response() -> ControlResponse {
+    ControlResponse::Error {
+        message: "LIVE audio engine is unavailable".into(),
+    }
 }
 
 fn selection_response(receiver: Receiver<Result<String, String>>) -> ControlResponse {

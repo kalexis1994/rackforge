@@ -17,11 +17,12 @@ La primera etapa soporta:
 - afinación `wsmp` con corrección fina signed, atenuación y loops;
 - envolvente EG1 en centibeles desde `art1`/`art2`;
 - envolvente de pitch EG2, incluida la profundidad `EG2 → Pitch`;
+- LFO DLS con frecuencia, delay y profundidad de pitch/atenuación controlada por `CC1`;
 - render offline a 48 kHz;
 - reproducción MIDI de baja latencia hacia ALSA en Linux ARM64.
 
 Todavía no se interpretan todos los destinos de articulación de DLS-2, filtros,
-LFO, matrices de modulación, formatos de onda distintos de PCM16 mono ni chunks
+matrices de modulación, formatos de onda distintos de PCM16 mono ni chunks
 propietarios. Un banco que use esas capacidades puede ser DLS válido y aun así
 quedar fuera de la compatibilidad actual de RF-DLS.
 

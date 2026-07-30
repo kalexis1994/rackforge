@@ -1,0 +1,10 @@
+[package]
+name = "rackforge-controller-api"
+description = "Explicit controller and UI surface contracts for RackForge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+

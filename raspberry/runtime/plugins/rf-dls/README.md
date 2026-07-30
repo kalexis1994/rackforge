@@ -13,15 +13,19 @@ recurso obligatorio `dls-bank`.
 - Salida: mono duplicada en todos los canales ofrecidos por el host
 - Banco inicial: General MIDI bank 0, program 0
 - Preset inicial: `gm.piano-1`
-- Estado persistente: volumen, banco y programa seleccionados
-- Catálogo dinámico: todos los instrumentos únicos descubiertos en el DLS
+- Estado v2: volumen e ID estable del programa seleccionado; sigue leyendo el
+  estado v1 basado en banco/programa
+- Catálogo dinámico separado en `DLS` (solo lectura) y `CUSTOM`
 
 ## MIDI implementado
 
 - Note On
 - Note Off
 - Note On con velocidad cero como Note Off
+- Pitch Bend de 14 bits, inicialmente con rango de ±2 semitonos
+- CC1 modulation wheel aplicado a las conexiones LFO del instrumento DLS
 - CC64 sustain, con liberación diferida hasta levantar el pedal
+- CC121 Reset All Controllers
 - CC120 All Sound Off, que corta y limpia inmediatamente todas las voces
 - CC123 All Notes Off, que respeta el estado del pedal
 
@@ -55,11 +59,43 @@ dls.b00000000.p00000030
 
 RackForge usa el ID para seleccionar el sonido, pero la interfaz muestra el
 nombre y un detalle corto como `B000 P048` o `DRUM P000`. El bridge del KeyLab
-no conoce la estructura DLS.
+recibe además el banco lógico y presenta primero `DLS` o `CUSTOM`; no conoce la
+estructura interna del addon.
+
+## Programas CUSTOM
+
+Los instrumentos descubiertos dentro del DLS son inmutables. Un CUSTOM no
+reescribe el banco: guarda una referencia a `dls-bank` + banco + programa y
+únicamente sus overrides. RF-DLS busca documentos con sufijo
+`.rackforge-program.json` en:
+
+```text
+data/addons/org.rackforge.rf-dls/custom/
+```
+
+El payload v1 admite slot, ganancia, transposición, afinación fina, ADSR
+opcional, rango de pitch bend y profundidad de modulación. Los campos ADSR
+ausentes heredan exactamente el instrumento DLS. IDs y slots duplicados,
+symlinks, archivos mayores a 256 KiB, payloads desconocidos o valores fuera de
+rango se ignoran individualmente y se registran como advertencia; no impiden
+arrancar el resto del banco.
+
+El ejemplo versionado
+`examples/custom.warm-piano.rackforge-program.json` se puede instalar mediante
+el escritor atómico común:
+
+```bash
+rackforge-core program-save /home/kalex/rackforge/data \
+  custom/custom.warm-piano.rackforge-program.json \
+  examples/custom.warm-piano.rackforge-program.json
+```
+
+El ID de catálogo resultante es `custom.user.warm-piano`. Cambiar o agregar
+archivos requiere reiniciar el motor RF-DLS para reconstruir el catálogo.
 
 ## Límites de esta etapa
 
 - Aún no responde a Bank Select ni Program Change MIDI.
 - Todos los canales MIDI controlan la misma instancia.
-- La selección dinámica de instrumentos, programas RackForge, controles de
-  envelope y FX se agregará sobre este contrato sin modificar su identidad.
+- La creación/edición de CUSTOM desde la pantalla y los FX todavía no están
+  conectados; el modelo persistente y la ejecución ya están disponibles.

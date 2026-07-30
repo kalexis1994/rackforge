@@ -3,7 +3,7 @@ use crate::{LoadedPlugin, PluginInstance, PluginPackage};
 use alsa::pcm::{Access, Format, HwParams, PCM};
 use alsa::{Direction, ValueOr};
 use anyhow::{Context, Result, bail};
-use midir::{Ignore, MidiInput, MidiInputConnection, MidiInputPort};
+use midir::{Ignore, MidiInput, MidiInputConnection};
 use rackforge_control_api::{
     CONTROL_SCHEMA_VERSION, CONTROL_SOCKET_NAME, LiveSnapshot, SoundSummary,
 };
@@ -14,6 +14,7 @@ use std::env;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 const OUTPUT_DEVICE: &str = "hw:CARD=USB,DEV=0";
 const OUTPUT_RATE: u32 = 48_000;
@@ -21,6 +22,13 @@ const CHANNELS: usize = 2;
 const PERIOD_FRAMES: usize = 128;
 const BUFFER_FRAMES: i64 = 384;
 const MAX_EVENTS_PER_BLOCK: usize = 256;
+const AUDITION_LEASE_TIMEOUT: Duration = Duration::from_secs(15);
+
+struct AuditionLease {
+    id: u64,
+    previous_sound_id: Option<String>,
+    last_keep_alive: Instant,
+}
 
 pub struct LiveConfig {
     pub package: PathBuf,
@@ -79,8 +87,8 @@ pub fn run(config: LiveConfig) -> Result<()> {
     )?;
 
     let (sender, receiver) = mpsc::channel();
-    let (_midi_connection, midi_port_name) = connect_keylab(sender)?;
-    println!("MIDI_READY port={midi_port_name:?}");
+    let (_midi_connections, midi_port_names) = connect_midi_sources(sender)?;
+    println!("MIDI_READY ports={midi_port_names:?}");
     let pcm = open_scarlett()?;
     println!(
         "AUDIO_READY device={OUTPUT_DEVICE:?} rate={OUTPUT_RATE} channels={CHANNELS} \
@@ -99,12 +107,14 @@ pub fn run(config: LiveConfig) -> Result<()> {
         schema_version: CONTROL_SCHEMA_VERSION,
         plugin_id: plugin.manifest().id.clone(),
         plugin_name: plugin.manifest().name.clone(),
+        ui_layouts: plugin.manifest().ui_layouts.clone(),
         sounds: presets
             .presets
             .iter()
             .map(|preset| SoundSummary {
                 id: preset.id.clone(),
                 name: preset.name.clone(),
+                bank: preset.bank.clone(),
                 detail: preset
                     .description
                     .clone()
@@ -132,62 +142,68 @@ fn control_socket_path() -> PathBuf {
         })
 }
 
-fn is_keylab_midi(name: &str) -> bool {
+fn is_performance_midi_input(name: &str) -> bool {
     let folded = name.to_ascii_lowercase();
-    (folded.contains("kl essential") || folded.contains("keylab"))
-        && folded.contains("midi")
+    folded.contains("midi")
+        && !folded.contains("midi through")
         && !folded.contains("dinthru")
         && !folded.contains("mcu")
         && !folded.contains("hui")
         && !folded.contains(" alv")
+        && !folded.contains("rackforge")
 }
 
-fn select_keylab_port(midi: &MidiInput) -> Result<(MidiInputPort, String)> {
-    let mut matches = Vec::new();
+fn performance_midi_names(midi: &MidiInput) -> Result<Vec<String>> {
+    let mut matches = BTreeMap::new();
     for port in midi.ports() {
         let name = midi.port_name(&port)?;
-        if is_keylab_midi(&name) {
-            matches.push((port, name));
+        if is_performance_midi_input(&name) {
+            matches.insert(name.clone(), name);
         }
     }
-    match matches.len() {
-        0 => bail!("KeyLab main MIDI input was not found"),
-        1 => Ok(matches.remove(0)),
-        _ => bail!(
-            "KeyLab MIDI input selection is ambiguous: {}",
-            matches
-                .iter()
-                .map(|(_, name)| name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
+    if matches.is_empty() {
+        bail!("no performance MIDI input was found");
     }
+    Ok(matches.into_values().collect())
 }
 
-fn connect_keylab(sender: Sender<MidiEventV1>) -> Result<(MidiInputConnection<()>, String)> {
-    let mut midi = MidiInput::new("rackforge-core-live")?;
-    midi.ignore(Ignore::None);
-    let (port, name) = select_keylab_port(&midi)?;
-    let connection = midi
-        .connect(
-            &port,
-            "rackforge-core-live-input",
-            move |_timestamp, message, _| {
-                if message.is_empty() || message[0] >= 0xF0 || message.len() > 3 {
-                    return;
-                }
-                let mut data = [0_u8; 3];
-                data[..message.len()].copy_from_slice(message);
-                let _ = sender.send(MidiEventV1 {
-                    frame: 0,
-                    length: message.len() as u8,
-                    data,
-                });
-            },
-            (),
-        )
-        .map_err(|error| anyhow::anyhow!("connecting KeyLab MIDI input: {error}"))?;
-    Ok((connection, name))
+fn connect_midi_sources(
+    sender: Sender<MidiEventV1>,
+) -> Result<(Vec<MidiInputConnection<()>>, Vec<String>)> {
+    let discovery = MidiInput::new("rackforge-core-discovery")?;
+    let names = performance_midi_names(&discovery)?;
+    let mut connections = Vec::with_capacity(names.len());
+    for (index, name) in names.iter().enumerate() {
+        let mut midi = MidiInput::new(&format!("rackforge-core-live-{index}"))?;
+        midi.ignore(Ignore::None);
+        let port = midi
+            .ports()
+            .into_iter()
+            .find(|port| midi.port_name(port).as_deref() == Ok(name.as_str()))
+            .with_context(|| format!("MIDI input {name:?} disappeared during connection"))?;
+        let source_sender = sender.clone();
+        let connection = midi
+            .connect(
+                &port,
+                &format!("rackforge-core-input-{index}"),
+                move |_timestamp, message, _| {
+                    if message.is_empty() || message[0] >= 0xF0 || message.len() > 3 {
+                        return;
+                    }
+                    let mut data = [0_u8; 3];
+                    data[..message.len()].copy_from_slice(message);
+                    let _ = source_sender.send(MidiEventV1 {
+                        frame: 0,
+                        length: message.len() as u8,
+                        data,
+                    });
+                },
+                (),
+            )
+            .map_err(|error| anyhow::anyhow!("connecting MIDI input {name:?}: {error}"))?;
+        connections.push(connection);
+    }
+    Ok((connections, names))
 }
 
 fn open_scarlett() -> Result<PCM> {
@@ -236,8 +252,24 @@ fn audio_loop(
     let mut meter_peak = 0_f32;
     let mut meter_clipped = 0_usize;
     let mut dropped_events = 0_usize;
+    let mut audition: Option<AuditionLease> = None;
+    let mut next_audition_id = 1_u64;
 
     loop {
+        if audition
+            .as_ref()
+            .is_some_and(|lease| lease.last_keep_alive.elapsed() >= AUDITION_LEASE_TIMEOUT)
+            && let Some(expired) = audition.take()
+        {
+            if let Err(error) = restore_after_audition(instance, snapshot, &expired) {
+                eprintln!(
+                    "AUDITION_RESTORE_ERROR lease={} error={error:#}",
+                    expired.id
+                );
+            } else {
+                println!("AUDITION_EXPIRED lease={}", expired.id);
+            }
+        }
         while let Ok(command) = control_receiver.try_recv() {
             match command {
                 ControlCommand::SelectSound { id, reply } => {
@@ -249,6 +281,63 @@ fn audio_loop(
                         id
                     });
                     let _ = reply.send(result.map_err(|error| error.to_string()));
+                }
+                ControlCommand::BeginAudition { plugin_id, reply } => {
+                    let result = (|| -> Result<u64, String> {
+                        if audition.is_some() {
+                            return Err("audition focus is already leased".into());
+                        }
+                        let (active_plugin, previous_sound_id) = snapshot
+                            .lock()
+                            .map_err(|_| "live snapshot lock is poisoned".to_owned())
+                            .map(|snapshot| {
+                                (
+                                    snapshot.plugin_id.clone(),
+                                    snapshot.selected_sound_id.clone(),
+                                )
+                            })?;
+                        if plugin_id != active_plugin {
+                            return Err(format!(
+                                "plugin {plugin_id:?} cannot audition while {active_plugin:?} is active"
+                            ));
+                        }
+                        instance.reset().map_err(|error| error.to_string())?;
+                        let lease_id = next_audition_id;
+                        next_audition_id = next_audition_id.wrapping_add(1).max(1);
+                        audition = Some(AuditionLease {
+                            id: lease_id,
+                            previous_sound_id,
+                            last_keep_alive: Instant::now(),
+                        });
+                        println!("AUDITION_GRANTED lease={lease_id} plugin={plugin_id}");
+                        Ok(lease_id)
+                    })();
+                    let _ = reply.send(result);
+                }
+                ControlCommand::KeepAuditionAlive { lease_id, reply } => {
+                    let result = match audition.as_mut() {
+                        Some(lease) if lease.id == lease_id => {
+                            lease.last_keep_alive = Instant::now();
+                            Ok(lease_id)
+                        }
+                        _ => Err("audition lease is missing or no longer valid".into()),
+                    };
+                    let _ = reply.send(result);
+                }
+                ControlCommand::EndAudition { lease_id, reply } => {
+                    let result = match audition.take() {
+                        Some(lease) if lease.id == lease_id => {
+                            restore_after_audition(instance, snapshot, &lease)
+                                .map_err(|error| error.to_string())
+                                .map(|()| println!("AUDITION_RELEASED lease={lease_id}"))
+                        }
+                        Some(lease) => {
+                            audition = Some(lease);
+                            Err("audition lease is missing or no longer valid".into())
+                        }
+                        None => Err("audition lease is missing or no longer valid".into()),
+                    };
+                    let _ = reply.send(result);
                 }
             }
         }
@@ -293,6 +382,22 @@ fn audio_loop(
     }
 }
 
+fn restore_after_audition(
+    instance: &mut PluginInstance<'_>,
+    snapshot: &Arc<Mutex<LiveSnapshot>>,
+    lease: &AuditionLease,
+) -> Result<()> {
+    instance.reset()?;
+    if let Some(previous) = &lease.previous_sound_id {
+        instance.load_preset(previous)?;
+    }
+    let mut snapshot = snapshot
+        .lock()
+        .map_err(|_| anyhow::anyhow!("live snapshot lock is poisoned"))?;
+    snapshot.selected_sound_id = lease.previous_sound_id.clone();
+    Ok(())
+}
+
 fn write_period(pcm: &PCM, io: &alsa::pcm::IO<'_, i32>, output: &[i32]) -> Result<()> {
     let mut frame_offset = 0;
     while frame_offset < PERIOD_FRAMES {
@@ -315,9 +420,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selects_only_the_main_keylab_endpoint() {
-        assert!(is_keylab_midi("KL Essential 61 mk3 MIDI 28:0"));
-        assert!(!is_keylab_midi("KL Essential 61 mk3 DINTHRU 28:1"));
-        assert!(!is_keylab_midi("KL Essential 61 mk3 MCU/HUI 28:2"));
+    fn accepts_unknown_musical_midi_without_treating_auxiliary_ports_as_sources() {
+        assert!(is_performance_midi_input("KL Essential 61 mk3 MIDI 28:0"));
+        assert!(is_performance_midi_input("Unknown USB MIDI 31:0"));
+        assert!(!is_performance_midi_input(
+            "KL Essential 61 mk3 DINTHRU 28:1"
+        ));
+        assert!(!is_performance_midi_input(
+            "KL Essential 61 mk3 MCU/HUI 28:2"
+        ));
+        assert!(!is_performance_midi_input("Midi Through MIDI 0:1"));
     }
 }

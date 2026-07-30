@@ -1,10 +1,13 @@
+mod custom_program;
+
+use custom_program::{CustomProgram, ProgramParameters};
 use rackforge_plugin_api::abi::{
-    HostApiV1, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, MidiEventV1, ParameterEventV1, PluginApiV1,
-    ProcessBlockV1, STATUS_INVALID_ARGUMENT, STATUS_INVALID_STATE, STATUS_OK,
+    HostApiV1, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, LOG_LEVEL_WARN, MidiEventV1, ParameterEventV1,
+    PluginApiV1, ProcessBlockV1, STATUS_INVALID_ARGUMENT, STATUS_INVALID_STATE, STATUS_OK,
     STATUS_UNKNOWN_PARAMETER, copy_to_host_buffer, pack_version, version_major, version_minor,
 };
 use rackforge_plugin_api::{BankDescriptor, PresetCatalog, PresetDescriptor};
-use rf_dls::{DlsBank, Voice};
+use rf_dls::{DlsBank, EnvelopeSpec, Voice};
 use std::collections::BTreeSet;
 use std::ffi::c_void;
 use std::mem::size_of;
@@ -16,14 +19,15 @@ const RESOURCE_ID: &[u8] = b"dls-bank";
 const PIANO_PRESET_ID: &str = "gm.piano-1";
 const MASTER_GAIN_PARAMETER: u32 = 0;
 const DEFAULT_MASTER_GAIN: f32 = 0.65;
+const DEFAULT_PITCH_BEND_RANGE_CENTS: f32 = 200.0;
 const MAX_VOICES: usize = 32;
-const STATE_SIZE: usize = 16;
+const LEGACY_STATE_SIZE: usize = 16;
 
 const RUNTIME_DESCRIPTOR: &[u8] = br#"{
   "schema_version": 1,
   "id": "org.rackforge.rf-dls",
   "version": "0.1.0",
-  "state_version": 1
+  "state_version": 2
 }"#;
 
 const PARAMETER_SCHEMA: &[u8] = br#"{
@@ -83,13 +87,27 @@ struct RfDls {
     output_channels: u32,
     active: bool,
     sustain: bool,
+    pitch_bend_cents: f32,
+    pitch_bend_range_cents: f32,
+    modulation_wheel: f32,
     master_gain: f32,
+    program_gain: f32,
+    program_pitch_offset_cents: f32,
+    program_modulation_depth: f32,
+    envelope_override: Option<EnvelopeSpec>,
     selected_bank: u32,
     selected_program: u32,
+    selected_preset_id: String,
+    custom_programs: Vec<CustomProgram>,
 }
 
 impl RfDls {
-    fn new(bank: DlsBank, selected_bank: u32, selected_program: u32) -> Self {
+    fn new(
+        bank: DlsBank,
+        selected_bank: u32,
+        selected_program: u32,
+        custom_programs: Vec<CustomProgram>,
+    ) -> Self {
         Self {
             bank,
             voices: Vec::with_capacity(MAX_VOICES),
@@ -99,9 +117,18 @@ impl RfDls {
             output_channels: 0,
             active: false,
             sustain: false,
+            pitch_bend_cents: 0.0,
+            pitch_bend_range_cents: DEFAULT_PITCH_BEND_RANGE_CENTS,
+            modulation_wheel: 0.0,
             master_gain: DEFAULT_MASTER_GAIN,
+            program_gain: 1.0,
+            program_pitch_offset_cents: 0.0,
+            program_modulation_depth: 1.0,
+            envelope_override: None,
             selected_bank,
             selected_program,
+            selected_preset_id: dynamic_preset_id(selected_bank, selected_program),
+            custom_programs,
         }
     }
 
@@ -109,6 +136,8 @@ impl RfDls {
         self.voices.clear();
         self.held_notes.fill(false);
         self.sustain = false;
+        self.pitch_bend_cents = 0.0;
+        self.modulation_wheel = 0.0;
     }
 
     fn select_instrument(&mut self, bank: u32, program: u32) -> bool {
@@ -117,8 +146,59 @@ impl RfDls {
         }
         self.selected_bank = bank;
         self.selected_program = program;
+        self.selected_preset_id = dynamic_preset_id(bank, program);
+        self.apply_program_parameters(ProgramParameters::default(), None);
         self.reset();
         true
+    }
+
+    fn select_custom(&mut self, preset_id: &str) -> bool {
+        let Some(program) = self
+            .custom_programs
+            .iter()
+            .find(|program| program.preset_id() == preset_id)
+            .cloned()
+        else {
+            return false;
+        };
+        let Some(instrument) = self
+            .bank
+            .instrument(program.source.bank, program.source.program)
+        else {
+            return false;
+        };
+        let envelope = program.resolved_envelope(instrument.envelope);
+        self.selected_bank = program.source.bank;
+        self.selected_program = program.source.program;
+        self.selected_preset_id = preset_id.to_owned();
+        self.apply_program_parameters(program.parameters, Some(envelope));
+        self.reset();
+        true
+    }
+
+    fn select_preset(&mut self, preset_id: &str) -> bool {
+        if preset_id.starts_with("custom.") {
+            return self.select_custom(preset_id);
+        }
+        let selection = if preset_id == PIANO_PRESET_ID {
+            Some((0, 0))
+        } else {
+            parse_dynamic_preset_id(preset_id)
+        };
+        selection.is_some_and(|(bank, program)| self.select_instrument(bank, program))
+    }
+
+    fn apply_program_parameters(
+        &mut self,
+        parameters: ProgramParameters,
+        envelope: Option<EnvelopeSpec>,
+    ) {
+        self.program_gain = parameters.gain;
+        self.program_pitch_offset_cents =
+            f32::from(parameters.transpose_semitones) * 100.0 + parameters.fine_tune_cents;
+        self.pitch_bend_range_cents = parameters.pitch_bend_range_semitones * 100.0;
+        self.program_modulation_depth = parameters.modulation_depth;
+        self.envelope_override = envelope;
     }
 
     fn set_parameter(&mut self, index: u32, value: f64) -> i32 {
@@ -143,9 +223,16 @@ impl RfDls {
             return;
         };
         for region in instrument.matching_regions(note, velocity) {
-            if let Ok(voice) =
-                Voice::new(bank, instrument, region, note, velocity, self.sample_rate)
-            {
+            let envelope = self.envelope_override.unwrap_or(instrument.envelope);
+            if let Ok(voice) = Voice::new_with_envelope(
+                bank,
+                instrument,
+                region,
+                note,
+                velocity,
+                self.sample_rate,
+                envelope,
+            ) {
                 if self.voices.len() == MAX_VOICES {
                     self.voices.remove(0);
                 }
@@ -194,6 +281,27 @@ impl RfDls {
         self.reset();
     }
 
+    fn set_pitch_bend(&mut self, least_significant: u8, most_significant: u8) {
+        let raw = i32::from(least_significant & 0x7f) | (i32::from(most_significant & 0x7f) << 7);
+        let centered = raw - 8_192;
+        let normalized = if centered >= 0 {
+            centered as f32 / 8_191.0
+        } else {
+            centered as f32 / 8_192.0
+        };
+        self.pitch_bend_cents = normalized * self.pitch_bend_range_cents;
+    }
+
+    fn set_modulation_wheel(&mut self, value: u8) {
+        self.modulation_wheel = f32::from(value & 0x7f) / 127.0;
+    }
+
+    fn reset_controllers(&mut self) {
+        self.set_sustain(false);
+        self.pitch_bend_cents = 0.0;
+        self.modulation_wheel = 0.0;
+    }
+
     fn handle_midi(&mut self, event: MidiEventV1) {
         if event.length == 0 {
             return;
@@ -205,10 +313,15 @@ impl RfDls {
                 self.note_on(event.data[1] & 0x7f, event.data[2] & 0x7f);
             }
             0x90 if event.length >= 3 => self.note_off(event.data[1] & 0x7f),
+            0xe0 if event.length >= 3 => self.set_pitch_bend(event.data[1], event.data[2]),
+            0xb0 if event.length >= 3 && event.data[1] == 1 => {
+                self.set_modulation_wheel(event.data[2]);
+            }
             0xb0 if event.length >= 3 && event.data[1] == 64 => {
                 self.set_sustain(event.data[2] >= 64);
             }
             0xb0 if event.length >= 3 && event.data[1] == 120 => self.all_sound_off(),
+            0xb0 if event.length >= 3 && event.data[1] == 121 => self.reset_controllers(),
             0xb0 if event.length >= 3 && event.data[1] == 123 => self.all_notes_off(),
             _ => {}
         }
@@ -218,14 +331,17 @@ impl RfDls {
         let mut mixed = 0.0_f32;
         let mut index = 0;
         while index < self.voices.len() {
-            mixed += self.voices[index].next_sample();
+            mixed += self.voices[index].next_sample_modulated(
+                self.pitch_bend_cents + self.program_pitch_offset_cents,
+                self.modulation_wheel * self.program_modulation_depth,
+            );
             if self.voices[index].is_finished() {
                 self.voices.swap_remove(index);
             } else {
                 index += 1;
             }
         }
-        mixed * self.master_gain
+        mixed * self.master_gain * self.program_gain
     }
 }
 
@@ -253,7 +369,7 @@ fn parse_dynamic_preset_id(id: &str) -> Option<(u32, u32)> {
     ))
 }
 
-fn dynamic_catalog(bank: &DlsBank) -> PresetCatalog {
+fn dynamic_catalog(bank: &DlsBank, custom_programs: &[CustomProgram]) -> PresetCatalog {
     let mut seen = BTreeSet::new();
     let mut presets = Vec::new();
     let mut instruments = bank.instruments.iter().collect::<Vec<_>>();
@@ -295,18 +411,40 @@ fn dynamic_catalog(bank: &DlsBank) -> PresetCatalog {
             tags: vec![if is_drum { "drums" } else { "melodic" }.into()],
         });
     }
+    for program in custom_programs {
+        presets.push(PresetDescriptor {
+            id: program.preset_id(),
+            name: program.name.clone(),
+            description: Some(format!("CUSTOM {:03}", program.slot)),
+            bank: Some("custom".into()),
+            category: program.category.clone(),
+            order: i32::from(program.slot),
+            tags: vec!["custom".into()],
+        });
+    }
     PresetCatalog {
         schema_version: 1,
-        banks: vec![BankDescriptor {
-            id: "dls".into(),
-            name: "DLS Bank".into(),
-            order: 0,
-        }],
+        banks: vec![
+            BankDescriptor {
+                id: "dls".into(),
+                name: "DLS".into(),
+                order: 0,
+            },
+            BankDescriptor {
+                id: "custom".into(),
+                name: "CUSTOM".into(),
+                order: 1,
+            },
+        ],
         presets,
     }
 }
 
-fn publish_dynamic_catalog(host: &HostApiV1, bank: &DlsBank) -> Result<(), String> {
+fn publish_dynamic_catalog(
+    host: &HostApiV1,
+    bank: &DlsBank,
+    custom_programs: &[CustomProgram],
+) -> Result<(), String> {
     if version_major(host.api_version) != 1
         || version_minor(host.api_version) < 3
         || host.struct_size < size_of::<HostApiV1>() as u32
@@ -316,7 +454,8 @@ fn publish_dynamic_catalog(host: &HostApiV1, bank: &DlsBank) -> Result<(), Strin
     let callback = host
         .publish_preset_catalog
         .ok_or_else(|| "host dynamic preset callback is unavailable".to_owned())?;
-    let bytes = serde_json::to_vec(&dynamic_catalog(bank)).map_err(|error| error.to_string())?;
+    let bytes = serde_json::to_vec(&dynamic_catalog(bank, custom_programs))
+        .map_err(|error| error.to_string())?;
     // SAFETY: bytes remain readable for the callback duration.
     let status = unsafe { callback(host.context, bytes.as_ptr(), bytes.len()) };
     if status != STATUS_OK {
@@ -368,6 +507,34 @@ fn resource_path(host: &HostApiV1) -> Result<PathBuf, String> {
     Ok(PathBuf::from(text))
 }
 
+fn addon_data_path(host: &HostApiV1) -> Result<Option<PathBuf>, String> {
+    if version_major(host.api_version) != 1 || version_minor(host.api_version) < 2 {
+        return Ok(None);
+    }
+    if host.struct_size < size_of::<HostApiV1>() as u32 {
+        return Err("host API 1.2 table is truncated".into());
+    }
+    let Some(callback) = host.get_addon_data_path else {
+        return Ok(None);
+    };
+    // SAFETY: a null destination queries the required path size.
+    let required = unsafe { callback(host.context, ptr::null_mut(), 0) };
+    if required == 0 {
+        return Ok(None);
+    }
+    if required > 32 * 1024 {
+        return Err("addon data path is unreasonably large".into());
+    }
+    let mut bytes = vec![0_u8; required];
+    // SAFETY: bytes is writable for exactly the reported size.
+    let reported = unsafe { callback(host.context, bytes.as_mut_ptr(), bytes.len()) };
+    if reported != required {
+        return Err("addon data path changed while being read".into());
+    }
+    let text = String::from_utf8(bytes).map_err(|_| "addon data path is not UTF-8".to_owned())?;
+    Ok(Some(PathBuf::from(text)))
+}
+
 unsafe extern "C" fn write_runtime_descriptor(destination: *mut u8, capacity: usize) -> usize {
     unsafe { copy_to_host_buffer(RUNTIME_DESCRIPTOR, destination, capacity) }
 }
@@ -386,7 +553,29 @@ unsafe extern "C" fn create(host: *const HostApiV1) -> *mut c_void {
     };
     let result = resource_path(host)
         .and_then(|path| DlsBank::open(path).map_err(|error| error.to_string()))
-        .and_then(|bank| {
+        .and_then(|bank| addon_data_path(host).map(|data_root| (bank, data_root)))
+        .and_then(|(bank, data_root)| {
+            let (mut custom_programs, warnings) =
+                custom_program::load_programs(data_root.as_deref())?;
+            for warning in warnings {
+                log_host(host, LOG_LEVEL_WARN, &warning);
+            }
+            custom_programs.retain(|program| {
+                let valid = bank
+                    .instrument(program.source.bank, program.source.program)
+                    .is_some();
+                if !valid {
+                    log_host(
+                        host,
+                        LOG_LEVEL_WARN,
+                        &format!(
+                            "ignoring CUSTOM {:?}: DLS bank {} program {} is missing",
+                            program.id, program.source.bank, program.source.program
+                        ),
+                    );
+                }
+                valid
+            });
             let default = bank
                 .instrument(0, 0)
                 .or_else(|| {
@@ -397,13 +586,26 @@ unsafe extern "C" fn create(host: *const HostApiV1) -> *mut c_void {
                 .or_else(|| bank.instruments.first())
                 .map(|instrument| (instrument.bank, instrument.program))
                 .ok_or_else(|| "DLS bank contains no selectable instruments".to_owned())?;
-            publish_dynamic_catalog(host, &bank)?;
-            Ok((bank, default))
+            publish_dynamic_catalog(host, &bank, &custom_programs)?;
+            Ok((bank, default, custom_programs))
         });
     match result {
-        Ok((bank, (selected_bank, selected_program))) => {
-            log_host(host, LOG_LEVEL_INFO, "RF-DLS bank loaded");
-            Box::into_raw(Box::new(RfDls::new(bank, selected_bank, selected_program))).cast()
+        Ok((bank, (selected_bank, selected_program), custom_programs)) => {
+            log_host(
+                host,
+                LOG_LEVEL_INFO,
+                &format!(
+                    "RF-DLS bank loaded with {} CUSTOM programs",
+                    custom_programs.len()
+                ),
+            );
+            Box::into_raw(Box::new(RfDls::new(
+                bank,
+                selected_bank,
+                selected_program,
+                custom_programs,
+            )))
+            .cast()
         }
         Err(error) => {
             log_host(host, LOG_LEVEL_ERROR, &error);
@@ -489,12 +691,14 @@ unsafe extern "C" fn get_parameter(
     STATUS_OK
 }
 
-fn state_bytes(plugin: &RfDls) -> [u8; STATE_SIZE] {
-    let mut state = [0_u8; STATE_SIZE];
-    state[..4].copy_from_slice(b"RFD1");
-    state[4..8].copy_from_slice(&plugin.master_gain.to_le_bytes());
-    state[8..12].copy_from_slice(&plugin.selected_bank.to_le_bytes());
-    state[12..16].copy_from_slice(&plugin.selected_program.to_le_bytes());
+fn state_bytes(plugin: &RfDls) -> Vec<u8> {
+    let id = plugin.selected_preset_id.as_bytes();
+    let length = u16::try_from(id.len()).expect("validated preset IDs fit in u16");
+    let mut state = Vec::with_capacity(10 + id.len());
+    state.extend_from_slice(b"RFD2");
+    state.extend_from_slice(&plugin.master_gain.to_le_bytes());
+    state.extend_from_slice(&length.to_le_bytes());
+    state.extend_from_slice(id);
     state
 }
 
@@ -514,24 +718,35 @@ unsafe extern "C" fn load_state(instance: *mut c_void, source: *const u8, length
     let Some(plugin) = (unsafe { instance.cast::<RfDls>().as_mut() }) else {
         return STATUS_INVALID_ARGUMENT;
     };
-    if source.is_null() || length != STATE_SIZE {
+    if source.is_null() || length < 4 {
         return STATUS_INVALID_ARGUMENT;
     }
     let bytes = unsafe { slice::from_raw_parts(source, length) };
-    if &bytes[..4] != b"RFD1" {
+    let (gain, selected) = if &bytes[..4] == b"RFD1" && length == LEGACY_STATE_SIZE {
+        let gain = f32::from_le_bytes(bytes[4..8].try_into().expect("fixed slice"));
+        let bank = u32::from_le_bytes(bytes[8..12].try_into().expect("fixed slice"));
+        let program = u32::from_le_bytes(bytes[12..16].try_into().expect("fixed slice"));
+        (gain, dynamic_preset_id(bank, program))
+    } else if &bytes[..4] == b"RFD2" && length >= 10 {
+        let gain = f32::from_le_bytes(bytes[4..8].try_into().expect("fixed slice"));
+        let id_length = u16::from_le_bytes(bytes[8..10].try_into().expect("fixed slice")) as usize;
+        if id_length == 0 || length != 10 + id_length {
+            return STATUS_INVALID_ARGUMENT;
+        }
+        let Ok(id) = std::str::from_utf8(&bytes[10..]) else {
+            return STATUS_INVALID_ARGUMENT;
+        };
+        (gain, id.to_owned())
+    } else {
         return STATUS_INVALID_ARGUMENT;
-    }
-    let gain = f32::from_le_bytes(bytes[4..8].try_into().expect("fixed slice"));
-    let bank = u32::from_le_bytes(bytes[8..12].try_into().expect("fixed slice"));
-    let program = u32::from_le_bytes(bytes[12..16].try_into().expect("fixed slice"));
-    if plugin.bank.instrument(bank, program).is_none() {
-        return STATUS_INVALID_STATE;
-    }
+    };
     let status = plugin.set_parameter(MASTER_GAIN_PARAMETER, f64::from(gain));
     if status != STATUS_OK {
         return status;
     }
-    plugin.select_instrument(bank, program);
+    if !plugin.select_preset(&selected) {
+        return STATUS_INVALID_STATE;
+    }
     STATUS_OK
 }
 
@@ -550,15 +765,7 @@ unsafe extern "C" fn load_preset(
     let Ok(id) = std::str::from_utf8(id) else {
         return STATUS_INVALID_ARGUMENT;
     };
-    let selection = if id == PIANO_PRESET_ID {
-        Some((0, 0))
-    } else {
-        parse_dynamic_preset_id(id)
-    };
-    let Some((bank, program)) = selection else {
-        return STATUS_INVALID_ARGUMENT;
-    };
-    if !plugin.select_instrument(bank, program) {
+    if !plugin.select_preset(id) {
         return STATUS_INVALID_STATE;
     }
     plugin.master_gain = DEFAULT_MASTER_GAIN;
@@ -683,9 +890,18 @@ mod tests {
     use super::*;
     use rackforge_plugin_api::{ParameterSchema, PresetCatalog, RuntimeDescriptor};
     use rf_dls::{
-        EnvelopeSpec, Instrument, PitchEnvelopeSpec, Region, SampleLoop, SampleParams, Wave,
+        EnvelopeSpec, Instrument, LfoSpec, PitchEnvelopeSpec, Region, SampleLoop, SampleParams,
+        Wave,
     };
     use std::sync::Arc;
+
+    fn custom_program() -> CustomProgram {
+        let document = serde_json::from_slice(include_bytes!(
+            "../examples/custom.warm-piano.rackforge-program.json"
+        ))
+        .unwrap();
+        CustomProgram::from_document(document).unwrap()
+    }
 
     fn synthetic_plugin() -> RfDls {
         let samples = (0..512)
@@ -718,6 +934,7 @@ mod tests {
                         release_seconds: 0.01,
                     },
                     pitch_envelope: PitchEnvelopeSpec::default(),
+                    lfo: LfoSpec::default(),
                 }],
                 waves: vec![Wave {
                     name: "Synthetic Wave".into(),
@@ -728,6 +945,7 @@ mod tests {
             },
             0,
             0,
+            Vec::new(),
         )
     }
 
@@ -744,7 +962,7 @@ mod tests {
     #[test]
     fn dynamic_catalog_uses_opaque_stable_ids() {
         let plugin = synthetic_plugin();
-        let catalog = dynamic_catalog(&plugin.bank);
+        let catalog = dynamic_catalog(&plugin.bank, &[]);
         assert_eq!(catalog.validate(), Ok(()));
         assert_eq!(catalog.presets.len(), 1);
         assert_eq!(catalog.presets[0].id, "dls.b00000000.p00000000");
@@ -753,6 +971,32 @@ mod tests {
             parse_dynamic_preset_id(&catalog.presets[0].id),
             Some((0, 0))
         );
+    }
+
+    #[test]
+    fn custom_programs_are_separate_and_survive_state_round_trip() {
+        let mut plugin = synthetic_plugin();
+        plugin.custom_programs.push(custom_program());
+        let catalog = dynamic_catalog(&plugin.bank, &plugin.custom_programs);
+        assert_eq!(catalog.validate(), Ok(()));
+        assert_eq!(catalog.banks[0].name, "DLS");
+        assert_eq!(catalog.banks[1].name, "CUSTOM");
+        assert_eq!(catalog.presets[1].id, "custom.user.warm-piano");
+        assert_eq!(catalog.presets[1].bank.as_deref(), Some("custom"));
+
+        assert!(plugin.select_custom("custom.user.warm-piano"));
+        let state = state_bytes(&plugin);
+        assert!(plugin.select_instrument(0, 0));
+        let status = unsafe {
+            load_state(
+                (&mut plugin as *mut RfDls).cast(),
+                state.as_ptr(),
+                state.len(),
+            )
+        };
+        assert_eq!(status, STATUS_OK);
+        assert_eq!(plugin.selected_preset_id, "custom.user.warm-piano");
+        assert_eq!(plugin.envelope_override.unwrap().release_seconds, 1.2);
     }
 
     #[test]
@@ -833,6 +1077,53 @@ mod tests {
             data: [0x90, 60, 0],
         });
         assert!(!plugin.held_notes[60]);
+    }
+
+    #[test]
+    fn pitch_bend_uses_the_full_fourteen_bit_range() {
+        let mut plugin = synthetic_plugin();
+        plugin.handle_midi(MidiEventV1 {
+            frame: 0,
+            length: 3,
+            data: [0xe0, 0, 0],
+        });
+        assert_eq!(plugin.pitch_bend_cents, -200.0);
+        plugin.handle_midi(MidiEventV1 {
+            frame: 0,
+            length: 3,
+            data: [0xe0, 0, 64],
+        });
+        assert_eq!(plugin.pitch_bend_cents, 0.0);
+        plugin.handle_midi(MidiEventV1 {
+            frame: 0,
+            length: 3,
+            data: [0xe0, 127, 127],
+        });
+        assert_eq!(plugin.pitch_bend_cents, 200.0);
+    }
+
+    #[test]
+    fn mod_wheel_and_reset_controllers_update_plugin_state() {
+        let mut plugin = synthetic_plugin();
+        plugin.handle_midi(MidiEventV1 {
+            frame: 0,
+            length: 3,
+            data: [0xb0, 1, 127],
+        });
+        plugin.handle_midi(MidiEventV1 {
+            frame: 0,
+            length: 3,
+            data: [0xe0, 127, 127],
+        });
+        assert_eq!(plugin.modulation_wheel, 1.0);
+        assert_eq!(plugin.pitch_bend_cents, 200.0);
+        plugin.handle_midi(MidiEventV1 {
+            frame: 0,
+            length: 3,
+            data: [0xb0, 121, 0],
+        });
+        assert_eq!(plugin.modulation_wheel, 0.0);
+        assert_eq!(plugin.pitch_bend_cents, 0.0);
     }
 
     #[test]

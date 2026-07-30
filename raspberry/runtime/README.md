@@ -274,11 +274,29 @@ El host permanece genérico: selección de muestras, voces, sustain y
 parámetros pertenecen al plugin. El host solo administra carga, MIDI, bloques
 de audio y salida ALSA.
 
+Las entradas musicales y las superficies UI son conceptos independientes.
+Core conecta los endpoints MIDI normales —incluidos controladores todavía
+desconocidos— y excluye puertos auxiliares/DAW conocidos. Esto no concede
+permiso de display: solamente un driver registrado y una negociación exacta de
+layout pueden abrir una salida SysEx.
+
 `scripts/install.sh` instala binario y plugins mediante reemplazos atómicos.
 `scripts/select-live-engine.sh rf-dls-plugin` activa RF-DLS mediante Plugin API;
 `rf-dls` conserva temporalmente el daemon provisional como rollback. El selector
 verifica cada PID antes de detenerlo y restaura el motor anterior si el nuevo no
 alcanza `READY_TO_PLAY`.
+
+## Foco temporal de audition
+
+El protocolo LIVE permite adquirir, renovar y devolver una lease exclusiva para
+un editor de addon. Core captura el preset activo antes de concederla y ejecuta
+`reset` al transferir o devolver el foco, evitando notas colgadas. Las
+selecciones hechas durante la lease son audibles, pero al liberarla se restaura
+el preset capturado.
+
+La lease vence después de 15 segundos sin heartbeat. Esto cubre cierres,
+desconexiones y crashes del editor sin dejar permanentemente activo un sonido
+de preview.
 
 ## Alcance de API v1.3
 
@@ -297,6 +315,7 @@ Incluye:
 - documento común de programas con payload versionado por el plugin.
 - catálogos de presets dinámicos dependientes de recursos externos;
 - protocolo local genérico para consultar LIVE y seleccionar sonidos.
+- lease exclusiva y recuperable para audition durante la edición.
 
 Quedan para extensiones compatibles:
 

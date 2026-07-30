@@ -8,7 +8,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const PLUGIN_ID: &str = "org.rackforge.rf-dls";
-pub const PAYLOAD_VERSION: u32 = 2;
+pub const PAYLOAD_VERSION: u32 = 4;
+pub const CHORUS_PAYLOAD_VERSION: u32 = 3;
+pub const LAYER_PAYLOAD_VERSION: u32 = 2;
 pub const LEGACY_PAYLOAD_VERSION: u32 = 1;
 pub const PROGRAM_SUFFIX: &str = ".rackforge-program.json";
 pub const MAX_LAYERS: usize = 2;
@@ -23,6 +25,7 @@ pub struct CustomProgram {
     pub slot: u16,
     pub gain: f32,
     pub layers: Vec<ProgramLayer>,
+    pub effects: SharedEffects,
 }
 
 impl CustomProgram {
@@ -41,7 +44,7 @@ impl CustomProgram {
                 document.plugin_state_version
             ));
         }
-        let (slot, gain, layers) = match document.payload_version {
+        let (slot, gain, layers, effects) = match document.payload_version {
             LEGACY_PAYLOAD_VERSION => {
                 let payload: LegacyCustomProgramPayload = serde_json::from_value(document.payload)
                     .map_err(|error| format!("parsing RF-DLS v1 payload: {error}"))?;
@@ -53,13 +56,19 @@ impl CustomProgram {
                         payload.source,
                         payload.parameters,
                     )],
+                    SharedEffects::default(),
                 )
             }
-            PAYLOAD_VERSION => {
+            LAYER_PAYLOAD_VERSION | CHORUS_PAYLOAD_VERSION | PAYLOAD_VERSION => {
                 let payload: CustomProgramPayload = serde_json::from_value(document.payload)
-                    .map_err(|error| format!("parsing RF-DLS v2 payload: {error}"))?;
+                    .map_err(|error| {
+                        format!(
+                            "parsing RF-DLS v{} payload: {error}",
+                            document.payload_version
+                        )
+                    })?;
                 payload.validate()?;
-                (payload.slot, payload.gain, payload.layers)
+                (payload.slot, payload.gain, payload.layers, payload.effects)
             }
             version => return Err(format!("unsupported RF-DLS payload version {version}")),
         };
@@ -70,6 +79,7 @@ impl CustomProgram {
             slot,
             gain,
             layers,
+            effects,
         };
         program.validate()?;
         Ok(program)
@@ -90,6 +100,7 @@ impl CustomProgram {
                 slot: self.slot,
                 gain: self.gain,
                 layers: self.layers.clone(),
+                effects: self.effects,
             })
             .map_err(|error| format!("serializing RF-DLS payload: {error}"))?,
         })
@@ -133,6 +144,7 @@ impl CustomProgram {
                 return Err(format!("duplicate CUSTOM layer id {:?}", layer.id));
             }
         }
+        self.effects.validate()?;
         Ok(())
     }
 }
@@ -144,6 +156,8 @@ pub struct CustomProgramPayload {
     #[serde(default = "default_gain")]
     pub gain: f32,
     pub layers: Vec<ProgramLayer>,
+    #[serde(default)]
+    pub effects: SharedEffects,
 }
 
 impl CustomProgramPayload {
@@ -155,8 +169,119 @@ impl CustomProgramPayload {
             slot: self.slot,
             gain: self.gain,
             layers: self.layers.clone(),
+            effects: self.effects,
         }
         .validate()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SharedEffects {
+    pub chorus: ChorusEffectSettings,
+    pub reverb: ReverbEffectSettings,
+}
+
+impl SharedEffects {
+    fn validate(&self) -> Result<(), String> {
+        self.chorus.validate()?;
+        self.reverb.validate()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReverbEffectSettings {
+    pub enabled: bool,
+    pub size: f32,
+    pub decay_seconds: f32,
+    pub pre_delay_ms: f32,
+    pub damping: f32,
+    pub width: f32,
+    pub mix: f32,
+}
+
+impl Default for ReverbEffectSettings {
+    fn default() -> Self {
+        let defaults = rackforge_dsp::ReverbParameters::default();
+        Self {
+            enabled: defaults.enabled,
+            size: defaults.size,
+            decay_seconds: defaults.decay_seconds,
+            pre_delay_ms: defaults.pre_delay_ms,
+            damping: defaults.damping,
+            width: defaults.width,
+            mix: defaults.mix,
+        }
+    }
+}
+
+impl ReverbEffectSettings {
+    pub fn parameters(self) -> rackforge_dsp::ReverbParameters {
+        rackforge_dsp::ReverbParameters {
+            enabled: self.enabled,
+            size: self.size,
+            decay_seconds: self.decay_seconds,
+            pre_delay_ms: self.pre_delay_ms,
+            damping: self.damping,
+            width: self.width,
+            mix: self.mix,
+        }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        self.parameters()
+            .validate()
+            .map(|_| ())
+            .map_err(|field| format!("{field} is outside its supported range"))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ChorusEffectSettings {
+    pub enabled: bool,
+    pub rate_hz: f32,
+    pub depth: f32,
+    pub delay_ms: f32,
+    pub feedback: f32,
+    pub width: f32,
+    pub mix: f32,
+}
+
+impl Default for ChorusEffectSettings {
+    fn default() -> Self {
+        let defaults = rackforge_dsp::ChorusParameters::default();
+        Self {
+            enabled: defaults.enabled,
+            rate_hz: defaults.rate_hz,
+            depth: defaults.depth,
+            delay_ms: defaults.delay_ms,
+            feedback: defaults.feedback,
+            width: defaults.width,
+            mix: defaults.mix,
+        }
+    }
+}
+
+impl ChorusEffectSettings {
+    pub fn parameters(self) -> rackforge_dsp::ChorusParameters {
+        rackforge_dsp::ChorusParameters {
+            enabled: self.enabled,
+            rate_hz: self.rate_hz,
+            depth: self.depth,
+            delay_ms: self.delay_ms,
+            feedback: self.feedback,
+            width: self.width,
+            mix: self.mix,
+        }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        self.parameters()
+            .validate()
+            .map(|_| ())
+            .map_err(|field| format!("{field} is outside its supported range"))
     }
 }
 
@@ -698,6 +823,47 @@ mod tests {
     }
 
     #[test]
+    fn v2_programs_migrate_to_disabled_shared_effects() {
+        let legacy = CustomProgram::from_document(document()).unwrap();
+        let mut v2 = legacy.to_document().unwrap();
+        v2.payload_version = LAYER_PAYLOAD_VERSION;
+        v2.payload
+            .as_object_mut()
+            .unwrap()
+            .remove("effects")
+            .unwrap();
+
+        let migrated = CustomProgram::from_document(v2).unwrap();
+        assert_eq!(migrated.effects, SharedEffects::default());
+        assert!(!migrated.effects.chorus.enabled);
+        let encoded = migrated.to_document().unwrap();
+        assert_eq!(encoded.payload_version, PAYLOAD_VERSION);
+        assert!(encoded.payload.get("effects").is_some());
+    }
+
+    #[test]
+    fn v3_programs_migrate_to_disabled_reverb() {
+        let mut v3 = CustomProgram::from_document(document())
+            .unwrap()
+            .to_document()
+            .unwrap();
+        v3.payload_version = CHORUS_PAYLOAD_VERSION;
+        v3.payload["effects"]
+            .as_object_mut()
+            .unwrap()
+            .remove("reverb")
+            .unwrap();
+
+        let migrated = CustomProgram::from_document(v3).unwrap();
+        assert!(!migrated.effects.reverb.enabled);
+        assert_eq!(migrated.effects.reverb, ReverbEffectSettings::default());
+        assert_eq!(
+            migrated.to_document().unwrap().payload_version,
+            PAYLOAD_VERSION
+        );
+    }
+
+    #[test]
     fn rejects_invalid_source_and_ranges() {
         let mut invalid_source = document();
         invalid_source.payload["source"]["resource_id"] = json!("something-else");
@@ -706,6 +872,20 @@ mod tests {
         let mut invalid_gain = document();
         invalid_gain.payload["parameters"]["gain"] = json!(9.0);
         assert!(CustomProgram::from_document(invalid_gain).is_err());
+
+        let mut invalid_chorus = CustomProgram::from_document(document())
+            .unwrap()
+            .to_document()
+            .unwrap();
+        invalid_chorus.payload["effects"]["chorus"]["mix"] = json!(2.0);
+        assert!(CustomProgram::from_document(invalid_chorus).is_err());
+
+        let mut invalid_reverb = CustomProgram::from_document(document())
+            .unwrap()
+            .to_document()
+            .unwrap();
+        invalid_reverb.payload["effects"]["reverb"]["decay_seconds"] = json!(99.0);
+        assert!(CustomProgram::from_document(invalid_reverb).is_err());
     }
 
     #[test]
@@ -722,6 +902,10 @@ mod tests {
         layer_b.parameters.lfo.delay_seconds = Some(0.75);
         layer_b.parameters.lfo.mod_wheel_pitch_depth_cents = Some(80.0);
         program.layers.push(layer_b);
+        program.effects.chorus.enabled = true;
+        program.effects.chorus.mix = 0.4;
+        program.effects.reverb.enabled = true;
+        program.effects.reverb.decay_seconds = 3.5;
 
         let document = program.to_document().unwrap();
         assert_eq!(document.payload_version, PAYLOAD_VERSION);
@@ -729,6 +913,10 @@ mod tests {
         assert_eq!(decoded.layers.len(), 2);
         assert_eq!(decoded.layers[1].source.program, 48);
         assert_eq!(decoded.layers[1].parameters.lfo.delay_seconds, Some(0.75));
+        assert!(decoded.effects.chorus.enabled);
+        assert_eq!(decoded.effects.chorus.mix, 0.4);
+        assert!(decoded.effects.reverb.enabled);
+        assert_eq!(decoded.effects.reverb.decay_seconds, 3.5);
     }
 
     #[test]

@@ -1061,15 +1061,23 @@ impl Menu {
                     self.emit_current_generic_editor_value(true);
                 }
             }
-            ComponentEvent::EditCommitted(_) => self.emit_current_generic_editor_value(false),
-            ComponentEvent::EditCancelled(_) => self.restore_program_preview(),
-            ComponentEvent::ExitRequested(_) => {
-                self.editor_field = None;
-                self.editor_field_id = None;
-                self.page = Page::ProgramEditorPage;
+            ComponentEvent::EditCommitted(_) => {
+                self.emit_current_generic_editor_value(false);
+                self.close_generic_editor_field();
             }
+            ComponentEvent::EditCancelled(_) => {
+                self.restore_program_preview();
+                self.close_generic_editor_field();
+            }
+            ComponentEvent::ExitRequested(_) => self.close_generic_editor_field(),
             _ => {}
         }
+    }
+
+    fn close_generic_editor_field(&mut self) {
+        self.editor_field = None;
+        self.editor_field_id = None;
+        self.page = Page::ProgramEditorPage;
     }
 
     fn active_editor_field(&self) -> Option<&ProgramEditorField> {
@@ -1416,8 +1424,8 @@ impl Menu {
         let Some(editor) = self.editor_field.as_ref() else {
             return Screen::with_header(&field.label, "NO EDITOR", " ");
         };
-        let [line_1, line_2] = component_lines(editor, true);
-        Screen::with_header(&field.label, line_1, line_2)
+        let [_redundant_label, value] = component_lines(editor, true);
+        Screen::with_header(&field.label, value, " ")
     }
 
     fn render_generic_editor_sound(&self) -> Screen {
@@ -3009,10 +3017,12 @@ mod tests {
                 .as_ref()
                 .is_some_and(ValueCarousel::is_editing)
         );
-        assert!(menu.render().line_2.starts_with('['));
+        assert_eq!(menu.render().header, Header::Visible("ATTACK".into()));
+        assert!(menu.render().line_1.starts_with('['));
+        assert!(menu.render().line_2.trim().is_empty());
         menu.apply_input(Input::EncoderRight);
         assert_eq!(
-            menu.render().line_2.trim_matches(&['[', ']', ' '][..]),
+            menu.render().line_1.trim_matches(&['[', ']', ' '][..]),
             "0.01 s"
         );
         assert_eq!(
@@ -3029,26 +3039,15 @@ mod tests {
             menu.take_command(),
             Some(MenuCommand::RestoreProgramDraftPreview { draft_id: 17 })
         );
+        assert!(menu.render().line_1.contains("ATTACK"));
         assert_eq!(menu.render().line_2.trim(), "INHERIT");
-        assert!(
-            !menu
-                .editor_field
-                .as_ref()
-                .is_some_and(ValueCarousel::is_editing)
-        );
-        assert!(menu.render().line_1.starts_with('['));
+        assert!(menu.editor_field.is_none());
 
         menu.apply_input(Input::Button1);
         menu.apply_input(Input::EncoderRight);
         menu.apply_input(Input::Button1);
-        assert_eq!(menu.render().line_2.trim(), "0.01 s");
-        assert!(
-            !menu
-                .editor_field
-                .as_ref()
-                .is_some_and(ValueCarousel::is_editing)
-        );
-        assert!(menu.render().line_1.starts_with('['));
+        assert!(menu.render().line_1.contains("ATTACK"));
+        assert!(menu.editor_field.is_none());
         assert_eq!(
             menu.take_command(),
             Some(MenuCommand::EditProgramDraftField {
@@ -3059,8 +3058,6 @@ mod tests {
             })
         );
 
-        menu.apply_input(Input::Button4);
-        assert!(menu.render().line_1.contains("ATTACK"));
         menu.apply_input(Input::Button4);
         assert!(menu.render().line_1.contains("AMP ENV"));
     }
@@ -3188,7 +3185,8 @@ mod tests {
 
         menu.apply(Action::Select);
         assert_eq!(menu.render().header, Header::Visible("VOLUME".into()));
-        assert!(menu.render().line_1.contains("VOLUME"));
+        assert_eq!(menu.render().line_1.trim(), "1.00");
+        assert!(menu.render().line_2.trim().is_empty());
         menu.apply_input(Input::Button1);
         menu.apply_input(Input::Button2);
         assert_eq!(
@@ -3267,7 +3265,9 @@ mod tests {
         menu.apply(Action::Next);
         assert!(menu.render().line_1.contains("OUTPUT"));
         menu.apply(Action::Select);
-        assert!(menu.render().line_1.contains("GAIN"));
+        assert_eq!(menu.render().header, Header::Visible("GAIN".into()));
+        assert_eq!(menu.render().line_1.trim(), "1.00");
+        assert!(menu.render().line_2.trim().is_empty());
         menu.apply_input(Input::Button1);
         menu.apply_input(Input::Button2);
         assert_eq!(

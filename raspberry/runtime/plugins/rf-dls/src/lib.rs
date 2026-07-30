@@ -1,7 +1,8 @@
 mod custom_program;
 mod program_editor;
 
-use custom_program::{CustomProgram, DlsSource, ProgramLayer};
+use custom_program::{CustomProgram, DlsSource, ProgramLayer, SharedEffects};
+use rackforge_dsp::{Chorus, Reverb, StereoFrame};
 use rackforge_plugin_api::abi::{
     HostApiV1, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, LOG_LEVEL_WARN, MidiEventV1,
     PROGRAM_EXTENSION_VERSION, ParameterEventV1, PluginApiV1, ProcessBlockV1,
@@ -100,6 +101,9 @@ struct RfDls {
     program_gain: f32,
     program_gain_target: f32,
     active_layers: Vec<ProgramLayer>,
+    active_effects: SharedEffects,
+    chorus: Chorus,
+    reverb: Reverb,
     selected_bank: u32,
     selected_program: u32,
     selected_preset_id: String,
@@ -137,6 +141,9 @@ impl RfDls {
                     program: selected_program,
                 },
             )],
+            active_effects: SharedEffects::default(),
+            chorus: Chorus::new(48_000.0).expect("48 kHz is a supported DSP sample rate"),
+            reverb: Reverb::new(48_000.0).expect("48 kHz is a supported DSP sample rate"),
             selected_bank,
             selected_program,
             selected_preset_id: dynamic_preset_id(selected_bank, selected_program),
@@ -150,6 +157,8 @@ impl RfDls {
         self.sustain = false;
         self.pitch_bend_normalized = 0.0;
         self.modulation_wheel = 0.0;
+        self.chorus.reset();
+        self.reverb.reset();
     }
 
     fn select_instrument(&mut self, bank: u32, program: u32) -> bool {
@@ -169,6 +178,13 @@ impl RfDls {
                 program,
             },
         )];
+        self.active_effects = SharedEffects::default();
+        self.chorus
+            .set_parameters(self.active_effects.chorus.parameters())
+            .expect("default chorus settings are valid");
+        self.reverb
+            .set_parameters(self.active_effects.reverb.parameters())
+            .expect("default reverb settings are valid");
         self.reset();
         true
     }
@@ -212,6 +228,18 @@ impl RfDls {
         if reset_voices {
             self.program_gain = program.gain;
         }
+        if self
+            .chorus
+            .set_parameters(program.effects.chorus.parameters())
+            .is_err()
+            || self
+                .reverb
+                .set_parameters(program.effects.reverb.parameters())
+                .is_err()
+        {
+            return false;
+        }
+        self.active_effects = program.effects;
         self.active_layers = program.layers;
         if reset_voices {
             self.reset();
@@ -311,6 +339,7 @@ impl RfDls {
                     program: source.program,
                 },
             )],
+            effects: SharedEffects::default(),
         }
         .prepared()
     }
@@ -831,6 +860,26 @@ unsafe extern "C" fn activate(
     plugin.sample_rate = sample_rate.round() as u32;
     plugin.maximum_frames = maximum_frames;
     plugin.output_channels = output_channels;
+    let Ok(mut chorus) = Chorus::new(sample_rate as f32) else {
+        return STATUS_INVALID_ARGUMENT;
+    };
+    if chorus
+        .set_parameters(plugin.active_effects.chorus.parameters())
+        .is_err()
+    {
+        return STATUS_INVALID_STATE;
+    }
+    let Ok(mut reverb) = Reverb::new(sample_rate as f32) else {
+        return STATUS_INVALID_ARGUMENT;
+    };
+    if reverb
+        .set_parameters(plugin.active_effects.reverb.parameters())
+        .is_err()
+    {
+        return STATUS_INVALID_STATE;
+    }
+    plugin.chorus = chorus;
+    plugin.reverb = reverb;
     plugin.active = true;
     plugin.reset();
     STATUS_OK
@@ -1013,9 +1062,19 @@ unsafe extern "C" fn process(instance: *mut c_void, block: *const ProcessBlockV1
             midi_index += 1;
         }
         let sample = plugin.render_frame();
+        let chorused = plugin.chorus.process(StereoFrame::splat(sample));
+        let processed = plugin.reverb.process(chorused);
         let start = frame as usize * block.output_channels as usize;
-        for channel in 0..block.output_channels as usize {
-            output[start + channel] = sample;
+        output[start] = if block.output_channels == 1 {
+            processed.mono()
+        } else {
+            processed.left
+        };
+        if block.output_channels > 1 {
+            output[start + 1] = processed.right;
+        }
+        for channel in 2..block.output_channels as usize {
+            output[start + channel] = processed.mono();
         }
     }
     STATUS_OK
@@ -1499,6 +1558,46 @@ mod tests {
         let program = CustomProgram::from_document(quieter.document).unwrap();
         assert_eq!(program.layers[0].parameters.gain, 1.0);
         assert_eq!(program.layers[1].parameters.gain, 0.75);
+
+        let chorus = plugin
+            .apply_program_edit(ProgramFieldEditRequest {
+                schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+                document: program.to_document().unwrap(),
+                field_id: "fx.chorus.enabled".into(),
+                value: rackforge_plugin_api::ProgramEditorValue::Boolean(true),
+            })
+            .unwrap();
+        let chorus = plugin
+            .apply_program_edit(ProgramFieldEditRequest {
+                schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+                document: chorus.document,
+                field_id: "fx.chorus.rate".into(),
+                value: rackforge_plugin_api::ProgramEditorValue::Integer(125),
+            })
+            .unwrap();
+        let program = CustomProgram::from_document(chorus.document).unwrap();
+        assert!(program.effects.chorus.enabled);
+        assert_eq!(program.effects.chorus.rate_hz, 1.25);
+
+        let reverb = plugin
+            .apply_program_edit(ProgramFieldEditRequest {
+                schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+                document: program.to_document().unwrap(),
+                field_id: "fx.reverb.enabled".into(),
+                value: rackforge_plugin_api::ProgramEditorValue::Boolean(true),
+            })
+            .unwrap();
+        let reverb = plugin
+            .apply_program_edit(ProgramFieldEditRequest {
+                schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+                document: reverb.document,
+                field_id: "fx.reverb.decay".into(),
+                value: rackforge_plugin_api::ProgramEditorValue::Integer(375),
+            })
+            .unwrap();
+        let program = CustomProgram::from_document(reverb.document).unwrap();
+        assert!(program.effects.reverb.enabled);
+        assert_eq!(program.effects.reverb.decay_seconds, 3.75);
     }
 
     #[test]

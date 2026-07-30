@@ -6,6 +6,7 @@ members = [
     "rackforge-controller-api",
     "rackforge-controller-package",
     "rackforge-controller-host",
+    "rackforge-dsp",
     "rackforge-plugin-api",
     "rackforge-program-api",
     "rackforge-session-api",

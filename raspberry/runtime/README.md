@@ -186,8 +186,11 @@ sin asumir que todos los instrumentos tienen capas, osciladores o FX iguales.
 RF-DLS define un payload versionado de una o dos capas. Cada capa referencia un
 instrumento DLS y posee rangos de tecla/velocidad y overrides de nivel, tuning,
 pitch bend, modulación, envolventes y LFO. Los campos opcionales ausentes
-heredan los articuladores del DLS. Los payloads v1 se migran a una sola capa
-`A` al leerlos y se escriben como v2 al siguiente guardado.
+heredan los articuladores del DLS. El payload v3 agregó una cadena FX compartida
+después del mix de capas con chorus estéreo; el payload v4 agrega una reverb
+ROOM después del chorus. Los payloads v1 se migran a una sola capa `A`; v1 y v2
+heredan ambos FX desactivados, v3 hereda la reverb desactivada y todos se
+escriben como v4 al siguiente guardado.
 
 La extensión binaria de programas 1.1 agrega un callback opcional de preview.
 La versión 1.2 agrega `editor_view` y `apply_edit`: el plugin publica páginas y

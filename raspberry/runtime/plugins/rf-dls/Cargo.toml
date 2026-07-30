@@ -9,6 +9,7 @@ license.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+rackforge-dsp = { path = "../../rackforge-dsp" }
 rackforge-plugin-api = { path = "../../rackforge-plugin-api" }
 rf-dls = { path = "../../../engines/rf-dls" }
 serde.workspace = true

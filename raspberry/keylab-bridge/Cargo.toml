@@ -1,6 +1,6 @@
 [package]
 name = "rackforge-controller-arturia-keylab-essential-mk3"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "RackForge controller driver for the Arturia KeyLab Essential mk3"
 license = "GPL-2.0-or-later"

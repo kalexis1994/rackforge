@@ -496,6 +496,7 @@ Estado: **en curso**
 - [ ] Consolidar nombres: plugin, instancia, programa, recurso, superficie,
       driver, comando, evento y sesión.
 - [ ] Documentar invariantes de tiempo real y ownership.
+- [x] Separar primitivas DSP portables y documentar procedencia/licencias.
 
 Criterio de salida: el modelo de dominio puede describir el instrumento actual
 sin mencionar ALSA, KeyLab, Raspberry ni una biblioteca dinámica concreta.

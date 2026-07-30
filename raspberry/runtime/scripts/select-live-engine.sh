@@ -19,7 +19,7 @@ rf_dls_binary="$root/bin/rf-dls-live"
 plugin_package="$root/plugins/roland-scva"
 rf_dls_plugin_package="$root/plugins/rf-dls"
 rendered_bank="$root/share/rendered-piano-v1"
-rf_dls_bank="$root/data/addons/rf-dls/banks/gm.dls"
+rf_dls_bank="$root/data/plugins/rf-dls/banks/gm.dls"
 
 process_command() {
   local pid="$1"
@@ -205,12 +205,13 @@ case "$mode" in
     preset="${selection:-gm.piano-1}"
     test -x "$plugin_binary"
     test -x "$rf_dls_binary"
-    test -f "$rf_dls_bank"
     test -f "$rf_dls_plugin_package/rackforge-plugin.toml"
     stop_verified "$plugin_pid_file" "$plugin_binary"
     stop_verified "$native_pid_file" "$legacy_binary"
     stop_verified "$legacy_pid_file" "$legacy_binary"
     stop_verified "$rf_dls_pid_file" "$rf_dls_binary"
+    "$plugin_binary" plugin-init "$root/data" org.rackforge.rf-dls
+    test -f "$rf_dls_bank"
     if ! start_rf_dls_plugin "$preset" || ! wait_ready "$plugin_pid_file" "$plugin_log"; then
       stop_verified "$plugin_pid_file" "$plugin_binary" || true
       start_rf_dls

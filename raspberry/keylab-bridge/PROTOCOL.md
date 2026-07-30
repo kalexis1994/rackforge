@@ -335,13 +335,13 @@ Los cuatro botones producen una pulsación corta al soltarse o una pulsación
 larga una vez alcanzados 650 ms. Ambos gestos son mutuamente excluyentes.
 
 - `BACK` sostenido vuelve al modo activo de RackForge. En `PLAY` regresa al
-  addon seleccionado y le permite sugerir el programa que debe quedar centrado;
+  plugin seleccionado y le permite sugerir el programa que debe quedar centrado;
   en `LIVE` vuelve al rack o instrumento seleccionado.
 - `OK` + `BACK`, iniciados con una diferencia máxima de 250 ms y sostenidos
   durante 650 ms, fuerzan `HOME`.
 - El acorde de emergencia tiene prioridad: no genera además `OK LONG` ni
   `BACK LONG`.
-- Estas dos rutas son propiedad del host. Un addon puede ser notificado después
+- Estas dos rutas son propiedad del host. Un plugin puede ser notificado después
   de la navegación, pero no puede consumirlas, cancelarlas ni impedirlas.
 
 El editor de texto reutilizable asigna `OK` corto a entrar o confirmar el texto,

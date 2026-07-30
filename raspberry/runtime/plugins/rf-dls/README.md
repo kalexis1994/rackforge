@@ -1,6 +1,6 @@
 # RF-DLS
 
-RF-DLS es el addon de instrumento DLS nativo de RackForge. El binario no
+RF-DLS es el plugin de instrumento DLS nativo de RackForge. El binario no
 incluye sonidos: recibe un archivo DLS aportado por el usuario mediante el
 recurso obligatorio `dls-bank`.
 
@@ -40,17 +40,17 @@ Ejemplo de prueba en ARM64:
 ```bash
 rackforge-core smoke plugins/rf-dls/package \
   --library target/release/librackforge_rf_dls.so \
-  --resource dls-bank=/home/kalex/rackforge/data/addons/rf-dls/banks/gm.dls \
+  --resource dls-bank=/home/kalex/rackforge/data/plugins/rf-dls/banks/gm.dls \
   --preset gm.piano-1 \
   --data-root /home/kalex/rackforge/data
 ```
 
-El `.dls` no debe copiarse al repositorio ni al futuro paquete `.rfaddon`.
+El `.dls` no debe copiarse al repositorio ni al futuro paquete `.rfplugin`.
 
 ## PLAY dinámico
 
 Al crear la instancia, RF-DLS ordena los instrumentos por banco y programa,
-elimina duplicados y publica un catálogo mediante Host API 1.3. Los IDs tienen
+elimina duplicados y publica un catálogo mediante Host API 1.4. Los IDs tienen
 esta forma opaca:
 
 ```text
@@ -60,7 +60,7 @@ dls.b00000000.p00000030
 RackForge usa el ID para seleccionar el sonido, pero la interfaz muestra el
 nombre y un detalle corto como `B000 P048` o `DRUM P000`. El bridge del KeyLab
 recibe además el banco lógico y presenta primero `DLS` o `CUSTOM`; no conoce la
-estructura interna del addon.
+estructura interna del plugin.
 
 ## Programas CUSTOM
 
@@ -70,7 +70,7 @@ reescribe el banco: guarda una referencia a `dls-bank` + banco + programa y
 `.rackforge-program.json` en:
 
 ```text
-data/addons/org.rackforge.rf-dls/custom/
+data/plugins/org.rackforge.rf-dls/custom/
 ```
 
 El payload v2 admite una capa `A` obligatoria y una capa `B` opcional. `A`
@@ -102,7 +102,7 @@ rackforge-core program-save /home/kalex/rackforge/data \
 El ID de catálogo resultante es `custom.user.warm-piano`. Cambiar o agregar
 archivos requiere reiniciar el motor RF-DLS para reconstruir el catálogo.
 
-Durante una edición, Core entrega al addon el documento completo mediante la
+Durante una edición, Core entrega al plugin el documento completo mediante la
 extensión de programas 1.1. RF-DLS preescucha ese borrador de forma transitoria:
 las dos capas y sus overrides ya se oyen antes de guardar, pero el catálogo y
 los archivos sólo cambian después de confirmar `SAVE`.

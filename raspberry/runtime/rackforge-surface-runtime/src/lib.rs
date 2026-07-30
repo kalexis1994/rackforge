@@ -1,4 +1,4 @@
-//! RackForge-owned LITTLE surface state and addon navigation.
+//! RackForge-owned LITTLE surface state and plugin navigation.
 //!
 //! This crate has no MIDI, SysEx, USB or controller-model knowledge.
 
@@ -225,7 +225,7 @@ enum Page {
     Live,
     Play,
     Config,
-    Addons,
+    Plugins,
     RfDlsLibrary,
     RfDlsPlay,
     RfDlsCustomPrograms,
@@ -258,7 +258,7 @@ pub struct Menu {
     live_index: usize,
     play_index: usize,
     config_index: usize,
-    addon_index: usize,
+    plugin_index: usize,
     rf_dls_library_index: usize,
     rf_dls_play_index: usize,
     rf_dls_custom_index: usize,
@@ -291,15 +291,15 @@ const LIVE_ITEMS: [&str; 4] = ["PIANO 1", "WARM PAD", "DLS STRINGS", "M1 HOUSE"]
 const LIVE_DETAILS: [&str; 4] = ["DLS piano", "Layered pad", "RF-DLS bank", "Korg M1"];
 const PLAY_ITEMS: [&str; 1] = ["RF-DLS"];
 const PLAY_DETAILS: [&str; 1] = ["DLS banks"];
-const CONFIG_ITEMS: [&str; 4] = ["ADDONS", "SETLISTS", "AUDIO", "SYSTEM"];
+const CONFIG_ITEMS: [&str; 4] = ["PLUGINS", "SETLISTS", "AUDIO", "SYSTEM"];
 const CONFIG_DETAILS: [&str; 4] = [
-    "Addon settings",
+    "Plugin settings",
     "Performance order",
     "Scarlett Solo",
     "RackForge settings",
 ];
-const ADDON_ITEMS: [&str; 1] = ["RF-DLS"];
-const ADDON_DETAILS: [&str; 1] = [" "];
+const PLUGIN_ITEMS: [&str; 1] = ["RF-DLS"];
+const PLUGIN_DETAILS: [&str; 1] = [" "];
 const RF_DLS_LIBRARIES: [&str; 2] = ["DLS", "CUSTOM"];
 const RF_DLS_PROGRAM_SECTIONS: [&str; 6] = ["NAME", "LAYER A", "LAYER B", "FX", "OUTPUT", "SAVE"];
 const RF_DLS_SECTION_DETAILS: [&str; 6] = [
@@ -338,7 +338,7 @@ impl Default for Menu {
             live_index: 0,
             play_index: 0,
             config_index: 0,
-            addon_index: 0,
+            plugin_index: 0,
             rf_dls_library_index: 0,
             rf_dls_play_index: 0,
             rf_dls_custom_index: 0,
@@ -566,7 +566,7 @@ impl Menu {
                 self.page = match self.page {
                     Page::RfDlsPlay => Page::RfDlsLibrary,
                     Page::RfDlsLibrary => Page::Play,
-                    Page::RfDlsCustomPrograms => Page::Addons,
+                    Page::RfDlsCustomPrograms => Page::Plugins,
                     Page::RfDlsName | Page::RfDlsSharedFx | Page::RfDlsProgramOutput => {
                         Page::RfDlsProgramSections
                     }
@@ -592,7 +592,7 @@ impl Menu {
                         }
                         Page::RfDlsCustomPrograms
                     }
-                    Page::Addons => Page::Config,
+                    Page::Plugins => Page::Config,
                     Page::Home => Page::Home,
                     _ => Page::Home,
                 };
@@ -623,8 +623,8 @@ impl Menu {
                         self.rf_dls_play_index = 0;
                         Page::RfDlsPlay
                     }
-                    Page::Config if self.config_index == 0 => Page::Addons,
-                    Page::Addons if self.addon_index == 0 => Page::RfDlsCustomPrograms,
+                    Page::Config if self.config_index == 0 => Page::Plugins,
+                    Page::Plugins if self.plugin_index == 0 => Page::RfDlsCustomPrograms,
                     Page::RfDlsCustomPrograms => {
                         self.begin_program_edit();
                         Page::RfDlsCustomPrograms
@@ -752,11 +752,11 @@ impl Menu {
                 &CONFIG_DETAILS,
                 self.config_index,
             ),
-            Page::Addons => simple_screen(
-                indexed_title("ADDONS", self.addon_index, ADDON_ITEMS.len()),
-                &ADDON_ITEMS,
-                &ADDON_DETAILS,
-                self.addon_index,
+            Page::Plugins => simple_screen(
+                indexed_title("PLUGINS", self.plugin_index, PLUGIN_ITEMS.len()),
+                &PLUGIN_ITEMS,
+                &PLUGIN_DETAILS,
+                self.plugin_index,
             ),
             Page::RfDlsLibrary => self.render_rf_dls_library(),
             Page::RfDlsPlay => self.render_rf_dls_play(),
@@ -823,7 +823,7 @@ impl Menu {
             Page::Live => (&mut self.live_index, LIVE_ITEMS.len()),
             Page::Play => (&mut self.play_index, PLAY_ITEMS.len()),
             Page::Config => (&mut self.config_index, CONFIG_ITEMS.len()),
-            Page::Addons => (&mut self.addon_index, ADDON_ITEMS.len()),
+            Page::Plugins => (&mut self.plugin_index, PLUGIN_ITEMS.len()),
             Page::RfDlsLibrary => (&mut self.rf_dls_library_index, RF_DLS_LIBRARIES.len()),
             Page::RfDlsPlay if self.filtered_sounds().is_empty() => return,
             Page::RfDlsPlay => {
@@ -1960,14 +1960,14 @@ mod tests {
     }
 
     #[test]
-    fn envelope_is_owned_by_the_rf_dls_addon() {
+    fn envelope_is_owned_by_the_rf_dls_plugin() {
         let mut menu = Menu::default();
         menu.apply(Action::Previous);
         menu.apply(Action::Select);
         menu.apply(Action::Select);
         assert_eq!(
             menu.render().header,
-            Header::Visible("ADDONS         1/1".into())
+            Header::Visible("PLUGINS        1/1".into())
         );
         assert!(menu.render().line_1.contains("RF-DLS"));
         assert!(menu.render().line_2.trim().is_empty());
@@ -2006,7 +2006,7 @@ mod tests {
         menu.apply(Action::Back);
         assert_eq!(
             menu.render().header,
-            Header::Visible("ADDONS         1/1".into())
+            Header::Visible("PLUGINS        1/1".into())
         );
     }
 
@@ -2043,7 +2043,7 @@ mod tests {
     }
 
     #[test]
-    fn rf_dls_play_and_config_are_distinct_addon_sections() {
+    fn rf_dls_play_and_config_are_distinct_plugin_sections() {
         let mut menu = Menu::default();
         menu.apply(Action::Next);
         menu.apply(Action::Select);
@@ -2166,7 +2166,7 @@ mod tests {
     }
 
     #[test]
-    fn live_remains_a_rackforge_mode_above_addons() {
+    fn live_remains_a_rackforge_mode_above_plugins() {
         let mut menu = Menu::default();
         menu.apply(Action::Select);
         assert_eq!(
@@ -2557,7 +2557,7 @@ mod tests {
     }
 
     #[test]
-    fn long_back_returns_to_the_active_play_addon_and_centers_selection() {
+    fn long_back_returns_to_the_active_play_plugin_and_centers_selection() {
         let mut menu = Menu::default();
         menu.set_play_sounds(
             vec![
@@ -2576,7 +2576,7 @@ mod tests {
         menu.apply(Action::Back);
         menu.apply(Action::Next);
         menu.apply(Action::Select);
-        assert!(menu.render().line_1.contains("ADDONS"));
+        assert!(menu.render().line_1.contains("PLUGINS"));
 
         menu.apply_input(Input::Button4Long);
         assert!(matches!(

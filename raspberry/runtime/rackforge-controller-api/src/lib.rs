@@ -138,12 +138,12 @@ pub struct NegotiatedSurface {
 /// Screen size, control count and layout names are never inferred.
 pub fn negotiate_surface(
     controller: &ControllerProfile,
-    addon_layouts: &[String],
+    plugin_layouts: &[String],
 ) -> Option<NegotiatedSurface> {
     controller
         .surfaces
         .iter()
-        .filter(|surface| addon_layouts.contains(&surface.layout_id))
+        .filter(|surface| plugin_layouts.contains(&surface.layout_id))
         .min_by_key(|surface| surface.priority)
         .map(|surface| NegotiatedSurface {
             layout_id: surface.layout_id.clone(),

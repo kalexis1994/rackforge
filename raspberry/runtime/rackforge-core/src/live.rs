@@ -9,7 +9,7 @@ use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_plugin_api::PluginKind;
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_session_api::{
-    AddonInstanceState, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, InstanceId, Revision,
+    DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, InstanceId, PluginInstanceState, Revision,
     SESSION_SCHEMA_VERSION, SessionId, SessionState, SoundSummary,
 };
 use std::collections::BTreeMap;
@@ -218,10 +218,10 @@ pub fn run(config: LiveConfig) -> Result<()> {
             .map_err(|message| anyhow::anyhow!(message))?,
         revision: Revision::ZERO,
         active_instance_id: Some(instance_id.clone()),
-        instances: vec![AddonInstanceState {
+        instances: vec![PluginInstanceState {
             instance_id,
-            addon_id: plugin.manifest().id.clone(),
-            addon_name: plugin.manifest().name.clone(),
+            plugin_id: plugin.manifest().id.clone(),
+            plugin_name: plugin.manifest().name.clone(),
             ui_layouts: plugin.manifest().ui_layouts.clone(),
             sounds: presets
                 .presets
@@ -247,7 +247,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
     let control_storage = config
         .data_root
         .as_ref()
-        .map(|root| crate::AddonStorage::new(root.clone()));
+        .map(|root| crate::PluginStorage::new(root.clone()));
     let _control_server = control::start(
         &control_path,
         session_store,

@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 #define RACKFORGE_ABI_VERSION_MAJOR 1u
-#define RACKFORGE_ABI_VERSION_MINOR 3u
+#define RACKFORGE_ABI_VERSION_MINOR 4u
 #define RACKFORGE_ABI_VERSION \
     ((RACKFORGE_ABI_VERSION_MAJOR << 16u) | RACKFORGE_ABI_VERSION_MINOR)
 
@@ -38,7 +38,7 @@ typedef size_t (*RackForgeHostGetResourcePathFnV1)(
     uint8_t *destination,
     size_t capacity
 );
-typedef size_t (*RackForgeHostGetAddonDataPathFnV1)(
+typedef size_t (*RackForgeHostGetPluginDataPathFnV1)(
     void *context,
     uint8_t *destination,
     size_t capacity
@@ -55,7 +55,7 @@ typedef struct RackForgeHostApiV1 {
     void *context;
     RackForgeHostLogFnV1 log;
     RackForgeHostGetResourcePathFnV1 get_resource_path;
-    RackForgeHostGetAddonDataPathFnV1 get_addon_data_path;
+    RackForgeHostGetPluginDataPathFnV1 get_plugin_data_path;
     RackForgeHostPublishPresetCatalogFnV1 publish_preset_catalog;
 } RackForgeHostApiV1;
 

@@ -16,7 +16,7 @@ ui_layouts = ["little@1"]
 
 [api]
 major = 1
-minor = 3
+minor = 4
 
 [[resources]]
 id = "dls-bank"

@@ -35,10 +35,10 @@ estabilizar la API sin interrumpir el instrumento que ya funciona.
 - Los plugins no dependen de módulos privados de `rackforge-core`; esta frontera
   permite moverlos a repositorios independientes cuando la ABI se estabilice.
 
-El formato distribuible de un addon usa la extensión `.rfaddon`:
+El formato distribuible de un plugin usa la extensión `.rfplugin`:
 
 ```text
-rf-dls-0.1.0.rfaddon
+rf-dls-0.1.0.rfplugin
 └── plugin/
     ├── rackforge-plugin.toml
     ├── lib/
@@ -61,7 +61,7 @@ plugins/rf-dls/
 ```
 
 Las rutas declaradas en el manifiesto deben ser relativas y no pueden escapar
-del paquete. El host no ejecuta bibliotecas directamente desde `.rfaddon`;
+del paquete. El host no ejecuta bibliotecas directamente desde `.rfplugin`;
 primero las materializa para que el cargador nativo pueda abrirlas y para
 permitir verificación, actualización y rollback.
 
@@ -83,37 +83,47 @@ solo solicita su ruta mediante `get_resource_path`; no conoce ubicaciones
 específicas de la Raspberry. Esto mantiene bancos, ROMs y muestras fuera de
 Git y permite que la misma biblioteca funcione en distintas instalaciones.
 
-La extensión es compatible hacia atrás: el plugin Gain continúa declarando
-API 1.0 y se carga sin utilizar el callback agregado en 1.1.
+El host conserva compatibilidad binaria con plugins API 1.0–1.3. Los plugins
+de referencia se compilan contra la API vigente para probar el contrato
+completo.
 
-## Datos privados de addons
+## Datos privados de plugins
 
-API 1.2 agrega una raíz de datos privada por addon:
+API 1.2 agrega una raíz de datos privada por plugin:
 
 ```text
 <data-root>/
-└── addons/
+└── plugins/
     └── org.rackforge.roland-scva/
 ```
 
 RackForge crea, valida y aísla únicamente esa raíz. No crea carpetas internas ni
-impone nombres como `programs`, `resources` o `banks`. Cada addon decide toda
+impone nombres como `programs`, `resources` o `banks`. Cada plugin decide toda
 su estructura interna y puede cambiarla mediante sus propias migraciones.
 
 El host ofrece operaciones de rutas relativas y escritura atómica: rechaza
 `..`, rutas absolutas y enlaces simbólicos que escapen del namespace. La
-biblioteca nativa recibe la ruta mediante `get_addon_data_path`; sigue siendo
+biblioteca nativa recibe la ruta mediante `get_plugin_data_path`; sigue siendo
 código confiable dentro del proceso hasta que exista aislamiento opcional.
 
-Los recursos declarados y los datos del addon son conceptos distintos:
+API 1.4 consolida el vocabulario público de `plugin`. El slot binario del
+callback de datos no cambió, por lo que los binarios 1.0–1.3 continúan siendo
+aceptados. Las nuevas compilaciones usan `get_plugin_data_path`.
+
+Al abrir por primera vez un plugin, Core migra de forma atómica la antigua raíz
+`<data-root>/addons` a `<data-root>/plugins`. Si ambas existen, mueve solamente
+namespaces que no colisionan y se niega a sobrescribir datos cuando encuentra
+contenido en ambos lados.
+
+Los recursos declarados y los datos del plugin son conceptos distintos:
 
 - un recurso es una dependencia externa seleccionada por RackForge, como una ROM
   o un banco renderizado;
-- la raíz privada contiene todo lo que el addon decida crear o guardar.
+- la raíz privada contiene todo lo que el plugin decida crear o guardar.
 
 ## Catálogos dinámicos
 
-API 1.3 permite que un addon publique su catálogo después de crear la instancia
+API 1.3 permite que un plugin publique su catálogo después de crear la instancia
 y abrir sus recursos. Esto resuelve bancos externos cuyo contenido no se conoce
 al compilar el plugin. La publicación usa JSON validado por Core y una extensión
 compatible de `HostApiV1`; la tabla exportada por plugins 1.0–1.2 no cambia.
@@ -127,8 +137,12 @@ por `instance_id` y una revisión monotónica. El socket Unix local expone
 snapshots, historial acotado de eventos y comandos tipados:
 
 ```text
-addon → HostApi 1.3 → SessionState → rackforge-control-api → superficies
+plugin → HostApi 1.4 → SessionState → rackforge-control-api → superficies
 ```
+
+El esquema de sesión v2 publica `plugin_id`, `plugin_name` y
+`PluginInstanceState`. El lector conserva aliases para snapshots v1, pero todo
+estado nuevo se serializa únicamente con el vocabulario `plugin`.
 
 LITTLE ya utiliza `SessionCommand::SelectSound`, `BeginAudition`,
 `KeepAuditionAlive` y `EndAudition`. Core valida la instancia y el catálogo,
@@ -138,7 +152,7 @@ de audio. El callback no toca el store de sesión ni realiza E/S.
 
 La edición auditiva usa `PreviewProgramDraft` y
 `RestoreProgramDraftPreview`. Preview valida el documento completo y lo entrega
-al callback del addon, pero no cambia el snapshot, no avanza la revisión y no
+al callback del plugin, pero no cambia el snapshot, no avanza la revisión y no
 marca el draft como dirty. `ReplaceProgramDraft` continúa siendo el único
 commit. Así una superficie puede preescuchar cada paso del encoder, confirmar
 con `OK` o restaurar el documento confirmado con `BACK`.
@@ -150,13 +164,13 @@ vista sin depender de estado implícito.
 Para crear la raíz o guardar un documento desde tooling:
 
 ```bash
-rackforge-core addon-init /home/kalex/rackforge/data org.rackforge.roland-scva
+rackforge-core plugin-init /home/kalex/rackforge/data org.rackforge.roland-scva
 rackforge-core program-save /home/kalex/rackforge/data \
   programs/factory/piano-1.json \
   plugins/roland-scva/programs/factory.piano-1.json
 ```
 
-La ruta `programs/factory/piano-1.json` es una decisión del addon Roland, no
+La ruta `programs/factory/piano-1.json` es una decisión del plugin Roland, no
 una convención obligatoria de RackForge.
 
 ## Modelo de programas
@@ -279,7 +293,7 @@ principal del KeyLab y a la Scarlett. RF-DLS usa el `.dls` como recurso externo:
 
 ```bash
 rackforge-core live /home/kalex/rackforge/plugins/rf-dls \
-  --resource dls-bank=/home/kalex/rackforge/data/addons/rf-dls/banks/gm.dls \
+  --resource dls-bank=/home/kalex/rackforge/data/plugins/rf-dls/banks/gm.dls \
   --preset gm.piano-1
 ```
 
@@ -318,7 +332,7 @@ alcanza `READY_TO_PLAY`.
 ## Foco temporal de audition
 
 El protocolo LIVE permite adquirir, renovar y devolver una lease exclusiva para
-un editor de addon. Core captura el preset activo antes de concederla y ejecuta
+un editor de plugin. Core captura el preset activo antes de concederla y ejecuta
 `reset` al transferir o devolver el foco, evitando notas colgadas. Las
 selecciones hechas durante la lease son audibles, pero al liberarla se restaura
 el preset capturado.
@@ -342,7 +356,7 @@ Incluye:
 - estado opaco versionado por el plugin;
 - carga dinámica nativa.
 - recursos externos declarados por el plugin.
-- raíz de datos privada por addon, sin estructura interna impuesta;
+- raíz de datos privada por plugin, sin estructura interna impuesta;
 - documento común de programas con payload versionado por el plugin.
 - catálogos de presets dinámicos dependientes de recursos externos;
 - sesión versionada con instancias estables, comandos y eventos monotónicos;

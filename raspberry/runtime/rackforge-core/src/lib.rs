@@ -9,4 +9,4 @@ pub mod storage;
 
 pub use loader::{LoadedPlugin, PluginInstance};
 pub use package::{PluginPackage, platform_key};
-pub use storage::{AddonDirectory, AddonStorage, RECOMMENDED_PROGRAM_SUFFIX};
+pub use storage::{PluginDirectory, PluginStorage, RECOMMENDED_PROGRAM_SUFFIX};

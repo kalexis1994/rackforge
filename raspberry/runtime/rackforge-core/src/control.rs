@@ -1,4 +1,4 @@
-use crate::AddonStorage;
+use crate::PluginStorage;
 use crate::session::SharedSessionStore;
 use anyhow::{Context, Result, bail};
 use rackforge_control_api::{
@@ -90,7 +90,7 @@ impl ControlFailure {
 struct ControlContext {
     store: SharedSessionStore,
     audio_sender: SyncSender<AudioControlCommand>,
-    storage: Option<AddonStorage>,
+    storage: Option<PluginStorage>,
     dispatch_lock: Mutex<()>,
     lease_deadline: Mutex<Option<LeaseDeadline>>,
     next_draft_id: AtomicU64,
@@ -105,7 +105,7 @@ pub fn start(
     socket_path: &Path,
     store: SharedSessionStore,
     audio_sender: SyncSender<AudioControlCommand>,
-    storage: Option<AddonStorage>,
+    storage: Option<PluginStorage>,
 ) -> Result<ControlServer> {
     if let Some(parent) = socket_path.parent() {
         fs::create_dir_all(parent)
@@ -482,9 +482,9 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             }
             match receive_audio(reply_receiver, "begin program editing") {
                 Ok((lease_id, prepared)) => {
-                    if prepared.document.plugin_id != instance.addon_id {
+                    if prepared.document.plugin_id != instance.plugin_id {
                         return internal_error(
-                            "addon prepared a program for a different addon",
+                            "plugin prepared a program for a different plugin",
                             Some(snapshot.revision),
                         );
                     }
@@ -835,7 +835,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             let preset_id = format!("custom.{}", prepared.document.id);
             let Some(preset) = catalog.presets.iter().find(|preset| preset.id == preset_id) else {
                 return internal_error(
-                    "installed program is missing from the addon catalog",
+                    "installed program is missing from the plugin catalog",
                     Some(snapshot.revision),
                 );
             };
@@ -961,8 +961,8 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 return error_response(
                     ControlErrorCode::Rejected,
                     format!(
-                        "addon {} does not expose layout {}",
-                        instance.addon_id, request.layout_id
+                        "plugin {} does not expose layout {}",
+                        instance.plugin_id, request.layout_id
                     ),
                     Some(snapshot.revision),
                 );
@@ -978,7 +978,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             ) {
                 return failure.into_response();
             }
-            match receive_audio(reply_receiver, "activate addon surface") {
+            match receive_audio(reply_receiver, "activate plugin surface") {
                 Ok(response) => record_command_event(
                     context,
                     command_ref,
@@ -997,7 +997,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
 fn require_active_instance<'a>(
     snapshot: &'a rackforge_session_api::SessionState,
     instance_id: &InstanceId,
-) -> Result<&'a rackforge_session_api::AddonInstanceState, ControlFailure> {
+) -> Result<&'a rackforge_session_api::PluginInstanceState, ControlFailure> {
     let instance = snapshot.instance(instance_id).ok_or_else(|| {
         control_failure(
             ControlErrorCode::NotFound,
@@ -1058,7 +1058,7 @@ fn program_draft_state(
 ) -> Result<ProgramDraftState, ControlResponse> {
     if let Err(error) = prepared.validate() {
         return Err(internal_error(
-            format!("addon returned an invalid prepared program: {error}"),
+            format!("plugin returned an invalid prepared program: {error}"),
             None,
         ));
     }
@@ -1289,8 +1289,8 @@ mod tests {
     use super::*;
     use crate::session::SessionStore;
     use rackforge_session_api::{
-        AddonInstanceState, ClientId, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, SessionId,
-        SessionState, SoundSummary,
+        ClientId, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, PluginInstanceState,
+        SessionId, SessionState, SoundSummary,
     };
     use std::sync::mpsc::sync_channel;
 
@@ -1301,10 +1301,10 @@ mod tests {
             session_id: SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             revision: Revision::ZERO,
             active_instance_id: Some(instance_id.clone()),
-            instances: vec![AddonInstanceState {
+            instances: vec![PluginInstanceState {
                 instance_id,
-                addon_id: "org.rackforge.rf-dls".into(),
-                addon_name: "RF-DLS".into(),
+                plugin_id: "org.rackforge.rf-dls".into(),
+                plugin_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
                 sounds: vec![SoundSummary {
                     id: "piano".into(),

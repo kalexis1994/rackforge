@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use rackforge_core::{AddonStorage, LoadedPlugin, PluginPackage};
+use rackforge_core::{LoadedPlugin, PluginPackage, PluginStorage};
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{ParameterKind, PluginKind, ProgramDocument};
 use std::collections::BTreeMap;
@@ -30,7 +30,9 @@ fn run() -> Result<()> {
             )
         }
         "live" => run_live(&arguments[1..]),
-        "addon-init" if arguments.len() == 3 => init_addon(Path::new(&arguments[1]), &arguments[2]),
+        "plugin-init" if arguments.len() == 3 => {
+            init_plugin(Path::new(&arguments[1]), &arguments[2])
+        }
         "program-save" if arguments.len() == 4 => save_program(
             Path::new(&arguments[1]),
             Path::new(&arguments[2]),
@@ -42,16 +44,16 @@ fn run() -> Result<()> {
              [--preset ID] [--data-root DIRECTORY]\n  \
              rackforge-core live PACKAGE [--library FILE] [--resource ID=PATH]... \
              [--preset ID] [--data-root DIRECTORY]\n  \
-             rackforge-core addon-init DATA_ROOT PLUGIN_ID\n  \
+             rackforge-core plugin-init DATA_ROOT PLUGIN_ID\n  \
              rackforge-core program-save DATA_ROOT RELATIVE_PATH DOCUMENT"
         ),
     }
 }
 
-fn init_addon(data_root: &Path, plugin_id: &str) -> Result<()> {
-    let directory = AddonStorage::new(data_root).ensure_addon(plugin_id)?;
+fn init_plugin(data_root: &Path, plugin_id: &str) -> Result<()> {
+    let directory = PluginStorage::new(data_root).ensure_plugin(plugin_id)?;
     println!(
-        "ADDON_DATA_READY id={} root={}",
+        "PLUGIN_DATA_READY id={} root={}",
         plugin_id,
         directory.root.display()
     );
@@ -63,7 +65,7 @@ fn save_program(data_root: &Path, relative: &Path, document: &Path) -> Result<()
         std::fs::read(document).with_context(|| format!("reading {}", document.display()))?;
     let program: ProgramDocument = serde_json::from_slice(&bytes)
         .with_context(|| format!("parsing {}", document.display()))?;
-    let destination = AddonStorage::new(data_root).save_program(relative, &program)?;
+    let destination = PluginStorage::new(data_root).save_program(relative, &program)?;
     println!(
         "PROGRAM_SAVED id={} plugin={} path={}",
         program.id,

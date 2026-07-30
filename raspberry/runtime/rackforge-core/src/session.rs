@@ -120,8 +120,8 @@ impl SessionStore {
 mod tests {
     use super::*;
     use rackforge_session_api::{
-        AddonInstanceState, ClientId, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID,
-        InstanceId, SessionId, SoundSummary,
+        ClientId, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, InstanceId,
+        PluginInstanceState, SessionId, SoundSummary,
     };
 
     fn store(capacity: usize) -> SessionStore {
@@ -131,10 +131,10 @@ mod tests {
             session_id: SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             revision: Revision::ZERO,
             active_instance_id: Some(instance_id.clone()),
-            instances: vec![AddonInstanceState {
+            instances: vec![PluginInstanceState {
                 instance_id,
-                addon_id: "org.rackforge.rf-dls".into(),
-                addon_name: "RF-DLS".into(),
+                plugin_id: "org.rackforge.rf-dls".into(),
+                plugin_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
                 sounds: vec![
                     SoundSummary {

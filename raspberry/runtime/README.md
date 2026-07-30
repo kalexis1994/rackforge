@@ -188,9 +188,12 @@ instrumento DLS y posee rangos de tecla/velocidad y overrides de nivel, tuning,
 pitch bend, modulación, envolventes y LFO. Los campos opcionales ausentes
 heredan los articuladores del DLS. El payload v3 agregó una cadena FX compartida
 después del mix de capas con chorus estéreo; el payload v4 agrega una reverb
-ROOM después del chorus. Los payloads v1 se migran a una sola capa `A`; v1 y v2
-heredan ambos FX desactivados, v3 hereda la reverb desactivada y todos se
-escriben como v4 al siguiente guardado.
+ROOM después del chorus; el payload v5 agrega un exciter antes del chorus. Los
+payloads v1 se migran a una sola capa `A`; v1 y v2 heredan todos los FX
+desactivados, v3 hereda reverb y exciter desactivados y v4 hereda el exciter
+desactivado. El payload v6 reemplaza el primer exciter por el modelo clásico de
+blend, emphatic point, EQ low/high y dry/wet; v5 se migra automáticamente y
+todos se escriben como v6 al siguiente guardado.
 
 La extensión binaria de programas 1.1 agrega un callback opcional de preview.
 La versión 1.2 agrega `editor_view` y `apply_edit`: el plugin publica páginas y

@@ -2,7 +2,7 @@ mod custom_program;
 mod program_editor;
 
 use custom_program::{CustomProgram, DlsSource, ProgramLayer, SharedEffects};
-use rackforge_dsp::{Chorus, Reverb, StereoFrame};
+use rackforge_dsp::{Chorus, Exciter, Reverb, StereoFrame};
 use rackforge_plugin_api::abi::{
     HostApiV1, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, LOG_LEVEL_WARN, MidiEventV1,
     PROGRAM_EXTENSION_VERSION, ParameterEventV1, PluginApiV1, ProcessBlockV1,
@@ -102,6 +102,7 @@ struct RfDls {
     program_gain_target: f32,
     active_layers: Vec<ProgramLayer>,
     active_effects: SharedEffects,
+    exciter: Exciter,
     chorus: Chorus,
     reverb: Reverb,
     selected_bank: u32,
@@ -142,6 +143,7 @@ impl RfDls {
                 },
             )],
             active_effects: SharedEffects::default(),
+            exciter: Exciter::new(48_000.0).expect("48 kHz is a supported DSP sample rate"),
             chorus: Chorus::new(48_000.0).expect("48 kHz is a supported DSP sample rate"),
             reverb: Reverb::new(48_000.0).expect("48 kHz is a supported DSP sample rate"),
             selected_bank,
@@ -157,6 +159,7 @@ impl RfDls {
         self.sustain = false;
         self.pitch_bend_normalized = 0.0;
         self.modulation_wheel = 0.0;
+        self.exciter.reset();
         self.chorus.reset();
         self.reverb.reset();
     }
@@ -179,6 +182,9 @@ impl RfDls {
             },
         )];
         self.active_effects = SharedEffects::default();
+        self.exciter
+            .set_parameters(self.active_effects.exciter.parameters())
+            .expect("default exciter settings are valid");
         self.chorus
             .set_parameters(self.active_effects.chorus.parameters())
             .expect("default chorus settings are valid");
@@ -229,9 +235,13 @@ impl RfDls {
             self.program_gain = program.gain;
         }
         if self
-            .chorus
-            .set_parameters(program.effects.chorus.parameters())
+            .exciter
+            .set_parameters(program.effects.exciter.parameters())
             .is_err()
+            || self
+                .chorus
+                .set_parameters(program.effects.chorus.parameters())
+                .is_err()
             || self
                 .reverb
                 .set_parameters(program.effects.reverb.parameters())
@@ -860,6 +870,15 @@ unsafe extern "C" fn activate(
     plugin.sample_rate = sample_rate.round() as u32;
     plugin.maximum_frames = maximum_frames;
     plugin.output_channels = output_channels;
+    let Ok(mut exciter) = Exciter::new(sample_rate as f32) else {
+        return STATUS_INVALID_ARGUMENT;
+    };
+    if exciter
+        .set_parameters(plugin.active_effects.exciter.parameters())
+        .is_err()
+    {
+        return STATUS_INVALID_STATE;
+    }
     let Ok(mut chorus) = Chorus::new(sample_rate as f32) else {
         return STATUS_INVALID_ARGUMENT;
     };
@@ -878,6 +897,7 @@ unsafe extern "C" fn activate(
     {
         return STATUS_INVALID_STATE;
     }
+    plugin.exciter = exciter;
     plugin.chorus = chorus;
     plugin.reverb = reverb;
     plugin.active = true;
@@ -1062,7 +1082,8 @@ unsafe extern "C" fn process(instance: *mut c_void, block: *const ProcessBlockV1
             midi_index += 1;
         }
         let sample = plugin.render_frame();
-        let chorused = plugin.chorus.process(StereoFrame::splat(sample));
+        let excited = plugin.exciter.process(StereoFrame::splat(sample));
+        let chorused = plugin.chorus.process(excited);
         let processed = plugin.reverb.process(chorused);
         let start = frame as usize * block.output_channels as usize;
         output[start] = if block.output_channels == 1 {
@@ -1558,6 +1579,26 @@ mod tests {
         let program = CustomProgram::from_document(quieter.document).unwrap();
         assert_eq!(program.layers[0].parameters.gain, 1.0);
         assert_eq!(program.layers[1].parameters.gain, 0.75);
+
+        let exciter = plugin
+            .apply_program_edit(ProgramFieldEditRequest {
+                schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+                document: program.to_document().unwrap(),
+                field_id: "fx.exciter.enabled".into(),
+                value: rackforge_plugin_api::ProgramEditorValue::Boolean(true),
+            })
+            .unwrap();
+        let exciter = plugin
+            .apply_program_edit(ProgramFieldEditRequest {
+                schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+                document: exciter.document,
+                field_id: "fx.exciter.emphatic-point".into(),
+                value: rackforge_plugin_api::ProgramEditorValue::Integer(7),
+            })
+            .unwrap();
+        let program = CustomProgram::from_document(exciter.document).unwrap();
+        assert!(program.effects.exciter.enabled);
+        assert_eq!(program.effects.exciter.emphatic_point, 7);
 
         let chorus = plugin
             .apply_program_edit(ProgramFieldEditRequest {

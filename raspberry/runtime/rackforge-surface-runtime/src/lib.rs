@@ -68,6 +68,35 @@ pub enum ActiveMode {
     Play,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WebAccess {
+    Local,
+    Lan,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WebSystemSettings {
+    pub enabled: bool,
+    pub access: WebAccess,
+    pub port: u16,
+    pub lan_ip: Option<[u8; 4]>,
+    pub service_online: bool,
+    pub pairing_available: bool,
+}
+
+impl Default for WebSystemSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            access: WebAccess::Local,
+            port: 8787,
+            lan_ip: None,
+            service_online: false,
+            pairing_available: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProgramExitDestination {
     CustomPrograms,
@@ -126,6 +155,16 @@ pub enum MenuCommand {
     ForceHome {
         cancel_draft_id: Option<u64>,
     },
+    SetWebEnabled {
+        enabled: bool,
+    },
+    SetWebAccess {
+        access: WebAccess,
+    },
+    SetWebPort {
+        port: u16,
+    },
+    BeginWebPairing,
 }
 
 impl Screen {
@@ -201,6 +240,9 @@ enum Page {
     Play,
     Config,
     Plugins,
+    System,
+    SystemWeb,
+    SystemWebPairing,
     RfDlsLibrary,
     RfDlsPlay,
     RfDlsCustomPrograms,
@@ -238,6 +280,12 @@ pub struct Menu {
     play_index: usize,
     config_index: usize,
     plugin_index: usize,
+    system_index: usize,
+    system_web_index: usize,
+    web_settings: WebSystemSettings,
+    web_edit_candidate: WebSystemSettings,
+    system_web_editing: bool,
+    pairing_code: Option<String>,
     rf_dls_library_index: usize,
     rf_dls_play_index: usize,
     rf_dls_custom_index: usize,
@@ -283,6 +331,16 @@ const CONFIG_DETAILS: [&str; 4] = [
 ];
 const PLUGIN_ITEMS: [&str; 1] = ["RF-DLS"];
 const PLUGIN_DETAILS: [&str; 1] = [" "];
+const SYSTEM_ITEMS: [&str; 1] = ["WEB INTERFACE"];
+const SYSTEM_DETAILS: [&str; 1] = ["Browser and pairing"];
+const SYSTEM_WEB_ITEMS: [&str; 6] = [
+    "ENABLED",
+    "ACCESS",
+    "ADDRESS",
+    "PORT",
+    "PAIR DEVICE",
+    "STATUS",
+];
 const RF_DLS_LIBRARIES: [&str; 2] = ["DLS", "CUSTOM"];
 const RF_DLS_PROGRAM_SECTIONS: [&str; 6] = ["NAME", "LAYER A", "LAYER B", "FX", "OUTPUT", "SAVE"];
 const RF_DLS_SECTION_DETAILS: [&str; 6] = [
@@ -322,6 +380,12 @@ impl Default for Menu {
             play_index: 0,
             config_index: 0,
             plugin_index: 0,
+            system_index: 0,
+            system_web_index: 0,
+            web_settings: WebSystemSettings::default(),
+            web_edit_candidate: WebSystemSettings::default(),
+            system_web_editing: false,
+            pairing_code: None,
             rf_dls_library_index: 0,
             rf_dls_play_index: 0,
             rf_dls_custom_index: 0,
@@ -362,6 +426,21 @@ impl Default for Menu {
 impl Menu {
     pub fn sync_active_mode(&mut self, mode: ActiveMode) {
         self.active_mode = mode;
+    }
+
+    pub fn sync_web_settings(&mut self, settings: WebSystemSettings) {
+        self.web_settings = settings;
+        if !self.system_web_editing {
+            self.web_edit_candidate = settings;
+        }
+    }
+
+    pub fn show_pairing_code(&mut self, code: impl Into<String>) {
+        let code = code.into();
+        if code.len() == 6 && code.bytes().all(|byte| byte.is_ascii_digit()) {
+            self.pairing_code = Some(code);
+            self.page = Page::SystemWebPairing;
+        }
     }
 
     pub fn set_play_sounds(&mut self, sounds: Vec<PlaySound>, selected_sound_id: Option<&str>) {
@@ -498,6 +577,12 @@ impl Menu {
             self.apply_program_name_input(input);
         } else if self.page == Page::RfDlsProgramOutput {
             self.apply_program_output_input(input);
+        } else if self.page == Page::SystemWeb {
+            self.apply_system_web_input(input);
+        } else if self.page == Page::SystemWebPairing {
+            if matches!(input, Input::Button4 | Input::EncoderPress) {
+                self.page = Page::SystemWeb;
+            }
         } else if self.is_layer_parameter_page() {
             self.apply_layer_parameter_input(input);
         } else if let Some(action) = input.default_navigation() {
@@ -615,6 +700,9 @@ impl Menu {
                         Page::RfDlsCustomPrograms
                     }
                     Page::Plugins => Page::Config,
+                    Page::SystemWeb => Page::System,
+                    Page::SystemWebPairing => Page::SystemWeb,
+                    Page::System => Page::Config,
                     Page::Home => Page::Home,
                     _ => Page::Home,
                 };
@@ -652,7 +740,9 @@ impl Menu {
                         Page::RfDlsPlay
                     }
                     Page::Config if self.config_index == 0 => Page::Plugins,
+                    Page::Config if self.config_index == 3 => Page::System,
                     Page::Plugins if self.plugin_index == 0 => Page::RfDlsCustomPrograms,
+                    Page::System if self.system_index == 0 => Page::SystemWeb,
                     Page::RfDlsCustomPrograms => {
                         self.begin_program_edit();
                         Page::RfDlsCustomPrograms
@@ -794,6 +884,14 @@ impl Menu {
                 &PLUGIN_DETAILS,
                 self.plugin_index,
             ),
+            Page::System => simple_screen(
+                indexed_title("SYSTEM", self.system_index, SYSTEM_ITEMS.len()),
+                &SYSTEM_ITEMS,
+                &SYSTEM_DETAILS,
+                self.system_index,
+            ),
+            Page::SystemWeb => self.render_system_web(),
+            Page::SystemWebPairing => self.render_pairing_code(),
             Page::RfDlsLibrary => self.render_rf_dls_library(),
             Page::RfDlsPlay => self.render_rf_dls_play(),
             Page::RfDlsCustomPrograms => self.render_custom_programs(),
@@ -857,6 +955,146 @@ impl Menu {
         screen
     }
 
+    fn render_system_web(&self) -> Screen {
+        let settings = if self.system_web_editing {
+            self.web_edit_candidate
+        } else {
+            self.web_settings
+        };
+        let value = match self.system_web_index {
+            0 => {
+                if settings.enabled {
+                    "ON".to_owned()
+                } else {
+                    "OFF".to_owned()
+                }
+            }
+            1 => match settings.access {
+                WebAccess::Local => "LOCAL ONLY".to_owned(),
+                WebAccess::Lan => "LAN".to_owned(),
+            },
+            2 => match (settings.access, settings.lan_ip) {
+                (WebAccess::Lan, Some([a, b, c, d])) => {
+                    format!("{a}.{b}.{c}.{d}:{}", settings.port)
+                }
+                (WebAccess::Lan, None) => "NO LAN ADDRESS".to_owned(),
+                (WebAccess::Local, _) => "ENABLE LAN FIRST".to_owned(),
+            },
+            3 => settings.port.to_string(),
+            4 => {
+                if settings.pairing_available {
+                    "READY".to_owned()
+                } else {
+                    "LOCKED".to_owned()
+                }
+            }
+            _ => {
+                if settings.service_online {
+                    "ONLINE".to_owned()
+                } else {
+                    "OFFLINE".to_owned()
+                }
+            }
+        };
+        let value = if self.system_web_editing {
+            format!("[{value}]")
+        } else {
+            value
+        };
+        Screen::with_header(
+            indexed_title("WEB", self.system_web_index, SYSTEM_WEB_ITEMS.len()),
+            SYSTEM_WEB_ITEMS[self.system_web_index],
+            value,
+        )
+    }
+
+    fn render_pairing_code(&self) -> Screen {
+        let line_1 = self.pairing_code.as_ref().map_or_else(
+            || "NO ACTIVE CODE".to_owned(),
+            |code| format!("CODE {code}"),
+        );
+        Screen::with_header("PAIR DEVICE", line_1, "VALID FOR 2 MIN")
+    }
+
+    fn apply_system_web_input(&mut self, input: Input) {
+        if self.system_web_editing {
+            match input {
+                Input::Button2 | Input::EncoderLeft => self.adjust_web_candidate(input, -1),
+                Input::Button3 | Input::EncoderRight => self.adjust_web_candidate(input, 1),
+                Input::Button1 | Input::EncoderPress => {
+                    self.system_web_editing = false;
+                    self.web_settings = self.web_edit_candidate;
+                    self.pending_command = match self.system_web_index {
+                        0 => Some(MenuCommand::SetWebEnabled {
+                            enabled: self.web_settings.enabled,
+                        }),
+                        1 => Some(MenuCommand::SetWebAccess {
+                            access: self.web_settings.access,
+                        }),
+                        3 => Some(MenuCommand::SetWebPort {
+                            port: self.web_settings.port,
+                        }),
+                        _ => None,
+                    };
+                }
+                Input::Button4 => {
+                    self.system_web_editing = false;
+                    self.web_edit_candidate = self.web_settings;
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match input {
+            Input::Button2 | Input::EncoderLeft => {
+                self.system_web_index = self
+                    .system_web_index
+                    .checked_sub(1)
+                    .unwrap_or(SYSTEM_WEB_ITEMS.len() - 1);
+            }
+            Input::Button3 | Input::EncoderRight => {
+                self.system_web_index = (self.system_web_index + 1) % SYSTEM_WEB_ITEMS.len();
+            }
+            Input::Button4 => self.page = Page::System,
+            Input::Button1 | Input::EncoderPress => match self.system_web_index {
+                0 | 1 | 3 => {
+                    self.web_edit_candidate = self.web_settings;
+                    self.system_web_editing = true;
+                }
+                4 if self.web_settings.pairing_available => {
+                    self.pending_command = Some(MenuCommand::BeginWebPairing);
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    fn adjust_web_candidate(&mut self, input: Input, direction: i32) {
+        match self.system_web_index {
+            0 => self.web_edit_candidate.enabled = !self.web_edit_candidate.enabled,
+            1 => {
+                self.web_edit_candidate.access = match self.web_edit_candidate.access {
+                    WebAccess::Local => WebAccess::Lan,
+                    WebAccess::Lan => WebAccess::Local,
+                };
+            }
+            3 => {
+                let step = if matches!(input, Input::EncoderLeft | Input::EncoderRight) {
+                    10
+                } else {
+                    1
+                };
+                self.web_edit_candidate.port = i32::from(self.web_edit_candidate.port)
+                    .saturating_add(direction * step)
+                    .clamp(1024, i32::from(u16::MAX))
+                    as u16;
+            }
+            _ => {}
+        }
+    }
+
     fn move_selection(&mut self, delta: isize) {
         let (selection, len) = match self.page {
             Page::Home => (&mut self.home_index, HOME_ITEMS.len()),
@@ -864,6 +1102,8 @@ impl Menu {
             Page::Play => (&mut self.play_index, PLAY_ITEMS.len()),
             Page::Config => (&mut self.config_index, CONFIG_ITEMS.len()),
             Page::Plugins => (&mut self.plugin_index, PLUGIN_ITEMS.len()),
+            Page::System => (&mut self.system_index, SYSTEM_ITEMS.len()),
+            Page::SystemWeb => (&mut self.system_web_index, SYSTEM_WEB_ITEMS.len()),
             Page::RfDlsLibrary => (&mut self.rf_dls_library_index, RF_DLS_LIBRARIES.len()),
             Page::RfDlsPlay if self.filtered_sounds().is_empty() => return,
             Page::RfDlsPlay => {
@@ -900,7 +1140,8 @@ impl Menu {
             | Page::ProgramEditorRoot
             | Page::ProgramEditorPage
             | Page::ProgramEditorField
-            | Page::ProgramEditorSound => return,
+            | Page::ProgramEditorSound
+            | Page::SystemWebPairing => return,
         };
         *selection = ((*selection as isize + delta).rem_euclid(len as isize)) as usize;
     }
@@ -3549,5 +3790,88 @@ mod tests {
                 .all(|button| button.state == VisualState::Normal)
         );
         assert!(!menu.set_button_pressed(Input::EncoderPress, true));
+    }
+
+    #[test]
+    fn system_web_settings_are_navigable_and_reflect_host_state() {
+        let mut menu = Menu::default();
+        menu.sync_web_settings(WebSystemSettings {
+            enabled: true,
+            access: WebAccess::Local,
+            port: 8787,
+            lan_ip: Some([192, 168, 1, 17]),
+            service_online: true,
+            pairing_available: false,
+        });
+
+        menu.apply(Action::Previous);
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1.trim(), "PLUGINS");
+        menu.apply(Action::Previous);
+        assert_eq!(menu.render().line_1.trim(), "SYSTEM");
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1.trim(), "WEB INTERFACE");
+        menu.apply(Action::Select);
+
+        let enabled = menu.render();
+        assert!(matches!(
+            enabled.header,
+            Header::Visible(header)
+                if header.starts_with("WEB") && header.ends_with("1/6")
+        ));
+        assert_eq!(enabled.line_1, "ENABLED");
+        assert_eq!(enabled.line_2, "ON");
+
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button3);
+        assert_eq!(menu.render().line_2, "[OFF]");
+        menu.apply_input(Input::Button4);
+        assert_eq!(menu.render().line_2, "ON");
+
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "ACCESS");
+        assert_eq!(menu.render().line_2, "LOCAL ONLY");
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button3);
+        assert_eq!(menu.render().line_2, "[LAN]");
+        menu.apply_input(Input::Button1);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetWebAccess {
+                access: WebAccess::Lan
+            })
+        );
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "ADDRESS");
+        assert_eq!(menu.render().line_2, "192.168.1.17:8787");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "PORT");
+        assert_eq!(menu.render().line_2, "8787");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "PAIR DEVICE");
+        assert_eq!(menu.render().line_2, "LOCKED");
+
+        menu.sync_web_settings(WebSystemSettings {
+            enabled: true,
+            access: WebAccess::Lan,
+            port: 8787,
+            lan_ip: Some([192, 168, 1, 17]),
+            service_online: true,
+            pairing_available: true,
+        });
+        menu.apply_input(Input::Button1);
+        assert_eq!(menu.take_command(), Some(MenuCommand::BeginWebPairing));
+        menu.show_pairing_code("123456");
+        assert_eq!(menu.render().header, Header::Visible("PAIR DEVICE".into()));
+        assert_eq!(menu.render().line_1, "CODE 123456");
+        menu.apply_input(Input::Button4);
+        assert_eq!(menu.render().line_1, "PAIR DEVICE");
+
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "STATUS");
+        assert_eq!(menu.render().line_2, "ONLINE");
+
+        menu.apply(Action::Back);
+        assert_eq!(menu.render().line_1.trim(), "WEB INTERFACE");
     }
 }

@@ -31,7 +31,7 @@ use std::fs;
 #[cfg(target_os = "linux")]
 use std::io::{Read, Write};
 #[cfg(target_os = "linux")]
-use std::net::Shutdown;
+use std::net::{Ipv4Addr, Shutdown};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::MetadataExt;
 #[cfg(target_os = "linux")]
@@ -59,6 +59,8 @@ const ACQUIRE_RETRY_DELAY: Duration = Duration::from_secs(2);
 const LONG_PRESS_THRESHOLD: Duration = Duration::from_millis(650);
 const HOME_CHORD_SIMULTANEITY: Duration = Duration::from_millis(250);
 const HOST_CONTROL_HEADER_TIMEOUT: Duration = Duration::from_millis(1_500);
+#[cfg(target_os = "linux")]
+const WEB_CONTROL_SOCKET_NAME: &str = "web-control.sock";
 #[cfg(target_os = "linux")]
 static NEXT_CONTROL_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -1381,6 +1383,9 @@ fn apply_host_control(_event: HostControlEvent) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
+    if let Err(error) = refresh_web_settings(menu) {
+        eprintln!("No se pudo refrescar CONFIG > SYSTEM > WEB: {error}");
+    }
     let snapshot = live_snapshot()?;
     menu.sync_active_mode(match snapshot.active_mode {
         SurfaceMode::Live => menu::ActiveMode::Live,
@@ -1415,6 +1420,80 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
         selected.as_deref(),
     );
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn refresh_web_settings(menu: &mut menu::Menu) -> Result<(), String> {
+    let response = web_control_request(&serde_json::json!({"op": "status"}))?;
+    let config = response
+        .get("config")
+        .ok_or_else(|| "RackForge Web no devolvió su configuración".to_owned())?;
+    let enabled = config
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "RackForge Web no devolvió enabled".to_owned())?;
+    let port = config
+        .get("port")
+        .and_then(Value::as_u64)
+        .and_then(|value| u16::try_from(value).ok())
+        .ok_or_else(|| "RackForge Web devolvió un puerto inválido".to_owned())?;
+    let lan_ip = response
+        .get("lan_ip")
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse::<Ipv4Addr>().ok())
+        .map(|address| address.octets());
+    menu.sync_web_settings(menu::WebSystemSettings {
+        enabled,
+        access: match config.get("access").and_then(Value::as_str) {
+            Some("local") => menu::WebAccess::Local,
+            Some("lan") => menu::WebAccess::Lan,
+            _ => return Err("RackForge Web devolvió un acceso inválido".into()),
+        },
+        port,
+        lan_ip,
+        service_online: true,
+        pairing_available: response
+            .get("pairing_available")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    });
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn web_control_request(request: &Value) -> Result<Value, String> {
+    let root = env::var_os("RACKFORGE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"));
+    let path = root.join("state").join(WEB_CONTROL_SOCKET_NAME);
+    let mut stream =
+        UnixStream::connect(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(250)))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(250)))
+        .map_err(|error| error.to_string())?;
+    serde_json::to_writer(&mut stream, request).map_err(|error| error.to_string())?;
+    stream.write_all(b"\n").map_err(|error| error.to_string())?;
+    stream
+        .shutdown(Shutdown::Write)
+        .map_err(|error| error.to_string())?;
+    let mut response = String::new();
+    stream
+        .take(4096)
+        .read_to_string(&mut response)
+        .map_err(|error| error.to_string())?;
+    let response: Value = serde_json::from_str(&response)
+        .map_err(|error| format!("respuesta WEB inválida: {error}"))?;
+    if response.get("status").and_then(Value::as_str) != Some("ok") {
+        return Err(response
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("RackForge Web devolvió un estado inválido")
+            .to_owned());
+    }
+    Ok(response)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -1559,6 +1638,47 @@ fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
             }
             refresh_live_catalog(menu)?;
             return_to_active_mode(menu, mode, selected_sound_id)?;
+            Ok(true)
+        }
+        menu::MenuCommand::SetWebEnabled { enabled } => {
+            web_control_request(&serde_json::json!({
+                "op": "set",
+                "field": "enabled",
+                "value": enabled
+            }))?;
+            println!("WEB_SETTING_SET field=enabled value={enabled}");
+            Ok(true)
+        }
+        menu::MenuCommand::SetWebAccess { access } => {
+            let value = match access {
+                menu::WebAccess::Local => "local",
+                menu::WebAccess::Lan => "lan",
+            };
+            web_control_request(&serde_json::json!({
+                "op": "set",
+                "field": "access",
+                "value": value
+            }))?;
+            println!("WEB_SETTING_SET field=access value={value}");
+            Ok(true)
+        }
+        menu::MenuCommand::SetWebPort { port } => {
+            web_control_request(&serde_json::json!({
+                "op": "set",
+                "field": "port",
+                "value": port
+            }))?;
+            println!("WEB_SETTING_SET field=port value={port}");
+            Ok(true)
+        }
+        menu::MenuCommand::BeginWebPairing => {
+            let response = web_control_request(&serde_json::json!({"op": "begin_pairing"}))?;
+            let code = response
+                .get("pairing_code")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "RackForge Web no devolvió el código".to_owned())?;
+            menu.show_pairing_code(code);
+            println!("WEB_PAIRING_STARTED");
             Ok(true)
         }
         menu::MenuCommand::ForceHome { cancel_draft_id } => {

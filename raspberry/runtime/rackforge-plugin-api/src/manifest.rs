@@ -53,6 +53,27 @@ pub struct ApiRequirement {
     pub minor: u16,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSurfaceKind {
+    Play,
+    Config,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebSurface {
+    pub kind: WebSurfaceKind,
+    pub entry: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebUi {
+    pub api_version: u16,
+    pub surfaces: Vec<WebSurface>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginManifest {
@@ -70,6 +91,8 @@ pub struct PluginManifest {
     pub resources: Vec<ResourceRequirement>,
     #[serde(default)]
     pub ui_layouts: Vec<String>,
+    #[serde(default)]
+    pub web_ui: Option<WebUi>,
     pub binaries: BTreeMap<String, String>,
 }
 
@@ -131,6 +154,28 @@ impl PluginManifest {
                 .map_err(|_| ManifestError::InvalidPlatform(platform.clone()))?;
             if !is_safe_relative_path(path) {
                 return Err(ManifestError::UnsafeBinaryPath(path.clone()));
+            }
+        }
+        if let Some(web_ui) = &self.web_ui {
+            if web_ui.api_version != 1 {
+                return Err(ManifestError::UnsupportedWebApi(web_ui.api_version));
+            }
+            if web_ui.surfaces.is_empty() {
+                return Err(ManifestError::NoWebSurfaces);
+            }
+            let mut kinds = BTreeSet::new();
+            for surface in &web_ui.surfaces {
+                if !kinds.insert(surface.kind) {
+                    return Err(ManifestError::DuplicateWebSurface(surface.kind));
+                }
+                if !is_safe_relative_path(&surface.entry)
+                    || Path::new(&surface.entry)
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        != Some("html")
+                {
+                    return Err(ManifestError::UnsafeWebEntry(surface.entry.clone()));
+                }
             }
         }
         Ok(())
@@ -225,6 +270,14 @@ pub enum ManifestError {
     InvalidPlatform(String),
     #[error("binary path must be a safe relative path: {0:?}")]
     UnsafeBinaryPath(String),
+    #[error("unsupported RackForge Web Plugin API {0}")]
+    UnsupportedWebApi(u16),
+    #[error("web UI declares no surfaces")]
+    NoWebSurfaces,
+    #[error("web surface {0:?} appears more than once")]
+    DuplicateWebSurface(WebSurfaceKind),
+    #[error("web entry must be a safe relative HTML path: {0:?}")]
+    UnsafeWebEntry(String),
     #[error("plugin has no binary for platform {0}")]
     MissingPlatform(String),
     #[error("runtime descriptor does not match manifest field {0}")]
@@ -248,6 +301,7 @@ mod tests {
             capabilities: vec![Capability::AudioInput, Capability::AudioOutput],
             resources: Vec::new(),
             ui_layouts: Vec::new(),
+            web_ui: None,
             binaries: BTreeMap::from([("linux-aarch64".into(), "lib/librackforge_gain.so".into())]),
         }
     }
@@ -266,6 +320,60 @@ mod tests {
         assert!(matches!(
             candidate.validate(),
             Err(ManifestError::UnsafeBinaryPath(_))
+        ));
+    }
+
+    #[test]
+    fn validates_static_web_surfaces() {
+        let mut candidate = manifest();
+        candidate.web_ui = Some(WebUi {
+            api_version: 1,
+            surfaces: vec![
+                WebSurface {
+                    kind: WebSurfaceKind::Play,
+                    entry: "web/play.html".into(),
+                },
+                WebSurface {
+                    kind: WebSurfaceKind::Config,
+                    entry: "web/config.html".into(),
+                },
+            ],
+        });
+        assert_eq!(candidate.validate(), Ok(()));
+    }
+
+    #[test]
+    fn rejects_duplicate_or_escaping_web_surfaces() {
+        let mut duplicate = manifest();
+        duplicate.web_ui = Some(WebUi {
+            api_version: 1,
+            surfaces: vec![
+                WebSurface {
+                    kind: WebSurfaceKind::Play,
+                    entry: "web/play.html".into(),
+                },
+                WebSurface {
+                    kind: WebSurfaceKind::Play,
+                    entry: "web/other.html".into(),
+                },
+            ],
+        });
+        assert!(matches!(
+            duplicate.validate(),
+            Err(ManifestError::DuplicateWebSurface(WebSurfaceKind::Play))
+        ));
+
+        let mut escaping = manifest();
+        escaping.web_ui = Some(WebUi {
+            api_version: 1,
+            surfaces: vec![WebSurface {
+                kind: WebSurfaceKind::Config,
+                entry: "../config.html".into(),
+            }],
+        });
+        assert!(matches!(
+            escaping.validate(),
+            Err(ManifestError::UnsafeWebEntry(_))
         ));
     }
 }

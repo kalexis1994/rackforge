@@ -73,12 +73,21 @@ reescribe el banco: guarda una referencia a `dls-bank` + banco + programa y
 data/addons/org.rackforge.rf-dls/custom/
 ```
 
-El payload v1 admite slot, ganancia, transposición, afinación fina, ADSR
-opcional, rango de pitch bend y profundidad de modulación. Los campos ADSR
-ausentes heredan exactamente el instrumento DLS. IDs y slots duplicados,
-symlinks, archivos mayores a 256 KiB, payloads desconocidos o valores fuera de
-rango se ignoran individualmente y se registran como advertencia; no impiden
-arrancar el resto del banco.
+El payload v2 admite una capa `A` obligatoria y una capa `B` opcional. `A`
+siempre está habilitada; `B` puede desactivarse conservando toda su
+configuración. Cada capa referencia directamente un instrumento del DLS y
+define rangos de tecla y velocidad. Sus overrides
+incluyen nivel, transposición, afinación fina, rango de pitch bend, profundidad
+de modulación, envolventes de amplitud y pitch, y LFO con rate, delay y
+profundidades. Un valor opcional ausente significa `INHERIT`: el motor conserva
+el comportamiento original codificado en el instrumento DLS.
+
+Los documentos v1 existentes se migran en memoria a una única capa `A` y se
+siguen reproduciendo sin reescribir el archivo. La siguiente vez que el usuario
+los guarda se serializan como v2. IDs y slots duplicados, symlinks, archivos
+mayores a 256 KiB, payloads desconocidos o valores fuera de rango se ignoran
+individualmente y se registran como advertencia; no impiden arrancar el resto
+del banco.
 
 El ejemplo versionado
 `examples/custom.warm-piano.rackforge-program.json` se puede instalar mediante
@@ -93,9 +102,13 @@ rackforge-core program-save /home/kalex/rackforge/data \
 El ID de catálogo resultante es `custom.user.warm-piano`. Cambiar o agregar
 archivos requiere reiniciar el motor RF-DLS para reconstruir el catálogo.
 
+Durante una edición, Core entrega al addon el documento completo mediante la
+extensión de programas 1.1. RF-DLS preescucha ese borrador de forma transitoria:
+las dos capas y sus overrides ya se oyen antes de guardar, pero el catálogo y
+los archivos sólo cambian después de confirmar `SAVE`.
+
 ## Límites de esta etapa
 
 - Aún no responde a Bank Select ni Program Change MIDI.
 - Todos los canales MIDI controlan la misma instancia.
-- La creación/edición de CUSTOM desde la pantalla y los FX todavía no están
-  conectados; el modelo persistente y la ejecución ya están disponibles.
+- Los FX insertables y el paneo por capa todavía no están implementados.

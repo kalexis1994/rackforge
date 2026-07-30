@@ -1,6 +1,6 @@
 mod custom_program;
 
-use custom_program::{CustomProgram, ProgramParameters};
+use custom_program::{CustomProgram, DlsSource, ProgramLayer};
 use rackforge_plugin_api::abi::{
     HostApiV1, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, LOG_LEVEL_WARN, MidiEventV1,
     PROGRAM_EXTENSION_VERSION, ParameterEventV1, PluginApiV1, ProcessBlockV1,
@@ -12,7 +12,7 @@ use rackforge_plugin_api::{
     BankDescriptor, PreparedProgram, PresetCatalog, PresetDescriptor, ProgramDocument,
     ProgramEditRequest, SurfaceActivationRequest, SurfaceActivationResponse,
 };
-use rf_dls::{DlsBank, EnvelopeSpec, Voice};
+use rf_dls::{DlsBank, Voice};
 use std::collections::BTreeSet;
 use std::ffi::c_void;
 use std::mem::size_of;
@@ -24,7 +24,6 @@ const RESOURCE_ID: &[u8] = b"dls-bank";
 const PIANO_PRESET_ID: &str = "gm.piano-1";
 const MASTER_GAIN_PARAMETER: u32 = 0;
 const DEFAULT_MASTER_GAIN: f32 = 0.65;
-const DEFAULT_PITCH_BEND_RANGE_CENTS: f32 = 200.0;
 const MAX_VOICES: usize = 32;
 const LEGACY_STATE_SIZE: usize = 16;
 
@@ -93,14 +92,12 @@ struct RfDls {
     output_channels: u32,
     active: bool,
     sustain: bool,
-    pitch_bend_cents: f32,
-    pitch_bend_range_cents: f32,
+    pitch_bend_normalized: f32,
     modulation_wheel: f32,
     master_gain: f32,
     program_gain: f32,
-    program_pitch_offset_cents: f32,
-    program_modulation_depth: f32,
-    envelope_override: Option<EnvelopeSpec>,
+    program_gain_target: f32,
+    active_layers: Vec<ProgramLayer>,
     selected_bank: u32,
     selected_program: u32,
     selected_preset_id: String,
@@ -125,14 +122,19 @@ impl RfDls {
             output_channels: 0,
             active: false,
             sustain: false,
-            pitch_bend_cents: 0.0,
-            pitch_bend_range_cents: DEFAULT_PITCH_BEND_RANGE_CENTS,
+            pitch_bend_normalized: 0.0,
             modulation_wheel: 0.0,
             master_gain: DEFAULT_MASTER_GAIN,
             program_gain: 1.0,
-            program_pitch_offset_cents: 0.0,
-            program_modulation_depth: 1.0,
-            envelope_override: None,
+            program_gain_target: 1.0,
+            active_layers: vec![ProgramLayer::inherited(
+                "a",
+                DlsSource {
+                    resource_id: "dls-bank".into(),
+                    bank: selected_bank,
+                    program: selected_program,
+                },
+            )],
             selected_bank,
             selected_program,
             selected_preset_id: dynamic_preset_id(selected_bank, selected_program),
@@ -144,7 +146,7 @@ impl RfDls {
         self.voices.clear();
         self.held_notes.fill(false);
         self.sustain = false;
-        self.pitch_bend_cents = 0.0;
+        self.pitch_bend_normalized = 0.0;
         self.modulation_wheel = 0.0;
     }
 
@@ -155,7 +157,16 @@ impl RfDls {
         self.selected_bank = bank;
         self.selected_program = program;
         self.selected_preset_id = dynamic_preset_id(bank, program);
-        self.apply_program_parameters(ProgramParameters::default(), None);
+        self.program_gain = 1.0;
+        self.program_gain_target = 1.0;
+        self.active_layers = vec![ProgramLayer::inherited(
+            "a",
+            DlsSource {
+                resource_id: "dls-bank".into(),
+                bank,
+                program,
+            },
+        )];
         self.reset();
         true
     }
@@ -169,19 +180,57 @@ impl RfDls {
         else {
             return false;
         };
-        let Some(instrument) = self
-            .bank
-            .instrument(program.source.bank, program.source.program)
-        else {
+        self.apply_custom_program(program, preset_id)
+    }
+
+    fn apply_custom_program(&mut self, program: CustomProgram, preset_id: &str) -> bool {
+        self.activate_custom_program(program, preset_id, true)
+    }
+
+    fn activate_custom_program(
+        &mut self,
+        program: CustomProgram,
+        preset_id: &str,
+        reset_voices: bool,
+    ) -> bool {
+        if program.layers.iter().any(|layer| {
+            self.bank
+                .instrument(layer.source.bank, layer.source.program)
+                .is_none()
+        }) {
+            return false;
+        }
+        let Some(primary) = program.layers.iter().find(|layer| layer.enabled) else {
             return false;
         };
-        let envelope = program.resolved_envelope(instrument.envelope);
-        self.selected_bank = program.source.bank;
-        self.selected_program = program.source.program;
+        self.selected_bank = primary.source.bank;
+        self.selected_program = primary.source.program;
         self.selected_preset_id = preset_id.to_owned();
-        self.apply_program_parameters(program.parameters, Some(envelope));
-        self.reset();
+        self.program_gain_target = program.gain;
+        if reset_voices {
+            self.program_gain = program.gain;
+        }
+        self.active_layers = program.layers;
+        if reset_voices {
+            self.reset();
+        }
         true
+    }
+
+    fn preview_program(&mut self, prepared: PreparedProgram) -> Result<(), String> {
+        prepared.validate().map_err(|error| error.to_string())?;
+        let canonical = self.prepare_program_save(prepared.document)?;
+        if canonical.storage_path != prepared.storage_path
+            || canonical.preview_sound_id != prepared.preview_sound_id
+        {
+            return Err("prepared RF-DLS preview metadata is not canonical".into());
+        }
+        let program = CustomProgram::from_document(canonical.document)?;
+        let preset_id = format!("preview.{}", program.id);
+        if !self.activate_custom_program(program, &preset_id, false) {
+            return Err("RF-DLS could not activate the prepared preview".into());
+        }
+        Ok(())
     }
 
     fn select_preset(&mut self, preset_id: &str) -> bool {
@@ -251,27 +300,32 @@ impl RfDls {
             name: format!("CUSTOM {slot:03}"),
             category: None,
             slot,
-            source: custom_program::DlsSource {
-                resource_id: "dls-bank".into(),
-                bank: source.bank,
-                program: source.program,
-            },
-            parameters: ProgramParameters::default(),
+            gain: 1.0,
+            layers: vec![ProgramLayer::inherited(
+                "a",
+                DlsSource {
+                    resource_id: "dls-bank".into(),
+                    bank: source.bank,
+                    program: source.program,
+                },
+            )],
         }
         .prepared()
     }
 
     fn prepare_program_save(&self, document: ProgramDocument) -> Result<PreparedProgram, String> {
         let program = CustomProgram::from_document(document)?;
-        if self
-            .bank
-            .instrument(program.source.bank, program.source.program)
-            .is_none()
-        {
-            return Err(format!(
-                "DLS bank does not contain source bank={} program={}",
-                program.source.bank, program.source.program
-            ));
+        for layer in &program.layers {
+            if self
+                .bank
+                .instrument(layer.source.bank, layer.source.program)
+                .is_none()
+            {
+                return Err(format!(
+                    "DLS bank does not contain layer {:?} source bank={} program={}",
+                    layer.id, layer.source.bank, layer.source.program
+                ));
+            }
         }
         if self
             .custom_programs
@@ -306,19 +360,6 @@ impl RfDls {
         publish_dynamic_catalog(&self.host, &self.bank, &self.custom_programs)
     }
 
-    fn apply_program_parameters(
-        &mut self,
-        parameters: ProgramParameters,
-        envelope: Option<EnvelopeSpec>,
-    ) {
-        self.program_gain = parameters.gain;
-        self.program_pitch_offset_cents =
-            f32::from(parameters.transpose_semitones) * 100.0 + parameters.fine_tune_cents;
-        self.pitch_bend_range_cents = parameters.pitch_bend_range_semitones * 100.0;
-        self.program_modulation_depth = parameters.modulation_depth;
-        self.envelope_override = envelope;
-    }
-
     fn set_parameter(&mut self, index: u32, value: f64) -> i32 {
         if !value.is_finite() {
             return STATUS_INVALID_ARGUMENT;
@@ -337,24 +378,29 @@ impl RfDls {
         self.held_notes[note as usize] = true;
         self.voices.retain(|voice| voice.note != note);
         let bank = &self.bank;
-        let Some(instrument) = bank.instrument(self.selected_bank, self.selected_program) else {
-            return;
-        };
-        for region in instrument.matching_regions(note, velocity) {
-            let envelope = self.envelope_override.unwrap_or(instrument.envelope);
-            if let Ok(voice) = Voice::new_with_envelope(
-                bank,
-                instrument,
-                region,
-                note,
-                velocity,
-                self.sample_rate,
-                envelope,
-            ) {
-                if self.voices.len() == MAX_VOICES {
-                    self.voices.remove(0);
+        for layer in &self.active_layers {
+            if !layer.accepts(note, velocity) {
+                continue;
+            }
+            let Some(instrument) = bank.instrument(layer.source.bank, layer.source.program) else {
+                continue;
+            };
+            let config = layer.voice_config(instrument);
+            for region in instrument.matching_regions(note, velocity) {
+                if let Ok(voice) = Voice::new_with_config(
+                    bank,
+                    instrument,
+                    region,
+                    note,
+                    velocity,
+                    self.sample_rate,
+                    config,
+                ) {
+                    if self.voices.len() >= MAX_VOICES {
+                        self.voices.remove(0);
+                    }
+                    self.voices.push(voice);
                 }
-                self.voices.push(voice);
             }
         }
     }
@@ -407,7 +453,7 @@ impl RfDls {
         } else {
             centered as f32 / 8_192.0
         };
-        self.pitch_bend_cents = normalized * self.pitch_bend_range_cents;
+        self.pitch_bend_normalized = normalized;
     }
 
     fn set_modulation_wheel(&mut self, value: u8) {
@@ -416,7 +462,7 @@ impl RfDls {
 
     fn reset_controllers(&mut self) {
         self.set_sustain(false);
-        self.pitch_bend_cents = 0.0;
+        self.pitch_bend_normalized = 0.0;
         self.modulation_wheel = 0.0;
     }
 
@@ -446,13 +492,12 @@ impl RfDls {
     }
 
     fn render_frame(&mut self) -> f32 {
+        self.program_gain += (self.program_gain_target - self.program_gain) * 0.005;
         let mut mixed = 0.0_f32;
         let mut index = 0;
         while index < self.voices.len() {
-            mixed += self.voices[index].next_sample_modulated(
-                self.pitch_bend_cents + self.program_pitch_offset_cents,
-                self.modulation_wheel * self.program_modulation_depth,
-            );
+            mixed += self.voices[index]
+                .next_sample_controlled(self.pitch_bend_normalized, self.modulation_wheel);
             if self.voices[index].is_finished() {
                 self.voices.swap_remove(index);
             } else {
@@ -679,20 +724,23 @@ unsafe extern "C" fn create(host: *const HostApiV1) -> *mut c_void {
                 log_host(host, LOG_LEVEL_WARN, &warning);
             }
             custom_programs.retain(|program| {
-                let valid = bank
-                    .instrument(program.source.bank, program.source.program)
-                    .is_some();
-                if !valid {
+                let missing = program.layers.iter().find(|layer| {
+                    bank.instrument(layer.source.bank, layer.source.program)
+                        .is_none()
+                });
+                if let Some(layer) = missing {
                     log_host(
                         host,
                         LOG_LEVEL_WARN,
                         &format!(
-                            "ignoring CUSTOM {:?}: DLS bank {} program {} is missing",
-                            program.id, program.source.bank, program.source.program
+                            "ignoring CUSTOM {:?}: layer {:?} DLS bank {} program {} is missing",
+                            program.id, layer.id, layer.source.bank, layer.source.program
                         ),
                     );
+                    false
+                } else {
+                    true
                 }
-                valid
             });
             let default = bank
                 .instrument(0, 0)
@@ -1055,6 +1103,29 @@ unsafe extern "C" fn install_program_json(
     }
 }
 
+unsafe extern "C" fn preview_program_json(
+    instance: *mut c_void,
+    source: *const u8,
+    source_length: usize,
+) -> i32 {
+    let Some(plugin) = (unsafe { instance.cast::<RfDls>().as_mut() }) else {
+        return STATUS_INVALID_ARGUMENT;
+    };
+    let Some(bytes) = (unsafe { read_extension_source(source, source_length) }) else {
+        return STATUS_INVALID_ARGUMENT;
+    };
+    match serde_json::from_slice::<PreparedProgram>(bytes)
+        .map_err(|error| error.to_string())
+        .and_then(|prepared| plugin.preview_program(prepared))
+    {
+        Ok(()) => STATUS_OK,
+        Err(error) => {
+            log_host(&plugin.host, LOG_LEVEL_WARN, &error);
+            STATUS_INVALID_ARGUMENT
+        }
+    }
+}
+
 unsafe extern "C" fn activate_surface_json(
     instance: *mut c_void,
     source: *const u8,
@@ -1113,6 +1184,7 @@ static PROGRAM_EXTENSION_API: ProgramExtensionApiV1 = ProgramExtensionApiV1 {
     begin_edit: begin_program_edit_json,
     prepare_save: prepare_program_save_json,
     install: install_program_json,
+    preview: Some(preview_program_json),
 };
 
 static SURFACE_EXTENSION_API: SurfaceExtensionApiV1 = SurfaceExtensionApiV1 {
@@ -1273,7 +1345,14 @@ mod tests {
         };
         assert_eq!(status, STATUS_OK);
         assert_eq!(plugin.selected_preset_id, "custom.user.warm-piano");
-        assert_eq!(plugin.envelope_override.unwrap().release_seconds, 1.2);
+        let instrument = plugin.bank.instrument(0, 0).unwrap();
+        assert_eq!(
+            plugin.active_layers[0]
+                .voice_config(instrument)
+                .amplitude_envelope
+                .release_seconds,
+            1.2
+        );
     }
 
     #[test]
@@ -1303,6 +1382,29 @@ mod tests {
             .unwrap();
         assert_eq!(reopened.document.id, "user.warm-piano");
         assert_eq!(reopened.preview_sound_id, "dls.b00000000.p00000000");
+    }
+
+    #[test]
+    fn draft_preview_applies_layers_without_installing_a_catalog_program() {
+        let mut plugin = synthetic_plugin();
+        plugin.note_on(60, 127);
+        assert_eq!(plugin.voices.len(), 1);
+        let mut program = custom_program();
+        let mut layer_b = program.layers[0].clone();
+        layer_b.id = "b".into();
+        layer_b.parameters.gain = 0.5;
+        layer_b.parameters.lfo.delay_seconds = Some(0.25);
+        program.layers.push(layer_b);
+        let prepared = program.prepared().unwrap();
+
+        plugin.preview_program(prepared).unwrap();
+        assert_eq!(plugin.active_layers.len(), 2);
+        assert!(plugin.selected_preset_id.starts_with("preview."));
+        assert!(plugin.custom_programs.is_empty());
+        assert_eq!(plugin.voices.len(), 1);
+
+        plugin.note_on(62, 127);
+        assert_eq!(plugin.voices.len(), 3);
     }
 
     #[test]
@@ -1393,19 +1495,19 @@ mod tests {
             length: 3,
             data: [0xe0, 0, 0],
         });
-        assert_eq!(plugin.pitch_bend_cents, -200.0);
+        assert_eq!(plugin.pitch_bend_normalized, -1.0);
         plugin.handle_midi(MidiEventV1 {
             frame: 0,
             length: 3,
             data: [0xe0, 0, 64],
         });
-        assert_eq!(plugin.pitch_bend_cents, 0.0);
+        assert_eq!(plugin.pitch_bend_normalized, 0.0);
         plugin.handle_midi(MidiEventV1 {
             frame: 0,
             length: 3,
             data: [0xe0, 127, 127],
         });
-        assert_eq!(plugin.pitch_bend_cents, 200.0);
+        assert_eq!(plugin.pitch_bend_normalized, 1.0);
     }
 
     #[test]
@@ -1422,14 +1524,14 @@ mod tests {
             data: [0xe0, 127, 127],
         });
         assert_eq!(plugin.modulation_wheel, 1.0);
-        assert_eq!(plugin.pitch_bend_cents, 200.0);
+        assert_eq!(plugin.pitch_bend_normalized, 1.0);
         plugin.handle_midi(MidiEventV1 {
             frame: 0,
             length: 3,
             data: [0xb0, 121, 0],
         });
         assert_eq!(plugin.modulation_wheel, 0.0);
-        assert_eq!(plugin.pitch_bend_cents, 0.0);
+        assert_eq!(plugin.pitch_bend_normalized, 0.0);
     }
 
     #[test]

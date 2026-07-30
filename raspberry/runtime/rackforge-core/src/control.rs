@@ -620,6 +620,138 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 Err(failure) => failure.into_response(),
             }
         }
+        SessionCommand::PreviewProgramDraft {
+            draft_id,
+            document_json,
+        } => {
+            let draft = match snapshot
+                .program_draft
+                .as_ref()
+                .filter(|draft| draft.draft_id == draft_id)
+            {
+                Some(draft) => draft,
+                None => {
+                    return error_response(
+                        ControlErrorCode::NotFound,
+                        "program draft is missing or no longer valid",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let audition = match snapshot
+                .audition
+                .as_ref()
+                .filter(|audition| audition.instance_id == draft.instance_id)
+            {
+                Some(audition) => audition,
+                None => {
+                    return internal_error(
+                        "program draft lost its audition lease",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let document: ProgramDocument = match serde_json::from_str(&document_json) {
+                Ok(document) => document,
+                Err(error) => {
+                    return error_response(
+                        ControlErrorCode::InvalidRequest,
+                        format!("invalid preview program document JSON: {error}"),
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let confirmed: ProgramDocument = match serde_json::from_str(&draft.document_json) {
+                Ok(document) => document,
+                Err(error) => {
+                    return internal_error(
+                        format!("stored program draft is invalid: {error}"),
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            if document.id != confirmed.id || document.plugin_id != confirmed.plugin_id {
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    "program identity cannot change during preview",
+                    Some(snapshot.revision),
+                );
+            }
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::ReplaceProgramDraft {
+                    instance_id: draft.instance_id.clone(),
+                    document,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "preview program draft") {
+                Ok(_) => {
+                    set_lease_deadline(context, Some(audition.lease_id));
+                    command_applied_without_events(context, command_ref)
+                }
+                Err(failure) => failure.into_response(),
+            }
+        }
+        SessionCommand::RestoreProgramDraftPreview { draft_id } => {
+            let draft = match snapshot
+                .program_draft
+                .as_ref()
+                .filter(|draft| draft.draft_id == draft_id)
+            {
+                Some(draft) => draft,
+                None => {
+                    return error_response(
+                        ControlErrorCode::NotFound,
+                        "program draft is missing or no longer valid",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let audition = match snapshot
+                .audition
+                .as_ref()
+                .filter(|audition| audition.instance_id == draft.instance_id)
+            {
+                Some(audition) => audition,
+                None => {
+                    return internal_error(
+                        "program draft lost its audition lease",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let document: ProgramDocument = match serde_json::from_str(&draft.document_json) {
+                Ok(document) => document,
+                Err(error) => {
+                    return internal_error(
+                        format!("stored program draft is invalid: {error}"),
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::ReplaceProgramDraft {
+                    instance_id: draft.instance_id.clone(),
+                    document,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "restore confirmed program draft preview") {
+                Ok(_) => {
+                    set_lease_deadline(context, Some(audition.lease_id));
+                    command_applied_without_events(context, command_ref)
+                }
+                Err(failure) => failure.into_response(),
+            }
+        }
         SessionCommand::SaveProgramDraft { draft_id } => {
             let draft = match snapshot
                 .program_draft
@@ -956,6 +1088,21 @@ fn record_command_event(
     record_command_events(context, command, vec![event])
 }
 
+fn command_applied_without_events(
+    context: &ControlContext,
+    command: CommandRef,
+) -> ControlResponse {
+    match context.store.lock() {
+        Ok(store) => ControlResponse::CommandApplied {
+            client_id: command.client_id,
+            command_id: command.command_id,
+            revision: store.state().revision,
+            events: Vec::new(),
+        },
+        Err(_) => internal_error("session store lock is poisoned", None),
+    }
+}
+
 fn record_command_events(
     context: &ControlContext,
     command: CommandRef,
@@ -1255,5 +1402,29 @@ mod tests {
         assert_eq!(store.snapshot().revision.get(), 1);
         assert_eq!(store.events_after(Revision::ZERO).unwrap(), events);
         audio.join().unwrap();
+    }
+
+    #[test]
+    fn transient_command_response_does_not_advance_session_revision() {
+        let (context, _) = context();
+        let response = command_applied_without_events(
+            &context,
+            CommandRef {
+                client_id: ClientId::new("test.preview").unwrap(),
+                command_id: 8,
+            },
+        );
+        let ControlResponse::CommandApplied {
+            revision, events, ..
+        } = response
+        else {
+            panic!("transient command was not applied");
+        };
+        assert_eq!(revision, Revision::ZERO);
+        assert!(events.is_empty());
+        assert_eq!(
+            context.store.lock().unwrap().state().revision,
+            Revision::ZERO
+        );
     }
 }

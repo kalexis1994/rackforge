@@ -134,4 +134,34 @@ mod tests {
             request
         );
     }
+
+    #[test]
+    fn transient_program_preview_commands_round_trip() {
+        let preview = ControlRequest::Dispatch {
+            envelope: CommandEnvelope::new(
+                ClientId::new("test.preview").unwrap(),
+                51,
+                SessionCommand::PreviewProgramDraft {
+                    draft_id: 7,
+                    document_json: r#"{"payload":{"gain":0.75}}"#.into(),
+                },
+            ),
+        };
+        assert_eq!(
+            decode_request(&encode_line(&preview).unwrap()).unwrap(),
+            preview
+        );
+
+        let restore = ControlRequest::Dispatch {
+            envelope: CommandEnvelope::new(
+                ClientId::new("test.preview").unwrap(),
+                52,
+                SessionCommand::RestoreProgramDraftPreview { draft_id: 7 },
+            ),
+        };
+        assert_eq!(
+            decode_request(&encode_line(&restore).unwrap()).unwrap(),
+            restore
+        );
+    }
 }

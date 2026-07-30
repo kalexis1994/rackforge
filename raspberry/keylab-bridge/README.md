@@ -41,7 +41,9 @@ SysEx. La jerarquía inicial es:
 - `RF-DLS PLAY`: selector de colección `DLS` o `CUSTOM`, seguido por sus
   programas tocables;
 - `RF-DLS CONFIG`: `ADD NEW`, los CUSTOM existentes y las secciones `NAME`,
-  `TIMBRE`, `EXPRESSION`, `ENVELOPE`, `TUNING`, `FX`, `OUTPUT` y `SAVE`.
+  `LAYER A`, `LAYER B`, `FX`, `OUTPUT` y `SAVE`. Cada layer contiene sus
+  propias secciones `TIMBRE`, `AMP ENV`, `PITCH ENV`, `LFO`, `TUNING`, `RANGE`
+  y `VOLUME`.
 
 `LIVE` nunca pertenece a RF-DLS ni a otro addon: carga programas de RackForge
 que pueden combinar varias instancias y efectos. RF-DLS tiene dos rutas
@@ -64,6 +66,37 @@ nombre provisional se genera como `CUSTOM NNN` y se preselecciona el primer
 timbre DLS; así el draft nunca carece de los dos requisitos mínimos de guardado.
 El bridge renueva la lease con su heartbeat. `BACK`, una desconexión o el
 timeout del motor devuelven el foco y restauran el sonido anterior.
+
+Cada CUSTOM comienza con una capa `A` obligatoria, que no se puede desactivar.
+`LAYER B` abre primero su menú `ENABLED`; mientras esté en `OFF` no muestra
+`TIMBRE` ni genera voces. `OK` sobre `ENABLED` alterna directamente ON/OFF, sin
+abrir otro editor. Al pasar a `ON`, el bridge crea la capa copiando la
+configuración de `A` y agrega `TIMBRE` como opción hermana del mismo carrusel;
+recién `OK` sobre `TIMBRE` abre la lista DLS. Volver a `OFF` conserva su fuente
+y overrides para poder reactivarla sin perder el trabajo.
+
+Las configuraciones de síntesis nunca dependen del último layer visitado:
+viven dentro del carrusel de `LAYER A` o `LAYER B`. `VOLUME` mezcla ese layer
+de forma independiente (`0.00x` lo silencia y `1.00x` conserva su nivel);
+después se suman A+B, pasan por una única cadena `FX` compartida y finalmente
+por `OUTPUT`. En esta etapa `OUTPUT` ya modifica el gain persistente del
+programa y `FX` muestra honestamente una cadena vacía hasta que exista el motor
+de efectos.
+Los editores de envolventes, LFO, tuning, rango y volumen actúan sobre la última
+capa seleccionada. Los campos opcionales muestran `INHERIT`; al editarlos se
+crea el override y al bajar del mínimo vuelven a heredar el valor DLS.
+
+Core preescucha el documento completo después de cada cambio, no sólo el timbre
+base. Por eso las capas, splits de tecla/velocidad y overrides se pueden tocar
+desde el KeyLab antes de guardar. El addon valida y normaliza el JSON en cada
+reemplazo; la superficie sólo modifica campos permitidos.
+
+Los carruseles numéricos mantienen una working copy auditiva. Mientras están en
+edición, cada paso de flecha o encoder envía un preview transitorio al Core; se
+puede tocar inmediatamente para oír el resultado. `OK` confirma el valor en el
+draft y recién entonces lo marca dirty. `BACK` restaura tanto el valor visual
+como el audio del documento confirmado. El transporte síncrono aplica
+backpressure, por lo que nunca acumula una cola ilimitada de movimientos.
 
 Core conserva el estado `dirty` publicado para el draft del addon. Al intentar
 abandonar un programa modificado, tanto con `BACK` desde sus secciones como con

@@ -136,6 +136,13 @@ envía la operación mediante una cola acotada y publica un `SessionEvent` solo
 después de que el motor la aplica. La selección ocurre al comienzo de un bloque
 de audio. El callback no toca el store de sesión ni realiza E/S.
 
+La edición auditiva usa `PreviewProgramDraft` y
+`RestoreProgramDraftPreview`. Preview valida el documento completo y lo entrega
+al callback del addon, pero no cambia el snapshot, no avanza la revisión y no
+marca el draft como dirty. `ReplaceProgramDraft` continúa siendo el único
+commit. Así una superficie puede preescuchar cada paso del encoder, confirmar
+con `OK` o restaurar el documento confirmado con `BACK`.
+
 Los clientes pueden declarar `expected_revision` para rechazar ediciones
 obsoletas. Si pierden eventos, solicitan un snapshot completo y reconstruyen su
 vista sin depender de estado implícito.
@@ -159,9 +166,16 @@ propietario, versiones, categoría, tags y un `payload` JSON. El plugin posee,
 valida y migra el contenido del payload. Así Core puede catalogar un programa
 sin asumir que todos los instrumentos tienen capas, osciladores o FX iguales.
 
-Roland define inicialmente un payload de una o dos capas. Cada capa referencia
-un `sound_id` y posee gain, pan, octava, transposición, afinación fina, rangos
-MIDI y ADSR. El programa de fábrica Piano 1 comienza con una sola capa `A`.
+RF-DLS define un payload versionado de una o dos capas. Cada capa referencia un
+instrumento DLS y posee rangos de tecla/velocidad y overrides de nivel, tuning,
+pitch bend, modulación, envolventes y LFO. Los campos opcionales ausentes
+heredan los articuladores del DLS. Los payloads v1 se migran a una sola capa
+`A` al leerlos y se escriben como v2 al siguiente guardado.
+
+La extensión binaria de programas 1.1 agrega un callback opcional de preview.
+Core sigue cargando extensiones 1.0 por su prefijo de estructura y, si no
+ofrecen preview completo, cae en la selección del sonido base. RF-DLS 1.1
+preescucha el documento validado completo sin instalarlo ni persistirlo.
 
 ## Parámetros y pantalla
 
@@ -281,6 +295,13 @@ rackforge-core live /home/kalex/rackforge/plugins/roland-scva \
 El host permanece genérico: selección de muestras, voces, sustain y
 parámetros pertenecen al plugin. El host solo administra carga, MIDI, bloques
 de audio y salida ALSA.
+
+Core retiene por canal el último estado de los controladores MIDI continuos
+(`CC 0..119`), pitch bend y channel pressure. Después de seleccionar un sonido
+o transferir/restaurar el foco de audition, reinyecta ese estado al instrumento
+al comienzo del siguiente bloque. Así una rueda de modulación o pedal conserva
+su posición lógica aunque el plugin haya sido reseteado. `CC 121` sigue siendo
+la única orden que borra explícitamente el estado retenido de ese canal.
 
 Las entradas musicales y las superficies UI son conceptos independientes.
 Core conecta los endpoints MIDI normales —incluidos controladores todavía

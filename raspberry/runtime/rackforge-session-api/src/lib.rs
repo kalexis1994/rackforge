@@ -1,3 +1,4 @@
+use rackforge_program_api::{ProgramEditorValue, ProgramEditorView};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -5,7 +6,7 @@ pub use rackforge_surface_api::{
     SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const SESSION_SCHEMA_VERSION: u32 = 2;
+pub const SESSION_SCHEMA_VERSION: u32 = 3;
 pub const DEFAULT_LIVE_SESSION_ID: &str = "live.main";
 pub const DEFAULT_LIVE_INSTANCE_ID: &str = "live.main.instrument.1";
 
@@ -109,6 +110,7 @@ pub struct ProgramDraftState {
     pub preview_sound_id: String,
     pub storage_path: String,
     pub document_json: String,
+    pub editor: ProgramEditorView,
     pub dirty: bool,
 }
 
@@ -253,6 +255,10 @@ impl SessionState {
                 {
                     return Err("program draft metadata is invalid".into());
                 }
+                draft
+                    .editor
+                    .validate()
+                    .map_err(|error| format!("program editor is invalid: {error}"))?;
                 self.program_draft = Some(draft.clone());
             }
             SessionEvent::ProgramDraftUpdated { draft } => {
@@ -269,6 +275,10 @@ impl SessionState {
                 {
                     return Err("program draft update does not match the active draft".into());
                 }
+                draft
+                    .editor
+                    .validate()
+                    .map_err(|error| format!("program editor is invalid: {error}"))?;
                 if self
                     .audition
                     .as_ref()
@@ -364,6 +374,13 @@ pub enum SessionCommand {
     PreviewProgramDraft {
         draft_id: u64,
         document_json: String,
+    },
+    EditProgramDraftField {
+        draft_id: u64,
+        field_id: String,
+        value: ProgramEditorValue,
+        #[serde(default)]
+        preview: bool,
     },
     RestoreProgramDraftPreview {
         draft_id: u64,
@@ -534,6 +551,32 @@ mod tests {
             preview_sound_id: "dls.piano-1".into(),
             storage_path: "custom/user.custom-001.rackforge-program.json".into(),
             document_json: r#"{"id":"user.custom-001","payload":{}}"#.into(),
+            editor: rackforge_program_api::ProgramEditorView {
+                schema_version: rackforge_program_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+                title: "TEST".into(),
+                pages: vec![rackforge_program_api::ProgramEditorPage {
+                    id: "output".into(),
+                    label: "OUTPUT".into(),
+                    detail: "Program output".into(),
+                    enabled: true,
+                    pages: Vec::new(),
+                    fields: vec![rackforge_program_api::ProgramEditorField {
+                        id: "program.gain".into(),
+                        label: "GAIN".into(),
+                        detail: "Output gain".into(),
+                        value: rackforge_program_api::ProgramEditorValue::Integer(100),
+                        kind: rackforge_program_api::ProgramEditorFieldKind::Number {
+                            minimum: 0,
+                            maximum: 200,
+                            step: 1,
+                            decimals: 2,
+                            unit: None,
+                            allow_inherited: false,
+                        },
+                        live_preview: true,
+                    }],
+                }],
+            },
             dirty,
         }
     }

@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-controller-arturia-keylab-essential-mk3"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "midir",
  "rackforge-control-api",
@@ -501,9 +501,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-program-api"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "rackforge-session-api"
 version = "0.1.0"
 dependencies = [
+ "rackforge-program-api",
  "rackforge-surface-api",
  "serde",
 ]
@@ -521,6 +532,7 @@ name = "rackforge-surface-runtime"
 version = "0.1.0"
 dependencies = [
  "rackforge-controller-api",
+ "rackforge-program-api",
  "rackforge-session-api",
  "rackforge-ui",
  "serde_json",

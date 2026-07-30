@@ -587,6 +587,7 @@ dependencies = [
 name = "rackforge-session-api"
 version = "0.1.0"
 dependencies = [
+ "rackforge-program-api",
  "rackforge-surface-api",
  "serde",
  "serde_json",
@@ -605,6 +606,7 @@ name = "rackforge-surface-runtime"
 version = "0.1.0"
 dependencies = [
  "rackforge-controller-api",
+ "rackforge-program-api",
  "rackforge-session-api",
  "rackforge-ui",
  "serde_json",

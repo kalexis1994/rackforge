@@ -6,8 +6,8 @@ use rackforge_control_api::{
     encode_line,
 };
 use rackforge_plugin_api::{
-    PreparedProgram, PresetCatalog, ProgramDocument, ProgramEditRequest, SurfaceActivationRequest,
-    SurfaceActivationResponse,
+    PreparedProgram, PresetCatalog, ProgramDocument, ProgramEditRequest, ProgramEditorView,
+    ProgramFieldEditRequest, SurfaceActivationRequest, SurfaceActivationResponse,
 };
 use rackforge_session_api::{
     AuditionEndReason, CommandEnvelope, CommandRef, InstanceId, ProgramDraftState, Revision,
@@ -51,12 +51,17 @@ pub enum AudioControlCommand {
         instance_id: InstanceId,
         request: ProgramEditRequest,
         previous_sound_id: Option<String>,
-        reply: SyncSender<Result<(u64, PreparedProgram), String>>,
+        reply: SyncSender<Result<(u64, PreparedProgram, ProgramEditorView), String>>,
     },
     ReplaceProgramDraft {
         instance_id: InstanceId,
         document: ProgramDocument,
-        reply: SyncSender<Result<PreparedProgram, String>>,
+        reply: SyncSender<Result<(PreparedProgram, ProgramEditorView), String>>,
+    },
+    EditProgramDraftField {
+        instance_id: InstanceId,
+        request: ProgramFieldEditRequest,
+        reply: SyncSender<Result<(PreparedProgram, ProgramEditorView), String>>,
     },
     InstallProgram {
         instance_id: InstanceId,
@@ -481,7 +486,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 return failure.into_response();
             }
             match receive_audio(reply_receiver, "begin program editing") {
-                Ok((lease_id, prepared)) => {
+                Ok((lease_id, prepared, editor)) => {
                     if prepared.document.plugin_id != instance.plugin_id {
                         return internal_error(
                             "plugin prepared a program for a different plugin",
@@ -494,6 +499,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                         instance_id.clone(),
                         program_id,
                         &prepared,
+                        editor,
                         false,
                     ) {
                         Ok(draft) => draft,
@@ -591,12 +597,13 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 return failure.into_response();
             }
             match receive_audio(reply_receiver, "validate program draft") {
-                Ok(prepared) => {
+                Ok((prepared, editor)) => {
                     let updated = match program_draft_state(
                         draft_id,
                         draft.instance_id.clone(),
                         draft.original_program_id.clone(),
                         &prepared,
+                        editor,
                         true,
                     ) {
                         Ok(draft) => draft,
@@ -692,6 +699,107 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 Ok(_) => {
                     set_lease_deadline(context, Some(audition.lease_id));
                     command_applied_without_events(context, command_ref)
+                }
+                Err(failure) => failure.into_response(),
+            }
+        }
+        SessionCommand::EditProgramDraftField {
+            draft_id,
+            field_id,
+            value,
+            preview,
+        } => {
+            let draft = match snapshot
+                .program_draft
+                .as_ref()
+                .filter(|draft| draft.draft_id == draft_id)
+            {
+                Some(draft) => draft,
+                None => {
+                    return error_response(
+                        ControlErrorCode::NotFound,
+                        "program draft is missing or no longer valid",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let audition = match snapshot
+                .audition
+                .as_ref()
+                .filter(|audition| audition.instance_id == draft.instance_id)
+            {
+                Some(audition) => audition,
+                None => {
+                    return internal_error(
+                        "program draft lost its audition lease",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let document: ProgramDocument = match serde_json::from_str(&draft.document_json) {
+                Ok(document) => document,
+                Err(error) => {
+                    return internal_error(
+                        format!("stored program draft is invalid: {error}"),
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let request = ProgramFieldEditRequest {
+                schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+                document,
+                field_id,
+                value,
+            };
+            if let Err(error) = request.validate() {
+                return error_response(
+                    ControlErrorCode::InvalidRequest,
+                    error.to_string(),
+                    Some(snapshot.revision),
+                );
+            }
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::EditProgramDraftField {
+                    instance_id: draft.instance_id.clone(),
+                    request,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "apply program field edit") {
+                Ok((_prepared, _editor)) if preview => {
+                    set_lease_deadline(context, Some(audition.lease_id));
+                    command_applied_without_events(context, command_ref)
+                }
+                Ok((prepared, editor)) => {
+                    let updated = match program_draft_state(
+                        draft_id,
+                        draft.instance_id.clone(),
+                        draft.original_program_id.clone(),
+                        &prepared,
+                        editor,
+                        true,
+                    ) {
+                        Ok(draft) => draft,
+                        Err(response) => return response,
+                    };
+                    set_lease_deadline(context, Some(audition.lease_id));
+                    record_command_events(
+                        context,
+                        command_ref,
+                        vec![
+                            SessionEvent::ProgramDraftUpdated {
+                                draft: updated.clone(),
+                            },
+                            SessionEvent::SoundSelected {
+                                instance_id: draft.instance_id.clone(),
+                                sound_id: updated.preview_sound_id,
+                            },
+                        ],
+                    )
                 }
                 Err(failure) => failure.into_response(),
             }
@@ -1054,11 +1162,18 @@ fn program_draft_state(
     instance_id: InstanceId,
     original_program_id: Option<String>,
     prepared: &PreparedProgram,
+    editor: ProgramEditorView,
     dirty: bool,
 ) -> Result<ProgramDraftState, ControlResponse> {
     if let Err(error) = prepared.validate() {
         return Err(internal_error(
             format!("plugin returned an invalid prepared program: {error}"),
+            None,
+        ));
+    }
+    if let Err(error) = editor.validate() {
+        return Err(internal_error(
+            format!("plugin returned an invalid program editor: {error}"),
             None,
         ));
     }
@@ -1076,6 +1191,7 @@ fn program_draft_state(
         preview_sound_id: prepared.preview_sound_id.clone(),
         storage_path: prepared.storage_path.clone(),
         document_json,
+        editor,
         dirty,
     })
 }

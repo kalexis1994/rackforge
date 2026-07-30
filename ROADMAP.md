@@ -49,6 +49,9 @@ las capacidades musicales, el SDK y el formato de distribución de RackForge.
     existirán solamente durante la transición o como extensión opcional.
 13. `Plugin` es el término público para instrumentos, efectos, procesadores
     MIDI y utilities; `module` queda reservado para implementación interna.
+14. El payload de un programa pertenece exclusivamente al plugin. Las
+    superficies editan campos opacos mediante un árbol declarativo común y
+    nunca conocen rutas JSON internas.
 
 ## Arquitectura objetivo
 

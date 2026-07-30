@@ -4,15 +4,17 @@ use libloading::{Library, Symbol};
 use rackforge_plugin_api::abi::{
     ABI_VERSION, ENTRY_SYMBOL_V1, HostApiV1, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO,
     LOG_LEVEL_TRACE, LOG_LEVEL_WARN, MidiEventV1, PROGRAM_EXTENSION_ENTRY_SYMBOL_V1,
-    PROGRAM_EXTENSION_V1_0_SIZE, ParameterEventV1, PluginApiV1, PluginEntryFnV1, ProcessBlockV1,
-    ProgramExchangeJsonFnV1, ProgramExtensionApiV1, ProgramExtensionEntryFnV1,
-    STATUS_INTERNAL_ERROR, STATUS_INVALID_ARGUMENT, STATUS_OK, SURFACE_EXTENSION_ENTRY_SYMBOL_V1,
-    SurfaceExtensionApiV1, SurfaceExtensionEntryFnV1, copy_to_host_buffer, is_compatible,
-    is_program_extension_compatible, is_surface_extension_compatible,
+    PROGRAM_EXTENSION_V1_0_SIZE, PROGRAM_EXTENSION_V1_1_SIZE, PROGRAM_EXTENSION_V1_2_SIZE,
+    ParameterEventV1, PluginApiV1, PluginEntryFnV1, ProcessBlockV1, ProgramExchangeJsonFnV1,
+    ProgramExtensionApiV1, ProgramExtensionEntryFnV1, STATUS_INTERNAL_ERROR,
+    STATUS_INVALID_ARGUMENT, STATUS_OK, SURFACE_EXTENSION_ENTRY_SYMBOL_V1, SurfaceExtensionApiV1,
+    SurfaceExtensionEntryFnV1, copy_to_host_buffer, is_compatible, is_program_extension_compatible,
+    is_surface_extension_compatible,
 };
 use rackforge_plugin_api::{
     Capability, ParameterSchema, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
-    ProgramEditRequest, RuntimeDescriptor, SurfaceActivationRequest, SurfaceActivationResponse,
+    ProgramEditRequest, ProgramEditorView, ProgramFieldEditRequest, RuntimeDescriptor,
+    SurfaceActivationRequest, SurfaceActivationResponse,
 };
 use std::collections::BTreeMap;
 use std::ffi::c_void;
@@ -332,7 +334,7 @@ impl PluginInstance<'_> {
             .plugin
             .program_extension
             .context("plugin does not expose the program editing extension")?;
-        if extension.struct_size < size_of::<ProgramExtensionApiV1>() as u32 {
+        if extension.struct_size < PROGRAM_EXTENSION_V1_1_SIZE {
             return Ok(false);
         }
         let Some(preview) = extension.preview else {
@@ -342,6 +344,53 @@ impl PluginInstance<'_> {
         let status = unsafe { preview(self.handle, source.as_ptr(), source.len()) };
         check_status(status, "preview_program")?;
         Ok(true)
+    }
+
+    pub fn program_editor_view(&mut self, document: &ProgramDocument) -> Result<ProgramEditorView> {
+        document.validate().context("validating editor program")?;
+        let extension = self
+            .plugin
+            .program_extension
+            .context("plugin does not expose the program editing extension")?;
+        if extension.struct_size < PROGRAM_EXTENSION_V1_2_SIZE {
+            bail!("plugin program extension does not expose a declarative editor");
+        }
+        let editor_view = extension
+            .editor_view
+            .context("plugin program extension does not expose an editor view")?;
+        let source = serde_json::to_vec(document).context("serializing editor program")?;
+        let bytes =
+            exchange_program_json(editor_view, self.handle, &source, "resolve program editor")?;
+        let view: ProgramEditorView =
+            serde_json::from_slice(&bytes).context("parsing program editor view")?;
+        view.validate().context("validating program editor view")?;
+        Ok(view)
+    }
+
+    pub fn apply_program_edit(
+        &mut self,
+        request: &ProgramFieldEditRequest,
+    ) -> Result<PreparedProgram> {
+        request
+            .validate()
+            .context("validating program field edit")?;
+        let extension = self
+            .plugin
+            .program_extension
+            .context("plugin does not expose the program editing extension")?;
+        if extension.struct_size < PROGRAM_EXTENSION_V1_2_SIZE {
+            bail!("plugin program extension does not expose declarative edits");
+        }
+        let apply_edit = extension
+            .apply_edit
+            .context("plugin program extension does not expose declarative edits")?;
+        let source = serde_json::to_vec(request).context("serializing program field edit")?;
+        let bytes =
+            exchange_program_json(apply_edit, self.handle, &source, "apply program field edit")?;
+        let prepared: PreparedProgram =
+            serde_json::from_slice(&bytes).context("parsing edited program")?;
+        prepared.validate().context("validating edited program")?;
+        Ok(prepared)
     }
 
     pub fn preset_catalog(&self) -> Result<PresetCatalog> {

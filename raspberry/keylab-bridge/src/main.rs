@@ -1219,129 +1219,22 @@ fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
             println!("PROGRAM_EDIT_STARTED draft={draft_id}");
             Ok(true)
         }
-        menu::MenuCommand::SetProgramDraftSound {
+        menu::MenuCommand::EditProgramDraftField {
             draft_id,
-            layer_index,
-            sound_id,
-        } => {
-            let snapshot = live_snapshot()?;
-            let draft = snapshot
-                .program_draft
-                .as_ref()
-                .filter(|draft| draft.draft_id == draft_id)
-                .ok_or_else(|| "el borrador de programa ya no está activo".to_owned())?;
-            let document_json =
-                replace_dls_layer_source(&draft.document_json, layer_index, &sound_id)?;
-            dispatch_session_command(SessionCommand::ReplaceProgramDraft {
-                draft_id,
-                document_json,
-            })?;
-            refresh_live_catalog(menu)?;
-            println!("PROGRAM_DRAFT_SOUND draft={draft_id} layer={layer_index} sound={sound_id}");
-            Ok(true)
-        }
-        menu::MenuCommand::AddProgramDraftLayer { draft_id } => {
-            let snapshot = live_snapshot()?;
-            let draft = snapshot
-                .program_draft
-                .as_ref()
-                .filter(|draft| draft.draft_id == draft_id)
-                .ok_or_else(|| "el borrador de programa ya no está activo".to_owned())?;
-            let document_json = add_dls_program_layer(&draft.document_json)?;
-            dispatch_session_command(SessionCommand::ReplaceProgramDraft {
-                draft_id,
-                document_json,
-            })?;
-            refresh_live_catalog(menu)?;
-            println!("PROGRAM_DRAFT_LAYER_ADDED draft={draft_id}");
-            Ok(true)
-        }
-        menu::MenuCommand::SetProgramDraftLayerParameter {
-            draft_id,
-            layer_index,
-            parameter,
+            field_id,
             value,
+            preview,
         } => {
-            let snapshot = live_snapshot()?;
-            let draft = snapshot
-                .program_draft
-                .as_ref()
-                .filter(|draft| draft.draft_id == draft_id)
-                .ok_or_else(|| "el borrador de programa ya no está activo".to_owned())?;
-            let document_json =
-                replace_dls_layer_parameter(&draft.document_json, layer_index, &parameter, value)?;
-            dispatch_session_command(SessionCommand::ReplaceProgramDraft {
+            dispatch_session_command(SessionCommand::EditProgramDraftField {
                 draft_id,
-                document_json,
+                field_id: field_id.clone(),
+                value,
+                preview,
             })?;
-            refresh_live_catalog(menu)?;
-            println!(
-                "PROGRAM_DRAFT_PARAMETER draft={draft_id} layer={layer_index} parameter={parameter}"
-            );
-            Ok(true)
-        }
-        menu::MenuCommand::PreviewProgramDraftLayerParameter {
-            draft_id,
-            layer_index,
-            parameter,
-            value,
-        } => {
-            let snapshot = live_snapshot()?;
-            let draft = snapshot
-                .program_draft
-                .as_ref()
-                .filter(|draft| draft.draft_id == draft_id)
-                .ok_or_else(|| "el borrador de programa ya no está activo".to_owned())?;
-            let document_json =
-                replace_dls_layer_parameter(&draft.document_json, layer_index, &parameter, value)?;
-            dispatch_session_command(SessionCommand::PreviewProgramDraft {
-                draft_id,
-                document_json,
-            })?;
-            println!(
-                "PROGRAM_DRAFT_PREVIEW draft={draft_id} layer={layer_index} parameter={parameter}"
-            );
-            Ok(true)
-        }
-        menu::MenuCommand::SetProgramDraftParameter {
-            draft_id,
-            parameter,
-            value,
-        } => {
-            let snapshot = live_snapshot()?;
-            let draft = snapshot
-                .program_draft
-                .as_ref()
-                .filter(|draft| draft.draft_id == draft_id)
-                .ok_or_else(|| "el borrador de programa ya no está activo".to_owned())?;
-            let document_json =
-                replace_dls_program_parameter(&draft.document_json, &parameter, value)?;
-            dispatch_session_command(SessionCommand::ReplaceProgramDraft {
-                draft_id,
-                document_json,
-            })?;
-            refresh_live_catalog(menu)?;
-            println!("PROGRAM_DRAFT_PARAMETER draft={draft_id} parameter={parameter}");
-            Ok(true)
-        }
-        menu::MenuCommand::PreviewProgramDraftParameter {
-            draft_id,
-            parameter,
-            value,
-        } => {
-            let snapshot = live_snapshot()?;
-            let draft = snapshot
-                .program_draft
-                .as_ref()
-                .filter(|draft| draft.draft_id == draft_id)
-                .ok_or_else(|| "el borrador de programa ya no está activo".to_owned())?;
-            let document_json =
-                replace_dls_program_parameter(&draft.document_json, &parameter, value)?;
-            dispatch_session_command(SessionCommand::PreviewProgramDraft {
-                draft_id,
-                document_json,
-            })?;
-            println!("PROGRAM_DRAFT_PREVIEW draft={draft_id} parameter={parameter}");
+            if !preview {
+                refresh_live_catalog(menu)?;
+            }
+            println!("PROGRAM_DRAFT_FIELD draft={draft_id} field={field_id} preview={preview}");
             Ok(true)
         }
         menu::MenuCommand::RestoreProgramDraftPreview { draft_id } => {
@@ -1466,163 +1359,6 @@ fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn replace_dls_layer_source(
-    document_json: &str,
-    layer_index: usize,
-    sound_id: &str,
-) -> Result<String, String> {
-    let (bank, program) = parse_dls_sound_id(sound_id)?;
-    let mut document: Value = serde_json::from_str(document_json)
-        .map_err(|error| format!("el borrador contiene JSON inválido: {error}"))?;
-    let source = document
-        .pointer_mut(&format!("/payload/layers/{layer_index}/source"))
-        .and_then(Value::as_object_mut)
-        .ok_or_else(|| {
-            format!("el borrador RF-DLS no contiene payload.layers[{layer_index}].source")
-        })?;
-    source.insert("bank".into(), Value::from(bank));
-    source.insert("program".into(), Value::from(program));
-    serde_json::to_string(&document)
-        .map_err(|error| format!("no se pudo serializar el borrador RF-DLS: {error}"))
-}
-
-#[cfg(target_os = "linux")]
-fn add_dls_program_layer(document_json: &str) -> Result<String, String> {
-    let mut document: Value = serde_json::from_str(document_json)
-        .map_err(|error| format!("el borrador contiene JSON inválido: {error}"))?;
-    let layers = document
-        .pointer_mut("/payload/layers")
-        .and_then(Value::as_array_mut)
-        .ok_or_else(|| "el borrador RF-DLS no contiene payload.layers".to_owned())?;
-    if layers.len() >= 2 {
-        return Err("RF-DLS admite como máximo dos capas por ahora".into());
-    }
-    let mut layer = layers
-        .first()
-        .cloned()
-        .ok_or_else(|| "el borrador RF-DLS no contiene la capa A".to_owned())?;
-    let layer = layer
-        .as_object_mut()
-        .ok_or_else(|| "la capa A no es un objeto JSON".to_owned())?;
-    layer.insert("id".into(), Value::from("b"));
-    layer.insert("enabled".into(), Value::Bool(true));
-    layers.push(Value::Object(layer.clone()));
-    serde_json::to_string(&document)
-        .map_err(|error| format!("no se pudo serializar el borrador RF-DLS: {error}"))
-}
-
-#[cfg(target_os = "linux")]
-fn replace_dls_layer_parameter(
-    document_json: &str,
-    layer_index: usize,
-    parameter: &str,
-    value: menu::ProgramParameterValue,
-) -> Result<String, String> {
-    let allowed = [
-        "enabled",
-        "key_range.low",
-        "key_range.high",
-        "velocity_range.low",
-        "velocity_range.high",
-        "gain",
-        "transpose_semitones",
-        "fine_tune_cents",
-        "pitch_bend_range_semitones",
-        "modulation_depth",
-        "amplitude_envelope.attack_seconds",
-        "amplitude_envelope.decay_seconds",
-        "amplitude_envelope.sustain_level",
-        "amplitude_envelope.release_seconds",
-        "pitch_envelope.attack_seconds",
-        "pitch_envelope.decay_seconds",
-        "pitch_envelope.sustain_level",
-        "pitch_envelope.release_seconds",
-        "pitch_envelope.depth_cents",
-        "lfo.enabled",
-        "lfo.frequency_hz",
-        "lfo.delay_seconds",
-        "lfo.pitch_depth_cents",
-        "lfo.mod_wheel_pitch_depth_cents",
-        "lfo.attenuation_depth_centibels",
-        "lfo.mod_wheel_attenuation_depth_centibels",
-    ];
-    if !allowed.contains(&parameter) {
-        return Err(format!(
-            "parámetro de capa RF-DLS desconocido {parameter:?}"
-        ));
-    }
-    if parameter == "enabled" && layer_index == 0 {
-        return Err("la capa A de RF-DLS es obligatoria y no se puede desactivar".into());
-    }
-    let nested = parameter.replace('.', "/");
-    let pointer = if parameter == "enabled"
-        || parameter.starts_with("key_range.")
-        || parameter.starts_with("velocity_range.")
-    {
-        format!("/payload/layers/{layer_index}/{nested}")
-    } else {
-        format!("/payload/layers/{layer_index}/parameters/{nested}")
-    };
-    let mut document: Value = serde_json::from_str(document_json)
-        .map_err(|error| format!("el borrador contiene JSON inválido: {error}"))?;
-    let destination = document.pointer_mut(&pointer).ok_or_else(|| {
-        format!("el borrador RF-DLS no contiene el parámetro {parameter:?} en la capa")
-    })?;
-    *destination = match value {
-        menu::ProgramParameterValue::Number(Some(value)) => {
-            if !value.is_finite() {
-                return Err("el parámetro de capa no es finito".into());
-            }
-            Value::Number(
-                serde_json::Number::from_f64(value)
-                    .ok_or_else(|| "el parámetro de capa no es JSON válido".to_owned())?,
-            )
-        }
-        menu::ProgramParameterValue::Number(None) | menu::ProgramParameterValue::Boolean(None) => {
-            Value::Null
-        }
-        menu::ProgramParameterValue::Integer(value) => Value::from(value),
-        menu::ProgramParameterValue::Boolean(Some(value)) => Value::Bool(value),
-    };
-    serde_json::to_string(&document)
-        .map_err(|error| format!("no se pudo serializar el borrador RF-DLS: {error}"))
-}
-
-#[cfg(target_os = "linux")]
-fn replace_dls_program_parameter(
-    document_json: &str,
-    parameter: &str,
-    value: menu::ProgramParameterValue,
-) -> Result<String, String> {
-    if parameter != "gain" {
-        return Err(format!(
-            "parámetro compartido RF-DLS desconocido {parameter:?}"
-        ));
-    }
-    let menu::ProgramParameterValue::Number(Some(value)) = value else {
-        return Err("el gain compartido RF-DLS requiere un número".into());
-    };
-    if !value.is_finite() || !(0.0..=2.0).contains(&value) {
-        return Err("el gain compartido RF-DLS debe estar entre 0 y 2".into());
-    }
-    let mut document: Value = serde_json::from_str(document_json)
-        .map_err(|error| format!("el borrador contiene JSON inválido: {error}"))?;
-    let payload = document
-        .pointer_mut("/payload")
-        .and_then(Value::as_object_mut)
-        .ok_or_else(|| "el borrador RF-DLS no contiene un payload válido".to_owned())?;
-    payload.insert(
-        "gain".into(),
-        Value::Number(
-            serde_json::Number::from_f64(value)
-                .ok_or_else(|| "el gain compartido no es JSON válido".to_owned())?,
-        ),
-    );
-    serde_json::to_string(&document)
-        .map_err(|error| format!("no se pudo serializar el borrador RF-DLS: {error}"))
-}
-
-#[cfg(target_os = "linux")]
 fn replace_program_name(document_json: &str, name: &str) -> Result<String, String> {
     let name = name.trim();
     if name.is_empty() || name.len() > 64 || !name.is_ascii() || name.contains('\0') {
@@ -1636,21 +1372,6 @@ fn replace_program_name(document_json: &str, name: &str) -> Result<String, Strin
     object.insert("name".into(), Value::from(name));
     serde_json::to_string(&document)
         .map_err(|error| format!("no se pudo serializar el borrador RF-DLS: {error}"))
-}
-
-#[cfg(target_os = "linux")]
-fn parse_dls_sound_id(sound_id: &str) -> Result<(u32, u32), String> {
-    let encoded = sound_id
-        .strip_prefix("dls.b")
-        .ok_or_else(|| format!("{sound_id:?} no es un sonido DLS nativo"))?;
-    let (bank, program) = encoded
-        .split_once(".p")
-        .ok_or_else(|| format!("{sound_id:?} no tiene banco y programa DLS"))?;
-    let bank =
-        u32::from_str_radix(bank, 16).map_err(|_| format!("banco DLS inválido en {sound_id:?}"))?;
-    let program = u32::from_str_radix(program, 16)
-        .map_err(|_| format!("programa DLS inválido en {sound_id:?}"))?;
-    Ok((bank, program))
 }
 
 fn acquire_screen(
@@ -2081,97 +1802,5 @@ mod tests {
         );
         assert_eq!(parse_physical_input(&[0xB0, 116, 64]), None);
         assert_eq!(parse_physical_input(&[0x90, 60, 100]), None);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn draft_layer_mutations_are_scoped_and_preserve_other_layers() {
-        let document = serde_json::json!({
-            "payload": {
-                "layers": [{
-                    "id": "a",
-                    "enabled": true,
-                    "source": {"resource_id":"dls-bank","bank":0,"program":0},
-                    "key_range": {"low":0,"high":127},
-                    "velocity_range": {"low":0,"high":127},
-                    "parameters": {
-                        "gain":1.0,
-                        "transpose_semitones":0,
-                        "fine_tune_cents":0.0,
-                        "pitch_bend_range_semitones":2.0,
-                        "modulation_depth":1.0,
-                        "amplitude_envelope": {
-                            "attack_seconds":null,"decay_seconds":null,
-                            "sustain_level":null,"release_seconds":null
-                        },
-                        "pitch_envelope": {
-                            "attack_seconds":null,"decay_seconds":null,
-                            "sustain_level":null,"release_seconds":null,
-                            "depth_cents":null
-                        },
-                        "lfo": {
-                            "enabled":null,"frequency_hz":null,"delay_seconds":null,
-                            "pitch_depth_cents":null,
-                            "mod_wheel_pitch_depth_cents":null,
-                            "attenuation_depth_centibels":null,
-                            "mod_wheel_attenuation_depth_centibels":null
-                        }
-                    }
-                }]
-            }
-        })
-        .to_string();
-        let layered = add_dls_program_layer(&document).unwrap();
-        let layered = replace_dls_layer_source(&layered, 1, "dls.b00000000.p00000030").unwrap();
-        let layered = replace_dls_layer_parameter(
-            &layered,
-            1,
-            "lfo.delay_seconds",
-            menu::ProgramParameterValue::Number(Some(0.75)),
-        )
-        .unwrap();
-        let layered = replace_dls_layer_parameter(
-            &layered,
-            1,
-            "enabled",
-            menu::ProgramParameterValue::Boolean(Some(false)),
-        )
-        .unwrap();
-        let value: Value = serde_json::from_str(&layered).unwrap();
-        assert_eq!(value["payload"]["layers"].as_array().unwrap().len(), 2);
-        assert_eq!(value["payload"]["layers"][0]["enabled"], true);
-        assert_eq!(value["payload"]["layers"][1]["enabled"], false);
-        assert_eq!(value["payload"]["layers"][0]["source"]["program"], 0);
-        assert_eq!(value["payload"]["layers"][1]["source"]["program"], 48);
-        assert_eq!(
-            value["payload"]["layers"][1]["parameters"]["lfo"]["delay_seconds"],
-            0.75
-        );
-        assert!(
-            replace_dls_layer_parameter(
-                &layered,
-                0,
-                "enabled",
-                menu::ProgramParameterValue::Boolean(Some(false)),
-            )
-            .is_err()
-        );
-
-        let output = replace_dls_program_parameter(
-            &layered,
-            "gain",
-            menu::ProgramParameterValue::Number(Some(0.8)),
-        )
-        .unwrap();
-        let output: Value = serde_json::from_str(&output).unwrap();
-        assert_eq!(output["payload"]["gain"], 0.8);
-        assert!(
-            replace_dls_program_parameter(
-                &layered,
-                "gain",
-                menu::ProgramParameterValue::Number(Some(3.0)),
-            )
-            .is_err()
-        );
     }
 }

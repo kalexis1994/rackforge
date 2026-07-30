@@ -6,6 +6,7 @@ use thiserror::Error;
 
 pub const PROGRAM_SCHEMA_VERSION: u32 = 1;
 pub const PROGRAM_EDIT_SCHEMA_VERSION: u32 = 1;
+pub const PROGRAM_EDITOR_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -58,6 +59,236 @@ pub struct PreparedProgram {
     pub storage_path: String,
     pub preview_sound_id: String,
     pub document: ProgramDocument,
+}
+
+/// A resolved, platform-neutral editor tree published by a plugin for one
+/// concrete program draft. Surfaces render this tree without knowing the
+/// plugin payload shape.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProgramEditorView {
+    pub schema_version: u32,
+    pub title: String,
+    pub pages: Vec<ProgramEditorPage>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProgramEditorPage {
+    pub id: String,
+    pub label: String,
+    pub detail: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<ProgramEditorPage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<ProgramEditorField>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProgramEditorField {
+    pub id: String,
+    pub label: String,
+    pub detail: String,
+    pub value: ProgramEditorValue,
+    pub kind: ProgramEditorFieldKind,
+    #[serde(default)]
+    pub live_preview: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ProgramEditorFieldKind {
+    Toggle,
+    Number {
+        minimum: i64,
+        maximum: i64,
+        step: i64,
+        #[serde(default)]
+        decimals: u8,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<String>,
+        #[serde(default)]
+        allow_inherited: bool,
+    },
+    Choice {
+        options: Vec<ProgramEditorChoice>,
+    },
+    Sound {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bank: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProgramEditorChoice {
+    pub value: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum ProgramEditorValue {
+    Inherited,
+    Boolean(bool),
+    Integer(i64),
+    Choice(String),
+    SoundId(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProgramFieldEditRequest {
+    pub schema_version: u32,
+    pub document: ProgramDocument,
+    pub field_id: String,
+    pub value: ProgramEditorValue,
+}
+
+impl ProgramEditorView {
+    pub fn validate(&self) -> Result<(), ProgramError> {
+        if self.schema_version != PROGRAM_EDITOR_SCHEMA_VERSION {
+            return Err(ProgramError::UnsupportedEditorSchema(self.schema_version));
+        }
+        validate_editor_text(&self.title)?;
+        if self.pages.is_empty() {
+            return Err(ProgramError::EmptyEditor);
+        }
+        let mut ids = BTreeSet::new();
+        for page in &self.pages {
+            page.validate(&mut ids)?;
+        }
+        Ok(())
+    }
+}
+
+impl ProgramEditorPage {
+    fn validate(&self, ids: &mut BTreeSet<String>) -> Result<(), ProgramError> {
+        validate_editor_id(&self.id)?;
+        if !ids.insert(self.id.clone()) {
+            return Err(ProgramError::DuplicateEditorIdentifier(self.id.clone()));
+        }
+        validate_editor_text(&self.label)?;
+        validate_editor_text(&self.detail)?;
+        if self.pages.is_empty() && self.fields.is_empty() {
+            return Err(ProgramError::EmptyEditorPage(self.id.clone()));
+        }
+        for page in &self.pages {
+            page.validate(ids)?;
+        }
+        for field in &self.fields {
+            field.validate(ids)?;
+        }
+        Ok(())
+    }
+}
+
+impl ProgramEditorField {
+    fn validate(&self, ids: &mut BTreeSet<String>) -> Result<(), ProgramError> {
+        validate_editor_id(&self.id)?;
+        if !ids.insert(self.id.clone()) {
+            return Err(ProgramError::DuplicateEditorIdentifier(self.id.clone()));
+        }
+        validate_editor_text(&self.label)?;
+        validate_editor_text(&self.detail)?;
+        match (&self.kind, &self.value) {
+            (ProgramEditorFieldKind::Toggle, ProgramEditorValue::Boolean(_)) => {}
+            (
+                ProgramEditorFieldKind::Number {
+                    minimum,
+                    maximum,
+                    step,
+                    decimals,
+                    unit,
+                    allow_inherited,
+                },
+                value,
+            ) => {
+                if minimum > maximum || *step <= 0 || *decimals > 6 {
+                    return Err(ProgramError::InvalidEditorField(self.id.clone()));
+                }
+                if unit
+                    .as_ref()
+                    .is_some_and(|unit| validate_editor_text(unit).is_err())
+                {
+                    return Err(ProgramError::InvalidEditorField(self.id.clone()));
+                }
+                match value {
+                    ProgramEditorValue::Integer(value) if (*minimum..=*maximum).contains(value) => {
+                    }
+                    ProgramEditorValue::Inherited if *allow_inherited => {}
+                    _ => return Err(ProgramError::InvalidEditorField(self.id.clone())),
+                }
+            }
+            (ProgramEditorFieldKind::Choice { options }, ProgramEditorValue::Choice(value)) => {
+                if options.is_empty()
+                    || !options.iter().any(|option| option.value == *value)
+                    || options.iter().any(|option| {
+                        validate_editor_id(&option.value).is_err()
+                            || validate_editor_text(&option.label).is_err()
+                            || option
+                                .detail
+                                .as_ref()
+                                .is_some_and(|detail| validate_editor_text(detail).is_err())
+                    })
+                {
+                    return Err(ProgramError::InvalidEditorField(self.id.clone()));
+                }
+            }
+            (ProgramEditorFieldKind::Sound { bank }, ProgramEditorValue::SoundId(value)) => {
+                if value.trim().is_empty()
+                    || value.contains('\0')
+                    || bank
+                        .as_ref()
+                        .is_some_and(|bank| validate_editor_id(bank).is_err())
+                {
+                    return Err(ProgramError::InvalidEditorField(self.id.clone()));
+                }
+            }
+            _ => return Err(ProgramError::InvalidEditorField(self.id.clone())),
+        }
+        Ok(())
+    }
+}
+
+impl ProgramFieldEditRequest {
+    pub fn validate(&self) -> Result<(), ProgramError> {
+        if self.schema_version != PROGRAM_EDITOR_SCHEMA_VERSION {
+            return Err(ProgramError::UnsupportedEditorSchema(self.schema_version));
+        }
+        self.document.validate()?;
+        validate_editor_id(&self.field_id)
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn validate_editor_id(value: &str) -> Result<(), ProgramError> {
+    if value.is_empty()
+        || value.starts_with('.')
+        || value.ends_with('.')
+        || value.contains("..")
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b".-_".contains(&byte)
+        })
+    {
+        return Err(ProgramError::InvalidEditorIdentifier(value.to_owned()));
+    }
+    Ok(())
+}
+
+fn validate_editor_text(value: &str) -> Result<(), ProgramError> {
+    if value.trim().is_empty() || value.contains('\0') || !value.is_ascii() || value.len() > 64 {
+        return Err(ProgramError::InvalidEditorText);
+    }
+    Ok(())
 }
 
 impl PreparedProgram {
@@ -172,6 +403,20 @@ pub enum ProgramError {
     UnsupportedEditSchema(u32),
     #[error("program edit metadata is empty or contains NUL")]
     InvalidEditMetadata,
+    #[error("unsupported program editor schema {0}")]
+    UnsupportedEditorSchema(u32),
+    #[error("program editor is empty")]
+    EmptyEditor,
+    #[error("program editor page {0:?} is empty")]
+    EmptyEditorPage(String),
+    #[error("invalid program editor identifier {0:?}")]
+    InvalidEditorIdentifier(String),
+    #[error("duplicate program editor identifier {0:?}")]
+    DuplicateEditorIdentifier(String),
+    #[error("program editor text is empty, non-ASCII, too long, or contains NUL")]
+    InvalidEditorText,
+    #[error("invalid program editor field {0:?}")]
+    InvalidEditorField(String),
 }
 
 #[cfg(test)]
@@ -227,5 +472,44 @@ mod tests {
             document: valid_program(),
         };
         assert_eq!(prepared.validate(), Ok(()));
+    }
+
+    #[test]
+    fn validates_declarative_editor_and_typed_mutation() {
+        let view = ProgramEditorView {
+            schema_version: PROGRAM_EDITOR_SCHEMA_VERSION,
+            title: "RF-DLS".into(),
+            pages: vec![ProgramEditorPage {
+                id: "layer-a".into(),
+                label: "LAYER A".into(),
+                detail: "Required layer".into(),
+                enabled: true,
+                pages: Vec::new(),
+                fields: vec![ProgramEditorField {
+                    id: "layer.a.gain".into(),
+                    label: "VOLUME".into(),
+                    detail: "Layer mix gain".into(),
+                    value: ProgramEditorValue::Integer(100),
+                    kind: ProgramEditorFieldKind::Number {
+                        minimum: 0,
+                        maximum: 200,
+                        step: 1,
+                        decimals: 2,
+                        unit: None,
+                        allow_inherited: false,
+                    },
+                    live_preview: true,
+                }],
+            }],
+        };
+        assert_eq!(view.validate(), Ok(()));
+
+        let edit = ProgramFieldEditRequest {
+            schema_version: PROGRAM_EDITOR_SCHEMA_VERSION,
+            document: valid_program(),
+            field_id: "layer.a.gain".into(),
+            value: ProgramEditorValue::Integer(80),
+        };
+        assert_eq!(edit.validate(), Ok(()));
     }
 }

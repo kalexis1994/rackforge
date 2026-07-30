@@ -19,8 +19,10 @@ pub use parameter::{
 };
 pub use preset::{BankDescriptor, PresetCatalog, PresetDescriptor};
 pub use program::{
-    PROGRAM_EDIT_SCHEMA_VERSION, PROGRAM_SCHEMA_VERSION, PreparedProgram, ProgramDocument,
-    ProgramEditRequest, ProgramError, validate_plugin_identifier, validate_program_identifier,
+    PROGRAM_EDIT_SCHEMA_VERSION, PROGRAM_EDITOR_SCHEMA_VERSION, PROGRAM_SCHEMA_VERSION,
+    PreparedProgram, ProgramDocument, ProgramEditRequest, ProgramEditorChoice, ProgramEditorField,
+    ProgramEditorFieldKind, ProgramEditorPage, ProgramEditorValue, ProgramEditorView, ProgramError,
+    ProgramFieldEditRequest, validate_plugin_identifier, validate_program_identifier,
 };
 pub use rackforge_surface_api::{
     SURFACE_ACTIVATION_SCHEMA_VERSION, SurfaceActivationReason, SurfaceActivationRequest,

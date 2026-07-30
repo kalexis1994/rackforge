@@ -7,6 +7,7 @@ description = "Controller-independent RackForge hardware surface state and navig
 
 [dependencies]
 rackforge-controller-api = { path = "../rackforge-controller-api" }
+rackforge-program-api = { path = "../rackforge-program-api" }
 rackforge-session-api = { path = "../rackforge-session-api" }
 rackforge-ui = { path = "../rackforge-ui" }
 serde_json.workspace = true

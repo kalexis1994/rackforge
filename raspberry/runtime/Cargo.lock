@@ -534,6 +534,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-dsp"
+version = "0.1.0"
+
+[[package]]
 name = "rackforge-gain"
 version = "0.1.0"
 dependencies = [
@@ -567,6 +571,7 @@ dependencies = [
 name = "rackforge-rf-dls"
 version = "0.1.0"
 dependencies = [
+ "rackforge-dsp",
  "rackforge-plugin-api",
  "rf-dls",
  "serde",

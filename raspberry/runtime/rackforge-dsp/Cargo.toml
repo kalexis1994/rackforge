@@ -1,0 +1,8 @@
+[package]
+name = "rackforge-dsp"
+description = "Portable, real-time-safe DSP building blocks for RackForge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

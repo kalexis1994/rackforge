@@ -10,7 +10,7 @@ recurso obligatorio `dls-bank`.
 - Plugin API: 1.3
 - Tipo: instrumento
 - Polifonía máxima: 32 voces
-- Salida: mono duplicada en todos los canales ofrecidos por el host
+- Salida: estéreo; sin FX conserva la señal mono original en ambos canales
 - Banco inicial: General MIDI bank 0, program 0
 - Preset inicial: `gm.piano-1`
 - Estado v2: volumen e ID estable del programa seleccionado; sigue leyendo el
@@ -73,7 +73,7 @@ reescribe el banco: guarda una referencia a `dls-bank` + banco + programa y
 data/plugins/org.rackforge.rf-dls/custom/
 ```
 
-El payload v2 admite una capa `A` obligatoria y una capa `B` opcional. `A`
+El payload v4 admite una capa `A` obligatoria y una capa `B` opcional. `A`
 siempre está habilitada; `B` puede desactivarse conservando toda su
 configuración. Cada capa referencia directamente un instrumento del DLS y
 define rangos de tecla y velocidad. Sus overrides
@@ -82,9 +82,21 @@ de modulación, envolventes de amplitud y pitch, y LFO con rate, delay y
 profundidades. Un valor opcional ausente significa `INHERIT`: el motor conserva
 el comportamiento original codificado en el instrumento DLS.
 
-Los documentos v1 existentes se migran en memoria a una única capa `A` y se
-siguen reproduciendo sin reescribir el archivo. La siguiente vez que el usuario
-los guarda se serializan como v2. IDs y slots duplicados, symlinks, archivos
+Después del mix de capas, el programa dispone de una cadena FX compartida. El
+primer nodo es un chorus estéreo con enable, rate, depth, delay, feedback,
+width y mix. Sus cambios se preescuchan mientras se mueve el control y se
+suavizan dentro del DSP para evitar saltos.
+
+El segundo nodo es una reverb ROOM estéreo con enable, size, decay, pre-delay,
+damping, width y mix. Usa una red de ocho delays realimentados y reserva todos
+sus buffers al activar el plugin; el hilo de audio no asigna memoria ni realiza
+I/O.
+
+Los documentos v1 existentes se migran en memoria a una única capa `A`; los v2
+conservan sus dos capas. Las versiones v1 y v2 reciben ambos FX desactivados, y
+la v3 recibe la nueva reverb desactivada, sin reescribir el archivo. La
+siguiente vez que el usuario los guarda se serializan como v4. IDs y slots
+duplicados, symlinks, archivos
 mayores a 256 KiB, payloads desconocidos o valores fuera de rango se ignoran
 individualmente y se registran como advertencia; no impiden arrancar el resto
 del banco.
@@ -103,9 +115,10 @@ El ID de catálogo resultante es `custom.user.warm-piano`. Cambiar o agregar
 archivos requiere reiniciar el motor RF-DLS para reconstruir el catálogo.
 
 Durante una edición, Core entrega al plugin el documento completo mediante la
-extensión de programas 1.1. RF-DLS preescucha ese borrador de forma transitoria:
-las dos capas y sus overrides ya se oyen antes de guardar, pero el catálogo y
-los archivos sólo cambian después de confirmar `SAVE`.
+extensión de programas. RF-DLS preescucha ese borrador de forma transitoria:
+las dos capas, sus overrides, el chorus y la reverb compartidos ya se oyen antes de
+guardar, pero el catálogo y los archivos sólo cambian después de confirmar
+`SAVE`.
 
 ## Límites de esta etapa
 

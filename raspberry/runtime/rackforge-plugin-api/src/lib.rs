@@ -11,7 +11,7 @@ pub mod program;
 
 pub use manifest::{
     ApiRequirement, Capability, PluginKind, PluginManifest, ResourceKind, ResourceRequirement,
-    RuntimeDescriptor,
+    RuntimeDescriptor, WebSurface, WebSurfaceKind, WebUi,
 };
 pub use parameter::{
     EnumChoice, PageDescriptor, ParameterDescriptor, ParameterFlags, ParameterKind,

@@ -1,0 +1,4 @@
+[web]
+enabled = true
+access = "local"
+port = 8787

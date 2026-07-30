@@ -11,7 +11,7 @@ $archive = Join-Path ([System.IO.Path]::GetTempPath()) (
 )
 
 try {
-    & tar -C $source --exclude=target --exclude=.git -cf $archive .
+    & tar -C $source --exclude=target --exclude=.git --exclude=web/node_modules -cf $archive .
     if ($LASTEXITCODE -ne 0) {
         throw "No se pudo crear el paquete de despliegue."
     }

@@ -13,6 +13,10 @@ use rackforge_control_api::{
 };
 #[cfg(target_os = "linux")]
 use rackforge_controller_api::LITTLE_V1;
+#[cfg(target_os = "linux")]
+use rackforge_session_api::{
+    AddonInstanceState, ClientId, CommandEnvelope, InstanceId, SessionCommand, SessionState,
+};
 use std::env;
 use std::error::Error;
 use std::fmt::Write as _;
@@ -26,6 +30,8 @@ use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
+#[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -42,6 +48,8 @@ const CLEAR_SCREEN: &[u8] = &[
 ];
 const USB_BOOT_STABILITY: Duration = Duration::from_secs(5);
 const ACQUIRE_RETRY_DELAY: Duration = Duration::from_secs(2);
+#[cfg(target_os = "linux")]
+static NEXT_CONTROL_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug)]
 struct Cli {
@@ -866,41 +874,84 @@ fn control_request(request: &ControlRequest) -> Result<ControlResponse, String> 
 }
 
 #[cfg(target_os = "linux")]
-fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
-    let response = control_request(&ControlRequest::Snapshot)?;
-    match response {
-        ControlResponse::Snapshot { snapshot } if snapshot.plugin_id == "org.rackforge.rf-dls" => {
-            if !snapshot.ui_layouts.iter().any(|layout| layout == LITTLE_V1) {
-                return Err(format!(
-                    "{} no declara una vista compatible con {LITTLE_V1}",
-                    snapshot.plugin_name
-                ));
-            }
-            let selected = snapshot.selected_sound_id.clone();
-            menu.set_play_sounds(
-                snapshot
-                    .sounds
-                    .into_iter()
-                    .map(|sound| {
-                        menu::PlaySound::new(
-                            sound.id,
-                            sound.name,
-                            sound.bank.unwrap_or_else(|| "dls".into()),
-                            sound.detail.unwrap_or_else(|| " ".into()),
-                        )
-                    })
-                    .collect(),
-                selected.as_deref(),
-            );
-            Ok(())
-        }
-        ControlResponse::Snapshot { snapshot } => Err(format!(
-            "el motor LIVE activo es {}, no RF-DLS",
-            snapshot.plugin_id
-        )),
-        ControlResponse::Error { message } => Err(message),
-        _ => Err("respuesta inesperada al pedir catálogo".into()),
+fn live_snapshot() -> Result<SessionState, String> {
+    match control_request(&ControlRequest::Snapshot)? {
+        ControlResponse::Snapshot { snapshot } => Ok(snapshot),
+        ControlResponse::Error { message, .. } => Err(message),
+        _ => Err("respuesta inesperada al pedir estado de sesión".into()),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn active_rf_dls_instance(snapshot: &SessionState) -> Result<&AddonInstanceState, String> {
+    let instance = snapshot
+        .active_instance()
+        .ok_or_else(|| "la sesión LIVE no tiene una instancia activa".to_owned())?;
+    if instance.addon_id != "org.rackforge.rf-dls" {
+        return Err(format!(
+            "el motor LIVE activo es {}, no RF-DLS",
+            instance.addon_id
+        ));
+    }
+    if !instance.ui_layouts.iter().any(|layout| layout == LITTLE_V1) {
+        return Err(format!(
+            "{} no declara una vista compatible con {LITTLE_V1}",
+            instance.addon_name
+        ));
+    }
+    Ok(instance)
+}
+
+#[cfg(target_os = "linux")]
+fn active_rf_dls_instance_id() -> Result<InstanceId, String> {
+    let snapshot = live_snapshot()?;
+    Ok(active_rf_dls_instance(&snapshot)?.instance_id.clone())
+}
+
+#[cfg(target_os = "linux")]
+fn dispatch_session_command(command: SessionCommand) -> Result<(), String> {
+    let command_id = NEXT_CONTROL_COMMAND_ID
+        .fetch_add(1, Ordering::Relaxed)
+        .max(1);
+    match control_request(&ControlRequest::Dispatch {
+        envelope: CommandEnvelope::new(
+            ClientId::new("surface.arturia.keylab-essential-mk3")
+                .map_err(|message| format!("client_id inválido: {message}"))?,
+            command_id,
+            command,
+        ),
+    })? {
+        ControlResponse::CommandApplied {
+            command_id: confirmed,
+            ..
+        } if confirmed == command_id => Ok(()),
+        ControlResponse::Error { message, .. } => Err(message),
+        _ => Err("respuesta inesperada al ejecutar comando de sesión".into()),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
+    let snapshot = live_snapshot()?;
+    let instance = active_rf_dls_instance(&snapshot)?;
+    let selected = instance.selected_sound_id.clone();
+    menu.set_play_sounds(
+        instance
+            .sounds
+            .iter()
+            .cloned()
+            .map(|sound| {
+                menu::PlaySound::new(
+                    sound.id,
+                    sound.name,
+                    sound.bank.unwrap_or_else(|| "dls".into()),
+                    sound.detail.unwrap_or_else(|| " ".into()),
+                )
+            })
+            .collect(),
+        selected.as_deref(),
+    );
+    Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -910,13 +961,7 @@ fn refresh_live_catalog(_menu: &mut menu::Menu) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn keep_audition_alive(lease_id: u64) -> Result<(), String> {
-    match control_request(&ControlRequest::KeepAuditionAlive { lease_id })? {
-        ControlResponse::AuditionKeptAlive {
-            lease_id: confirmed,
-        } if confirmed == lease_id => Ok(()),
-        ControlResponse::Error { message } => Err(message),
-        _ => Err("respuesta inesperada al renovar audition".into()),
-    }
+    dispatch_session_command(SessionCommand::KeepAuditionAlive { lease_id })
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -931,63 +976,54 @@ fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
     };
     match command {
         menu::MenuCommand::SelectSound { id } => {
-            match control_request(&ControlRequest::SelectSound { id })? {
-                ControlResponse::Ok { selected_sound_id } => {
-                    refresh_live_catalog(menu)?;
-                    println!("SOUND_SELECTED id={selected_sound_id}");
-                    Ok(true)
-                }
-                ControlResponse::Error { message } => Err(message),
-                _ => Err("respuesta inesperada al seleccionar sonido".into()),
-            }
+            let instance_id = active_rf_dls_instance_id()?;
+            dispatch_session_command(SessionCommand::SelectSound {
+                instance_id,
+                sound_id: id.clone(),
+            })?;
+            refresh_live_catalog(menu)?;
+            println!("SOUND_SELECTED id={id}");
+            Ok(true)
         }
         menu::MenuCommand::BeginAudition {
             preview_sound_id,
             draft_name,
             program_id,
         } => {
-            let lease_id = match control_request(&ControlRequest::BeginAudition {
-                plugin_id: "org.rackforge.rf-dls".into(),
-            })? {
-                ControlResponse::AuditionGranted { lease_id } => lease_id,
-                ControlResponse::Error { message } => return Err(message),
-                _ => return Err("respuesta inesperada al pedir audition".into()),
-            };
-            match control_request(&ControlRequest::SelectSound {
-                id: preview_sound_id,
-            })? {
-                ControlResponse::Ok { .. } => {
-                    if !menu.audition_started(lease_id) {
-                        let _ = control_request(&ControlRequest::EndAudition { lease_id });
-                        return Err("el menú perdió el draft de audition".into());
-                    }
-                    println!(
-                        "AUDITION_STARTED lease={lease_id} program={:?} name={draft_name:?}",
-                        program_id
-                    );
-                    Ok(true)
-                }
-                ControlResponse::Error { message } => {
-                    let _ = control_request(&ControlRequest::EndAudition { lease_id });
-                    Err(message)
-                }
-                _ => {
-                    let _ = control_request(&ControlRequest::EndAudition { lease_id });
-                    Err("respuesta inesperada al preparar audition".into())
-                }
+            let instance_id = active_rf_dls_instance_id()?;
+            dispatch_session_command(SessionCommand::BeginAudition {
+                instance_id: instance_id.clone(),
+            })?;
+            let snapshot = live_snapshot()?;
+            let lease_id = snapshot
+                .audition
+                .as_ref()
+                .filter(|audition| audition.instance_id == instance_id)
+                .map(|audition| audition.lease_id)
+                .ok_or_else(|| "RackForge no publicó el foco de audition".to_owned())?;
+            if let Err(message) = dispatch_session_command(SessionCommand::SelectSound {
+                instance_id,
+                sound_id: preview_sound_id,
+            }) {
+                let _ = dispatch_session_command(SessionCommand::EndAudition { lease_id });
+                return Err(message);
             }
+            if !menu.audition_started(lease_id) {
+                let _ = dispatch_session_command(SessionCommand::EndAudition { lease_id });
+                return Err("el menú perdió el draft de audition".into());
+            }
+            println!(
+                "AUDITION_STARTED lease={lease_id} program={:?} name={draft_name:?}",
+                program_id
+            );
+            Ok(true)
         }
         menu::MenuCommand::EndAudition { lease_id } => {
-            match control_request(&ControlRequest::EndAudition { lease_id })? {
-                ControlResponse::AuditionEnded => {
-                    menu.audition_ended();
-                    refresh_live_catalog(menu)?;
-                    println!("AUDITION_ENDED lease={lease_id}");
-                    Ok(true)
-                }
-                ControlResponse::Error { message } => Err(message),
-                _ => Err("respuesta inesperada al terminar audition".into()),
-            }
+            dispatch_session_command(SessionCommand::EndAudition { lease_id })?;
+            menu.audition_ended();
+            refresh_live_catalog(menu)?;
+            println!("AUDITION_ENDED lease={lease_id}");
+            Ok(true)
         }
     }
 }

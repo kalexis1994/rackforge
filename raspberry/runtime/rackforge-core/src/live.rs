@@ -1,20 +1,21 @@
-use crate::control::{self, ControlCommand};
+use crate::control::{self, AudioControlCommand};
+use crate::session::SessionStore;
 use crate::{LoadedPlugin, PluginInstance, PluginPackage};
 use alsa::pcm::{Access, Format, HwParams, PCM};
 use alsa::{Direction, ValueOr};
 use anyhow::{Context, Result, bail};
 use midir::{Ignore, MidiInput, MidiInputConnection};
-use rackforge_control_api::{
-    CONTROL_SCHEMA_VERSION, CONTROL_SOCKET_NAME, LiveSnapshot, SoundSummary,
-};
+use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_plugin_api::PluginKind;
 use rackforge_plugin_api::abi::MidiEventV1;
+use rackforge_session_api::{
+    AddonInstanceState, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, InstanceId, Revision,
+    SESSION_SCHEMA_VERSION, SessionId, SessionState, SoundSummary,
+};
 use std::collections::BTreeMap;
 use std::env;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 
 const OUTPUT_DEVICE: &str = "hw:CARD=USB,DEV=0";
 const OUTPUT_RATE: u32 = 48_000;
@@ -22,12 +23,13 @@ const CHANNELS: usize = 2;
 const PERIOD_FRAMES: usize = 128;
 const BUFFER_FRAMES: i64 = 384;
 const MAX_EVENTS_PER_BLOCK: usize = 256;
-const AUDITION_LEASE_TIMEOUT: Duration = Duration::from_secs(15);
+const MIDI_QUEUE_CAPACITY: usize = 2_048;
+const AUDIO_CONTROL_QUEUE_CAPACITY: usize = 64;
 
 struct AuditionLease {
     id: u64,
+    instance_id: InstanceId,
     previous_sound_id: Option<String>,
-    last_keep_alive: Instant,
 }
 
 pub struct LiveConfig {
@@ -86,7 +88,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         CHANNELS as u32,
     )?;
 
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
     let (_midi_connections, midi_port_names) = connect_midi_sources(sender)?;
     println!("MIDI_READY ports={midi_port_names:?}");
     let pcm = open_scarlett()?;
@@ -103,32 +105,43 @@ pub fn run(config: LiveConfig) -> Result<()> {
         })
         .map(|selected| selected.id.clone())
         .or_else(|| presets.presets.first().map(|preset| preset.id.clone()));
-    let snapshot = Arc::new(Mutex::new(LiveSnapshot {
-        schema_version: CONTROL_SCHEMA_VERSION,
-        plugin_id: plugin.manifest().id.clone(),
-        plugin_name: plugin.manifest().name.clone(),
-        ui_layouts: plugin.manifest().ui_layouts.clone(),
-        sounds: presets
-            .presets
-            .iter()
-            .map(|preset| SoundSummary {
-                id: preset.id.clone(),
-                name: preset.name.clone(),
-                bank: preset.bank.clone(),
-                detail: preset
-                    .description
-                    .clone()
-                    .or_else(|| preset.category.clone()),
-            })
-            .collect(),
-        selected_sound_id,
-    }));
-    let (control_sender, control_receiver) = mpsc::channel();
+    let instance_id =
+        InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).map_err(|message| anyhow::anyhow!(message))?;
+    let session = SessionState {
+        schema_version: SESSION_SCHEMA_VERSION,
+        session_id: SessionId::new(DEFAULT_LIVE_SESSION_ID)
+            .map_err(|message| anyhow::anyhow!(message))?,
+        revision: Revision::ZERO,
+        active_instance_id: Some(instance_id.clone()),
+        instances: vec![AddonInstanceState {
+            instance_id,
+            addon_id: plugin.manifest().id.clone(),
+            addon_name: plugin.manifest().name.clone(),
+            ui_layouts: plugin.manifest().ui_layouts.clone(),
+            sounds: presets
+                .presets
+                .iter()
+                .map(|preset| SoundSummary {
+                    id: preset.id.clone(),
+                    name: preset.name.clone(),
+                    bank: preset.bank.clone(),
+                    detail: preset
+                        .description
+                        .clone()
+                        .or_else(|| preset.category.clone()),
+                })
+                .collect(),
+            selected_sound_id,
+        }],
+        audition: None,
+    };
+    let session_store = SessionStore::shared(session)?;
+    let (control_sender, control_receiver) = mpsc::sync_channel(AUDIO_CONTROL_QUEUE_CAPACITY);
     let control_path = control_socket_path();
-    let _control_server = control::start(&control_path, Arc::clone(&snapshot), control_sender)?;
+    let _control_server = control::start(&control_path, session_store, control_sender)?;
     println!("CONTROL_READY socket={}", control_path.display());
     println!("READY_TO_PLAY");
-    audio_loop(&pcm, &receiver, &control_receiver, &snapshot, &mut instance)
+    audio_loop(&pcm, &receiver, &control_receiver, &mut instance)
 }
 
 fn control_socket_path() -> PathBuf {
@@ -168,7 +181,7 @@ fn performance_midi_names(midi: &MidiInput) -> Result<Vec<String>> {
 }
 
 fn connect_midi_sources(
-    sender: Sender<MidiEventV1>,
+    sender: SyncSender<MidiEventV1>,
 ) -> Result<(Vec<MidiInputConnection<()>>, Vec<String>)> {
     let discovery = MidiInput::new("rackforge-core-discovery")?;
     let names = performance_midi_names(&discovery)?;
@@ -192,7 +205,7 @@ fn connect_midi_sources(
                     }
                     let mut data = [0_u8; 3];
                     data[..message.len()].copy_from_slice(message);
-                    let _ = source_sender.send(MidiEventV1 {
+                    let _ = source_sender.try_send(MidiEventV1 {
                         frame: 0,
                         length: message.len() as u8,
                         data,
@@ -239,8 +252,7 @@ fn open_scarlett() -> Result<PCM> {
 fn audio_loop(
     pcm: &PCM,
     receiver: &Receiver<MidiEventV1>,
-    control_receiver: &Receiver<ControlCommand>,
-    snapshot: &Arc<Mutex<LiveSnapshot>>,
+    control_receiver: &Receiver<AudioControlCommand>,
     instance: &mut PluginInstance<'_>,
 ) -> Result<()> {
     let io = pcm.io_i32()?;
@@ -256,80 +268,58 @@ fn audio_loop(
     let mut next_audition_id = 1_u64;
 
     loop {
-        if audition
-            .as_ref()
-            .is_some_and(|lease| lease.last_keep_alive.elapsed() >= AUDITION_LEASE_TIMEOUT)
-            && let Some(expired) = audition.take()
-        {
-            if let Err(error) = restore_after_audition(instance, snapshot, &expired) {
-                eprintln!(
-                    "AUDITION_RESTORE_ERROR lease={} error={error:#}",
-                    expired.id
-                );
-            } else {
-                println!("AUDITION_EXPIRED lease={}", expired.id);
-            }
-        }
         while let Ok(command) = control_receiver.try_recv() {
             match command {
-                ControlCommand::SelectSound { id, reply } => {
-                    let result = instance.load_preset(&id).map(|()| {
-                        if let Ok(mut snapshot) = snapshot.lock() {
-                            snapshot.selected_sound_id = Some(id.clone());
-                        }
-                        println!("LIVE_SOUND_SELECTED id={id}");
-                        id
+                AudioControlCommand::SelectSound {
+                    instance_id,
+                    sound_id,
+                    reply,
+                } => {
+                    let result = instance.load_preset(&sound_id).map(|()| {
+                        println!("LIVE_SOUND_SELECTED instance={instance_id} id={sound_id}");
                     });
                     let _ = reply.send(result.map_err(|error| error.to_string()));
                 }
-                ControlCommand::BeginAudition { plugin_id, reply } => {
+                AudioControlCommand::BeginAudition {
+                    instance_id,
+                    previous_sound_id,
+                    reply,
+                } => {
                     let result = (|| -> Result<u64, String> {
                         if audition.is_some() {
                             return Err("audition focus is already leased".into());
-                        }
-                        let (active_plugin, previous_sound_id) = snapshot
-                            .lock()
-                            .map_err(|_| "live snapshot lock is poisoned".to_owned())
-                            .map(|snapshot| {
-                                (
-                                    snapshot.plugin_id.clone(),
-                                    snapshot.selected_sound_id.clone(),
-                                )
-                            })?;
-                        if plugin_id != active_plugin {
-                            return Err(format!(
-                                "plugin {plugin_id:?} cannot audition while {active_plugin:?} is active"
-                            ));
                         }
                         instance.reset().map_err(|error| error.to_string())?;
                         let lease_id = next_audition_id;
                         next_audition_id = next_audition_id.wrapping_add(1).max(1);
                         audition = Some(AuditionLease {
                             id: lease_id,
+                            instance_id: instance_id.clone(),
                             previous_sound_id,
-                            last_keep_alive: Instant::now(),
                         });
-                        println!("AUDITION_GRANTED lease={lease_id} plugin={plugin_id}");
+                        println!("AUDITION_GRANTED lease={lease_id} instance={instance_id}");
                         Ok(lease_id)
                     })();
                     let _ = reply.send(result);
                 }
-                ControlCommand::KeepAuditionAlive { lease_id, reply } => {
-                    let result = match audition.as_mut() {
-                        Some(lease) if lease.id == lease_id => {
-                            lease.last_keep_alive = Instant::now();
-                            Ok(lease_id)
-                        }
+                AudioControlCommand::KeepAuditionAlive { lease_id, reply } => {
+                    let result = match audition.as_ref() {
+                        Some(lease) if lease.id == lease_id => Ok(()),
                         _ => Err("audition lease is missing or no longer valid".into()),
                     };
                     let _ = reply.send(result);
                 }
-                ControlCommand::EndAudition { lease_id, reply } => {
+                AudioControlCommand::EndAudition { lease_id, reply } => {
                     let result = match audition.take() {
                         Some(lease) if lease.id == lease_id => {
-                            restore_after_audition(instance, snapshot, &lease)
+                            restore_after_audition(instance, &lease)
                                 .map_err(|error| error.to_string())
-                                .map(|()| println!("AUDITION_RELEASED lease={lease_id}"))
+                                .map(|()| {
+                                    println!(
+                                        "AUDITION_RELEASED lease={lease_id} instance={}",
+                                        lease.instance_id
+                                    )
+                                })
                         }
                         Some(lease) => {
                             audition = Some(lease);
@@ -382,19 +372,11 @@ fn audio_loop(
     }
 }
 
-fn restore_after_audition(
-    instance: &mut PluginInstance<'_>,
-    snapshot: &Arc<Mutex<LiveSnapshot>>,
-    lease: &AuditionLease,
-) -> Result<()> {
+fn restore_after_audition(instance: &mut PluginInstance<'_>, lease: &AuditionLease) -> Result<()> {
     instance.reset()?;
     if let Some(previous) = &lease.previous_sound_id {
         instance.load_preset(previous)?;
     }
-    let mut snapshot = snapshot
-        .lock()
-        .map_err(|_| anyhow::anyhow!("live snapshot lock is poisoned"))?;
-    snapshot.selected_sound_id = lease.previous_sound_id.clone();
     Ok(())
 }
 

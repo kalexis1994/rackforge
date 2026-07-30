@@ -4,6 +4,7 @@ pub mod control;
 pub mod live;
 pub mod loader;
 pub mod package;
+pub mod session;
 pub mod storage;
 
 pub use loader::{LoadedPlugin, PluginInstance};

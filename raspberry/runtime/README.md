@@ -9,6 +9,7 @@ estabilizar la API sin interrumpir el instrumento que ya funciona.
 | Directorio | Responsabilidad |
 |---|---|
 | `rackforge-control-api/` | Protocolo local versionado entre Core y superficies de control. |
+| `rackforge-session-api/` | Estado, instancias, comandos, eventos y revisiones independientes de plataforma. |
 | `rackforge-plugin-api/` | ABI C versionada, manifiestos y esquema declarativo de parámetros. |
 | `rackforge-core/` | Descubrimiento, validación, carga dinámica e instancias. |
 | `rackforge-ui/` | Componentes, foco, layout y estilos independientes del hardware. |
@@ -121,16 +122,23 @@ RF-DLS usa esta capacidad para convertir cada instrumento encontrado en el DLS
 en un preset dinámico con ID opaco y estable, nombre y detalle. Core conserva la
 selección activa y las superficies de control nunca leen ni interpretan DLS.
 
-El proceso LIVE expone una foto del catálogo y órdenes `SelectSound` mediante
-un socket Unix local versionado:
+El proceso LIVE crea una sesión con un `session_id`, instancias identificadas
+por `instance_id` y una revisión monotónica. El socket Unix local expone
+snapshots, historial acotado de eventos y comandos tipados:
 
 ```text
-addon → HostApi 1.3 → Core LIVE → rackforge-control-api → KeyLab bridge
+addon → HostApi 1.3 → SessionState → rackforge-control-api → superficies
 ```
 
-La selección se aplica al comienzo de un bloque de audio. El servidor de
-control usa mensajes JSON acotados, valida IDs contra el catálogo publicado y
-no realiza E/S dentro del callback de procesamiento del plugin.
+LITTLE ya utiliza `SessionCommand::SelectSound`, `BeginAudition`,
+`KeepAuditionAlive` y `EndAudition`. Core valida la instancia y el catálogo,
+envía la operación mediante una cola acotada y publica un `SessionEvent` solo
+después de que el motor la aplica. La selección ocurre al comienzo de un bloque
+de audio. El callback no toca el store de sesión ni realiza E/S.
+
+Los clientes pueden declarar `expected_revision` para rechazar ediciones
+obsoletas. Si pierden eventos, solicitan un snapshot completo y reconstruyen su
+vista sin depender de estado implícito.
 
 Para crear la raíz o guardar un documento desde tooling:
 
@@ -294,9 +302,11 @@ un editor de addon. Core captura el preset activo antes de concederla y ejecuta
 selecciones hechas durante la lease son audibles, pero al liberarla se restaura
 el preset capturado.
 
-La lease vence después de 15 segundos sin heartbeat. Esto cubre cierres,
-desconexiones y crashes del editor sin dejar permanentemente activo un sonido
-de preview.
+La lease vence después de 15 segundos sin heartbeat. Un watchdog del plano de
+control ordena la restauración mediante la misma cola acotada y publica
+`AuditionEnded`; el hilo de audio no consulta relojes, mutexes ni estado de
+interfaz. Esto cubre cierres, desconexiones y crashes del editor sin dejar
+permanentemente activo un sonido de preview.
 
 ## Alcance de API v1.3
 
@@ -314,8 +324,10 @@ Incluye:
 - raíz de datos privada por addon, sin estructura interna impuesta;
 - documento común de programas con payload versionado por el plugin.
 - catálogos de presets dinámicos dependientes de recursos externos;
-- protocolo local genérico para consultar LIVE y seleccionar sonidos.
-- lease exclusiva y recuperable para audition durante la edición.
+- sesión versionada con instancias estables, comandos y eventos monotónicos;
+- historial acotado para sincronización de superficies;
+- lease exclusiva y recuperable para audition durante la edición;
+- colas MIDI y de control acotadas hacia el hilo de audio.
 
 Quedan para extensiones compatibles:
 

@@ -17,7 +17,7 @@ use rackforge_controller_package::{
 };
 #[cfg(target_os = "linux")]
 use rackforge_session_api::{
-    AddonInstanceState, ClientId, CommandEnvelope, EventEnvelope, InstanceId, SessionCommand,
+    ClientId, CommandEnvelope, EventEnvelope, InstanceId, PluginInstanceState, SessionCommand,
     SessionEvent, SessionState, SurfaceActivationRequest, SurfaceMode,
 };
 use rackforge_surface_runtime as menu;
@@ -1091,20 +1091,20 @@ fn live_snapshot() -> Result<SessionState, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn active_rf_dls_instance(snapshot: &SessionState) -> Result<&AddonInstanceState, String> {
+fn active_rf_dls_instance(snapshot: &SessionState) -> Result<&PluginInstanceState, String> {
     let instance = snapshot
         .active_instance()
         .ok_or_else(|| "la sesión LIVE no tiene una instancia activa".to_owned())?;
-    if instance.addon_id != "org.rackforge.rf-dls" {
+    if instance.plugin_id != "org.rackforge.rf-dls" {
         return Err(format!(
             "el motor LIVE activo es {}, no RF-DLS",
-            instance.addon_id
+            instance.plugin_id
         ));
     }
     if !instance.ui_layouts.iter().any(|layout| layout == LITTLE_V1) {
         return Err(format!(
             "{} no declara una vista compatible con {LITTLE_V1}",
-            instance.addon_name
+            instance.plugin_name
         ));
     }
     Ok(instance)

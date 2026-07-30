@@ -216,11 +216,11 @@ struct RolandScva {
     decay_seconds: f32,
     sustain_level: f32,
     release_seconds: f32,
-    _addon_data_root: Option<PathBuf>,
+    _plugin_data_root: Option<PathBuf>,
 }
 
 impl RolandScva {
-    fn new(bank: Arc<SampleBank>, addon_data_root: Option<PathBuf>) -> Self {
+    fn new(bank: Arc<SampleBank>, plugin_data_root: Option<PathBuf>) -> Self {
         let banks = BTreeMap::from([(PIANO_SOUND_ID.to_owned(), Arc::clone(&bank))]);
         Self {
             bank,
@@ -237,7 +237,7 @@ impl RolandScva {
             decay_seconds: 0.0,
             sustain_level: 1.0,
             release_seconds: 0.05,
-            _addon_data_root: addon_data_root,
+            _plugin_data_root: plugin_data_root,
         }
     }
 
@@ -590,14 +590,14 @@ fn resource_path(host: &HostApiV1) -> Result<PathBuf, String> {
     Ok(PathBuf::from(text))
 }
 
-fn addon_data_path(host: &HostApiV1) -> Result<Option<PathBuf>, String> {
+fn plugin_data_path(host: &HostApiV1) -> Result<Option<PathBuf>, String> {
     if version_major(host.api_version) != 1 || version_minor(host.api_version) < 2 {
         return Ok(None);
     }
     if host.struct_size < size_of::<HostApiV1>() as u32 {
         return Err("host API 1.2 table is truncated".into());
     }
-    let Some(callback) = host.get_addon_data_path else {
+    let Some(callback) = host.get_plugin_data_path else {
         return Ok(None);
     };
     // SAFETY: a null destination queries the required path size.
@@ -606,19 +606,19 @@ fn addon_data_path(host: &HostApiV1) -> Result<Option<PathBuf>, String> {
         return Ok(None);
     }
     if required > 32 * 1024 {
-        return Err("addon data path is unreasonably large".into());
+        return Err("plugin data path is unreasonably large".into());
     }
     let mut bytes = vec![0_u8; required];
     // SAFETY: the buffer remains valid and writable for the callback.
     let reported = unsafe { callback(host.context, bytes.as_mut_ptr(), bytes.len()) };
     if reported != required {
-        return Err("addon data path changed while being read".into());
+        return Err("plugin data path changed while being read".into());
     }
-    let text = String::from_utf8(bytes).map_err(|_| "addon data path is not UTF-8".to_owned())?;
+    let text = String::from_utf8(bytes).map_err(|_| "plugin data path is not UTF-8".to_owned())?;
     Ok(Some(PathBuf::from(text)))
 }
 
-fn optional_addon_bank(
+fn optional_plugin_bank(
     data_root: Option<&Path>,
     sound_id: &str,
 ) -> Result<Option<Arc<SampleBank>>, String> {
@@ -650,16 +650,16 @@ unsafe extern "C" fn create(host: *const HostApiV1) -> *mut c_void {
     };
     let result = resource_path(host)
         .and_then(|path| cached_bank(&path))
-        .and_then(|bank| addon_data_path(host).map(|data_root| (bank, data_root)))
+        .and_then(|bank| plugin_data_path(host).map(|data_root| (bank, data_root)))
         .and_then(|(bank, data_root)| {
-            optional_addon_bank(data_root.as_deref(), STRINGS_SOUND_ID)
+            optional_plugin_bank(data_root.as_deref(), STRINGS_SOUND_ID)
                 .map(|strings| (bank, data_root, strings))
         });
     match result {
         Ok((bank, data_root, strings)) => {
             log_host(host, LOG_LEVEL_INFO, "Roland SCVA rendered bank loaded");
             if data_root.is_some() {
-                log_host(host, LOG_LEVEL_INFO, "Roland SCVA addon data root ready");
+                log_host(host, LOG_LEVEL_INFO, "Roland SCVA plugin data root ready");
             }
             let mut plugin = RolandScva::new(bank, data_root);
             if let Some(strings) = strings {

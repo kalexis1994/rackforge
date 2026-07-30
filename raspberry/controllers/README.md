@@ -1,6 +1,6 @@
 # RackForge controller packages
 
-Los controladores físicos no forman parte de Core ni de los addons de audio.
+Los controladores físicos no forman parte de Core ni de los plugins de audio.
 Cada integración se distribuye como un directorio autocontenido con extensión
 `.rfcontroller`, un `rackforge-controller.toml` validado y artefactos por
 plataforma.
@@ -44,7 +44,7 @@ Un paquete de controlador puede:
 - implementar handshake, display, LEDs, heartbeat y restauración;
 - declarar layouts explícitos como `little@1`.
 
-No puede definir instrumentos, programas, bancos ni lógica propia de un addon.
+No puede definir instrumentos, programas, bancos ni lógica propia de un plugin.
 Los layouts y eventos lógicos son la frontera entre el hardware y RackForge.
 
 ## Runtimes

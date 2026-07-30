@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 pub use rackforge_session_api::{
-    AddonInstanceState, AuditionEndReason, AuditionState, ClientId, CommandEnvelope, CommandRef,
-    EventEnvelope, InstanceId, ProgramDraftState, Revision, SESSION_SCHEMA_VERSION, SessionCommand,
-    SessionEvent, SessionId, SessionState, SoundSummary, SurfaceActivationReason,
+    AuditionEndReason, AuditionState, ClientId, CommandEnvelope, CommandRef, EventEnvelope,
+    InstanceId, PluginInstanceState, ProgramDraftState, Revision, SESSION_SCHEMA_VERSION,
+    SessionCommand, SessionEvent, SessionId, SessionState, SoundSummary, SurfaceActivationReason,
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
@@ -101,10 +101,10 @@ mod tests {
                 session_id: SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
                 revision: Revision::ZERO,
                 active_instance_id: Some(instance_id()),
-                instances: vec![AddonInstanceState {
+                instances: vec![PluginInstanceState {
                     instance_id: instance_id(),
-                    addon_id: "org.rackforge.rf-dls".into(),
-                    addon_name: "RF-DLS".into(),
+                    plugin_id: "org.rackforge.rf-dls".into(),
+                    plugin_name: "RF-DLS".into(),
                     ui_layouts: vec!["little@1".into()],
                     sounds: vec![SoundSummary {
                         id: "dls.b00000000.p00000000".into(),

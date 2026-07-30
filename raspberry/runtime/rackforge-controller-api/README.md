@@ -8,14 +8,14 @@ control.
   enviar SysEx o interpretar controles de superficie.
 - Los layouts nunca se infieren por resolución o cantidad de controles.
 - La negociación considera únicamente implementaciones declaradas por el
-  controlador y vistas declaradas por el addon.
+  controlador y vistas declaradas por el plugin.
 
 `little@1` garantiza 18 columnas seguras, header, dos filas de cuerpo, cuatro
 soft keys y las acciones Previous, Next, Confirm y Back.
 
 Un controlador `medium@1` no obtiene compatibilidad LITTLE automáticamente.
 Debe incluir y probar una implementación
-`SurfaceQuality::CertifiedCompatibility`; si no la declara, un addon
+`SurfaceQuality::CertifiedCompatibility`; si no la declara, un plugin
 exclusivamente LITTLE resulta incompatible.
 
 La distribución dinámica vive en `rackforge-controller-package`: transforma

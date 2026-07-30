@@ -10,5 +10,5 @@ del dispositivo.
 
 La separación evita que un nuevo `.rfcontroller` tenga que copiar menús o
 conocer RF-DLS. La siguiente evolución moverá también el cliente de sesión y
-los adaptadores de vistas de addons desde el ejecutable Arturia hacia este
+los adaptadores de vistas de plugins desde el ejecutable Arturia hacia este
 runtime, dejando en el paquete únicamente transporte y lifecycle.

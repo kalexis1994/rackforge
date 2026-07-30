@@ -52,7 +52,7 @@ activos sin conocer marcas o modelos.
 de hardware que no reproduce sonido ni modifica el mezclador.
 
 `engines/rf-dls/` contiene RF-DLS, el motor GM activo. Los bancos `.dls`
-aportados por el usuario viven en `data/addons/rf-dls`, fuera de Git.
+aportados por el usuario viven en `data/plugins/rf-dls`, fuera de Git.
 
 `runtime/` contiene `rackforge-core`, la API binaria versionada para plugins y los
 esquemas declarativos con los que cada plugin aporta sus propias páginas de

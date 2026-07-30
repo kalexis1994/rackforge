@@ -8,3 +8,6 @@ license.workspace = true
 [dependencies]
 serde.workspace = true
 rackforge-surface-api = { path = "../rackforge-surface-api" }
+
+[dev-dependencies]
+serde_json.workspace = true

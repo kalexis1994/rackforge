@@ -670,14 +670,14 @@ fn resource_path(host: &HostApiV1) -> Result<PathBuf, String> {
     Ok(PathBuf::from(text))
 }
 
-fn addon_data_path(host: &HostApiV1) -> Result<Option<PathBuf>, String> {
+fn plugin_data_path(host: &HostApiV1) -> Result<Option<PathBuf>, String> {
     if version_major(host.api_version) != 1 || version_minor(host.api_version) < 2 {
         return Ok(None);
     }
     if host.struct_size < size_of::<HostApiV1>() as u32 {
         return Err("host API 1.2 table is truncated".into());
     }
-    let Some(callback) = host.get_addon_data_path else {
+    let Some(callback) = host.get_plugin_data_path else {
         return Ok(None);
     };
     // SAFETY: a null destination queries the required path size.
@@ -686,15 +686,15 @@ fn addon_data_path(host: &HostApiV1) -> Result<Option<PathBuf>, String> {
         return Ok(None);
     }
     if required > 32 * 1024 {
-        return Err("addon data path is unreasonably large".into());
+        return Err("plugin data path is unreasonably large".into());
     }
     let mut bytes = vec![0_u8; required];
     // SAFETY: bytes is writable for exactly the reported size.
     let reported = unsafe { callback(host.context, bytes.as_mut_ptr(), bytes.len()) };
     if reported != required {
-        return Err("addon data path changed while being read".into());
+        return Err("plugin data path changed while being read".into());
     }
-    let text = String::from_utf8(bytes).map_err(|_| "addon data path is not UTF-8".to_owned())?;
+    let text = String::from_utf8(bytes).map_err(|_| "plugin data path is not UTF-8".to_owned())?;
     Ok(Some(PathBuf::from(text)))
 }
 
@@ -716,7 +716,7 @@ unsafe extern "C" fn create(host: *const HostApiV1) -> *mut c_void {
     };
     let result = resource_path(host)
         .and_then(|path| DlsBank::open(path).map_err(|error| error.to_string()))
-        .and_then(|bank| addon_data_path(host).map(|data_root| (bank, data_root)))
+        .and_then(|bank| plugin_data_path(host).map(|data_root| (bank, data_root)))
         .and_then(|(bank, data_root)| {
             let (mut custom_programs, warnings) =
                 custom_program::load_programs(data_root.as_deref())?;

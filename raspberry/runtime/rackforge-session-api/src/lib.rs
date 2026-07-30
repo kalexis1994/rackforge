@@ -5,7 +5,7 @@ pub use rackforge_surface_api::{
     SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const SESSION_SCHEMA_VERSION: u32 = 1;
+pub const SESSION_SCHEMA_VERSION: u32 = 2;
 pub const DEFAULT_LIVE_SESSION_ID: &str = "live.main";
 pub const DEFAULT_LIVE_INSTANCE_ID: &str = "live.main.instrument.1";
 
@@ -75,10 +75,12 @@ pub struct SoundSummary {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AddonInstanceState {
+pub struct PluginInstanceState {
     pub instance_id: InstanceId,
-    pub addon_id: String,
-    pub addon_name: String,
+    #[serde(alias = "addon_id")]
+    pub plugin_id: String,
+    #[serde(alias = "addon_name")]
+    pub plugin_name: String,
     #[serde(default)]
     pub ui_layouts: Vec<String>,
     #[serde(default)]
@@ -119,7 +121,7 @@ pub struct SessionState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_instance_id: Option<InstanceId>,
     #[serde(default)]
-    pub instances: Vec<AddonInstanceState>,
+    pub instances: Vec<PluginInstanceState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audition: Option<AuditionState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -139,13 +141,13 @@ impl SessionState {
         }
     }
 
-    pub fn instance(&self, id: &InstanceId) -> Option<&AddonInstanceState> {
+    pub fn instance(&self, id: &InstanceId) -> Option<&PluginInstanceState> {
         self.instances
             .iter()
             .find(|instance| &instance.instance_id == id)
     }
 
-    pub fn active_instance(&self) -> Option<&AddonInstanceState> {
+    pub fn active_instance(&self) -> Option<&PluginInstanceState> {
         self.active_instance_id
             .as_ref()
             .and_then(|id| self.instance(id))
@@ -493,10 +495,10 @@ mod tests {
             session_id: SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             revision: Revision::ZERO,
             active_instance_id: Some(instance_id.clone()),
-            instances: vec![AddonInstanceState {
+            instances: vec![PluginInstanceState {
                 instance_id,
-                addon_id: "org.rackforge.rf-dls".into(),
-                addon_name: "RF-DLS".into(),
+                plugin_id: "org.rackforge.rf-dls".into(),
+                plugin_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
                 sounds: vec![SoundSummary {
                     id: "dls.piano-1".into(),
@@ -561,6 +563,29 @@ mod tests {
                 ))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn reads_legacy_instance_fields_but_writes_only_plugin_vocabulary() {
+        let legacy = r#"{
+            "schema_version": 1,
+            "session_id": "live.main",
+            "revision": 0,
+            "active_instance_id": "live.main.instrument.1",
+            "instances": [{
+                "instance_id": "live.main.instrument.1",
+                "addon_id": "org.rackforge.rf-dls",
+                "addon_name": "RF-DLS"
+            }]
+        }"#;
+        let session: SessionState = serde_json::from_str(legacy).unwrap();
+        assert_eq!(session.instances[0].plugin_id, "org.rackforge.rf-dls");
+
+        let serialized = serde_json::to_string(&session).unwrap();
+        assert!(serialized.contains("\"plugin_id\""));
+        assert!(serialized.contains("\"plugin_name\""));
+        assert!(!serialized.contains("\"addon_id\""));
+        assert!(!serialized.contains("\"addon_name\""));
     }
 
     #[test]

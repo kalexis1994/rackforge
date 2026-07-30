@@ -51,7 +51,7 @@ solamente con `A`. Cada capa declara:
 El documento común pertenece a RackForge y el payload pertenece a Roland. El
 ejemplo validado está en `programs/factory.piano-1.json`. La estructura de
 carpetas que Roland elija dentro de su raíz privada no forma parte del contrato
-global y puede evolucionar con migraciones del addon.
+global y puede evolucionar con migraciones del plugin.
 
 ## Prueba
 

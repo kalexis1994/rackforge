@@ -3,16 +3,16 @@
 ## Visión
 
 RackForge debe convertirse en un runtime musical autónomo y multiplataforma.
-El mismo addon debe poder ejecutarse en Linux ARM64, Windows, macOS y Android
+El mismo plugin debe poder ejecutarse en Linux ARM64, Windows, macOS y Android
 sin conocer ALSA, WASAPI, CoreAudio, AAudio, USB, rutas del sistema ni la
 arquitectura del procesador.
 
 La Raspberry Pi es la primera plataforma de producción, no una restricción del
-diseño. RackForge será para los addons lo que una máquina virtual es para una
+diseño. RackForge será para los plugins lo que una máquina virtual es para una
 aplicación portable:
 
 ```text
-Addon universal
+Plugin universal
       │
       ▼
 RackForge Runtime + API estable
@@ -29,15 +29,15 @@ las capacidades musicales, el SDK y el formato de distribución de RackForge.
 
 ## Principios no negociables
 
-1. Un addon consume solamente la API pública de RackForge.
-2. Ningún addon depende directamente de APIs de una plataforma.
+1. Un plugin consume solamente la API pública de RackForge.
+2. Ningún plugin depende directamente de APIs de una plataforma.
 3. El host es dueño del audio, MIDI, almacenamiento, red, controladores y
    superficies.
 4. El hilo de audio no asigna memoria, no realiza E/S, no bloquea y no ejecuta
    lógica de interfaz.
-5. Los addons reciben capacidades explícitas, no acceso general al sistema.
+5. Los plugins reciben capacidades explícitas, no acceso general al sistema.
 6. Toda API pública y todo formato persistente son versionados.
-7. Las instancias, no solamente los tipos de addon, poseen estado.
+7. Las instancias, no solamente los tipos de plugin, poseen estado.
 8. LITTLE, MEDIUM y WEB son proyecciones del mismo estado y utilizan los
    mismos comandos.
 9. Un controlador MIDI desconocido puede tocar, pero nunca recibe SysEx ni
@@ -47,6 +47,8 @@ las capacidades musicales, el SDK y el formato de distribución de RackForge.
     de conformidad y migraciones.
 12. El formato portable será el camino principal; los plugins nativos actuales
     existirán solamente durante la transición o como extensión opcional.
+13. `Plugin` es el término público para instrumentos, efectos, procesadores
+    MIDI y utilities; `module` queda reservado para implementación interna.
 
 ## Arquitectura objetivo
 
@@ -64,7 +66,7 @@ Automatización futura ───────┘
                │
        ┌───────┴────────┐
        ▼                ▼
-Addon Control API   Motor de tiempo real
+Plugin Control API   Motor de tiempo real
        │                │
        ▼                ▼
 LITTLE / WEB       Backend de audio
@@ -76,7 +78,7 @@ LITTLE / WEB       Backend de audio
 El estado de sesión es la única fuente de verdad. Una modificación realizada
 desde WEB debe aparecer en LITTLE, y una modificación hecha con el encoder debe
 llegar a WEB. Ninguna superficie implementa por separado la lógica musical del
-addon.
+plugin.
 
 ## Capas del sistema
 
@@ -84,7 +86,7 @@ addon.
 
 Responsable de:
 
-- descubrir, validar, instalar y actualizar addons;
+- descubrir, validar, instalar y actualizar plugins;
 - crear y destruir instancias;
 - administrar racks, programas, bancos y recursos;
 - mantener el estado autoritativo de sesión;
@@ -106,7 +108,7 @@ Cada plataforma implementa adaptadores concretos:
 | USB/controladores | Driver Linux | Driver Windows | Driver macOS | Driver Android |
 | WEB | Servidor headless | Local/embebido | Local/embebido | WebView/embebido |
 
-Los backends traducen el sistema operativo al modelo común. Los addons nunca
+Los backends traducen el sistema operativo al modelo común. Los plugins nunca
 ven estas diferencias.
 
 ### Runtime portable
@@ -133,15 +135,15 @@ La ABI C y las bibliotecas `.so`/`.dll` existentes permanecerán disponibles
 mientras se construye la ruta WebAssembly. Un adaptador permitirá que Core
 trate instancias nativas y portables mediante el mismo modelo interno.
 
-No se agregarán dependencias de plataforma nuevas a la API de addons nativos.
-RF-DLS será el primer addon migrado y la ABI nativa se declarará heredada cuando
+No se agregarán dependencias de plataforma nuevas a la API de plugins nativos.
+RF-DLS será el primer plugin migrado y la ABI nativa se declarará heredada cuando
 la implementación portable alcance paridad funcional y de rendimiento.
 
-## API universal de addons
+## API universal de plugins
 
 La API pública debe cubrir, como mínimo:
 
-- descriptor y versión del addon;
+- descriptor y versión del plugin;
 - ciclo de vida de instancias;
 - configuración de audio;
 - procesamiento de audio y MIDI;
@@ -150,18 +152,18 @@ La API pública debe cubrir, como mínimo:
 - selección y edición de programas;
 - serialización, restauración y migración de estado;
 - recursos externos aportados por el usuario;
-- almacenamiento privado del addon;
+- almacenamiento privado del plugin;
 - solicitud y devolución de foco de audition;
 - comandos, eventos y suscripciones;
 - layouts compatibles;
 - contribuciones opcionales para la superficie WEB;
 - logging y reloj monotónico mediante capacidades.
 
-El addon no recibirá rutas arbitrarias ni handles del sistema operativo.
+El plugin no recibirá rutas arbitrarias ni handles del sistema operativo.
 RackForge entregará identificadores y operaciones acotadas:
 
 ```text
-storage.addon-data
+storage.plugin-data
 storage.package-assets
 resources.read
 audio.render
@@ -223,8 +225,8 @@ Los layouts son contratos versionados, no nombres descriptivos inferidos:
 Un controlador MEDIUM no implementa LITTLE automáticamente. Debe declarar una
 implementación nativa o una compatibilidad certificada y probada.
 
-Los addons declaran exactamente los layouts que soportan. RackForge negocia
-solamente la intersección explícita entre addon y controlador.
+Los plugins declaran exactamente los layouts que soportan. RackForge negocia
+solamente la intersección explícita entre plugin y controlador.
 
 ### Separación entre MIDI y superficie
 
@@ -276,14 +278,14 @@ RackForge será dueño de:
 - Command/Event Bus;
 - ciclo de montaje y desmontaje de vistas.
 
-Los addons no abrirán servidores ni puertos. Contribuirán una vista que
+Los plugins no abrirán servidores ni puertos. Contribuirán una vista que
 RackForge montará dentro del área de contenido de su SPA:
 
 ```text
 RACKFORGE WEB
 ├── Header y navegación global
 ├── Rutas de RackForge
-└── Área del addon
+└── Área del plugin
     └── RF-DLS: PLAY / CONFIG / PROGRAMS / ENVELOPE / FX
 ```
 
@@ -291,18 +293,18 @@ Las rutas pertenecerán al router de RackForge:
 
 ```text
 /live
-/addons
-/addons/org.rackforge.rf-dls
+/plugins
+/plugins/org.rackforge.rf-dls
 /live/racks/concert/instances/layer-1/config
 /live/racks/concert/instances/layer-1/programs/warm-piano
 ```
 
 Las rutas apuntarán a `instance_id` cuando representen estado ejecutable. Dos
-instancias del mismo addon pueden tener programas y parámetros diferentes.
+instancias del mismo plugin pueden tener programas y parámetros diferentes.
 
 ### Modos de interfaz WEB
 
-Un addon podrá elegir:
+Un plugin podrá elegir:
 
 1. **Declarativo:** RackForge genera páginas, formularios y controles usando
    parámetros, catálogos y programas expuestos por la API.
@@ -318,7 +320,7 @@ Código WEB de terceros no se importará directamente en el contexto de la SPA.
 La primera arquitectura segura utilizará un `iframe sandbox` visualmente
 integrado y un canal tipado basado en `MessagePort`.
 
-El addon no tendrá acceso directo a:
+El plugin no tendrá acceso directo a:
 
 - DOM superior;
 - credenciales;
@@ -358,7 +360,7 @@ computadora de la red.
 La API define el contrato binario; el SDK ofrece la experiencia de desarrollo.
 Se crearán dos partes coordinadas.
 
-### SDK de addons
+### SDK de plugins
 
 Inicialmente orientado a Rust:
 
@@ -402,15 +404,15 @@ rackforge dev
 ```
 
 También habrá simuladores para layouts, MIDI, audio, WEB y ciclos de
-reconexión, además de una suite de conformidad que todo addon debe superar.
+reconexión, además de una suite de conformidad que todo plugin debe superar.
 
-## Formato `.rfaddon`
+## Formato `.rfplugin`
 
 El artefacto portable objetivo será independiente de CPU y sistema operativo:
 
 ```text
-rf-dls.rfaddon
-├── rackforge-addon.toml
+rf-dls.rfplugin
+├── rackforge-plugin.toml
 ├── component.wasm
 ├── assets/
 ├── presets/
@@ -436,10 +438,10 @@ Los recursos grandes o con licencias propias, como bancos DLS o ROMs, seguirán
 fuera del paquete. Los datos modificables continuarán dentro del namespace:
 
 ```text
-data/addons/<addon-id>/
+data/plugins/<plugin-id>/
 ```
 
-Cada addon decide su estructura interna. RackForge aplica aislamiento,
+Cada plugin decide su estructura interna. RackForge aplica aislamiento,
 escrituras atómicas, cuotas, migraciones y rollback sin imponer nombres como
 `programs` o `banks`.
 
@@ -454,7 +456,7 @@ Se versionarán por separado:
 - protocolo WEB;
 - manifiesto;
 - esquema de programas;
-- estado privado de cada addon;
+- estado privado de cada plugin;
 - formato del paquete.
 
 Una versión mayor indica ruptura deliberada. Una versión menor solo agrega
@@ -476,7 +478,7 @@ Cada versión estable tendrá:
 Estado: **en curso**
 
 - [x] Separar Core, Plugin API, Control API, UI y bridge del KeyLab.
-- [x] Crear programas, recursos externos y datos privados por addon.
+- [x] Crear programas, recursos externos y datos privados por plugin.
 - [x] Crear catálogos dinámicos y selección desde LIVE.
 - [x] Separar entrada MIDI de superficie registrada.
 - [x] Crear contratos versionados de controlador/layout.
@@ -488,7 +490,7 @@ Estado: **en curso**
 - [x] Extraer el estado LITTLE a un Surface Runtime sin MIDI/SysEx.
 - [ ] Mover el cliente de sesión restante fuera del proceso Arturia.
 - [ ] Implementar el runtime `wasm-v1` con capabilities reales.
-- [ ] Consolidar nombres: addon, instancia, programa, recurso, superficie,
+- [ ] Consolidar nombres: plugin, instancia, programa, recurso, superficie,
       driver, comando, evento y sesión.
 - [ ] Documentar invariantes de tiempo real y ownership.
 
@@ -510,7 +512,7 @@ Estado: **en curso**
 
 Criterio de salida: LITTLE puede reiniciarse y reconstruirse desde el estado;
 una segunda superficie puede observar y modificar la misma instancia sin
-lógica especial en el addon.
+lógica especial en el plugin.
 
 ### Fase 2 — Contrato portable
 
@@ -519,8 +521,8 @@ lógica especial en el addon.
 - [ ] Diseñar la ABI de DSP preasignada.
 - [ ] Seleccionar y encapsular el motor WebAssembly.
 - [ ] Implementar límites de memoria, tiempo y fallos.
-- [ ] Crear el adaptador común para addons nativos y portables.
-- [ ] Ejecutar un addon Gain WebAssembly en Linux ARM64.
+- [ ] Crear el adaptador común para plugins nativos y portables.
+- [ ] Ejecutar un plugin Gain WebAssembly en Linux ARM64.
 - [ ] Medir latencia, CPU, memoria y comportamiento ante fallos.
 
 Criterio de salida: un componente Gain portable procesa audio en la Raspberry
@@ -530,13 +532,13 @@ con restricciones de tiempo real verificadas.
 
 - [ ] Crear el SDK Rust desde WIT.
 - [ ] Implementar `rackforge new/build/test/validate/package`.
-- [ ] Definir la nueva estructura portable de `.rfaddon`.
+- [ ] Definir la nueva estructura portable de `.rfplugin`.
 - [ ] Implementar instalación atómica, integridad y rollback.
 - [ ] Crear simuladores de audio, MIDI y layouts.
 - [ ] Publicar una suite de conformidad.
-- [ ] Documentar creación y migración de addons.
+- [ ] Documentar creación y migración de plugins.
 
-Criterio de salida: un desarrollador puede crear, probar y empaquetar un addon
+Criterio de salida: un desarrollador puede crear, probar y empaquetar un plugin
 sin importar módulos internos de Core ni conocer la memoria WebAssembly.
 
 ### Fase 4 — Migración de RF-DLS
@@ -547,7 +549,7 @@ sin importar módulos internos de Core ni conocer la memoria WebAssembly.
 - [ ] Verificar equivalencia de audio con fixtures reproducibles.
 - [ ] Probar edición y audition mediante Command/Event Bus.
 - [ ] Comparar rendimiento nativo y WebAssembly.
-- [ ] Ejecutar el mismo `.rfaddon` en Linux ARM64 y Windows.
+- [ ] Ejecutar el mismo `.rfplugin` en Linux ARM64 y Windows.
 
 Criterio de salida: un único paquete RF-DLS produce el mismo resultado y carga
 el mismo estado en ambas plataformas.
@@ -557,7 +559,7 @@ el mismo estado en ambas plataformas.
 - [ ] Crear el servidor configurable propiedad de RackForge.
 - [ ] Crear la SPA, shell, router y navegación global.
 - [ ] Definir el protocolo interno entre SPA y Core.
-- [ ] Crear páginas globales: LIVE, ADDONS, INSTANCIAS y CONFIG.
+- [ ] Crear páginas globales: LIVE, PLUGINS, INSTANCIAS y CONFIG.
 - [ ] Generar vistas declarativas desde la API de parámetros.
 - [ ] Sincronizar WEB y LITTLE mediante eventos.
 - [ ] Crear `@rackforge/web-sdk`.
@@ -577,7 +579,7 @@ cambio; el navegador puede reconectarse sin alterar ni interrumpir el audio.
 - [ ] Ejecutar la suite de conformidad en x86-64 y ARM64.
 - [ ] Crear instaladores y actualizaciones.
 
-Criterio de salida: el mismo `.rfaddon` certificado funciona en Raspberry,
+Criterio de salida: el mismo `.rfplugin` certificado funciona en Raspberry,
 Windows y macOS sin cambios del autor.
 
 ### Fase 7 — Android
@@ -590,16 +592,16 @@ Windows y macOS sin cambios del autor.
 - [ ] Crear empaquetado e instalación.
 
 Criterio de salida: un dispositivo Android compatible puede alojar RackForge,
-un controlador MIDI y el mismo addon portable.
+un controlador MIDI y el mismo plugin portable.
 
 ### Fase 8 — Ecosistema
 
-- [ ] Firma opcional y procedencia de addons.
+- [ ] Firma opcional y procedencia de plugins.
 - [ ] Repositorio y actualizaciones.
 - [ ] Política de permisos visible al usuario.
 - [ ] Compatibilidad automatizada por plataforma y versión.
 - [ ] Crash isolation y reportes sin datos privados.
-- [ ] Versionado de dependencias entre addons.
+- [ ] Versionado de dependencias entre plugins.
 - [ ] Documentación pública y plantillas.
 - [ ] Política de publicación, licencias y recursos aportados por usuarios.
 
@@ -611,7 +613,7 @@ Se investigarán mediante prototipos antes de congelar una API:
 - representación exacta de buffers de audio en memoria;
 - formato definitivo de WIT;
 - protocolo y seguridad de `web@1`;
-- distribución y firma de addons;
+- distribución y firma de plugins;
 - soporte opcional para aceleradores nativos;
 - compatibilidad o wrappers de estándares como CLAP, LV2 o VST;
 - política de ejecución de interfaces WEB de terceros en Android y escritorio.

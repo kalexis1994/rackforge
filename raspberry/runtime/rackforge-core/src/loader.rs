@@ -1,4 +1,4 @@
-use crate::{AddonStorage, PluginPackage};
+use crate::{PluginPackage, PluginStorage};
 use anyhow::{Context, Result, anyhow, bail};
 use libloading::{Library, Symbol};
 use rackforge_plugin_api::abi::{
@@ -59,11 +59,14 @@ impl LoadedPlugin {
                 Ok((id, text.as_bytes().to_vec()))
             })
             .collect::<Result<BTreeMap<_, _>>>()?;
-        let addon_data_path = data_root
+        let plugin_data_path = data_root
             .map(|root| {
-                let directory = AddonStorage::new(root).ensure_addon(&package.manifest().id)?;
+                let directory = PluginStorage::new(root).ensure_plugin(&package.manifest().id)?;
                 let text = directory.root.to_str().with_context(|| {
-                    format!("addon data path is not UTF-8: {}", directory.root.display())
+                    format!(
+                        "plugin data path is not UTF-8: {}",
+                        directory.root.display()
+                    )
                 })?;
                 Ok::<_, anyhow::Error>(text.as_bytes().to_vec())
             })
@@ -173,7 +176,7 @@ impl LoadedPlugin {
 
         let mut host_context = Box::new(HostContext {
             resource_paths,
-            addon_data_path,
+            plugin_data_path,
             dynamic_presets: Mutex::new(None),
         });
         let context = host_context.as_mut() as *mut HostContext as *mut c_void;
@@ -181,7 +184,7 @@ impl LoadedPlugin {
             context,
             Some(host_log),
             Some(host_get_resource_path),
-            Some(host_get_addon_data_path),
+            Some(host_get_plugin_data_path),
             Some(host_publish_preset_catalog),
         ));
         Ok(Self {
@@ -231,7 +234,7 @@ impl LoadedPlugin {
 
 struct HostContext {
     resource_paths: BTreeMap<String, Vec<u8>>,
-    addon_data_path: Option<Vec<u8>>,
+    plugin_data_path: Option<Vec<u8>>,
     dynamic_presets: Mutex<Option<PresetCatalog>>,
 }
 
@@ -262,7 +265,7 @@ impl PluginInstance<'_> {
             extension.activate,
             self.handle,
             &source,
-            "activate addon surface",
+            "activate plugin surface",
         )?;
         let response: SurfaceActivationResponse =
             serde_json::from_slice(&bytes).context("parsing surface activation response")?;
@@ -279,7 +282,7 @@ impl PluginInstance<'_> {
         let extension = self
             .plugin
             .program_extension
-            .context("addon does not expose the program editing extension")?;
+            .context("plugin does not expose the program editing extension")?;
         let source = serde_json::to_vec(request).context("serializing program edit request")?;
         let bytes = exchange_program_json(
             extension.begin_edit,
@@ -298,7 +301,7 @@ impl PluginInstance<'_> {
         let extension = self
             .plugin
             .program_extension
-            .context("addon does not expose the program editing extension")?;
+            .context("plugin does not expose the program editing extension")?;
         let source = serde_json::to_vec(document).context("serializing program draft")?;
         let bytes = exchange_program_json(
             extension.prepare_save,
@@ -317,7 +320,7 @@ impl PluginInstance<'_> {
         let extension = self
             .plugin
             .program_extension
-            .context("addon does not expose the program editing extension")?;
+            .context("plugin does not expose the program editing extension")?;
         let source = serde_json::to_vec(prepared).context("serializing program install")?;
         let status = unsafe { (extension.install)(self.handle, source.as_ptr(), source.len()) };
         check_status(status, "install_program")
@@ -328,7 +331,7 @@ impl PluginInstance<'_> {
         let extension = self
             .plugin
             .program_extension
-            .context("addon does not expose the program editing extension")?;
+            .context("plugin does not expose the program editing extension")?;
         if extension.struct_size < size_of::<ProgramExtensionApiV1>() as u32 {
             return Ok(false);
         }
@@ -565,10 +568,10 @@ fn exchange_program_json(
 ) -> Result<Vec<u8>> {
     let required = unsafe { exchange(instance, source.as_ptr(), source.len(), ptr::null_mut(), 0) };
     if required == 0 {
-        bail!("addon returned an empty response for {label}");
+        bail!("plugin returned an empty response for {label}");
     }
     if required > MAX_METADATA_BYTES {
-        bail!("addon response for {label} is unreasonably large: {required} bytes");
+        bail!("plugin response for {label} is unreasonably large: {required} bytes");
     }
     let mut bytes = vec![0_u8; required];
     let reported = unsafe {
@@ -581,7 +584,7 @@ fn exchange_program_json(
         )
     };
     if reported != required {
-        bail!("addon response for {label} changed size while being read");
+        bail!("plugin response for {label} changed size while being read");
     }
     Ok(bytes)
 }
@@ -638,7 +641,7 @@ unsafe extern "C" fn host_get_resource_path(
     unsafe { copy_to_host_buffer(path, destination, capacity) }
 }
 
-unsafe extern "C" fn host_get_addon_data_path(
+unsafe extern "C" fn host_get_plugin_data_path(
     context: *mut c_void,
     destination: *mut u8,
     capacity: usize,
@@ -651,7 +654,7 @@ unsafe extern "C" fn host_get_addon_data_path(
     let Some(host) = (unsafe { context.cast::<HostContext>().as_ref() }) else {
         return 0;
     };
-    let Some(path) = host.addon_data_path.as_deref() else {
+    let Some(path) = host.plugin_data_path.as_deref() else {
         return 0;
     };
     // SAFETY: the plugin owns and describes the destination buffer.

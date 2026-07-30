@@ -33,7 +33,7 @@ impl CustomProgram {
     pub fn from_document(document: ProgramDocument) -> Result<Self, String> {
         document.validate().map_err(|error| error.to_string())?;
         if document.plugin_id != PLUGIN_ID {
-            return Err("program belongs to a different addon".into());
+            return Err("program belongs to a different plugin".into());
         }
         if !matches!(document.plugin_state_version, 1 | 2) {
             return Err(format!(
@@ -634,7 +634,7 @@ fn load_one(root: &Path, path: &Path) -> Result<CustomProgram, String> {
     }
     let canonical = fs::canonicalize(path).map_err(|error| format!("resolving file: {error}"))?;
     if !canonical.starts_with(root) {
-        return Err("CUSTOM program escapes its private addon directory".into());
+        return Err("CUSTOM program escapes its private plugin directory".into());
     }
     let bytes = fs::read(&canonical).map_err(|error| format!("reading file: {error}"))?;
     let document: ProgramDocument =

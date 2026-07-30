@@ -329,6 +329,29 @@ En un editor:
 - `BACK` fuera de edición sale del editor;
 - `<` y `>` cambian el punto o parámetro seleccionado.
 
+### Pulsaciones largas y escape del host
+
+Los cuatro botones producen una pulsación corta al soltarse o una pulsación
+larga una vez alcanzados 650 ms. Ambos gestos son mutuamente excluyentes.
+
+- `BACK` sostenido vuelve al modo activo de RackForge. En `PLAY` regresa al
+  addon seleccionado y le permite sugerir el programa que debe quedar centrado;
+  en `LIVE` vuelve al rack o instrumento seleccionado.
+- `OK` + `BACK`, iniciados con una diferencia máxima de 250 ms y sostenidos
+  durante 650 ms, fuerzan `HOME`.
+- El acorde de emergencia tiene prioridad: no genera además `OK LONG` ni
+  `BACK LONG`.
+- Estas dos rutas son propiedad del host. Un addon puede ser notificado después
+  de la navegación, pero no puede consumirlas, cancelarlas ni impedirlas.
+
+El editor de texto reutilizable asigna `OK` corto a entrar o confirmar el texto,
+`<` y `>` cortos a cambiar el carácter, y sus pulsaciones largas a mover el
+cursor. `OK` largo borra el carácter actual y `BACK` corto cancela toda la
+edición restaurando el original. Al mover el cursor a la derecha desde el final
+se crea un nuevo espacio editable. El giro y la presión del encoder replican
+las acciones cortas. `BACK` largo y el acorde de emergencia conservan siempre
+el significado global.
+
 ## Próxima prueba visual
 
 La siguiente prueba debe ser reversible y limitada al display:

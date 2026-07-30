@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 
 pub use rackforge_session_api::{
     AddonInstanceState, AuditionEndReason, AuditionState, ClientId, CommandEnvelope, CommandRef,
-    EventEnvelope, InstanceId, Revision, SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent,
-    SessionId, SessionState, SoundSummary,
+    EventEnvelope, InstanceId, ProgramDraftState, Revision, SESSION_SCHEMA_VERSION, SessionCommand,
+    SessionEvent, SessionId, SessionState, SoundSummary, SurfaceActivationReason,
+    SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
 pub const CONTROL_SCHEMA_VERSION: u32 = 2;
@@ -34,7 +35,7 @@ pub enum ControlErrorCode {
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlResponse {
     Snapshot {
-        snapshot: SessionState,
+        snapshot: Box<SessionState>,
     },
     Events {
         current_revision: Revision,
@@ -95,7 +96,7 @@ mod tests {
         assert_eq!(decode_request(&encoded).unwrap(), request);
 
         let response = ControlResponse::Snapshot {
-            snapshot: SessionState {
+            snapshot: Box::new(SessionState {
                 schema_version: SESSION_SCHEMA_VERSION,
                 session_id: SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
                 revision: Revision::ZERO,
@@ -114,7 +115,8 @@ mod tests {
                     selected_sound_id: Some("dls.b00000000.p00000000".into()),
                 }],
                 audition: None,
-            },
+                program_draft: None,
+            }),
         };
         assert_eq!(
             decode_response(&encode_line(&response).unwrap()).unwrap(),

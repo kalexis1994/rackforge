@@ -2,11 +2,16 @@ mod custom_program;
 
 use custom_program::{CustomProgram, ProgramParameters};
 use rackforge_plugin_api::abi::{
-    HostApiV1, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, LOG_LEVEL_WARN, MidiEventV1, ParameterEventV1,
-    PluginApiV1, ProcessBlockV1, STATUS_INVALID_ARGUMENT, STATUS_INVALID_STATE, STATUS_OK,
-    STATUS_UNKNOWN_PARAMETER, copy_to_host_buffer, pack_version, version_major, version_minor,
+    HostApiV1, LOG_LEVEL_ERROR, LOG_LEVEL_INFO, LOG_LEVEL_WARN, MidiEventV1,
+    PROGRAM_EXTENSION_VERSION, ParameterEventV1, PluginApiV1, ProcessBlockV1,
+    ProgramExtensionApiV1, STATUS_INVALID_ARGUMENT, STATUS_INVALID_STATE, STATUS_OK,
+    STATUS_UNKNOWN_PARAMETER, SURFACE_EXTENSION_VERSION, SurfaceExtensionApiV1,
+    copy_to_host_buffer, pack_version, version_major, version_minor,
 };
-use rackforge_plugin_api::{BankDescriptor, PresetCatalog, PresetDescriptor};
+use rackforge_plugin_api::{
+    BankDescriptor, PreparedProgram, PresetCatalog, PresetDescriptor, ProgramDocument,
+    ProgramEditRequest, SurfaceActivationRequest, SurfaceActivationResponse,
+};
 use rf_dls::{DlsBank, EnvelopeSpec, Voice};
 use std::collections::BTreeSet;
 use std::ffi::c_void;
@@ -79,6 +84,7 @@ const PRESET_CATALOG: &[u8] = br#"{
 }"#;
 
 struct RfDls {
+    host: HostApiV1,
     bank: DlsBank,
     voices: Vec<Voice>,
     held_notes: [bool; 128],
@@ -103,12 +109,14 @@ struct RfDls {
 
 impl RfDls {
     fn new(
+        host: HostApiV1,
         bank: DlsBank,
         selected_bank: u32,
         selected_program: u32,
         custom_programs: Vec<CustomProgram>,
     ) -> Self {
         Self {
+            host,
             bank,
             voices: Vec::with_capacity(MAX_VOICES),
             held_notes: [false; 128],
@@ -186,6 +194,116 @@ impl RfDls {
             parse_dynamic_preset_id(preset_id)
         };
         selection.is_some_and(|(bank, program)| self.select_instrument(bank, program))
+    }
+
+    fn has_preset(&self, preset_id: &str) -> bool {
+        if let Some(id) = preset_id.strip_prefix("custom.") {
+            return self.custom_programs.iter().any(|program| program.id == id);
+        }
+        let selection = if preset_id == PIANO_PRESET_ID {
+            Some((0, 0))
+        } else {
+            parse_dynamic_preset_id(preset_id)
+        };
+        selection.is_some_and(|(bank, program)| self.bank.instrument(bank, program).is_some())
+    }
+
+    fn activate_surface(
+        &self,
+        request: SurfaceActivationRequest,
+    ) -> Result<SurfaceActivationResponse, String> {
+        request.validate().map_err(|error| error.to_string())?;
+        let focus = request
+            .selected_item_id
+            .filter(|preset_id| self.has_preset(preset_id));
+        Ok(SurfaceActivationResponse::focus(focus))
+    }
+
+    fn begin_program_edit(&self, request: &ProgramEditRequest) -> Result<PreparedProgram, String> {
+        request.validate().map_err(|error| error.to_string())?;
+        if let Some(program_id) = &request.program_id {
+            let id = program_id.strip_prefix("custom.").unwrap_or(program_id);
+            let program = self
+                .custom_programs
+                .iter()
+                .find(|program| program.id == id)
+                .ok_or_else(|| format!("unknown CUSTOM program {program_id:?}"))?;
+            return program.prepared();
+        }
+
+        let slot = (1..=999)
+            .find(|slot| {
+                self.custom_programs
+                    .iter()
+                    .all(|program| program.slot != *slot)
+            })
+            .ok_or_else(|| "RF-DLS has no free CUSTOM slots".to_owned())?;
+        let source = self
+            .bank
+            .instruments
+            .iter()
+            .filter(|instrument| !instrument.is_drum())
+            .min_by_key(|instrument| (instrument.bank, instrument.program))
+            .or_else(|| self.bank.instruments.first())
+            .ok_or_else(|| "DLS bank contains no source instruments".to_owned())?;
+        CustomProgram {
+            id: format!("user.custom-{slot:03}"),
+            name: format!("CUSTOM {slot:03}"),
+            category: None,
+            slot,
+            source: custom_program::DlsSource {
+                resource_id: "dls-bank".into(),
+                bank: source.bank,
+                program: source.program,
+            },
+            parameters: ProgramParameters::default(),
+        }
+        .prepared()
+    }
+
+    fn prepare_program_save(&self, document: ProgramDocument) -> Result<PreparedProgram, String> {
+        let program = CustomProgram::from_document(document)?;
+        if self
+            .bank
+            .instrument(program.source.bank, program.source.program)
+            .is_none()
+        {
+            return Err(format!(
+                "DLS bank does not contain source bank={} program={}",
+                program.source.bank, program.source.program
+            ));
+        }
+        if self
+            .custom_programs
+            .iter()
+            .any(|candidate| candidate.id != program.id && candidate.slot == program.slot)
+        {
+            return Err(format!("CUSTOM slot {} is already in use", program.slot));
+        }
+        program.prepared()
+    }
+
+    fn install_program(&mut self, prepared: PreparedProgram) -> Result<(), String> {
+        prepared.validate().map_err(|error| error.to_string())?;
+        let canonical = self.prepare_program_save(prepared.document)?;
+        if canonical.storage_path != prepared.storage_path
+            || canonical.preview_sound_id != prepared.preview_sound_id
+        {
+            return Err("prepared RF-DLS program metadata is not canonical".into());
+        }
+        let program = CustomProgram::from_document(canonical.document)?;
+        if let Some(current) = self
+            .custom_programs
+            .iter_mut()
+            .find(|current| current.id == program.id)
+        {
+            *current = program;
+        } else {
+            self.custom_programs.push(program);
+        }
+        self.custom_programs
+            .sort_by_key(|program| (program.slot, program.id.clone()));
+        publish_dynamic_catalog(&self.host, &self.bank, &self.custom_programs)
     }
 
     fn apply_program_parameters(
@@ -600,6 +718,7 @@ unsafe extern "C" fn create(host: *const HostApiV1) -> *mut c_void {
                 ),
             );
             Box::into_raw(Box::new(RfDls::new(
+                *host,
                 bank,
                 selected_bank,
                 selected_program,
@@ -861,6 +980,114 @@ where
     Ok(events)
 }
 
+unsafe extern "C" fn begin_program_edit_json(
+    instance: *mut c_void,
+    source: *const u8,
+    source_length: usize,
+    destination: *mut u8,
+    capacity: usize,
+) -> usize {
+    let Some(plugin) = (unsafe { instance.cast::<RfDls>().as_ref() }) else {
+        return 0;
+    };
+    let Some(bytes) = (unsafe { read_extension_source(source, source_length) }) else {
+        return 0;
+    };
+    let prepared = serde_json::from_slice::<ProgramEditRequest>(bytes)
+        .map_err(|error| error.to_string())
+        .and_then(|request| plugin.begin_program_edit(&request))
+        .and_then(|prepared| serde_json::to_vec(&prepared).map_err(|error| error.to_string()));
+    match prepared {
+        Ok(bytes) => unsafe { copy_to_host_buffer(&bytes, destination, capacity) },
+        Err(error) => {
+            log_host(&plugin.host, LOG_LEVEL_WARN, &error);
+            0
+        }
+    }
+}
+
+unsafe extern "C" fn prepare_program_save_json(
+    instance: *mut c_void,
+    source: *const u8,
+    source_length: usize,
+    destination: *mut u8,
+    capacity: usize,
+) -> usize {
+    let Some(plugin) = (unsafe { instance.cast::<RfDls>().as_ref() }) else {
+        return 0;
+    };
+    let Some(bytes) = (unsafe { read_extension_source(source, source_length) }) else {
+        return 0;
+    };
+    let prepared = serde_json::from_slice::<ProgramDocument>(bytes)
+        .map_err(|error| error.to_string())
+        .and_then(|document| plugin.prepare_program_save(document))
+        .and_then(|prepared| serde_json::to_vec(&prepared).map_err(|error| error.to_string()));
+    match prepared {
+        Ok(bytes) => unsafe { copy_to_host_buffer(&bytes, destination, capacity) },
+        Err(error) => {
+            log_host(&plugin.host, LOG_LEVEL_WARN, &error);
+            0
+        }
+    }
+}
+
+unsafe extern "C" fn install_program_json(
+    instance: *mut c_void,
+    source: *const u8,
+    source_length: usize,
+) -> i32 {
+    let Some(plugin) = (unsafe { instance.cast::<RfDls>().as_mut() }) else {
+        return STATUS_INVALID_ARGUMENT;
+    };
+    let Some(bytes) = (unsafe { read_extension_source(source, source_length) }) else {
+        return STATUS_INVALID_ARGUMENT;
+    };
+    match serde_json::from_slice::<PreparedProgram>(bytes)
+        .map_err(|error| error.to_string())
+        .and_then(|prepared| plugin.install_program(prepared))
+    {
+        Ok(()) => STATUS_OK,
+        Err(error) => {
+            log_host(&plugin.host, LOG_LEVEL_WARN, &error);
+            STATUS_INVALID_ARGUMENT
+        }
+    }
+}
+
+unsafe extern "C" fn activate_surface_json(
+    instance: *mut c_void,
+    source: *const u8,
+    source_length: usize,
+    destination: *mut u8,
+    capacity: usize,
+) -> usize {
+    let Some(plugin) = (unsafe { instance.cast::<RfDls>().as_ref() }) else {
+        return 0;
+    };
+    let Some(bytes) = (unsafe { read_extension_source(source, source_length) }) else {
+        return 0;
+    };
+    let response = serde_json::from_slice::<SurfaceActivationRequest>(bytes)
+        .map_err(|error| error.to_string())
+        .and_then(|request| plugin.activate_surface(request))
+        .and_then(|response| serde_json::to_vec(&response).map_err(|error| error.to_string()));
+    match response {
+        Ok(bytes) => unsafe { copy_to_host_buffer(&bytes, destination, capacity) },
+        Err(error) => {
+            log_host(&plugin.host, LOG_LEVEL_WARN, &error);
+            0
+        }
+    }
+}
+
+unsafe fn read_extension_source<'a>(source: *const u8, source_length: usize) -> Option<&'a [u8]> {
+    if source.is_null() || source_length == 0 || source_length > 1024 * 1024 {
+        return None;
+    }
+    Some(unsafe { slice::from_raw_parts(source, source_length) })
+}
+
 static PLUGIN_API: PluginApiV1 = PluginApiV1 {
     struct_size: size_of::<PluginApiV1>() as u32,
     api_version: pack_version(1, 3),
@@ -880,15 +1107,39 @@ static PLUGIN_API: PluginApiV1 = PluginApiV1 {
     process,
 };
 
+static PROGRAM_EXTENSION_API: ProgramExtensionApiV1 = ProgramExtensionApiV1 {
+    struct_size: size_of::<ProgramExtensionApiV1>() as u32,
+    api_version: PROGRAM_EXTENSION_VERSION,
+    begin_edit: begin_program_edit_json,
+    prepare_save: prepare_program_save_json,
+    install: install_program_json,
+};
+
+static SURFACE_EXTENSION_API: SurfaceExtensionApiV1 = SurfaceExtensionApiV1 {
+    struct_size: size_of::<SurfaceExtensionApiV1>() as u32,
+    api_version: SURFACE_EXTENSION_VERSION,
+    activate: activate_surface_json,
+};
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rackforge_plugin_entry_v1() -> *const PluginApiV1 {
     ptr::addr_of!(PLUGIN_API)
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn rackforge_program_extension_entry_v1() -> *const ProgramExtensionApiV1 {
+    ptr::addr_of!(PROGRAM_EXTENSION_API)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rackforge_surface_extension_entry_v1() -> *const SurfaceExtensionApiV1 {
+    ptr::addr_of!(SURFACE_EXTENSION_API)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rackforge_plugin_api::{ParameterSchema, PresetCatalog, RuntimeDescriptor};
+    use rackforge_plugin_api::{ParameterSchema, PresetCatalog, RuntimeDescriptor, SurfaceMode};
     use rf_dls::{
         EnvelopeSpec, Instrument, LfoSpec, PitchEnvelopeSpec, Region, SampleLoop, SampleParams,
         Wave,
@@ -908,6 +1159,7 @@ mod tests {
             .map(|frame| if frame % 2 == 0 { 0.5 } else { -0.5 })
             .collect::<Vec<_>>();
         RfDls::new(
+            HostApiV1::new(ptr::null_mut(), None, None, None, None),
             DlsBank {
                 instruments: vec![Instrument {
                     name: "Synthetic Piano".into(),
@@ -947,6 +1199,31 @@ mod tests {
             0,
             Vec::new(),
         )
+    }
+
+    #[test]
+    fn surface_activation_only_focuses_existing_programs() {
+        let mut plugin = synthetic_plugin();
+        plugin.custom_programs.push(custom_program());
+        let response = plugin
+            .activate_surface(SurfaceActivationRequest::return_to(
+                "little@1",
+                SurfaceMode::Play,
+                Some("custom.user.warm-piano".into()),
+            ))
+            .unwrap();
+        assert_eq!(
+            response.focus_item_id.as_deref(),
+            Some("custom.user.warm-piano")
+        );
+        let response = plugin
+            .activate_surface(SurfaceActivationRequest::return_to(
+                "little@1",
+                SurfaceMode::Play,
+                Some("custom.missing".into()),
+            ))
+            .unwrap();
+        assert_eq!(response.focus_item_id, None);
     }
 
     #[test]
@@ -997,6 +1274,35 @@ mod tests {
         assert_eq!(status, STATUS_OK);
         assert_eq!(plugin.selected_preset_id, "custom.user.warm-piano");
         assert_eq!(plugin.envelope_override.unwrap().release_seconds, 1.2);
+    }
+
+    #[test]
+    fn program_extension_creates_and_reopens_canonical_drafts() {
+        let mut plugin = synthetic_plugin();
+        let created = plugin
+            .begin_program_edit(&ProgramEditRequest::new(None))
+            .unwrap();
+        assert_eq!(created.document.id, "user.custom-001");
+        assert_eq!(created.document.name, "CUSTOM 001");
+        assert_eq!(
+            created.storage_path,
+            "custom/user.custom-001.rackforge-program.json"
+        );
+        assert_eq!(
+            plugin
+                .prepare_program_save(created.document.clone())
+                .unwrap(),
+            created
+        );
+
+        plugin.custom_programs.push(custom_program());
+        let reopened = plugin
+            .begin_program_edit(&ProgramEditRequest::new(Some(
+                "custom.user.warm-piano".into(),
+            )))
+            .unwrap();
+        assert_eq!(reopened.document.id, "user.warm-piano");
+        assert_eq!(reopened.preview_sound_id, "dls.b00000000.p00000000");
     }
 
     #[test]

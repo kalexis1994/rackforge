@@ -1,18 +1,24 @@
+use crate::AddonStorage;
 use crate::session::SharedSessionStore;
 use anyhow::{Context, Result, bail};
 use rackforge_control_api::{
     ControlErrorCode, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES, decode_request,
     encode_line,
 };
+use rackforge_plugin_api::{
+    PreparedProgram, PresetCatalog, ProgramDocument, ProgramEditRequest, SurfaceActivationRequest,
+    SurfaceActivationResponse,
+};
 use rackforge_session_api::{
-    AuditionEndReason, CommandEnvelope, CommandRef, InstanceId, Revision, SESSION_SCHEMA_VERSION,
-    SessionCommand, SessionEvent,
+    AuditionEndReason, CommandEnvelope, CommandRef, InstanceId, ProgramDraftState, Revision,
+    SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SoundSummary,
 };
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -41,6 +47,27 @@ pub enum AudioControlCommand {
         lease_id: u64,
         reply: SyncSender<Result<(), String>>,
     },
+    BeginProgramEdit {
+        instance_id: InstanceId,
+        request: ProgramEditRequest,
+        previous_sound_id: Option<String>,
+        reply: SyncSender<Result<(u64, PreparedProgram), String>>,
+    },
+    ReplaceProgramDraft {
+        instance_id: InstanceId,
+        document: ProgramDocument,
+        reply: SyncSender<Result<PreparedProgram, String>>,
+    },
+    InstallProgram {
+        instance_id: InstanceId,
+        prepared: PreparedProgram,
+        reply: SyncSender<Result<PresetCatalog, String>>,
+    },
+    ActivateSurface {
+        instance_id: InstanceId,
+        request: SurfaceActivationRequest,
+        reply: SyncSender<Result<SurfaceActivationResponse, String>>,
+    },
 }
 
 struct LeaseDeadline {
@@ -63,8 +90,10 @@ impl ControlFailure {
 struct ControlContext {
     store: SharedSessionStore,
     audio_sender: SyncSender<AudioControlCommand>,
+    storage: Option<AddonStorage>,
     dispatch_lock: Mutex<()>,
     lease_deadline: Mutex<Option<LeaseDeadline>>,
+    next_draft_id: AtomicU64,
 }
 
 pub struct ControlServer {
@@ -76,6 +105,7 @@ pub fn start(
     socket_path: &Path,
     store: SharedSessionStore,
     audio_sender: SyncSender<AudioControlCommand>,
+    storage: Option<AddonStorage>,
 ) -> Result<ControlServer> {
     if let Some(parent) = socket_path.parent() {
         fs::create_dir_all(parent)
@@ -112,8 +142,10 @@ pub fn start(
     let context = Arc::new(ControlContext {
         store,
         audio_sender,
+        storage,
         dispatch_lock: Mutex::new(()),
         lease_deadline: Mutex::new(None),
+        next_draft_id: AtomicU64::new(1),
     });
     let path = socket_path.to_path_buf();
     let server_context = Arc::clone(&context);
@@ -184,7 +216,7 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
     let response = match request {
         ControlRequest::Snapshot => match context.store.lock() {
             Ok(store) => ControlResponse::Snapshot {
-                snapshot: store.snapshot(),
+                snapshot: Box::new(store.snapshot()),
             },
             Err(_) => internal_error("session store lock is poisoned", None),
         },
@@ -367,6 +399,17 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             }
         }
         SessionCommand::EndAudition { lease_id } => {
+            if snapshot.program_draft.as_ref().is_some_and(|draft| {
+                snapshot.audition.as_ref().is_some_and(|audition| {
+                    audition.lease_id == lease_id && audition.instance_id == draft.instance_id
+                })
+            }) {
+                return error_response(
+                    ControlErrorCode::Conflict,
+                    "program editing must be saved or cancelled before releasing audition focus",
+                    Some(snapshot.revision),
+                );
+            }
             let audition = match snapshot
                 .audition
                 .as_ref()
@@ -405,6 +448,414 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                         },
                     )
                 }
+                Err(failure) => failure.into_response(),
+            }
+        }
+        SessionCommand::BeginProgramEdit {
+            instance_id,
+            program_id,
+        } => {
+            let instance = match require_active_instance(&snapshot, &instance_id) {
+                Ok(instance) => instance,
+                Err(failure) => return failure.into_response(),
+            };
+            if snapshot.audition.is_some() || snapshot.program_draft.is_some() {
+                return error_response(
+                    ControlErrorCode::Conflict,
+                    "another audition or program edit is already active",
+                    Some(snapshot.revision),
+                );
+            }
+            let previous_sound_id = instance.selected_sound_id.clone();
+            let request = ProgramEditRequest::new(program_id.clone());
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::BeginProgramEdit {
+                    instance_id: instance_id.clone(),
+                    request,
+                    previous_sound_id: previous_sound_id.clone(),
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "begin program editing") {
+                Ok((lease_id, prepared)) => {
+                    if prepared.document.plugin_id != instance.addon_id {
+                        return internal_error(
+                            "addon prepared a program for a different addon",
+                            Some(snapshot.revision),
+                        );
+                    }
+                    let draft_id = context.next_draft_id.fetch_add(1, Ordering::Relaxed).max(1);
+                    let draft = match program_draft_state(
+                        draft_id,
+                        instance_id.clone(),
+                        program_id,
+                        &prepared,
+                        false,
+                    ) {
+                        Ok(draft) => draft,
+                        Err(response) => return response,
+                    };
+                    let response = record_command_events(
+                        context,
+                        command_ref,
+                        vec![
+                            SessionEvent::AuditionStarted {
+                                lease_id,
+                                instance_id,
+                                previous_sound_id,
+                            },
+                            SessionEvent::ProgramEditStarted { draft },
+                        ],
+                    );
+                    if matches!(response, ControlResponse::CommandApplied { .. }) {
+                        set_lease_deadline(context, Some(lease_id));
+                    }
+                    response
+                }
+                Err(failure) => failure.into_response(),
+            }
+        }
+        SessionCommand::ReplaceProgramDraft {
+            draft_id,
+            document_json,
+        } => {
+            let draft = match snapshot
+                .program_draft
+                .as_ref()
+                .filter(|draft| draft.draft_id == draft_id)
+            {
+                Some(draft) => draft,
+                None => {
+                    return error_response(
+                        ControlErrorCode::NotFound,
+                        "program draft is missing or no longer valid",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let audition = match snapshot
+                .audition
+                .as_ref()
+                .filter(|audition| audition.instance_id == draft.instance_id)
+            {
+                Some(audition) => audition,
+                None => {
+                    return internal_error(
+                        "program draft lost its audition lease",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let document: ProgramDocument = match serde_json::from_str(&document_json) {
+                Ok(document) => document,
+                Err(error) => {
+                    return error_response(
+                        ControlErrorCode::InvalidRequest,
+                        format!("invalid program document JSON: {error}"),
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let previous_document: ProgramDocument =
+                match serde_json::from_str(&draft.document_json) {
+                    Ok(document) => document,
+                    Err(error) => {
+                        return internal_error(
+                            format!("stored program draft is invalid: {error}"),
+                            Some(snapshot.revision),
+                        );
+                    }
+                };
+            if document.id != previous_document.id
+                || document.plugin_id != previous_document.plugin_id
+            {
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    "program identity cannot change while editing",
+                    Some(snapshot.revision),
+                );
+            }
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::ReplaceProgramDraft {
+                    instance_id: draft.instance_id.clone(),
+                    document,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "validate program draft") {
+                Ok(prepared) => {
+                    let updated = match program_draft_state(
+                        draft_id,
+                        draft.instance_id.clone(),
+                        draft.original_program_id.clone(),
+                        &prepared,
+                        true,
+                    ) {
+                        Ok(draft) => draft,
+                        Err(response) => return response,
+                    };
+                    set_lease_deadline(context, Some(audition.lease_id));
+                    record_command_events(
+                        context,
+                        command_ref,
+                        vec![
+                            SessionEvent::ProgramDraftUpdated {
+                                draft: updated.clone(),
+                            },
+                            SessionEvent::SoundSelected {
+                                instance_id: draft.instance_id.clone(),
+                                sound_id: updated.preview_sound_id,
+                            },
+                        ],
+                    )
+                }
+                Err(failure) => failure.into_response(),
+            }
+        }
+        SessionCommand::SaveProgramDraft { draft_id } => {
+            let draft = match snapshot
+                .program_draft
+                .as_ref()
+                .filter(|draft| draft.draft_id == draft_id)
+            {
+                Some(draft) => draft,
+                None => {
+                    return error_response(
+                        ControlErrorCode::NotFound,
+                        "program draft is missing or no longer valid",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let audition = match snapshot
+                .audition
+                .as_ref()
+                .filter(|audition| audition.instance_id == draft.instance_id)
+            {
+                Some(audition) => audition,
+                None => {
+                    return internal_error(
+                        "program draft lost its audition lease",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let document: ProgramDocument = match serde_json::from_str(&draft.document_json) {
+                Ok(document) => document,
+                Err(error) => {
+                    return internal_error(
+                        format!("stored program draft is invalid: {error}"),
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let prepared = PreparedProgram {
+                schema_version: rackforge_plugin_api::PROGRAM_EDIT_SCHEMA_VERSION,
+                storage_path: draft.storage_path.clone(),
+                preview_sound_id: draft.preview_sound_id.clone(),
+                document,
+            };
+            if let Err(error) = prepared.validate() {
+                return internal_error(
+                    format!("stored prepared program is invalid: {error}"),
+                    Some(snapshot.revision),
+                );
+            }
+            let Some(storage) = &context.storage else {
+                return error_response(
+                    ControlErrorCode::Unavailable,
+                    "RackForge data storage is not configured",
+                    Some(snapshot.revision),
+                );
+            };
+            if let Err(error) =
+                storage.save_program(Path::new(&prepared.storage_path), &prepared.document)
+            {
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    format!("saving program: {error:#}"),
+                    Some(snapshot.revision),
+                );
+            }
+            let (install_sender, install_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::InstallProgram {
+                    instance_id: draft.instance_id.clone(),
+                    prepared: prepared.clone(),
+                    reply: install_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            let catalog = match receive_audio(install_receiver, "install saved program") {
+                Ok(catalog) => catalog,
+                Err(failure) => return failure.into_response(),
+            };
+            let preset_id = format!("custom.{}", prepared.document.id);
+            let Some(preset) = catalog.presets.iter().find(|preset| preset.id == preset_id) else {
+                return internal_error(
+                    "installed program is missing from the addon catalog",
+                    Some(snapshot.revision),
+                );
+            };
+            let (end_sender, end_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::EndAudition {
+                    lease_id: audition.lease_id,
+                    reply: end_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            if let Err(failure) = receive_audio(end_receiver, "release program edit focus") {
+                return failure.into_response();
+            }
+            set_lease_deadline(context, None);
+            record_command_events(
+                context,
+                command_ref,
+                vec![
+                    SessionEvent::ProgramSaved {
+                        draft_id,
+                        instance_id: draft.instance_id.clone(),
+                        sound: SoundSummary {
+                            id: preset.id.clone(),
+                            name: preset.name.clone(),
+                            bank: preset.bank.clone(),
+                            detail: preset
+                                .description
+                                .clone()
+                                .or_else(|| preset.category.clone()),
+                        },
+                    },
+                    SessionEvent::AuditionEnded {
+                        lease_id: audition.lease_id,
+                        instance_id: audition.instance_id.clone(),
+                        restored_sound_id: audition.previous_sound_id.clone(),
+                        reason: AuditionEndReason::Released,
+                    },
+                ],
+            )
+        }
+        SessionCommand::CancelProgramEdit { draft_id } => {
+            let draft = match snapshot
+                .program_draft
+                .as_ref()
+                .filter(|draft| draft.draft_id == draft_id)
+            {
+                Some(draft) => draft,
+                None => {
+                    return error_response(
+                        ControlErrorCode::NotFound,
+                        "program draft is missing or no longer valid",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let audition = match snapshot
+                .audition
+                .as_ref()
+                .filter(|audition| audition.instance_id == draft.instance_id)
+            {
+                Some(audition) => audition,
+                None => {
+                    return internal_error(
+                        "program draft lost its audition lease",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::EndAudition {
+                    lease_id: audition.lease_id,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            if let Err(failure) = receive_audio(reply_receiver, "cancel program editing") {
+                return failure.into_response();
+            }
+            set_lease_deadline(context, None);
+            record_command_events(
+                context,
+                command_ref,
+                vec![
+                    SessionEvent::ProgramEditCancelled {
+                        draft_id,
+                        instance_id: draft.instance_id.clone(),
+                    },
+                    SessionEvent::AuditionEnded {
+                        lease_id: audition.lease_id,
+                        instance_id: audition.instance_id.clone(),
+                        restored_sound_id: audition.previous_sound_id.clone(),
+                        reason: AuditionEndReason::Cancelled,
+                    },
+                ],
+            )
+        }
+        SessionCommand::ActivateSurface {
+            instance_id,
+            request,
+        } => {
+            let instance = match require_active_instance(&snapshot, &instance_id) {
+                Ok(instance) => instance,
+                Err(failure) => return failure.into_response(),
+            };
+            if let Err(error) = request.validate() {
+                return error_response(
+                    ControlErrorCode::InvalidRequest,
+                    error.to_string(),
+                    Some(snapshot.revision),
+                );
+            }
+            if !instance
+                .ui_layouts
+                .iter()
+                .any(|layout| layout == &request.layout_id)
+            {
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    format!(
+                        "addon {} does not expose layout {}",
+                        instance.addon_id, request.layout_id
+                    ),
+                    Some(snapshot.revision),
+                );
+            }
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::ActivateSurface {
+                    instance_id: instance_id.clone(),
+                    request: request.clone(),
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "activate addon surface") {
+                Ok(response) => record_command_event(
+                    context,
+                    command_ref,
+                    SessionEvent::SurfaceActivated {
+                        instance_id,
+                        request,
+                        response,
+                    },
+                ),
                 Err(failure) => failure.into_response(),
             }
         }
@@ -466,18 +917,60 @@ fn receive_audio<T>(
     }
 }
 
+fn program_draft_state(
+    draft_id: u64,
+    instance_id: InstanceId,
+    original_program_id: Option<String>,
+    prepared: &PreparedProgram,
+    dirty: bool,
+) -> Result<ProgramDraftState, ControlResponse> {
+    if let Err(error) = prepared.validate() {
+        return Err(internal_error(
+            format!("addon returned an invalid prepared program: {error}"),
+            None,
+        ));
+    }
+    let document_json = serde_json::to_string(&prepared.document).map_err(|error| {
+        internal_error(
+            format!("serializing prepared program document: {error}"),
+            None,
+        )
+    })?;
+    Ok(ProgramDraftState {
+        draft_id,
+        instance_id,
+        original_program_id,
+        name: prepared.document.name.clone(),
+        preview_sound_id: prepared.preview_sound_id.clone(),
+        storage_path: prepared.storage_path.clone(),
+        document_json,
+        dirty,
+    })
+}
+
 fn record_command_event(
     context: &ControlContext,
     command: CommandRef,
     event: SessionEvent,
 ) -> ControlResponse {
+    record_command_events(context, command, vec![event])
+}
+
+fn record_command_events(
+    context: &ControlContext,
+    command: CommandRef,
+    events: Vec<SessionEvent>,
+) -> ControlResponse {
     match context.store.lock() {
-        Ok(mut store) => match store.record(Some(command.clone()), event) {
-            Ok(event) => ControlResponse::CommandApplied {
+        Ok(mut store) => match store.record_many(Some(command.clone()), events) {
+            Ok(events) => ControlResponse::CommandApplied {
                 client_id: command.client_id,
                 command_id: command.command_id,
-                revision: event.revision,
-                events: vec![event],
+                revision: events
+                    .last()
+                    .map(|event| event.revision)
+                    .unwrap_or(store.state().revision),
+                events,
             },
             Err(error) => internal_error(error.to_string(), Some(store.state().revision)),
         },
@@ -543,21 +1036,32 @@ fn audition_watchdog(context: Arc<ControlContext>) {
         }
         set_lease_deadline(&context, None);
         match context.store.lock() {
-            Ok(mut store) => match store.record(
-                None,
-                SessionEvent::AuditionEnded {
+            Ok(mut store) => {
+                let mut events = Vec::new();
+                if let Some(draft) = snapshot
+                    .program_draft
+                    .as_ref()
+                    .filter(|draft| draft.instance_id == audition.instance_id)
+                {
+                    events.push(SessionEvent::ProgramEditCancelled {
+                        draft_id: draft.draft_id,
+                        instance_id: draft.instance_id.clone(),
+                    });
+                }
+                events.push(SessionEvent::AuditionEnded {
                     lease_id,
                     instance_id: audition.instance_id.clone(),
                     restored_sound_id: audition.previous_sound_id.clone(),
                     reason: AuditionEndReason::Expired,
-                },
-            ) {
-                Ok(event) => println!(
-                    "AUDITION_EXPIRED lease={lease_id} revision={}",
-                    event.revision.get()
-                ),
-                Err(error) => eprintln!("AUDITION_WATCHDOG_ERROR {error:#}"),
-            },
+                });
+                match store.record_many(None, events) {
+                    Ok(events) => println!(
+                        "AUDITION_EXPIRED lease={lease_id} revision={}",
+                        events.last().map_or(0, |event| event.revision.get())
+                    ),
+                    Err(error) => eprintln!("AUDITION_WATCHDOG_ERROR {error:#}"),
+                }
+            }
             Err(_) => {
                 eprintln!("AUDITION_WATCHDOG_ERROR session store lock is poisoned");
                 return;
@@ -664,14 +1168,17 @@ mod tests {
                 selected_sound_id: Some("piano".into()),
             }],
             audition: None,
+            program_draft: None,
         };
         let (sender, receiver) = sync_channel(4);
         (
             Arc::new(ControlContext {
                 store: SessionStore::shared(state).unwrap(),
                 audio_sender: sender,
+                storage: None,
                 dispatch_lock: Mutex::new(()),
                 lease_deadline: Mutex::new(None),
+                next_draft_id: AtomicU64::new(1),
             }),
             receiver,
         )

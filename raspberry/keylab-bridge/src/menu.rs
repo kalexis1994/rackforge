@@ -1,8 +1,12 @@
 use rackforge_controller_api::LITTLE_TEXT_COLUMNS;
+use rackforge_session_api::ProgramDraftState;
 pub use rackforge_ui::Input;
 use rackforge_ui::{
     Component, ComponentEvent, Frame, NavigationAction as Action, Rect, TextFallback, VisualState,
-    components::{Button, CarouselItem, EditableValue, SimpleCarousel, ValueCarousel, ValueItem},
+    components::{
+        Button, CarouselItem, ConfirmationDialog, EditableValue, SimpleCarousel, TextEditor,
+        ValueCarousel, ValueItem,
+    },
 };
 
 pub const DISPLAY_COLUMNS: usize = LITTLE_TEXT_COLUMNS;
@@ -51,18 +55,61 @@ impl PlaySound {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActiveMode {
+    Live,
+    Play,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProgramExitDestination {
+    CustomPrograms,
+    ActiveMode {
+        mode: ActiveMode,
+        selected_sound_id: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProgramExitDecision {
+    Save,
+    Discard,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MenuCommand {
     SelectSound {
         id: String,
     },
-    BeginAudition {
-        preview_sound_id: String,
-        draft_name: String,
+    BeginProgramEdit {
         program_id: Option<String>,
     },
-    EndAudition {
-        lease_id: u64,
+    SetProgramDraftSound {
+        draft_id: u64,
+        sound_id: String,
+    },
+    SetProgramDraftName {
+        draft_id: u64,
+        name: String,
+    },
+    SaveProgramDraft {
+        draft_id: u64,
+    },
+    CancelProgramEdit {
+        draft_id: u64,
+    },
+    ResolveProgramExit {
+        draft_id: u64,
+        decision: ProgramExitDecision,
+        destination: ProgramExitDestination,
+    },
+    ReturnToActiveMode {
+        mode: ActiveMode,
+        cancel_draft_id: Option<u64>,
+        selected_sound_id: Option<String>,
+    },
+    ForceHome {
+        cancel_draft_id: Option<u64>,
     },
 }
 
@@ -143,24 +190,26 @@ enum Page {
     RfDlsPlay,
     RfDlsCustomPrograms,
     RfDlsProgramSections,
+    RfDlsName,
     RfDlsTimbre,
     RfDlsExpression,
     RfDlsEnvelope,
     RfDlsTuning,
     RfDlsFx,
     RfDlsOutput,
+    RfDlsUnsavedChanges,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct ProgramDraft {
-    program_id: Option<String>,
-    name: String,
-    base_sound_id: String,
+struct PendingProgramExit {
+    return_page: Page,
+    destination: ProgramExitDestination,
 }
 
 #[derive(Debug)]
 pub struct Menu {
     page: Page,
+    active_mode: ActiveMode,
     home_index: usize,
     live_index: usize,
     play_index: usize,
@@ -173,10 +222,13 @@ pub struct Menu {
     rf_dls_timbre_index: usize,
     rf_dls_sounds: Vec<PlaySound>,
     rf_dls_active_sound_id: Option<String>,
+    play_anchor_sound_id: Option<String>,
     audition_lease_id: Option<u64>,
-    pending_draft: Option<ProgramDraft>,
-    program_draft: Option<ProgramDraft>,
+    program_draft: Option<ProgramDraftState>,
+    program_name: TextEditor,
     envelope: ValueCarousel,
+    unsaved_changes: ConfirmationDialog,
+    pending_program_exit: Option<PendingProgramExit>,
     pressed_button: Option<usize>,
     pending_command: Option<MenuCommand>,
 }
@@ -197,21 +249,32 @@ const CONFIG_DETAILS: [&str; 4] = [
 const ADDON_ITEMS: [&str; 1] = ["RF-DLS"];
 const ADDON_DETAILS: [&str; 1] = [" "];
 const RF_DLS_LIBRARIES: [&str; 2] = ["DLS", "CUSTOM"];
-const RF_DLS_PROGRAM_SECTIONS: [&str; 6] =
-    ["TIMBRE", "EXPRESSION", "ENVELOPE", "TUNING", "FX", "OUTPUT"];
-const RF_DLS_SECTION_DETAILS: [&str; 6] = [
+const RF_DLS_PROGRAM_SECTIONS: [&str; 8] = [
+    "NAME",
+    "TIMBRE",
+    "EXPRESSION",
+    "ENVELOPE",
+    "TUNING",
+    "FX",
+    "OUTPUT",
+    "SAVE",
+];
+const RF_DLS_SECTION_DETAILS: [&str; 8] = [
+    "Program name",
     "Base DLS sound",
     "Wheel and pedals",
     "ADSR override",
     "Pitch and octave",
     "Chorus / reverb",
     "Level and pan",
+    "Store program",
 ];
 
 impl Default for Menu {
     fn default() -> Self {
         Self {
             page: Page::Home,
+            active_mode: ActiveMode::Live,
             home_index: 0,
             live_index: 0,
             play_index: 0,
@@ -229,10 +292,13 @@ impl Default for Menu {
                 "B000 P000",
             )],
             rf_dls_active_sound_id: Some("dls.b00000000.p00000000".into()),
+            play_anchor_sound_id: Some("dls.b00000000.p00000000".into()),
             audition_lease_id: None,
-            pending_draft: None,
             program_draft: None,
+            program_name: program_name_editor("CUSTOM 001"),
             envelope: envelope_carousel(),
+            unsaved_changes: unsaved_changes_dialog(),
+            pending_program_exit: None,
             pressed_button: None,
             pending_command: None,
         }
@@ -247,6 +313,9 @@ impl Menu {
             .map(|sound| sound.id.clone());
         self.rf_dls_sounds = sounds;
         self.rf_dls_active_sound_id = selected_sound_id.map(str::to_owned);
+        if self.program_draft.is_none() {
+            self.play_anchor_sound_id = selected_sound_id.map(str::to_owned);
+        }
         let focus_id = browsed_sound_id.as_deref().or(selected_sound_id);
         if let Some(sound) =
             focus_id.and_then(|id| self.rf_dls_sounds.iter().find(|sound| sound.id == id))
@@ -270,25 +339,31 @@ impl Menu {
         self.audition_lease_id
     }
 
-    pub fn audition_started(&mut self, lease_id: u64) -> bool {
-        let Some(draft) = self.pending_draft.take() else {
-            return false;
-        };
-        if draft.name.trim().is_empty() || draft.base_sound_id.is_empty() {
-            return false;
-        }
-        self.audition_lease_id = Some(lease_id);
-        self.program_draft = Some(draft);
-        self.rf_dls_section_index = 0;
-        self.page = Page::RfDlsProgramSections;
-        true
-    }
+    pub fn sync_program_edit(
+        &mut self,
+        draft: Option<ProgramDraftState>,
+        audition_lease_id: Option<u64>,
+    ) {
+        let previous_draft_id = self.program_draft.as_ref().map(|draft| draft.draft_id);
+        let next_draft_id = draft.as_ref().map(|draft| draft.draft_id);
+        let edit_was_visible = self.program_draft.is_some() && self.is_program_edit_page();
+        self.audition_lease_id = audition_lease_id;
+        self.program_draft = draft;
 
-    pub fn audition_ended(&mut self) {
-        self.audition_lease_id = None;
-        self.pending_draft = None;
-        self.program_draft = None;
-        self.page = Page::RfDlsCustomPrograms;
+        if let Some(draft_id) = next_draft_id {
+            if !self.program_name.is_editing()
+                && let Some(name) = self.program_draft.as_ref().map(|draft| draft.name.as_str())
+            {
+                self.program_name.set_value(name);
+            }
+            if previous_draft_id != Some(draft_id) {
+                self.rf_dls_section_index = 0;
+                self.page = Page::RfDlsProgramSections;
+            }
+        } else if edit_was_visible {
+            self.pending_program_exit = None;
+            self.page = Page::RfDlsCustomPrograms;
+        }
     }
 
     pub fn set_button_pressed(&mut self, input: Input, pressed: bool) -> bool {
@@ -312,41 +387,51 @@ impl Menu {
     }
 
     pub fn apply_input(&mut self, input: Input) {
-        if self.page == Page::RfDlsEnvelope {
+        if input == Input::HomeChord {
+            let cancel_draft_id = self.program_draft.as_ref().map(|draft| draft.draft_id);
+            self.audition_lease_id = None;
+            self.program_draft = None;
+            self.page = Page::Home;
+            self.pending_command = Some(MenuCommand::ForceHome { cancel_draft_id });
+            return;
+        }
+        if input == Input::Button4Long {
+            if self.program_draft.as_ref().is_some_and(|draft| draft.dirty) {
+                self.open_unsaved_changes(ProgramExitDestination::ActiveMode {
+                    mode: self.active_mode,
+                    selected_sound_id: self.play_anchor_sound_id.clone(),
+                });
+                return;
+            }
+            self.pending_command = Some(MenuCommand::ReturnToActiveMode {
+                mode: self.active_mode,
+                cancel_draft_id: self.program_draft.as_ref().map(|draft| draft.draft_id),
+                selected_sound_id: self.play_anchor_sound_id.clone(),
+            });
+            return;
+        }
+        if self.page == Page::RfDlsUnsavedChanges {
+            self.apply_unsaved_changes_input(input);
+        } else if self.page == Page::RfDlsName {
+            self.apply_program_name_input(input);
+        } else if self.page == Page::RfDlsEnvelope {
             self.apply_envelope_input(input);
-        } else {
-            self.apply(input.default_navigation());
+        } else if let Some(action) = input.default_navigation() {
+            self.apply(action);
         }
     }
 
     fn begin_program_edit(&mut self) {
-        let dls_sounds = self.dls_sounds();
-        let Some(first_dls) = dls_sounds.first() else {
-            return;
-        };
         let custom_sounds = self.custom_sounds();
-        let draft = if self.rf_dls_custom_index == 0 {
-            ProgramDraft {
-                program_id: None,
-                name: format!("CUSTOM {:03}", custom_sounds.len() + 1),
-                base_sound_id: first_dls.id.clone(),
-            }
+        let program_id = if self.rf_dls_custom_index == 0 {
+            None
         } else {
             let Some(program) = custom_sounds.get(self.rf_dls_custom_index - 1) else {
                 return;
             };
-            ProgramDraft {
-                program_id: Some(program.id.clone()),
-                name: program.name.clone(),
-                base_sound_id: program.id.clone(),
-            }
+            Some(program.id.clone())
         };
-        self.pending_command = Some(MenuCommand::BeginAudition {
-            preview_sound_id: draft.base_sound_id.clone(),
-            draft_name: draft.name.clone(),
-            program_id: draft.program_id.clone(),
-        });
-        self.pending_draft = Some(draft);
+        self.pending_command = Some(MenuCommand::BeginProgramEdit { program_id });
     }
 
     pub fn apply_input_and_render(&mut self, input: Input) -> Screen {
@@ -355,6 +440,26 @@ impl Menu {
     }
 
     pub fn apply(&mut self, action: Action) {
+        if self.page == Page::RfDlsUnsavedChanges {
+            let input = match action {
+                Action::Previous => Input::Button2,
+                Action::Next => Input::Button3,
+                Action::Back => Input::Button4,
+                Action::Select => Input::Button1,
+            };
+            self.apply_unsaved_changes_input(input);
+            return;
+        }
+        if self.page == Page::RfDlsName {
+            let input = match action {
+                Action::Previous => Input::Button2,
+                Action::Next => Input::Button3,
+                Action::Back => Input::Button4,
+                Action::Select => Input::Button1,
+            };
+            self.apply_program_name_input(input);
+            return;
+        }
         if self.page == Page::RfDlsEnvelope {
             let input = match action {
                 Action::Previous => Input::Button2,
@@ -373,15 +478,23 @@ impl Menu {
                     Page::RfDlsPlay => Page::RfDlsLibrary,
                     Page::RfDlsLibrary => Page::Play,
                     Page::RfDlsCustomPrograms => Page::Addons,
-                    Page::RfDlsTimbre
+                    Page::RfDlsName
+                    | Page::RfDlsTimbre
                     | Page::RfDlsExpression
                     | Page::RfDlsEnvelope
                     | Page::RfDlsTuning
                     | Page::RfDlsFx
                     | Page::RfDlsOutput => Page::RfDlsProgramSections,
                     Page::RfDlsProgramSections => {
-                        if let Some(lease_id) = self.audition_lease_id {
-                            self.pending_command = Some(MenuCommand::EndAudition { lease_id });
+                        if self.program_draft.as_ref().is_some_and(|draft| draft.dirty) {
+                            self.open_unsaved_changes(ProgramExitDestination::CustomPrograms);
+                            return;
+                        }
+                        if let Some(draft_id) =
+                            self.program_draft.as_ref().map(|draft| draft.draft_id)
+                        {
+                            self.pending_command =
+                                Some(MenuCommand::CancelProgramEdit { draft_id });
                             return;
                         }
                         Page::RfDlsCustomPrograms
@@ -402,8 +515,14 @@ impl Menu {
                 }
                 self.page = match self.page {
                     Page::Home => match self.home_index {
-                        0 => Page::Live,
-                        1 => Page::Play,
+                        0 => {
+                            self.active_mode = ActiveMode::Live;
+                            Page::Live
+                        }
+                        1 => {
+                            self.active_mode = ActiveMode::Play;
+                            Page::Play
+                        }
                         _ => Page::Config,
                     },
                     Page::Play if self.play_index == 0 => Page::RfDlsLibrary,
@@ -418,28 +537,66 @@ impl Menu {
                         Page::RfDlsCustomPrograms
                     }
                     Page::RfDlsProgramSections => match self.rf_dls_section_index {
-                        0 => Page::RfDlsTimbre,
-                        1 => Page::RfDlsExpression,
-                        2 => Page::RfDlsEnvelope,
-                        3 => Page::RfDlsTuning,
-                        4 => Page::RfDlsFx,
-                        _ => Page::RfDlsOutput,
+                        0 => Page::RfDlsName,
+                        1 => Page::RfDlsTimbre,
+                        2 => Page::RfDlsExpression,
+                        3 => Page::RfDlsEnvelope,
+                        4 => Page::RfDlsTuning,
+                        5 => Page::RfDlsFx,
+                        6 => Page::RfDlsOutput,
+                        _ => {
+                            if let Some(draft_id) =
+                                self.program_draft.as_ref().map(|draft| draft.draft_id)
+                            {
+                                self.pending_command =
+                                    Some(MenuCommand::SaveProgramDraft { draft_id });
+                            }
+                            Page::RfDlsProgramSections
+                        }
                     },
                     Page::RfDlsTimbre => {
                         let sound_id = self
                             .dls_sounds()
                             .get(self.rf_dls_timbre_index)
                             .map(|sound| sound.id.clone());
-                        if let Some(sound_id) = sound_id {
-                            if let Some(draft) = self.program_draft.as_mut() {
-                                draft.base_sound_id = sound_id.clone();
-                            }
-                            self.pending_command = Some(MenuCommand::SelectSound { id: sound_id });
+                        if let Some(sound_id) = sound_id
+                            && let Some(draft_id) =
+                                self.program_draft.as_ref().map(|draft| draft.draft_id)
+                        {
+                            self.pending_command =
+                                Some(MenuCommand::SetProgramDraftSound { draft_id, sound_id });
                         }
                         Page::RfDlsTimbre
                     }
                     page => page,
                 };
+            }
+        }
+    }
+
+    pub fn complete_return_to_active_mode(
+        &mut self,
+        mode: ActiveMode,
+        focus_sound_id: Option<&str>,
+    ) {
+        self.active_mode = mode;
+        match mode {
+            ActiveMode::Live => {
+                self.page = Page::Live;
+            }
+            ActiveMode::Play => {
+                let focus_sound_id = focus_sound_id.or(self.play_anchor_sound_id.as_deref());
+                if let Some(sound) = focus_sound_id
+                    .and_then(|id| self.rf_dls_sounds.iter().find(|sound| sound.id == id))
+                {
+                    self.rf_dls_library_index = library_index(&sound.bank).unwrap_or(0);
+                    self.rf_dls_play_index = self
+                        .filtered_sounds()
+                        .iter()
+                        .position(|candidate| candidate.id == sound.id)
+                        .unwrap_or(0);
+                }
+                self.page = Page::RfDlsPlay;
             }
         }
     }
@@ -489,6 +646,10 @@ impl Menu {
                 &RF_DLS_SECTION_DETAILS,
                 self.rf_dls_section_index,
             ),
+            Page::RfDlsName => {
+                let [line_1, line_2] = component_lines(&self.program_name, false);
+                Screen::with_header("RF-DLS", line_1, line_2)
+            }
             Page::RfDlsTimbre => self.render_timbre(),
             Page::RfDlsExpression => Screen::with_header("EXPRESSION", "MOD WHEEL", "DEPTH 100%"),
             Page::RfDlsEnvelope => {
@@ -498,6 +659,10 @@ impl Menu {
             Page::RfDlsTuning => Screen::with_header("TUNING", "TRANSPOSE", "0 st"),
             Page::RfDlsFx => Screen::with_header("FX", "REVERB", "0%"),
             Page::RfDlsOutput => Screen::with_header("OUTPUT", "LEVEL", "100%"),
+            Page::RfDlsUnsavedChanges => {
+                let [line_1, line_2] = component_lines(&self.unsaved_changes, true);
+                Screen::with_header("RF-DLS", line_1, line_2)
+            }
         };
         screen.footer = standard_footer(self.pressed_button);
         screen
@@ -529,8 +694,9 @@ impl Menu {
                 let len = self.dls_sounds().len();
                 (&mut self.rf_dls_timbre_index, len)
             }
+            Page::RfDlsName => return,
             Page::RfDlsExpression | Page::RfDlsTuning | Page::RfDlsFx | Page::RfDlsOutput => return,
-            Page::RfDlsEnvelope => return,
+            Page::RfDlsEnvelope | Page::RfDlsUnsavedChanges => return,
         };
         *selection = ((*selection as isize + delta).rem_euclid(len as isize)) as usize;
     }
@@ -541,6 +707,71 @@ impl Menu {
             ComponentEvent::ExitRequested(_)
         ) {
             self.page = Page::RfDlsProgramSections;
+        }
+    }
+
+    fn apply_program_name_input(&mut self, input: Input) {
+        match self.program_name.handle(input) {
+            ComponentEvent::EditCommitted(_) => {
+                if let Some(draft_id) = self.program_draft.as_ref().map(|draft| draft.draft_id) {
+                    self.pending_command = Some(MenuCommand::SetProgramDraftName {
+                        draft_id,
+                        name: self.program_name.value().to_owned(),
+                    });
+                }
+            }
+            ComponentEvent::ExitRequested(_) => {
+                self.page = Page::RfDlsProgramSections;
+            }
+            _ => {}
+        }
+    }
+
+    fn open_unsaved_changes(&mut self, destination: ProgramExitDestination) {
+        let return_page = if self.page == Page::RfDlsUnsavedChanges {
+            self.pending_program_exit
+                .as_ref()
+                .map_or(Page::RfDlsProgramSections, |pending| pending.return_page)
+        } else {
+            self.page
+        };
+        self.unsaved_changes.set_selected(0);
+        self.pending_program_exit = Some(PendingProgramExit {
+            return_page,
+            destination,
+        });
+        self.page = Page::RfDlsUnsavedChanges;
+    }
+
+    fn apply_unsaved_changes_input(&mut self, input: Input) {
+        match self.unsaved_changes.handle(input) {
+            ComponentEvent::Activated(_) => {
+                let Some(pending) = self.pending_program_exit.as_ref() else {
+                    self.page = Page::RfDlsProgramSections;
+                    return;
+                };
+                let Some(draft_id) = self.program_draft.as_ref().map(|draft| draft.draft_id) else {
+                    self.pending_program_exit = None;
+                    self.page = Page::RfDlsCustomPrograms;
+                    return;
+                };
+                self.pending_command = Some(MenuCommand::ResolveProgramExit {
+                    draft_id,
+                    decision: if self.unsaved_changes.selected() == 0 {
+                        ProgramExitDecision::Save
+                    } else {
+                        ProgramExitDecision::Discard
+                    },
+                    destination: pending.destination.clone(),
+                });
+            }
+            ComponentEvent::ExitRequested(_) => {
+                self.page = self
+                    .pending_program_exit
+                    .take()
+                    .map_or(Page::RfDlsProgramSections, |pending| pending.return_page);
+            }
+            _ => {}
         }
     }
 
@@ -626,7 +857,7 @@ impl Menu {
         let selected_id = self
             .program_draft
             .as_ref()
-            .map(|draft| draft.base_sound_id.as_str());
+            .map(|draft| draft.preview_sound_id.as_str());
         let mut carousel = SimpleCarousel::new(
             "rf-dls-timbre",
             sounds.iter().map(|sound| {
@@ -673,6 +904,21 @@ impl Menu {
             .iter()
             .filter(|sound| sound.bank == "custom")
             .collect()
+    }
+
+    fn is_program_edit_page(&self) -> bool {
+        matches!(
+            self.page,
+            Page::RfDlsProgramSections
+                | Page::RfDlsName
+                | Page::RfDlsTimbre
+                | Page::RfDlsExpression
+                | Page::RfDlsEnvelope
+                | Page::RfDlsTuning
+                | Page::RfDlsFx
+                | Page::RfDlsOutput
+                | Page::RfDlsUnsavedChanges
+        )
     }
 }
 
@@ -784,10 +1030,23 @@ fn envelope_carousel() -> ValueCarousel {
     carousel
 }
 
+fn program_name_editor(name: &str) -> TextEditor {
+    let mut editor = TextEditor::new("rf-dls-program-name", "NAME", name, 16);
+    editor.set_focused(true);
+    editor
+}
+
+fn unsaved_changes_dialog() -> ConfirmationDialog {
+    let mut dialog =
+        ConfirmationDialog::new("rf-dls-unsaved", "SAVE CHANGES?", ["SAVE", "DISCARD"]);
+    dialog.set_focused(true);
+    dialog
+}
+
 pub fn demo_frames() -> Vec<Screen> {
     let mut menu = Menu::default();
     let mut screens = vec![menu.render()];
-    for input in Input::ALL {
+    for input in Input::PHYSICAL {
         menu.apply_input(input);
         screens.push(menu.render());
     }
@@ -814,6 +1073,20 @@ pub fn demo_frames() -> Vec<Screen> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackforge_session_api::InstanceId;
+
+    fn draft(draft_id: u64, preview_sound_id: &str) -> ProgramDraftState {
+        ProgramDraftState {
+            draft_id,
+            instance_id: InstanceId::new("live.main.instrument.1").unwrap(),
+            original_program_id: None,
+            name: "CUSTOM 001".into(),
+            preview_sound_id: preview_sound_id.into(),
+            storage_path: "custom/user.custom-001.rackforge-program.json".into(),
+            document_json: r#"{"payload":{"source":{"bank":0,"program":0}}}"#.into(),
+            dirty: false,
+        }
+    }
 
     fn open_new_program_editor(menu: &mut Menu) {
         menu.apply(Action::Previous);
@@ -824,12 +1097,9 @@ mod tests {
         menu.apply(Action::Select);
         assert!(matches!(
             menu.take_command(),
-            Some(MenuCommand::BeginAudition {
-                program_id: None,
-                ..
-            })
+            Some(MenuCommand::BeginProgramEdit { program_id: None })
         ));
-        assert!(menu.audition_started(7));
+        menu.sync_program_edit(Some(draft(17, "dls.b00000000.p00000000")), Some(7));
     }
 
     #[test]
@@ -884,8 +1154,9 @@ mod tests {
         assert!(menu.render().line_1.contains("ADD NEW"));
         menu.apply(Action::Select);
         let _ = menu.take_command();
-        assert!(menu.audition_started(7));
-        assert!(menu.render().line_1.contains("TIMBRE"));
+        menu.sync_program_edit(Some(draft(17, "dls.b00000000.p00000000")), Some(7));
+        assert!(menu.render().line_1.contains("NAME"));
+        menu.apply(Action::Next);
         menu.apply(Action::Next);
         menu.apply(Action::Next);
         assert!(menu.render().line_1.contains("ENVELOPE"));
@@ -900,9 +1171,9 @@ mod tests {
         menu.apply(Action::Back);
         assert!(matches!(
             menu.take_command(),
-            Some(MenuCommand::EndAudition { lease_id: 7 })
+            Some(MenuCommand::CancelProgramEdit { draft_id: 17 })
         ));
-        menu.audition_ended();
+        menu.sync_program_edit(None, None);
         assert_eq!(
             menu.render().header,
             Header::Visible("CUSTOM PROGRAM 1/1".into())
@@ -916,14 +1187,22 @@ mod tests {
 
     #[test]
     fn exposes_exactly_seven_physical_inputs() {
-        assert_eq!(Input::ALL.len(), 7);
-        assert_eq!(Input::Button1.default_navigation(), Action::Select);
-        assert_eq!(Input::Button2.default_navigation(), Action::Previous);
-        assert_eq!(Input::Button3.default_navigation(), Action::Next);
-        assert_eq!(Input::Button4.default_navigation(), Action::Back);
-        assert_eq!(Input::EncoderLeft.default_navigation(), Action::Previous);
-        assert_eq!(Input::EncoderRight.default_navigation(), Action::Next);
-        assert_eq!(Input::EncoderPress.default_navigation(), Action::Select);
+        assert_eq!(Input::PHYSICAL.len(), 7);
+        assert_eq!(Input::ALL.len(), 12);
+        assert_eq!(Input::Button1.default_navigation(), Some(Action::Select));
+        assert_eq!(Input::Button2.default_navigation(), Some(Action::Previous));
+        assert_eq!(Input::Button3.default_navigation(), Some(Action::Next));
+        assert_eq!(Input::Button4.default_navigation(), Some(Action::Back));
+        assert_eq!(
+            Input::EncoderLeft.default_navigation(),
+            Some(Action::Previous)
+        );
+        assert_eq!(Input::EncoderRight.default_navigation(), Some(Action::Next));
+        assert_eq!(
+            Input::EncoderPress.default_navigation(),
+            Some(Action::Select)
+        );
+        assert_eq!(Input::Button4Long.default_navigation(), None);
     }
 
     #[test]
@@ -1090,6 +1369,7 @@ mod tests {
         open_new_program_editor(&mut menu);
         menu.apply(Action::Next);
         menu.apply(Action::Next);
+        menu.apply(Action::Next);
         menu.apply(Action::Select);
 
         assert!(menu.render().line_1.contains("ATTACK"));
@@ -1115,6 +1395,226 @@ mod tests {
 
         menu.apply_input(Input::Button4);
         assert!(menu.render().line_1.contains("ENVELOPE"));
+    }
+
+    #[test]
+    fn timbre_change_targets_the_core_owned_program_draft() {
+        let mut menu = Menu::default();
+        menu.set_play_sounds(
+            vec![
+                PlaySound::new("dls.b00000000.p00000000", "Piano 1", "dls", "B000 P000"),
+                PlaySound::new("dls.b00000000.p00000030", "Strings 1", "dls", "B000 P048"),
+            ],
+            Some("dls.b00000000.p00000000"),
+        );
+        open_new_program_editor(&mut menu);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        assert!(menu.render().line_1.contains("STRINGS 1"));
+        menu.apply(Action::Select);
+
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetProgramDraftSound {
+                draft_id: 17,
+                sound_id: "dls.b00000000.p00000030".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn save_is_an_explicit_program_section() {
+        let mut menu = Menu::default();
+        open_new_program_editor(&mut menu);
+        for _ in 0..7 {
+            menu.apply(Action::Next);
+        }
+        assert!(menu.render().line_1.contains("SAVE"));
+        assert_eq!(menu.render().line_2.trim(), "Store program");
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SaveProgramDraft { draft_id: 17 })
+        );
+    }
+
+    #[test]
+    fn dirty_program_requires_save_or_discard_before_leaving() {
+        let mut menu = Menu::default();
+        open_new_program_editor(&mut menu);
+        menu.program_draft.as_mut().unwrap().dirty = true;
+
+        menu.apply(Action::Back);
+        assert!(menu.render().line_1.contains("SAVE CHANGES?"));
+        assert!(menu.render().line_2.starts_with('['));
+        assert!(menu.render().line_2.contains("SAVE"));
+        assert_eq!(menu.take_command(), None);
+
+        menu.apply(Action::Back);
+        assert!(menu.render().line_1.contains("NAME"));
+
+        menu.apply(Action::Back);
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::ResolveProgramExit {
+                draft_id: 17,
+                decision: ProgramExitDecision::Save,
+                destination: ProgramExitDestination::CustomPrograms,
+            })
+        );
+    }
+
+    #[test]
+    fn dirty_program_can_be_explicitly_discarded() {
+        let mut menu = Menu::default();
+        open_new_program_editor(&mut menu);
+        menu.program_draft.as_mut().unwrap().dirty = true;
+
+        menu.apply(Action::Back);
+        menu.apply(Action::Next);
+        assert!(menu.render().line_2.starts_with('['));
+        assert!(menu.render().line_2.contains("DISCARD"));
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::ResolveProgramExit {
+                draft_id: 17,
+                decision: ProgramExitDecision::Discard,
+                destination: ProgramExitDestination::CustomPrograms,
+            })
+        );
+    }
+
+    #[test]
+    fn long_back_also_protects_a_dirty_program_before_returning_to_play() {
+        let mut menu = Menu {
+            active_mode: ActiveMode::Play,
+            ..Menu::default()
+        };
+        open_new_program_editor(&mut menu);
+        menu.program_draft.as_mut().unwrap().dirty = true;
+
+        menu.apply_input(Input::Button4Long);
+        assert!(menu.render().line_1.contains("SAVE CHANGES?"));
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::ResolveProgramExit {
+                draft_id: 17,
+                decision: ProgramExitDecision::Discard,
+                destination: ProgramExitDestination::ActiveMode {
+                    mode: ActiveMode::Play,
+                    selected_sound_id: Some("dls.b00000000.p00000000".into()),
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn custom_program_name_is_edited_as_part_of_the_core_draft() {
+        let mut menu = Menu::default();
+        open_new_program_editor(&mut menu);
+        assert!(menu.render().line_1.contains("NAME"));
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().header, Header::Visible("RF-DLS".into()));
+        menu.apply_input(Input::Button1);
+        assert!(menu.program_name.is_editing());
+        menu.apply_input(Input::EncoderRight);
+        menu.apply_input(Input::Button1);
+
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetProgramDraftName {
+                draft_id: 17,
+                name: "CUSTOM 002".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn long_back_returns_to_the_active_play_addon_and_centers_selection() {
+        let mut menu = Menu::default();
+        menu.set_play_sounds(
+            vec![
+                PlaySound::new("dls.piano", "Piano", "dls", "B000 P000"),
+                PlaySound::new(
+                    "custom.user.warm-piano",
+                    "Warm Piano",
+                    "custom",
+                    "CUSTOM 001",
+                ),
+            ],
+            Some("custom.user.warm-piano"),
+        );
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        menu.apply(Action::Back);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        assert!(menu.render().line_1.contains("ADDONS"));
+
+        menu.apply_input(Input::Button4Long);
+        assert!(matches!(
+            menu.take_command(),
+            Some(MenuCommand::ReturnToActiveMode {
+                mode: ActiveMode::Play,
+                ..
+            })
+        ));
+        menu.complete_return_to_active_mode(ActiveMode::Play, Some("custom.user.warm-piano"));
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("CUSTOM         1/1".into())
+        );
+        assert!(menu.render().line_1.contains("[WARM PIANO]"));
+    }
+
+    #[test]
+    fn audition_preview_never_replaces_the_play_navigation_anchor() {
+        let mut menu = Menu::default();
+        let sounds = vec![
+            PlaySound::new("dls.b00000000.p00000000", "Piano", "dls", "B000 P000"),
+            PlaySound::new(
+                "custom.user.warm-piano",
+                "Warm Piano",
+                "custom",
+                "CUSTOM 001",
+            ),
+        ];
+        menu.set_play_sounds(sounds.clone(), Some("custom.user.warm-piano"));
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        menu.sync_program_edit(Some(draft(17, "dls.b00000000.p00000000")), Some(7));
+        menu.set_play_sounds(sounds, Some("dls.b00000000.p00000000"));
+        menu.apply_input(Input::Button4Long);
+
+        assert!(matches!(
+            menu.take_command(),
+            Some(MenuCommand::ReturnToActiveMode {
+                mode: ActiveMode::Play,
+                cancel_draft_id: Some(17),
+                selected_sound_id: Some(id),
+            }) if id == "custom.user.warm-piano"
+        ));
+    }
+
+    #[test]
+    fn home_chord_is_an_immediate_host_owned_escape() {
+        let mut menu = Menu::default();
+        open_new_program_editor(&mut menu);
+        menu.apply_input(Input::HomeChord);
+        assert_eq!(menu.render().header, Header::Visible(HOME_HEADER.into()));
+        assert!(matches!(
+            menu.take_command(),
+            Some(MenuCommand::ForceHome {
+                cancel_draft_id: Some(17)
+            })
+        ));
+        assert!(menu.program_draft.is_none());
+        assert!(menu.audition_lease_id.is_none());
     }
 
     #[test]

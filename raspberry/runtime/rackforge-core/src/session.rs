@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use rackforge_session_api::{
     CommandRef, EventEnvelope, Revision, SESSION_SCHEMA_VERSION, SessionEvent, SessionState,
 };
@@ -54,24 +54,41 @@ impl SessionStore {
         command: Option<CommandRef>,
         event: SessionEvent,
     ) -> Result<EventEnvelope> {
-        let envelope = EventEnvelope {
-            schema_version: SESSION_SCHEMA_VERSION,
-            revision: self
-                .state
-                .revision
-                .next()
-                .map_err(|message| anyhow!(message))?,
-            command,
-            event,
-        };
-        self.state
-            .apply(&envelope)
-            .map_err(|message| anyhow!(message))?;
-        if self.events.len() == self.event_capacity {
-            self.events.pop_front();
+        self.record_many(command, vec![event])?
+            .pop()
+            .context("record_many returned no event")
+    }
+
+    pub fn record_many(
+        &mut self,
+        command: Option<CommandRef>,
+        events: Vec<SessionEvent>,
+    ) -> Result<Vec<EventEnvelope>> {
+        if events.is_empty() {
+            bail!("at least one session event is required");
         }
-        self.events.push_back(envelope.clone());
-        Ok(envelope)
+        let mut staged = self.state.clone();
+        let mut envelopes = Vec::with_capacity(events.len());
+        for event in events {
+            let envelope = EventEnvelope {
+                schema_version: SESSION_SCHEMA_VERSION,
+                revision: staged.revision.next().map_err(|message| anyhow!(message))?,
+                command: command.clone(),
+                event,
+            };
+            staged
+                .apply(&envelope)
+                .map_err(|message| anyhow!(message))?;
+            envelopes.push(envelope);
+        }
+        self.state = staged;
+        for envelope in &envelopes {
+            if self.events.len() == self.event_capacity {
+                self.events.pop_front();
+            }
+            self.events.push_back(envelope.clone());
+        }
+        Ok(envelopes)
     }
 
     pub fn events_after(&self, revision: Revision) -> Result<Vec<EventEnvelope>> {
@@ -136,6 +153,7 @@ mod tests {
                 selected_sound_id: Some("piano".into()),
             }],
             audition: None,
+            program_draft: None,
         };
         SessionStore::with_capacity(state, capacity).unwrap()
     }
@@ -178,5 +196,29 @@ mod tests {
         }
         assert!(store.events_after(Revision::ZERO).is_err());
         assert_eq!(store.events_after(Revision::new(1)).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn record_many_is_atomic_when_a_later_event_is_invalid() {
+        let mut store = store(4);
+        let before = store.snapshot();
+        let instance_id = before.active_instance_id.clone().unwrap();
+        let result = store.record_many(
+            None,
+            vec![
+                SessionEvent::SoundSelected {
+                    instance_id: instance_id.clone(),
+                    sound_id: "strings".into(),
+                },
+                SessionEvent::SoundSelected {
+                    instance_id,
+                    sound_id: "missing".into(),
+                },
+            ],
+        );
+
+        assert!(result.is_err());
+        assert_eq!(store.snapshot(), before);
+        assert!(store.events_after(Revision::ZERO).unwrap().is_empty());
     }
 }

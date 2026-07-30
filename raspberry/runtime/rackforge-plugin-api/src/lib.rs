@@ -19,11 +19,15 @@ pub use parameter::{
 };
 pub use preset::{BankDescriptor, PresetCatalog, PresetDescriptor};
 pub use program::{
-    ProgramDocument, ProgramError, validate_plugin_identifier, validate_program_identifier,
+    PROGRAM_EDIT_SCHEMA_VERSION, PROGRAM_SCHEMA_VERSION, PreparedProgram, ProgramDocument,
+    ProgramEditRequest, ProgramError, validate_plugin_identifier, validate_program_identifier,
+};
+pub use rackforge_surface_api::{
+    SURFACE_ACTIVATION_SCHEMA_VERSION, SurfaceActivationReason, SurfaceActivationRequest,
+    SurfaceActivationResponse, SurfaceError, SurfaceMode,
 };
 
 pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
 pub const PARAMETER_SCHEMA_VERSION: u32 = 1;
 pub const PRESET_CATALOG_SCHEMA_VERSION: u32 = 1;
-pub const PROGRAM_SCHEMA_VERSION: u32 = 1;
 pub const RUNTIME_DESCRIPTOR_SCHEMA_VERSION: u32 = 1;

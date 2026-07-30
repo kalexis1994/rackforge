@@ -69,12 +69,30 @@ pub enum SurfaceQuality {
     CertifiedCompatibility,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GestureCapabilities {
+    pub soft_key_long_press: bool,
+    pub emergency_home_chord: bool,
+}
+
+impl GestureCapabilities {
+    pub fn validate(self) -> Result<(), String> {
+        if self.emergency_home_chord && !self.soft_key_long_press {
+            return Err("emergency home chord requires soft-key long press detection".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SurfaceImplementation {
     pub layout_id: String,
     pub quality: SurfaceQuality,
     pub priority: u16,
+    #[serde(default)]
+    pub gestures: GestureCapabilities,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -97,6 +115,7 @@ impl ControllerProfile {
         let mut priorities = BTreeSet::new();
         for surface in &self.surfaces {
             validate_versioned_id(&surface.layout_id)?;
+            surface.gestures.validate()?;
             if !ids.insert(surface.layout_id.as_str()) {
                 return Err(format!("duplicate surface {:?}", surface.layout_id));
             }
@@ -172,12 +191,14 @@ mod tests {
             layout_id: "medium@1".into(),
             quality: SurfaceQuality::Native,
             priority: 0,
+            gestures: GestureCapabilities::default(),
         }];
         if with_little {
             surfaces.push(SurfaceImplementation {
                 layout_id: LITTLE_V1.into(),
                 quality: SurfaceQuality::CertifiedCompatibility,
                 priority: 1,
+                gestures: GestureCapabilities::default(),
             });
         }
         ControllerProfile {

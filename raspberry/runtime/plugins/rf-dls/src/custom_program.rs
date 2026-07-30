@@ -1,4 +1,6 @@
-use rackforge_plugin_api::ProgramDocument;
+use rackforge_plugin_api::{
+    PROGRAM_EDIT_SCHEMA_VERSION, PROGRAM_SCHEMA_VERSION, PreparedProgram, ProgramDocument,
+};
 use rf_dls::EnvelopeSpec;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -53,6 +55,35 @@ impl CustomProgram {
             slot: payload.slot,
             source: payload.source,
             parameters: payload.parameters,
+        })
+    }
+
+    pub fn to_document(&self) -> Result<ProgramDocument, String> {
+        Ok(ProgramDocument {
+            schema_version: PROGRAM_SCHEMA_VERSION,
+            id: self.id.clone(),
+            name: self.name.clone(),
+            plugin_id: PLUGIN_ID.into(),
+            plugin_version: env!("CARGO_PKG_VERSION").into(),
+            plugin_state_version: 2,
+            payload_version: PAYLOAD_VERSION,
+            category: self.category.clone(),
+            tags: vec!["custom".into()],
+            payload: serde_json::to_value(CustomProgramPayload {
+                slot: self.slot,
+                source: self.source.clone(),
+                parameters: self.parameters,
+            })
+            .map_err(|error| format!("serializing RF-DLS payload: {error}"))?,
+        })
+    }
+
+    pub fn prepared(&self) -> Result<PreparedProgram, String> {
+        Ok(PreparedProgram {
+            schema_version: PROGRAM_EDIT_SCHEMA_VERSION,
+            storage_path: format!("custom/{}{}", self.id, PROGRAM_SUFFIX),
+            preview_sound_id: format!("dls.b{:08x}.p{:08x}", self.source.bank, self.source.program),
+            document: self.to_document()?,
         })
     }
 
@@ -290,6 +321,12 @@ mod tests {
         assert_eq!(program.slot, 1);
         assert_eq!(program.parameters.transpose_semitones, 0);
         assert_eq!(program.parameters.release_seconds, Some(1.2));
+        assert_eq!(
+            CustomProgram::from_document(program.to_document().unwrap())
+                .unwrap()
+                .id,
+            "user.warm-piano"
+        );
     }
 
     #[test]

@@ -15,8 +15,11 @@ use rackforge_control_api::{
 use rackforge_controller_api::LITTLE_V1;
 #[cfg(target_os = "linux")]
 use rackforge_session_api::{
-    AddonInstanceState, ClientId, CommandEnvelope, InstanceId, SessionCommand, SessionState,
+    AddonInstanceState, ClientId, CommandEnvelope, EventEnvelope, InstanceId, SessionCommand,
+    SessionEvent, SessionState, SurfaceActivationRequest, SurfaceMode,
 };
+#[cfg(target_os = "linux")]
+use serde_json::Value;
 use std::env;
 use std::error::Error;
 use std::fmt::Write as _;
@@ -48,6 +51,8 @@ const CLEAR_SCREEN: &[u8] = &[
 ];
 const USB_BOOT_STABILITY: Duration = Duration::from_secs(5);
 const ACQUIRE_RETRY_DELAY: Duration = Duration::from_secs(2);
+const LONG_PRESS_THRESHOLD: Duration = Duration::from_millis(650);
+const HOME_CHORD_SIMULTANEITY: Duration = Duration::from_millis(250);
 #[cfg(target_os = "linux")]
 static NEXT_CONTROL_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -254,6 +259,97 @@ enum InputPhase {
 struct PhysicalInputEvent {
     input: menu::Input,
     phase: InputPhase,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HeldButton {
+    pressed_at: Instant,
+    long_emitted: bool,
+}
+
+#[derive(Debug, Default)]
+struct ButtonGestureTracker {
+    held: [Option<HeldButton>; 4],
+    home_chord_emitted: bool,
+}
+
+impl ButtonGestureTracker {
+    fn press(&mut self, input: menu::Input, now: Instant) -> bool {
+        let Some(index) = soft_button_index(input) else {
+            return false;
+        };
+        self.held[index].get_or_insert(HeldButton {
+            pressed_at: now,
+            long_emitted: false,
+        });
+        true
+    }
+
+    fn release(&mut self, input: menu::Input, now: Instant) -> Option<menu::Input> {
+        let index = soft_button_index(input)?;
+        let held = self.held[index].take()?;
+        let gesture = if held.long_emitted {
+            None
+        } else if now.saturating_duration_since(held.pressed_at) >= LONG_PRESS_THRESHOLD {
+            input.long_press()
+        } else {
+            Some(input)
+        };
+        if self.held.iter().all(Option::is_none) {
+            self.home_chord_emitted = false;
+        }
+        gesture
+    }
+
+    fn poll(&mut self, now: Instant) -> Vec<menu::Input> {
+        let mut gestures = Vec::new();
+        if !self.home_chord_emitted
+            && let (Some(ok), Some(back)) = (self.held[0], self.held[3])
+        {
+            let separation = if ok.pressed_at >= back.pressed_at {
+                ok.pressed_at.duration_since(back.pressed_at)
+            } else {
+                back.pressed_at.duration_since(ok.pressed_at)
+            };
+            let chord_started = ok.pressed_at.max(back.pressed_at);
+            if separation <= HOME_CHORD_SIMULTANEITY
+                && now.saturating_duration_since(chord_started) >= LONG_PRESS_THRESHOLD
+            {
+                self.home_chord_emitted = true;
+                self.held[0].as_mut().expect("OK is held").long_emitted = true;
+                self.held[3].as_mut().expect("BACK is held").long_emitted = true;
+                gestures.push(menu::Input::HomeChord);
+            }
+        }
+        for (index, held) in self.held.iter_mut().enumerate() {
+            let Some(held) = held else {
+                continue;
+            };
+            if !held.long_emitted
+                && now.saturating_duration_since(held.pressed_at) >= LONG_PRESS_THRESHOLD
+            {
+                held.long_emitted = true;
+                let input = [
+                    menu::Input::Button1,
+                    menu::Input::Button2,
+                    menu::Input::Button3,
+                    menu::Input::Button4,
+                ][index];
+                gestures.push(input.long_press().expect("soft buttons have long gestures"));
+            }
+        }
+        gestures
+    }
+}
+
+fn soft_button_index(input: menu::Input) -> Option<usize> {
+    match input {
+        menu::Input::Button1 => Some(0),
+        menu::Input::Button2 => Some(1),
+        menu::Input::Button3 => Some(2),
+        menu::Input::Button4 => Some(3),
+        _ => None,
+    }
 }
 
 fn enumerate_ports(midi: &MidiOutput) -> Result<Vec<PortInfo>, Box<dyn Error>> {
@@ -714,7 +810,8 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         println!("OLED bajo control de RackForge: {port_name}");
         let mut next_heartbeat = Instant::now() + Duration::from_secs(6);
         let mut missed_acks = 0_u8;
-        loop {
+        let mut button_gestures = ButtonGestureTracker::default();
+        'surface: loop {
             if usb_generation.is_some() && keylab_usb_generation() != usb_generation {
                 eprintln!("Cambió la instancia USB del KeyLab; creando una sesión MIDI nueva...");
                 break;
@@ -725,27 +822,22 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 .recv_timeout(Duration::from_millis(100))
             {
                 Ok(event) => {
+                    let mut navigation_input = None;
                     match event.phase {
                         InputPhase::Press => {
-                            if menu.set_button_pressed(event.input, true) {
+                            if button_gestures.press(event.input, Instant::now()) {
+                                menu.set_button_pressed(event.input, true);
                                 messages = render_menu_messages(&menu)?;
                                 if let Err(error) = session.send(&messages.footer) {
                                     eprintln!("No se pudo mostrar el botón presionado: {error}");
                                     break;
                                 }
-                            }
-                            match send_menu_frames(
-                                &mut session,
-                                vec![menu.apply_input_and_render(event.input)],
-                            ) {
-                                Ok(rendered) => messages = rendered,
-                                Err(error) => {
-                                    eprintln!("No se pudo actualizar el menú: {error}");
-                                    break;
-                                }
+                            } else {
+                                navigation_input = Some(event.input);
                             }
                         }
                         InputPhase::Release => {
+                            navigation_input = button_gestures.release(event.input, Instant::now());
                             if menu.set_button_pressed(event.input, false) {
                                 messages = render_menu_messages(&menu)?;
                                 if let Err(error) = session.send(&messages.footer) {
@@ -755,15 +847,18 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                             }
                         }
                         InputPhase::Turn => {
-                            match send_menu_frames(
-                                &mut session,
-                                vec![menu.apply_input_and_render(event.input)],
-                            ) {
-                                Ok(rendered) => messages = rendered,
-                                Err(error) => {
-                                    eprintln!("No se pudo actualizar el menú: {error}");
-                                    break;
-                                }
+                            navigation_input = Some(event.input);
+                        }
+                    }
+                    if let Some(navigation_input) = navigation_input {
+                        match send_menu_frames(
+                            &mut session,
+                            vec![menu.apply_input_and_render(navigation_input)],
+                        ) {
+                            Ok(rendered) => messages = rendered,
+                            Err(error) => {
+                                eprintln!("No se pudo actualizar el menú: {error}");
+                                break;
                             }
                         }
                     }
@@ -787,6 +882,31 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 }
             }
 
+            for long_input in button_gestures.poll(Instant::now()) {
+                match send_menu_frames(&mut session, vec![menu.apply_input_and_render(long_input)])
+                {
+                    Ok(rendered) => messages = rendered,
+                    Err(error) => {
+                        eprintln!("No se pudo aplicar la pulsación prolongada: {error}");
+                        break 'surface;
+                    }
+                }
+                match apply_pending_menu_command(&mut menu) {
+                    Ok(true) => {
+                        messages = render_menu_messages(&menu)?;
+                        if let Err(error) = send_menu(&mut session, &messages) {
+                            eprintln!("No se pudo confirmar la pulsación prolongada: {error}");
+                            break 'surface;
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        eprintln!("No se pudo aplicar la pulsación prolongada: {error}")
+                    }
+                }
+                println!("INPUT_LONG {long_input:?}");
+            }
+
             if Instant::now() < next_heartbeat {
                 continue;
             }
@@ -800,7 +920,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                             Ok(()) => {}
                             Err(message) => {
                                 eprintln!("Se perdió el foco de audition: {message}");
-                                menu.audition_ended();
+                                menu.sync_program_edit(None, None);
                             }
                         }
                     }
@@ -876,7 +996,7 @@ fn control_request(request: &ControlRequest) -> Result<ControlResponse, String> 
 #[cfg(target_os = "linux")]
 fn live_snapshot() -> Result<SessionState, String> {
     match control_request(&ControlRequest::Snapshot)? {
-        ControlResponse::Snapshot { snapshot } => Ok(snapshot),
+        ControlResponse::Snapshot { snapshot } => Ok(*snapshot),
         ControlResponse::Error { message, .. } => Err(message),
         _ => Err("respuesta inesperada al pedir estado de sesión".into()),
     }
@@ -909,7 +1029,7 @@ fn active_rf_dls_instance_id() -> Result<InstanceId, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn dispatch_session_command(command: SessionCommand) -> Result<(), String> {
+fn dispatch_session_command(command: SessionCommand) -> Result<Vec<EventEnvelope>, String> {
     let command_id = NEXT_CONTROL_COMMAND_ID
         .fetch_add(1, Ordering::Relaxed)
         .max(1);
@@ -923,8 +1043,9 @@ fn dispatch_session_command(command: SessionCommand) -> Result<(), String> {
     })? {
         ControlResponse::CommandApplied {
             command_id: confirmed,
+            events,
             ..
-        } if confirmed == command_id => Ok(()),
+        } if confirmed == command_id => Ok(events),
         ControlResponse::Error { message, .. } => Err(message),
         _ => Err("respuesta inesperada al ejecutar comando de sesión".into()),
     }
@@ -935,6 +1056,16 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
     let snapshot = live_snapshot()?;
     let instance = active_rf_dls_instance(&snapshot)?;
     let selected = instance.selected_sound_id.clone();
+    let audition_lease_id = snapshot
+        .audition
+        .as_ref()
+        .filter(|audition| audition.instance_id == instance.instance_id)
+        .map(|audition| audition.lease_id);
+    let program_draft = snapshot
+        .program_draft
+        .clone()
+        .filter(|draft| draft.instance_id == instance.instance_id);
+    menu.sync_program_edit(program_draft, audition_lease_id);
     menu.set_play_sounds(
         instance
             .sounds
@@ -961,7 +1092,7 @@ fn refresh_live_catalog(_menu: &mut menu::Menu) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn keep_audition_alive(lease_id: u64) -> Result<(), String> {
-    dispatch_session_command(SessionCommand::KeepAuditionAlive { lease_id })
+    dispatch_session_command(SessionCommand::KeepAuditionAlive { lease_id }).map(|_| ())
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -985,60 +1116,197 @@ fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
             println!("SOUND_SELECTED id={id}");
             Ok(true)
         }
-        menu::MenuCommand::BeginAudition {
-            preview_sound_id,
-            draft_name,
-            program_id,
-        } => {
+        menu::MenuCommand::BeginProgramEdit { program_id } => {
             let instance_id = active_rf_dls_instance_id()?;
-            dispatch_session_command(SessionCommand::BeginAudition {
-                instance_id: instance_id.clone(),
-            })?;
-            let snapshot = live_snapshot()?;
-            let lease_id = snapshot
-                .audition
-                .as_ref()
-                .filter(|audition| audition.instance_id == instance_id)
-                .map(|audition| audition.lease_id)
-                .ok_or_else(|| "RackForge no publicó el foco de audition".to_owned())?;
-            if let Err(message) = dispatch_session_command(SessionCommand::SelectSound {
+            dispatch_session_command(SessionCommand::BeginProgramEdit {
                 instance_id,
-                sound_id: preview_sound_id,
-            }) {
-                let _ = dispatch_session_command(SessionCommand::EndAudition { lease_id });
-                return Err(message);
-            }
-            if !menu.audition_started(lease_id) {
-                let _ = dispatch_session_command(SessionCommand::EndAudition { lease_id });
-                return Err("el menú perdió el draft de audition".into());
-            }
-            println!(
-                "AUDITION_STARTED lease={lease_id} program={:?} name={draft_name:?}",
-                program_id
-            );
+                program_id,
+            })?;
+            refresh_live_catalog(menu)?;
+            let draft_id = live_snapshot()?
+                .program_draft
+                .as_ref()
+                .map(|draft| draft.draft_id)
+                .ok_or_else(|| "RackForge no publicó el borrador de programa".to_owned())?;
+            println!("PROGRAM_EDIT_STARTED draft={draft_id}");
             Ok(true)
         }
-        menu::MenuCommand::EndAudition { lease_id } => {
-            dispatch_session_command(SessionCommand::EndAudition { lease_id })?;
-            menu.audition_ended();
+        menu::MenuCommand::SetProgramDraftSound { draft_id, sound_id } => {
+            let snapshot = live_snapshot()?;
+            let draft = snapshot
+                .program_draft
+                .as_ref()
+                .filter(|draft| draft.draft_id == draft_id)
+                .ok_or_else(|| "el borrador de programa ya no está activo".to_owned())?;
+            let document_json = replace_dls_source(&draft.document_json, &sound_id)?;
+            dispatch_session_command(SessionCommand::ReplaceProgramDraft {
+                draft_id,
+                document_json,
+            })?;
             refresh_live_catalog(menu)?;
-            println!("AUDITION_ENDED lease={lease_id}");
+            println!("PROGRAM_DRAFT_SOUND draft={draft_id} sound={sound_id}");
+            Ok(true)
+        }
+        menu::MenuCommand::SetProgramDraftName { draft_id, name } => {
+            let snapshot = live_snapshot()?;
+            let draft = snapshot
+                .program_draft
+                .as_ref()
+                .filter(|draft| draft.draft_id == draft_id)
+                .ok_or_else(|| "el borrador de programa ya no está activo".to_owned())?;
+            let document_json = replace_program_name(&draft.document_json, &name)?;
+            dispatch_session_command(SessionCommand::ReplaceProgramDraft {
+                draft_id,
+                document_json,
+            })?;
+            refresh_live_catalog(menu)?;
+            println!("PROGRAM_DRAFT_NAME draft={draft_id} name={name:?}");
+            Ok(true)
+        }
+        menu::MenuCommand::SaveProgramDraft { draft_id } => {
+            dispatch_session_command(SessionCommand::SaveProgramDraft { draft_id })?;
+            refresh_live_catalog(menu)?;
+            println!("PROGRAM_SAVED draft={draft_id}");
+            Ok(true)
+        }
+        menu::MenuCommand::CancelProgramEdit { draft_id } => {
+            dispatch_session_command(SessionCommand::CancelProgramEdit { draft_id })?;
+            refresh_live_catalog(menu)?;
+            println!("PROGRAM_EDIT_CANCELLED draft={draft_id}");
+            Ok(true)
+        }
+        menu::MenuCommand::ResolveProgramExit {
+            draft_id,
+            decision,
+            destination,
+        } => {
+            match decision {
+                menu::ProgramExitDecision::Save => {
+                    dispatch_session_command(SessionCommand::SaveProgramDraft { draft_id })?;
+                    println!("PROGRAM_SAVED_ON_EXIT draft={draft_id}");
+                }
+                menu::ProgramExitDecision::Discard => {
+                    dispatch_session_command(SessionCommand::CancelProgramEdit { draft_id })?;
+                    println!("PROGRAM_DISCARDED_ON_EXIT draft={draft_id}");
+                }
+            }
+            refresh_live_catalog(menu)?;
+            if let menu::ProgramExitDestination::ActiveMode {
+                mode,
+                selected_sound_id,
+            } = destination
+            {
+                return_to_active_mode(menu, mode, selected_sound_id)?;
+            }
+            Ok(true)
+        }
+        menu::MenuCommand::ReturnToActiveMode {
+            mode,
+            cancel_draft_id,
+            selected_sound_id,
+        } => {
+            if let Some(draft_id) = cancel_draft_id {
+                dispatch_session_command(SessionCommand::CancelProgramEdit { draft_id })?;
+            }
+            refresh_live_catalog(menu)?;
+            return_to_active_mode(menu, mode, selected_sound_id)?;
+            Ok(true)
+        }
+        menu::MenuCommand::ForceHome { cancel_draft_id } => {
+            if let Some(draft_id) = cancel_draft_id
+                && let Err(error) =
+                    dispatch_session_command(SessionCommand::CancelProgramEdit { draft_id })
+            {
+                eprintln!(
+                    "HOME_FORCED: el Core no liberó inmediatamente el draft {draft_id}: {error}"
+                );
+            }
+            println!("HOME_FORCED");
             Ok(true)
         }
     }
 }
 
+#[cfg(target_os = "linux")]
+fn return_to_active_mode(
+    menu: &mut menu::Menu,
+    mode: menu::ActiveMode,
+    selected_sound_id: Option<String>,
+) -> Result<(), String> {
+    let instance_id = active_rf_dls_instance_id()?;
+    let surface_mode = match mode {
+        menu::ActiveMode::Live => SurfaceMode::Live,
+        menu::ActiveMode::Play => SurfaceMode::Play,
+    };
+    let events = dispatch_session_command(SessionCommand::ActivateSurface {
+        instance_id,
+        request: SurfaceActivationRequest::return_to(
+            LITTLE_V1,
+            surface_mode,
+            selected_sound_id.clone(),
+        ),
+    })?;
+    let focus_item_id = events.iter().find_map(|event| match &event.event {
+        SessionEvent::SurfaceActivated { response, .. } => response.focus_item_id.as_deref(),
+        _ => None,
+    });
+    menu.complete_return_to_active_mode(mode, focus_item_id.or(selected_sound_id.as_deref()));
+    println!("SURFACE_RETURNED mode={mode:?}");
+    Ok(())
+}
+
 #[cfg(not(target_os = "linux"))]
 fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
     match menu.take_command() {
-        Some(menu::MenuCommand::BeginAudition { .. }) => Ok(menu.audition_started(1)),
-        Some(menu::MenuCommand::EndAudition { .. }) => {
-            menu.audition_ended();
-            Ok(true)
-        }
-        Some(menu::MenuCommand::SelectSound { .. }) => Ok(true),
+        Some(_) => Ok(true),
         None => Ok(false),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn replace_dls_source(document_json: &str, sound_id: &str) -> Result<String, String> {
+    let (bank, program) = parse_dls_sound_id(sound_id)?;
+    let mut document: Value = serde_json::from_str(document_json)
+        .map_err(|error| format!("el borrador contiene JSON inválido: {error}"))?;
+    let source = document
+        .pointer_mut("/payload/source")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "el borrador RF-DLS no contiene payload.source".to_owned())?;
+    source.insert("bank".into(), Value::from(bank));
+    source.insert("program".into(), Value::from(program));
+    serde_json::to_string(&document)
+        .map_err(|error| format!("no se pudo serializar el borrador RF-DLS: {error}"))
+}
+
+#[cfg(target_os = "linux")]
+fn replace_program_name(document_json: &str, name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() || name.len() > 64 || !name.is_ascii() || name.contains('\0') {
+        return Err("el nombre debe tener entre 1 y 64 caracteres ASCII".into());
+    }
+    let mut document: Value = serde_json::from_str(document_json)
+        .map_err(|error| format!("el borrador contiene JSON inválido: {error}"))?;
+    let object = document
+        .as_object_mut()
+        .ok_or_else(|| "el borrador de programa no es un objeto JSON".to_owned())?;
+    object.insert("name".into(), Value::from(name));
+    serde_json::to_string(&document)
+        .map_err(|error| format!("no se pudo serializar el borrador RF-DLS: {error}"))
+}
+
+#[cfg(target_os = "linux")]
+fn parse_dls_sound_id(sound_id: &str) -> Result<(u32, u32), String> {
+    let encoded = sound_id
+        .strip_prefix("dls.b")
+        .ok_or_else(|| format!("{sound_id:?} no es un sonido DLS nativo"))?;
+    let (bank, program) = encoded
+        .split_once(".p")
+        .ok_or_else(|| format!("{sound_id:?} no tiene banco y programa DLS"))?;
+    let bank =
+        u32::from_str_radix(bank, 16).map_err(|_| format!("banco DLS inválido en {sound_id:?}"))?;
+    let program = u32::from_str_radix(program, 16)
+        .map_err(|_| format!("programa DLS inválido en {sound_id:?}"))?;
+    Ok((bank, program))
 }
 
 fn acquire_screen(
@@ -1292,6 +1560,58 @@ fn run_led_demo(midi: MidiOutput, port: &PortInfo, execute: bool) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn button_gestures_resolve_short_and_long_without_double_firing() {
+        let started = Instant::now();
+        let mut tracker = ButtonGestureTracker::default();
+        assert!(tracker.press(menu::Input::Button2, started));
+        assert_eq!(
+            tracker.release(menu::Input::Button2, started + Duration::from_millis(100)),
+            Some(menu::Input::Button2)
+        );
+
+        assert!(tracker.press(menu::Input::Button2, started));
+        assert!(
+            tracker
+                .poll(started + LONG_PRESS_THRESHOLD - Duration::from_millis(1))
+                .is_empty()
+        );
+        assert_eq!(
+            tracker.poll(started + LONG_PRESS_THRESHOLD),
+            vec![menu::Input::Button2Long]
+        );
+        assert!(
+            tracker
+                .release(
+                    menu::Input::Button2,
+                    started + LONG_PRESS_THRESHOLD + Duration::from_millis(1)
+                )
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn simultaneous_long_ok_and_back_has_priority_as_home_chord() {
+        let started = Instant::now();
+        let mut tracker = ButtonGestureTracker::default();
+        tracker.press(menu::Input::Button1, started);
+        tracker.press(menu::Input::Button4, started + Duration::from_millis(100));
+        assert_eq!(
+            tracker.poll(started + Duration::from_millis(750)),
+            vec![menu::Input::HomeChord]
+        );
+        assert!(
+            tracker
+                .release(menu::Input::Button1, started + Duration::from_millis(760))
+                .is_none()
+        );
+        assert!(
+            tracker
+                .release(menu::Input::Button4, started + Duration::from_millis(770))
+                .is_none()
+        );
+    }
 
     #[test]
     fn builds_expected_preset_messages() {

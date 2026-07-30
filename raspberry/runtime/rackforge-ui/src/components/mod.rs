@@ -1,11 +1,15 @@
 mod button;
 mod carousel;
+mod confirmation_dialog;
 mod select;
+mod text_editor;
 mod value_carousel;
 
 pub use button::Button;
 pub use carousel::{CarouselItem, SimpleCarousel};
+pub use confirmation_dialog::ConfirmationDialog;
 pub use select::Select;
+pub use text_editor::TextEditor;
 pub use value_carousel::{EditableValue, ValueCarousel, ValueItem};
 
 use crate::{Frame, Rect, Style};

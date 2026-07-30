@@ -6,7 +6,8 @@ produce un frame de celdas con estilo.
 
 ## Contratos
 
-- `Input`: las siete entradas físicas públicas de RackForge.
+- `Input`: siete controles físicos y sus gestos lógicos de pulsación larga y
+  escape de emergencia.
 - `NavigationAction`: navegación base sin imponerla a cada plugin.
 - `Frame`, `Cell` y `Rect`: superficie recortada y verificable.
 - `Style`: colores semánticos y rol visual.
@@ -52,6 +53,13 @@ no cambian físicamente el peso de la fuente.
   línea 2. `OK` o la presión del encoder entra y confirma edición; las flechas
   o la rueda modifican el valor; `BACK` cancela y restaura el original. Fuera
   de edición, `BACK` solicita salir.
+- `TextEditor`: edición ASCII determinista para superficies pequeñas. Muestra
+  el carácter enfocado entre corchetes; las flechas cortas cambian el carácter
+  y las largas mueven el cursor. `OK` corto confirma, `OK` largo borra y `BACK`
+  corto cancela la edición completa. El encoder replica las acciones cortas.
+- `ConfirmationDialog`: pregunta de dos líneas con opciones recorribles;
+  `OK` confirma la opción y `BACK` cierra el diálogo sin elegir. Sirve para
+  decisiones reversibles como guardar o descartar un draft modificado.
 
 El backend del KeyLab no agrega corchetes al carrusel simple: al mostrar una
 sola opción no hacen falta. El carrusel de valores sí los usa para indicar si
@@ -60,3 +68,6 @@ el foco está en el nombre o en el valor editable.
 
 Los próximos componentes deben implementar el mismo trait: listas, toggles,
 sliders, medidores, diálogos y editores de parámetros de plugins.
+
+Los componentes no consumen `BACK` largo ni `HomeChord`. Son gestos reservados
+por el host para volver al modo activo y forzar `HOME`, respectivamente.

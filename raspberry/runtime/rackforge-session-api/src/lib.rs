@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub use rackforge_surface_api::{
+    SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
+};
+
 pub const SESSION_SCHEMA_VERSION: u32 = 1;
 pub const DEFAULT_LIVE_SESSION_ID: &str = "live.main";
 pub const DEFAULT_LIVE_INSTANCE_ID: &str = "live.main.instrument.1";
@@ -94,6 +98,20 @@ pub struct AuditionState {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ProgramDraftState {
+    pub draft_id: u64,
+    pub instance_id: InstanceId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_program_id: Option<String>,
+    pub name: String,
+    pub preview_sound_id: String,
+    pub storage_path: String,
+    pub document_json: String,
+    pub dirty: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SessionState {
     pub schema_version: u32,
     pub session_id: SessionId,
@@ -104,6 +122,8 @@ pub struct SessionState {
     pub instances: Vec<AddonInstanceState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audition: Option<AuditionState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_draft: Option<ProgramDraftState>,
 }
 
 impl SessionState {
@@ -115,6 +135,7 @@ impl SessionState {
             active_instance_id: None,
             instances: Vec::new(),
             audition: None,
+            program_draft: None,
         }
     }
 
@@ -193,6 +214,15 @@ impl SessionState {
                 if audition.lease_id != *lease_id || audition.instance_id != *instance_id {
                     return Err("audition lease does not match the active lease".into());
                 }
+                if self
+                    .program_draft
+                    .as_ref()
+                    .is_some_and(|draft| draft.instance_id == *instance_id)
+                {
+                    return Err(
+                        "program draft must be saved or cancelled before audition ends".into(),
+                    );
+                }
                 let instance = self
                     .instances
                     .iter_mut()
@@ -200,6 +230,103 @@ impl SessionState {
                     .ok_or_else(|| format!("unknown instance {instance_id}"))?;
                 instance.selected_sound_id = restored_sound_id.clone();
                 self.audition = None;
+            }
+            SessionEvent::ProgramEditStarted { draft } => {
+                if self.program_draft.is_some() {
+                    return Err("a program draft is already active".into());
+                }
+                if self
+                    .audition
+                    .as_ref()
+                    .is_none_or(|audition| audition.instance_id != draft.instance_id)
+                {
+                    return Err("program draft requires matching audition focus".into());
+                }
+                if self.instance(&draft.instance_id).is_none()
+                    || draft.draft_id == 0
+                    || draft.name.trim().is_empty()
+                    || draft.preview_sound_id.trim().is_empty()
+                    || draft.storage_path.trim().is_empty()
+                    || draft.document_json.trim().is_empty()
+                {
+                    return Err("program draft metadata is invalid".into());
+                }
+                self.program_draft = Some(draft.clone());
+            }
+            SessionEvent::ProgramDraftUpdated { draft } => {
+                let current = self
+                    .program_draft
+                    .as_ref()
+                    .ok_or_else(|| "program draft is not active".to_owned())?;
+                if current.draft_id != draft.draft_id
+                    || current.instance_id != draft.instance_id
+                    || draft.name.trim().is_empty()
+                    || draft.preview_sound_id.trim().is_empty()
+                    || draft.storage_path.trim().is_empty()
+                    || draft.document_json.trim().is_empty()
+                {
+                    return Err("program draft update does not match the active draft".into());
+                }
+                if self
+                    .audition
+                    .as_ref()
+                    .is_none_or(|audition| audition.instance_id != draft.instance_id)
+                {
+                    return Err("program draft lost matching audition focus".into());
+                }
+                self.program_draft = Some(draft.clone());
+            }
+            SessionEvent::ProgramSaved {
+                draft_id,
+                instance_id,
+                sound,
+            } => {
+                let current = self
+                    .program_draft
+                    .as_ref()
+                    .ok_or_else(|| "program draft is not active".to_owned())?;
+                if current.draft_id != *draft_id || current.instance_id != *instance_id {
+                    return Err("saved program does not match the active draft".into());
+                }
+                let instance = self
+                    .instances
+                    .iter_mut()
+                    .find(|instance| &instance.instance_id == instance_id)
+                    .ok_or_else(|| format!("unknown instance {instance_id}"))?;
+                if let Some(existing) = instance
+                    .sounds
+                    .iter_mut()
+                    .find(|existing| existing.id == sound.id)
+                {
+                    *existing = sound.clone();
+                } else {
+                    instance.sounds.push(sound.clone());
+                }
+                self.program_draft = None;
+            }
+            SessionEvent::ProgramEditCancelled {
+                draft_id,
+                instance_id,
+            } => {
+                let current = self
+                    .program_draft
+                    .as_ref()
+                    .ok_or_else(|| "program draft is not active".to_owned())?;
+                if current.draft_id != *draft_id || current.instance_id != *instance_id {
+                    return Err("cancelled program does not match the active draft".into());
+                }
+                self.program_draft = None;
+            }
+            SessionEvent::SurfaceActivated {
+                instance_id,
+                request,
+                response,
+            } => {
+                if self.instance(instance_id).is_none() {
+                    return Err(format!("unknown instance {instance_id}"));
+                }
+                request.validate().map_err(|error| error.to_string())?;
+                response.validate().map_err(|error| error.to_string())?;
             }
         }
         self.revision = envelope.revision;
@@ -222,6 +349,25 @@ pub enum SessionCommand {
     },
     EndAudition {
         lease_id: u64,
+    },
+    BeginProgramEdit {
+        instance_id: InstanceId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        program_id: Option<String>,
+    },
+    ReplaceProgramDraft {
+        draft_id: u64,
+        document_json: String,
+    },
+    SaveProgramDraft {
+        draft_id: u64,
+    },
+    CancelProgramEdit {
+        draft_id: u64,
+    },
+    ActivateSurface {
+        instance_id: InstanceId,
+        request: SurfaceActivationRequest,
     },
 }
 
@@ -283,6 +429,26 @@ pub enum SessionEvent {
         restored_sound_id: Option<String>,
         reason: AuditionEndReason,
     },
+    ProgramEditStarted {
+        draft: ProgramDraftState,
+    },
+    ProgramDraftUpdated {
+        draft: ProgramDraftState,
+    },
+    ProgramSaved {
+        draft_id: u64,
+        instance_id: InstanceId,
+        sound: SoundSummary,
+    },
+    ProgramEditCancelled {
+        draft_id: u64,
+        instance_id: InstanceId,
+    },
+    SurfaceActivated {
+        instance_id: InstanceId,
+        request: SurfaceActivationRequest,
+        response: SurfaceActivationResponse,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -334,6 +500,7 @@ mod tests {
                 selected_sound_id: None,
             }],
             audition: None,
+            program_draft: None,
         }
     }
 
@@ -346,6 +513,19 @@ mod tests {
                 command_id: revision,
             }),
             event,
+        }
+    }
+
+    fn program_draft(instance_id: InstanceId, dirty: bool) -> ProgramDraftState {
+        ProgramDraftState {
+            draft_id: 17,
+            instance_id,
+            original_program_id: None,
+            name: "CUSTOM 001".into(),
+            preview_sound_id: "dls.piano-1".into(),
+            storage_path: "custom/user.custom-001.rackforge-program.json".into(),
+            document_json: r#"{"id":"user.custom-001","payload":{}}"#.into(),
+            dirty,
         }
     }
 
@@ -418,6 +598,89 @@ mod tests {
                 .selected_sound_id
                 .as_deref(),
             Some("dls.piano-1")
+        );
+    }
+
+    #[test]
+    fn program_edit_lifecycle_is_bound_to_audition_and_publishes_saved_sound() {
+        let mut session = session();
+        let instance_id = session.active_instance_id.clone().unwrap();
+        session
+            .apply(&event(
+                1,
+                SessionEvent::AuditionStarted {
+                    lease_id: 7,
+                    instance_id: instance_id.clone(),
+                    previous_sound_id: None,
+                },
+            ))
+            .unwrap();
+        session
+            .apply(&event(
+                2,
+                SessionEvent::ProgramEditStarted {
+                    draft: program_draft(instance_id.clone(), false),
+                },
+            ))
+            .unwrap();
+
+        assert!(
+            session
+                .apply(&event(
+                    3,
+                    SessionEvent::AuditionEnded {
+                        lease_id: 7,
+                        instance_id: instance_id.clone(),
+                        restored_sound_id: None,
+                        reason: AuditionEndReason::Released,
+                    },
+                ))
+                .is_err()
+        );
+        session
+            .apply(&event(
+                3,
+                SessionEvent::ProgramDraftUpdated {
+                    draft: program_draft(instance_id.clone(), true),
+                },
+            ))
+            .unwrap();
+        session
+            .apply(&event(
+                4,
+                SessionEvent::ProgramSaved {
+                    draft_id: 17,
+                    instance_id: instance_id.clone(),
+                    sound: SoundSummary {
+                        id: "custom.user.custom-001".into(),
+                        name: "CUSTOM 001".into(),
+                        bank: Some("custom".into()),
+                        detail: Some("CUSTOM 001".into()),
+                    },
+                },
+            ))
+            .unwrap();
+        session
+            .apply(&event(
+                5,
+                SessionEvent::AuditionEnded {
+                    lease_id: 7,
+                    instance_id,
+                    restored_sound_id: None,
+                    reason: AuditionEndReason::Released,
+                },
+            ))
+            .unwrap();
+
+        assert!(session.program_draft.is_none());
+        assert!(session.audition.is_none());
+        assert!(
+            session
+                .active_instance()
+                .unwrap()
+                .sounds
+                .iter()
+                .any(|sound| sound.id == "custom.user.custom-001")
         );
     }
 }

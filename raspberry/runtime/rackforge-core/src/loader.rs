@@ -3,12 +3,16 @@ use anyhow::{Context, Result, anyhow, bail};
 use libloading::{Library, Symbol};
 use rackforge_plugin_api::abi::{
     ABI_VERSION, ENTRY_SYMBOL_V1, HostApiV1, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO,
-    LOG_LEVEL_TRACE, LOG_LEVEL_WARN, MidiEventV1, ParameterEventV1, PluginApiV1, PluginEntryFnV1,
-    ProcessBlockV1, STATUS_INTERNAL_ERROR, STATUS_INVALID_ARGUMENT, STATUS_OK, copy_to_host_buffer,
-    is_compatible,
+    LOG_LEVEL_TRACE, LOG_LEVEL_WARN, MidiEventV1, PROGRAM_EXTENSION_ENTRY_SYMBOL_V1,
+    ParameterEventV1, PluginApiV1, PluginEntryFnV1, ProcessBlockV1, ProgramExchangeJsonFnV1,
+    ProgramExtensionApiV1, ProgramExtensionEntryFnV1, STATUS_INTERNAL_ERROR,
+    STATUS_INVALID_ARGUMENT, STATUS_OK, SURFACE_EXTENSION_ENTRY_SYMBOL_V1, SurfaceExtensionApiV1,
+    SurfaceExtensionEntryFnV1, copy_to_host_buffer, is_compatible, is_program_extension_compatible,
+    is_surface_extension_compatible,
 };
 use rackforge_plugin_api::{
-    Capability, ParameterSchema, PluginManifest, PresetCatalog, RuntimeDescriptor,
+    Capability, ParameterSchema, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
+    ProgramEditRequest, RuntimeDescriptor, SurfaceActivationRequest, SurfaceActivationResponse,
 };
 use std::collections::BTreeMap;
 use std::ffi::c_void;
@@ -25,6 +29,8 @@ pub struct LoadedPlugin {
     parameters: ParameterSchema,
     presets: PresetCatalog,
     api: &'static PluginApiV1,
+    program_extension: Option<&'static ProgramExtensionApiV1>,
+    surface_extension: Option<&'static SurfaceExtensionApiV1>,
     _host_context: Box<HostContext>,
     host_api: Box<HostApiV1>,
     _library: Library,
@@ -92,6 +98,48 @@ impl LoadedPlugin {
                 api.api_version
             );
         }
+        let program_extension = match unsafe {
+            library.get::<ProgramExtensionEntryFnV1>(PROGRAM_EXTENSION_ENTRY_SYMBOL_V1)
+        } {
+            Ok(entry) => {
+                let pointer = unsafe { entry() };
+                let extension = unsafe { pointer.as_ref() }
+                    .context("program extension entry returned a null API table")?;
+                if extension.struct_size < size_of::<ProgramExtensionApiV1>() as u32 {
+                    bail!("program extension API table is truncated");
+                }
+                if !is_program_extension_compatible(extension.api_version) {
+                    bail!(
+                        "program extension ABI {:#010x} is incompatible",
+                        extension.api_version
+                    );
+                }
+                Some(extension)
+            }
+            Err(_) => None,
+        };
+        let surface_extension = match unsafe {
+            library.get::<SurfaceExtensionEntryFnV1>(SURFACE_EXTENSION_ENTRY_SYMBOL_V1)
+        } {
+            Ok(entry) => {
+                // SAFETY: the optional symbol follows the same static-table
+                // lifetime contract as the primary plugin entry.
+                let pointer = unsafe { entry() };
+                let extension = unsafe { pointer.as_ref() }
+                    .context("surface extension entry returned a null API table")?;
+                if extension.struct_size < size_of::<SurfaceExtensionApiV1>() as u32 {
+                    bail!("surface extension API table is truncated");
+                }
+                if !is_surface_extension_compatible(extension.api_version) {
+                    bail!(
+                        "surface extension ABI {:#010x} is incompatible",
+                        extension.api_version
+                    );
+                }
+                Some(extension)
+            }
+            Err(_) => None,
+        };
 
         let descriptor_bytes =
             read_plugin_bytes(api.runtime_descriptor_json, "runtime descriptor")?;
@@ -142,6 +190,8 @@ impl LoadedPlugin {
             parameters,
             presets,
             api,
+            program_extension,
+            surface_extension,
             _host_context: host_context,
             host_api,
             _library: library,
@@ -192,6 +242,87 @@ pub struct PluginInstance<'plugin> {
 }
 
 impl PluginInstance<'_> {
+    pub fn supports_program_editing(&self) -> bool {
+        self.plugin.program_extension.is_some()
+    }
+
+    pub fn activate_surface(
+        &mut self,
+        request: &SurfaceActivationRequest,
+    ) -> Result<SurfaceActivationResponse> {
+        request
+            .validate()
+            .context("validating surface activation request")?;
+        let Some(extension) = self.plugin.surface_extension else {
+            return Ok(SurfaceActivationResponse::focus(None));
+        };
+        let source =
+            serde_json::to_vec(request).context("serializing surface activation request")?;
+        let bytes = exchange_program_json(
+            extension.activate,
+            self.handle,
+            &source,
+            "activate addon surface",
+        )?;
+        let response: SurfaceActivationResponse =
+            serde_json::from_slice(&bytes).context("parsing surface activation response")?;
+        response
+            .validate()
+            .context("validating surface activation response")?;
+        Ok(response)
+    }
+
+    pub fn begin_program_edit(&mut self, request: &ProgramEditRequest) -> Result<PreparedProgram> {
+        request
+            .validate()
+            .context("validating program edit request")?;
+        let extension = self
+            .plugin
+            .program_extension
+            .context("addon does not expose the program editing extension")?;
+        let source = serde_json::to_vec(request).context("serializing program edit request")?;
+        let bytes = exchange_program_json(
+            extension.begin_edit,
+            self.handle,
+            &source,
+            "begin program edit",
+        )?;
+        let prepared: PreparedProgram =
+            serde_json::from_slice(&bytes).context("parsing prepared program")?;
+        prepared.validate().context("validating prepared program")?;
+        Ok(prepared)
+    }
+
+    pub fn prepare_program_save(&mut self, document: &ProgramDocument) -> Result<PreparedProgram> {
+        document.validate().context("validating program draft")?;
+        let extension = self
+            .plugin
+            .program_extension
+            .context("addon does not expose the program editing extension")?;
+        let source = serde_json::to_vec(document).context("serializing program draft")?;
+        let bytes = exchange_program_json(
+            extension.prepare_save,
+            self.handle,
+            &source,
+            "prepare program save",
+        )?;
+        let prepared: PreparedProgram =
+            serde_json::from_slice(&bytes).context("parsing prepared program")?;
+        prepared.validate().context("validating prepared program")?;
+        Ok(prepared)
+    }
+
+    pub fn install_program(&mut self, prepared: &PreparedProgram) -> Result<()> {
+        prepared.validate().context("validating program install")?;
+        let extension = self
+            .plugin
+            .program_extension
+            .context("addon does not expose the program editing extension")?;
+        let source = serde_json::to_vec(prepared).context("serializing program install")?;
+        let status = unsafe { (extension.install)(self.handle, source.as_ptr(), source.len()) };
+        check_status(status, "install_program")
+    }
+
     pub fn preset_catalog(&self) -> Result<PresetCatalog> {
         let dynamic = self
             .plugin
@@ -404,6 +535,35 @@ fn read_plugin_bytes(
     let reported = unsafe { writer(bytes.as_mut_ptr(), bytes.len()) };
     if reported != required {
         bail!("plugin {label} changed size while being read");
+    }
+    Ok(bytes)
+}
+
+fn exchange_program_json(
+    exchange: ProgramExchangeJsonFnV1,
+    instance: *mut c_void,
+    source: &[u8],
+    label: &str,
+) -> Result<Vec<u8>> {
+    let required = unsafe { exchange(instance, source.as_ptr(), source.len(), ptr::null_mut(), 0) };
+    if required == 0 {
+        bail!("addon returned an empty response for {label}");
+    }
+    if required > MAX_METADATA_BYTES {
+        bail!("addon response for {label} is unreasonably large: {required} bytes");
+    }
+    let mut bytes = vec![0_u8; required];
+    let reported = unsafe {
+        exchange(
+            instance,
+            source.as_ptr(),
+            source.len(),
+            bytes.as_mut_ptr(),
+            bytes.len(),
+        )
+    };
+    if reported != required {
+        bail!("addon response for {label} changed size while being read");
     }
     Ok(bytes)
 }

@@ -11,6 +11,20 @@ pub const ABI_VERSION_MAJOR: u16 = 1;
 pub const ABI_VERSION_MINOR: u16 = 3;
 pub const ABI_VERSION: u32 = pack_version(ABI_VERSION_MAJOR, ABI_VERSION_MINOR);
 pub const ENTRY_SYMBOL_V1: &[u8] = b"rackforge_plugin_entry_v1\0";
+pub const PROGRAM_EXTENSION_VERSION_MAJOR: u16 = 1;
+pub const PROGRAM_EXTENSION_VERSION_MINOR: u16 = 0;
+pub const PROGRAM_EXTENSION_VERSION: u32 = pack_version(
+    PROGRAM_EXTENSION_VERSION_MAJOR,
+    PROGRAM_EXTENSION_VERSION_MINOR,
+);
+pub const PROGRAM_EXTENSION_ENTRY_SYMBOL_V1: &[u8] = b"rackforge_program_extension_entry_v1\0";
+pub const SURFACE_EXTENSION_VERSION_MAJOR: u16 = 1;
+pub const SURFACE_EXTENSION_VERSION_MINOR: u16 = 0;
+pub const SURFACE_EXTENSION_VERSION: u32 = pack_version(
+    SURFACE_EXTENSION_VERSION_MAJOR,
+    SURFACE_EXTENSION_VERSION_MINOR,
+);
+pub const SURFACE_EXTENSION_ENTRY_SYMBOL_V1: &[u8] = b"rackforge_surface_extension_entry_v1\0";
 
 pub const STATUS_OK: i32 = 0;
 pub const STATUS_INVALID_ARGUMENT: i32 = -1;
@@ -176,6 +190,36 @@ pub struct PluginApiV1 {
 
 pub type PluginEntryFnV1 = unsafe extern "C" fn() -> *const PluginApiV1;
 
+pub type ProgramExchangeJsonFnV1 = unsafe extern "C" fn(
+    instance: *mut c_void,
+    source: *const u8,
+    source_length: usize,
+    destination: *mut u8,
+    capacity: usize,
+) -> usize;
+pub type ProgramInstallFnV1 =
+    unsafe extern "C" fn(instance: *mut c_void, source: *const u8, source_length: usize) -> i32;
+
+#[repr(C)]
+pub struct ProgramExtensionApiV1 {
+    pub struct_size: u32,
+    pub api_version: u32,
+    pub begin_edit: ProgramExchangeJsonFnV1,
+    pub prepare_save: ProgramExchangeJsonFnV1,
+    pub install: ProgramInstallFnV1,
+}
+
+pub type ProgramExtensionEntryFnV1 = unsafe extern "C" fn() -> *const ProgramExtensionApiV1;
+
+#[repr(C)]
+pub struct SurfaceExtensionApiV1 {
+    pub struct_size: u32,
+    pub api_version: u32,
+    pub activate: ProgramExchangeJsonFnV1,
+}
+
+pub type SurfaceExtensionEntryFnV1 = unsafe extern "C" fn() -> *const SurfaceExtensionApiV1;
+
 /// Copies plugin-owned bytes into a host-owned buffer and returns the required
 /// size. Passing a null destination or zero capacity performs a size query.
 ///
@@ -199,6 +243,16 @@ pub fn is_compatible(plugin_version: u32) -> bool {
     version_major(plugin_version) == ABI_VERSION_MAJOR && plugin_version <= ABI_VERSION
 }
 
+pub fn is_program_extension_compatible(version: u32) -> bool {
+    version_major(version) == PROGRAM_EXTENSION_VERSION_MAJOR
+        && version <= PROGRAM_EXTENSION_VERSION
+}
+
+pub fn is_surface_extension_compatible(version: u32) -> bool {
+    version_major(version) == SURFACE_EXTENSION_VERSION_MAJOR
+        && version <= SURFACE_EXTENSION_VERSION
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,6 +267,12 @@ mod tests {
         assert!(is_compatible(pack_version(1, 3)));
         assert!(!is_compatible(pack_version(2, 0)));
         assert!(!is_compatible(pack_version(1, 4)));
+        assert!(is_program_extension_compatible(pack_version(1, 0)));
+        assert!(!is_program_extension_compatible(pack_version(1, 1)));
+        assert!(!is_program_extension_compatible(pack_version(2, 0)));
+        assert!(is_surface_extension_compatible(pack_version(1, 0)));
+        assert!(!is_surface_extension_compatible(pack_version(1, 1)));
+        assert!(!is_surface_extension_compatible(pack_version(2, 0)));
     }
 
     #[test]

@@ -1,0 +1,10 @@
+[package]
+name = "rackforge-surface-api"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-2.0-or-later"
+description = "Versioned surface activation contracts for RackForge hosts and addons"
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true

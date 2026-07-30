@@ -25,11 +25,116 @@ const BUFFER_FRAMES: i64 = 384;
 const MAX_EVENTS_PER_BLOCK: usize = 256;
 const MIDI_QUEUE_CAPACITY: usize = 2_048;
 const AUDIO_CONTROL_QUEUE_CAPACITY: usize = 64;
+const MIDI_CHANNELS: usize = 16;
+const CONTINUOUS_CONTROLLERS: usize = 120;
 
 struct AuditionLease {
     id: u64,
     instance_id: InstanceId,
     previous_sound_id: Option<String>,
+}
+
+struct MidiControllerState {
+    continuous_controllers: [[Option<u8>; CONTINUOUS_CONTROLLERS]; MIDI_CHANNELS],
+    pitch_bend: [Option<(u8, u8)>; MIDI_CHANNELS],
+    channel_pressure: [Option<u8>; MIDI_CHANNELS],
+}
+
+impl Default for MidiControllerState {
+    fn default() -> Self {
+        Self {
+            continuous_controllers: [[None; CONTINUOUS_CONTROLLERS]; MIDI_CHANNELS],
+            pitch_bend: [None; MIDI_CHANNELS],
+            channel_pressure: [None; MIDI_CHANNELS],
+        }
+    }
+}
+
+impl MidiControllerState {
+    fn observe(&mut self, event: MidiEventV1) {
+        if event.length == 0 {
+            return;
+        }
+        let status = event.data[0] & 0xf0;
+        let channel = usize::from(event.data[0] & 0x0f);
+        match status {
+            0xb0 if event.length >= 3 => {
+                let controller = usize::from(event.data[1] & 0x7f);
+                if controller < CONTINUOUS_CONTROLLERS {
+                    self.continuous_controllers[channel][controller] = Some(event.data[2] & 0x7f);
+                } else if controller == 121 {
+                    self.continuous_controllers[channel].fill(None);
+                    self.pitch_bend[channel] = None;
+                    self.channel_pressure[channel] = None;
+                }
+            }
+            0xd0 if event.length >= 2 => {
+                self.channel_pressure[channel] = Some(event.data[1] & 0x7f);
+            }
+            0xe0 if event.length >= 3 => {
+                self.pitch_bend[channel] = Some((event.data[1] & 0x7f, event.data[2] & 0x7f));
+            }
+            _ => {}
+        }
+    }
+
+    fn replay_into(&self, events: &mut Vec<MidiEventV1>, maximum_events: usize) -> usize {
+        let mut omitted = 0;
+        for channel in 0..MIDI_CHANNELS {
+            for (controller, value) in self.continuous_controllers[channel].iter().enumerate() {
+                if let Some(value) = value {
+                    push_replay_event(
+                        events,
+                        maximum_events,
+                        MidiEventV1 {
+                            frame: 0,
+                            length: 3,
+                            data: [0xb0 | channel as u8, controller as u8, *value],
+                        },
+                        &mut omitted,
+                    );
+                }
+            }
+            if let Some(pressure) = self.channel_pressure[channel] {
+                push_replay_event(
+                    events,
+                    maximum_events,
+                    MidiEventV1 {
+                        frame: 0,
+                        length: 2,
+                        data: [0xd0 | channel as u8, pressure, 0],
+                    },
+                    &mut omitted,
+                );
+            }
+            if let Some((least_significant, most_significant)) = self.pitch_bend[channel] {
+                push_replay_event(
+                    events,
+                    maximum_events,
+                    MidiEventV1 {
+                        frame: 0,
+                        length: 3,
+                        data: [0xe0 | channel as u8, least_significant, most_significant],
+                    },
+                    &mut omitted,
+                );
+            }
+        }
+        omitted
+    }
+}
+
+fn push_replay_event(
+    events: &mut Vec<MidiEventV1>,
+    maximum_events: usize,
+    event: MidiEventV1,
+    omitted: &mut usize,
+) {
+    if events.len() < maximum_events {
+        events.push(event);
+    } else {
+        *omitted += 1;
+    }
 }
 
 pub struct LiveConfig {
@@ -276,6 +381,8 @@ fn audio_loop(
     let mut dropped_events = 0_usize;
     let mut audition: Option<AuditionLease> = None;
     let mut next_audition_id = 1_u64;
+    let mut controller_state = MidiControllerState::default();
+    let mut replay_controller_state = false;
 
     loop {
         while let Ok(command) = control_receiver.try_recv() {
@@ -288,6 +395,7 @@ fn audio_loop(
                     let result = instance.load_preset(&sound_id).map(|()| {
                         println!("LIVE_SOUND_SELECTED instance={instance_id} id={sound_id}");
                     });
+                    replay_controller_state |= result.is_ok();
                     let _ = reply.send(result.map_err(|error| error.to_string()));
                 }
                 AudioControlCommand::BeginAudition {
@@ -310,6 +418,7 @@ fn audio_loop(
                         println!("AUDITION_GRANTED lease={lease_id} instance={instance_id}");
                         Ok(lease_id)
                     })();
+                    replay_controller_state |= result.is_ok();
                     let _ = reply.send(result);
                 }
                 AudioControlCommand::KeepAuditionAlive { lease_id, reply } => {
@@ -337,6 +446,7 @@ fn audio_loop(
                         }
                         None => Err("audition lease is missing or no longer valid".into()),
                     };
+                    replay_controller_state |= result.is_ok();
                     let _ = reply.send(result);
                 }
                 AudioControlCommand::BeginProgramEdit {
@@ -353,9 +463,14 @@ fn audio_loop(
                             .begin_program_edit(&request)
                             .map_err(|error| error.to_string())?;
                         instance.reset().map_err(|error| error.to_string())?;
-                        instance
-                            .load_preset(&prepared.preview_sound_id)
-                            .map_err(|error| error.to_string())?;
+                        if !instance
+                            .preview_program(&prepared)
+                            .map_err(|error| error.to_string())?
+                        {
+                            instance
+                                .load_preset(&prepared.preview_sound_id)
+                                .map_err(|error| error.to_string())?;
+                        }
                         let lease_id = next_audition_id;
                         next_audition_id = next_audition_id.wrapping_add(1).max(1);
                         audition = Some(AuditionLease {
@@ -368,6 +483,7 @@ fn audio_loop(
                         );
                         Ok((lease_id, prepared))
                     })();
+                    replay_controller_state |= result.is_ok();
                     let _ = reply.send(result);
                 }
                 AudioControlCommand::ReplaceProgramDraft {
@@ -379,12 +495,18 @@ fn audio_loop(
                         let prepared = instance
                             .prepare_program_save(&document)
                             .map_err(|error| error.to_string())?;
-                        instance
-                            .load_preset(&prepared.preview_sound_id)
-                            .map_err(|error| error.to_string())?;
+                        if !instance
+                            .preview_program(&prepared)
+                            .map_err(|error| error.to_string())?
+                        {
+                            instance
+                                .load_preset(&prepared.preview_sound_id)
+                                .map_err(|error| error.to_string())?;
+                        }
                         println!("PROGRAM_DRAFT_AUDIO_READY instance={instance_id}");
                         Ok(prepared)
                     })();
+                    replay_controller_state |= result.is_ok();
                     let _ = reply.send(result);
                 }
                 AudioControlCommand::InstallProgram {
@@ -423,7 +545,16 @@ fn audio_loop(
             }
         }
         events.clear();
+        if replay_controller_state {
+            let omitted = controller_state.replay_into(&mut events, MAX_EVENTS_PER_BLOCK);
+            dropped_events += omitted;
+            if omitted > 0 {
+                eprintln!("MIDI_CONTROLLER_REPLAY_TRUNCATED omitted={omitted}");
+            }
+            replay_controller_state = false;
+        }
         while let Ok(event) = receiver.try_recv() {
+            controller_state.observe(event);
             if events.len() < MAX_EVENTS_PER_BLOCK {
                 events.push(event);
             } else {
@@ -492,6 +623,14 @@ fn write_period(pcm: &PCM, io: &alsa::pcm::IO<'_, i32>, output: &[i32]) -> Resul
 mod tests {
     use super::*;
 
+    fn midi(length: u8, data: [u8; 3]) -> MidiEventV1 {
+        MidiEventV1 {
+            frame: 0,
+            length,
+            data,
+        }
+    }
+
     #[test]
     fn accepts_unknown_musical_midi_without_treating_auxiliary_ports_as_sources() {
         assert!(is_performance_midi_input("KL Essential 61 mk3 MIDI 28:0"));
@@ -503,5 +642,53 @@ mod tests {
             "KL Essential 61 mk3 MCU/HUI 28:2"
         ));
         assert!(!is_performance_midi_input("Midi Through MIDI 0:1"));
+    }
+
+    #[test]
+    fn controller_state_replays_mod_wheel_pitch_and_pressure_by_channel() {
+        let mut state = MidiControllerState::default();
+        state.observe(midi(3, [0xb2, 1, 87]));
+        state.observe(midi(3, [0xe2, 12, 100]));
+        state.observe(midi(2, [0xd2, 44, 0]));
+        state.observe(midi(3, [0x92, 60, 127]));
+
+        let mut replay = Vec::new();
+        assert_eq!(state.replay_into(&mut replay, MAX_EVENTS_PER_BLOCK), 0);
+        assert_eq!(replay.len(), 3);
+        assert!(replay.iter().any(|event| event.data == [0xb2, 1, 87]));
+        assert!(replay.iter().any(|event| event.data == [0xe2, 12, 100]));
+        assert!(
+            replay
+                .iter()
+                .any(|event| event.length == 2 && event.data == [0xd2, 44, 0])
+        );
+    }
+
+    #[test]
+    fn reset_all_controllers_clears_the_latched_channel_state() {
+        let mut state = MidiControllerState::default();
+        state.observe(midi(3, [0xb0, 1, 127]));
+        state.observe(midi(3, [0xe0, 0, 127]));
+        state.observe(midi(2, [0xd0, 64, 0]));
+        state.observe(midi(3, [0xb0, 121, 0]));
+
+        let mut replay = Vec::new();
+        assert_eq!(state.replay_into(&mut replay, MAX_EVENTS_PER_BLOCK), 0);
+        assert!(replay.is_empty());
+    }
+
+    #[test]
+    fn controller_replay_is_bounded_without_forgetting_state() {
+        let mut state = MidiControllerState::default();
+        state.observe(midi(3, [0xb0, 1, 10]));
+        state.observe(midi(3, [0xb0, 11, 20]));
+
+        let mut first = Vec::new();
+        assert_eq!(state.replay_into(&mut first, 1), 1);
+        assert_eq!(first.len(), 1);
+
+        let mut second = Vec::new();
+        assert_eq!(state.replay_into(&mut second, 2), 0);
+        assert_eq!(second.len(), 2);
     }
 }

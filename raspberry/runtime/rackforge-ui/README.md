@@ -52,7 +52,11 @@ no cambian físicamente el peso de la fuente.
 - `ValueCarousel`: muestra una sola variable en la línea 1 y su valor en la
   línea 2. `OK` o la presión del encoder entra y confirma edición; las flechas
   o la rueda modifican el valor; `BACK` cancela y restaura el original. Fuera
-  de edición, `BACK` solicita salir.
+  de edición, `BACK` solicita salir. `OptionalNumber` representa overrides:
+  `None` se muestra como `INHERIT`, el primer ajuste crea un valor y bajar del
+  mínimo vuelve a heredar. Mientras edita emite `Changed` por cada ajuste; el
+  host puede convertirlo en preview auditivo sin confundirlo con
+  `EditCommitted`.
 - `TextEditor`: edición ASCII determinista para superficies pequeñas. Muestra
   el carácter enfocado entre corchetes; las flechas cortas cambian el carácter
   y las largas mueven el cursor. `OK` corto confirma, `OK` largo borra y `BACK`

@@ -4,11 +4,11 @@ use libloading::{Library, Symbol};
 use rackforge_plugin_api::abi::{
     ABI_VERSION, ENTRY_SYMBOL_V1, HostApiV1, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO,
     LOG_LEVEL_TRACE, LOG_LEVEL_WARN, MidiEventV1, PROGRAM_EXTENSION_ENTRY_SYMBOL_V1,
-    ParameterEventV1, PluginApiV1, PluginEntryFnV1, ProcessBlockV1, ProgramExchangeJsonFnV1,
-    ProgramExtensionApiV1, ProgramExtensionEntryFnV1, STATUS_INTERNAL_ERROR,
-    STATUS_INVALID_ARGUMENT, STATUS_OK, SURFACE_EXTENSION_ENTRY_SYMBOL_V1, SurfaceExtensionApiV1,
-    SurfaceExtensionEntryFnV1, copy_to_host_buffer, is_compatible, is_program_extension_compatible,
-    is_surface_extension_compatible,
+    PROGRAM_EXTENSION_V1_0_SIZE, ParameterEventV1, PluginApiV1, PluginEntryFnV1, ProcessBlockV1,
+    ProgramExchangeJsonFnV1, ProgramExtensionApiV1, ProgramExtensionEntryFnV1,
+    STATUS_INTERNAL_ERROR, STATUS_INVALID_ARGUMENT, STATUS_OK, SURFACE_EXTENSION_ENTRY_SYMBOL_V1,
+    SurfaceExtensionApiV1, SurfaceExtensionEntryFnV1, copy_to_host_buffer, is_compatible,
+    is_program_extension_compatible, is_surface_extension_compatible,
 };
 use rackforge_plugin_api::{
     Capability, ParameterSchema, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
@@ -105,7 +105,7 @@ impl LoadedPlugin {
                 let pointer = unsafe { entry() };
                 let extension = unsafe { pointer.as_ref() }
                     .context("program extension entry returned a null API table")?;
-                if extension.struct_size < size_of::<ProgramExtensionApiV1>() as u32 {
+                if extension.struct_size < PROGRAM_EXTENSION_V1_0_SIZE {
                     bail!("program extension API table is truncated");
                 }
                 if !is_program_extension_compatible(extension.api_version) {
@@ -321,6 +321,24 @@ impl PluginInstance<'_> {
         let source = serde_json::to_vec(prepared).context("serializing program install")?;
         let status = unsafe { (extension.install)(self.handle, source.as_ptr(), source.len()) };
         check_status(status, "install_program")
+    }
+
+    pub fn preview_program(&mut self, prepared: &PreparedProgram) -> Result<bool> {
+        prepared.validate().context("validating program preview")?;
+        let extension = self
+            .plugin
+            .program_extension
+            .context("addon does not expose the program editing extension")?;
+        if extension.struct_size < size_of::<ProgramExtensionApiV1>() as u32 {
+            return Ok(false);
+        }
+        let Some(preview) = extension.preview else {
+            return Ok(false);
+        };
+        let source = serde_json::to_vec(prepared).context("serializing program preview")?;
+        let status = unsafe { preview(self.handle, source.as_ptr(), source.len()) };
+        check_status(status, "preview_program")?;
+        Ok(true)
     }
 
     pub fn preset_catalog(&self) -> Result<PresetCatalog> {

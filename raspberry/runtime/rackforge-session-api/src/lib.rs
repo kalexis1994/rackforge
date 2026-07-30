@@ -359,6 +359,13 @@ pub enum SessionCommand {
         draft_id: u64,
         document_json: String,
     },
+    PreviewProgramDraft {
+        draft_id: u64,
+        document_json: String,
+    },
+    RestoreProgramDraftPreview {
+        draft_id: u64,
+    },
     SaveProgramDraft {
         draft_id: u64,
     },

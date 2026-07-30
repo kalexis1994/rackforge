@@ -15,6 +15,15 @@ pub enum EditableValue {
         decimals: usize,
         unit: String,
     },
+    OptionalNumber {
+        value: Option<f64>,
+        initial: f64,
+        minimum: f64,
+        maximum: f64,
+        step: f64,
+        decimals: usize,
+        unit: String,
+    },
     Integer {
         value: i64,
         minimum: i64,
@@ -79,6 +88,38 @@ impl EditableValue {
         }
     }
 
+    pub fn optional_number(
+        value: Option<f64>,
+        initial: f64,
+        minimum: f64,
+        maximum: f64,
+        step: f64,
+        decimals: usize,
+        unit: impl Into<String>,
+    ) -> Self {
+        assert!(
+            value.is_none_or(f64::is_finite)
+                && initial.is_finite()
+                && minimum.is_finite()
+                && maximum.is_finite()
+                && step.is_finite()
+                && minimum < maximum
+                && value.is_none_or(|value| (minimum..=maximum).contains(&value))
+                && (minimum..=maximum).contains(&initial)
+                && step > 0.0
+                && decimals <= 6
+        );
+        Self::OptionalNumber {
+            value,
+            initial,
+            minimum,
+            maximum,
+            step,
+            decimals,
+            unit: unit.into(),
+        }
+    }
+
     pub fn choice(selected: usize, choices: impl IntoIterator<Item = impl Into<String>>) -> Self {
         let choices: Vec<String> = choices.into_iter().map(Into::into).collect();
         assert!(!choices.is_empty() && selected < choices.len());
@@ -105,6 +146,15 @@ impl EditableValue {
                 unit,
                 ..
             } => with_unit(format!("{value:.decimals$}"), unit),
+            Self::OptionalNumber {
+                value,
+                decimals,
+                unit,
+                ..
+            } => value.map_or_else(
+                || "INHERIT".into(),
+                |value| with_unit(format!("{value:.decimals$}"), unit),
+            ),
             Self::Integer { value, unit, .. } => with_unit(value.to_string(), unit),
             Self::Choice { selected, choices } => choices[*selected].clone(),
             Self::Toggle {
@@ -124,9 +174,31 @@ impl EditableValue {
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Self::Number { value, .. } => Some(*value),
+            Self::OptionalNumber { value, .. } => *value,
             Self::Integer { value, .. } => Some(*value as f64),
             Self::Choice { selected, .. } => Some(*selected as f64),
             Self::Toggle { value, .. } => Some(u8::from(*value) as f64),
+        }
+    }
+
+    pub fn as_optional_f64(&self) -> Option<Option<f64>> {
+        match self {
+            Self::OptionalNumber { value, .. } => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            Self::Integer { value, .. } => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn choice_index(&self) -> Option<usize> {
+        match self {
+            Self::Choice { selected, .. } => Some(*selected),
+            _ => None,
         }
     }
 
@@ -148,6 +220,29 @@ impl EditableValue {
                     return false;
                 }
                 *value = next;
+            }
+            Self::OptionalNumber {
+                value,
+                initial,
+                minimum,
+                maximum,
+                step,
+                ..
+            } => {
+                let Some(current) = *value else {
+                    *value = Some(*initial);
+                    return true;
+                };
+                let index = ((current - *minimum) / *step).round() + delta as f64;
+                if index < 0.0 {
+                    *value = None;
+                    return true;
+                }
+                let next = (*minimum + index * *step).clamp(*minimum, *maximum);
+                if (next - current).abs() <= f64::EPSILON {
+                    return false;
+                }
+                *value = Some(next);
             }
             Self::Integer {
                 value,
@@ -451,5 +546,17 @@ mod tests {
         assert_eq!(carousel.selected(), 1);
         assert_eq!(carousel.selected_item().id(), "sustain");
         assert_eq!(carousel.selected_item().value().as_f64(), Some(1.0));
+    }
+
+    #[test]
+    fn optional_number_can_inherit_override_and_return_to_inherit() {
+        let mut value = EditableValue::optional_number(None, 5.0, 0.0, 10.0, 1.0, 1, "Hz");
+        assert_eq!(value.display(), "INHERIT");
+        assert!(value.adjust(1));
+        assert_eq!(value.as_optional_f64(), Some(Some(5.0)));
+        for _ in 0..6 {
+            value.adjust(-1);
+        }
+        assert_eq!(value.as_optional_f64(), Some(None));
     }
 }

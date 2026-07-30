@@ -80,10 +80,11 @@ start_plugin() {
 }
 
 start_rf_dls_plugin() {
+  local preset="${1:-gm.piano-1}"
   : >"$plugin_log"
   nohup "$plugin_binary" live "$rf_dls_plugin_package" \
     --resource "dls-bank=$rf_dls_bank" \
-    --preset gm.piano-1 \
+    --preset "$preset" \
     --data-root "$root/data" \
     >"$plugin_log" 2>&1 </dev/null &
   printf '%s\n' "$!" >"$plugin_pid_file"
@@ -201,6 +202,7 @@ case "$mode" in
       "$program" "$(<"$rf_dls_pid_file")"
     ;;
   rf-dls-plugin)
+    preset="${selection:-gm.piano-1}"
     test -x "$plugin_binary"
     test -x "$rf_dls_binary"
     test -f "$rf_dls_bank"
@@ -209,19 +211,19 @@ case "$mode" in
     stop_verified "$native_pid_file" "$legacy_binary"
     stop_verified "$legacy_pid_file" "$legacy_binary"
     stop_verified "$rf_dls_pid_file" "$rf_dls_binary"
-    if ! start_rf_dls_plugin || ! wait_ready "$plugin_pid_file" "$plugin_log"; then
+    if ! start_rf_dls_plugin "$preset" || ! wait_ready "$plugin_pid_file" "$plugin_log"; then
       stop_verified "$plugin_pid_file" "$plugin_binary" || true
       start_rf_dls
       wait_ready "$rf_dls_pid_file" "$rf_dls_log"
       printf 'RF_DLS_PLUGIN_START_FAILED rollback=rf-dls\n' >&2
       exit 1
     fi
-    printf 'LIVE_ENGINE_SELECTED engine=rf-dls-plugin preset=gm.piano-1 pid=%s\n' \
-      "$(<"$plugin_pid_file")"
+    printf 'LIVE_ENGINE_SELECTED engine=rf-dls-plugin preset=%s pid=%s\n' \
+      "$preset" "$(<"$plugin_pid_file")"
     ;;
   *)
     printf \
-      'usage: %s plugin [preset]|native [tone]|legacy|rf-dls [program]|rf-dls-plugin\n' \
+      'usage: %s plugin [preset]|native [tone]|legacy|rf-dls [program]|rf-dls-plugin [preset]\n' \
       "$0" >&2
     exit 2
     ;;

@@ -455,6 +455,31 @@ impl Instrument {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct VoiceConfig {
+    pub amplitude_envelope: EnvelopeSpec,
+    pub pitch_envelope: PitchEnvelopeSpec,
+    pub lfo: LfoSpec,
+    pub pitch_offset_cents: f32,
+    pub pitch_bend_range_cents: f32,
+    pub modulation_depth: f32,
+    pub gain: f32,
+}
+
+impl VoiceConfig {
+    pub fn inherit(instrument: &Instrument) -> Self {
+        Self {
+            amplitude_envelope: instrument.envelope,
+            pitch_envelope: instrument.pitch_envelope,
+            lfo: instrument.lfo,
+            pitch_offset_cents: 0.0,
+            pitch_bend_range_cents: 200.0,
+            modulation_depth: 1.0,
+            gain: 1.0,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Wave {
     pub name: String,
@@ -893,6 +918,9 @@ pub struct Voice {
     lfo: LfoSpec,
     lfo_phase: f32,
     lfo_delay_frames: usize,
+    pitch_offset_cents: f32,
+    pitch_bend_range_cents: f32,
+    modulation_depth: f32,
     output_rate: f32,
     finished: bool,
 }
@@ -925,6 +953,28 @@ impl Voice {
         velocity: u8,
         output_rate: u32,
         envelope: EnvelopeSpec,
+    ) -> Result<Self, DlsError> {
+        let mut config = VoiceConfig::inherit(instrument);
+        config.amplitude_envelope = envelope;
+        Self::new_with_config(
+            bank,
+            instrument,
+            region,
+            note,
+            velocity,
+            output_rate,
+            config,
+        )
+    }
+
+    pub fn new_with_config(
+        bank: &DlsBank,
+        instrument: &Instrument,
+        region: &Region,
+        note: u8,
+        velocity: u8,
+        output_rate: u32,
+        config: VoiceConfig,
     ) -> Result<Self, DlsError> {
         let wave = &bank.waves[region.wave_index];
         let params = region.sample_params.or(wave.sample_params).ok_or_else(|| {
@@ -962,15 +1012,18 @@ impl Voice {
             position: 0.0,
             base_increment,
             sample_loop: params.sample_loop,
-            gain: attenuation * velocity_gain,
-            envelope: AmplitudeEnvelope::new(envelope, output_rate),
-            pitch_envelope: Envelope::new(instrument.pitch_envelope.envelope, output_rate),
-            pitch_depth_cents: instrument.pitch_envelope.depth_cents,
-            lfo: instrument.lfo,
+            gain: attenuation * velocity_gain * config.gain,
+            envelope: AmplitudeEnvelope::new(config.amplitude_envelope, output_rate),
+            pitch_envelope: Envelope::new(config.pitch_envelope.envelope, output_rate),
+            pitch_depth_cents: config.pitch_envelope.depth_cents,
+            lfo: config.lfo,
             lfo_phase: 0.0,
-            lfo_delay_frames: (instrument.lfo.delay_seconds * output_rate as f32)
+            lfo_delay_frames: (config.lfo.delay_seconds * output_rate as f32)
                 .max(0.0)
                 .round() as usize,
+            pitch_offset_cents: config.pitch_offset_cents,
+            pitch_bend_range_cents: config.pitch_bend_range_cents,
+            modulation_depth: config.modulation_depth,
             output_rate: output_rate as f32,
             finished: false,
         })
@@ -1034,6 +1087,18 @@ impl Voice {
         self.position += self.base_increment * pitch_ratio;
         let lfo_gain = 10.0_f32.powf(-lfo_attenuation_centibels / 200.0);
         sample * self.gain * self.envelope.next_gain() * lfo_gain
+    }
+
+    pub fn next_sample_controlled(
+        &mut self,
+        pitch_bend_normalized: f32,
+        modulation_wheel: f32,
+    ) -> f32 {
+        self.next_sample_modulated(
+            self.pitch_offset_cents
+                + pitch_bend_normalized.clamp(-1.0, 1.0) * self.pitch_bend_range_cents,
+            modulation_wheel.clamp(0.0, 1.0) * self.modulation_depth,
+        )
     }
 }
 

@@ -435,6 +435,7 @@ dependencies = [
 name = "rackforge-control-api"
 version = "0.1.0"
 dependencies = [
+ "rackforge-session-api",
  "serde",
  "serde_json",
 ]
@@ -457,6 +458,7 @@ dependencies = [
  "midir",
  "rackforge-control-api",
  "rackforge-plugin-api",
+ "rackforge-session-api",
  "serde_json",
  "toml",
 ]
@@ -497,6 +499,13 @@ dependencies = [
  "rackforge-plugin-api",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "rackforge-session-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

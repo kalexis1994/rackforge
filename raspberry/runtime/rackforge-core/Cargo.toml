@@ -9,6 +9,7 @@ license.workspace = true
 anyhow.workspace = true
 rackforge-plugin-api = { path = "../rackforge-plugin-api" }
 rackforge-control-api = { path = "../rackforge-control-api" }
+rackforge-session-api = { path = "../rackforge-session-api" }
 libloading.workspace = true
 serde_json.workspace = true
 toml.workspace = true

@@ -5,6 +5,7 @@ members = [
     "rackforge-control-api",
     "rackforge-controller-api",
     "rackforge-plugin-api",
+    "rackforge-session-api",
     "rackforge-ui",
     "plugins/gain",
     "plugins/rf-dls",

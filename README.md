@@ -3,6 +3,9 @@
 RackForge convierte un Arturia KeyLab Essential 61 mk3 y una Raspberry Pi 4B en
 un instrumento autónomo, sin escritorio, monitor ni DAW.
 
+La dirección multiplataforma, el runtime portable de addons, el SDK y las
+superficies futuras están definidos en el [roadmap técnico](ROADMAP.md).
+
 El proyecto tiene dos subsistemas:
 
 | Área | Responsabilidad |

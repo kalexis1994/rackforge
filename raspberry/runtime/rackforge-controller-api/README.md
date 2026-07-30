@@ -18,3 +18,8 @@ Debe incluir y probar una implementación
 `SurfaceQuality::CertifiedCompatibility`; si no la declara, un addon
 exclusivamente LITTLE resulta incompatible.
 
+La distribución dinámica vive en `rackforge-controller-package`: transforma
+estos contratos en manifests `.rfcontroller`, versiones inmutables,
+entrypoints por plataforma y niveles de confianza. `rackforge-controller-host`
+descubre y supervisa esos paquetes; este crate continúa siendo una API pura,
+sin filesystem, procesos ni conocimiento de marcas.

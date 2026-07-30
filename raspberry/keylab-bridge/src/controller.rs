@@ -37,6 +37,10 @@ impl ControllerDriver for KeyLabEssentialMk3 {
 static KEYLAB_ESSENTIAL_MK3: KeyLabEssentialMk3 = KeyLabEssentialMk3;
 static DRIVERS: [&'static dyn ControllerDriver; 1] = [&KEYLAB_ESSENTIAL_MK3];
 
+pub fn package_profile() -> &'static ControllerProfile {
+    KEYLAB_ESSENTIAL_MK3.profile()
+}
+
 pub fn display_driver(port_name: &str) -> Option<&'static dyn ControllerDriver> {
     DRIVERS
         .iter()

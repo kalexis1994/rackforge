@@ -1,0 +1,11 @@
+[package]
+name = "rackforge-controller-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Hardware-agnostic controller package host for RackForge"
+
+[dependencies]
+anyhow.workspace = true
+rackforge-controller-package = { path = "../rackforge-controller-package" }
+serde_json.workspace = true

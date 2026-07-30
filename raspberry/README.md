@@ -42,8 +42,11 @@ Desde Windows:
 .\raspberry\dev\connect.ps1
 ```
 
-`keylab-bridge/` es el puente SysEx actual. Será absorbido progresivamente por
-el daemon principal cuando el protocolo compañero esté estabilizado.
+`controllers/` contiene paquetes `.rfcontroller`, tooling de instalación y el
+driver Arturia de referencia. `keylab-bridge/` conserva temporalmente el código
+fuente de ese driver, pero ya no es parte de Core ni se instala como servicio
+independiente: `rackforge-controller-host` descubre y supervisa los paquetes
+activos sin conocer marcas o modelos.
 
 `audio/` contiene el perfil ALSA inicial de la Scarlett Solo y un diagnóstico
 de hardware que no reproduce sonido ni modifica el mezclador.

@@ -91,9 +91,19 @@ struct WifiTask {
     receiver: Receiver<Result<WifiTaskSuccess, String>>,
 }
 
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct AudioTask {
+    receiver: Receiver<Result<rackforge_control_api::AudioOutputState, String>>,
+}
+
 #[cfg(not(target_os = "linux"))]
 #[derive(Debug)]
 struct WifiTask;
+
+#[cfg(not(target_os = "linux"))]
+#[derive(Debug)]
+struct AudioTask;
 
 #[derive(Debug)]
 struct Cli {
@@ -1021,6 +1031,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let mut button_gestures = ButtonGestureTracker::default();
         let mut transient_header = TransientHeader::default();
         let mut wifi_task: Option<WifiTask> = None;
+        let mut audio_task: Option<AudioTask> = None;
         let mut next_spinner_frame = Instant::now();
         'surface: loop {
             if control_socket_generation() != control_generation {
@@ -1103,7 +1114,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                             }
                         }
                     }
-                    match apply_pending_menu_command(&mut menu, &mut wifi_task) {
+                    match apply_pending_menu_command(&mut menu, &mut wifi_task, &mut audio_task) {
                         Ok(true) => {
                             messages = render_menu_messages(&menu)?;
                             if let Err(error) = send_menu_with_header_override(
@@ -1139,7 +1150,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                         break 'surface;
                     }
                 }
-                match apply_pending_menu_command(&mut menu, &mut wifi_task) {
+                match apply_pending_menu_command(&mut menu, &mut wifi_task, &mut audio_task) {
                     Ok(true) => {
                         messages = render_menu_messages(&menu)?;
                         if let Err(error) = send_menu_with_header_override(
@@ -1170,9 +1181,19 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                     eprintln!("Could not show Wi-Fi operation result: {error}");
                     break;
                 }
-            } else if wifi_task.is_some() && now >= next_spinner_frame {
+            } else if poll_audio_task(&mut audio_task, &mut menu) {
+                messages = render_menu_messages(&menu)?;
+                if let Err(error) = send_menu_with_header_override(
+                    &mut session,
+                    &messages,
+                    transient_header.visible_message(now),
+                ) {
+                    eprintln!("Could not show audio operation result: {error}");
+                    break;
+                }
+            } else if (wifi_task.is_some() || audio_task.is_some()) && now >= next_spinner_frame {
                 next_spinner_frame = now + SPINNER_FRAME_INTERVAL;
-                if menu.advance_wifi_spinner() {
+                if menu.advance_wifi_spinner() || menu.advance_audio_spinner() {
                     messages = render_menu_messages(&menu)?;
                     if let Err(error) = session.send(&messages.body) {
                         eprintln!("Could not advance async loader: {error}");
@@ -1269,11 +1290,19 @@ fn control_socket_generation() -> Option<(u64, u64, i64, i64)> {
 
 #[cfg(target_os = "linux")]
 fn control_request(request: &ControlRequest) -> Result<ControlResponse, String> {
+    control_request_with_timeout(request, Duration::from_secs(1))
+}
+
+#[cfg(target_os = "linux")]
+fn control_request_with_timeout(
+    request: &ControlRequest,
+    timeout: Duration,
+) -> Result<ControlResponse, String> {
     let path = control_socket_path();
     let mut stream =
         UnixStream::connect(&path).map_err(|error| format!("{}: {error}", path.display()))?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(1)))
+        .set_read_timeout(Some(timeout))
         .map_err(|error| error.to_string())?;
     stream
         .set_write_timeout(Some(Duration::from_secs(1)))
@@ -1438,6 +1467,9 @@ fn apply_host_control(_event: HostControlEvent) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
+    if let Err(error) = refresh_audio_settings(menu) {
+        eprintln!("Could not refresh CONFIG > AUDIO: {error}");
+    }
     if let Err(error) = refresh_web_settings(menu) {
         eprintln!("No se pudo refrescar CONFIG > SYSTEM > WEB: {error}");
     }
@@ -1478,6 +1510,18 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
         selected.as_deref(),
     );
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn refresh_audio_settings(menu: &mut menu::Menu) -> Result<(), String> {
+    match control_request(&ControlRequest::AudioSnapshot)? {
+        ControlResponse::AudioSnapshot { snapshot } => {
+            menu.sync_audio_state(*snapshot);
+            Ok(())
+        }
+        ControlResponse::Error { message, .. } => Err(message),
+        _ => Err("unexpected response while reading audio state".into()),
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1668,6 +1712,7 @@ fn keep_audition_alive(_lease_id: u64) -> Result<(), String> {
 fn apply_pending_menu_command(
     menu: &mut menu::Menu,
     wifi_task: &mut Option<WifiTask>,
+    audio_task: &mut Option<AudioTask>,
 ) -> Result<bool, String> {
     let Some(command) = menu.take_command() else {
         return Ok(false);
@@ -1901,6 +1946,10 @@ fn apply_pending_menu_command(
             start_wifi_scan(wifi_task, menu)?;
             Ok(true)
         }
+        menu::MenuCommand::ApplyAudioOutput { profile } => {
+            start_audio_change(audio_task, menu, profile)?;
+            Ok(true)
+        }
         menu::MenuCommand::ForceHome { cancel_draft_id } => {
             if let Some(draft_id) = cancel_draft_id
                 && let Err(error) =
@@ -2026,6 +2075,61 @@ fn poll_wifi_task(_task: &mut Option<WifiTask>, _menu: &mut menu::Menu) -> bool 
 }
 
 #[cfg(target_os = "linux")]
+fn start_audio_change(
+    task: &mut Option<AudioTask>,
+    menu: &mut menu::Menu,
+    profile: rackforge_control_api::AudioOutputProfile,
+) -> Result<(), String> {
+    if task.is_some() {
+        return Err("an audio change is already running".into());
+    }
+    let (sender, receiver) = mpsc::sync_channel(1);
+    *task = Some(AudioTask { receiver });
+    menu.begin_audio_busy();
+    thread::Builder::new()
+        .name("rackforge-audio-settings".into())
+        .spawn(move || {
+            let result = match control_request_with_timeout(
+                &ControlRequest::ApplyAudioOutput { profile },
+                Duration::from_secs(10),
+            ) {
+                Ok(ControlResponse::AudioApplied { snapshot }) => Ok(*snapshot),
+                Ok(ControlResponse::Error { message, .. }) => Err(message),
+                Ok(_) => Err("unexpected response while applying audio output".into()),
+                Err(error) => Err(error),
+            };
+            let _ = sender.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn poll_audio_task(task: &mut Option<AudioTask>, menu: &mut menu::Menu) -> bool {
+    let Some(active) = task else {
+        return false;
+    };
+    let result = match active.receiver.try_recv() {
+        Ok(result) => result,
+        Err(mpsc::TryRecvError::Empty) => return false,
+        Err(mpsc::TryRecvError::Disconnected) => {
+            Err("audio settings worker stopped unexpectedly".into())
+        }
+    };
+    *task = None;
+    if let Err(error) = &result {
+        eprintln!("AUDIO_CHANGE_FAILED {error}");
+    }
+    menu.complete_audio_change(result);
+    true
+}
+
+#[cfg(not(target_os = "linux"))]
+fn poll_audio_task(_task: &mut Option<AudioTask>, _menu: &mut menu::Menu) -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
 fn return_to_active_mode(
     menu: &mut menu::Menu,
     mode: menu::ActiveMode,
@@ -2057,6 +2161,7 @@ fn return_to_active_mode(
 fn apply_pending_menu_command(
     menu: &mut menu::Menu,
     _wifi_task: &mut Option<WifiTask>,
+    _audio_task: &mut Option<AudioTask>,
 ) -> Result<bool, String> {
     match menu.take_command() {
         Some(_) => Ok(true),

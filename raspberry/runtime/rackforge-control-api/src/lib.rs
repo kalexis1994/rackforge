@@ -1,3 +1,4 @@
+pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
 use serde::{Deserialize, Serialize};
 
 pub use rackforge_session_api::{
@@ -15,6 +16,8 @@ pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlRequest {
     Snapshot,
+    AudioSnapshot,
+    ApplyAudioOutput { profile: AudioOutputProfile },
     Events { after_revision: Revision },
     Dispatch { envelope: CommandEnvelope },
 }
@@ -36,6 +39,12 @@ pub enum ControlErrorCode {
 pub enum ControlResponse {
     Snapshot {
         snapshot: Box<SessionState>,
+    },
+    AudioSnapshot {
+        snapshot: Box<AudioOutputState>,
+    },
+    AudioApplied {
+        snapshot: Box<AudioOutputState>,
     },
     Events {
         current_revision: Revision,
@@ -132,6 +141,15 @@ mod tests {
         let request = ControlRequest::Events {
             after_revision: Revision::ZERO,
         };
+        assert_eq!(
+            decode_request(&encode_line(&request).unwrap()).unwrap(),
+            request
+        );
+    }
+
+    #[test]
+    fn audio_requests_round_trip() {
+        let request = ControlRequest::AudioSnapshot;
         assert_eq!(
             decode_request(&encode_line(&request).unwrap()).unwrap(),
             request

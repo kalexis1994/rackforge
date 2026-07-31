@@ -62,10 +62,11 @@ The intended hierarchy is:
 
 ```text
 Setlist
-  Live item
-    Rack
-      Plugin instances
-      MIDI routes
+  Song
+    Part
+      Rack
+        Plugin instances
+        MIDI routes
 ```
 
 Every route contains:
@@ -173,7 +174,7 @@ receive normalized MIDI packets for a declared input bus.
 4. Store route graphs in sessions and expose editing through LITTLE and WEB.
 5. Add multiple plugin instances, audio graph mixing and the note ownership
    ledger.
-6. Add LIVE racks, live items and setlists.
+6. Add LIVE Racks, Songs, Parts and Setlists through the shared performance API.
 
 Each phase must preserve the current one-plugin PLAY path until its replacement
 has tests and an explicit migration.

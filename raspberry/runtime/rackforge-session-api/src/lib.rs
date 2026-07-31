@@ -1,3 +1,6 @@
+pub use rackforge_performance_api::{
+    LiveBrowseMode, LiveLocation, LivePerformanceState, RackDefinition, RackId,
+};
 use rackforge_program_api::{ProgramEditorValue, ProgramEditorView};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
@@ -9,7 +12,7 @@ pub use rackforge_surface_api::{
     SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const SESSION_SCHEMA_VERSION: u32 = 6;
+pub const SESSION_SCHEMA_VERSION: u32 = 8;
 
 fn default_surface_mode() -> SurfaceMode {
     SurfaceMode::Live
@@ -249,6 +252,8 @@ pub struct SessionState {
     pub master_level: MasterLevel,
     #[serde(default)]
     pub master_pan: MasterPan,
+    #[serde(default)]
+    pub live: LivePerformanceState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_instance_id: Option<InstanceId>,
     #[serde(default)]
@@ -268,6 +273,7 @@ impl SessionState {
             active_mode: SurfaceMode::Live,
             master_level: MasterLevel::UNITY,
             master_pan: MasterPan::CENTER,
+            live: LivePerformanceState::default(),
             active_instance_id: None,
             instances: Vec::new(),
             audition: None,
@@ -312,6 +318,12 @@ impl SessionState {
             }
             SessionEvent::ActiveModeChanged { mode } => {
                 self.active_mode = *mode;
+            }
+            SessionEvent::LiveBrowseModeChanged { mode } => {
+                self.live.mode = *mode;
+            }
+            SessionEvent::LiveTargetActivated { location, rack_id } => {
+                self.live.activate(location.clone(), rack_id.clone());
             }
             SessionEvent::SoundSelected {
                 instance_id,
@@ -503,6 +515,16 @@ pub enum SessionCommand {
     SetActiveMode {
         mode: SurfaceMode,
     },
+    SetLiveBrowseMode {
+        mode: LiveBrowseMode,
+    },
+    ActivateLiveTarget {
+        location: LiveLocation,
+    },
+    /// Auditions an unsaved Rack draft without changing the persisted LIVE target.
+    PreviewRack {
+        rack: RackDefinition,
+    },
     SelectSound {
         instance_id: InstanceId,
         sound_id: String,
@@ -601,6 +623,13 @@ pub enum SessionEvent {
     ActiveModeChanged {
         mode: SurfaceMode,
     },
+    LiveBrowseModeChanged {
+        mode: LiveBrowseMode,
+    },
+    LiveTargetActivated {
+        location: LiveLocation,
+        rack_id: RackId,
+    },
     SoundSelected {
         instance_id: InstanceId,
         sound_id: String,
@@ -677,6 +706,7 @@ mod tests {
             active_mode: SurfaceMode::Live,
             master_level: MasterLevel::UNITY,
             master_pan: MasterPan::CENTER,
+            live: LivePerformanceState::default(),
             active_instance_id: Some(instance_id.clone()),
             instances: vec![PluginInstanceState {
                 instance_id,

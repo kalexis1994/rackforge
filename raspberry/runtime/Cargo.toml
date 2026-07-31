@@ -11,6 +11,7 @@ members = [
     "rackforge-midi-api",
     "rackforge-platform-api",
     "rackforge-platform-host",
+    "rackforge-performance-api",
     "rackforge-plugin-api",
     "rackforge-program-api",
     "rackforge-session-api",

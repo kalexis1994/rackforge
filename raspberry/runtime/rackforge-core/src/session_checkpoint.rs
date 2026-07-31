@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use rackforge_session_api::{SessionId, SessionState, SurfaceMode};
+use rackforge_session_api::{LivePerformanceState, SessionId, SessionState, SurfaceMode};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -7,7 +7,7 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-const CHECKPOINT_SCHEMA_VERSION: u32 = 1;
+const CHECKPOINT_SCHEMA_VERSION: u32 = 2;
 const CHECKPOINT_DIRECTORY: &str = "sessions";
 const LIVE_CHECKPOINT_FILE: &str = "live.main.json";
 
@@ -22,6 +22,8 @@ struct SessionCheckpoint {
     #[serde(default)]
     master_pan: rackforge_session_api::MasterPan,
     #[serde(default)]
+    live: LivePerformanceState,
+    #[serde(default)]
     selected_sounds: BTreeMap<String, String>,
 }
 
@@ -33,6 +35,7 @@ impl SessionCheckpoint {
             active_mode: state.active_mode,
             master_level: state.master_level,
             master_pan: state.master_pan,
+            live: state.live.clone(),
             selected_sounds: state
                 .instances
                 .iter()
@@ -94,6 +97,13 @@ impl SessionCheckpointStore {
             .map(|checkpoint| checkpoint.master_pan))
     }
 
+    pub fn live_state(&self, session_id: &SessionId) -> Result<Option<LivePerformanceState>> {
+        Ok(self
+            .load(session_id)?
+            .filter(|checkpoint| checkpoint.schema_version >= 2)
+            .map(|checkpoint| checkpoint.live))
+    }
+
     pub fn save(&self, state: &SessionState) -> Result<()> {
         let parent = self
             .path
@@ -152,7 +162,7 @@ impl SessionCheckpointStore {
         };
         let checkpoint: SessionCheckpoint = serde_json::from_slice(&bytes)
             .with_context(|| format!("parsing session checkpoint {}", self.path.display()))?;
-        if checkpoint.schema_version != CHECKPOINT_SCHEMA_VERSION {
+        if !matches!(checkpoint.schema_version, 1 | CHECKPOINT_SCHEMA_VERSION) {
             bail!(
                 "unsupported session checkpoint schema {} in {}",
                 checkpoint.schema_version,
@@ -188,6 +198,7 @@ mod tests {
             active_mode: mode,
             master_level: rackforge_session_api::MasterLevel::new(725).unwrap(),
             master_pan: rackforge_session_api::MasterPan::new(-250).unwrap(),
+            live: rackforge_session_api::LivePerformanceState::default(),
             active_instance_id: Some(instance_id.clone()),
             instances: vec![PluginInstanceState {
                 instance_id,

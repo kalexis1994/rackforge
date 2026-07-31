@@ -1467,6 +1467,9 @@ fn apply_host_control(_event: HostControlEvent) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
+    if let Err(error) = refresh_performance_snapshot(menu) {
+        eprintln!("Could not refresh LIVE performance library: {error}");
+    }
     if let Err(error) = refresh_audio_settings(menu) {
         eprintln!("Could not refresh CONFIG > AUDIO: {error}");
     }
@@ -1510,6 +1513,18 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
         selected.as_deref(),
     );
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn refresh_performance_snapshot(menu: &mut menu::Menu) -> Result<(), String> {
+    match control_request(&ControlRequest::PerformanceSnapshot)? {
+        ControlResponse::PerformanceSnapshot { snapshot } => {
+            menu.sync_performance_snapshot(*snapshot);
+            Ok(())
+        }
+        ControlResponse::Error { message, .. } => Err(message),
+        _ => Err("unexpected response while reading LIVE performance state".into()),
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1726,6 +1741,45 @@ fn apply_pending_menu_command(
                 },
             })?;
             println!("ACTIVE_MODE_SET mode={mode:?}");
+            Ok(true)
+        }
+        menu::MenuCommand::SetLiveBrowseMode { mode } => {
+            dispatch_session_command(SessionCommand::SetLiveBrowseMode { mode })?;
+            refresh_live_catalog(menu)?;
+            println!("LIVE_BROWSE_MODE_SET mode={mode:?}");
+            Ok(true)
+        }
+        menu::MenuCommand::ActivateLiveTarget { location } => {
+            dispatch_session_command(SessionCommand::ActivateLiveTarget {
+                location: location.clone(),
+            })?;
+            refresh_live_catalog(menu)?;
+            println!("LIVE_TARGET_ACTIVATED location={location:?}");
+            Ok(true)
+        }
+        menu::MenuCommand::PreviewRack { rack } => {
+            let rack_id = rack.id.clone();
+            let slot_count = rack.slots.iter().filter(|slot| slot.enabled).count();
+            dispatch_session_command(SessionCommand::PreviewRack { rack })?;
+            println!("RACK_PREVIEWED id={rack_id} slots={slot_count}");
+            Ok(true)
+        }
+        menu::MenuCommand::EditPerformance {
+            expected_revision,
+            edit,
+        } => {
+            let result = match control_request(&ControlRequest::EditPerformance {
+                expected_revision,
+                edit,
+            }) {
+                Ok(ControlResponse::PerformanceEdited { snapshot }) => Ok(*snapshot),
+                Ok(ControlResponse::Error { message, .. }) => Err(message),
+                Ok(_) => Err("unexpected response while editing performance library".into()),
+                Err(error) => Err(error),
+            };
+            let success = result.is_ok();
+            menu.complete_performance_edit(result);
+            println!("PERFORMANCE_EDIT_COMPLETED success={success}");
             Ok(true)
         }
         menu::MenuCommand::SelectSound { id } => {

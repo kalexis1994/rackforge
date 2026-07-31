@@ -471,6 +471,7 @@ name = "rackforge-control-api"
 version = "0.1.0"
 dependencies = [
  "rackforge-audio-api",
+ "rackforge-performance-api",
  "rackforge-session-api",
  "serde",
  "serde_json",
@@ -485,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-controller-arturia-keylab-essential-mk3"
-version = "0.2.10"
+version = "0.2.18"
 dependencies = [
  "midir",
  "rackforge-control-api",
@@ -512,6 +513,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-performance-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "rackforge-platform-api"
 version = "0.1.0"
 dependencies = [
@@ -535,6 +544,7 @@ name = "rackforge-session-api"
 version = "0.1.0"
 dependencies = [
  "rackforge-controller-api",
+ "rackforge-performance-api",
  "rackforge-program-api",
  "rackforge-surface-api",
  "serde",
@@ -554,6 +564,7 @@ version = "0.1.0"
 dependencies = [
  "rackforge-audio-api",
  "rackforge-controller-api",
+ "rackforge-performance-api",
  "rackforge-program-api",
  "rackforge-session-api",
  "rackforge-ui",

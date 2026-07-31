@@ -1,4 +1,9 @@
 use anyhow::{Context, Result, bail};
+#[cfg(target_os = "linux")]
+use rackforge_audio_api::{
+    AudioDeviceSelector, AudioFallbackPolicy, AudioOutputDocument, AudioOutputProfile,
+    AudioSampleFormat,
+};
 use rackforge_core::{LoadedPlugin, PluginPackage, PluginStorage};
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{ParameterKind, PluginKind, ProgramDocument};
@@ -33,6 +38,8 @@ fn run() -> Result<()> {
         }
         "live" => run_live(&arguments[1..]),
         "resume" if arguments.len() == 2 => resume(Path::new(&arguments[1])),
+        #[cfg(target_os = "linux")]
+        "audio-list" if arguments.len() == 1 => list_audio_devices(),
         "plugin-init" if arguments.len() == 3 => {
             init_plugin(Path::new(&arguments[1]), &arguments[2])
         }
@@ -48,6 +55,7 @@ fn run() -> Result<()> {
              rackforge-core live PACKAGE [--library FILE] [--resource ID=PATH]... \
              [--preset ID] [--data-root DIRECTORY]\n  \
              rackforge-core resume STARTUP_CONFIG\n  \
+             rackforge-core audio-list\n  \
              rackforge-core plugin-init DATA_ROOT PLUGIN_ID\n  \
              rackforge-core program-save DATA_ROOT RELATIVE_PATH DOCUMENT"
         ),
@@ -55,7 +63,7 @@ fn run() -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-const AUDIO_STARTUP_SCHEMA_VERSION: u32 = 1;
+const AUDIO_STARTUP_SCHEMA_VERSION: u32 = 2;
 
 #[cfg(target_os = "linux")]
 #[derive(Clone, Debug, Deserialize)]
@@ -68,6 +76,15 @@ struct AudioStartupConfig {
     #[serde(default)]
     preset: Option<String>,
     data_root: PathBuf,
+    #[serde(default)]
+    audio: Option<AudioStartupSection>,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AudioStartupSection {
+    output: AudioOutputProfile,
 }
 
 #[cfg(target_os = "linux")]
@@ -76,7 +93,7 @@ fn resume(path: &Path) -> Result<()> {
         .with_context(|| format!("reading audio startup config {}", path.display()))?;
     let config: AudioStartupConfig = toml::from_str(&text)
         .with_context(|| format!("parsing audio startup config {}", path.display()))?;
-    if config.schema_version != AUDIO_STARTUP_SCHEMA_VERSION {
+    if !matches!(config.schema_version, 1 | AUDIO_STARTUP_SCHEMA_VERSION) {
         bail!(
             "unsupported audio startup schema {} in {}",
             config.schema_version,
@@ -89,13 +106,95 @@ fn resume(path: &Path) -> Result<()> {
     if config.resources.values().any(|path| !path.is_absolute()) {
         bail!("audio startup resource paths must be absolute");
     }
+    let configured_audio_output = match (config.schema_version, config.audio) {
+        (1, None) => {
+            eprintln!("AUDIO_CONFIG_MIGRATED from_schema=1 to_schema=2");
+            legacy_scarlett_profile()
+        }
+        (AUDIO_STARTUP_SCHEMA_VERSION, Some(audio)) | (1, Some(audio)) => audio.output,
+        (_, None) => bail!("audio startup schema 2 requires [audio.output]"),
+        _ => unreachable!(),
+    };
+    let audio_state_path = audio_output_state_path();
+    let audio_output =
+        load_persisted_audio_output(&audio_state_path).unwrap_or(configured_audio_output);
+    audio_output
+        .validate()
+        .context("validating [audio.output]")?;
     rackforge_core::live::run(rackforge_core::live::LiveConfig {
         package: config.package,
         binary: None,
         resources: config.resources,
         preset: config.preset,
         data_root: Some(config.data_root),
+        audio_output,
+        audio_state_path,
     })
+}
+
+#[cfg(target_os = "linux")]
+fn audio_output_state_path() -> PathBuf {
+    env::var_os("RACKFORGE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"))
+        .join("state")
+        .join("audio-output.toml")
+}
+
+#[cfg(target_os = "linux")]
+fn load_persisted_audio_output(path: &Path) -> Option<AudioOutputProfile> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            eprintln!("AUDIO_STATE_IGNORED path={} reason={error}", path.display());
+            return None;
+        }
+    };
+    match toml::from_str::<AudioOutputDocument>(&text)
+        .context("parsing persisted audio output")
+        .and_then(|document| {
+            document
+                .validate()
+                .context("validating persisted audio output")?;
+            Ok(document.output)
+        }) {
+        Ok(profile) => {
+            println!("AUDIO_STATE_RESTORED path={}", path.display());
+            Some(profile)
+        }
+        Err(error) => {
+            eprintln!(
+                "AUDIO_STATE_IGNORED path={} reason={error:#}",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn legacy_scarlett_profile() -> AudioOutputProfile {
+    AudioOutputProfile {
+        device: AudioDeviceSelector::Usb {
+            vendor_id: 0x1235,
+            product_id: 0x8211,
+            serial: None,
+        },
+        fallback: AudioFallbackPolicy::None,
+        sample_format: AudioSampleFormat::S32Le,
+        sample_rate_hz: 48_000,
+        channels: 2,
+        period_frames: 128,
+        buffer_frames: 384,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn list_audio_devices() -> Result<()> {
+    let devices = rackforge_core::audio::discover_audio_devices()?;
+    println!("{}", serde_json::to_string_pretty(&devices)?);
+    Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -335,10 +434,60 @@ fn run_live(arguments: &[String]) -> Result<()> {
         resources,
         preset,
         data_root,
+        audio_output: legacy_scarlett_profile(),
+        audio_state_path: audio_output_state_path(),
     })
 }
 
 #[cfg(not(target_os = "linux"))]
 fn run_live(_arguments: &[String]) -> Result<()> {
     bail!("rackforge-core live is available on Linux only")
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schema_two_requires_and_parses_a_typed_audio_profile() {
+        let config: AudioStartupConfig = toml::from_str(
+            r#"
+schema_version = 2
+package = "/opt/rackforge/plugin"
+data_root = "/var/lib/rackforge"
+
+[audio.output]
+fallback = "none"
+sample_format = "s32_le"
+sample_rate_hz = 48000
+channels = 2
+period_frames = 128
+buffer_frames = 384
+
+[audio.output.device]
+mode = "usb"
+vendor_id = 0x1235
+product_id = 0x8211
+"#,
+        )
+        .unwrap();
+        let output = config.audio.unwrap().output;
+        output.validate().unwrap();
+        assert_eq!(output.sample_rate_hz, 48_000);
+        assert_eq!(output.fallback, AudioFallbackPolicy::None);
+    }
+
+    #[test]
+    fn schema_one_remains_parseable_for_explicit_migration() {
+        let config: AudioStartupConfig = toml::from_str(
+            r#"
+schema_version = 1
+package = "/opt/rackforge/plugin"
+data_root = "/var/lib/rackforge"
+"#,
+        )
+        .unwrap();
+        assert!(config.audio.is_none());
+        legacy_scarlett_profile().validate().unwrap();
+    }
 }

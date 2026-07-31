@@ -752,9 +752,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
+name = "rackforge-audio-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "toml",
+]
+
+[[package]]
 name = "rackforge-control-api"
 version = "0.1.0"
 dependencies = [
+ "rackforge-audio-api",
  "rackforge-session-api",
  "serde",
  "serde_json",
@@ -798,6 +809,7 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
  "midir",
+ "rackforge-audio-api",
  "rackforge-control-api",
  "rackforge-midi-api",
  "rackforge-plugin-api",
@@ -915,6 +927,7 @@ dependencies = [
 name = "rackforge-surface-runtime"
 version = "0.1.0"
 dependencies = [
+ "rackforge-audio-api",
  "rackforge-controller-api",
  "rackforge-program-api",
  "rackforge-session-api",

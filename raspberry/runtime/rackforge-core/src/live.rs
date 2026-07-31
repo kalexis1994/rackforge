@@ -1,11 +1,14 @@
+use crate::audio::{OpenedAudioOutput, discover_audio_devices, open_audio_output_from_inventory};
 use crate::control::{self, AudioControlCommand};
 use crate::session::SessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
 use crate::{LoadedPlugin, PluginInstance, PluginPackage};
-use alsa::pcm::{Access, Format, HwParams, PCM};
-use alsa::{Direction, ValueOr};
+use alsa::pcm::PCM;
 use anyhow::{Context, Result, bail};
 use midir::{Ignore, MidiInput, MidiInputConnection};
+use rackforge_audio_api::{
+    AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioOutputProfile, AudioOutputState, AudioSampleFormat,
+};
 use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_midi_api::{
     CompiledMidiRoute, DEFAULT_INPUT_BUS_ID, IngressMidiEvent, MIDI_ROUTING_SCHEMA_VERSION,
@@ -24,12 +27,8 @@ use std::collections::BTreeMap;
 use std::env;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::{Arc, Mutex};
 
-const OUTPUT_DEVICE: &str = "hw:CARD=USB,DEV=0";
-const OUTPUT_RATE: u32 = 48_000;
-const CHANNELS: usize = 2;
-const PERIOD_FRAMES: usize = 128;
-const BUFFER_FRAMES: i64 = 384;
 const MAX_EVENTS_PER_BLOCK: usize = 256;
 const MIDI_QUEUE_CAPACITY: usize = 2_048;
 const AUDIO_CONTROL_QUEUE_CAPACITY: usize = 64;
@@ -304,9 +303,15 @@ pub struct LiveConfig {
     pub resources: BTreeMap<String, PathBuf>,
     pub preset: Option<String>,
     pub data_root: Option<PathBuf>,
+    pub audio_output: AudioOutputProfile,
+    pub audio_state_path: PathBuf,
 }
 
 pub fn run(config: LiveConfig) -> Result<()> {
+    ensure_supported_engine_profile(&config.audio_output)?;
+    let output_rate = config.audio_output.sample_rate_hz;
+    let period_frames = config.audio_output.period_frames as usize;
+    let channels = config.audio_output.channels as usize;
     let session_id =
         SessionId::new(DEFAULT_LIVE_SESSION_ID).map_err(|message| anyhow::anyhow!(message))?;
     let checkpoint = config
@@ -398,10 +403,10 @@ pub fn run(config: LiveConfig) -> Result<()> {
         println!("LIVE_PRESET_READY id={} name={:?}", preset.id, preset.name);
     }
     instance.activate(
-        f64::from(OUTPUT_RATE),
-        PERIOD_FRAMES as u32,
+        f64::from(output_rate),
+        period_frames as u32,
         0,
-        CHANNELS as u32,
+        channels as u32,
     )?;
 
     let (sender, receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
@@ -422,10 +427,20 @@ pub fn run(config: LiveConfig) -> Result<()> {
         DEFAULT_LIVE_INSTANCE_ID,
         DEFAULT_INPUT_BUS_ID
     );
-    let pcm = open_scarlett()?;
+    let audio_devices = discover_audio_devices()?;
+    let output = open_audio_output_from_inventory(&config.audio_output, &audio_devices)?;
     println!(
-        "AUDIO_READY device={OUTPUT_DEVICE:?} rate={OUTPUT_RATE} channels={CHANNELS} \
-         format=S32_LE period={PERIOD_FRAMES} buffer={BUFFER_FRAMES}"
+        "AUDIO_READY id={} name={:?} backend={} rate={} channels={} format={:?} \
+         period={} buffer={} nominal_buffer_ms={:.2}",
+        output.device.id,
+        output.device.name,
+        output.device.backend_address,
+        output.profile.sample_rate_hz,
+        output.profile.channels,
+        output.profile.sample_format,
+        output.profile.period_frames,
+        output.profile.buffer_frames,
+        output.profile.nominal_buffer_latency_ms(),
     );
     let selected_sound_id = preset
         .and_then(|selected| {
@@ -477,6 +492,12 @@ pub fn run(config: LiveConfig) -> Result<()> {
     let initial_master_level = session.master_level;
     let initial_master_pan = session.master_pan;
     let session_store = SessionStore::shared(session)?;
+    let audio_state = Arc::new(Mutex::new(AudioOutputState {
+        schema_version: AUDIO_OUTPUT_STATE_SCHEMA_VERSION,
+        active_device: output.device.clone(),
+        active_profile: output.profile.clone(),
+        devices: audio_devices,
+    }));
     let (control_sender, control_receiver) = mpsc::sync_channel(AUDIO_CONTROL_QUEUE_CAPACITY);
     let control_path = control_socket_path();
     let control_storage = config
@@ -487,13 +508,15 @@ pub fn run(config: LiveConfig) -> Result<()> {
         &control_path,
         session_store,
         control_sender,
+        Arc::clone(&audio_state),
+        config.audio_state_path,
         control_storage,
         checkpoint,
     )?;
     println!("CONTROL_READY socket={}", control_path.display());
     println!("READY_TO_PLAY");
     audio_loop(
-        &pcm,
+        output,
         &receiver,
         &control_receiver,
         &mut instance,
@@ -501,6 +524,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         midi_port_names.len(),
         initial_master_level,
         initial_master_pan,
+        audio_state,
     )
 }
 
@@ -644,38 +668,25 @@ fn compile_default_play_route(
     route.compile(sources, channel_model).map_err(Into::into)
 }
 
-fn open_scarlett() -> Result<PCM> {
-    let pcm = PCM::new(OUTPUT_DEVICE, Direction::Playback, false)
-        .context("opening Scarlett ALSA playback")?;
-    {
-        let parameters = HwParams::any(&pcm)?;
-        parameters.set_access(Access::RWInterleaved)?;
-        parameters.set_format(Format::s32())?;
-        parameters.set_channels(CHANNELS as u32)?;
-        parameters.set_rate(OUTPUT_RATE, ValueOr::Nearest)?;
-        parameters.set_period_size(PERIOD_FRAMES as i64, ValueOr::Nearest)?;
-        parameters.set_buffer_size(BUFFER_FRAMES)?;
-        pcm.hw_params(&parameters)?;
-    }
-    let actual = pcm.hw_params_current()?;
-    if actual.get_rate()? != OUTPUT_RATE
-        || actual.get_channels()? != CHANNELS as u32
-        || actual.get_period_size()? != PERIOD_FRAMES as i64
-    {
+fn ensure_supported_engine_profile(profile: &AudioOutputProfile) -> Result<()> {
+    profile.validate()?;
+    if profile.sample_format != AudioSampleFormat::S32Le {
         bail!(
-            "Scarlett negotiated unsupported format: rate={} channels={} period={}",
-            actual.get_rate()?,
-            actual.get_channels()?,
-            actual.get_period_size()?
+            "audio engine currently renders S32_LE only, requested {:?}",
+            profile.sample_format
         );
     }
-    drop(actual);
-    pcm.prepare()?;
-    Ok(pcm)
+    if profile.channels != 2 {
+        bail!(
+            "audio engine currently renders stereo only, requested {} channels",
+            profile.channels
+        );
+    }
+    Ok(())
 }
 
 fn audio_loop(
-    pcm: &PCM,
+    initial_output: OpenedAudioOutput,
     receiver: &Receiver<IngressMidiEvent>,
     control_receiver: &Receiver<AudioControlCommand>,
     instance: &mut PluginInstance<'_>,
@@ -683,11 +694,15 @@ fn audio_loop(
     midi_source_count: usize,
     initial_master_level: MasterLevel,
     initial_master_pan: MasterPan,
+    audio_state: Arc<Mutex<AudioOutputState>>,
 ) -> Result<()> {
-    let io = pcm.io_i32()?;
+    let mut output = Some(initial_output);
+    let mut period_frames = output.as_ref().unwrap().profile.period_frames as usize;
+    let mut channels = output.as_ref().unwrap().profile.channels as usize;
+    let mut output_rate = output.as_ref().unwrap().profile.sample_rate_hz as usize;
     let input = Vec::new();
-    let mut plugin_output = vec![0.0_f32; PERIOD_FRAMES * CHANNELS];
-    let mut device_output = vec![0_i32; PERIOD_FRAMES * CHANNELS];
+    let mut plugin_output = vec![0.0_f32; period_frames * channels];
+    let mut device_output = vec![0_i32; period_frames * channels];
     let mut events = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
     let mut meter_frames = 0_usize;
     let mut meter_peak = 0_f32;
@@ -704,6 +719,21 @@ fn audio_loop(
     loop {
         while let Ok(command) = control_receiver.try_recv() {
             match command {
+                AudioControlCommand::ApplyAudioOutput { profile, reply } => {
+                    let result =
+                        reconfigure_audio_output(&mut output, instance, profile, &audio_state);
+                    if let Ok(snapshot) = &result {
+                        period_frames = snapshot.active_profile.period_frames as usize;
+                        channels = snapshot.active_profile.channels as usize;
+                        output_rate = snapshot.active_profile.sample_rate_hz as usize;
+                        plugin_output.resize(period_frames * channels, 0.0);
+                        device_output.resize(period_frames * channels, 0);
+                        meter_frames = 0;
+                        meter_peak = 0.0;
+                        meter_clipped = 0;
+                    }
+                    let _ = reply.send(result.map_err(|error| error.to_string()));
+                }
                 AudioControlCommand::RegisterHostControls {
                     controller_id,
                     bindings,
@@ -945,15 +975,15 @@ fn audio_loop(
         instance.process_interleaved(
             &input,
             &mut plugin_output,
-            PERIOD_FRAMES as u32,
+            period_frames as u32,
             0,
-            CHANNELS as u32,
+            channels as u32,
             &events,
             &[],
         )?;
         for (source_frame, target_frame) in plugin_output
-            .chunks_exact(CHANNELS)
-            .zip(device_output.chunks_exact_mut(CHANNELS))
+            .chunks_exact(channels)
+            .zip(device_output.chunks_exact_mut(channels))
         {
             let gain = master_gain.next_gain();
             let (left_balance, right_balance) = master_balance.next_balance();
@@ -969,10 +999,20 @@ fn audio_loop(
                 *target = (mastered.clamp(-0.95, 0.95) * i32::MAX as f32) as i32;
             }
         }
-        meter_frames += PERIOD_FRAMES;
-        write_period(pcm, &io, &device_output)?;
+        meter_frames += period_frames;
+        let current_output = output
+            .as_ref()
+            .context("audio output disappeared after reconfiguration")?;
+        let io = current_output.pcm.io_i32()?;
+        write_period(
+            &current_output.pcm,
+            &io,
+            &device_output,
+            period_frames,
+            channels,
+        )?;
 
-        if meter_frames >= OUTPUT_RATE as usize {
+        if meter_frames >= output_rate {
             println!(
                 "AUDIO_METER peak={meter_peak:.3} clipped={meter_clipped} \
                  midi_events={} dropped_events={dropped_events}",
@@ -982,6 +1022,91 @@ fn audio_loop(
             meter_peak = 0.0;
             meter_clipped = 0;
             dropped_events = 0;
+        }
+    }
+}
+
+fn reconfigure_audio_output(
+    output: &mut Option<OpenedAudioOutput>,
+    instance: &mut PluginInstance<'_>,
+    requested: AudioOutputProfile,
+    shared_state: &Arc<Mutex<AudioOutputState>>,
+) -> Result<AudioOutputState> {
+    ensure_supported_engine_profile(&requested)?;
+    let previous_profile = output
+        .as_ref()
+        .context("audio output is unavailable")?
+        .profile
+        .clone();
+    if requested == previous_profile {
+        return shared_state
+            .lock()
+            .map(|state| state.clone())
+            .map_err(|_| anyhow::anyhow!("audio state lock is poisoned"));
+    }
+
+    instance
+        .deactivate()
+        .context("deactivating plugin for audio change")?;
+    drop(output.take());
+    let apply = (|| -> Result<(OpenedAudioOutput, Vec<_>)> {
+        let devices = discover_audio_devices().context("refreshing audio device inventory")?;
+        let opened = open_audio_output_from_inventory(&requested, &devices)?;
+        instance
+            .activate(
+                f64::from(requested.sample_rate_hz),
+                requested.period_frames,
+                0,
+                requested.channels,
+            )
+            .context("activating plugin for requested audio profile")?;
+        Ok((opened, devices))
+    })();
+
+    match apply {
+        Ok((opened, devices)) => {
+            let state = AudioOutputState {
+                schema_version: AUDIO_OUTPUT_STATE_SCHEMA_VERSION,
+                active_device: opened.device.clone(),
+                active_profile: opened.profile.clone(),
+                devices,
+            };
+            state.validate().context("validating applied audio state")?;
+            *output = Some(opened);
+            *shared_state
+                .lock()
+                .map_err(|_| anyhow::anyhow!("audio state lock is poisoned"))? = state.clone();
+            println!(
+                "AUDIO_RECONFIGURED id={} rate={} period={} buffer={} nominal_buffer_ms={:.2}",
+                state.active_device.id,
+                state.active_profile.sample_rate_hz,
+                state.active_profile.period_frames,
+                state.active_profile.buffer_frames,
+                state.active_profile.nominal_buffer_latency_ms(),
+            );
+            Ok(state)
+        }
+        Err(apply_error) => {
+            let rollback = (|| -> Result<OpenedAudioOutput> {
+                let devices = discover_audio_devices()?;
+                let opened = open_audio_output_from_inventory(&previous_profile, &devices)?;
+                instance.activate(
+                    f64::from(previous_profile.sample_rate_hz),
+                    previous_profile.period_frames,
+                    0,
+                    previous_profile.channels,
+                )?;
+                Ok(opened)
+            })();
+            match rollback {
+                Ok(opened) => {
+                    *output = Some(opened);
+                    bail!("audio change rejected: {apply_error:#}; previous output restored")
+                }
+                Err(rollback_error) => bail!(
+                    "audio change failed: {apply_error:#}; rollback failed: {rollback_error:#}"
+                ),
+            }
         }
     }
 }
@@ -1002,11 +1127,17 @@ fn restore_after_audition(instance: &mut PluginInstance<'_>, lease: &AuditionLea
     Ok(())
 }
 
-fn write_period(pcm: &PCM, io: &alsa::pcm::IO<'_, i32>, output: &[i32]) -> Result<()> {
+fn write_period(
+    pcm: &PCM,
+    io: &alsa::pcm::IO<'_, i32>,
+    output: &[i32],
+    period_frames: usize,
+    channels: usize,
+) -> Result<()> {
     let mut frame_offset = 0;
-    while frame_offset < PERIOD_FRAMES {
-        match io.writei(&output[frame_offset * CHANNELS..]) {
-            Ok(0) => bail!("Scarlett accepted zero audio frames"),
+    while frame_offset < period_frames {
+        match io.writei(&output[frame_offset * channels..]) {
+            Ok(0) => bail!("audio output accepted zero frames"),
             Ok(frames) => frame_offset += frames,
             Err(error) if error.errno() == libc::EPIPE => {
                 eprintln!("XRUN_RECOVERED");
@@ -1212,5 +1343,28 @@ mod tests {
 
         reserved.replace(&[]);
         assert!(!reserved.contains(midi(3, [0xb0, 82, 64])));
+    }
+
+    #[test]
+    fn engine_profile_rejects_formats_and_layouts_not_rendered_yet() {
+        let mut profile = AudioOutputProfile {
+            device: rackforge_audio_api::AudioDeviceSelector::Usb {
+                vendor_id: 0x1235,
+                product_id: 0x8211,
+                serial: None,
+            },
+            fallback: rackforge_audio_api::AudioFallbackPolicy::None,
+            sample_format: AudioSampleFormat::S32Le,
+            sample_rate_hz: 48_000,
+            channels: 2,
+            period_frames: 128,
+            buffer_frames: 384,
+        };
+        ensure_supported_engine_profile(&profile).unwrap();
+        profile.sample_format = AudioSampleFormat::S16Le;
+        assert!(ensure_supported_engine_profile(&profile).is_err());
+        profile.sample_format = AudioSampleFormat::S32Le;
+        profile.channels = 1;
+        assert!(ensure_supported_engine_profile(&profile).is_err());
     }
 }

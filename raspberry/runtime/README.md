@@ -375,10 +375,25 @@ acotado y `rackforge-audio.service`. Core se inicia mediante:
 rackforge-core resume /home/kalex/rackforge/config/audio.toml
 ```
 
-El documento de inicio es versionado y conserva el paquete, recursos y raíz de
-datos. El servicio no depende de Internet ni de `network-online.target`; si el
-teclado o la interfaz de audio todavía no están disponibles, systemd reintenta
-sin bloquear el controlador ni la web.
+El documento de inicio es versionado y conserva el paquete, recursos, raíz de
+datos y un perfil tipado `[audio.output]`. El schema 2 selecciona la interfaz por
+ID estable o identidad USB, nunca por el índice ALSA efímero. El schema 1 se
+migra explícitamente al perfil Scarlett anterior para mantener instalaciones
+existentes. El servicio no depende de Internet ni de `network-online.target`;
+si el teclado o la interfaz de audio todavía no están disponibles, systemd
+reintenta sin bloquear el controlador ni la web.
+
+El inventario puede inspeccionarse, con el servicio de audio detenido, mediante:
+
+```bash
+rackforge-core audio-list
+```
+
+Core valida capacidades, aplica todos los parámetros ALSA juntos y comprueba el
+perfil realmente negociado antes de publicar `AUDIO_READY`. El renderer inicial
+acepta `S32_LE` estéreo y permite configurar sample rate, period y buffer. La API
+puede describir capture, pero capture y controles específicos de fabricante se
+mantienen fuera del flujo activo por ahora.
 
 Sobre una instalación limpia de Raspberry Pi OS Lite, la transición opcional a
 appliance se ejecuta con `scripts/install-appliance.sh --optimize`, o por

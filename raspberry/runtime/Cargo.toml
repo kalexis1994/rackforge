@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "rackforge-core",
+    "rackforge-audio-api",
     "rackforge-control-api",
     "rackforge-controller-api",
     "rackforge-controller-package",

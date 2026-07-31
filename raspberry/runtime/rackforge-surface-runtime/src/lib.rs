@@ -2,6 +2,10 @@
 //!
 //! This crate has no MIDI, SysEx, USB or controller-model knowledge.
 
+use rackforge_audio_api::{
+    AudioDeviceDescriptor, AudioDeviceSelector, AudioFallbackPolicy, AudioOutputProfile,
+    AudioOutputState, AudioSampleFormat,
+};
 use rackforge_controller_api::LITTLE_TEXT_COLUMNS;
 use rackforge_program_api::{
     ProgramEditorField, ProgramEditorFieldKind, ProgramEditorPage, ProgramEditorValue,
@@ -205,6 +209,9 @@ pub enum MenuCommand {
         enabled: bool,
     },
     ScanWifi,
+    ApplyAudioOutput {
+        profile: AudioOutputProfile,
+    },
 }
 
 impl Screen {
@@ -281,6 +288,12 @@ enum Page {
     Config,
     Plugins,
     System,
+    Audio,
+    AudioOutput,
+    AudioRate,
+    AudioLatency,
+    AudioBusy,
+    AudioResult,
     SystemWeb,
     SystemWebPairing,
     SystemWifi,
@@ -347,6 +360,11 @@ pub struct Menu {
     wifi_password: SecretEditor,
     wifi_spinner: Spinner,
     wifi_result: Option<(bool, String)>,
+    audio_state: Option<AudioOutputState>,
+    audio_index: usize,
+    audio_value_index: usize,
+    audio_spinner: Spinner,
+    audio_result: Option<(bool, String)>,
     rf_dls_library_index: usize,
     rf_dls_play_index: usize,
     rf_dls_custom_index: usize,
@@ -387,7 +405,7 @@ const CONFIG_ITEMS: [&str; 4] = ["PLUGINS", "SETLISTS", "AUDIO", "SYSTEM"];
 const CONFIG_DETAILS: [&str; 4] = [
     "Plugin settings",
     "Performance order",
-    "Scarlett Solo",
+    "Output settings",
     "RackForge settings",
 ];
 const PLUGIN_ITEMS: [&str; 1] = ["RF-DLS"];
@@ -403,6 +421,13 @@ const SYSTEM_WEB_ITEMS: [&str; 6] = [
     "STATUS",
 ];
 const SYSTEM_WIFI_ITEMS: [&str; 3] = ["STATUS", "NETWORKS", "RADIO"];
+const AUDIO_ITEMS: [&str; 3] = ["OUTPUT", "SAMPLE RATE", "LATENCY"];
+const AUDIO_LATENCIES: [(&str, u32, u32); 4] = [
+    ("ULTRA 2 MS", 32, 96),
+    ("LOW 4 MS", 64, 192),
+    ("BALANCED 8 MS", 128, 384),
+    ("SAFE 16 MS", 256, 768),
+];
 const WIFI_NETWORK_GROUPS: [&str; 2] = ["KNOWN", "DISCOVERED"];
 const WIFI_KNOWN_ACTIONS: [&str; 2] = ["CONNECT", "FORGET"];
 const WIFI_ACTIVE_ACTIONS: [&str; 2] = ["DISCONNECT", "FORGET"];
@@ -463,6 +488,11 @@ impl Default for Menu {
             wifi_password: wifi_password_editor(),
             wifi_spinner: Spinner::ascii("system-loader", "LOADING", "PLEASE WAIT"),
             wifi_result: None,
+            audio_state: None,
+            audio_index: 0,
+            audio_value_index: 0,
+            audio_spinner: Spinner::ascii("audio-loader", "APPLYING", "PLEASE WAIT"),
+            audio_result: None,
             rf_dls_library_index: 0,
             rf_dls_play_index: 0,
             rf_dls_custom_index: 0,
@@ -592,6 +622,49 @@ impl Menu {
         }
         self.wifi_spinner.advance();
         true
+    }
+
+    pub fn sync_audio_state(&mut self, state: AudioOutputState) {
+        if state.validate().is_err() {
+            return;
+        }
+        self.audio_state = Some(state);
+        self.audio_value_index = 0;
+    }
+
+    pub fn begin_audio_busy(&mut self) {
+        self.audio_spinner.reset("APPLYING");
+        self.audio_spinner.set_detail("PLEASE WAIT");
+        self.audio_result = None;
+        self.page = Page::AudioBusy;
+    }
+
+    pub fn advance_audio_spinner(&mut self) -> bool {
+        if self.page != Page::AudioBusy {
+            return false;
+        }
+        self.audio_spinner.advance();
+        true
+    }
+
+    pub fn complete_audio_change(&mut self, result: Result<AudioOutputState, impl Into<String>>) {
+        if self.page != Page::AudioBusy {
+            return;
+        }
+        match result {
+            Ok(state) => {
+                self.sync_audio_state(state);
+                self.audio_result = Some((true, "OUTPUT READY".into()));
+            }
+            Err(error) => self.audio_result = Some((false, error.into())),
+        }
+        self.page = Page::AudioResult;
+    }
+
+    pub fn audio_device_name(&self) -> Option<String> {
+        self.audio_state
+            .as_ref()
+            .map(|state| normalized_display_text(&state.active_device.name, "AUDIO OUTPUT"))
     }
 
     pub fn complete_wifi_scan(&mut self, networks: Vec<DiscoveredWifiNetwork>) {
@@ -755,6 +828,16 @@ impl Menu {
             self.apply_program_name_input(input);
         } else if self.page == Page::RfDlsProgramOutput {
             self.apply_program_output_input(input);
+        } else if matches!(
+            self.page,
+            Page::Audio
+                | Page::AudioOutput
+                | Page::AudioRate
+                | Page::AudioLatency
+                | Page::AudioBusy
+                | Page::AudioResult
+        ) {
+            self.apply_audio_input(input);
         } else if self.page == Page::SystemWeb {
             self.apply_system_web_input(input);
         } else if self.page == Page::SystemWifi {
@@ -824,6 +907,24 @@ impl Menu {
             } else {
                 self.apply_wifi_network_input(input);
             }
+            return;
+        }
+        if matches!(
+            self.page,
+            Page::Audio
+                | Page::AudioOutput
+                | Page::AudioRate
+                | Page::AudioLatency
+                | Page::AudioBusy
+                | Page::AudioResult
+        ) {
+            let input = match action {
+                Action::Previous => Input::Button2,
+                Action::Next => Input::Button3,
+                Action::Back => Input::Button4,
+                Action::Select => Input::Button1,
+            };
+            self.apply_audio_input(input);
             return;
         }
         if matches!(
@@ -917,6 +1018,9 @@ impl Menu {
                         Page::RfDlsCustomPrograms
                     }
                     Page::Plugins => Page::Config,
+                    Page::Audio => Page::Config,
+                    Page::AudioOutput | Page::AudioRate | Page::AudioLatency => Page::Audio,
+                    Page::AudioBusy | Page::AudioResult => Page::Audio,
                     Page::SystemWeb => Page::System,
                     Page::SystemWebPairing => Page::SystemWeb,
                     Page::SystemWifi => Page::System,
@@ -966,6 +1070,7 @@ impl Menu {
                         Page::RfDlsPlay
                     }
                     Page::Config if self.config_index == 0 => Page::Plugins,
+                    Page::Config if self.config_index == 2 => Page::Audio,
                     Page::Config if self.config_index == 3 => Page::System,
                     Page::Plugins if self.plugin_index == 0 => Page::RfDlsCustomPrograms,
                     Page::System if self.system_index == 0 => Page::SystemWeb,
@@ -1101,12 +1206,19 @@ impl Menu {
                 &PLAY_DETAILS,
                 self.play_index,
             ),
-            Page::Config => simple_screen(
-                indexed_title("CONFIG", self.config_index, CONFIG_ITEMS.len()),
-                &CONFIG_ITEMS,
-                &CONFIG_DETAILS,
-                self.config_index,
-            ),
+            Page::Config => {
+                let detail = if self.config_index == 2 {
+                    self.audio_device_name()
+                        .unwrap_or_else(|| "Detecting output".into())
+                } else {
+                    CONFIG_DETAILS[self.config_index].into()
+                };
+                Screen::with_header(
+                    indexed_title("CONFIG", self.config_index, CONFIG_ITEMS.len()),
+                    CONFIG_ITEMS[self.config_index],
+                    detail,
+                )
+            }
             Page::Plugins => simple_screen(
                 indexed_title("PLUGINS", self.plugin_index, PLUGIN_ITEMS.len()),
                 &PLUGIN_ITEMS,
@@ -1121,6 +1233,13 @@ impl Menu {
                     detail,
                 )
             }
+            Page::Audio => self.render_audio(),
+            Page::AudioOutput | Page::AudioRate | Page::AudioLatency => self.render_audio_value(),
+            Page::AudioBusy => {
+                let [line_1, line_2] = component_lines(&self.audio_spinner, false);
+                Screen::with_header("AUDIO", line_1, line_2)
+            }
+            Page::AudioResult => self.render_audio_result(),
             Page::SystemWeb => self.render_system_web(),
             Page::SystemWebPairing => self.render_pairing_code(),
             Page::SystemWifi => self.render_system_wifi(),
@@ -1199,6 +1318,81 @@ impl Menu {
         };
         screen.footer = standard_footer(self.pressed_button);
         screen
+    }
+
+    fn render_audio(&self) -> Screen {
+        let detail = match (&self.audio_state, self.audio_index) {
+            (Some(state), 0) => normalized_display_text(&state.active_device.name, "OUTPUT"),
+            (Some(state), 1) => format!("{} HZ", state.active_profile.sample_rate_hz),
+            (Some(state), _) => format!(
+                "{:.1} MS {}/{}",
+                state.active_profile.nominal_buffer_latency_ms(),
+                state.active_profile.period_frames,
+                state.active_profile.buffer_frames
+            ),
+            (None, _) => "UNAVAILABLE".into(),
+        };
+        Screen::with_header(
+            indexed_title("AUDIO", self.audio_index, AUDIO_ITEMS.len()),
+            AUDIO_ITEMS[self.audio_index],
+            normalized_display_text(&detail, "UNAVAILABLE"),
+        )
+    }
+
+    fn render_audio_value(&self) -> Screen {
+        let (title, value, count) = match self.page {
+            Page::AudioOutput => {
+                let devices = self.compatible_audio_devices();
+                let value = devices
+                    .get(self.audio_value_index)
+                    .map(|device| device.name.clone())
+                    .unwrap_or_else(|| "NO OUTPUTS".into());
+                ("OUTPUT", value, devices.len())
+            }
+            Page::AudioRate => {
+                let rates = self.audio_rates();
+                let value = rates
+                    .get(self.audio_value_index)
+                    .map(|rate| format!("{rate} HZ"))
+                    .unwrap_or_else(|| "NO RATES".into());
+                ("SAMPLE RATE", value, rates.len())
+            }
+            Page::AudioLatency => {
+                let latencies = self.audio_latencies();
+                let value = latencies
+                    .get(self.audio_value_index)
+                    .map(|(label, _, _)| (*label).to_owned())
+                    .unwrap_or_else(|| "NO PRESETS".into());
+                ("LATENCY", value, latencies.len())
+            }
+            _ => unreachable!(),
+        };
+        let value = normalized_display_text(&value, "UNAVAILABLE")
+            .chars()
+            .take(DISPLAY_COLUMNS.saturating_sub(2))
+            .collect::<String>();
+        Screen::with_header(
+            indexed_title(
+                title,
+                self.audio_value_index.min(count.saturating_sub(1)),
+                count.max(1),
+            ),
+            format!("[{value}]"),
+            "OK TO APPLY",
+        )
+    }
+
+    fn render_audio_result(&self) -> Screen {
+        let (success, message) = self
+            .audio_result
+            .as_ref()
+            .map(|(success, message)| (*success, message.as_str()))
+            .unwrap_or((false, "UNKNOWN RESULT"));
+        Screen::with_header(
+            "AUDIO",
+            if success { "APPLIED" } else { "FAILED" },
+            normalized_display_text(message, "UNKNOWN ERROR"),
+        )
     }
 
     fn render_system_web(&self) -> Screen {
@@ -1401,6 +1595,176 @@ impl Menu {
             if *success { "SUCCESS" } else { "FAILED" },
             normalized_display_text(message, "UNKNOWN ERROR"),
         )
+    }
+
+    fn apply_audio_input(&mut self, input: Input) {
+        match self.page {
+            Page::Audio => match input {
+                Input::Button2 | Input::EncoderLeft => {
+                    self.audio_index =
+                        (self.audio_index + AUDIO_ITEMS.len() - 1) % AUDIO_ITEMS.len();
+                }
+                Input::Button3 | Input::EncoderRight => {
+                    self.audio_index = (self.audio_index + 1) % AUDIO_ITEMS.len();
+                }
+                Input::Button4 => self.page = Page::Config,
+                Input::Button1 | Input::EncoderPress => {
+                    self.audio_value_index = self.current_audio_value_index();
+                    self.page = match self.audio_index {
+                        0 => Page::AudioOutput,
+                        1 => Page::AudioRate,
+                        _ => Page::AudioLatency,
+                    };
+                }
+                _ => {}
+            },
+            Page::AudioOutput | Page::AudioRate | Page::AudioLatency => match input {
+                Input::Button2 | Input::EncoderLeft => {
+                    let len = self.audio_value_count();
+                    if len > 0 {
+                        self.audio_value_index = (self.audio_value_index + len - 1) % len;
+                    }
+                }
+                Input::Button3 | Input::EncoderRight => {
+                    let len = self.audio_value_count();
+                    if len > 0 {
+                        self.audio_value_index = (self.audio_value_index + 1) % len;
+                    }
+                }
+                Input::Button4 => self.page = Page::Audio,
+                Input::Button1 | Input::EncoderPress => {
+                    if let Some(profile) = self.selected_audio_profile() {
+                        self.pending_command = Some(MenuCommand::ApplyAudioOutput { profile });
+                    }
+                }
+                _ => {}
+            },
+            Page::AudioResult => {
+                if matches!(input, Input::Button1 | Input::Button4 | Input::EncoderPress) {
+                    self.page = Page::Audio;
+                }
+            }
+            Page::AudioBusy => {}
+            _ => {}
+        }
+    }
+
+    fn compatible_audio_devices(&self) -> Vec<&AudioDeviceDescriptor> {
+        self.audio_state
+            .as_ref()
+            .into_iter()
+            .flat_map(|state| &state.devices)
+            .filter(|device| {
+                device.playback.as_ref().is_some_and(|playback| {
+                    playback.sample_formats.contains(&AudioSampleFormat::S32Le)
+                        && playback.channels.contains(2)
+                })
+            })
+            .collect()
+    }
+
+    fn audio_rates(&self) -> Vec<u32> {
+        self.audio_state
+            .as_ref()
+            .and_then(|state| state.active_device.playback.as_ref())
+            .map(|playback| playback.sample_rates_hz.clone())
+            .unwrap_or_default()
+    }
+
+    fn audio_latencies(&self) -> Vec<(&'static str, u32, u32)> {
+        let Some(playback) = self
+            .audio_state
+            .as_ref()
+            .and_then(|state| state.active_device.playback.as_ref())
+        else {
+            return Vec::new();
+        };
+        AUDIO_LATENCIES
+            .into_iter()
+            .filter(|(_, period, buffer)| {
+                playback.period_frames.contains(*period) && playback.buffer_frames.contains(*buffer)
+            })
+            .collect()
+    }
+
+    fn current_audio_value_index(&self) -> usize {
+        let Some(state) = &self.audio_state else {
+            return 0;
+        };
+        match self.audio_index {
+            0 => self
+                .compatible_audio_devices()
+                .iter()
+                .position(|device| device.id == state.active_device.id)
+                .unwrap_or(0),
+            1 => self
+                .audio_rates()
+                .iter()
+                .position(|rate| *rate == state.active_profile.sample_rate_hz)
+                .unwrap_or(0),
+            _ => self
+                .audio_latencies()
+                .iter()
+                .position(|(_, period, buffer)| {
+                    *period == state.active_profile.period_frames
+                        && *buffer == state.active_profile.buffer_frames
+                })
+                .unwrap_or(0),
+        }
+    }
+
+    fn audio_value_count(&self) -> usize {
+        match self.page {
+            Page::AudioOutput => self.compatible_audio_devices().len(),
+            Page::AudioRate => self.audio_rates().len(),
+            Page::AudioLatency => self.audio_latencies().len(),
+            _ => 0,
+        }
+    }
+
+    fn selected_audio_profile(&self) -> Option<AudioOutputProfile> {
+        let state = self.audio_state.as_ref()?;
+        let mut profile = state.active_profile.clone();
+        match self.page {
+            Page::AudioOutput => {
+                let devices = self.compatible_audio_devices();
+                let device = devices.get(self.audio_value_index)?;
+                let playback = device.playback.as_ref()?;
+                profile.device = AudioDeviceSelector::Id {
+                    id: device.id.clone(),
+                };
+                profile.fallback = AudioFallbackPolicy::None;
+                if !playback.sample_rates_hz.contains(&profile.sample_rate_hz) {
+                    profile.sample_rate_hz = playback
+                        .sample_rates_hz
+                        .iter()
+                        .copied()
+                        .find(|rate| *rate == 48_000)
+                        .or_else(|| playback.sample_rates_hz.first().copied())?;
+                }
+                if !playback.period_frames.contains(profile.period_frames)
+                    || !playback.buffer_frames.contains(profile.buffer_frames)
+                {
+                    let (_, period, buffer) =
+                        AUDIO_LATENCIES.into_iter().find(|(_, period, buffer)| {
+                            playback.period_frames.contains(*period)
+                                && playback.buffer_frames.contains(*buffer)
+                        })?;
+                    profile.period_frames = period;
+                    profile.buffer_frames = buffer;
+                }
+            }
+            Page::AudioRate => {
+                profile.sample_rate_hz = *self.audio_rates().get(self.audio_value_index)?;
+            }
+            Page::AudioLatency => {
+                let (_, period, buffer) = *self.audio_latencies().get(self.audio_value_index)?;
+                profile.period_frames = period;
+                profile.buffer_frames = buffer;
+            }
+            _ => return None,
+        }
+        Some(profile)
     }
 
     fn apply_system_web_input(&mut self, input: Input) {
@@ -1693,6 +2057,7 @@ impl Menu {
                 (&mut self.system_index, len)
             }
             Page::SystemWeb => (&mut self.system_web_index, SYSTEM_WEB_ITEMS.len()),
+            Page::Audio => (&mut self.audio_index, AUDIO_ITEMS.len()),
             Page::RfDlsLibrary => (&mut self.rf_dls_library_index, RF_DLS_LIBRARIES.len()),
             Page::RfDlsPlay if self.filtered_sounds().is_empty() => return,
             Page::RfDlsPlay => {
@@ -1740,6 +2105,11 @@ impl Menu {
             | Page::SystemWifiPassword
             | Page::SystemWifiBusy
             | Page::SystemWifiResult => return,
+            Page::AudioOutput
+            | Page::AudioRate
+            | Page::AudioLatency
+            | Page::AudioBusy
+            | Page::AudioResult => return,
         };
         *selection = ((*selection as isize + delta).rem_euclid(len as isize)) as usize;
     }
@@ -3304,7 +3674,73 @@ pub fn demo_frames() -> Vec<Screen> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackforge_audio_api::{
+        AUDIO_DEVICE_SCHEMA_VERSION, AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioBackend,
+        AudioDeviceId, AudioStreamCapabilities, AudioTransport, AudioValueRange,
+    };
     use rackforge_session_api::InstanceId;
+
+    fn test_audio_state() -> AudioOutputState {
+        let scarlett = AudioDeviceDescriptor {
+            schema_version: AUDIO_DEVICE_SCHEMA_VERSION,
+            id: AudioDeviceId::new("alsa.usb-scarlett.pcm-0").unwrap(),
+            name: "Scarlett Solo USB".into(),
+            backend: AudioBackend::Alsa,
+            backend_address: "hw:3,0".into(),
+            transport: AudioTransport::Usb,
+            usb: Some(rackforge_audio_api::UsbAudioIdentity {
+                vendor_id: 0x1235,
+                product_id: 0x8211,
+                serial: Some("TEST".into()),
+            }),
+            playback: Some(AudioStreamCapabilities {
+                sample_formats: vec![AudioSampleFormat::S32Le],
+                sample_rates_hz: vec![44_100, 48_000, 96_000],
+                channels: AudioValueRange::new(2, 2).unwrap(),
+                period_frames: AudioValueRange::new(8, 4096).unwrap(),
+                buffer_frames: AudioValueRange::new(16, 8192).unwrap(),
+            }),
+            capture: None,
+        };
+        AudioOutputState {
+            schema_version: AUDIO_OUTPUT_STATE_SCHEMA_VERSION,
+            active_device: scarlett.clone(),
+            active_profile: AudioOutputProfile {
+                device: AudioDeviceSelector::Id {
+                    id: scarlett.id.clone(),
+                },
+                fallback: AudioFallbackPolicy::None,
+                sample_format: AudioSampleFormat::S32Le,
+                sample_rate_hz: 48_000,
+                channels: 2,
+                period_frames: 128,
+                buffer_frames: 384,
+            },
+            devices: vec![scarlett],
+        }
+    }
+
+    #[test]
+    fn audio_menu_uses_runtime_state_and_emits_typed_changes() {
+        let mut menu = Menu::default();
+        menu.sync_audio_state(test_audio_state());
+        menu.apply(Action::Previous);
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "AUDIO");
+        assert!(menu.render().line_2.contains("Scarlett"));
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1, "OUTPUT");
+        menu.apply(Action::Select);
+        assert!(menu.render().line_1.contains("Scarlett"));
+        menu.apply(Action::Select);
+        let Some(MenuCommand::ApplyAudioOutput { profile }) = menu.take_command() else {
+            panic!("expected typed audio output command");
+        };
+        assert_eq!(profile.sample_rate_hz, 48_000);
+        assert_eq!(profile.period_frames, 128);
+    }
 
     fn test_number(id: &str, label: &str, value: Option<i64>, decimals: u8) -> ProgramEditorField {
         ProgramEditorField {

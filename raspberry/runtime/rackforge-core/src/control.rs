@@ -2,6 +2,7 @@ use crate::PluginStorage;
 use crate::session::SharedSessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
 use anyhow::{Context, Result, bail};
+use rackforge_audio_api::{AudioOutputDocument, AudioOutputProfile, AudioOutputState};
 use rackforge_control_api::{
     ControlErrorCode, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES, decode_request,
     encode_line,
@@ -27,10 +28,15 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 const AUDIO_COMMAND_TIMEOUT: Duration = Duration::from_secs(1);
+const AUDIO_RECONFIGURE_TIMEOUT: Duration = Duration::from_secs(8);
 const AUDITION_LEASE_TIMEOUT: Duration = Duration::from_secs(15);
 const AUDITION_WATCHDOG_PERIOD: Duration = Duration::from_millis(250);
 
 pub enum AudioControlCommand {
+    ApplyAudioOutput {
+        profile: AudioOutputProfile,
+        reply: SyncSender<Result<AudioOutputState, String>>,
+    },
     RegisterHostControls {
         controller_id: String,
         bindings: Vec<HostControlBinding>,
@@ -110,6 +116,8 @@ impl ControlFailure {
 struct ControlContext {
     store: SharedSessionStore,
     audio_sender: SyncSender<AudioControlCommand>,
+    audio_state: Arc<Mutex<AudioOutputState>>,
+    audio_state_path: PathBuf,
     storage: Option<PluginStorage>,
     checkpoint: Option<SessionCheckpointStore>,
     dispatch_lock: Mutex<()>,
@@ -126,6 +134,8 @@ pub fn start(
     socket_path: &Path,
     store: SharedSessionStore,
     audio_sender: SyncSender<AudioControlCommand>,
+    audio_state: Arc<Mutex<AudioOutputState>>,
+    audio_state_path: PathBuf,
     storage: Option<PluginStorage>,
     checkpoint: Option<SessionCheckpointStore>,
 ) -> Result<ControlServer> {
@@ -164,6 +174,8 @@ pub fn start(
     let context = Arc::new(ControlContext {
         store,
         audio_sender,
+        audio_state,
+        audio_state_path,
         storage,
         checkpoint,
         dispatch_lock: Mutex::new(()),
@@ -243,6 +255,13 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             },
             Err(_) => internal_error("session store lock is poisoned", None),
         },
+        ControlRequest::AudioSnapshot => match context.audio_state.lock() {
+            Ok(snapshot) => ControlResponse::AudioSnapshot {
+                snapshot: Box::new(snapshot.clone()),
+            },
+            Err(_) => internal_error("audio state lock is poisoned", current_revision(context)),
+        },
+        ControlRequest::ApplyAudioOutput { profile } => apply_audio_output(context, profile),
         ControlRequest::Events { after_revision } => match context.store.lock() {
             Ok(store) => match store.events_after(after_revision) {
                 Ok(events) => ControlResponse::Events {
@@ -260,6 +279,99 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
         ControlRequest::Dispatch { envelope } => dispatch_command(context, envelope),
     };
     write_response(&mut stream, &response)
+}
+
+fn apply_audio_output(
+    context: &Arc<ControlContext>,
+    profile: AudioOutputProfile,
+) -> ControlResponse {
+    if let Err(error) = profile.validate() {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            error.to_string(),
+            current_revision(context),
+        );
+    }
+    let previous = match context.audio_state.lock() {
+        Ok(state) => state.active_profile.clone(),
+        Err(_) => return internal_error("audio state lock is poisoned", current_revision(context)),
+    };
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    if let Err(failure) = send_audio(
+        context,
+        AudioControlCommand::ApplyAudioOutput {
+            profile: profile.clone(),
+            reply: reply_sender,
+        },
+    ) {
+        return failure.into_response();
+    }
+    let snapshot = match receive_audio_with_timeout(
+        reply_receiver,
+        "apply audio output",
+        AUDIO_RECONFIGURE_TIMEOUT,
+    ) {
+        Ok(snapshot) => snapshot,
+        Err(failure) => return failure.into_response(),
+    };
+    if let Err(error) = persist_audio_output(&context.audio_state_path, &profile) {
+        let (rollback_sender, rollback_receiver) = sync_channel(1);
+        let rollback = send_audio(
+            context,
+            AudioControlCommand::ApplyAudioOutput {
+                profile: previous,
+                reply: rollback_sender,
+            },
+        )
+        .and_then(|()| {
+            receive_audio_with_timeout(
+                rollback_receiver,
+                "roll back audio output after persistence failure",
+                AUDIO_RECONFIGURE_TIMEOUT,
+            )
+            .map(|_| ())
+        });
+        let suffix = match rollback {
+            Ok(()) => "the previous output was restored".to_owned(),
+            Err(failure) => format!("rollback also failed: {}", failure.message),
+        };
+        return error_response(
+            ControlErrorCode::Internal,
+            format!("could not persist audio output: {error:#}; {suffix}"),
+            current_revision(context),
+        );
+    }
+    ControlResponse::AudioApplied {
+        snapshot: Box::new(snapshot),
+    }
+}
+
+fn persist_audio_output(path: &Path, profile: &AudioOutputProfile) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("audio output state path has no parent")?;
+    fs::create_dir_all(parent)
+        .with_context(|| format!("creating audio state directory {}", parent.display()))?;
+    let document = AudioOutputDocument::new(profile.clone());
+    document
+        .validate()
+        .context("validating audio output state")?;
+    let bytes = toml::to_string_pretty(&document)?.into_bytes();
+    let temporary = path.with_extension(format!("toml.tmp.{}", std::process::id()));
+    {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .with_context(|| format!("creating {}", temporary.display()))?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+    }
+    if let Err(error) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error).with_context(|| format!("replacing {}", path.display()));
+    }
+    Ok(())
 }
 
 fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) -> ControlResponse {
@@ -1240,7 +1352,15 @@ fn receive_audio<T>(
     receiver: Receiver<Result<T, String>>,
     action: &str,
 ) -> Result<T, ControlFailure> {
-    match receiver.recv_timeout(AUDIO_COMMAND_TIMEOUT) {
+    receive_audio_with_timeout(receiver, action, AUDIO_COMMAND_TIMEOUT)
+}
+
+fn receive_audio_with_timeout<T>(
+    receiver: Receiver<Result<T, String>>,
+    action: &str,
+    timeout: Duration,
+) -> Result<T, ControlFailure> {
+    match receiver.recv_timeout(timeout) {
         Ok(Ok(value)) => Ok(value),
         Ok(Err(message)) => Err(control_failure(ControlErrorCode::Rejected, message, None)),
         Err(_) => Err(control_failure(
@@ -1520,6 +1640,11 @@ fn write_response(stream: &mut UnixStream, response: &ControlResponse) -> Result
 mod tests {
     use super::*;
     use crate::session::SessionStore;
+    use rackforge_audio_api::{
+        AUDIO_DEVICE_SCHEMA_VERSION, AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioBackend,
+        AudioDeviceDescriptor, AudioDeviceId, AudioDeviceSelector, AudioFallbackPolicy,
+        AudioSampleFormat, AudioStreamCapabilities, AudioTransport, AudioValueRange,
+    };
     use rackforge_session_api::{
         ClientId, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, EventEnvelope,
         PluginInstanceState, SessionId, SessionState, SoundSummary,
@@ -1553,10 +1678,45 @@ mod tests {
             program_draft: None,
         };
         let (sender, receiver) = sync_channel(4);
+        let device = AudioDeviceDescriptor {
+            schema_version: AUDIO_DEVICE_SCHEMA_VERSION,
+            id: AudioDeviceId::new("alsa.card-test.pcm-0").unwrap(),
+            name: "Test Output".into(),
+            backend: AudioBackend::Alsa,
+            backend_address: "hw:0,0".into(),
+            transport: AudioTransport::BuiltIn,
+            usb: None,
+            playback: Some(AudioStreamCapabilities {
+                sample_formats: vec![AudioSampleFormat::S32Le],
+                sample_rates_hz: vec![48_000],
+                channels: AudioValueRange::new(2, 2).unwrap(),
+                period_frames: AudioValueRange::new(32, 1024).unwrap(),
+                buffer_frames: AudioValueRange::new(64, 4096).unwrap(),
+            }),
+            capture: None,
+        };
+        let profile = AudioOutputProfile {
+            device: AudioDeviceSelector::Id {
+                id: device.id.clone(),
+            },
+            fallback: AudioFallbackPolicy::None,
+            sample_format: AudioSampleFormat::S32Le,
+            sample_rate_hz: 48_000,
+            channels: 2,
+            period_frames: 128,
+            buffer_frames: 384,
+        };
         (
             Arc::new(ControlContext {
                 store: SessionStore::shared(state).unwrap(),
                 audio_sender: sender,
+                audio_state: Arc::new(Mutex::new(AudioOutputState {
+                    schema_version: AUDIO_OUTPUT_STATE_SCHEMA_VERSION,
+                    active_device: device.clone(),
+                    active_profile: profile,
+                    devices: vec![device],
+                })),
+                audio_state_path: std::env::temp_dir().join("rackforge-control-audio.toml"),
                 storage: None,
                 checkpoint: None,
                 dispatch_lock: Mutex::new(()),

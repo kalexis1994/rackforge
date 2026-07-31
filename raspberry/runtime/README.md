@@ -14,8 +14,14 @@ estabilizar la API sin interrumpir el instrumento que ya funciona.
 | `rackforge-core/` | Descubrimiento, validación, carga dinámica e instancias. |
 | `rackforge-ui/` | Componentes, foco, layout y estilos independientes del hardware. |
 | `plugins/gain/` | Plugin de referencia que prueba audio, parámetros y estado. |
-| `plugins/rf-dls/` | Instrumento DLS nativo que usa bancos externos aportados por el usuario. |
 | `plugins/roland-scva/` | Primer instrumento real, alimentado por un banco privado externo. |
+
+RF-DLS vive en su repositorio independiente
+`rackforge-plugin-rf-dls`. El workspace de Core contiene únicamente APIs,
+hosts y plugins de referencia; los instrumentos distribuibles se construyen y
+versionan fuera del host.
+El flujo de desarrollo y empaquetado está documentado en
+[`../../docs/PLUGIN_DEVELOPMENT.md`](../../docs/PLUGIN_DEVELOPMENT.md).
 
 ## Principios del contrato
 
@@ -364,11 +370,11 @@ desconocidos— y excluye puertos auxiliares/DAW conocidos. Esto no concede
 permiso de display: solamente un driver registrado y una negociación exacta de
 layout pueden abrir una salida SysEx.
 
-`scripts/install.sh` instala binario y plugins mediante reemplazos atómicos.
-`scripts/select-live-engine.sh rf-dls-plugin` activa RF-DLS mediante Plugin API;
-`rf-dls` conserva temporalmente el daemon provisional como rollback. El selector
-verifica cada PID antes de detenerlo y restaura el motor anterior si el nuevo no
-alcanza `READY_TO_PLAY`.
+`scripts/install.sh` instala el runtime y sus plugins incluidos mediante
+reemplazos atómicos. Los plugins externos se empaquetan e instalan desde sus
+propios repositorios; `scripts/select-live-engine.sh rf-dls-plugin` puede activar
+un paquete RF-DLS ya instalado mediante Plugin API. El antiguo daemon DLS nativo
+ya no forma parte de RackForge.
 
 ## Perfiles de plataforma y arranque
 

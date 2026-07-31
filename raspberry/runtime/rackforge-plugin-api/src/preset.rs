@@ -75,6 +75,9 @@ pub struct PresetDescriptor {
     pub order: i32,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Whether the plugin can reopen this preset through its program editor.
+    #[serde(default)]
+    pub editable: bool,
 }
 
 fn validate_identifier(value: &str) -> Result<(), PresetError> {
@@ -128,8 +131,29 @@ mod tests {
                 category: Some("Piano".into()),
                 order: 0,
                 tags: vec!["acoustic".into()],
+                editable: false,
             }],
         };
         assert_eq!(catalog.validate(), Ok(()));
+    }
+
+    #[test]
+    fn legacy_catalogs_default_presets_to_read_only() {
+        let catalog: PresetCatalog = serde_json::from_str(
+            r#"{
+                "schema_version": 1,
+                "banks": [{"id":"factory","name":"Factory","order":0}],
+                "presets": [{
+                    "id":"factory.piano-1",
+                    "name":"Piano 1",
+                    "bank":"factory",
+                    "order":0,
+                    "tags":[]
+                }]
+            }"#,
+        )
+        .expect("legacy catalog");
+
+        assert!(!catalog.presets[0].editable);
     }
 }

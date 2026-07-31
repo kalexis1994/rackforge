@@ -51,8 +51,9 @@ activos sin conocer marcas o modelos.
 `audio/` contiene el perfil ALSA inicial de la Scarlett Solo y un diagnóstico
 de hardware que no reproduce sonido ni modifica el mezclador.
 
-`engines/rf-dls/` contiene RF-DLS, el motor GM activo. Los bancos `.dls`
-aportados por el usuario viven en `data/plugins/rf-dls`, fuera de Git.
+RF-DLS y su motor DLS viven en el repositorio independiente
+`rackforge-plugin-rf-dls`. Los bancos `.dls` aportados por el usuario continúan
+en `data/plugins/rf-dls`, fuera de Git y de cualquier paquete distribuible.
 
 `runtime/` contiene `rackforge-core`, la API binaria versionada para plugins y los
 esquemas declarativos con los que cada plugin aporta sus propias páginas de

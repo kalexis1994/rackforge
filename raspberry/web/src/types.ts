@@ -5,6 +5,7 @@ export interface SoundSummary {
   name: string;
   bank?: string;
   detail?: string;
+  editable: boolean;
 }
 
 export interface PluginInstance {

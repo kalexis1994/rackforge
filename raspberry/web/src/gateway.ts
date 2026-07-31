@@ -11,7 +11,7 @@ import type {
 } from "./types";
 
 const CLIENT_ID = "web.main";
-const SESSION_SCHEMA_VERSION = 6;
+const SESSION_SCHEMA_VERSION = 9;
 const RECONNECT_DELAY_MS = 1200;
 
 let socket: WebSocket | null = null;

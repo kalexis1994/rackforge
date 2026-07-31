@@ -600,6 +600,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
                         .description
                         .clone()
                         .or_else(|| preset.category.clone()),
+                    editable: preset.editable,
                 })
                 .collect(),
             selected_sound_id,

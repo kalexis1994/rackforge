@@ -12,7 +12,7 @@ pub use rackforge_surface_api::{
     SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const SESSION_SCHEMA_VERSION: u32 = 8;
+pub const SESSION_SCHEMA_VERSION: u32 = 9;
 
 fn default_surface_mode() -> SurfaceMode {
     SurfaceMode::Live
@@ -198,6 +198,8 @@ pub struct SoundSummary {
     pub bank: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    #[serde(default)]
+    pub editable: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -718,6 +720,7 @@ mod tests {
                     name: "Piano 1".into(),
                     bank: Some("dls".into()),
                     detail: None,
+                    editable: false,
                 }],
                 selected_sound_id: None,
             }],
@@ -991,6 +994,7 @@ mod tests {
                         name: "CUSTOM 001".into(),
                         bank: Some("custom".into()),
                         detail: Some("CUSTOM 001".into()),
+                        editable: true,
                     },
                 },
             ))

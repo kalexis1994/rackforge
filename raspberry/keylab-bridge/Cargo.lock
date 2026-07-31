@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-controller-arturia-keylab-essential-mk3"
-version = "0.2.18"
+version = "0.2.19"
 dependencies = [
  "midir",
  "rackforge-control-api",

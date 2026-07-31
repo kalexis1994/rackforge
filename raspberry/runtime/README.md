@@ -341,12 +341,13 @@ El host permanece genérico: selección de muestras, voces, sustain y
 parámetros pertenecen al plugin. El host solo administra carga, MIDI, bloques
 de audio y salida ALSA.
 
-Core retiene por canal el último estado de los controladores MIDI continuos
-(`CC 0..119`), pitch bend y channel pressure. Después de seleccionar un sonido
-o transferir/restaurar el foco de audition, reinyecta ese estado al instrumento
-al comienzo del siguiente bloque. Así una rueda de modulación o pedal conserva
-su posición lógica aunque el plugin haya sido reseteado. `CC 121` sigue siendo
-la única orden que borra explícitamente el estado retenido de ese canal.
+Core retiene por fuente y canal el último estado de los controladores MIDI
+continuos (`CC 0..119`), pitch bend y channel pressure. Después de seleccionar
+un sonido o transferir/restaurar el foco de audition, reinyecta ese estado al
+instrumento al comienzo del siguiente bloque. Así una rueda de modulación o
+pedal conserva su posición lógica aunque el plugin haya sido reseteado, sin
+mezclar dos controladores que usen el mismo canal. `CC 121` sigue siendo la
+única orden que borra explícitamente el estado retenido de ese canal y fuente.
 
 Las entradas musicales y las superficies UI son conceptos independientes.
 Core conecta los endpoints MIDI normales —incluidos controladores todavía
@@ -359,6 +360,43 @@ layout pueden abrir una salida SysEx.
 `rf-dls` conserva temporalmente el daemon provisional como rollback. El selector
 verifica cada PID antes de detenerlo y restaura el motor anterior si el nuevo no
 alcanza `READY_TO_PLAY`.
+
+## Perfiles de plataforma y arranque
+
+`rackforge-platform-host detect` separa la plataforma binaria, el perfil de
+hardware y las capacidades disponibles. En la Raspberry de desarrollo resuelve
+`linux-aarch64`, `org.rackforge.hardware.raspberry-pi-4` y los proveedores de
+Wi-Fi, telemetría y arranque de audio.
+
+`scripts/install-appliance.sh` instala el host privilegiado con socket Unix
+acotado y `rackforge-audio.service`. Core se inicia mediante:
+
+```bash
+rackforge-core resume /home/kalex/rackforge/config/audio.toml
+```
+
+El documento de inicio es versionado y conserva el paquete, recursos y raíz de
+datos. El servicio no depende de Internet ni de `network-online.target`; si el
+teclado o la interfaz de audio todavía no están disponibles, systemd reintenta
+sin bloquear el controlador ni la web.
+
+Sobre una instalación limpia de Raspberry Pi OS Lite, la transición opcional a
+appliance se ejecuta con `scripts/install-appliance.sh --optimize`, o por
+separado con `scripts/optimize-appliance.sh audit|apply|rollback`. El perfil no
+desactiva cloud-init hasta comprobar que el primer aprovisionamiento, SSH y al
+menos una conexión persistente terminaron correctamente. Todos los cambios del
+OS tienen rollback local.
+
+La superficie LITTLE muestra CONFIG > SYSTEM > WI-FI sólo cuando el perfil
+publica `system.network.wifi.manage.v1`. Separa redes conocidas y descubiertas,
+permite conectar, desconectar u olvidar perfiles, y admite credenciales nuevas
+mediante un editor secreto. La clave se entrega al host de plataforma por el
+socket local y nunca aparece en argumentos ni logs.
+
+`rackforge-ui::Spinner` es un componente reutilizable e independiente del
+transporte. Su animación ASCII `| / - \\` es dirigida por el host mientras una
+operación asíncrona sigue activa; Wi-Fi es su primer consumidor, pero el mismo
+componente sirve para carga de plugins, bancos o espera de hardware.
 
 ## Foco temporal de audition
 

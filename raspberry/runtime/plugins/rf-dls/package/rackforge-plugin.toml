@@ -14,6 +14,14 @@ capabilities = [
 ]
 ui_layouts = ["little@1"]
 
+[midi]
+channel_model = "single_part"
+program_change = "ignore"
+
+[[midi.input_buses]]
+id = "main"
+name = "Main"
+
 [web_ui]
 api_version = 1
 

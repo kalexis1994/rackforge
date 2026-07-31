@@ -1,14 +1,18 @@
 mod button;
 mod carousel;
 mod confirmation_dialog;
+mod secret_editor;
 mod select;
+mod spinner;
 mod text_editor;
 mod value_carousel;
 
 pub use button::Button;
 pub use carousel::{CarouselItem, SimpleCarousel};
 pub use confirmation_dialog::ConfirmationDialog;
+pub use secret_editor::{SecretEditor, SecretValue};
 pub use select::Select;
+pub use spinner::Spinner;
 pub use text_editor::TextEditor;
 pub use value_carousel::{EditableValue, ValueCarousel, ValueItem};
 

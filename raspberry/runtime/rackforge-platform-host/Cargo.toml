@@ -1,0 +1,12 @@
+[package]
+name = "rackforge-platform-host"
+description = "RackForge hardware detection and allowlisted platform capability host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+rackforge-platform-api = { path = "../rackforge-platform-api" }
+serde.workspace = true
+serde_json.workspace = true

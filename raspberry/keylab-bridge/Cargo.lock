@@ -475,12 +475,13 @@ dependencies = [
 
 [[package]]
 name = "rackforge-controller-arturia-keylab-essential-mk3"
-version = "0.2.4"
+version = "0.2.8"
 dependencies = [
  "midir",
  "rackforge-control-api",
  "rackforge-controller-api",
  "rackforge-controller-package",
+ "rackforge-platform-api",
  "rackforge-session-api",
  "rackforge-surface-runtime",
  "rackforge-ui",
@@ -498,6 +499,15 @@ dependencies = [
  "sha2",
  "thiserror 2.0.19",
  "toml",
+]
+
+[[package]]
+name = "rackforge-platform-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.19",
+ "zeroize",
 ]
 
 [[package]]
@@ -542,6 +552,9 @@ dependencies = [
 [[package]]
 name = "rackforge-ui"
 version = "0.1.0"
+dependencies = [
+ "zeroize",
+]
 
 [[package]]
 name = "redox_syscall"
@@ -1144,6 +1157,12 @@ name = "winnow"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
+
+[[package]]
+name = "zeroize"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 
 [[package]]
 name = "zmij"

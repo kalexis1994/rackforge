@@ -6,3 +6,4 @@ license.workspace = true
 description = "Transport-agnostic component framework for RackForge hardware interfaces"
 
 [dependencies]
+zeroize.workspace = true

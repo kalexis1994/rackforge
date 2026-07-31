@@ -7,6 +7,9 @@ members = [
     "rackforge-controller-package",
     "rackforge-controller-host",
     "rackforge-dsp",
+    "rackforge-midi-api",
+    "rackforge-platform-api",
+    "rackforge-platform-host",
     "rackforge-plugin-api",
     "rackforge-program-api",
     "rackforge-session-api",
@@ -36,3 +39,4 @@ sha2 = "0.10"
 thiserror = "2.0"
 toml = "0.9"
 tokio = { version = "1.47", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+zeroize = "1.8"

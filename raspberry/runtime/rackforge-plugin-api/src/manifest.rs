@@ -3,6 +3,7 @@ use crate::{
     abi::{is_compatible, pack_version},
     parameter::SchemaError,
 };
+use rackforge_midi_api::{DEFAULT_INPUT_BUS_ID, MidiInputBusId, PluginChannelModel};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -74,6 +75,30 @@ pub struct WebUi {
     pub surfaces: Vec<WebSurface>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MidiProgramChangePolicy {
+    #[default]
+    Ignore,
+    PluginDefined,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MidiInputBus {
+    pub id: MidiInputBusId,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginMidiContract {
+    pub channel_model: PluginChannelModel,
+    pub input_buses: Vec<MidiInputBus>,
+    #[serde(default)]
+    pub program_change: MidiProgramChangePolicy,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginManifest {
@@ -93,6 +118,8 @@ pub struct PluginManifest {
     pub ui_layouts: Vec<String>,
     #[serde(default)]
     pub web_ui: Option<WebUi>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi: Option<PluginMidiContract>,
     pub binaries: BTreeMap<String, String>,
 }
 
@@ -176,6 +203,26 @@ impl PluginManifest {
                 {
                     return Err(ManifestError::UnsafeWebEntry(surface.entry.clone()));
                 }
+            }
+        }
+        if let Some(midi) = &self.midi {
+            if !self.capabilities.contains(&Capability::MidiInput) {
+                return Err(ManifestError::MidiContractWithoutInputCapability);
+            }
+            if midi.input_buses.is_empty() {
+                return Err(ManifestError::NoMidiInputBuses);
+            }
+            let mut bus_ids = BTreeSet::new();
+            for bus in &midi.input_buses {
+                if bus.name.trim().is_empty() {
+                    return Err(ManifestError::EmptyMidiInputBusName(bus.id.to_string()));
+                }
+                if !bus_ids.insert(bus.id.as_str()) {
+                    return Err(ManifestError::DuplicateMidiInputBus(bus.id.to_string()));
+                }
+            }
+            if self.kind == PluginKind::Instrument && !bus_ids.contains(DEFAULT_INPUT_BUS_ID) {
+                return Err(ManifestError::InstrumentMissingMainMidiBus);
             }
         }
         Ok(())
@@ -278,6 +325,16 @@ pub enum ManifestError {
     DuplicateWebSurface(WebSurfaceKind),
     #[error("web entry must be a safe relative HTML path: {0:?}")]
     UnsafeWebEntry(String),
+    #[error("MIDI contract requires the midi_input capability")]
+    MidiContractWithoutInputCapability,
+    #[error("MIDI contract declares no input buses")]
+    NoMidiInputBuses,
+    #[error("MIDI input bus {0} has an empty display name")]
+    EmptyMidiInputBusName(String),
+    #[error("MIDI input bus {0} appears more than once")]
+    DuplicateMidiInputBus(String),
+    #[error("instrument MIDI contract must declare the main input bus")]
+    InstrumentMissingMainMidiBus,
     #[error("plugin has no binary for platform {0}")]
     MissingPlatform(String),
     #[error("runtime descriptor does not match manifest field {0}")]
@@ -302,6 +359,7 @@ mod tests {
             resources: Vec::new(),
             ui_layouts: Vec::new(),
             web_ui: None,
+            midi: None,
             binaries: BTreeMap::from([("linux-aarch64".into(), "lib/librackforge_gain.so".into())]),
         }
     }
@@ -375,5 +433,54 @@ mod tests {
             escaping.validate(),
             Err(ManifestError::UnsafeWebEntry(_))
         ));
+    }
+
+    #[test]
+    fn validates_an_instrument_midi_contract() {
+        let mut candidate = manifest();
+        candidate.kind = PluginKind::Instrument;
+        candidate.capabilities.push(Capability::MidiInput);
+        candidate.midi = Some(PluginMidiContract {
+            channel_model: PluginChannelModel::SinglePart,
+            input_buses: vec![MidiInputBus {
+                id: MidiInputBusId::new(DEFAULT_INPUT_BUS_ID).unwrap(),
+                name: "Main".into(),
+            }],
+            program_change: MidiProgramChangePolicy::Ignore,
+        });
+        assert_eq!(candidate.validate(), Ok(()));
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_incomplete_midi_contracts() {
+        let mut no_capability = manifest();
+        no_capability.midi = Some(PluginMidiContract {
+            channel_model: PluginChannelModel::SinglePart,
+            input_buses: vec![MidiInputBus {
+                id: MidiInputBusId::new(DEFAULT_INPUT_BUS_ID).unwrap(),
+                name: "Main".into(),
+            }],
+            program_change: MidiProgramChangePolicy::Ignore,
+        });
+        assert_eq!(
+            no_capability.validate(),
+            Err(ManifestError::MidiContractWithoutInputCapability)
+        );
+
+        let mut missing_main = manifest();
+        missing_main.kind = PluginKind::Instrument;
+        missing_main.capabilities.push(Capability::MidiInput);
+        missing_main.midi = Some(PluginMidiContract {
+            channel_model: PluginChannelModel::MultiPart,
+            input_buses: vec![MidiInputBus {
+                id: MidiInputBusId::new("parts").unwrap(),
+                name: "Parts".into(),
+            }],
+            program_change: MidiProgramChangePolicy::PluginDefined,
+        });
+        assert_eq!(
+            missing_main.validate(),
+            Err(ManifestError::InstrumentMissingMainMidiBus)
+        );
     }
 }

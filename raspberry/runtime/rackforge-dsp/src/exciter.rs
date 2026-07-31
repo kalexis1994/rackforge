@@ -280,9 +280,7 @@ impl Channel {
             + harmonic_dc_block_coefficient * self.harmonic_dc_block_output;
         self.previous_harmonics = raw_harmonics;
         self.harmonic_dc_block_output = denormal_guard(harmonics);
-        denormal_guard(
-            emphasized * PRESENCE_GAIN + self.harmonic_dc_block_output * HARMONIC_GAIN,
-        )
+        denormal_guard(emphasized * PRESENCE_GAIN + self.harmonic_dc_block_output * HARMONIC_GAIN)
     }
 }
 
@@ -466,9 +464,8 @@ mod tests {
         let mut output_peak = 0.0_f32;
         for index in 0..96_000 {
             let phase = TAU * index as f32 / 48_000.0;
-            let input = phase.sin() * 0.32
-                + (phase * 7.0).sin() * 0.18
-                + (phase * 31.0).sin() * 0.08;
+            let input =
+                phase.sin() * 0.32 + (phase * 7.0).sin() * 0.18 + (phase * 31.0).sin() * 0.08;
             let output = exciter.process(StereoFrame::splat(input)).left;
             assert!(output.is_finite());
             dry_energy += f64::from(input * input);

@@ -1,0 +1,26 @@
+[Unit]
+Description=RackForge supervised low-latency audio engine
+After=local-fs.target sound.target
+Wants=sound.target
+StartLimitIntervalSec=0
+ConditionPathExists=/home/kalex/rackforge/config/audio.toml
+
+[Service]
+Type=simple
+User=kalex
+Group=kalex
+SupplementaryGroups=audio
+Environment=RACKFORGE_ROOT=/home/kalex/rackforge
+ExecStart=/home/kalex/rackforge/bin/rackforge-core resume /home/kalex/rackforge/config/audio.toml
+Restart=always
+RestartSec=1
+TimeoutStopSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/kalex/rackforge/data /home/kalex/rackforge/state /home/kalex/rackforge/logs
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

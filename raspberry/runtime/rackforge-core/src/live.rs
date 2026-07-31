@@ -7,6 +7,12 @@ use alsa::{Direction, ValueOr};
 use anyhow::{Context, Result, bail};
 use midir::{Ignore, MidiInput, MidiInputConnection};
 use rackforge_control_api::CONTROL_SOCKET_NAME;
+use rackforge_midi_api::{
+    CompiledMidiRoute, DEFAULT_INPUT_BUS_ID, IngressMidiEvent, MIDI_ROUTING_SCHEMA_VERSION,
+    MidiInputBusId, MidiPacket, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget,
+    MidiRouteTransform, MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry,
+    MidiTargetId, PluginChannelModel,
+};
 use rackforge_plugin_api::PluginKind;
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_session_api::{
@@ -153,6 +159,56 @@ struct MidiControllerState {
     channel_pressure: [Option<u8>; MIDI_CHANNELS],
 }
 
+struct MidiControllerStates {
+    sources: Vec<MidiControllerState>,
+}
+
+impl MidiControllerStates {
+    fn new(source_count: usize) -> Self {
+        Self {
+            sources: (0..source_count)
+                .map(|_| MidiControllerState::default())
+                .collect(),
+        }
+    }
+
+    fn observe(&mut self, source: MidiSourceKey, event: MidiEventV1) {
+        if let Some(state) = self.sources.get_mut(source.get() as usize) {
+            state.observe(event);
+        }
+    }
+
+    fn replay_routed_into(
+        &self,
+        route: &CompiledMidiRoute,
+        events: &mut Vec<MidiEventV1>,
+        maximum_events: usize,
+    ) -> usize {
+        let mut omitted = 0;
+        for (source_index, state) in self.sources.iter().enumerate() {
+            state.visit_replay(|event| {
+                let ingress = IngressMidiEvent {
+                    source: MidiSourceKey::new(source_index as u32),
+                    packet: MidiPacket {
+                        frame: event.frame,
+                        length: event.length,
+                        data: event.data,
+                    },
+                };
+                if let Some(routed) = route.route(ingress) {
+                    push_replay_event(
+                        events,
+                        maximum_events,
+                        plugin_midi_event(routed.packet),
+                        &mut omitted,
+                    );
+                }
+            });
+        }
+        omitted
+    }
+}
+
 impl Default for MidiControllerState {
     fn default() -> Self {
         Self {
@@ -191,48 +247,40 @@ impl MidiControllerState {
         }
     }
 
-    fn replay_into(&self, events: &mut Vec<MidiEventV1>, maximum_events: usize) -> usize {
-        let mut omitted = 0;
+    fn visit_replay(&self, mut visit: impl FnMut(MidiEventV1)) {
         for channel in 0..MIDI_CHANNELS {
             for (controller, value) in self.continuous_controllers[channel].iter().enumerate() {
                 if let Some(value) = value {
-                    push_replay_event(
-                        events,
-                        maximum_events,
-                        MidiEventV1 {
-                            frame: 0,
-                            length: 3,
-                            data: [0xb0 | channel as u8, controller as u8, *value],
-                        },
-                        &mut omitted,
-                    );
+                    visit(MidiEventV1 {
+                        frame: 0,
+                        length: 3,
+                        data: [0xb0 | channel as u8, controller as u8, *value],
+                    });
                 }
             }
             if let Some(pressure) = self.channel_pressure[channel] {
-                push_replay_event(
-                    events,
-                    maximum_events,
-                    MidiEventV1 {
-                        frame: 0,
-                        length: 2,
-                        data: [0xd0 | channel as u8, pressure, 0],
-                    },
-                    &mut omitted,
-                );
+                visit(MidiEventV1 {
+                    frame: 0,
+                    length: 2,
+                    data: [0xd0 | channel as u8, pressure, 0],
+                });
             }
             if let Some((least_significant, most_significant)) = self.pitch_bend[channel] {
-                push_replay_event(
-                    events,
-                    maximum_events,
-                    MidiEventV1 {
-                        frame: 0,
-                        length: 3,
-                        data: [0xe0 | channel as u8, least_significant, most_significant],
-                    },
-                    &mut omitted,
-                );
+                visit(MidiEventV1 {
+                    frame: 0,
+                    length: 3,
+                    data: [0xe0 | channel as u8, least_significant, most_significant],
+                });
             }
         }
+    }
+
+    #[cfg(test)]
+    fn replay_into(&self, events: &mut Vec<MidiEventV1>, maximum_events: usize) -> usize {
+        let mut omitted = 0;
+        self.visit_replay(|event| {
+            push_replay_event(events, maximum_events, event, &mut omitted);
+        });
         omitted
     }
 }
@@ -357,8 +405,23 @@ pub fn run(config: LiveConfig) -> Result<()> {
     )?;
 
     let (sender, receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
-    let (_midi_connections, midi_port_names) = connect_midi_sources(sender)?;
+    let (_midi_connections, midi_port_names, midi_sources) = connect_midi_sources(sender)?;
     println!("MIDI_READY ports={midi_port_names:?}");
+    let play_route = compile_default_play_route(
+        &midi_sources,
+        plugin
+            .manifest()
+            .midi
+            .as_ref()
+            .map(|midi| midi.channel_model)
+            .unwrap_or(PluginChannelModel::SinglePart),
+    )?;
+    println!(
+        "MIDI_ROUTE_READY id={} source=primary input=omni output=auto target={}.{}",
+        play_route_id(),
+        DEFAULT_LIVE_INSTANCE_ID,
+        DEFAULT_INPUT_BUS_ID
+    );
     let pcm = open_scarlett()?;
     println!(
         "AUDIO_READY device={OUTPUT_DEVICE:?} rate={OUTPUT_RATE} channels={CHANNELS} \
@@ -434,6 +497,8 @@ pub fn run(config: LiveConfig) -> Result<()> {
         &receiver,
         &control_receiver,
         &mut instance,
+        &play_route,
+        midi_port_names.len(),
         initial_master_level,
         initial_master_pan,
     )
@@ -476,12 +541,26 @@ fn performance_midi_names(midi: &MidiInput) -> Result<Vec<String>> {
 }
 
 fn connect_midi_sources(
-    sender: SyncSender<MidiEventV1>,
-) -> Result<(Vec<MidiInputConnection<()>>, Vec<String>)> {
+    sender: SyncSender<IngressMidiEvent>,
+) -> Result<(
+    Vec<MidiInputConnection<()>>,
+    Vec<String>,
+    MidiSourceRegistry,
+)> {
     let discovery = MidiInput::new("rackforge-core-discovery")?;
     let names = performance_midi_names(&discovery)?;
     let mut connections = Vec::with_capacity(names.len());
+    let mut registry = MidiSourceRegistry::default();
     for (index, name) in names.iter().enumerate() {
+        let source = MidiSourceKey::new(index as u32);
+        registry.register(
+            source,
+            MidiSourceDescriptor {
+                id: stable_alsa_source_id(name)?,
+                name: name.clone(),
+                primary: index == 0,
+            },
+        )?;
         let mut midi = MidiInput::new(&format!("rackforge-core-live-{index}"))?;
         midi.ignore(Ignore::None);
         let port = midi
@@ -495,23 +574,74 @@ fn connect_midi_sources(
                 &port,
                 &format!("rackforge-core-input-{index}"),
                 move |_timestamp, message, _| {
-                    if message.is_empty() || message[0] >= 0xF0 || message.len() > 3 {
-                        return;
+                    if let Ok(packet) = MidiPacket::new(0, message) {
+                        let _ = source_sender.try_send(IngressMidiEvent { source, packet });
                     }
-                    let mut data = [0_u8; 3];
-                    data[..message.len()].copy_from_slice(message);
-                    let _ = source_sender.try_send(MidiEventV1 {
-                        frame: 0,
-                        length: message.len() as u8,
-                        data,
-                    });
                 },
                 (),
             )
             .map_err(|error| anyhow::anyhow!("connecting MIDI input {name:?}: {error}"))?;
         connections.push(connection);
     }
-    Ok((connections, names))
+    Ok((connections, names, registry))
+}
+
+fn stable_alsa_source_id(name: &str) -> Result<MidiSourceId> {
+    let stable_name = name
+        .rsplit_once(' ')
+        .filter(|(_, suffix)| {
+            suffix.split_once(':').is_some_and(|(client, port)| {
+                !client.is_empty()
+                    && !port.is_empty()
+                    && client.bytes().all(|byte| byte.is_ascii_digit())
+                    && port.bytes().all(|byte| byte.is_ascii_digit())
+            })
+        })
+        .map_or(name, |(stable, _)| stable);
+    let mut slug = String::with_capacity(stable_name.len());
+    let mut separator = false;
+    for byte in stable_name.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            if separator && !slug.is_empty() {
+                slug.push('-');
+            }
+            slug.push(char::from(byte.to_ascii_lowercase()));
+            separator = false;
+        } else {
+            separator = true;
+        }
+    }
+    if slug.is_empty() {
+        slug.push_str("unnamed");
+    }
+    let hash = stable_name
+        .bytes()
+        .fold(0xcbf29ce484222325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+        });
+    MidiSourceId::new(format!("alsa.{slug}-{hash:016x}")).map_err(Into::into)
+}
+
+fn play_route_id() -> &'static str {
+    "play.primary"
+}
+
+fn compile_default_play_route(
+    sources: &MidiSourceRegistry,
+    channel_model: PluginChannelModel,
+) -> Result<CompiledMidiRoute> {
+    let route = MidiRoute {
+        schema_version: MIDI_ROUTING_SCHEMA_VERSION,
+        id: MidiRouteId::new(play_route_id())?,
+        enabled: true,
+        matches: MidiRouteMatch::default(),
+        transform: MidiRouteTransform::default(),
+        target: MidiRouteTarget {
+            instance_id: MidiTargetId::new(DEFAULT_LIVE_INSTANCE_ID)?,
+            input_bus_id: MidiInputBusId::new(DEFAULT_INPUT_BUS_ID)?,
+        },
+    };
+    route.compile(sources, channel_model).map_err(Into::into)
 }
 
 fn open_scarlett() -> Result<PCM> {
@@ -546,9 +676,11 @@ fn open_scarlett() -> Result<PCM> {
 
 fn audio_loop(
     pcm: &PCM,
-    receiver: &Receiver<MidiEventV1>,
+    receiver: &Receiver<IngressMidiEvent>,
     control_receiver: &Receiver<AudioControlCommand>,
     instance: &mut PluginInstance<'_>,
+    play_route: &CompiledMidiRoute,
+    midi_source_count: usize,
     initial_master_level: MasterLevel,
     initial_master_pan: MasterPan,
 ) -> Result<()> {
@@ -563,7 +695,7 @@ fn audio_loop(
     let mut dropped_events = 0_usize;
     let mut audition: Option<AuditionLease> = None;
     let mut next_audition_id = 1_u64;
-    let mut controller_state = MidiControllerState::default();
+    let mut controller_states = MidiControllerStates::new(midi_source_count);
     let mut replay_controller_state = false;
     let mut master_gain = MasterGain::new(initial_master_level);
     let mut master_balance = MasterBalance::new(initial_master_pan);
@@ -786,7 +918,8 @@ fn audio_loop(
         }
         events.clear();
         if replay_controller_state {
-            let omitted = controller_state.replay_into(&mut events, MAX_EVENTS_PER_BLOCK);
+            let omitted =
+                controller_states.replay_routed_into(play_route, &mut events, MAX_EVENTS_PER_BLOCK);
             dropped_events += omitted;
             if omitted > 0 {
                 eprintln!("MIDI_CONTROLLER_REPLAY_TRUNCATED omitted={omitted}");
@@ -794,14 +927,17 @@ fn audio_loop(
             replay_controller_state = false;
         }
         while let Ok(event) = receiver.try_recv() {
-            if reserved_midi_controls.contains(event) {
+            let plugin_event = plugin_midi_event(event.packet);
+            if reserved_midi_controls.contains(plugin_event) {
                 continue;
             }
-            controller_state.observe(event);
-            if events.len() < MAX_EVENTS_PER_BLOCK {
-                events.push(event);
-            } else {
-                dropped_events += 1;
+            controller_states.observe(event.source, plugin_event);
+            if let Some(routed) = play_route.route(event) {
+                if events.len() < MAX_EVENTS_PER_BLOCK {
+                    events.push(plugin_midi_event(routed.packet));
+                } else {
+                    dropped_events += 1;
+                }
             }
         }
 
@@ -847,6 +983,14 @@ fn audio_loop(
             meter_clipped = 0;
             dropped_events = 0;
         }
+    }
+}
+
+fn plugin_midi_event(packet: MidiPacket) -> MidiEventV1 {
+    MidiEventV1 {
+        frame: packet.frame,
+        length: packet.length,
+        data: packet.data,
     }
 }
 
@@ -947,6 +1091,74 @@ mod tests {
         let mut second = Vec::new();
         assert_eq!(state.replay_into(&mut second, 2), 0);
         assert_eq!(second.len(), 2);
+    }
+
+    #[test]
+    fn controller_state_is_kept_separately_for_each_midi_source() {
+        let mut states = MidiControllerStates::new(2);
+        states.observe(MidiSourceKey::new(0), midi(3, [0xb0, 1, 20]));
+        states.observe(MidiSourceKey::new(1), midi(3, [0xb0, 1, 100]));
+
+        let mut first = Vec::new();
+        assert_eq!(
+            states.sources[0].replay_into(&mut first, MAX_EVENTS_PER_BLOCK),
+            0
+        );
+        assert_eq!(first[0].data, [0xb0, 1, 20]);
+
+        let mut second = Vec::new();
+        assert_eq!(
+            states.sources[1].replay_into(&mut second, MAX_EVENTS_PER_BLOCK),
+            0
+        );
+        assert_eq!(second[0].data, [0xb0, 1, 100]);
+    }
+
+    #[test]
+    fn stable_alsa_source_identity_ignores_the_ephemeral_client_port() {
+        let first =
+            stable_alsa_source_id("KL Essential 61 mk3:KL Essential 61 mk3 MIDI 24:0").unwrap();
+        let second =
+            stable_alsa_source_id("KL Essential 61 mk3:KL Essential 61 mk3 MIDI 28:0").unwrap();
+        assert_eq!(first, second);
+        assert!(first.as_str().starts_with("alsa.kl-essential-61-mk3"));
+    }
+
+    #[test]
+    fn default_play_route_uses_only_primary_and_normalizes_single_part_channel() {
+        let mut sources = MidiSourceRegistry::default();
+        sources
+            .register(
+                MidiSourceKey::new(0),
+                MidiSourceDescriptor {
+                    id: MidiSourceId::new("controller.primary").unwrap(),
+                    name: "Primary".into(),
+                    primary: true,
+                },
+            )
+            .unwrap();
+        sources
+            .register(
+                MidiSourceKey::new(1),
+                MidiSourceDescriptor {
+                    id: MidiSourceId::new("controller.secondary").unwrap(),
+                    name: "Secondary".into(),
+                    primary: false,
+                },
+            )
+            .unwrap();
+        let route = compile_default_play_route(&sources, PluginChannelModel::SinglePart).unwrap();
+        let primary = IngressMidiEvent {
+            source: MidiSourceKey::new(0),
+            packet: MidiPacket::new(0, &[0x97, 60, 100]).unwrap(),
+        };
+        let secondary = IngressMidiEvent {
+            source: MidiSourceKey::new(1),
+            packet: MidiPacket::new(0, &[0x97, 60, 100]).unwrap(),
+        };
+
+        assert_eq!(route.route(primary).unwrap().packet.data, [0x90, 60, 100]);
+        assert!(route.route(secondary).is_none());
     }
 
     #[test]

@@ -1,0 +1,41 @@
+schema_version = 1
+id = "org.rackforge.appliance.raspberry-pi-os-lite"
+hardware_profiles = [
+  "org.rackforge.hardware.raspberry-pi-4",
+  "org.rackforge.hardware.raspberry-pi-5",
+]
+os_family = "raspberry-pi-os-lite"
+network_provider = "org.rackforge.provider.network-manager"
+
+[boot]
+metric = "power-on-to-ready-to-play"
+audio_requires_network = false
+display_requires_network = false
+web_process_requires_network = false
+
+[provisioning]
+disable_cloud_init_after_successful_first_boot = true
+require_local_user = true
+require_ssh_host_keys = true
+require_network_profile = true
+
+[services]
+disable_after_provisioning = ["NetworkManager-wait-online.service"]
+keep = [
+  "NetworkManager.service",
+  "ssh.service",
+  "avahi-daemon.service",
+  "bluetooth.service",
+  "rpi-eeprom-update.service",
+]
+
+[filesystem]
+netplan_policy_mode = "0600"
+
+[headless_boot]
+camera_auto_detect = false
+dsi_display_auto_detect = false
+preserve_hdmi_kms = true
+
+[rollback]
+state_root = "/var/lib/rackforge/appliance"

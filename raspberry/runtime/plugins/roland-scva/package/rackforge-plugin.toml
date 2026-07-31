@@ -13,6 +13,14 @@ capabilities = [
     "sample_accurate_automation",
 ]
 
+[midi]
+channel_model = "single_part"
+program_change = "ignore"
+
+[[midi.input_buses]]
+id = "main"
+name = "Main"
+
 [api]
 major = 1
 minor = 4

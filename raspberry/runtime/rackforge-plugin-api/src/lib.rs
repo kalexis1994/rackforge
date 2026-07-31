@@ -10,8 +10,9 @@ pub mod preset;
 pub mod program;
 
 pub use manifest::{
-    ApiRequirement, Capability, PluginKind, PluginManifest, ResourceKind, ResourceRequirement,
-    RuntimeDescriptor, WebSurface, WebSurfaceKind, WebUi,
+    ApiRequirement, Capability, MidiInputBus, MidiProgramChangePolicy, PluginKind, PluginManifest,
+    PluginMidiContract, ResourceKind, ResourceRequirement, RuntimeDescriptor, WebSurface,
+    WebSurfaceKind, WebUi,
 };
 pub use parameter::{
     EnumChoice, PageDescriptor, ParameterDescriptor, ParameterFlags, ParameterKind,
@@ -24,6 +25,7 @@ pub use program::{
     ProgramEditorFieldKind, ProgramEditorPage, ProgramEditorValue, ProgramEditorView, ProgramError,
     ProgramFieldEditRequest, validate_plugin_identifier, validate_program_identifier,
 };
+pub use rackforge_midi_api::{MidiInputBusId, PluginChannelModel};
 pub use rackforge_surface_api::{
     SURFACE_ACTIVATION_SCHEMA_VERSION, SurfaceActivationReason, SurfaceActivationRequest,
     SurfaceActivationResponse, SurfaceError, SurfaceMode,

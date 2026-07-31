@@ -11,8 +11,8 @@ pub use rackforge_ui::Input;
 use rackforge_ui::{
     Component, ComponentEvent, Frame, NavigationAction as Action, Rect, TextFallback, VisualState,
     components::{
-        Button, CarouselItem, ConfirmationDialog, EditableValue, SimpleCarousel, TextEditor,
-        ValueCarousel, ValueItem,
+        Button, CarouselItem, ConfirmationDialog, EditableValue, SecretEditor, SecretValue,
+        SimpleCarousel, Spinner, TextEditor, ValueCarousel, ValueItem,
     },
 };
 
@@ -98,6 +98,31 @@ impl Default for WebSystemSettings {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SavedWifiNetwork {
+    pub id: String,
+    pub name: String,
+    pub ssid: Option<String>,
+    pub active: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct WifiSystemSettings {
+    pub available: bool,
+    pub enabled: bool,
+    pub connected: bool,
+    pub ssid: Option<String>,
+    pub signal_percent: Option<u8>,
+    pub saved_networks: Vec<SavedWifiNetwork>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiscoveredWifiNetwork {
+    pub ssid: String,
+    pub signal_percent: u8,
+    pub secured: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProgramExitDestination {
     CustomPrograms,
     ActiveMode {
@@ -165,6 +190,21 @@ pub enum MenuCommand {
         port: u16,
     },
     BeginWebPairing,
+    ActivateSavedWifi {
+        connection_id: String,
+    },
+    ForgetSavedWifi {
+        connection_id: String,
+    },
+    ConnectDiscoveredWifi {
+        ssid: String,
+        passphrase: Option<SecretValue>,
+    },
+    DisconnectWifi,
+    SetWifiEnabled {
+        enabled: bool,
+    },
+    ScanWifi,
 }
 
 impl Screen {
@@ -243,6 +283,15 @@ enum Page {
     System,
     SystemWeb,
     SystemWebPairing,
+    SystemWifi,
+    SystemWifiNetworks,
+    SystemWifiKnown,
+    SystemWifiKnownActions,
+    SystemWifiDiscovered,
+    SystemWifiDiscoveredActions,
+    SystemWifiPassword,
+    SystemWifiBusy,
+    SystemWifiResult,
     RfDlsLibrary,
     RfDlsPlay,
     RfDlsCustomPrograms,
@@ -286,6 +335,18 @@ pub struct Menu {
     web_edit_candidate: WebSystemSettings,
     system_web_editing: bool,
     pairing_code: Option<String>,
+    wifi_settings: WifiSystemSettings,
+    system_wifi_index: usize,
+    wifi_networks_index: usize,
+    wifi_saved_index: usize,
+    wifi_known_action_index: usize,
+    wifi_discovered_networks: Vec<DiscoveredWifiNetwork>,
+    wifi_discovered_index: usize,
+    wifi_radio_editing: bool,
+    wifi_radio_candidate: bool,
+    wifi_password: SecretEditor,
+    wifi_spinner: Spinner,
+    wifi_result: Option<(bool, String)>,
     rf_dls_library_index: usize,
     rf_dls_play_index: usize,
     rf_dls_custom_index: usize,
@@ -331,8 +392,8 @@ const CONFIG_DETAILS: [&str; 4] = [
 ];
 const PLUGIN_ITEMS: [&str; 1] = ["RF-DLS"];
 const PLUGIN_DETAILS: [&str; 1] = [" "];
-const SYSTEM_ITEMS: [&str; 1] = ["WEB INTERFACE"];
-const SYSTEM_DETAILS: [&str; 1] = ["Browser and pairing"];
+const SYSTEM_WEB_ITEM: (&str, &str) = ("WEB INTERFACE", "Browser & pairing");
+const SYSTEM_WIFI_ITEM: (&str, &str) = ("WI-FI", "Wireless network");
 const SYSTEM_WEB_ITEMS: [&str; 6] = [
     "ENABLED",
     "ACCESS",
@@ -341,6 +402,10 @@ const SYSTEM_WEB_ITEMS: [&str; 6] = [
     "PAIR DEVICE",
     "STATUS",
 ];
+const SYSTEM_WIFI_ITEMS: [&str; 3] = ["STATUS", "NETWORKS", "RADIO"];
+const WIFI_NETWORK_GROUPS: [&str; 2] = ["KNOWN", "DISCOVERED"];
+const WIFI_KNOWN_ACTIONS: [&str; 2] = ["CONNECT", "FORGET"];
+const WIFI_ACTIVE_ACTIONS: [&str; 2] = ["DISCONNECT", "FORGET"];
 const RF_DLS_LIBRARIES: [&str; 2] = ["DLS", "CUSTOM"];
 const RF_DLS_PROGRAM_SECTIONS: [&str; 6] = ["NAME", "LAYER A", "LAYER B", "FX", "OUTPUT", "SAVE"];
 const RF_DLS_SECTION_DETAILS: [&str; 6] = [
@@ -386,6 +451,18 @@ impl Default for Menu {
             web_edit_candidate: WebSystemSettings::default(),
             system_web_editing: false,
             pairing_code: None,
+            wifi_settings: WifiSystemSettings::default(),
+            system_wifi_index: 0,
+            wifi_networks_index: 0,
+            wifi_saved_index: 0,
+            wifi_known_action_index: 0,
+            wifi_discovered_networks: Vec::new(),
+            wifi_discovered_index: 0,
+            wifi_radio_editing: false,
+            wifi_radio_candidate: false,
+            wifi_password: wifi_password_editor(),
+            wifi_spinner: Spinner::ascii("system-loader", "LOADING", "PLEASE WAIT"),
+            wifi_result: None,
             rf_dls_library_index: 0,
             rf_dls_play_index: 0,
             rf_dls_custom_index: 0,
@@ -432,6 +509,107 @@ impl Menu {
         self.web_settings = settings;
         if !self.system_web_editing {
             self.web_edit_candidate = settings;
+        }
+    }
+
+    pub fn sync_wifi_settings(&mut self, settings: WifiSystemSettings) {
+        let focused_id = self
+            .wifi_settings
+            .saved_networks
+            .get(self.wifi_saved_index)
+            .map(|network| network.id.as_str());
+        let active_id = settings
+            .saved_networks
+            .iter()
+            .find(|network| network.active)
+            .map(|network| network.id.as_str());
+        let focus_id = focused_id.or(active_id);
+        self.wifi_saved_index = focus_id
+            .and_then(|id| {
+                settings
+                    .saved_networks
+                    .iter()
+                    .position(|network| network.id == id)
+            })
+            .unwrap_or(0)
+            .min(settings.saved_networks.len().saturating_sub(1));
+        self.wifi_radio_candidate = settings.enabled;
+        self.wifi_settings = settings;
+        self.system_index = self.system_index.min(self.system_item_count() - 1);
+    }
+
+    pub fn sync_discovered_wifi(&mut self, networks: Vec<DiscoveredWifiNetwork>) {
+        let focused_ssid = self
+            .wifi_discovered_networks
+            .get(self.wifi_discovered_index)
+            .map(|network| network.ssid.clone());
+        let saved_ssids = self
+            .wifi_settings
+            .saved_networks
+            .iter()
+            .filter_map(|network| network.ssid.as_deref())
+            .collect::<std::collections::BTreeSet<_>>();
+        self.wifi_discovered_networks = networks
+            .into_iter()
+            .filter(|network| !saved_ssids.contains(network.ssid.as_str()))
+            .collect();
+        self.wifi_discovered_index = focused_ssid
+            .as_deref()
+            .and_then(|ssid| {
+                self.wifi_discovered_networks
+                    .iter()
+                    .position(|network| network.ssid == ssid)
+            })
+            .unwrap_or(0)
+            .min(self.wifi_discovered_networks.len().saturating_sub(1));
+    }
+
+    pub fn show_wifi_result(&mut self, success: bool, message: impl Into<String>) {
+        self.wifi_password.clear();
+        self.wifi_result = Some((success, message.into()));
+        self.page = Page::SystemWifiResult;
+    }
+
+    pub fn complete_wifi_result(&mut self, success: bool, message: impl Into<String>) {
+        let was_visible = self.page == Page::SystemWifiBusy;
+        self.wifi_password.clear();
+        if was_visible {
+            self.wifi_result = Some((success, message.into()));
+            self.page = Page::SystemWifiResult;
+        }
+    }
+
+    pub fn begin_wifi_busy(&mut self, label: impl Into<String>) {
+        self.wifi_spinner.reset(label);
+        self.wifi_spinner.set_detail("PLEASE WAIT");
+        self.wifi_result = None;
+        self.page = Page::SystemWifiBusy;
+    }
+
+    pub fn advance_wifi_spinner(&mut self) -> bool {
+        if self.page != Page::SystemWifiBusy {
+            return false;
+        }
+        self.wifi_spinner.advance();
+        true
+    }
+
+    pub fn complete_wifi_scan(&mut self, networks: Vec<DiscoveredWifiNetwork>) {
+        self.sync_discovered_wifi(networks);
+        if self.page == Page::SystemWifiBusy {
+            self.page = Page::SystemWifiDiscovered;
+        }
+    }
+
+    fn system_item_count(&self) -> usize {
+        1 + usize::from(self.wifi_settings.available)
+    }
+
+    fn system_item(&self) -> (&'static str, &'static str) {
+        if self.system_index == 1 && self.wifi_settings.available {
+            SYSTEM_WIFI_ITEM
+        } else {
+            SYSTEM_WEB_ITEM
         }
     }
 
@@ -579,6 +757,20 @@ impl Menu {
             self.apply_program_output_input(input);
         } else if self.page == Page::SystemWeb {
             self.apply_system_web_input(input);
+        } else if self.page == Page::SystemWifi {
+            self.apply_system_wifi_input(input);
+        } else if matches!(
+            self.page,
+            Page::SystemWifiNetworks
+                | Page::SystemWifiKnown
+                | Page::SystemWifiKnownActions
+                | Page::SystemWifiDiscovered
+                | Page::SystemWifiDiscoveredActions
+                | Page::SystemWifiPassword
+                | Page::SystemWifiBusy
+                | Page::SystemWifiResult
+        ) {
+            self.apply_wifi_network_input(input);
         } else if self.page == Page::SystemWebPairing {
             if matches!(input, Input::Button4 | Input::EncoderPress) {
                 self.page = Page::SystemWeb;
@@ -609,6 +801,31 @@ impl Menu {
     }
 
     pub fn apply(&mut self, action: Action) {
+        if matches!(
+            self.page,
+            Page::SystemWifi
+                | Page::SystemWifiNetworks
+                | Page::SystemWifiKnown
+                | Page::SystemWifiKnownActions
+                | Page::SystemWifiDiscovered
+                | Page::SystemWifiDiscoveredActions
+                | Page::SystemWifiPassword
+                | Page::SystemWifiBusy
+                | Page::SystemWifiResult
+        ) {
+            let input = match action {
+                Action::Previous => Input::Button2,
+                Action::Next => Input::Button3,
+                Action::Back => Input::Button4,
+                Action::Select => Input::Button1,
+            };
+            if self.page == Page::SystemWifi {
+                self.apply_system_wifi_input(input);
+            } else {
+                self.apply_wifi_network_input(input);
+            }
+            return;
+        }
         if matches!(
             self.page,
             Page::ProgramEditorRoot | Page::ProgramEditorPage | Page::ProgramEditorSound
@@ -702,6 +919,15 @@ impl Menu {
                     Page::Plugins => Page::Config,
                     Page::SystemWeb => Page::System,
                     Page::SystemWebPairing => Page::SystemWeb,
+                    Page::SystemWifi => Page::System,
+                    Page::SystemWifiNetworks | Page::SystemWifiBusy | Page::SystemWifiResult => {
+                        Page::SystemWifi
+                    }
+                    Page::SystemWifiKnown | Page::SystemWifiDiscovered => Page::SystemWifiNetworks,
+                    Page::SystemWifiKnownActions => Page::SystemWifiKnown,
+                    Page::SystemWifiDiscoveredActions | Page::SystemWifiPassword => {
+                        Page::SystemWifiDiscovered
+                    }
                     Page::System => Page::Config,
                     Page::Home => Page::Home,
                     _ => Page::Home,
@@ -743,6 +969,9 @@ impl Menu {
                     Page::Config if self.config_index == 3 => Page::System,
                     Page::Plugins if self.plugin_index == 0 => Page::RfDlsCustomPrograms,
                     Page::System if self.system_index == 0 => Page::SystemWeb,
+                    Page::System if self.system_index == 1 && self.wifi_settings.available => {
+                        Page::SystemWifi
+                    }
                     Page::RfDlsCustomPrograms => {
                         self.begin_program_edit();
                         Page::RfDlsCustomPrograms
@@ -884,14 +1113,31 @@ impl Menu {
                 &PLUGIN_DETAILS,
                 self.plugin_index,
             ),
-            Page::System => simple_screen(
-                indexed_title("SYSTEM", self.system_index, SYSTEM_ITEMS.len()),
-                &SYSTEM_ITEMS,
-                &SYSTEM_DETAILS,
-                self.system_index,
-            ),
+            Page::System => {
+                let (item, detail) = self.system_item();
+                Screen::with_header(
+                    indexed_title("SYSTEM", self.system_index, self.system_item_count()),
+                    item,
+                    detail,
+                )
+            }
             Page::SystemWeb => self.render_system_web(),
             Page::SystemWebPairing => self.render_pairing_code(),
+            Page::SystemWifi => self.render_system_wifi(),
+            Page::SystemWifiNetworks => self.render_wifi_networks(),
+            Page::SystemWifiKnown => self.render_wifi_known(),
+            Page::SystemWifiKnownActions => self.render_wifi_known_actions(),
+            Page::SystemWifiDiscovered => self.render_wifi_discovered(),
+            Page::SystemWifiDiscoveredActions => self.render_wifi_discovered_actions(),
+            Page::SystemWifiPassword => {
+                let [line_1, line_2] = component_lines(&self.wifi_password, false);
+                Screen::with_header("WI-FI PASSWORD", line_1, line_2)
+            }
+            Page::SystemWifiBusy => {
+                let [line_1, line_2] = component_lines(&self.wifi_spinner, false);
+                Screen::with_header("WI-FI", line_1, line_2)
+            }
+            Page::SystemWifiResult => self.render_wifi_result(),
             Page::RfDlsLibrary => self.render_rf_dls_library(),
             Page::RfDlsPlay => self.render_rf_dls_play(),
             Page::RfDlsCustomPrograms => self.render_custom_programs(),
@@ -1016,6 +1262,147 @@ impl Menu {
         Screen::with_header("PAIR DEVICE", line_1, "VALID FOR 2 MIN")
     }
 
+    fn render_system_wifi(&self) -> Screen {
+        let value = match self.system_wifi_index {
+            0 => match (
+                self.wifi_settings.connected,
+                self.wifi_settings.ssid.as_deref(),
+                self.wifi_settings.signal_percent,
+            ) {
+                (true, Some(ssid), Some(signal)) => format!("{ssid} {signal}%"),
+                (true, Some(ssid), None) => ssid.to_owned(),
+                (true, None, _) => "CONNECTED".into(),
+                (false, _, _) if self.wifi_settings.enabled => "NOT CONNECTED".into(),
+                _ => "RADIO OFF".into(),
+            },
+            1 => format!("{} KNOWN", self.wifi_settings.saved_networks.len()),
+            _ => {
+                let enabled = if self.wifi_radio_editing {
+                    self.wifi_radio_candidate
+                } else {
+                    self.wifi_settings.enabled
+                };
+                let value = if enabled { "ON" } else { "OFF" };
+                if self.wifi_radio_editing {
+                    format!("[{value}]")
+                } else {
+                    value.into()
+                }
+            }
+        };
+        Screen::with_header(
+            indexed_title("WI-FI", self.system_wifi_index, SYSTEM_WIFI_ITEMS.len()),
+            SYSTEM_WIFI_ITEMS[self.system_wifi_index],
+            value,
+        )
+    }
+
+    fn render_wifi_networks(&self) -> Screen {
+        let detail = if self.wifi_networks_index == 0 {
+            format!("{} SAVED", self.wifi_settings.saved_networks.len())
+        } else if self.wifi_settings.enabled {
+            "SCAN FOR NETWORKS".to_owned()
+        } else {
+            "RADIO OFF".to_owned()
+        };
+        Screen::with_header(
+            indexed_title(
+                "NETWORKS",
+                self.wifi_networks_index,
+                WIFI_NETWORK_GROUPS.len(),
+            ),
+            WIFI_NETWORK_GROUPS[self.wifi_networks_index],
+            detail,
+        )
+    }
+
+    fn render_wifi_known(&self) -> Screen {
+        let Some(network) = self.wifi_settings.saved_networks.get(self.wifi_saved_index) else {
+            return Screen::with_header("KNOWN", "NO NETWORKS", "BACK TO RETURN");
+        };
+        let name = network.ssid.as_deref().unwrap_or(&network.name);
+        Screen::with_header(
+            indexed_title(
+                "KNOWN",
+                self.wifi_saved_index,
+                self.wifi_settings.saved_networks.len(),
+            ),
+            normalized_display_text(name, "UNNAMED"),
+            if network.active { "CONNECTED" } else { "SAVED" },
+        )
+    }
+
+    fn render_wifi_known_actions(&self) -> Screen {
+        let Some(network) = self.wifi_settings.saved_networks.get(self.wifi_saved_index) else {
+            return Screen::with_header("KNOWN", "NO NETWORK", "BACK TO RETURN");
+        };
+        let actions = if network.active {
+            &WIFI_ACTIVE_ACTIONS
+        } else {
+            &WIFI_KNOWN_ACTIONS
+        };
+        Screen::with_header(
+            normalized_display_text(network.ssid.as_deref().unwrap_or(&network.name), "KNOWN"),
+            actions[self.wifi_known_action_index],
+            if self.wifi_known_action_index == 0 {
+                "PRESS OK"
+            } else {
+                "REMOVE PROFILE"
+            },
+        )
+    }
+
+    fn render_wifi_discovered(&self) -> Screen {
+        let Some(network) = self
+            .wifi_discovered_networks
+            .get(self.wifi_discovered_index)
+        else {
+            return Screen::with_header("DISCOVERED", "NO NEW NETWORKS", "BACK TO RETURN");
+        };
+        Screen::with_header(
+            indexed_title(
+                "DISCOVERED",
+                self.wifi_discovered_index,
+                self.wifi_discovered_networks.len(),
+            ),
+            normalized_display_text(&network.ssid, "UNNAMED"),
+            format!(
+                "{}% {}",
+                network.signal_percent,
+                if network.secured { "SECURED" } else { "OPEN" }
+            ),
+        )
+    }
+
+    fn render_wifi_discovered_actions(&self) -> Screen {
+        let Some(network) = self
+            .wifi_discovered_networks
+            .get(self.wifi_discovered_index)
+        else {
+            return Screen::with_header("DISCOVERED", "NO NETWORK", "BACK TO RETURN");
+        };
+        Screen::with_header(
+            normalized_display_text(&network.ssid, "WI-FI"),
+            "CONNECT",
+            if network.secured {
+                "PASSWORD REQUIRED"
+            } else {
+                "OPEN NETWORK"
+            },
+        )
+    }
+
+    fn render_wifi_result(&self) -> Screen {
+        let Some((success, message)) = self.wifi_result.as_ref() else {
+            return Screen::with_header("WI-FI", "READY", "BACK TO RETURN");
+        };
+        Screen::with_header(
+            "WI-FI",
+            if *success { "SUCCESS" } else { "FAILED" },
+            normalized_display_text(message, "UNKNOWN ERROR"),
+        )
+    }
+
     fn apply_system_web_input(&mut self, input: Input) {
         if self.system_web_editing {
             match input {
@@ -1095,6 +1482,205 @@ impl Menu {
         }
     }
 
+    fn apply_system_wifi_input(&mut self, input: Input) {
+        if self.wifi_radio_editing {
+            match input {
+                Input::Button2 | Input::Button3 | Input::EncoderLeft | Input::EncoderRight => {
+                    self.wifi_radio_candidate = !self.wifi_radio_candidate;
+                }
+                Input::Button1 | Input::EncoderPress => {
+                    self.wifi_radio_editing = false;
+                    self.pending_command = Some(MenuCommand::SetWifiEnabled {
+                        enabled: self.wifi_radio_candidate,
+                    });
+                }
+                Input::Button4 => {
+                    self.wifi_radio_editing = false;
+                    self.wifi_radio_candidate = self.wifi_settings.enabled;
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match input {
+            Input::Button2 | Input::EncoderLeft => {
+                self.system_wifi_index = self
+                    .system_wifi_index
+                    .checked_sub(1)
+                    .unwrap_or(SYSTEM_WIFI_ITEMS.len() - 1);
+            }
+            Input::Button3 | Input::EncoderRight => {
+                self.system_wifi_index = (self.system_wifi_index + 1) % SYSTEM_WIFI_ITEMS.len();
+            }
+            Input::Button4 => self.page = Page::System,
+            Input::Button1 | Input::EncoderPress => match self.system_wifi_index {
+                1 => {
+                    self.wifi_networks_index = 0;
+                    self.page = Page::SystemWifiNetworks;
+                }
+                2 => {
+                    self.wifi_radio_candidate = self.wifi_settings.enabled;
+                    self.wifi_radio_editing = true;
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    fn apply_wifi_network_input(&mut self, input: Input) {
+        if self.page == Page::SystemWifiPassword {
+            match self.wifi_password.handle(input) {
+                ComponentEvent::EditCommitted(_) => {
+                    if let Some(network) = self
+                        .wifi_discovered_networks
+                        .get(self.wifi_discovered_index)
+                    {
+                        self.pending_command = Some(MenuCommand::ConnectDiscoveredWifi {
+                            ssid: network.ssid.clone(),
+                            passphrase: Some(self.wifi_password.take_secret()),
+                        });
+                    }
+                }
+                ComponentEvent::EditCancelled(_) | ComponentEvent::ExitRequested(_) => {
+                    self.wifi_password.clear();
+                    self.page = Page::SystemWifiDiscoveredActions;
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        if self.page == Page::SystemWifiResult {
+            if matches!(input, Input::Button1 | Input::EncoderPress | Input::Button4) {
+                self.wifi_result = None;
+                self.page = Page::SystemWifiNetworks;
+            }
+            return;
+        }
+
+        match self.page {
+            Page::SystemWifiNetworks => match input {
+                Input::Button2 | Input::EncoderLeft => {
+                    self.wifi_networks_index = self
+                        .wifi_networks_index
+                        .checked_sub(1)
+                        .unwrap_or(WIFI_NETWORK_GROUPS.len() - 1);
+                }
+                Input::Button3 | Input::EncoderRight => {
+                    self.wifi_networks_index =
+                        (self.wifi_networks_index + 1) % WIFI_NETWORK_GROUPS.len();
+                }
+                Input::Button4 => self.page = Page::SystemWifi,
+                Input::Button1 | Input::EncoderPress => {
+                    if self.wifi_networks_index == 0 {
+                        self.wifi_saved_index = self
+                            .wifi_saved_index
+                            .min(self.wifi_settings.saved_networks.len().saturating_sub(1));
+                        self.page = Page::SystemWifiKnown;
+                    } else if self.wifi_settings.enabled {
+                        self.wifi_discovered_networks.clear();
+                        self.wifi_discovered_index = 0;
+                        self.page = Page::SystemWifiDiscovered;
+                        self.pending_command = Some(MenuCommand::ScanWifi);
+                    }
+                }
+                _ => {}
+            },
+            Page::SystemWifiKnown => match input {
+                Input::Button2 | Input::EncoderLeft => {
+                    let len = self.wifi_settings.saved_networks.len();
+                    if len > 0 {
+                        self.wifi_saved_index =
+                            self.wifi_saved_index.checked_sub(1).unwrap_or(len - 1);
+                    }
+                }
+                Input::Button3 | Input::EncoderRight => {
+                    let len = self.wifi_settings.saved_networks.len();
+                    if len > 0 {
+                        self.wifi_saved_index = (self.wifi_saved_index + 1) % len;
+                    }
+                }
+                Input::Button4 => self.page = Page::SystemWifiNetworks,
+                Input::Button1 | Input::EncoderPress
+                    if !self.wifi_settings.saved_networks.is_empty() =>
+                {
+                    self.wifi_known_action_index = 0;
+                    self.page = Page::SystemWifiKnownActions;
+                }
+                _ => {}
+            },
+            Page::SystemWifiKnownActions => match input {
+                Input::Button2 | Input::Button3 | Input::EncoderLeft | Input::EncoderRight => {
+                    self.wifi_known_action_index = 1 - self.wifi_known_action_index;
+                }
+                Input::Button4 => self.page = Page::SystemWifiKnown,
+                Input::Button1 | Input::EncoderPress => {
+                    if let Some(network) =
+                        self.wifi_settings.saved_networks.get(self.wifi_saved_index)
+                    {
+                        self.pending_command = if self.wifi_known_action_index == 1 {
+                            Some(MenuCommand::ForgetSavedWifi {
+                                connection_id: network.id.clone(),
+                            })
+                        } else if network.active {
+                            Some(MenuCommand::DisconnectWifi)
+                        } else {
+                            Some(MenuCommand::ActivateSavedWifi {
+                                connection_id: network.id.clone(),
+                            })
+                        };
+                    }
+                }
+                _ => {}
+            },
+            Page::SystemWifiDiscovered => match input {
+                Input::Button2 | Input::EncoderLeft => {
+                    let len = self.wifi_discovered_networks.len();
+                    if len > 0 {
+                        self.wifi_discovered_index =
+                            self.wifi_discovered_index.checked_sub(1).unwrap_or(len - 1);
+                    }
+                }
+                Input::Button3 | Input::EncoderRight => {
+                    let len = self.wifi_discovered_networks.len();
+                    if len > 0 {
+                        self.wifi_discovered_index = (self.wifi_discovered_index + 1) % len;
+                    }
+                }
+                Input::Button4 => self.page = Page::SystemWifiNetworks,
+                Input::Button1 | Input::EncoderPress
+                    if !self.wifi_discovered_networks.is_empty() =>
+                {
+                    self.page = Page::SystemWifiDiscoveredActions;
+                }
+                _ => {}
+            },
+            Page::SystemWifiDiscoveredActions => match input {
+                Input::Button4 => self.page = Page::SystemWifiDiscovered,
+                Input::Button1 | Input::EncoderPress => {
+                    if let Some(network) = self
+                        .wifi_discovered_networks
+                        .get(self.wifi_discovered_index)
+                    {
+                        if network.secured {
+                            self.wifi_password.clear();
+                            self.page = Page::SystemWifiPassword;
+                        } else {
+                            self.pending_command = Some(MenuCommand::ConnectDiscoveredWifi {
+                                ssid: network.ssid.clone(),
+                                passphrase: None,
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
     fn move_selection(&mut self, delta: isize) {
         let (selection, len) = match self.page {
             Page::Home => (&mut self.home_index, HOME_ITEMS.len()),
@@ -1102,7 +1688,10 @@ impl Menu {
             Page::Play => (&mut self.play_index, PLAY_ITEMS.len()),
             Page::Config => (&mut self.config_index, CONFIG_ITEMS.len()),
             Page::Plugins => (&mut self.plugin_index, PLUGIN_ITEMS.len()),
-            Page::System => (&mut self.system_index, SYSTEM_ITEMS.len()),
+            Page::System => {
+                let len = self.system_item_count();
+                (&mut self.system_index, len)
+            }
             Page::SystemWeb => (&mut self.system_web_index, SYSTEM_WEB_ITEMS.len()),
             Page::RfDlsLibrary => (&mut self.rf_dls_library_index, RF_DLS_LIBRARIES.len()),
             Page::RfDlsPlay if self.filtered_sounds().is_empty() => return,
@@ -1141,7 +1730,16 @@ impl Menu {
             | Page::ProgramEditorPage
             | Page::ProgramEditorField
             | Page::ProgramEditorSound
-            | Page::SystemWebPairing => return,
+            | Page::SystemWebPairing
+            | Page::SystemWifi
+            | Page::SystemWifiNetworks
+            | Page::SystemWifiKnown
+            | Page::SystemWifiKnownActions
+            | Page::SystemWifiDiscovered
+            | Page::SystemWifiDiscoveredActions
+            | Page::SystemWifiPassword
+            | Page::SystemWifiBusy
+            | Page::SystemWifiResult => return,
         };
         *selection = ((*selection as isize + delta).rem_euclid(len as isize)) as usize;
     }
@@ -2663,6 +3261,12 @@ fn program_name_editor(name: &str) -> TextEditor {
     editor
 }
 
+fn wifi_password_editor() -> SecretEditor {
+    let mut editor = SecretEditor::new("system-wifi-password", "PASSWORD", 64);
+    editor.set_focused(true);
+    editor
+}
+
 fn unsaved_changes_dialog() -> ConfirmationDialog {
     let mut dialog =
         ConfirmationDialog::new("rf-dls-unsaved", "SAVE CHANGES?", ["SAVE", "DISCARD"]);
@@ -3873,5 +4477,140 @@ mod tests {
 
         menu.apply(Action::Back);
         assert_eq!(menu.render().line_1.trim(), "WEB INTERFACE");
+    }
+
+    #[test]
+    fn wifi_menu_groups_known_networks_and_exposes_profile_actions() {
+        let mut menu = Menu::default();
+        menu.sync_wifi_settings(WifiSystemSettings {
+            available: true,
+            enabled: true,
+            connected: true,
+            ssid: Some("PHONE HOTSPOT".into()),
+            signal_percent: Some(82),
+            saved_networks: vec![
+                SavedWifiNetwork {
+                    id: "wifi-phone".into(),
+                    name: "Phone".into(),
+                    ssid: Some("PHONE HOTSPOT".into()),
+                    active: true,
+                },
+                SavedWifiNetwork {
+                    id: "wifi-home".into(),
+                    name: "Home".into(),
+                    ssid: Some("HOME".into()),
+                    active: false,
+                },
+            ],
+        });
+
+        menu.apply(Action::Previous);
+        menu.apply(Action::Select);
+        menu.apply(Action::Previous);
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1, "WEB INTERFACE");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "WI-FI");
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1, "STATUS");
+        assert_eq!(menu.render().line_2, "PHONE HOTSPOT 82%");
+
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button1);
+        assert_eq!(menu.render().line_1, "KNOWN");
+        assert_eq!(menu.render().line_2, "2 SAVED");
+        menu.apply_input(Input::Button1);
+        assert_eq!(menu.render().line_1, "PHONE HOTSPOT");
+        assert_eq!(menu.render().line_2, "CONNECTED");
+        menu.apply_input(Input::Button3);
+        assert_eq!(menu.render().line_1, "HOME");
+        menu.apply_input(Input::Button1);
+        assert_eq!(menu.render().line_1, "CONNECT");
+        menu.apply_input(Input::Button1);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::ActivateSavedWifi {
+                connection_id: "wifi-home".into()
+            })
+        );
+
+        menu.apply_input(Input::Button4);
+        menu.apply_input(Input::Button4);
+        menu.apply_input(Input::Button4);
+        menu.apply_input(Input::Button3);
+        assert_eq!(menu.render().line_1, "RADIO");
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button3);
+        assert_eq!(menu.render().line_2, "[OFF]");
+        menu.apply_input(Input::Button1);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetWifiEnabled { enabled: false })
+        );
+    }
+
+    #[test]
+    fn discovered_secured_network_requests_a_redacted_password() {
+        let mut menu = Menu::default();
+        menu.sync_wifi_settings(WifiSystemSettings {
+            available: true,
+            enabled: true,
+            connected: false,
+            ssid: None,
+            signal_percent: None,
+            saved_networks: vec![SavedWifiNetwork {
+                id: "known".into(),
+                name: "Known".into(),
+                ssid: Some("KNOWN".into()),
+                active: false,
+            }],
+        });
+
+        menu.apply(Action::Previous);
+        menu.apply(Action::Select);
+        menu.apply(Action::Previous);
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button1);
+        assert_eq!(menu.take_command(), Some(MenuCommand::ScanWifi));
+
+        menu.sync_discovered_wifi(vec![
+            DiscoveredWifiNetwork {
+                ssid: "KNOWN".into(),
+                signal_percent: 99,
+                secured: true,
+            },
+            DiscoveredWifiNetwork {
+                ssid: "PHONE NEW".into(),
+                signal_percent: 75,
+                secured: true,
+            },
+        ]);
+        assert_eq!(menu.render().line_1, "PHONE NEW");
+        assert_eq!(menu.render().line_2, "75% SECURED");
+        menu.apply_input(Input::Button1);
+        assert_eq!(menu.render().line_1, "CONNECT");
+        menu.apply_input(Input::Button1);
+        assert_eq!(menu.render().line_1.trim(), "PASSWORD");
+        assert_eq!(menu.render().line_2.trim(), "PRESS OK");
+
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button3Long);
+        assert!(menu.render().line_2.contains("*[A]"));
+        menu.apply_input(Input::Button1);
+        let Some(MenuCommand::ConnectDiscoveredWifi {
+            ssid,
+            passphrase: Some(passphrase),
+        }) = menu.take_command()
+        else {
+            panic!("expected discovered Wi-Fi connection command");
+        };
+        assert_eq!(ssid, "PHONE NEW");
+        assert_eq!(passphrase.expose(), "AA");
+        assert!(!format!("{passphrase:?}").contains("AA"));
     }
 }

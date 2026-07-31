@@ -2,6 +2,8 @@ use anyhow::{Context, Result, bail};
 use rackforge_core::{LoadedPlugin, PluginPackage, PluginStorage};
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{ParameterKind, PluginKind, ProgramDocument};
+#[cfg(target_os = "linux")]
+use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -30,6 +32,7 @@ fn run() -> Result<()> {
             )
         }
         "live" => run_live(&arguments[1..]),
+        "resume" if arguments.len() == 2 => resume(Path::new(&arguments[1])),
         "plugin-init" if arguments.len() == 3 => {
             init_plugin(Path::new(&arguments[1]), &arguments[2])
         }
@@ -44,10 +47,60 @@ fn run() -> Result<()> {
              [--preset ID] [--data-root DIRECTORY]\n  \
              rackforge-core live PACKAGE [--library FILE] [--resource ID=PATH]... \
              [--preset ID] [--data-root DIRECTORY]\n  \
+             rackforge-core resume STARTUP_CONFIG\n  \
              rackforge-core plugin-init DATA_ROOT PLUGIN_ID\n  \
              rackforge-core program-save DATA_ROOT RELATIVE_PATH DOCUMENT"
         ),
     }
+}
+
+#[cfg(target_os = "linux")]
+const AUDIO_STARTUP_SCHEMA_VERSION: u32 = 1;
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AudioStartupConfig {
+    schema_version: u32,
+    package: PathBuf,
+    #[serde(default)]
+    resources: BTreeMap<String, PathBuf>,
+    #[serde(default)]
+    preset: Option<String>,
+    data_root: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+fn resume(path: &Path) -> Result<()> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading audio startup config {}", path.display()))?;
+    let config: AudioStartupConfig = toml::from_str(&text)
+        .with_context(|| format!("parsing audio startup config {}", path.display()))?;
+    if config.schema_version != AUDIO_STARTUP_SCHEMA_VERSION {
+        bail!(
+            "unsupported audio startup schema {} in {}",
+            config.schema_version,
+            path.display()
+        );
+    }
+    if !config.package.is_absolute() || !config.data_root.is_absolute() {
+        bail!("audio startup package and data_root must be absolute paths");
+    }
+    if config.resources.values().any(|path| !path.is_absolute()) {
+        bail!("audio startup resource paths must be absolute");
+    }
+    rackforge_core::live::run(rackforge_core::live::LiveConfig {
+        package: config.package,
+        binary: None,
+        resources: config.resources,
+        preset: config.preset,
+        data_root: Some(config.data_root),
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn resume(_path: &Path) -> Result<()> {
+    bail!("rackforge-core resume is available on Linux only")
 }
 
 fn init_plugin(data_root: &Path, plugin_id: &str) -> Result<()> {

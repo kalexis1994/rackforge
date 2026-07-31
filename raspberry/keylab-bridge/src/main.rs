@@ -16,6 +16,11 @@ use rackforge_controller_package::{
     CONTROLLER_DRIVER_API_VERSION, PROCESS_DRIVER_PROTOCOL_VERSION, ProcessDriverInfo,
 };
 #[cfg(target_os = "linux")]
+use rackforge_platform_api::{
+    PLATFORM_CONTROL_SCHEMA_VERSION, PlatformControlPayload, PlatformControlRequest,
+    PlatformControlResponse, PlatformOperation, WifiConnectionId, WifiPassphrase, WifiSsid,
+};
+#[cfg(target_os = "linux")]
 use rackforge_session_api::{
     ClientId, CommandEnvelope, EventEnvelope, InstanceId, PluginInstanceState, SessionCommand,
     SessionEvent, SessionState, SurfaceActivationRequest, SurfaceMode,
@@ -59,10 +64,36 @@ const ACQUIRE_RETRY_DELAY: Duration = Duration::from_secs(2);
 const LONG_PRESS_THRESHOLD: Duration = Duration::from_millis(650);
 const HOME_CHORD_SIMULTANEITY: Duration = Duration::from_millis(250);
 const HOST_CONTROL_HEADER_TIMEOUT: Duration = Duration::from_millis(1_500);
+const SPINNER_FRAME_INTERVAL: Duration = Duration::from_millis(125);
 #[cfg(target_os = "linux")]
 const WEB_CONTROL_SOCKET_NAME: &str = "web-control.sock";
 #[cfg(target_os = "linux")]
+const PLATFORM_CONTROL_SOCKET: &str = "/run/rackforge/platform-control.sock";
+#[cfg(target_os = "linux")]
 static NEXT_CONTROL_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
+
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+enum WifiTaskSuccess {
+    Scan {
+        networks: Vec<menu::DiscoveredWifiNetwork>,
+        settings: menu::WifiSystemSettings,
+    },
+    Changed {
+        message: &'static str,
+        settings: menu::WifiSystemSettings,
+    },
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct WifiTask {
+    receiver: Receiver<Result<WifiTaskSuccess, String>>,
+}
+
+#[cfg(not(target_os = "linux"))]
+#[derive(Debug)]
+struct WifiTask;
 
 #[derive(Debug)]
 struct Cli {
@@ -989,6 +1020,8 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let mut missed_acks = 0_u8;
         let mut button_gestures = ButtonGestureTracker::default();
         let mut transient_header = TransientHeader::default();
+        let mut wifi_task: Option<WifiTask> = None;
+        let mut next_spinner_frame = Instant::now();
         'surface: loop {
             if control_socket_generation() != control_generation {
                 eprintln!("Core cambió; cerrando MIDI para renovar los controles reservados...");
@@ -1070,7 +1103,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                             }
                         }
                     }
-                    match apply_pending_menu_command(&mut menu) {
+                    match apply_pending_menu_command(&mut menu, &mut wifi_task) {
                         Ok(true) => {
                             messages = render_menu_messages(&menu)?;
                             if let Err(error) = send_menu_with_header_override(
@@ -1106,7 +1139,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                         break 'surface;
                     }
                 }
-                match apply_pending_menu_command(&mut menu) {
+                match apply_pending_menu_command(&mut menu, &mut wifi_task) {
                     Ok(true) => {
                         messages = render_menu_messages(&menu)?;
                         if let Err(error) = send_menu_with_header_override(
@@ -1127,6 +1160,26 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
             }
 
             let now = Instant::now();
+            if poll_wifi_task(&mut wifi_task, &mut menu) {
+                messages = render_menu_messages(&menu)?;
+                if let Err(error) = send_menu_with_header_override(
+                    &mut session,
+                    &messages,
+                    transient_header.visible_message(now),
+                ) {
+                    eprintln!("Could not show Wi-Fi operation result: {error}");
+                    break;
+                }
+            } else if wifi_task.is_some() && now >= next_spinner_frame {
+                next_spinner_frame = now + SPINNER_FRAME_INTERVAL;
+                if menu.advance_wifi_spinner() {
+                    messages = render_menu_messages(&menu)?;
+                    if let Err(error) = session.send(&messages.body) {
+                        eprintln!("Could not advance async loader: {error}");
+                        break;
+                    }
+                }
+            }
             if transient_header.expire(now) {
                 if let Err(error) = session.send(&messages.header) {
                     eprintln!("No se pudo restaurar el header del menú: {error}");
@@ -1151,10 +1204,12 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                             }
                         }
                     }
-                    if let Err(error) = refresh_live_catalog(&mut menu) {
-                        eprintln!("No se pudo refrescar el catálogo LIVE: {error}");
-                    } else {
-                        messages = render_menu_messages(&menu)?;
+                    if wifi_task.is_none() {
+                        if let Err(error) = refresh_live_catalog(&mut menu) {
+                            eprintln!("No se pudo refrescar el catálogo LIVE: {error}");
+                        } else {
+                            messages = render_menu_messages(&menu)?;
+                        }
                     }
                     if let Err(error) = send_menu_with_header_override(
                         &mut session,
@@ -1386,6 +1441,9 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
     if let Err(error) = refresh_web_settings(menu) {
         eprintln!("No se pudo refrescar CONFIG > SYSTEM > WEB: {error}");
     }
+    if let Err(error) = refresh_wifi_settings(menu) {
+        eprintln!("Could not refresh CONFIG > SYSTEM > WI-FI: {error}");
+    }
     let snapshot = live_snapshot()?;
     menu.sync_active_mode(match snapshot.active_mode {
         SurfaceMode::Live => menu::ActiveMode::Live,
@@ -1420,6 +1478,101 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
         selected.as_deref(),
     );
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn refresh_wifi_settings(menu: &mut menu::Menu) -> Result<(), String> {
+    menu.sync_wifi_settings(load_wifi_settings()?);
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn load_wifi_settings() -> Result<menu::WifiSystemSettings, String> {
+    let status = match platform_control_request(PlatformOperation::GetWifiStatus)? {
+        PlatformControlPayload::WifiStatus(status) => status,
+        _ => return Err("platform host returned an unexpected Wi-Fi status".into()),
+    };
+    let saved = match platform_control_request(PlatformOperation::ListSavedWifi)? {
+        PlatformControlPayload::SavedWifi(saved) => saved,
+        _ => return Err("platform host returned an unexpected saved-network list".into()),
+    };
+    Ok(menu::WifiSystemSettings {
+        available: true,
+        enabled: status.enabled,
+        connected: status.connected,
+        ssid: status.ssid,
+        signal_percent: status.signal_percent,
+        saved_networks: saved
+            .into_iter()
+            .map(|connection| menu::SavedWifiNetwork {
+                id: connection.id.to_string(),
+                name: connection.name,
+                ssid: connection.ssid,
+                active: connection.active,
+            })
+            .collect(),
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn platform_control_request(
+    operation: PlatformOperation,
+) -> Result<PlatformControlPayload, String> {
+    let long_operation = matches!(
+        &operation,
+        PlatformOperation::ScanWifi
+            | PlatformOperation::ActivateSavedWifi { .. }
+            | PlatformOperation::ForgetSavedWifi { .. }
+            | PlatformOperation::ConnectVisibleWifi { .. }
+    );
+    let request_id = "keylab-platform";
+    let request = PlatformControlRequest {
+        schema_version: PLATFORM_CONTROL_SCHEMA_VERSION,
+        request_id: request_id.into(),
+        operation,
+    };
+    request.validate().map_err(|error| error.to_string())?;
+    let path = env::var_os("RACKFORGE_PLATFORM_SOCKET")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(PLATFORM_CONTROL_SOCKET));
+    let mut stream =
+        UnixStream::connect(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let timeout = if long_operation {
+        Duration::from_secs(45)
+    } else {
+        Duration::from_secs(5)
+    };
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    serde_json::to_writer(&mut stream, &request).map_err(|error| error.to_string())?;
+    stream.write_all(b"\n").map_err(|error| error.to_string())?;
+    stream
+        .shutdown(Shutdown::Write)
+        .map_err(|error| error.to_string())?;
+    let mut response = String::new();
+    stream
+        .take(64 * 1024)
+        .read_to_string(&mut response)
+        .map_err(|error| error.to_string())?;
+    match serde_json::from_str::<PlatformControlResponse>(&response)
+        .map_err(|error| format!("invalid platform response: {error}"))?
+    {
+        PlatformControlResponse::Ok {
+            schema_version,
+            request_id: response_id,
+            payload,
+        } if schema_version == PLATFORM_CONTROL_SCHEMA_VERSION && response_id == request_id => {
+            Ok(payload)
+        }
+        PlatformControlResponse::Ok { .. } => Err("platform response identity mismatch".into()),
+        PlatformControlResponse::Error { code, message, .. } => {
+            Err(format!("platform {code:?}: {message}"))
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1512,7 +1665,10 @@ fn keep_audition_alive(_lease_id: u64) -> Result<(), String> {
 }
 
 #[cfg(target_os = "linux")]
-fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
+fn apply_pending_menu_command(
+    menu: &mut menu::Menu,
+    wifi_task: &mut Option<WifiTask>,
+) -> Result<bool, String> {
     let Some(command) = menu.take_command() else {
         return Ok(false);
     };
@@ -1681,6 +1837,70 @@ fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
             println!("WEB_PAIRING_STARTED");
             Ok(true)
         }
+        menu::MenuCommand::ActivateSavedWifi { connection_id } => {
+            let connection_id =
+                WifiConnectionId::new(connection_id).map_err(|error| error.to_string())?;
+            start_wifi_change(
+                wifi_task,
+                menu,
+                "CONNECTING",
+                "CONNECTED",
+                PlatformOperation::ActivateSavedWifi { connection_id },
+            )?;
+            Ok(true)
+        }
+        menu::MenuCommand::ForgetSavedWifi { connection_id } => {
+            let connection_id =
+                WifiConnectionId::new(connection_id).map_err(|error| error.to_string())?;
+            start_wifi_change(
+                wifi_task,
+                menu,
+                "FORGETTING",
+                "FORGOTTEN",
+                PlatformOperation::ForgetSavedWifi { connection_id },
+            )?;
+            Ok(true)
+        }
+        menu::MenuCommand::ConnectDiscoveredWifi { ssid, passphrase } => {
+            let ssid = WifiSsid::new(ssid).map_err(|error| error.to_string())?;
+            let passphrase = passphrase
+                .as_ref()
+                .map(|secret| WifiPassphrase::new(secret.expose()))
+                .transpose()
+                .map_err(|error| error.to_string())?;
+            start_wifi_change(
+                wifi_task,
+                menu,
+                "CONNECTING",
+                "CONNECTED",
+                PlatformOperation::ConnectVisibleWifi { ssid, passphrase },
+            )?;
+            Ok(true)
+        }
+        menu::MenuCommand::DisconnectWifi => {
+            start_wifi_change(
+                wifi_task,
+                menu,
+                "DISCONNECTING",
+                "DISCONNECTED",
+                PlatformOperation::DisconnectWifi,
+            )?;
+            Ok(true)
+        }
+        menu::MenuCommand::SetWifiEnabled { enabled } => {
+            start_wifi_change(
+                wifi_task,
+                menu,
+                "UPDATING RADIO",
+                if enabled { "RADIO ON" } else { "RADIO OFF" },
+                PlatformOperation::SetWifiEnabled { enabled },
+            )?;
+            Ok(true)
+        }
+        menu::MenuCommand::ScanWifi => {
+            start_wifi_scan(wifi_task, menu)?;
+            Ok(true)
+        }
         menu::MenuCommand::ForceHome { cancel_draft_id } => {
             if let Some(draft_id) = cancel_draft_id
                 && let Err(error) =
@@ -1694,6 +1914,115 @@ fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
             Ok(true)
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn wifi_error_summary(error: &str) -> &'static str {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("password") || lower.contains("secret") || lower.contains("authentication") {
+        "AUTH FAILED"
+    } else if lower.contains("not found") {
+        "NOT FOUND"
+    } else if lower.contains("timeout") || lower.contains("timed out") {
+        "TIMEOUT"
+    } else {
+        "CONNECTION ERROR"
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn start_wifi_change(
+    task: &mut Option<WifiTask>,
+    menu: &mut menu::Menu,
+    busy_label: &'static str,
+    success_message: &'static str,
+    operation: PlatformOperation,
+) -> Result<(), String> {
+    if task.is_some() {
+        return Err("a Wi-Fi operation is already running".into());
+    }
+    let (sender, receiver) = mpsc::channel();
+    menu.begin_wifi_busy(busy_label);
+    *task = Some(WifiTask { receiver });
+    thread::spawn(move || {
+        let result = platform_control_request(operation)
+            .and_then(|_| load_wifi_settings())
+            .map(|settings| WifiTaskSuccess::Changed {
+                message: success_message,
+                settings,
+            });
+        let _ = sender.send(result);
+    });
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn start_wifi_scan(task: &mut Option<WifiTask>, menu: &mut menu::Menu) -> Result<(), String> {
+    if task.is_some() {
+        return Err("a Wi-Fi operation is already running".into());
+    }
+    let (sender, receiver) = mpsc::channel();
+    menu.begin_wifi_busy("SCANNING");
+    *task = Some(WifiTask { receiver });
+    thread::spawn(move || {
+        let result = platform_control_request(PlatformOperation::ScanWifi).and_then(|payload| {
+            let PlatformControlPayload::VisibleWifi(networks) = payload else {
+                return Err("platform host returned an unexpected Wi-Fi scan".into());
+            };
+            let networks = networks
+                .into_iter()
+                .map(|network| menu::DiscoveredWifiNetwork {
+                    ssid: network.ssid,
+                    signal_percent: network.signal_percent,
+                    secured: network.secured,
+                })
+                .collect();
+            Ok(WifiTaskSuccess::Scan {
+                networks,
+                settings: load_wifi_settings()?,
+            })
+        });
+        let _ = sender.send(result);
+    });
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn poll_wifi_task(task: &mut Option<WifiTask>, menu: &mut menu::Menu) -> bool {
+    let Some(active) = task.as_ref() else {
+        return false;
+    };
+    let result = match active.receiver.try_recv() {
+        Ok(result) => result,
+        Err(mpsc::TryRecvError::Empty) => return false,
+        Err(mpsc::TryRecvError::Disconnected) => {
+            Err("Wi-Fi worker stopped without a result".into())
+        }
+    };
+    *task = None;
+    match result {
+        Ok(WifiTaskSuccess::Scan { networks, settings }) => {
+            let count = networks.len();
+            menu.sync_wifi_settings(settings);
+            menu.complete_wifi_scan(networks);
+            println!("WIFI_SCAN_COMPLETED count={count}");
+        }
+        Ok(WifiTaskSuccess::Changed { message, settings }) => {
+            menu.sync_wifi_settings(settings);
+            menu.complete_wifi_result(true, message);
+            println!("WIFI_OPERATION_COMPLETED result={message:?}");
+        }
+        Err(error) => {
+            menu.complete_wifi_result(false, wifi_error_summary(&error));
+            eprintln!("WIFI_OPERATION_FAILED: {error}");
+        }
+    }
+    true
+}
+
+#[cfg(not(target_os = "linux"))]
+fn poll_wifi_task(_task: &mut Option<WifiTask>, _menu: &mut menu::Menu) -> bool {
+    false
 }
 
 #[cfg(target_os = "linux")]
@@ -1725,7 +2054,10 @@ fn return_to_active_mode(
 }
 
 #[cfg(not(target_os = "linux"))]
-fn apply_pending_menu_command(menu: &mut menu::Menu) -> Result<bool, String> {
+fn apply_pending_menu_command(
+    menu: &mut menu::Menu,
+    _wifi_task: &mut Option<WifiTask>,
+) -> Result<bool, String> {
     match menu.take_command() {
         Some(_) => Ok(true),
         None => Ok(false),
@@ -1933,7 +2265,15 @@ fn verify_daw_ack(
 }
 
 fn wait_for_keylab_usb(expected: &str, duration: Duration) -> bool {
-    let deadline = Instant::now() + duration;
+    let already_stable = keylab_usb_age().unwrap_or_default();
+    let remaining = duration.saturating_sub(already_stable);
+    if !remaining.is_zero() {
+        println!(
+            "Protección USB: faltan {:.2}s de estabilidad del KeyLab...",
+            remaining.as_secs_f64()
+        );
+    }
+    let deadline = Instant::now() + remaining;
     while Instant::now() < deadline {
         if keylab_usb_generation().as_deref() != Some(expected) {
             return false;
@@ -1941,6 +2281,60 @@ fn wait_for_keylab_usb(expected: &str, duration: Duration) -> bool {
         thread::sleep(Duration::from_millis(250));
     }
     true
+}
+
+#[cfg(target_os = "linux")]
+fn keylab_usb_age() -> Option<Duration> {
+    let devices = fs::read_dir("/sys/bus/usb/devices").ok()?;
+    for entry in devices.flatten() {
+        let path = entry.path();
+        let vendor = fs::read_to_string(path.join("idVendor")).ok();
+        let product = fs::read_to_string(path.join("idProduct")).ok();
+        if vendor.as_deref().map(str::trim) != Some("1c75")
+            || product.as_deref().map(str::trim) != Some("028c")
+        {
+            continue;
+        }
+        let busnum = fs::read_to_string(path.join("busnum"))
+            .ok()?
+            .trim()
+            .parse::<u64>()
+            .ok()?;
+        let devnum = fs::read_to_string(path.join("devnum"))
+            .ok()?
+            .trim()
+            .parse::<u64>()
+            .ok()?;
+        let minor = busnum.checked_sub(1)?.checked_mul(128)? + devnum.checked_sub(1)?;
+        let udev_data = fs::read_to_string(format!("/run/udev/data/c189:{minor}")).ok()?;
+        let initialized = parse_udev_initialized(&udev_data)?;
+        return boot_uptime()?.checked_sub(initialized);
+    }
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+fn keylab_usb_age() -> Option<Duration> {
+    None
+}
+
+fn parse_udev_initialized(data: &str) -> Option<Duration> {
+    let micros = data
+        .lines()
+        .find_map(|line| line.strip_prefix("I:"))?
+        .parse::<u64>()
+        .ok()?;
+    Some(Duration::from_micros(micros))
+}
+
+#[cfg(target_os = "linux")]
+fn boot_uptime() -> Option<Duration> {
+    let uptime = fs::read_to_string("/proc/uptime").ok()?;
+    let seconds = uptime.split_whitespace().next()?.parse::<f64>().ok()?;
+    if !seconds.is_finite() || seconds.is_sign_negative() {
+        return None;
+    }
+    Some(Duration::from_secs_f64(seconds))
 }
 
 #[cfg(target_os = "linux")]
@@ -2026,6 +2420,16 @@ fn run_led_demo(midi: MidiOutput, port: &PortInfo, execute: bool) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_udev_usb_initialization_timestamp() {
+        assert_eq!(
+            parse_udev_initialized("I:1828193\nE:ID_BUS=usb\n"),
+            Some(Duration::from_micros(1_828_193))
+        );
+        assert_eq!(parse_udev_initialized("E:ID_BUS=usb\n"), None);
+        assert_eq!(parse_udev_initialized("I:not-a-number\n"), None);
+    }
 
     #[test]
     fn button_gestures_resolve_short_and_long_without_double_firing() {

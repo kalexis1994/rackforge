@@ -1,6 +1,6 @@
 [package]
 name = "rackforge-controller-arturia-keylab-essential-mk3"
-version = "0.2.4"
+version = "0.2.8"
 edition = "2024"
 description = "RackForge controller driver for the Arturia KeyLab Essential mk3"
 license = "GPL-2.0-or-later"
@@ -15,6 +15,7 @@ rackforge-control-api = { path = "../runtime/rackforge-control-api" }
 rackforge-controller-api = { path = "../runtime/rackforge-controller-api" }
 rackforge-controller-package = { path = "../runtime/rackforge-controller-package" }
 rackforge-session-api = { path = "../runtime/rackforge-session-api" }
+rackforge-platform-api = { path = "../runtime/rackforge-platform-api" }
 rackforge-surface-runtime = { path = "../runtime/rackforge-surface-runtime" }
 midir = "0.11.0"
 serde_json = "1"

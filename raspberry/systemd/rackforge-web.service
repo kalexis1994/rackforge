@@ -1,7 +1,6 @@
 [Unit]
 Description=RackForge local web interface
-After=local-fs.target network.target
-Wants=network.target
+After=local-fs.target
 
 [Service]
 Type=simple

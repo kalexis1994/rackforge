@@ -11,10 +11,12 @@ rackforge-audio-api = { path = "../rackforge-audio-api" }
 rackforge-plugin-api = { path = "../rackforge-plugin-api" }
 rackforge-control-api = { path = "../rackforge-control-api" }
 rackforge-midi-api = { path = "../rackforge-midi-api" }
+rackforge-performance-api = { path = "../rackforge-performance-api" }
 rackforge-session-api = { path = "../rackforge-session-api" }
 libloading.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 toml.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]

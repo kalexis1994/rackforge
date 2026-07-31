@@ -7,6 +7,12 @@ use rackforge_audio_api::{
     AudioOutputState, AudioSampleFormat,
 };
 use rackforge_controller_api::LITTLE_TEXT_COLUMNS;
+use rackforge_performance_api::{
+    LibraryRevision, LiveBrowseMode, LiveLocation, LivePerformanceState, MidiOutputRoute,
+    PERFORMANCE_SCHEMA_VERSION, PerformanceEdit, PerformanceLibrary, PerformanceSnapshot,
+    RackDefinition, RackId, RackSlot, RackSlotId, SetlistDefinition, SetlistEntry, SetlistEntryId,
+    SetlistId, SongDefinition, SongId, SongPart, SongPartId,
+};
 use rackforge_program_api::{
     ProgramEditorField, ProgramEditorFieldKind, ProgramEditorPage, ProgramEditorValue,
 };
@@ -146,6 +152,19 @@ pub enum MenuCommand {
     SetActiveMode {
         mode: ActiveMode,
     },
+    SetLiveBrowseMode {
+        mode: LiveBrowseMode,
+    },
+    ActivateLiveTarget {
+        location: LiveLocation,
+    },
+    PreviewRack {
+        rack: RackDefinition,
+    },
+    EditPerformance {
+        expected_revision: LibraryRevision,
+        edit: PerformanceEdit,
+    },
     SelectSound {
         id: String,
     },
@@ -284,8 +303,42 @@ fn standard_footer(pressed: Option<usize>) -> [FooterButton; 4] {
 enum Page {
     Home,
     Live,
+    LiveRacks,
+    LiveSongs,
+    LiveSongParts,
+    LiveSetlists,
+    LiveSetlistEntries,
     Play,
     Config,
+    ConfigRacks,
+    ConfigRackEditor,
+    ConfigRackName,
+    ConfigRackSlots,
+    ConfigRackSlotEditor,
+    ConfigRackSlotName,
+    ConfigRackSlotPlugin,
+    ConfigRackSlotMidiChannel,
+    ConfigRackSlotMidiOutput,
+    ConfigRackSlotAudioOutput,
+    ConfigRackSlotLevel,
+    ConfigRackSlotPan,
+    ConfigSongs,
+    ConfigSongEditor,
+    ConfigSongName,
+    ConfigSongParts,
+    ConfigSongPartEditor,
+    ConfigSongPartName,
+    ConfigSongPartRack,
+    ConfigSetlists,
+    ConfigSetlistEditor,
+    ConfigSetlistName,
+    ConfigSetlistEntries,
+    ConfigSetlistEntryEditor,
+    ConfigSetlistEntrySong,
+    PerformanceUnsaved,
+    PerformanceDelete,
+    PerformanceBusy,
+    PerformanceResult,
     Plugins,
     System,
     Audio,
@@ -327,10 +380,58 @@ enum Page {
     ProgramEditorSound,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum RfDlsPlayContext {
+    #[default]
+    Standalone,
+    RackSlot,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingProgramExit {
     return_page: Page,
     destination: ProgramExitDestination,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum PerformanceDraft {
+    Rack(RackDefinition),
+    Song(SongDefinition),
+    Setlist(SetlistDefinition),
+}
+
+impl PerformanceDraft {
+    fn name(&self) -> &str {
+        match self {
+            Self::Rack(value) => &value.name,
+            Self::Song(value) => &value.name,
+            Self::Setlist(value) => &value.name,
+        }
+    }
+
+    fn enabled(&self) -> bool {
+        match self {
+            Self::Rack(value) => value.enabled,
+            Self::Song(value) => value.enabled,
+            Self::Setlist(value) => value.enabled,
+        }
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        match self {
+            Self::Rack(value) => value.enabled = enabled,
+            Self::Song(value) => value.enabled = enabled,
+            Self::Setlist(value) => value.enabled = enabled,
+        }
+    }
+
+    fn into_edit(self) -> PerformanceEdit {
+        match self {
+            Self::Rack(rack) => PerformanceEdit::PutRack { rack },
+            Self::Song(song) => PerformanceEdit::PutSong { song },
+            Self::Setlist(setlist) => PerformanceEdit::PutSetlist { setlist },
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -339,6 +440,27 @@ pub struct Menu {
     active_mode: ActiveMode,
     home_index: usize,
     live_index: usize,
+    live_rack_index: usize,
+    live_song_index: usize,
+    live_song_part_index: usize,
+    live_setlist_index: usize,
+    live_setlist_entry_index: usize,
+    performance_library: PerformanceLibrary,
+    performance_revision: LibraryRevision,
+    live_performance: LivePerformanceState,
+    performance_list_index: usize,
+    performance_editor_index: usize,
+    performance_child_index: usize,
+    performance_child_editor_index: usize,
+    performance_value_index: usize,
+    performance_draft: Option<PerformanceDraft>,
+    performance_dirty: bool,
+    performance_name: TextEditor,
+    performance_child_name: TextEditor,
+    performance_confirm: ConfirmationDialog,
+    performance_spinner: Spinner,
+    performance_result: Option<(bool, String)>,
+    performance_return_page: Page,
     play_index: usize,
     config_index: usize,
     plugin_index: usize,
@@ -367,6 +489,7 @@ pub struct Menu {
     audio_result: Option<(bool, String)>,
     rf_dls_library_index: usize,
     rf_dls_play_index: usize,
+    rf_dls_play_context: RfDlsPlayContext,
     rf_dls_custom_index: usize,
     rf_dls_section_index: usize,
     rf_dls_layer_index: usize,
@@ -397,17 +520,39 @@ pub struct Menu {
 
 const HOME_ITEMS: [&str; 3] = ["LIVE", "PLAY", "CONFIG"];
 const HOME_HEADER: &str = "RACK FORGE";
-const LIVE_ITEMS: [&str; 4] = ["PIANO 1", "WARM PAD", "DLS STRINGS", "M1 HOUSE"];
-const LIVE_DETAILS: [&str; 4] = ["DLS piano", "Layered pad", "RF-DLS bank", "Korg M1"];
+const LIVE_ITEMS: [&str; 3] = ["RACK", "SONG", "SETLIST"];
+const LIVE_DETAILS: [&str; 3] = [
+    "All configured Racks",
+    "Songs and parts",
+    "Performance order",
+];
 const PLAY_ITEMS: [&str; 1] = ["RF-DLS"];
 const PLAY_DETAILS: [&str; 1] = ["DLS banks"];
-const CONFIG_ITEMS: [&str; 4] = ["PLUGINS", "SETLISTS", "AUDIO", "SYSTEM"];
-const CONFIG_DETAILS: [&str; 4] = [
-    "Plugin settings",
+const CONFIG_ITEMS: [&str; 6] = ["RACKS", "SONGS", "SETLISTS", "PLUGINS", "AUDIO", "SYSTEM"];
+const CONFIG_DETAILS: [&str; 6] = [
+    "Playable Racks",
+    "Arrange Parts",
     "Performance order",
+    "Plugin settings",
     "Output settings",
     "RackForge settings",
 ];
+const RACK_EDITOR_ITEMS: [&str; 5] = ["NAME", "SLOTS", "ENABLED", "SAVE", "DELETE"];
+const RACK_SLOT_EDITOR_ITEMS: [&str; 9] = [
+    "NAME",
+    "PLUGIN",
+    "MIDI CH",
+    "MIDI OUT",
+    "AUDIO OUT",
+    "LEVEL",
+    "PAN",
+    "ENABLED",
+    "DELETE",
+];
+const SONG_EDITOR_ITEMS: [&str; 5] = ["NAME", "PARTS", "ENABLED", "SAVE", "DELETE"];
+const SETLIST_EDITOR_ITEMS: [&str; 5] = ["NAME", "SONGS", "ENABLED", "SAVE", "DELETE"];
+const PART_EDITOR_ITEMS: [&str; 5] = ["NAME", "RACK", "MOVE LEFT", "MOVE RIGHT", "DELETE"];
+const ENTRY_EDITOR_ITEMS: [&str; 4] = ["SONG", "MOVE LEFT", "MOVE RIGHT", "DELETE"];
 const PLUGIN_ITEMS: [&str; 1] = ["RF-DLS"];
 const PLUGIN_DETAILS: [&str; 1] = [" "];
 const SYSTEM_WEB_ITEM: (&str, &str) = ("WEB INTERFACE", "Browser & pairing");
@@ -467,6 +612,31 @@ impl Default for Menu {
             active_mode: ActiveMode::Live,
             home_index: 0,
             live_index: 0,
+            live_rack_index: 0,
+            live_song_index: 0,
+            live_song_part_index: 0,
+            live_setlist_index: 0,
+            live_setlist_entry_index: 0,
+            performance_library: PerformanceLibrary::empty(),
+            performance_revision: LibraryRevision::new("0".repeat(64)).unwrap(),
+            live_performance: LivePerformanceState::default(),
+            performance_list_index: 0,
+            performance_editor_index: 0,
+            performance_child_index: 0,
+            performance_child_editor_index: 0,
+            performance_value_index: 0,
+            performance_draft: None,
+            performance_dirty: false,
+            performance_name: performance_text_editor("performance-name", "NAME", "NEW ITEM"),
+            performance_child_name: performance_text_editor(
+                "performance-child-name",
+                "NAME",
+                "MAIN",
+            ),
+            performance_confirm: performance_confirmation(),
+            performance_spinner: Spinner::ascii("performance-loader", "SAVING", "PLEASE WAIT"),
+            performance_result: None,
+            performance_return_page: Page::Config,
             play_index: 0,
             config_index: 0,
             plugin_index: 0,
@@ -495,6 +665,7 @@ impl Default for Menu {
             audio_result: None,
             rf_dls_library_index: 0,
             rf_dls_play_index: 0,
+            rf_dls_play_context: RfDlsPlayContext::Standalone,
             rf_dls_custom_index: 0,
             rf_dls_section_index: 0,
             rf_dls_layer_index: 0,
@@ -533,6 +704,63 @@ impl Default for Menu {
 impl Menu {
     pub fn sync_active_mode(&mut self, mode: ActiveMode) {
         self.active_mode = mode;
+    }
+
+    pub fn sync_performance_snapshot(&mut self, snapshot: PerformanceSnapshot) {
+        if snapshot.validate().is_err() {
+            return;
+        }
+        self.performance_library = snapshot.library;
+        self.performance_revision = snapshot.revision;
+        self.live_performance = snapshot.live;
+        self.live_index = match self.live_performance.mode {
+            LiveBrowseMode::Rack => 0,
+            LiveBrowseMode::Song => 1,
+            LiveBrowseMode::Setlist => 2,
+        };
+
+        self.live_rack_index = match self.live_performance.rack.as_ref() {
+            Some(LiveLocation::Rack { rack_id }) => self
+                .live_racks()
+                .iter()
+                .position(|rack| &rack.id == rack_id)
+                .unwrap_or(0),
+            _ => 0,
+        };
+        if let Some(LiveLocation::Song { song_id, part_id }) = self.live_performance.song.as_ref() {
+            self.live_song_index = self
+                .live_songs()
+                .iter()
+                .position(|song| &song.id == song_id)
+                .unwrap_or(0);
+            self.live_song_part_index = self
+                .selected_live_song()
+                .and_then(|song| song.parts.iter().position(|part| &part.id == part_id))
+                .unwrap_or(0);
+        } else {
+            self.live_song_index = 0;
+            self.live_song_part_index = 0;
+        }
+        if let Some(LiveLocation::Setlist {
+            setlist_id,
+            entry_id,
+            part_id,
+        }) = self.live_performance.setlist.as_ref()
+        {
+            self.live_setlist_index = self
+                .live_setlists()
+                .iter()
+                .position(|setlist| &setlist.id == setlist_id)
+                .unwrap_or(0);
+            self.live_setlist_entry_index = self
+                .selected_setlist_parts()
+                .iter()
+                .position(|(entry, _, part)| &entry.id == entry_id && &part.id == part_id)
+                .unwrap_or(0);
+        } else {
+            self.live_setlist_index = 0;
+            self.live_setlist_entry_index = 0;
+        }
     }
 
     pub fn sync_web_settings(&mut self, settings: WebSystemSettings) {
@@ -719,6 +947,34 @@ impl Menu {
             .unwrap_or(0);
     }
 
+    fn focus_rf_dls_play_sound(&mut self, sound_id: Option<&str>) {
+        let Some((sound_id, bank)) = sound_id.and_then(|id| {
+            self.rf_dls_sounds
+                .iter()
+                .find(|sound| sound.id == id)
+                .map(|sound| (sound.id.clone(), sound.bank.clone()))
+        }) else {
+            self.rf_dls_library_index = 0;
+            self.rf_dls_play_index = 0;
+            return;
+        };
+        self.rf_dls_library_index = library_index(&bank).unwrap_or(0);
+        self.rf_dls_play_index = self
+            .filtered_sounds()
+            .iter()
+            .position(|sound| sound.id == sound_id)
+            .unwrap_or(0);
+    }
+
+    fn rf_dls_play_selected_sound_id(&self) -> Option<&str> {
+        match self.rf_dls_play_context {
+            RfDlsPlayContext::Standalone => self.rf_dls_active_sound_id.as_deref(),
+            RfDlsPlayContext::RackSlot => self
+                .focused_rack_slot()
+                .and_then(|slot| slot.plugin_state_id.as_deref()),
+        }
+    }
+
     pub fn take_command(&mut self) -> Option<MenuCommand> {
         self.pending_command.take()
     }
@@ -812,7 +1068,9 @@ impl Menu {
             });
             return;
         }
-        if self.page == Page::ProgramEditorField {
+        if self.is_performance_config_page() {
+            self.apply_performance_input(input);
+        } else if self.page == Page::ProgramEditorField {
             self.apply_generic_editor_field_input(input);
         } else if self.page == Page::ProgramEditorSound {
             if let Some(action) = input.default_navigation() {
@@ -878,12 +1136,959 @@ impl Menu {
         self.pending_command = Some(MenuCommand::BeginProgramEdit { program_id });
     }
 
+    pub fn complete_performance_edit(&mut self, result: Result<PerformanceSnapshot, String>) {
+        match result {
+            Ok(snapshot) => {
+                self.sync_performance_snapshot(snapshot);
+                self.performance_draft = None;
+                self.performance_dirty = false;
+                self.performance_result = Some((true, "SAVED".into()));
+            }
+            Err(error) => {
+                self.performance_result =
+                    Some((false, normalized_display_text(&error, "SAVE FAILED")));
+            }
+        }
+        self.page = Page::PerformanceResult;
+    }
+
+    fn is_performance_config_page(&self) -> bool {
+        matches!(
+            self.page,
+            Page::ConfigRacks
+                | Page::ConfigRackEditor
+                | Page::ConfigRackName
+                | Page::ConfigRackSlots
+                | Page::ConfigRackSlotEditor
+                | Page::ConfigRackSlotName
+                | Page::ConfigRackSlotPlugin
+                | Page::ConfigRackSlotMidiChannel
+                | Page::ConfigRackSlotMidiOutput
+                | Page::ConfigRackSlotAudioOutput
+                | Page::ConfigRackSlotLevel
+                | Page::ConfigRackSlotPan
+                | Page::ConfigSongs
+                | Page::ConfigSongEditor
+                | Page::ConfigSongName
+                | Page::ConfigSongParts
+                | Page::ConfigSongPartEditor
+                | Page::ConfigSongPartName
+                | Page::ConfigSongPartRack
+                | Page::ConfigSetlists
+                | Page::ConfigSetlistEditor
+                | Page::ConfigSetlistName
+                | Page::ConfigSetlistEntries
+                | Page::ConfigSetlistEntryEditor
+                | Page::ConfigSetlistEntrySong
+                | Page::PerformanceUnsaved
+                | Page::PerformanceDelete
+                | Page::PerformanceBusy
+                | Page::PerformanceResult
+        )
+    }
+
+    fn apply_performance_input(&mut self, input: Input) {
+        if self.page == Page::PerformanceBusy {
+            return;
+        }
+        if self.page == Page::PerformanceResult {
+            if matches!(input, Input::Button1 | Input::Button4 | Input::EncoderPress) {
+                let success = self
+                    .performance_result
+                    .as_ref()
+                    .is_some_and(|result| result.0);
+                self.performance_result = None;
+                self.page = if success {
+                    self.performance_return_page
+                } else {
+                    self.performance_editor_page()
+                };
+            }
+            return;
+        }
+        if self.page == Page::PerformanceUnsaved {
+            match self.performance_confirm.handle(input) {
+                ComponentEvent::Activated(_) if self.performance_confirm.selected() == 0 => {
+                    self.save_performance_draft();
+                }
+                ComponentEvent::Activated(_) => {
+                    self.performance_draft = None;
+                    self.performance_dirty = false;
+                    self.page = self.performance_return_page;
+                }
+                ComponentEvent::ExitRequested(_) => self.page = self.performance_editor_page(),
+                _ => {}
+            }
+            return;
+        }
+        if self.page == Page::PerformanceDelete {
+            match self.performance_confirm.handle(input) {
+                ComponentEvent::Activated(_) if self.performance_confirm.selected() == 0 => {
+                    self.delete_performance_draft();
+                }
+                ComponentEvent::Activated(_) | ComponentEvent::ExitRequested(_) => {
+                    self.page = self.performance_editor_page();
+                }
+                _ => {}
+            }
+            return;
+        }
+        if matches!(
+            self.page,
+            Page::ConfigRackName | Page::ConfigSongName | Page::ConfigSetlistName
+        ) {
+            match self.performance_name.handle(input) {
+                ComponentEvent::EditCommitted(_) => {
+                    let name = self.performance_name.value().to_owned();
+                    match self.performance_draft.as_mut() {
+                        Some(PerformanceDraft::Rack(value)) => value.name = name,
+                        Some(PerformanceDraft::Song(value)) => value.name = name,
+                        Some(PerformanceDraft::Setlist(value)) => value.name = name,
+                        None => {}
+                    }
+                    self.performance_dirty = true;
+                }
+                ComponentEvent::ExitRequested(_) => self.page = self.performance_editor_page(),
+                _ => {}
+            }
+            return;
+        }
+        if matches!(
+            self.page,
+            Page::ConfigSongPartName | Page::ConfigRackSlotName
+        ) {
+            match self.performance_child_name.handle(input) {
+                ComponentEvent::EditCommitted(_) => {
+                    let name = self.performance_child_name.value().to_owned();
+                    match self.performance_draft.as_mut() {
+                        Some(PerformanceDraft::Song(song)) => {
+                            if let Some(part) = song.parts.get_mut(self.performance_child_index) {
+                                part.name = name;
+                                self.performance_dirty = true;
+                            }
+                        }
+                        Some(PerformanceDraft::Rack(rack)) => {
+                            if let Some(slot) = rack.slots.get_mut(self.performance_child_index) {
+                                slot.name = name;
+                                self.performance_dirty = true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                ComponentEvent::ExitRequested(_) => {
+                    self.page = if matches!(self.performance_draft, Some(PerformanceDraft::Rack(_)))
+                    {
+                        Page::ConfigRackSlotEditor
+                    } else {
+                        Page::ConfigSongPartEditor
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        if !matches!(
+            input,
+            Input::Button1
+                | Input::Button2
+                | Input::Button3
+                | Input::Button4
+                | Input::EncoderPress
+                | Input::EncoderLeft
+                | Input::EncoderRight
+        ) {
+            return;
+        }
+        let previous = matches!(input, Input::Button2 | Input::EncoderLeft);
+        let next = matches!(input, Input::Button3 | Input::EncoderRight);
+        let select = matches!(input, Input::Button1 | Input::EncoderPress);
+        let back = input == Input::Button4;
+        match self.page {
+            Page::ConfigRacks | Page::ConfigSongs | Page::ConfigSetlists => {
+                let len = match self.page {
+                    Page::ConfigRacks => self.performance_library.racks.len() + 1,
+                    Page::ConfigSongs => self.performance_library.songs.len() + 1,
+                    _ => self.performance_library.setlists.len() + 1,
+                };
+                if previous || next {
+                    move_wrapped(
+                        &mut self.performance_list_index,
+                        len,
+                        if previous { -1 } else { 1 },
+                    );
+                } else if back {
+                    self.page = Page::Config;
+                } else if select {
+                    self.begin_performance_draft();
+                }
+            }
+            Page::ConfigRackEditor | Page::ConfigSongEditor | Page::ConfigSetlistEditor => {
+                let len = 5;
+                if previous || next {
+                    move_wrapped(
+                        &mut self.performance_editor_index,
+                        len,
+                        if previous { -1 } else { 1 },
+                    );
+                } else if back {
+                    self.leave_performance_editor();
+                } else if select {
+                    self.activate_performance_editor_item();
+                }
+            }
+            Page::ConfigRackSlots => self.apply_rack_slots_input(previous, next, select, back),
+            Page::ConfigRackSlotEditor => {
+                self.apply_rack_slot_editor_input(previous, next, select, back)
+            }
+            Page::ConfigRackSlotPlugin => {
+                if back {
+                    self.page = Page::ConfigRackSlotEditor;
+                } else if select {
+                    if let Some(PerformanceDraft::Rack(rack)) = self.performance_draft.as_mut()
+                        && let Some(slot) = rack.slots.get_mut(self.performance_child_index)
+                    {
+                        slot.plugin_id = "org.rackforge.rf-dls".into();
+                        self.performance_dirty = true;
+                    }
+                    let state_id = self
+                        .focused_rack_slot()
+                        .and_then(|slot| slot.plugin_state_id.clone());
+                    self.rf_dls_play_context = RfDlsPlayContext::RackSlot;
+                    self.focus_rf_dls_play_sound(state_id.as_deref());
+                    self.page = Page::RfDlsLibrary;
+                }
+            }
+            Page::ConfigRackSlotMidiChannel => {
+                if previous || next {
+                    move_wrapped(
+                        &mut self.performance_value_index,
+                        17,
+                        if previous { -1 } else { 1 },
+                    );
+                } else if select {
+                    self.update_rack_slot_midi_channel();
+                    self.page = Page::ConfigRackSlotEditor;
+                } else if back {
+                    self.page = Page::ConfigRackSlotEditor;
+                }
+            }
+            Page::ConfigRackSlotMidiOutput => {
+                if select {
+                    self.page = Page::ConfigRackSlotEditor;
+                } else if back {
+                    self.page = Page::ConfigRackSlotEditor;
+                }
+            }
+            Page::ConfigRackSlotAudioOutput => {
+                if back || select {
+                    self.page = Page::ConfigRackSlotEditor;
+                }
+            }
+            Page::ConfigRackSlotLevel => {
+                if previous || next {
+                    self.performance_value_index = if previous {
+                        self.performance_value_index.saturating_sub(1)
+                    } else {
+                        (self.performance_value_index + 1).min(100)
+                    };
+                } else if select {
+                    self.update_rack_slot_level();
+                    self.page = Page::ConfigRackSlotEditor;
+                } else if back {
+                    self.page = Page::ConfigRackSlotEditor;
+                }
+            }
+            Page::ConfigRackSlotPan => {
+                if previous || next {
+                    self.performance_value_index = if previous {
+                        self.performance_value_index.saturating_sub(1)
+                    } else {
+                        (self.performance_value_index + 1).min(200)
+                    };
+                } else if select {
+                    self.update_rack_slot_pan();
+                    self.page = Page::ConfigRackSlotEditor;
+                } else if back {
+                    self.page = Page::ConfigRackSlotEditor;
+                }
+            }
+            Page::ConfigSongParts => self.apply_song_parts_input(previous, next, select, back),
+            Page::ConfigSongPartEditor => {
+                self.apply_song_part_editor_input(previous, next, select, back)
+            }
+            Page::ConfigSongPartRack => {
+                let len = self.performance_library.racks.len();
+                if len == 0 {
+                    return;
+                }
+                if previous || next {
+                    move_wrapped(
+                        &mut self.performance_child_editor_index,
+                        len,
+                        if previous { -1 } else { 1 },
+                    );
+                } else if back {
+                    self.page = Page::ConfigSongPartEditor;
+                } else if select {
+                    let rack_id = self.performance_library.racks
+                        [self.performance_child_editor_index]
+                        .id
+                        .clone();
+                    if let Some(PerformanceDraft::Song(song)) = self.performance_draft.as_mut()
+                        && let Some(part) = song.parts.get_mut(self.performance_child_index)
+                    {
+                        part.rack_id = rack_id;
+                        self.performance_dirty = true;
+                    }
+                    self.page = Page::ConfigSongPartEditor;
+                }
+            }
+            Page::ConfigSetlistEntries => {
+                self.apply_setlist_entries_input(previous, next, select, back)
+            }
+            Page::ConfigSetlistEntryEditor => {
+                self.apply_setlist_entry_editor_input(previous, next, select, back)
+            }
+            Page::ConfigSetlistEntrySong => {
+                let len = self.performance_library.songs.len();
+                if len == 0 {
+                    return;
+                }
+                if previous || next {
+                    move_wrapped(
+                        &mut self.performance_child_editor_index,
+                        len,
+                        if previous { -1 } else { 1 },
+                    );
+                } else if back {
+                    self.page = Page::ConfigSetlistEntries;
+                } else if select {
+                    let song_id = self.performance_library.songs
+                        [self.performance_child_editor_index]
+                        .id
+                        .clone();
+                    if let Some(PerformanceDraft::Setlist(setlist)) =
+                        self.performance_draft.as_mut()
+                        && let Some(entry) = setlist.entries.get_mut(self.performance_child_index)
+                    {
+                        entry.song_id = song_id;
+                        self.performance_dirty = true;
+                    }
+                    self.page = Page::ConfigSetlistEntries;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn begin_performance_draft(&mut self) {
+        self.performance_editor_index = 0;
+        self.performance_child_index = 0;
+        self.performance_child_editor_index = 0;
+        self.performance_dirty = false;
+        self.performance_draft = match self.page {
+            Page::ConfigRacks if self.performance_list_index == 0 => {
+                Some(PerformanceDraft::Rack(RackDefinition {
+                    schema_version: PERFORMANCE_SCHEMA_VERSION,
+                    id: RackId::new(next_available_id(
+                        "rack.user",
+                        self.performance_library
+                            .racks
+                            .iter()
+                            .map(|value| value.id.as_str()),
+                    ))
+                    .unwrap(),
+                    name: "NEW RACK".into(),
+                    enabled: true,
+                    slots: Vec::new(),
+                }))
+            }
+            Page::ConfigRacks => self
+                .performance_library
+                .racks
+                .get(self.performance_list_index - 1)
+                .cloned()
+                .map(PerformanceDraft::Rack),
+            Page::ConfigSongs if self.performance_list_index == 0 => {
+                let Some(rack) = self.performance_library.racks.first() else {
+                    self.show_performance_error("CREATE A RACK FIRST");
+                    return;
+                };
+                Some(PerformanceDraft::Song(SongDefinition {
+                    schema_version: PERFORMANCE_SCHEMA_VERSION,
+                    id: SongId::new(next_available_id(
+                        "song.user",
+                        self.performance_library
+                            .songs
+                            .iter()
+                            .map(|value| value.id.as_str()),
+                    ))
+                    .unwrap(),
+                    name: "NEW SONG".into(),
+                    enabled: true,
+                    parts: vec![SongPart {
+                        id: SongPartId::new("part.001").unwrap(),
+                        name: "MAIN".into(),
+                        rack_id: rack.id.clone(),
+                    }],
+                }))
+            }
+            Page::ConfigSongs => self
+                .performance_library
+                .songs
+                .get(self.performance_list_index - 1)
+                .cloned()
+                .map(PerformanceDraft::Song),
+            Page::ConfigSetlists if self.performance_list_index == 0 => {
+                let Some(song) = self.performance_library.songs.first() else {
+                    self.show_performance_error("CREATE A SONG FIRST");
+                    return;
+                };
+                Some(PerformanceDraft::Setlist(SetlistDefinition {
+                    schema_version: PERFORMANCE_SCHEMA_VERSION,
+                    id: SetlistId::new(next_available_id(
+                        "setlist.user",
+                        self.performance_library
+                            .setlists
+                            .iter()
+                            .map(|value| value.id.as_str()),
+                    ))
+                    .unwrap(),
+                    name: "NEW SETLIST".into(),
+                    enabled: true,
+                    entries: vec![SetlistEntry {
+                        id: SetlistEntryId::new("entry.001").unwrap(),
+                        song_id: song.id.clone(),
+                    }],
+                }))
+            }
+            Page::ConfigSetlists => self
+                .performance_library
+                .setlists
+                .get(self.performance_list_index - 1)
+                .cloned()
+                .map(PerformanceDraft::Setlist),
+            _ => None,
+        };
+        if let Some(draft) = &self.performance_draft {
+            self.performance_name.set_value(draft.name());
+            self.page = self.performance_editor_page();
+        }
+    }
+
+    fn performance_editor_page(&self) -> Page {
+        match self.performance_draft {
+            Some(PerformanceDraft::Rack(_)) => Page::ConfigRackEditor,
+            Some(PerformanceDraft::Song(_)) => Page::ConfigSongEditor,
+            Some(PerformanceDraft::Setlist(_)) => Page::ConfigSetlistEditor,
+            None => self.performance_return_page,
+        }
+    }
+
+    fn performance_list_page(&self) -> Page {
+        match self.performance_draft {
+            Some(PerformanceDraft::Rack(_)) => Page::ConfigRacks,
+            Some(PerformanceDraft::Song(_)) => Page::ConfigSongs,
+            Some(PerformanceDraft::Setlist(_)) => Page::ConfigSetlists,
+            None => Page::Config,
+        }
+    }
+
+    fn leave_performance_editor(&mut self) {
+        self.performance_return_page = self.performance_list_page();
+        if self.performance_dirty {
+            self.performance_confirm = performance_confirmation();
+            self.page = Page::PerformanceUnsaved;
+        } else {
+            self.performance_draft = None;
+            self.page = self.performance_return_page;
+        }
+    }
+
+    fn activate_performance_editor_item(&mut self) {
+        match self.performance_editor_index {
+            0 => {
+                self.performance_name.set_value(
+                    self.performance_draft
+                        .as_ref()
+                        .map_or("NEW ITEM", PerformanceDraft::name),
+                );
+                self.page = match self.performance_draft {
+                    Some(PerformanceDraft::Rack(_)) => Page::ConfigRackName,
+                    Some(PerformanceDraft::Song(_)) => Page::ConfigSongName,
+                    _ => Page::ConfigSetlistName,
+                };
+            }
+            1 => match self.performance_draft {
+                Some(PerformanceDraft::Rack(_)) => {
+                    self.performance_child_index = 0;
+                    self.page = Page::ConfigRackSlots;
+                }
+                Some(PerformanceDraft::Song(_)) => {
+                    self.performance_child_index = 0;
+                    self.page = Page::ConfigSongParts;
+                }
+                Some(PerformanceDraft::Setlist(_)) => {
+                    self.performance_child_index = 0;
+                    self.page = Page::ConfigSetlistEntries;
+                }
+                None => {}
+            },
+            2 => {
+                if let Some(draft) = self.performance_draft.as_mut() {
+                    draft.set_enabled(!draft.enabled());
+                    self.performance_dirty = true;
+                }
+            }
+            3 => self.save_performance_draft(),
+            _ => {
+                if self.performance_draft_exists() {
+                    self.performance_confirm = delete_confirmation();
+                    self.page = Page::PerformanceDelete;
+                } else {
+                    let page = self.performance_list_page();
+                    self.performance_draft = None;
+                    self.performance_dirty = false;
+                    self.page = page;
+                }
+            }
+        }
+    }
+
+    fn performance_draft_exists(&self) -> bool {
+        match self.performance_draft.as_ref() {
+            Some(PerformanceDraft::Rack(value)) => {
+                self.performance_library.rack(&value.id).is_some()
+            }
+            Some(PerformanceDraft::Song(value)) => {
+                self.performance_library.song(&value.id).is_some()
+            }
+            Some(PerformanceDraft::Setlist(value)) => {
+                self.performance_library.setlist(&value.id).is_some()
+            }
+            None => false,
+        }
+    }
+
+    fn save_performance_draft(&mut self) {
+        let Some(draft) = self.performance_draft.clone() else {
+            return;
+        };
+        self.performance_return_page = self.performance_list_page();
+        self.pending_command = Some(MenuCommand::EditPerformance {
+            expected_revision: self.performance_revision.clone(),
+            edit: draft.into_edit(),
+        });
+        self.page = Page::PerformanceBusy;
+    }
+
+    fn delete_performance_draft(&mut self) {
+        let Some(draft) = self.performance_draft.as_ref() else {
+            return;
+        };
+        let edit = match draft {
+            PerformanceDraft::Rack(value) => PerformanceEdit::DeleteRack {
+                rack_id: value.id.clone(),
+            },
+            PerformanceDraft::Song(value) => PerformanceEdit::DeleteSong {
+                song_id: value.id.clone(),
+            },
+            PerformanceDraft::Setlist(value) => PerformanceEdit::DeleteSetlist {
+                setlist_id: value.id.clone(),
+            },
+        };
+        self.performance_return_page = self.performance_list_page();
+        self.pending_command = Some(MenuCommand::EditPerformance {
+            expected_revision: self.performance_revision.clone(),
+            edit,
+        });
+        self.page = Page::PerformanceBusy;
+    }
+
+    fn show_performance_error(&mut self, message: &str) {
+        self.performance_result = Some((false, message.into()));
+        self.performance_return_page = self.page;
+        self.page = Page::PerformanceResult;
+    }
+
+    fn apply_rack_slots_input(&mut self, previous: bool, next: bool, select: bool, back: bool) {
+        let len = match self.performance_draft.as_ref() {
+            Some(PerformanceDraft::Rack(rack)) => rack.slots.len() + 1,
+            _ => return,
+        };
+        if previous || next {
+            move_wrapped(
+                &mut self.performance_child_index,
+                len,
+                if previous { -1 } else { 1 },
+            );
+        } else if back {
+            self.page = Page::ConfigRackEditor;
+        } else if select && self.performance_child_index == 0 {
+            let state_id = self
+                .rf_dls_active_sound_id
+                .clone()
+                .or_else(|| self.rf_dls_sounds.first().map(|sound| sound.id.clone()));
+            if let Some(PerformanceDraft::Rack(rack)) = self.performance_draft.as_mut() {
+                let id =
+                    next_available_id("slot", rack.slots.iter().map(|value| value.id.as_str()));
+                rack.slots.push(RackSlot {
+                    id: RackSlotId::new(id).unwrap(),
+                    name: format!("SLOT {}", rack.slots.len() + 1),
+                    plugin_id: "org.rackforge.rf-dls".into(),
+                    plugin_state_id: state_id,
+                    enabled: true,
+                    midi_input_channel: None,
+                    midi_output: MidiOutputRoute::None,
+                    audio_output_bus: "main".into(),
+                    level_per_mille: 1_000,
+                    pan_per_mille: 0,
+                });
+                self.performance_child_index = rack.slots.len();
+                self.performance_dirty = true;
+            }
+        } else if select {
+            self.performance_child_index -= 1;
+            self.performance_child_editor_index = 0;
+            self.page = Page::ConfigRackSlotEditor;
+        }
+    }
+
+    fn apply_rack_slot_editor_input(
+        &mut self,
+        previous: bool,
+        next: bool,
+        select: bool,
+        back: bool,
+    ) {
+        if previous || next {
+            move_wrapped(
+                &mut self.performance_child_editor_index,
+                RACK_SLOT_EDITOR_ITEMS.len(),
+                if previous { -1 } else { 1 },
+            );
+        } else if back {
+            self.performance_child_index += 1;
+            self.page = Page::ConfigRackSlots;
+        } else if select {
+            match self.performance_child_editor_index {
+                0 => {
+                    if let Some(PerformanceDraft::Rack(rack)) = self.performance_draft.as_ref() {
+                        self.performance_child_name
+                            .set_value(&rack.slots[self.performance_child_index].name);
+                    }
+                    self.page = Page::ConfigRackSlotName;
+                }
+                1 => self.page = Page::ConfigRackSlotPlugin,
+                2 => {
+                    self.performance_value_index = self
+                        .focused_rack_slot()
+                        .and_then(|slot| slot.midi_input_channel)
+                        .map_or(0, usize::from);
+                    self.page = Page::ConfigRackSlotMidiChannel;
+                }
+                3 => {
+                    self.page = Page::ConfigRackSlotMidiOutput;
+                }
+                4 => self.page = Page::ConfigRackSlotAudioOutput,
+                5 => {
+                    self.performance_value_index = self
+                        .focused_rack_slot()
+                        .map_or(100, |slot| usize::from(slot.level_per_mille / 10));
+                    self.page = Page::ConfigRackSlotLevel;
+                }
+                6 => {
+                    self.performance_value_index = self.focused_rack_slot().map_or(100, |slot| {
+                        (i32::from(slot.pan_per_mille) / 10 + 100) as usize
+                    });
+                    self.page = Page::ConfigRackSlotPan;
+                }
+                7 => {
+                    if let Some(slot) = self.focused_rack_slot_mut() {
+                        slot.enabled = !slot.enabled;
+                        self.performance_dirty = true;
+                    }
+                }
+                _ => {
+                    if let Some(PerformanceDraft::Rack(rack)) = self.performance_draft.as_mut() {
+                        rack.slots.remove(self.performance_child_index);
+                        self.performance_dirty = true;
+                        self.performance_child_index = self
+                            .performance_child_index
+                            .min(rack.slots.len().saturating_sub(1))
+                            + 1;
+                        self.page = Page::ConfigRackSlots;
+                    }
+                }
+            }
+        }
+    }
+
+    fn focused_rack_slot(&self) -> Option<&RackSlot> {
+        match self.performance_draft.as_ref() {
+            Some(PerformanceDraft::Rack(rack)) => rack.slots.get(self.performance_child_index),
+            _ => None,
+        }
+    }
+
+    fn focused_rack_slot_mut(&mut self) -> Option<&mut RackSlot> {
+        match self.performance_draft.as_mut() {
+            Some(PerformanceDraft::Rack(rack)) => rack.slots.get_mut(self.performance_child_index),
+            _ => None,
+        }
+    }
+
+    fn update_rack_slot_midi_channel(&mut self) {
+        let value = self.performance_value_index;
+        if let Some(slot) = self.focused_rack_slot_mut() {
+            slot.midi_input_channel = (value != 0).then_some(value as u8);
+            self.performance_dirty = true;
+        }
+    }
+
+    fn update_rack_slot_level(&mut self) {
+        let value = self.performance_value_index as u16 * 10;
+        if let Some(slot) = self.focused_rack_slot_mut() {
+            slot.level_per_mille = value;
+            self.performance_dirty = true;
+        }
+    }
+
+    fn update_rack_slot_pan(&mut self) {
+        let value = (self.performance_value_index as i16 - 100) * 10;
+        if let Some(slot) = self.focused_rack_slot_mut() {
+            slot.pan_per_mille = value;
+            self.performance_dirty = true;
+        }
+    }
+
+    fn apply_song_parts_input(&mut self, previous: bool, next: bool, select: bool, back: bool) {
+        let len = match self.performance_draft.as_ref() {
+            Some(PerformanceDraft::Song(song)) => song.parts.len() + 1,
+            _ => return,
+        };
+        if previous || next {
+            move_wrapped(
+                &mut self.performance_child_index,
+                len,
+                if previous { -1 } else { 1 },
+            );
+        } else if back {
+            self.page = Page::ConfigSongEditor;
+        } else if select && self.performance_child_index == 0 {
+            let Some(rack) = self.performance_library.racks.first() else {
+                return;
+            };
+            if let Some(PerformanceDraft::Song(song)) = self.performance_draft.as_mut() {
+                let id =
+                    next_available_id("part", song.parts.iter().map(|value| value.id.as_str()));
+                song.parts.push(SongPart {
+                    id: SongPartId::new(id).unwrap(),
+                    name: format!("PART {}", song.parts.len() + 1),
+                    rack_id: rack.id.clone(),
+                });
+                self.performance_child_index = song.parts.len();
+                self.performance_dirty = true;
+            }
+        } else if select {
+            self.performance_child_index -= 1;
+            self.performance_child_editor_index = 0;
+            self.page = Page::ConfigSongPartEditor;
+        }
+    }
+
+    fn apply_song_part_editor_input(
+        &mut self,
+        previous: bool,
+        next: bool,
+        select: bool,
+        back: bool,
+    ) {
+        if previous || next {
+            move_wrapped(
+                &mut self.performance_child_editor_index,
+                PART_EDITOR_ITEMS.len(),
+                if previous { -1 } else { 1 },
+            );
+        } else if back {
+            self.performance_child_index += 1;
+            self.page = Page::ConfigSongParts;
+        } else if select {
+            match self.performance_child_editor_index {
+                0 => {
+                    if let Some(PerformanceDraft::Song(song)) = self.performance_draft.as_ref() {
+                        self.performance_child_name
+                            .set_value(&song.parts[self.performance_child_index].name);
+                    }
+                    self.page = Page::ConfigSongPartName;
+                }
+                1 => {
+                    if let Some(PerformanceDraft::Song(song)) = self.performance_draft.as_ref() {
+                        self.performance_child_editor_index = self
+                            .performance_library
+                            .racks
+                            .iter()
+                            .position(|rack| {
+                                rack.id == song.parts[self.performance_child_index].rack_id
+                            })
+                            .unwrap_or(0);
+                    }
+                    self.page = Page::ConfigSongPartRack;
+                }
+                2 => self.move_song_part(-1),
+                3 => self.move_song_part(1),
+                _ => {
+                    if let Some(PerformanceDraft::Song(song)) = self.performance_draft.as_mut() {
+                        if song.parts.len() > 1 {
+                            song.parts.remove(self.performance_child_index);
+                            self.performance_dirty = true;
+                            self.performance_child_index =
+                                self.performance_child_index.min(song.parts.len() - 1) + 1;
+                            self.page = Page::ConfigSongParts;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn move_song_part(&mut self, delta: isize) {
+        if let Some(PerformanceDraft::Song(song)) = self.performance_draft.as_mut() {
+            let target = (self.performance_child_index as isize + delta)
+                .clamp(0, song.parts.len().saturating_sub(1) as isize)
+                as usize;
+            if target != self.performance_child_index {
+                song.parts.swap(self.performance_child_index, target);
+                self.performance_child_index = target;
+                self.performance_dirty = true;
+            }
+        }
+    }
+
+    fn apply_setlist_entries_input(
+        &mut self,
+        previous: bool,
+        next: bool,
+        select: bool,
+        back: bool,
+    ) {
+        let len = match self.performance_draft.as_ref() {
+            Some(PerformanceDraft::Setlist(value)) => value.entries.len() + 1,
+            _ => return,
+        };
+        if previous || next {
+            move_wrapped(
+                &mut self.performance_child_index,
+                len,
+                if previous { -1 } else { 1 },
+            );
+        } else if back {
+            self.page = Page::ConfigSetlistEditor;
+        } else if select && self.performance_child_index == 0 {
+            let Some(song) = self.performance_library.songs.first() else {
+                return;
+            };
+            if let Some(PerformanceDraft::Setlist(setlist)) = self.performance_draft.as_mut() {
+                let id = next_available_id(
+                    "entry",
+                    setlist.entries.iter().map(|value| value.id.as_str()),
+                );
+                setlist.entries.push(SetlistEntry {
+                    id: SetlistEntryId::new(id).unwrap(),
+                    song_id: song.id.clone(),
+                });
+                self.performance_dirty = true;
+                self.performance_child_index = setlist.entries.len();
+            }
+        } else if select {
+            self.performance_child_index -= 1;
+            self.performance_child_editor_index = 0;
+            self.page = Page::ConfigSetlistEntryEditor;
+        }
+    }
+
+    fn apply_setlist_entry_editor_input(
+        &mut self,
+        previous: bool,
+        next: bool,
+        select: bool,
+        back: bool,
+    ) {
+        if previous || next {
+            move_wrapped(
+                &mut self.performance_child_editor_index,
+                ENTRY_EDITOR_ITEMS.len(),
+                if previous { -1 } else { 1 },
+            );
+        } else if back {
+            self.performance_child_index += 1;
+            self.page = Page::ConfigSetlistEntries;
+        } else if select {
+            match self.performance_child_editor_index {
+                0 => {
+                    if let Some(PerformanceDraft::Setlist(setlist)) =
+                        self.performance_draft.as_ref()
+                    {
+                        self.performance_child_editor_index = self
+                            .performance_library
+                            .songs
+                            .iter()
+                            .position(|song| {
+                                song.id == setlist.entries[self.performance_child_index].song_id
+                            })
+                            .unwrap_or(0);
+                    }
+                    self.page = Page::ConfigSetlistEntrySong;
+                }
+                1 => self.move_setlist_entry(-1),
+                2 => self.move_setlist_entry(1),
+                _ => {
+                    if let Some(PerformanceDraft::Setlist(setlist)) =
+                        self.performance_draft.as_mut()
+                    {
+                        if setlist.entries.len() > 1 {
+                            setlist.entries.remove(self.performance_child_index);
+                            self.performance_dirty = true;
+                            self.performance_child_index =
+                                self.performance_child_index.min(setlist.entries.len() - 1) + 1;
+                            self.page = Page::ConfigSetlistEntries;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn move_setlist_entry(&mut self, delta: isize) {
+        if let Some(PerformanceDraft::Setlist(setlist)) = self.performance_draft.as_mut() {
+            let target = (self.performance_child_index as isize + delta)
+                .clamp(0, setlist.entries.len().saturating_sub(1) as isize)
+                as usize;
+            if target != self.performance_child_index {
+                setlist.entries.swap(self.performance_child_index, target);
+                self.performance_child_index = target;
+                self.performance_dirty = true;
+            }
+        }
+    }
+
     pub fn apply_input_and_render(&mut self, input: Input) -> Screen {
         self.apply_input(input);
         self.render()
     }
 
     pub fn apply(&mut self, action: Action) {
+        if self.is_performance_config_page() {
+            let input = match action {
+                Action::Previous => Input::Button2,
+                Action::Next => Input::Button3,
+                Action::Back => Input::Button4,
+                Action::Select => Input::Button1,
+            };
+            self.apply_performance_input(input);
+            return;
+        }
         if matches!(
             self.page,
             Page::SystemWifi
@@ -989,7 +2194,16 @@ impl Menu {
             Action::Next => self.move_selection(1),
             Action::Back => {
                 self.page = match self.page {
+                    Page::LiveRacks | Page::LiveSongs | Page::LiveSetlists => Page::Live,
+                    Page::LiveSongParts => Page::LiveSongs,
+                    Page::LiveSetlistEntries => Page::LiveSetlists,
                     Page::RfDlsPlay => Page::RfDlsLibrary,
+                    Page::RfDlsLibrary
+                        if self.rf_dls_play_context == RfDlsPlayContext::RackSlot =>
+                    {
+                        self.rf_dls_play_context = RfDlsPlayContext::Standalone;
+                        Page::ConfigRackSlotPlugin
+                    }
                     Page::RfDlsLibrary => Page::Play,
                     Page::RfDlsCustomPrograms => Page::Plugins,
                     Page::RfDlsName | Page::RfDlsSharedFx | Page::RfDlsProgramOutput => {
@@ -1039,12 +2253,37 @@ impl Menu {
             }
             Action::Select => {
                 if self.page == Page::RfDlsPlay {
-                    if let Some(sound) = self.filtered_sounds().get(self.rf_dls_play_index) {
-                        self.pending_command = Some(MenuCommand::SelectSound {
-                            id: sound.id.clone(),
-                        });
+                    if let Some(sound) = self
+                        .filtered_sounds()
+                        .get(self.rf_dls_play_index)
+                        .map(|sound| (*sound).clone())
+                    {
+                        if self.rf_dls_play_context == RfDlsPlayContext::RackSlot {
+                            if let Some(slot) = self.focused_rack_slot_mut() {
+                                slot.plugin_state_id = Some(sound.id.clone());
+                                self.performance_dirty = true;
+                            }
+                            if let Some(PerformanceDraft::Rack(rack)) =
+                                self.performance_draft.clone()
+                            {
+                                self.pending_command = Some(MenuCommand::PreviewRack { rack });
+                            }
+                        } else {
+                            self.pending_command = Some(MenuCommand::SelectSound {
+                                id: sound.id.clone(),
+                            });
+                        }
                     }
                     return;
+                }
+                if let Some(location) = self.focused_live_location() {
+                    if matches!(
+                        self.page,
+                        Page::LiveRacks | Page::LiveSongParts | Page::LiveSetlistEntries
+                    ) {
+                        self.pending_command = Some(MenuCommand::ActivateLiveTarget { location });
+                        return;
+                    }
                 }
                 self.page = match self.page {
                     Page::Home => match self.home_index {
@@ -1064,14 +2303,51 @@ impl Menu {
                         }
                         _ => Page::Config,
                     },
-                    Page::Play if self.play_index == 0 => Page::RfDlsLibrary,
+                    Page::Play if self.play_index == 0 => {
+                        self.rf_dls_play_context = RfDlsPlayContext::Standalone;
+                        Page::RfDlsLibrary
+                    }
+                    Page::Live => {
+                        let mode = match self.live_index {
+                            0 => LiveBrowseMode::Rack,
+                            1 => LiveBrowseMode::Song,
+                            _ => LiveBrowseMode::Setlist,
+                        };
+                        self.live_performance.mode = mode;
+                        self.pending_command = Some(MenuCommand::SetLiveBrowseMode { mode });
+                        match mode {
+                            LiveBrowseMode::Rack => Page::LiveRacks,
+                            LiveBrowseMode::Song => Page::LiveSongs,
+                            LiveBrowseMode::Setlist => Page::LiveSetlists,
+                        }
+                    }
+                    Page::LiveSongs if !self.live_songs().is_empty() => {
+                        self.live_song_part_index = 0;
+                        Page::LiveSongParts
+                    }
+                    Page::LiveSetlists if !self.live_setlists().is_empty() => {
+                        self.live_setlist_entry_index = 0;
+                        Page::LiveSetlistEntries
+                    }
                     Page::RfDlsLibrary => {
                         self.rf_dls_play_index = 0;
                         Page::RfDlsPlay
                     }
-                    Page::Config if self.config_index == 0 => Page::Plugins,
-                    Page::Config if self.config_index == 2 => Page::Audio,
-                    Page::Config if self.config_index == 3 => Page::System,
+                    Page::Config if self.config_index == 0 => {
+                        self.performance_list_index = 0;
+                        Page::ConfigRacks
+                    }
+                    Page::Config if self.config_index == 1 => {
+                        self.performance_list_index = 0;
+                        Page::ConfigSongs
+                    }
+                    Page::Config if self.config_index == 2 => {
+                        self.performance_list_index = 0;
+                        Page::ConfigSetlists
+                    }
+                    Page::Config if self.config_index == 3 => Page::Plugins,
+                    Page::Config if self.config_index == 4 => Page::Audio,
+                    Page::Config if self.config_index == 5 => Page::System,
                     Page::Plugins if self.plugin_index == 0 => Page::RfDlsCustomPrograms,
                     Page::System if self.system_index == 0 => Page::SystemWeb,
                     Page::System if self.system_index == 1 && self.wifi_settings.available => {
@@ -1169,9 +2445,19 @@ impl Menu {
         self.active_mode = mode;
         match mode {
             ActiveMode::Live => {
-                self.page = Page::Live;
+                self.page = match self.live_performance.mode {
+                    LiveBrowseMode::Rack if !self.live_racks().is_empty() => Page::LiveRacks,
+                    LiveBrowseMode::Song if self.selected_live_song().is_some() => {
+                        Page::LiveSongParts
+                    }
+                    LiveBrowseMode::Setlist if !self.selected_setlist_parts().is_empty() => {
+                        Page::LiveSetlistEntries
+                    }
+                    _ => Page::Live,
+                };
             }
             ActiveMode::Play => {
+                self.rf_dls_play_context = RfDlsPlayContext::Standalone;
                 let focus_sound_id = focus_sound_id.or(self.play_anchor_sound_id.as_deref());
                 if let Some(sound) = focus_sound_id
                     .and_then(|id| self.rf_dls_sounds.iter().find(|sound| sound.id == id))
@@ -1195,11 +2481,16 @@ impl Menu {
                 Screen::with_header(HOME_HEADER, line_1, line_2)
             }
             Page::Live => simple_screen(
-                indexed_title("LIVE SET", self.live_index, LIVE_ITEMS.len()),
+                indexed_title("LIVE", self.live_index, LIVE_ITEMS.len()),
                 &LIVE_ITEMS,
                 &LIVE_DETAILS,
                 self.live_index,
             ),
+            Page::LiveRacks => self.render_live_racks(),
+            Page::LiveSongs => self.render_live_songs(),
+            Page::LiveSongParts => self.render_live_song_parts(),
+            Page::LiveSetlists => self.render_live_setlists(),
+            Page::LiveSetlistEntries => self.render_live_setlist_entries(),
             Page::Play => simple_screen(
                 indexed_title("PLAY", self.play_index, PLAY_ITEMS.len()),
                 &PLAY_ITEMS,
@@ -1207,7 +2498,7 @@ impl Menu {
                 self.play_index,
             ),
             Page::Config => {
-                let detail = if self.config_index == 2 {
+                let detail = if self.config_index == 4 {
                     self.audio_device_name()
                         .unwrap_or_else(|| "Detecting output".into())
                 } else {
@@ -1217,6 +2508,89 @@ impl Menu {
                     indexed_title("CONFIG", self.config_index, CONFIG_ITEMS.len()),
                     CONFIG_ITEMS[self.config_index],
                     detail,
+                )
+            }
+            Page::ConfigRacks => self.render_performance_list("RACKS"),
+            Page::ConfigSongs => self.render_performance_list("SONGS"),
+            Page::ConfigSetlists => self.render_performance_list("SETLISTS"),
+            Page::ConfigRackEditor => self.render_performance_editor("RACK", &RACK_EDITOR_ITEMS),
+            Page::ConfigSongEditor => self.render_performance_editor("SONG", &SONG_EDITOR_ITEMS),
+            Page::ConfigSetlistEditor => {
+                self.render_performance_editor("SETLIST", &SETLIST_EDITOR_ITEMS)
+            }
+            Page::ConfigRackName | Page::ConfigSongName | Page::ConfigSetlistName => {
+                let [line_1, line_2] = component_lines(&self.performance_name, false);
+                Screen::with_header("NAME", line_1, line_2)
+            }
+            Page::ConfigRackSlots => self.render_rack_slots(),
+            Page::ConfigRackSlotEditor => self.render_rack_slot_editor(),
+            Page::ConfigRackSlotName => {
+                let [line_1, line_2] = component_lines(&self.performance_child_name, false);
+                Screen::with_header("SLOT NAME", line_1, line_2)
+            }
+            Page::ConfigRackSlotPlugin => self.render_rack_slot_plugin(),
+            Page::ConfigRackSlotMidiChannel => self.render_rack_slot_value(
+                "MIDI CH",
+                if self.performance_value_index == 0 {
+                    "OMNI".into()
+                } else {
+                    self.performance_value_index.to_string()
+                },
+                "Input channel",
+            ),
+            Page::ConfigRackSlotMidiOutput => {
+                self.render_rack_slot_value("MIDI OUT", "N/A", "RF-DLS has no MIDI output")
+            }
+            Page::ConfigRackSlotAudioOutput => {
+                self.render_rack_slot_value("AUDIO OUT", "MAIN", "Audio destination")
+            }
+            Page::ConfigRackSlotLevel => self.render_rack_slot_value(
+                "LEVEL",
+                format!("{}%", self.performance_value_index),
+                "Slot mix level",
+            ),
+            Page::ConfigRackSlotPan => {
+                let pan = self.performance_value_index as i16 - 100;
+                self.render_rack_slot_value(
+                    "PAN",
+                    if pan == 0 {
+                        "CENTER".into()
+                    } else if pan < 0 {
+                        format!("L{}", -pan)
+                    } else {
+                        format!("R{pan}")
+                    },
+                    "Slot stereo pan",
+                )
+            }
+            Page::ConfigSongParts => self.render_song_parts(),
+            Page::ConfigSongPartEditor => self.render_song_part_editor(),
+            Page::ConfigSongPartName => {
+                let [line_1, line_2] = component_lines(&self.performance_child_name, false);
+                Screen::with_header("PART NAME", line_1, line_2)
+            }
+            Page::ConfigSongPartRack => self.render_reference_picker("RACK"),
+            Page::ConfigSetlistEntries => self.render_setlist_entries(),
+            Page::ConfigSetlistEntryEditor => self.render_setlist_entry_editor(),
+            Page::ConfigSetlistEntrySong => self.render_reference_picker("SONG"),
+            Page::PerformanceUnsaved | Page::PerformanceDelete => {
+                let [line_1, line_2] = component_lines(&self.performance_confirm, true);
+                Screen::with_header("PERFORMANCE", line_1, line_2)
+            }
+            Page::PerformanceBusy => {
+                let [line_1, line_2] = component_lines(&self.performance_spinner, false);
+                Screen::with_header("PERFORMANCE", line_1, line_2)
+            }
+            Page::PerformanceResult => {
+                let (success, message) = self
+                    .performance_result
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or((false, "UNKNOWN".into()));
+                Screen::with_header(
+                    "PERFORMANCE",
+                    if success { "SUCCESS" } else { "ERROR" },
+                    message,
                 )
             }
             Page::Plugins => simple_screen(
@@ -1318,6 +2692,552 @@ impl Menu {
         };
         screen.footer = standard_footer(self.pressed_button);
         screen
+    }
+
+    fn render_performance_list(&self, title: &str) -> Screen {
+        let (count, name, detail) = match self.page {
+            Page::ConfigRacks => {
+                let item = self
+                    .performance_list_index
+                    .checked_sub(1)
+                    .and_then(|index| self.performance_library.racks.get(index));
+                (
+                    self.performance_library.racks.len() + 1,
+                    item.map_or("+ ADD NEW", |value| value.name.as_str()),
+                    item.map_or("Create Rack".into(), |value| {
+                        format!(
+                            "{} SLOT{}",
+                            value.slots.len(),
+                            if value.slots.len() == 1 { "" } else { "S" }
+                        )
+                    }),
+                )
+            }
+            Page::ConfigSongs => {
+                let item = self
+                    .performance_list_index
+                    .checked_sub(1)
+                    .and_then(|index| self.performance_library.songs.get(index));
+                (
+                    self.performance_library.songs.len() + 1,
+                    item.map_or("+ ADD NEW", |value| value.name.as_str()),
+                    item.map_or("Create Song".into(), |value| {
+                        format!(
+                            "{} PART{}",
+                            value.parts.len(),
+                            if value.parts.len() == 1 { "" } else { "S" }
+                        )
+                    }),
+                )
+            }
+            _ => {
+                let item = self
+                    .performance_list_index
+                    .checked_sub(1)
+                    .and_then(|index| self.performance_library.setlists.get(index));
+                (
+                    self.performance_library.setlists.len() + 1,
+                    item.map_or("+ ADD NEW", |value| value.name.as_str()),
+                    item.map_or("Create Setlist".into(), |value| {
+                        format!(
+                            "{} SONG{}",
+                            value.entries.len(),
+                            if value.entries.len() == 1 { "" } else { "S" }
+                        )
+                    }),
+                )
+            }
+        };
+        Screen::with_header(
+            indexed_title(title, self.performance_list_index, count),
+            normalized_display_text(name, "+ ADD NEW"),
+            detail,
+        )
+    }
+
+    fn render_performance_editor(&self, title: &str, items: &[&str]) -> Screen {
+        let item = items[self.performance_editor_index];
+        let detail = match self.performance_editor_index {
+            0 => self
+                .performance_draft
+                .as_ref()
+                .map_or("UNNAMED".into(), |value| value.name().into()),
+            1 => match self.performance_draft.as_ref() {
+                Some(PerformanceDraft::Rack(rack)) => format!(
+                    "{} SLOT{}",
+                    rack.slots.len(),
+                    if rack.slots.len() == 1 { "" } else { "S" }
+                ),
+                Some(PerformanceDraft::Song(song)) => format!(
+                    "{} PART{}",
+                    song.parts.len(),
+                    if song.parts.len() == 1 { "" } else { "S" }
+                ),
+                Some(PerformanceDraft::Setlist(setlist)) => format!(
+                    "{} SONG{}",
+                    setlist.entries.len(),
+                    if setlist.entries.len() == 1 { "" } else { "S" }
+                ),
+                None => "EMPTY".into(),
+            },
+            2 => {
+                if self
+                    .performance_draft
+                    .as_ref()
+                    .is_some_and(PerformanceDraft::enabled)
+                {
+                    "ON".into()
+                } else {
+                    "OFF".into()
+                }
+            }
+            3 => {
+                if self.performance_dirty || !self.performance_draft_exists() {
+                    "Store changes".into()
+                } else {
+                    "No changes".into()
+                }
+            }
+            _ => {
+                if self.performance_draft_exists() {
+                    "Remove permanently".into()
+                } else {
+                    "Discard draft".into()
+                }
+            }
+        };
+        Screen::with_header(
+            indexed_title(title, self.performance_editor_index, items.len()),
+            item,
+            normalized_display_text(&detail, " "),
+        )
+    }
+
+    fn render_rack_slots(&self) -> Screen {
+        let Some(PerformanceDraft::Rack(rack)) = self.performance_draft.as_ref() else {
+            return Screen::with_header("SLOTS", "EMPTY", "BACK");
+        };
+        if self.performance_child_index == 0 {
+            return Screen::with_header(
+                indexed_title("SLOTS", 0, rack.slots.len() + 1),
+                "+ ADD SLOT",
+                "Add plugin",
+            );
+        }
+        let slot = &rack.slots[self.performance_child_index - 1];
+        Screen::with_header(
+            indexed_title("SLOTS", self.performance_child_index, rack.slots.len() + 1),
+            normalized_display_text(&slot.name, "UNNAMED SLOT"),
+            " ",
+        )
+    }
+
+    fn render_rack_slot_editor(&self) -> Screen {
+        let Some(slot) = self.focused_rack_slot() else {
+            return Screen::with_header("SLOT", "EMPTY", "BACK");
+        };
+        let detail = match self.performance_child_editor_index {
+            0 => slot.name.clone(),
+            1 => plugin_display_name(&slot.plugin_id).into(),
+            2 => slot
+                .midi_input_channel
+                .map_or("OMNI".into(), |channel| channel.to_string()),
+            3 => match &slot.midi_output {
+                MidiOutputRoute::None => "NONE".into(),
+                MidiOutputRoute::Bus { bus_id } => bus_id.clone(),
+            },
+            4 => slot.audio_output_bus.clone(),
+            5 => format!("{}%", slot.level_per_mille / 10),
+            6 => {
+                let pan = slot.pan_per_mille / 10;
+                if pan == 0 {
+                    "CENTER".into()
+                } else if pan < 0 {
+                    format!("L{}", -pan)
+                } else {
+                    format!("R{pan}")
+                }
+            }
+            7 => {
+                if slot.enabled {
+                    "ON".into()
+                } else {
+                    "OFF".into()
+                }
+            }
+            _ => "Remove Slot".into(),
+        };
+        Screen::with_header(
+            indexed_title(
+                "SLOT",
+                self.performance_child_editor_index,
+                RACK_SLOT_EDITOR_ITEMS.len(),
+            ),
+            RACK_SLOT_EDITOR_ITEMS[self.performance_child_editor_index],
+            normalized_display_text(&detail, " "),
+        )
+    }
+
+    fn render_rack_slot_plugin(&self) -> Screen {
+        Screen::with_header("PLUGIN       1/1", "RF-DLS", "OK opens PLAY")
+    }
+
+    fn render_rack_slot_value(
+        &self,
+        title: &str,
+        value: impl Into<String>,
+        detail: &str,
+    ) -> Screen {
+        Screen::with_header(title, normalized_display_text(&value.into(), " "), detail)
+    }
+
+    fn render_song_parts(&self) -> Screen {
+        let Some(PerformanceDraft::Song(song)) = self.performance_draft.as_ref() else {
+            return Screen::with_header("PARTS", "EMPTY", "BACK");
+        };
+        if self.performance_child_index == 0 {
+            return Screen::with_header(
+                indexed_title("PARTS", 0, song.parts.len() + 1),
+                "+ ADD PART",
+                "Append new Part",
+            );
+        }
+        let part = &song.parts[self.performance_child_index - 1];
+        let rack = self
+            .performance_library
+            .rack(&part.rack_id)
+            .map_or("MISSING RACK", |value| value.name.as_str());
+        Screen::with_header(
+            indexed_title("PARTS", self.performance_child_index, song.parts.len() + 1),
+            &part.name,
+            rack,
+        )
+    }
+
+    fn render_song_part_editor(&self) -> Screen {
+        let Some(PerformanceDraft::Song(song)) = self.performance_draft.as_ref() else {
+            return Screen::with_header("PART", "EMPTY", "BACK");
+        };
+        let part = &song.parts[self.performance_child_index];
+        let detail = match self.performance_child_editor_index {
+            0 => part.name.clone(),
+            1 => self
+                .performance_library
+                .rack(&part.rack_id)
+                .map_or("MISSING RACK".into(), |value| value.name.clone()),
+            2 => {
+                if self.performance_child_index == 0 {
+                    "Already first".into()
+                } else {
+                    "Move earlier".into()
+                }
+            }
+            3 => {
+                if self.performance_child_index + 1 == song.parts.len() {
+                    "Already last".into()
+                } else {
+                    "Move later".into()
+                }
+            }
+            _ => {
+                if song.parts.len() == 1 {
+                    "One Part required".into()
+                } else {
+                    "Remove Part".into()
+                }
+            }
+        };
+        Screen::with_header(
+            indexed_title(
+                "PART",
+                self.performance_child_editor_index,
+                PART_EDITOR_ITEMS.len(),
+            ),
+            PART_EDITOR_ITEMS[self.performance_child_editor_index],
+            detail,
+        )
+    }
+
+    fn render_setlist_entries(&self) -> Screen {
+        let Some(PerformanceDraft::Setlist(setlist)) = self.performance_draft.as_ref() else {
+            return Screen::with_header("SONGS", "EMPTY", "BACK");
+        };
+        if self.performance_child_index == 0 {
+            return Screen::with_header(
+                indexed_title("SONGS", 0, setlist.entries.len() + 1),
+                "+ ADD SONG",
+                "Append entry",
+            );
+        }
+        let entry = &setlist.entries[self.performance_child_index - 1];
+        let name = self
+            .performance_library
+            .song(&entry.song_id)
+            .map_or("MISSING SONG", |value| value.name.as_str());
+        Screen::with_header(
+            indexed_title(
+                "SONGS",
+                self.performance_child_index,
+                setlist.entries.len() + 1,
+            ),
+            name,
+            format!("POSITION {}", self.performance_child_index),
+        )
+    }
+
+    fn render_setlist_entry_editor(&self) -> Screen {
+        let Some(PerformanceDraft::Setlist(setlist)) = self.performance_draft.as_ref() else {
+            return Screen::with_header("ENTRY", "EMPTY", "BACK");
+        };
+        let entry = &setlist.entries[self.performance_child_index];
+        let detail = match self.performance_child_editor_index {
+            0 => self
+                .performance_library
+                .song(&entry.song_id)
+                .map_or("MISSING SONG".into(), |value| value.name.clone()),
+            1 => {
+                if self.performance_child_index == 0 {
+                    "Already first".into()
+                } else {
+                    "Move earlier".into()
+                }
+            }
+            2 => {
+                if self.performance_child_index + 1 == setlist.entries.len() {
+                    "Already last".into()
+                } else {
+                    "Move later".into()
+                }
+            }
+            _ => {
+                if setlist.entries.len() == 1 {
+                    "One Song required".into()
+                } else {
+                    "Remove entry".into()
+                }
+            }
+        };
+        Screen::with_header(
+            indexed_title(
+                "ENTRY",
+                self.performance_child_editor_index,
+                ENTRY_EDITOR_ITEMS.len(),
+            ),
+            ENTRY_EDITOR_ITEMS[self.performance_child_editor_index],
+            detail,
+        )
+    }
+
+    fn render_reference_picker(&self, kind: &str) -> Screen {
+        let (name, count) = if kind == "RACK" {
+            (
+                self.performance_library
+                    .racks
+                    .get(self.performance_child_editor_index)
+                    .map(|value| value.name.as_str()),
+                self.performance_library.racks.len(),
+            )
+        } else {
+            (
+                self.performance_library
+                    .songs
+                    .get(self.performance_child_editor_index)
+                    .map(|value| value.name.as_str()),
+                self.performance_library.songs.len(),
+            )
+        };
+        Screen::with_header(
+            indexed_title(kind, self.performance_child_editor_index, count),
+            name.unwrap_or("EMPTY"),
+            "OK TO SELECT",
+        )
+    }
+
+    fn live_racks(&self) -> Vec<&rackforge_performance_api::RackDefinition> {
+        self.performance_library
+            .racks
+            .iter()
+            .filter(|rack| rack.enabled)
+            .collect()
+    }
+
+    fn live_songs(&self) -> Vec<&rackforge_performance_api::SongDefinition> {
+        self.performance_library
+            .songs
+            .iter()
+            .filter(|song| song.enabled)
+            .collect()
+    }
+
+    fn live_setlists(&self) -> Vec<&rackforge_performance_api::SetlistDefinition> {
+        self.performance_library
+            .setlists
+            .iter()
+            .filter(|setlist| setlist.enabled)
+            .collect()
+    }
+
+    fn selected_live_song(&self) -> Option<&rackforge_performance_api::SongDefinition> {
+        self.live_songs().get(self.live_song_index).copied()
+    }
+
+    fn selected_setlist_parts(
+        &self,
+    ) -> Vec<(
+        &rackforge_performance_api::SetlistEntry,
+        &rackforge_performance_api::SongDefinition,
+        &rackforge_performance_api::SongPart,
+    )> {
+        let Some(setlist) = self.live_setlists().get(self.live_setlist_index).copied() else {
+            return Vec::new();
+        };
+        setlist
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                self.performance_library
+                    .song(&entry.song_id)
+                    .filter(|song| song.enabled)
+                    .map(|song| (entry, song))
+            })
+            .flat_map(|(entry, song)| song.parts.iter().map(move |part| (entry, song, part)))
+            .collect()
+    }
+
+    fn focused_live_location(&self) -> Option<LiveLocation> {
+        match self.page {
+            Page::LiveRacks => {
+                self.live_racks()
+                    .get(self.live_rack_index)
+                    .map(|rack| LiveLocation::Rack {
+                        rack_id: rack.id.clone(),
+                    })
+            }
+            Page::LiveSongParts => self.selected_live_song().and_then(|song| {
+                song.parts
+                    .get(self.live_song_part_index)
+                    .map(|part| LiveLocation::Song {
+                        song_id: song.id.clone(),
+                        part_id: part.id.clone(),
+                    })
+            }),
+            Page::LiveSetlistEntries => self
+                .selected_setlist_parts()
+                .get(self.live_setlist_entry_index)
+                .map(|(entry, _, part)| LiveLocation::Setlist {
+                    setlist_id: self.live_setlists()[self.live_setlist_index].id.clone(),
+                    entry_id: entry.id.clone(),
+                    part_id: part.id.clone(),
+                }),
+            _ => None,
+        }
+    }
+
+    fn render_live_racks(&self) -> Screen {
+        let racks = self.live_racks();
+        let Some(rack) = racks.get(self.live_rack_index) else {
+            return Screen::with_header("RACK 0/0", "EMPTY", "CONFIG > RACKS");
+        };
+        let active = self.live_performance.active_rack_id.as_ref() == Some(&rack.id);
+        Screen::with_header(
+            indexed_title("RACK", self.live_rack_index, racks.len()),
+            normalized_display_text(&rack.name, "UNNAMED RACK"),
+            if active { "ACTIVE" } else { "OK TO LOAD" },
+        )
+    }
+
+    fn render_live_songs(&self) -> Screen {
+        let songs = self.live_songs();
+        let Some(song) = songs.get(self.live_song_index) else {
+            return Screen::with_header("SONG 0/0", "EMPTY", "CONFIG > SONGS");
+        };
+        Screen::with_header(
+            indexed_title("SONG", self.live_song_index, songs.len()),
+            normalized_display_text(&song.name, "UNNAMED SONG"),
+            format!(
+                "{} PART{}",
+                song.parts.len(),
+                if song.parts.len() == 1 { "" } else { "S" }
+            ),
+        )
+    }
+
+    fn render_live_song_parts(&self) -> Screen {
+        let Some(song) = self.selected_live_song() else {
+            return Screen::with_header("SONG", "EMPTY", "BACK");
+        };
+        let Some(part) = song.parts.get(self.live_song_part_index) else {
+            return Screen::with_header("SONG", "NO PARTS", "BACK");
+        };
+        let location = LiveLocation::Song {
+            song_id: song.id.clone(),
+            part_id: part.id.clone(),
+        };
+        let rack_name = self
+            .performance_library
+            .rack(&part.rack_id)
+            .map(|rack| rack.name.as_str())
+            .unwrap_or("MISSING RACK");
+        let detail = if self.live_performance.active.as_ref() == Some(&location) {
+            "ACTIVE".to_owned()
+        } else {
+            rack_name.to_owned()
+        };
+        Screen::with_header(
+            indexed_title(
+                &normalized_display_text(&song.name, "SONG"),
+                self.live_song_part_index,
+                song.parts.len(),
+            ),
+            normalized_display_text(&part.name, "UNNAMED PART"),
+            normalized_display_text(&detail, "OK TO LOAD"),
+        )
+    }
+
+    fn render_live_setlists(&self) -> Screen {
+        let setlists = self.live_setlists();
+        let Some(setlist) = setlists.get(self.live_setlist_index) else {
+            return Screen::with_header("SETLIST 0/0", "EMPTY", "CONFIG > SETS");
+        };
+        Screen::with_header(
+            indexed_title("SETLIST", self.live_setlist_index, setlists.len()),
+            normalized_display_text(&setlist.name, "UNNAMED SETLIST"),
+            format!(
+                "{} SONG{}",
+                setlist.entries.len(),
+                if setlist.entries.len() == 1 { "" } else { "S" }
+            ),
+        )
+    }
+
+    fn render_live_setlist_entries(&self) -> Screen {
+        let setlists = self.live_setlists();
+        let Some(setlist) = setlists.get(self.live_setlist_index) else {
+            return Screen::with_header("SETLIST", "EMPTY", "BACK");
+        };
+        let parts = self.selected_setlist_parts();
+        let Some((entry, song, part)) = parts.get(self.live_setlist_entry_index) else {
+            return Screen::with_header("SETLIST", "NO SONGS", "BACK");
+        };
+        let location = LiveLocation::Setlist {
+            setlist_id: setlist.id.clone(),
+            entry_id: entry.id.clone(),
+            part_id: part.id.clone(),
+        };
+        let detail = if self.live_performance.active.as_ref() == Some(&location) {
+            format!("{} ACTIVE", part.name)
+        } else {
+            part.name.clone()
+        };
+        Screen::with_header(
+            indexed_title(
+                &normalized_display_text(&setlist.name, "SETLIST"),
+                self.live_setlist_entry_index,
+                parts.len(),
+            ),
+            normalized_display_text(&song.name, "UNNAMED SONG"),
+            normalized_display_text(&detail, "UNNAMED PART"),
+        )
     }
 
     fn render_audio(&self) -> Screen {
@@ -2049,6 +3969,41 @@ impl Menu {
         let (selection, len) = match self.page {
             Page::Home => (&mut self.home_index, HOME_ITEMS.len()),
             Page::Live => (&mut self.live_index, LIVE_ITEMS.len()),
+            Page::LiveRacks => {
+                let len = self.live_racks().len();
+                if len == 0 {
+                    return;
+                }
+                (&mut self.live_rack_index, len)
+            }
+            Page::LiveSongs => {
+                let len = self.live_songs().len();
+                if len == 0 {
+                    return;
+                }
+                (&mut self.live_song_index, len)
+            }
+            Page::LiveSongParts => {
+                let len = self.selected_live_song().map_or(0, |song| song.parts.len());
+                if len == 0 {
+                    return;
+                }
+                (&mut self.live_song_part_index, len)
+            }
+            Page::LiveSetlists => {
+                let len = self.live_setlists().len();
+                if len == 0 {
+                    return;
+                }
+                (&mut self.live_setlist_index, len)
+            }
+            Page::LiveSetlistEntries => {
+                let len = self.selected_setlist_parts().len();
+                if len == 0 {
+                    return;
+                }
+                (&mut self.live_setlist_entry_index, len)
+            }
             Page::Play => (&mut self.play_index, PLAY_ITEMS.len()),
             Page::Config => (&mut self.config_index, CONFIG_ITEMS.len()),
             Page::Plugins => (&mut self.plugin_index, PLUGIN_ITEMS.len()),
@@ -2082,6 +4037,35 @@ impl Menu {
                 (&mut self.rf_dls_timbre_index, len)
             }
             Page::RfDlsName => return,
+            Page::ConfigRacks
+            | Page::ConfigRackEditor
+            | Page::ConfigRackName
+            | Page::ConfigRackSlots
+            | Page::ConfigRackSlotEditor
+            | Page::ConfigRackSlotName
+            | Page::ConfigRackSlotPlugin
+            | Page::ConfigRackSlotMidiChannel
+            | Page::ConfigRackSlotMidiOutput
+            | Page::ConfigRackSlotAudioOutput
+            | Page::ConfigRackSlotLevel
+            | Page::ConfigRackSlotPan
+            | Page::ConfigSongs
+            | Page::ConfigSongEditor
+            | Page::ConfigSongName
+            | Page::ConfigSongParts
+            | Page::ConfigSongPartEditor
+            | Page::ConfigSongPartName
+            | Page::ConfigSongPartRack
+            | Page::ConfigSetlists
+            | Page::ConfigSetlistEditor
+            | Page::ConfigSetlistName
+            | Page::ConfigSetlistEntries
+            | Page::ConfigSetlistEntryEditor
+            | Page::ConfigSetlistEntrySong
+            | Page::PerformanceUnsaved
+            | Page::PerformanceDelete
+            | Page::PerformanceBusy
+            | Page::PerformanceResult => return,
             Page::RfDlsTuning
             | Page::RfDlsPitchEnvelope
             | Page::RfDlsLayerLevel
@@ -2703,7 +4687,7 @@ impl Menu {
         let mut carousel = SimpleCarousel::new(
             "rf-dls-sounds",
             sounds.iter().map(|sound| {
-                let name = if self.rf_dls_active_sound_id.as_deref() == Some(sound.id.as_str()) {
+                let name = if self.rf_dls_play_selected_sound_id() == Some(sound.id.as_str()) {
                     let bounded = sound
                         .name
                         .chars()
@@ -3194,6 +5178,13 @@ fn normalized_display_text(value: &str, fallback: &str) -> String {
     normalized
 }
 
+fn plugin_display_name(plugin_id: &str) -> &str {
+    match plugin_id {
+        "org.rackforge.rf-dls" => "RF-DLS",
+        _ => plugin_id,
+    }
+}
+
 fn render_home(selected: usize) -> [String; 2] {
     let mut frame = Frame::new(DISPLAY_COLUMNS, 2);
     for (index, (item, area)) in [
@@ -3631,6 +5622,40 @@ fn program_name_editor(name: &str) -> TextEditor {
     editor
 }
 
+fn performance_text_editor(id: &str, label: &str, name: &str) -> TextEditor {
+    let mut editor = TextEditor::new(id, label, name, 24);
+    editor.set_focused(true);
+    editor
+}
+
+fn performance_confirmation() -> ConfirmationDialog {
+    let mut dialog =
+        ConfirmationDialog::new("performance-unsaved", "SAVE CHANGES?", ["SAVE", "DISCARD"]);
+    dialog.set_focused(true);
+    dialog
+}
+
+fn delete_confirmation() -> ConfirmationDialog {
+    let mut dialog =
+        ConfirmationDialog::new("performance-delete", "DELETE ITEM?", ["DELETE", "CANCEL"]);
+    dialog.set_focused(true);
+    dialog
+}
+
+fn move_wrapped(selection: &mut usize, len: usize, delta: isize) {
+    if len > 0 {
+        *selection = (*selection as isize + delta).rem_euclid(len as isize) as usize;
+    }
+}
+
+fn next_available_id<'a>(prefix: &str, existing: impl Iterator<Item = &'a str>) -> String {
+    let existing = existing.collect::<std::collections::BTreeSet<_>>();
+    (1_u32..)
+        .map(|index| format!("{prefix}.{index:03}"))
+        .find(|candidate| !existing.contains(candidate.as_str()))
+        .expect("finite performance library always has a free id")
+}
+
 fn wifi_password_editor() -> SecretEditor {
     let mut editor = SecretEditor::new("system-wifi-password", "PASSWORD", 64);
     editor.set_focused(true);
@@ -3678,6 +5703,11 @@ mod tests {
         AUDIO_DEVICE_SCHEMA_VERSION, AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioBackend,
         AudioDeviceId, AudioStreamCapabilities, AudioTransport, AudioValueRange,
     };
+    use rackforge_performance_api::{
+        MidiOutputRoute, PERFORMANCE_SCHEMA_VERSION, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION,
+        RackDefinition, RackId, RackSlot, RackSlotId, SetlistDefinition, SetlistEntry,
+        SetlistEntryId, SetlistId, SongDefinition, SongId, SongPart, SongPartId,
+    };
     use rackforge_session_api::InstanceId;
 
     fn test_audio_state() -> AudioOutputState {
@@ -3720,12 +5750,242 @@ mod tests {
         }
     }
 
+    fn test_performance_snapshot() -> PerformanceSnapshot {
+        let rack_id = RackId::new("rack.stage-piano").unwrap();
+        let song_id = SongId::new("song.opener").unwrap();
+        let part_id = SongPartId::new("part.intro").unwrap();
+        let rack = RackDefinition {
+            schema_version: PERFORMANCE_SCHEMA_VERSION,
+            id: rack_id.clone(),
+            name: "Stage Piano".into(),
+            enabled: true,
+            slots: vec![RackSlot {
+                id: RackSlotId::new("instrument.main").unwrap(),
+                name: "Main Instrument".into(),
+                plugin_id: "org.rackforge.rf-dls".into(),
+                plugin_state_id: Some("custom.user.stage-piano".into()),
+                enabled: true,
+                midi_input_channel: None,
+                midi_output: MidiOutputRoute::None,
+                audio_output_bus: "main".into(),
+                level_per_mille: 1_000,
+                pan_per_mille: 0,
+            }],
+        };
+        let song = SongDefinition {
+            schema_version: PERFORMANCE_SCHEMA_VERSION,
+            id: song_id.clone(),
+            name: "Opener".into(),
+            enabled: true,
+            parts: vec![SongPart {
+                id: part_id.clone(),
+                name: "Intro".into(),
+                rack_id: rack_id.clone(),
+            }],
+        };
+        let setlist = SetlistDefinition {
+            schema_version: PERFORMANCE_SCHEMA_VERSION,
+            id: SetlistId::new("setlist.friday").unwrap(),
+            name: "Friday".into(),
+            enabled: true,
+            entries: vec![SetlistEntry {
+                id: SetlistEntryId::new("entry.opener").unwrap(),
+                song_id,
+            }],
+        };
+        let rack_location = LiveLocation::Rack {
+            rack_id: rack_id.clone(),
+        };
+        PerformanceSnapshot {
+            schema_version: PERFORMANCE_SNAPSHOT_SCHEMA_VERSION,
+            revision: LibraryRevision::new("0".repeat(64)).unwrap(),
+            library: PerformanceLibrary {
+                schema_version: PERFORMANCE_SCHEMA_VERSION,
+                racks: vec![rack],
+                songs: vec![song],
+                setlists: vec![setlist],
+            },
+            live: LivePerformanceState {
+                mode: LiveBrowseMode::Rack,
+                rack: Some(rack_location.clone()),
+                song: None,
+                setlist: None,
+                active: Some(rack_location),
+                active_rack_id: Some(rack_id),
+            },
+        }
+    }
+
+    #[test]
+    fn live_exposes_rack_song_and_setlist_without_forcing_a_hierarchy() {
+        let mut menu = Menu::default();
+        menu.sync_performance_snapshot(test_performance_snapshot());
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1.trim(), "RACK");
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetLiveBrowseMode {
+                mode: LiveBrowseMode::Rack
+            })
+        );
+        assert_eq!(menu.render().line_1, "Stage Piano");
+        assert_eq!(menu.render().line_2, "ACTIVE");
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::ActivateLiveTarget {
+                location: LiveLocation::Rack {
+                    rack_id: RackId::new("rack.stage-piano").unwrap()
+                }
+            })
+        );
+
+        menu.apply(Action::Back);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1, "Opener");
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1, "Intro");
+
+        menu.apply(Action::Back);
+        menu.apply(Action::Back);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1, "Friday");
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1, "Opener");
+        assert_eq!(menu.render().line_2, "Intro");
+    }
+
+    #[test]
+    fn rack_configuration_creates_a_transactional_draft() {
+        let mut menu = Menu::default();
+        menu.sync_performance_snapshot(test_performance_snapshot());
+        menu.apply(Action::Previous);
+        menu.apply(Action::Select);
+        menu.apply(Action::Select);
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1, "NAME");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "SLOTS");
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1, "+ ADD SLOT");
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1, "SLOT 1");
+        assert_eq!(menu.render().line_2, " ");
+        menu.apply(Action::Back);
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "SAVE");
+        menu.apply(Action::Select);
+        let Some(MenuCommand::EditPerformance {
+            expected_revision,
+            edit: PerformanceEdit::PutRack { rack },
+        }) = menu.take_command()
+        else {
+            panic!("expected a typed Rack edit");
+        };
+        assert_eq!(expected_revision.as_str(), "0".repeat(64));
+        assert_eq!(rack.id.as_str(), "rack.user.001");
+        assert_eq!(rack.slots.len(), 1);
+        assert_eq!(rack.slots[0].plugin_id, "org.rackforge.rf-dls");
+        assert_eq!(
+            rack.slots[0].plugin_state_id.as_deref(),
+            Some("dls.b00000000.p00000000")
+        );
+        assert_eq!(menu.render().line_1.trim(), "SAVING");
+    }
+
+    #[test]
+    fn rack_slot_enters_the_plugin_play_surface_without_exposing_programs_to_rack() {
+        let mut menu = Menu::default();
+        menu.sync_performance_snapshot(test_performance_snapshot());
+        menu.set_play_sounds(
+            vec![
+                PlaySound::new("dls.piano", "Piano", "dls", "B000 P000"),
+                PlaySound::new("dls.strings", "Strings", "dls", "B000 P048"),
+                PlaySound::new(
+                    "custom.user.warm-piano",
+                    "Warm Piano",
+                    "custom",
+                    "CUSTOM 001",
+                ),
+            ],
+            Some("dls.piano"),
+        );
+        menu.apply(Action::Previous);
+        menu.apply(Action::Select);
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1, "RF-DLS");
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("RF-DLS PLAY    1/2".into())
+        );
+        assert_eq!(menu.render().line_1.trim(), "DLS");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1.trim(), "CUSTOM");
+        menu.apply(Action::Select);
+        assert!(menu.render().line_1.contains("WARM PIANO"));
+        menu.apply(Action::Select);
+        let Some(MenuCommand::PreviewRack { rack }) = menu.take_command() else {
+            panic!("expected the complete Rack draft to be previewed");
+        };
+        assert_eq!(rack.slots.len(), 1);
+        assert_eq!(
+            rack.slots[0].plugin_state_id.as_deref(),
+            Some("custom.user.warm-piano")
+        );
+        assert_eq!(
+            menu.focused_rack_slot()
+                .and_then(|slot| slot.plugin_state_id.as_deref()),
+            Some("custom.user.warm-piano")
+        );
+        menu.apply(Action::Back);
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("RF-DLS PLAY    2/2".into())
+        );
+        menu.apply(Action::Back);
+        assert_eq!(menu.render().line_1, "RF-DLS");
+    }
+
+    #[test]
+    fn song_parts_and_setlist_entries_are_ordered_editable_children() {
+        let mut menu = Menu::default();
+        menu.sync_performance_snapshot(test_performance_snapshot());
+        menu.apply(Action::Previous);
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1, "+ ADD PART");
+        menu.apply(Action::Select);
+        assert!(menu.render().line_1.contains("PART 2"));
+        menu.apply(Action::Back);
+        assert_eq!(menu.render().line_1, "PARTS");
+        assert_eq!(menu.render().line_2, "2 PARTS");
+    }
+
     #[test]
     fn audio_menu_uses_runtime_state_and_emits_typed_changes() {
         let mut menu = Menu::default();
         menu.sync_audio_state(test_audio_state());
         menu.apply(Action::Previous);
         menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
         menu.apply(Action::Next);
         menu.apply(Action::Next);
         assert_eq!(menu.render().line_1, "AUDIO");
@@ -4018,6 +6278,9 @@ mod tests {
     fn open_new_program_editor(menu: &mut Menu) {
         menu.apply(Action::Previous);
         menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
         menu.apply(Action::Select);
         menu.apply(Action::Select);
         assert!(menu.render().line_1.contains("ADD NEW"));
@@ -4046,7 +6309,7 @@ mod tests {
         menu.apply(Action::Select);
         assert_eq!(
             menu.render().header,
-            Header::Visible("CONFIG         1/4".into())
+            Header::Visible("CONFIG         1/6".into())
         );
     }
 
@@ -4055,12 +6318,12 @@ mod tests {
         let mut menu = Menu::default();
         menu.apply(Action::Select);
         menu.apply(Action::Next);
-        assert!(menu.render().line_1.contains("WARM PAD"));
-        assert_eq!(menu.render().line_2.trim(), "Layered pad");
+        assert!(menu.render().line_1.contains("SONG"));
+        assert_eq!(menu.render().line_2.trim(), "Songs and parts");
         assert!(!menu.render().line_1.contains(" v"));
         menu.apply(Action::Back);
         menu.apply(Action::Select);
-        assert!(menu.render().line_1.contains("WARM PAD"));
+        assert!(menu.render().line_1.contains("SONG"));
     }
 
     #[test]
@@ -4068,6 +6331,9 @@ mod tests {
         let mut menu = Menu::default();
         menu.apply(Action::Previous);
         menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
         menu.apply(Action::Select);
         assert_eq!(
             menu.render().header,
@@ -4185,6 +6451,9 @@ mod tests {
         menu.apply(Action::Back);
         menu.apply(Action::Next);
         menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
         menu.apply(Action::Select);
         menu.apply(Action::Select);
         assert_eq!(
@@ -4278,7 +6547,7 @@ mod tests {
         menu.apply(Action::Select);
         assert_eq!(
             menu.render().header,
-            Header::Visible("LIVE SET       1/4".into())
+            Header::Visible("LIVE           1/3".into())
         );
         assert!(!menu.render().header.eq(&Header::Visible("RF-DLS".into())));
     }
@@ -4288,11 +6557,11 @@ mod tests {
         let mut menu = Menu::default();
         menu.apply(Action::Select);
         let screen = menu.apply_input_and_render(Input::Button3);
-        assert!(screen.line_1.contains("WARM PAD"));
-        assert!(!screen.line_1.contains("PIANO"));
+        assert!(screen.line_1.contains("SONG"));
+        assert!(!screen.line_1.contains("RACK"));
         assert!(!screen.line_1.contains('['));
         assert!(!screen.line_1.contains(']'));
-        assert_eq!(screen.line_2.trim(), "Layered pad");
+        assert_eq!(screen.line_2.trim(), "Songs and parts");
     }
 
     #[test]
@@ -4700,7 +6969,7 @@ mod tests {
         menu.apply(Action::Back);
         menu.apply(Action::Next);
         menu.apply(Action::Select);
-        assert!(menu.render().line_1.contains("PLUGINS"));
+        assert!(menu.render().line_1.contains("RACKS"));
 
         menu.apply_input(Input::Button4Long);
         assert!(matches!(
@@ -4846,7 +7115,7 @@ mod tests {
 
         menu.apply(Action::Previous);
         menu.apply(Action::Select);
-        assert_eq!(menu.render().line_1.trim(), "PLUGINS");
+        assert_eq!(menu.render().line_1.trim(), "RACKS");
         menu.apply(Action::Previous);
         assert_eq!(menu.render().line_1.trim(), "SYSTEM");
         menu.apply(Action::Select);

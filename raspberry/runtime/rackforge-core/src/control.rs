@@ -1,4 +1,5 @@
 use crate::PluginStorage;
+use crate::performance::PerformanceRepository;
 use crate::session::SharedSessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
 use anyhow::{Context, Result, bail};
@@ -6,6 +7,12 @@ use rackforge_audio_api::{AudioOutputDocument, AudioOutputProfile, AudioOutputSt
 use rackforge_control_api::{
     ControlErrorCode, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES, decode_request,
     encode_line,
+};
+#[cfg(test)]
+use rackforge_performance_api::PerformanceLibrary;
+use rackforge_performance_api::{
+    LibraryRevision, MidiOutputRoute, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit,
+    PerformanceSnapshot, RackDefinition,
 };
 use rackforge_plugin_api::{
     PreparedProgram, PresetCatalog, ProgramDocument, ProgramEditRequest, ProgramEditorView,
@@ -31,6 +38,16 @@ const AUDIO_COMMAND_TIMEOUT: Duration = Duration::from_secs(1);
 const AUDIO_RECONFIGURE_TIMEOUT: Duration = Duration::from_secs(8);
 const AUDITION_LEASE_TIMEOUT: Duration = Duration::from_secs(15);
 const AUDITION_WATCHDOG_PERIOD: Duration = Duration::from_millis(250);
+pub const MAX_ACTIVE_RACK_SLOTS: usize = 8;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RackSlotRuntimeSpec {
+    pub slot_id: String,
+    pub plugin_state_id: String,
+    pub midi_input_channel: Option<u8>,
+    pub level_per_mille: u16,
+    pub pan_per_mille: i16,
+}
 
 pub enum AudioControlCommand {
     ApplyAudioOutput {
@@ -50,9 +67,19 @@ pub enum AudioControlCommand {
         pan: MasterPan,
         reply: SyncSender<Result<(), String>>,
     },
+    SetRenderMode {
+        mode: rackforge_session_api::SurfaceMode,
+        reply: SyncSender<Result<(), String>>,
+    },
     SelectSound {
         instance_id: InstanceId,
         sound_id: String,
+        reply: SyncSender<Result<(), String>>,
+    },
+    ActivateRack {
+        rack_id: String,
+        instance_id: InstanceId,
+        slots: Vec<RackSlotRuntimeSpec>,
         reply: SyncSender<Result<(), String>>,
     },
     BeginAudition {
@@ -118,6 +145,7 @@ struct ControlContext {
     audio_sender: SyncSender<AudioControlCommand>,
     audio_state: Arc<Mutex<AudioOutputState>>,
     audio_state_path: PathBuf,
+    performance_repository: Arc<Mutex<PerformanceRepository>>,
     storage: Option<PluginStorage>,
     checkpoint: Option<SessionCheckpointStore>,
     dispatch_lock: Mutex<()>,
@@ -136,6 +164,7 @@ pub fn start(
     audio_sender: SyncSender<AudioControlCommand>,
     audio_state: Arc<Mutex<AudioOutputState>>,
     audio_state_path: PathBuf,
+    performance_repository: Arc<Mutex<PerformanceRepository>>,
     storage: Option<PluginStorage>,
     checkpoint: Option<SessionCheckpointStore>,
 ) -> Result<ControlServer> {
@@ -176,6 +205,7 @@ pub fn start(
         audio_sender,
         audio_state,
         audio_state_path,
+        performance_repository,
         storage,
         checkpoint,
         dispatch_lock: Mutex::new(()),
@@ -261,6 +291,33 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             },
             Err(_) => internal_error("audio state lock is poisoned", current_revision(context)),
         },
+        ControlRequest::PerformanceSnapshot => {
+            match (context.store.lock(), context.performance_repository.lock()) {
+                (Ok(store), Ok(repository)) => {
+                    let snapshot = PerformanceSnapshot {
+                        schema_version: PERFORMANCE_SNAPSHOT_SCHEMA_VERSION,
+                        revision: repository.revision(),
+                        library: repository.library().clone(),
+                        live: store.state().live.clone(),
+                    };
+                    match snapshot.validate() {
+                        Ok(()) => ControlResponse::PerformanceSnapshot {
+                            snapshot: Box::new(snapshot),
+                        },
+                        Err(error) => internal_error(
+                            format!("invalid performance snapshot: {error}"),
+                            Some(store.state().revision),
+                        ),
+                    }
+                }
+                (Err(_), _) => internal_error("session store lock is poisoned", None),
+                (_, Err(_)) => internal_error("performance repository lock is poisoned", None),
+            }
+        }
+        ControlRequest::EditPerformance {
+            expected_revision,
+            edit,
+        } => edit_performance(context, expected_revision, edit),
         ControlRequest::ApplyAudioOutput { profile } => apply_audio_output(context, profile),
         ControlRequest::Events { after_revision } => match context.store.lock() {
             Ok(store) => match store.events_after(after_revision) {
@@ -342,6 +399,61 @@ fn apply_audio_output(
         );
     }
     ControlResponse::AudioApplied {
+        snapshot: Box::new(snapshot),
+    }
+}
+
+fn edit_performance(
+    context: &Arc<ControlContext>,
+    expected_revision: LibraryRevision,
+    edit: PerformanceEdit,
+) -> ControlResponse {
+    if let Err(error) = expected_revision.validate() {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            error.to_string(),
+            current_revision(context),
+        );
+    }
+    let store = match context.store.lock() {
+        Ok(store) => store,
+        Err(_) => return internal_error("session store lock is poisoned", None),
+    };
+    let mut repository = match context.performance_repository.lock() {
+        Ok(repository) => repository,
+        Err(_) => {
+            return internal_error(
+                "performance repository lock is poisoned",
+                Some(store.state().revision),
+            );
+        }
+    };
+    let current = repository.revision();
+    if current != expected_revision {
+        return error_response(
+            ControlErrorCode::Conflict,
+            format!(
+                "performance library changed: expected {}, current {}",
+                expected_revision.as_str(),
+                current.as_str()
+            ),
+            Some(store.state().revision),
+        );
+    }
+    if let Err(error) = repository.apply_edit(&expected_revision, edit, &store.state().live) {
+        return error_response(
+            ControlErrorCode::Rejected,
+            error.to_string(),
+            Some(store.state().revision),
+        );
+    }
+    let snapshot = PerformanceSnapshot {
+        schema_version: PERFORMANCE_SNAPSHOT_SCHEMA_VERSION,
+        revision: repository.revision(),
+        library: repository.library().clone(),
+        live: store.state().live.clone(),
+    };
+    ControlResponse::PerformanceEdited {
         snapshot: Box::new(snapshot),
     }
 }
@@ -488,11 +600,113 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 Err(failure) => failure.into_response(),
             }
         }
-        SessionCommand::SetActiveMode { mode } => record_command_event(
+        SessionCommand::SetActiveMode { mode } => {
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::SetRenderMode {
+                    mode,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "change render mode") {
+                Ok(()) => record_command_event(
+                    context,
+                    command_ref,
+                    SessionEvent::ActiveModeChanged { mode },
+                ),
+                Err(failure) => failure.into_response(),
+            }
+        }
+        SessionCommand::SetLiveBrowseMode { mode } => record_command_event(
             context,
             command_ref,
-            SessionEvent::ActiveModeChanged { mode },
+            SessionEvent::LiveBrowseModeChanged { mode },
         ),
+        SessionCommand::ActivateLiveTarget { location } => {
+            if snapshot.active_mode != rackforge_session_api::SurfaceMode::Live {
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    "LIVE targets can only be activated while LIVE is active",
+                    Some(snapshot.revision),
+                );
+            }
+            let rack = match context.performance_repository.lock() {
+                Ok(repository) => match repository.library().resolve(&location) {
+                    Ok(rack) if rack.enabled => rack.clone(),
+                    Ok(_) => {
+                        return error_response(
+                            ControlErrorCode::Rejected,
+                            "the selected Rack is disabled",
+                            Some(snapshot.revision),
+                        );
+                    }
+                    Err(error) => {
+                        return error_response(
+                            ControlErrorCode::NotFound,
+                            error.to_string(),
+                            Some(snapshot.revision),
+                        );
+                    }
+                },
+                Err(_) => {
+                    return internal_error(
+                        "performance repository lock is poisoned",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            let (instance_id, slots) = match prepare_rack_runtime(&snapshot, &rack) {
+                Ok(runtime) => runtime,
+                Err(failure) => return failure.into_response(),
+            };
+            let rack_id = rack.id.clone();
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::ActivateRack {
+                    rack_id: rack_id.as_str().to_owned(),
+                    instance_id: instance_id.clone(),
+                    slots,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "activate LIVE Rack") {
+                Ok(()) => record_command_event(
+                    context,
+                    command_ref,
+                    SessionEvent::LiveTargetActivated { location, rack_id },
+                ),
+                Err(failure) => failure.into_response(),
+            }
+        }
+        SessionCommand::PreviewRack { rack } => {
+            let (instance_id, slots) = match prepare_rack_runtime(&snapshot, &rack) {
+                Ok(runtime) => runtime,
+                Err(failure) => return failure.into_response(),
+            };
+            let rack_id = rack.id.as_str().to_owned();
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::ActivateRack {
+                    rack_id,
+                    instance_id,
+                    slots,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "preview Rack") {
+                Ok(()) => command_applied_without_events(context, command_ref),
+                Err(failure) => failure.into_response(),
+            }
+        }
         SessionCommand::SelectSound {
             instance_id,
             sound_id,
@@ -1329,6 +1543,111 @@ fn require_active_instance<'a>(
     Ok(instance)
 }
 
+fn prepare_rack_runtime(
+    snapshot: &rackforge_session_api::SessionState,
+    rack: &RackDefinition,
+) -> Result<(InstanceId, Vec<RackSlotRuntimeSpec>), ControlFailure> {
+    rack.validate().map_err(|error| {
+        control_failure(
+            ControlErrorCode::InvalidRequest,
+            format!("invalid Rack {}: {error}", rack.id),
+            Some(snapshot.revision),
+        )
+    })?;
+    let enabled_slots = rack
+        .slots
+        .iter()
+        .filter(|slot| slot.enabled)
+        .collect::<Vec<_>>();
+    if enabled_slots.is_empty() {
+        return Err(control_failure(
+            ControlErrorCode::Rejected,
+            format!("Rack {} has no enabled Slots", rack.id),
+            Some(snapshot.revision),
+        ));
+    }
+    if enabled_slots.len() > MAX_ACTIVE_RACK_SLOTS {
+        return Err(control_failure(
+            ControlErrorCode::Rejected,
+            format!(
+                "Rack {} enables {} Slots; this engine supports at most {MAX_ACTIVE_RACK_SLOTS}",
+                rack.id,
+                enabled_slots.len()
+            ),
+            Some(snapshot.revision),
+        ));
+    }
+    let instance = snapshot.active_instance().ok_or_else(|| {
+        control_failure(
+            ControlErrorCode::Unavailable,
+            "the LIVE session has no active plugin instance",
+            Some(snapshot.revision),
+        )
+    })?;
+    let mut specs = Vec::with_capacity(enabled_slots.len());
+    for slot in enabled_slots {
+        if instance.plugin_id != slot.plugin_id {
+            return Err(control_failure(
+                ControlErrorCode::Rejected,
+                format!(
+                    "Rack Slot {} requires plugin {}, active plugin is {}",
+                    slot.id, slot.plugin_id, instance.plugin_id
+                ),
+                Some(snapshot.revision),
+            ));
+        }
+        if !matches!(slot.midi_output, MidiOutputRoute::None) {
+            return Err(control_failure(
+                ControlErrorCode::Rejected,
+                format!(
+                    "Rack Slot {} uses a MIDI output not supported by the current engine",
+                    slot.id
+                ),
+                Some(snapshot.revision),
+            ));
+        }
+        if slot.audio_output_bus != "main" {
+            return Err(control_failure(
+                ControlErrorCode::Rejected,
+                format!(
+                    "Rack Slot {} uses unavailable audio bus {:?}",
+                    slot.id, slot.audio_output_bus
+                ),
+                Some(snapshot.revision),
+            ));
+        }
+        let plugin_state_id = slot.plugin_state_id.clone().ok_or_else(|| {
+            control_failure(
+                ControlErrorCode::Rejected,
+                format!("Rack Slot {} has no plugin PLAY state", slot.id),
+                Some(snapshot.revision),
+            )
+        })?;
+        if !instance
+            .sounds
+            .iter()
+            .any(|sound| sound.id == plugin_state_id)
+        {
+            return Err(control_failure(
+                ControlErrorCode::NotFound,
+                format!(
+                    "Rack Slot {} references missing plugin state {:?}",
+                    slot.id, plugin_state_id
+                ),
+                Some(snapshot.revision),
+            ));
+        }
+        specs.push(RackSlotRuntimeSpec {
+            slot_id: slot.id.as_str().to_owned(),
+            plugin_state_id,
+            midi_input_channel: slot.midi_input_channel,
+            level_per_mille: slot.level_per_mille,
+            pan_per_mille: slot.pan_per_mille,
+        });
+    }
+    Ok((instance.instance_id.clone(), specs))
+}
+
 fn send_audio(
     context: &ControlContext,
     command: AudioControlCommand,
@@ -1444,6 +1763,8 @@ fn record_command_events(
             SessionEvent::MasterLevelChanged { .. }
                 | SessionEvent::MasterPanChanged { .. }
                 | SessionEvent::ActiveModeChanged { .. }
+                | SessionEvent::LiveBrowseModeChanged { .. }
+                | SessionEvent::LiveTargetActivated { .. }
                 | SessionEvent::SoundSelected { .. }
                 | SessionEvent::ProgramSaved { .. }
         )
@@ -1645,6 +1966,10 @@ mod tests {
         AudioDeviceDescriptor, AudioDeviceId, AudioDeviceSelector, AudioFallbackPolicy,
         AudioSampleFormat, AudioStreamCapabilities, AudioTransport, AudioValueRange,
     };
+    use rackforge_performance_api::{
+        LiveLocation, MidiOutputRoute, PERFORMANCE_SCHEMA_VERSION, RackDefinition, RackId,
+        RackSlot, RackSlotId,
+    };
     use rackforge_session_api::{
         ClientId, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, EventEnvelope,
         PluginInstanceState, SessionId, SessionState, SoundSummary,
@@ -1660,6 +1985,7 @@ mod tests {
             active_mode: rackforge_session_api::SurfaceMode::Live,
             master_level: rackforge_session_api::MasterLevel::UNITY,
             master_pan: rackforge_session_api::MasterPan::CENTER,
+            live: rackforge_session_api::LivePerformanceState::default(),
             active_instance_id: Some(instance_id.clone()),
             instances: vec![PluginInstanceState {
                 instance_id,
@@ -1717,6 +2043,32 @@ mod tests {
                     devices: vec![device],
                 })),
                 audio_state_path: std::env::temp_dir().join("rackforge-control-audio.toml"),
+                performance_repository: Arc::new(Mutex::new(
+                    PerformanceRepository::in_memory(PerformanceLibrary {
+                        schema_version: PERFORMANCE_SCHEMA_VERSION,
+                        racks: vec![RackDefinition {
+                            schema_version: PERFORMANCE_SCHEMA_VERSION,
+                            id: RackId::new("rack.test").unwrap(),
+                            name: "Test Rack".into(),
+                            enabled: true,
+                            slots: vec![RackSlot {
+                                id: RackSlotId::new("instrument.main").unwrap(),
+                                name: "Main Instrument".into(),
+                                plugin_id: "org.rackforge.rf-dls".into(),
+                                plugin_state_id: Some("piano".into()),
+                                enabled: true,
+                                midi_input_channel: None,
+                                midi_output: MidiOutputRoute::None,
+                                audio_output_bus: "main".into(),
+                                level_per_mille: 1_000,
+                                pan_per_mille: 0,
+                            }],
+                        }],
+                        songs: Vec::new(),
+                        setlists: Vec::new(),
+                    })
+                    .unwrap(),
+                )),
                 storage: None,
                 checkpoint: None,
                 dispatch_lock: Mutex::new(()),
@@ -1755,8 +2107,62 @@ mod tests {
     }
 
     #[test]
-    fn changes_active_mode_without_touching_the_audio_thread() {
+    fn activates_a_live_rack_only_after_audio_accepts_it() {
         let (context, receiver) = context();
+        let worker = thread::spawn(move || match receiver.recv().unwrap() {
+            AudioControlCommand::ActivateRack {
+                rack_id,
+                instance_id,
+                slots,
+                reply,
+            } => {
+                assert_eq!(rack_id, "rack.test");
+                assert_eq!(instance_id.as_str(), DEFAULT_LIVE_INSTANCE_ID);
+                assert_eq!(slots.len(), 1);
+                assert_eq!(slots[0].plugin_state_id, "piano");
+                assert_eq!(slots[0].midi_input_channel, None);
+                assert_eq!(slots[0].level_per_mille, 1_000);
+                assert_eq!(slots[0].pan_per_mille, 0);
+                reply.send(Ok(())).unwrap();
+            }
+            _ => panic!("expected LIVE Rack activation"),
+        });
+        let location = LiveLocation::Rack {
+            rack_id: RackId::new("rack.test").unwrap(),
+        };
+        let response = dispatch_command(
+            &context,
+            CommandEnvelope::new(
+                ClientId::new("test.live").unwrap(),
+                88,
+                SessionCommand::ActivateLiveTarget {
+                    location: location.clone(),
+                },
+            ),
+        );
+        worker.join().unwrap();
+        let ControlResponse::CommandApplied { events, .. } = response else {
+            panic!("expected applied LIVE Rack command");
+        };
+        assert_eq!(
+            events[0].event,
+            SessionEvent::LiveTargetActivated {
+                location,
+                rack_id: RackId::new("rack.test").unwrap(),
+            }
+        );
+    }
+
+    #[test]
+    fn changes_active_mode_and_the_audio_render_path_together() {
+        let (context, receiver) = context();
+        let worker = thread::spawn(move || match receiver.recv().unwrap() {
+            AudioControlCommand::SetRenderMode { mode, reply } => {
+                assert_eq!(mode, rackforge_session_api::SurfaceMode::Play);
+                reply.send(Ok(())).unwrap();
+            }
+            _ => panic!("expected render-mode change"),
+        });
         let response = dispatch_command(
             &context,
             CommandEnvelope::new(
@@ -1767,6 +2173,7 @@ mod tests {
                 },
             ),
         );
+        worker.join().unwrap();
 
         assert!(matches!(
             response,
@@ -1785,7 +2192,6 @@ mod tests {
             context.store.lock().unwrap().state().active_mode,
             rackforge_session_api::SurfaceMode::Play
         );
-        assert!(receiver.try_recv().is_err());
     }
 
     #[test]

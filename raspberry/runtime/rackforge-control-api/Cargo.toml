@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 rackforge-audio-api = { path = "../rackforge-audio-api" }
+rackforge-performance-api = { path = "../rackforge-performance-api" }
 rackforge-session-api = { path = "../rackforge-session-api" }
 serde.workspace = true
 serde_json.workspace = true

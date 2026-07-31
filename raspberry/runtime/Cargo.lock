@@ -766,6 +766,7 @@ name = "rackforge-control-api"
 version = "0.1.0"
 dependencies = [
  "rackforge-audio-api",
+ "rackforge-performance-api",
  "rackforge-session-api",
  "serde",
  "serde_json",
@@ -812,10 +813,12 @@ dependencies = [
  "rackforge-audio-api",
  "rackforge-control-api",
  "rackforge-midi-api",
+ "rackforge-performance-api",
  "rackforge-plugin-api",
  "rackforge-session-api",
  "serde",
  "serde_json",
+ "sha2",
  "toml",
 ]
 
@@ -833,6 +836,15 @@ dependencies = [
 
 [[package]]
 name = "rackforge-midi-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "rackforge-performance-api"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -909,6 +921,7 @@ name = "rackforge-session-api"
 version = "0.1.0"
 dependencies = [
  "rackforge-controller-api",
+ "rackforge-performance-api",
  "rackforge-program-api",
  "rackforge-surface-api",
  "serde",
@@ -929,6 +942,7 @@ version = "0.1.0"
 dependencies = [
  "rackforge-audio-api",
  "rackforge-controller-api",
+ "rackforge-performance-api",
  "rackforge-program-api",
  "rackforge-session-api",
  "rackforge-ui",

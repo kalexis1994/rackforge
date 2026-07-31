@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 serde.workspace = true
+rackforge-performance-api = { path = "../rackforge-performance-api" }
 rackforge-program-api = { path = "../rackforge-program-api" }
 rackforge-surface-api = { path = "../rackforge-surface-api" }
 rackforge-controller-api = { path = "../rackforge-controller-api" }

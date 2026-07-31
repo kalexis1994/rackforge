@@ -1,4 +1,5 @@
 pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
+pub use rackforge_performance_api::{LibraryRevision, PerformanceEdit, PerformanceSnapshot};
 use serde::{Deserialize, Serialize};
 
 pub use rackforge_session_api::{
@@ -8,7 +9,7 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 2;
+pub const CONTROL_SCHEMA_VERSION: u32 = 6;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 
@@ -16,10 +17,21 @@ pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlRequest {
     Snapshot,
+    PerformanceSnapshot,
+    EditPerformance {
+        expected_revision: LibraryRevision,
+        edit: PerformanceEdit,
+    },
     AudioSnapshot,
-    ApplyAudioOutput { profile: AudioOutputProfile },
-    Events { after_revision: Revision },
-    Dispatch { envelope: CommandEnvelope },
+    ApplyAudioOutput {
+        profile: AudioOutputProfile,
+    },
+    Events {
+        after_revision: Revision,
+    },
+    Dispatch {
+        envelope: CommandEnvelope,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -39,6 +51,12 @@ pub enum ControlErrorCode {
 pub enum ControlResponse {
     Snapshot {
         snapshot: Box<SessionState>,
+    },
+    PerformanceSnapshot {
+        snapshot: Box<PerformanceSnapshot>,
+    },
+    PerformanceEdited {
+        snapshot: Box<PerformanceSnapshot>,
     },
     AudioSnapshot {
         snapshot: Box<AudioOutputState>,
@@ -112,6 +130,7 @@ mod tests {
                 active_mode: rackforge_session_api::SurfaceMode::Live,
                 master_level: rackforge_session_api::MasterLevel::UNITY,
                 master_pan: rackforge_session_api::MasterPan::CENTER,
+                live: rackforge_session_api::LivePerformanceState::default(),
                 active_instance_id: Some(instance_id()),
                 instances: vec![PluginInstanceState {
                     instance_id: instance_id(),
@@ -150,6 +169,15 @@ mod tests {
     #[test]
     fn audio_requests_round_trip() {
         let request = ControlRequest::AudioSnapshot;
+        assert_eq!(
+            decode_request(&encode_line(&request).unwrap()).unwrap(),
+            request
+        );
+    }
+
+    #[test]
+    fn performance_snapshot_request_round_trips() {
+        let request = ControlRequest::PerformanceSnapshot;
         assert_eq!(
             decode_request(&encode_line(&request).unwrap()).unwrap(),
             request

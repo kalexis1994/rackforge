@@ -6,6 +6,8 @@ pub mod control;
 pub mod live;
 pub mod loader;
 pub mod package;
+#[cfg(target_os = "linux")]
+pub mod performance;
 pub mod session;
 #[cfg(target_os = "linux")]
 pub mod session_checkpoint;

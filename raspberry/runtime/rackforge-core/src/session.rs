@@ -133,6 +133,7 @@ mod tests {
             active_mode: rackforge_session_api::SurfaceMode::Live,
             master_level: rackforge_session_api::MasterLevel::UNITY,
             master_pan: rackforge_session_api::MasterPan::CENTER,
+            live: rackforge_session_api::LivePerformanceState::default(),
             active_instance_id: Some(instance_id.clone()),
             instances: vec![PluginInstanceState {
                 instance_id,

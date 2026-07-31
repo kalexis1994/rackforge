@@ -140,17 +140,17 @@ snapshots, historial acotado de eventos y comandos tipados:
 plugin → HostApi 1.4 → SessionState → rackforge-control-api → superficies
 ```
 
-El esquema de sesión v6 publica `plugin_id`, `plugin_name`,
+El esquema de sesión v7 publica `plugin_id`, `plugin_name`,
 `PluginInstanceState`, el modo superior activo (`LIVE` o `PLAY`), el
-`master_level`, el `master_pan` de RackForge y el árbol declarativo del editor
+`master_level`, el `master_pan`, el contexto `RACK`/`SONG`/`SETLIST` y el árbol declarativo del editor
 dentro del draft activo. El lector conserva aliases de vocabulario para campos
 de instancia v1 y acepta snapshots sin estos campos como `LIVE`, nivel unidad y
 pan centrado, pero todo estado nuevo se serializa únicamente con el vocabulario
 `plugin`.
 
 Core persiste el contexto estable de la sesión LIVE en
-`data/sessions/live.main.json`: modo activo, nivel y pan maestros, y sonido
-seleccionado por instancia. La escritura usa un archivo temporal, `fsync` y
+`data/sessions/live.main.json`: modo activo, contexto LIVE, nivel y pan maestros,
+y sonido seleccionado por instancia. La escritura usa un archivo temporal, `fsync` y
 reemplazo atómico. Audition, drafts y revisiones son deliberadamente
 transitorios. Al reiniciar, un sonido persistido válido tiene precedencia sobre
 el preset de arranque; si ya no está en el catálogo, Core informa el problema y
@@ -165,11 +165,20 @@ controles físicos no pueden reutilizarse como CC del instrumento. El balance
 maestro mantiene ambos canales a unidad en el centro, atenúa sólo el lado
 opuesto y también usa una rampa corta para evitar discontinuidades.
 
-LITTLE ya utiliza `SessionCommand::SetActiveMode`, `SelectSound`, `BeginAudition`,
-`KeepAuditionAlive` y `EndAudition`. Core valida la instancia y el catálogo,
+LITTLE ya utiliza `SessionCommand::SetActiveMode`, `SetLiveBrowseMode`,
+`ActivateLiveTarget`, `SelectSound`, `BeginAudition`, `KeepAuditionAlive` y
+`EndAudition`. Core valida la instancia y el catálogo,
 envía la operación mediante una cola acotada y publica un `SessionEvent` solo
 después de que el motor la aplica. La selección ocurre al comienzo de un bloque
 de audio. El callback no toca el store de sesión ni realiza E/S.
+
+Los contratos de performance viven en `rackforge-performance-api`. `Rack` es el
+objeto reproducible; `Song` ordena Parts que referencian Racks y `Setlist` ordena
+Songs. LIVE permite entrar directamente por `RACK`, `SONG` o `SETLIST`. Core
+guarda los documentos en `data/performance/{racks,songs,setlists}` y rechaza la
+biblioteca completa ante IDs duplicados o referencias colgantes. La activación
+publica `SoundSelected` y `LiveTargetActivated` sólo después de la confirmación
+del hilo de audio.
 
 La edición declarativa usa `EditProgramDraftField`. La superficie entrega un
 `field_id` opaco, un valor tipado y el indicador `preview`; Core nunca interpreta

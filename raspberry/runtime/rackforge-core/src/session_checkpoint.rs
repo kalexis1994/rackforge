@@ -210,6 +210,7 @@ mod tests {
                     name: "Test".into(),
                     bank: None,
                     detail: None,
+                    editable: false,
                 }],
                 selected_sound_id: Some(selected.into()),
             }],

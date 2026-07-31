@@ -9,7 +9,7 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 6;
+pub const CONTROL_SCHEMA_VERSION: u32 = 7;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 
@@ -142,6 +142,7 @@ mod tests {
                         name: "Piano 1".into(),
                         bank: Some("dls".into()),
                         detail: Some("B000 P000".into()),
+                        editable: false,
                     }],
                     selected_sound_id: Some("dls.b00000000.p00000000".into()),
                 }],

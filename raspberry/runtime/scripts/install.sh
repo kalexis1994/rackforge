@@ -5,15 +5,11 @@ root="${RACKFORGE_ROOT:-/home/kalex/rackforge}"
 source_root="${RACKFORGE_SOURCE:-$root/current/runtime}"
 web_source_root="${RACKFORGE_WEB_SOURCE:-$root/current/web}"
 roland_plugin_root="$root/plugins/roland-scva"
-rf_dls_plugin_root="$root/plugins/rf-dls"
 
 test -x "$source_root/target/release/rackforge-core"
 test -x "$source_root/target/release/rackforge-web"
 test -f "$source_root/target/release/librackforge_roland_scva.so"
-test -f "$source_root/target/release/librackforge_rf_dls.so"
 test -f "$source_root/plugins/roland-scva/package/rackforge-plugin.toml"
-test -f "$source_root/plugins/rf-dls/package/rackforge-plugin.toml"
-test -f "$source_root/plugins/rf-dls/package/web/play.html"
 test -f "$source_root/config/rackforge.toml"
 test -f "$web_source_root/dist/index.html"
 
@@ -21,8 +17,6 @@ install -d \
   "$root/bin" \
   "$root/config" \
   "$roland_plugin_root/lib" \
-  "$rf_dls_plugin_root/lib" \
-  "$rf_dls_plugin_root/web" \
   "$root/state" \
   "$root/logs"
 install -m 0755 \
@@ -55,24 +49,6 @@ mv \
   "$roland_plugin_root/lib/librackforge_roland_scva.so.new" \
   "$roland_plugin_root/lib/librackforge_roland_scva.so"
 
-install -m 0644 \
-  "$source_root/plugins/rf-dls/package/rackforge-plugin.toml" \
-  "$rf_dls_plugin_root/rackforge-plugin.toml.new"
-mv \
-  "$rf_dls_plugin_root/rackforge-plugin.toml.new" \
-  "$rf_dls_plugin_root/rackforge-plugin.toml"
-
-cp -R \
-  "$source_root/plugins/rf-dls/package/web/." \
-  "$rf_dls_plugin_root/web/"
-
-install -m 0755 \
-  "$source_root/target/release/librackforge_rf_dls.so" \
-  "$rf_dls_plugin_root/lib/librackforge_rf_dls.so.new"
-mv \
-  "$rf_dls_plugin_root/lib/librackforge_rf_dls.so.new" \
-  "$rf_dls_plugin_root/lib/librackforge_rf_dls.so"
-
 web_stage="$(mktemp -d "$root/.web-stage.XXXXXX")"
 web_previous="$root/.web-previous"
 trap 'rm -rf "$web_stage"' EXIT
@@ -85,5 +61,5 @@ mv "$web_stage" "$root/web"
 rm -rf "$web_previous"
 trap - EXIT
 
-printf 'RUNTIME_INSTALLED root=%s plugins=%s,%s web=%s\n' \
-  "$root" "$roland_plugin_root" "$rf_dls_plugin_root" "$root/web"
+printf 'RUNTIME_INSTALLED root=%s bundled_plugins=%s web=%s\n' \
+  "$root" "$roland_plugin_root" "$root/web"

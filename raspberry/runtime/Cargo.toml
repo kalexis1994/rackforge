@@ -20,7 +20,6 @@ members = [
     "rackforge-ui",
     "rackforge-web",
     "plugins/gain",
-    "plugins/rf-dls",
     "plugins/roland-scva",
 ]
 

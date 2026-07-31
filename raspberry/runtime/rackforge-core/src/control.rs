@@ -1396,6 +1396,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                                 .description
                                 .clone()
                                 .or_else(|| preset.category.clone()),
+                            editable: preset.editable,
                         },
                     },
                     SessionEvent::AuditionEnded {
@@ -1997,6 +1998,7 @@ mod tests {
                     name: "Piano".into(),
                     bank: None,
                     detail: None,
+                    editable: false,
                 }],
                 selected_sound_id: Some("piano".into()),
             }],

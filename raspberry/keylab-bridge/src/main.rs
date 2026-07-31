@@ -1335,16 +1335,10 @@ fn live_snapshot() -> Result<SessionState, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn active_rf_dls_instance(snapshot: &SessionState) -> Result<&PluginInstanceState, String> {
+fn active_plugin_instance(snapshot: &SessionState) -> Result<&PluginInstanceState, String> {
     let instance = snapshot
         .active_instance()
         .ok_or_else(|| "la sesión LIVE no tiene una instancia activa".to_owned())?;
-    if instance.plugin_id != "org.rackforge.rf-dls" {
-        return Err(format!(
-            "el motor LIVE activo es {}, no RF-DLS",
-            instance.plugin_id
-        ));
-    }
     if !instance.ui_layouts.iter().any(|layout| layout == LITTLE_V1) {
         return Err(format!(
             "{} no declara una vista compatible con {LITTLE_V1}",
@@ -1355,9 +1349,9 @@ fn active_rf_dls_instance(snapshot: &SessionState) -> Result<&PluginInstanceStat
 }
 
 #[cfg(target_os = "linux")]
-fn active_rf_dls_instance_id() -> Result<InstanceId, String> {
+fn active_plugin_instance_id() -> Result<InstanceId, String> {
     let snapshot = live_snapshot()?;
-    Ok(active_rf_dls_instance(&snapshot)?.instance_id.clone())
+    Ok(active_plugin_instance(&snapshot)?.instance_id.clone())
 }
 
 #[cfg(target_os = "linux")]
@@ -1484,7 +1478,8 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
         SurfaceMode::Live => menu::ActiveMode::Live,
         SurfaceMode::Play => menu::ActiveMode::Play,
     });
-    let instance = active_rf_dls_instance(&snapshot)?;
+    let instance = active_plugin_instance(&snapshot)?;
+    menu.set_active_plugin(&instance.plugin_id, &instance.plugin_name);
     let selected = instance.selected_sound_id.clone();
     let audition_lease_id = snapshot
         .audition
@@ -1505,9 +1500,10 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
                 menu::PlaySound::new(
                     sound.id,
                     sound.name,
-                    sound.bank.unwrap_or_else(|| "dls".into()),
+                    sound.bank.unwrap_or_else(|| "default".into()),
                     sound.detail.unwrap_or_else(|| " ".into()),
                 )
+                .editable(sound.editable)
             })
             .collect(),
         selected.as_deref(),
@@ -1783,7 +1779,7 @@ fn apply_pending_menu_command(
             Ok(true)
         }
         menu::MenuCommand::SelectSound { id } => {
-            let instance_id = active_rf_dls_instance_id()?;
+            let instance_id = active_plugin_instance_id()?;
             dispatch_session_command(SessionCommand::SelectSound {
                 instance_id,
                 sound_id: id.clone(),
@@ -1793,7 +1789,7 @@ fn apply_pending_menu_command(
             Ok(true)
         }
         menu::MenuCommand::BeginProgramEdit { program_id } => {
-            let instance_id = active_rf_dls_instance_id()?;
+            let instance_id = active_plugin_instance_id()?;
             dispatch_session_command(SessionCommand::BeginProgramEdit {
                 instance_id,
                 program_id,
@@ -2189,7 +2185,7 @@ fn return_to_active_mode(
     mode: menu::ActiveMode,
     selected_sound_id: Option<String>,
 ) -> Result<(), String> {
-    let instance_id = active_rf_dls_instance_id()?;
+    let instance_id = active_plugin_instance_id()?;
     let surface_mode = match mode {
         menu::ActiveMode::Live => SurfaceMode::Live,
         menu::ActiveMode::Play => SurfaceMode::Play,
@@ -2236,7 +2232,7 @@ fn replace_program_name(document_json: &str, name: &str) -> Result<String, Strin
         .ok_or_else(|| "el borrador de programa no es un objeto JSON".to_owned())?;
     object.insert("name".into(), Value::from(name));
     serde_json::to_string(&document)
-        .map_err(|error| format!("no se pudo serializar el borrador RF-DLS: {error}"))
+        .map_err(|error| format!("no se pudo serializar el borrador plugin: {error}"))
 }
 
 fn acquire_screen(

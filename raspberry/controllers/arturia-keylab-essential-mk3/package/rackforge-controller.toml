@@ -2,7 +2,7 @@ schema_version = 1
 kind = "controller"
 id = "org.rackforge.arturia-keylab-essential-mk3"
 name = "Arturia KeyLab Essential 61 mk3"
-version = "0.2.19"
+version = "0.2.23"
 controller_api = "^1.0"
 
 [runtime]
@@ -34,6 +34,15 @@ target = "master_pan"
 [host_controls.midi_cc]
 channel = 0
 controller = 104
+
+[[host_actions]]
+target = "keyboard_parts"
+
+[host_actions.midi_cc]
+channel = 0
+controller = 119
+press_value = 127
+release_value = 0
 
 [[devices]]
 id = "arturia.keylab-essential-mk3"

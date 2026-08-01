@@ -1,9 +1,9 @@
 use crate::audio::{OpenedAudioOutput, discover_audio_devices, open_audio_output_from_inventory};
-use crate::control::{self, AudioControlCommand, RackSlotRuntimeSpec};
+use crate::control::{self, AudioControlCommand, RackSlotRuntimeSpec, RackSlotStateLoad};
 use crate::performance::{PerformanceBootstrap, PerformanceRepository};
 use crate::session::SessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
-use crate::{LoadedPlugin, PluginInstance, PluginPackage};
+use crate::{LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore};
 use alsa::pcm::PCM;
 use anyhow::{Context, Result, bail};
 use midir::{Ignore, MidiInput, MidiInputConnection};
@@ -17,12 +17,14 @@ use rackforge_midi_api::{
     MidiRouteTransform, MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry,
     MidiTargetId, PluginChannelModel,
 };
+use rackforge_performance_api::RackKeyboardParts;
 use rackforge_plugin_api::PluginKind;
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_session_api::{
-    DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, HostControlBinding, InstanceId, MasterLevel,
-    MasterPan, PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionId, SessionState,
-    SoundSummary, SurfaceMode,
+    ButtonPhase, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, HostActionBinding,
+    HostActionTarget, HostControlBinding, InstanceId, MasterLevel, MasterPan, MidiButtonBinding,
+    PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionId, SessionState, SoundSummary,
+    SurfaceMode,
 };
 use std::collections::BTreeMap;
 use std::env;
@@ -102,6 +104,10 @@ struct RackSlotVoice<'plugin> {
     slot_id: String,
     instance: PluginInstance<'plugin>,
     midi_input_channel: Option<u8>,
+    midi_note_low: u8,
+    midi_note_high: u8,
+    midi_transpose: i8,
+    keyboard_parts: Option<RackKeyboardParts>,
     level: f32,
     pan: f32,
     output: Vec<f32>,
@@ -118,14 +124,20 @@ fn create_rack_voices<'plugin>(
     let mut voices = Vec::with_capacity(specs.len());
     for spec in specs {
         let mut instance = plugin.create_instance()?;
-        instance
-            .load_preset(&spec.plugin_state_id)
-            .with_context(|| {
-                format!(
-                    "loading state {:?} for Rack Slot {}",
-                    spec.plugin_state_id, spec.slot_id
-                )
-            })?;
+        match &spec.state {
+            RackSlotStateLoad::Default => {}
+            RackSlotStateLoad::Opaque(bytes) => instance
+                .load_state(bytes)
+                .with_context(|| format!("restoring Rack Slot {} state", spec.slot_id))?,
+            RackSlotStateLoad::LegacyPreset(preset_id) => {
+                instance.load_preset(preset_id).with_context(|| {
+                    format!(
+                        "loading legacy program {:?} for Rack Slot {}",
+                        preset_id, spec.slot_id
+                    )
+                })?
+            }
+        }
         instance
             .activate(f64::from(sample_rate_hz), period_frames, 0, channels)
             .with_context(|| format!("activating Rack Slot {}", spec.slot_id))?;
@@ -133,6 +145,10 @@ fn create_rack_voices<'plugin>(
             slot_id: spec.slot_id.clone(),
             instance,
             midi_input_channel: spec.midi_input_channel,
+            midi_note_low: spec.midi_note_low,
+            midi_note_high: spec.midi_note_high,
+            midi_transpose: spec.midi_transpose,
+            keyboard_parts: spec.keyboard_parts,
             level: f32::from(spec.level_per_mille) / 1_000.0,
             pan: f32::from(spec.pan_per_mille) / 1_000.0,
             output: vec![0.0; period_frames as usize * channels as usize],
@@ -179,30 +195,92 @@ impl MasterBalance {
 
 struct ReservedMidiControls {
     control_changes: [[bool; 120]; MIDI_CHANNELS],
+    keyboard_parts: Option<MidiButtonBinding>,
+    sources: Vec<ReservedMidiSourceState>,
+}
+
+struct ReservedMidiSourceState {
+    keyboard_parts_held: bool,
+    suppressed_notes: [[bool; 128]; MIDI_CHANNELS],
 }
 
 impl Default for ReservedMidiControls {
     fn default() -> Self {
-        Self {
-            control_changes: [[false; 120]; MIDI_CHANNELS],
-        }
+        Self::with_sources(1)
     }
 }
 
 impl ReservedMidiControls {
-    fn replace(&mut self, bindings: &[HostControlBinding]) {
-        self.control_changes = [[false; CONTINUOUS_CONTROLLERS]; MIDI_CHANNELS];
-        for binding in bindings {
-            self.control_changes[binding.midi_cc.channel as usize]
-                [binding.midi_cc.controller as usize] = true;
+    fn with_sources(source_count: usize) -> Self {
+        Self {
+            control_changes: [[false; 120]; MIDI_CHANNELS],
+            keyboard_parts: None,
+            sources: (0..source_count)
+                .map(|_| ReservedMidiSourceState {
+                    keyboard_parts_held: false,
+                    suppressed_notes: [[false; 128]; MIDI_CHANNELS],
+                })
+                .collect(),
         }
     }
 
-    fn contains(&self, event: MidiEventV1) -> bool {
-        if event.length != 3 || event.data[0] & 0xf0 != 0xb0 || event.data[1] > 119 {
+    fn replace(&mut self, controls: &[HostControlBinding], actions: &[HostActionBinding]) {
+        self.control_changes = [[false; CONTINUOUS_CONTROLLERS]; MIDI_CHANNELS];
+        self.keyboard_parts = None;
+        for source in &mut self.sources {
+            source.keyboard_parts_held = false;
+            source.suppressed_notes = [[false; 128]; MIDI_CHANNELS];
+        }
+        for binding in controls {
+            self.control_changes[binding.midi_cc.channel as usize]
+                [binding.midi_cc.controller as usize] = true;
+        }
+        for binding in actions {
+            self.control_changes[binding.midi_cc.channel as usize]
+                [binding.midi_cc.controller as usize] = true;
+            if binding.target == HostActionTarget::KeyboardParts {
+                self.keyboard_parts = Some(binding.midi_cc);
+            }
+        }
+    }
+
+    fn consume(&mut self, source: MidiSourceKey, event: MidiEventV1) -> bool {
+        let message = &event.data[..usize::from(event.length.min(3))];
+        if let Some(binding) = self.keyboard_parts
+            && let Some(phase) = binding.phase(message)
+        {
+            if let Some(state) = self.sources.get_mut(source.get() as usize) {
+                state.keyboard_parts_held = phase == ButtonPhase::Press;
+            }
+            return true;
+        }
+        if event.length == 3 && event.data[0] & 0xf0 == 0xb0 && event.data[1] <= 119 {
+            if self.control_changes[(event.data[0] & 0x0f) as usize][event.data[1] as usize] {
+                return true;
+            }
+        }
+        let Some(state) = self.sources.get_mut(source.get() as usize) else {
+            return false;
+        };
+        if event.length < 2 {
             return false;
         }
-        self.control_changes[(event.data[0] & 0x0f) as usize][event.data[1] as usize]
+        let channel = (event.data[0] & 0x0f) as usize;
+        let note = event.data[1] as usize;
+        let status = event.data[0] & 0xf0;
+        if status == 0x90 && event.length == 3 && event.data[2] > 0 && state.keyboard_parts_held {
+            state.suppressed_notes[channel][note] = true;
+            return true;
+        }
+        let release = status == 0x80 || (status == 0x90 && event.length == 3 && event.data[2] == 0);
+        if release && state.suppressed_notes[channel][note] {
+            state.suppressed_notes[channel][note] = false;
+            return true;
+        }
+        if status == 0xa0 && state.suppressed_notes[channel][note] {
+            return true;
+        }
+        false
     }
 }
 
@@ -478,14 +556,42 @@ pub fn run(config: LiveConfig) -> Result<()> {
     let bootstrap_preset = preset
         .or_else(|| presets.presets.first())
         .context("LIVE plugin exposes no program for the initial Rack")?;
-    let performance_repository = PerformanceRepository::load_or_bootstrap(
+    let mut state_store = PluginStateStore::new(config.data_root.as_deref())?;
+    let bootstrap_state = state_store.put(
+        &plugin.manifest().id,
+        &plugin.manifest().version,
+        plugin.manifest().state_version,
+        Some(bootstrap_preset.id.clone()),
+        &instance
+            .save_state()
+            .context("capturing initial plugin state")?,
+    )?;
+    let mut performance_repository = PerformanceRepository::load_or_bootstrap(
         config.data_root.as_deref(),
         PerformanceBootstrap {
             plugin_id: plugin.manifest().id.clone(),
-            plugin_state_id: bootstrap_preset.id.clone(),
+            state: bootstrap_state,
             name: bootstrap_preset.name.clone(),
         },
     )?;
+    let migrated = performance_repository.migrate_legacy_plugin_states(
+        &plugin.manifest().id,
+        |program_id| {
+            let mut migration_instance = plugin.create_instance()?;
+            migration_instance.load_preset(program_id)?;
+            let bytes = migration_instance.save_state()?;
+            state_store.put(
+                &plugin.manifest().id,
+                &plugin.manifest().version,
+                plugin.manifest().state_version,
+                Some(program_id.to_owned()),
+                &bytes,
+            )
+        },
+    )?;
+    if migrated > 0 {
+        println!("PERFORMANCE_PLUGIN_STATES_MIGRATED count={migrated}");
+    }
     let performance_library = performance_repository.library().clone();
     let live_state = match persisted_live {
         Some(live) if live.validate(&performance_library).is_ok() => live,
@@ -495,27 +601,38 @@ pub fn run(config: LiveConfig) -> Result<()> {
         }
         None => performance_repository.initial_live_state(),
     };
-    let initial_rack_specs = live_state
+    let mut initial_rack_specs = Vec::new();
+    if let Some(rack) = live_state
         .active
         .as_ref()
         .and_then(|location| performance_repository.library().resolve(location).ok())
-        .map(|rack| {
-            rack.slots
-                .iter()
-                .filter(|slot| slot.enabled)
-                .filter_map(|slot| {
-                    Some(RackSlotRuntimeSpec {
-                        slot_id: slot.id.as_str().to_owned(),
-                        plugin_state_id: slot.plugin_state_id.clone()?,
-                        midi_input_channel: slot.midi_input_channel,
-                        level_per_mille: slot.level_per_mille,
-                        pan_per_mille: slot.pan_per_mille,
-                    })
-                })
-                .take(control::MAX_ACTIVE_RACK_SLOTS)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    {
+        for slot in rack
+            .slots
+            .iter()
+            .filter(|slot| slot.enabled)
+            .take(control::MAX_ACTIVE_RACK_SLOTS)
+        {
+            let state = if let Some(reference) = &slot.state {
+                RackSlotStateLoad::Opaque(state_store.read(reference)?)
+            } else if let Some(program_id) = &slot.legacy_program_id {
+                RackSlotStateLoad::LegacyPreset(program_id.clone())
+            } else {
+                RackSlotStateLoad::Default
+            };
+            initial_rack_specs.push(RackSlotRuntimeSpec {
+                slot_id: slot.id.as_str().to_owned(),
+                state,
+                midi_input_channel: slot.midi_input_channel,
+                midi_note_low: slot.midi_note_low,
+                midi_note_high: slot.midi_note_high,
+                midi_transpose: slot.midi_transpose,
+                keyboard_parts: rack.keyboard_parts,
+                level_per_mille: slot.level_per_mille,
+                pan_per_mille: slot.pan_per_mille,
+            });
+        }
+    }
     instance.activate(
         f64::from(output_rate),
         period_frames as u32,
@@ -628,6 +745,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         .data_root
         .as_ref()
         .map(|root| crate::PluginStorage::new(root.clone()));
+    let state_store = Arc::new(Mutex::new(state_store));
     let _control_server = control::start(
         &control_path,
         session_store,
@@ -635,6 +753,8 @@ pub fn run(config: LiveConfig) -> Result<()> {
         Arc::clone(&audio_state),
         config.audio_state_path,
         Arc::new(Mutex::new(performance_repository)),
+        state_store,
+        plugin.manifest().clone(),
         control_storage,
         checkpoint,
     )?;
@@ -846,7 +966,7 @@ fn audio_loop<'plugin>(
     let mut replay_controller_state = false;
     let mut master_gain = MasterGain::new(initial_master_level);
     let mut master_balance = MasterBalance::new(initial_master_pan);
-    let mut reserved_midi_controls = ReservedMidiControls::default();
+    let mut reserved_midi_controls = ReservedMidiControls::with_sources(midi_source_count);
 
     loop {
         while let Ok(command) = control_receiver.try_recv() {
@@ -880,10 +1000,24 @@ fn audio_loop<'plugin>(
                     bindings,
                     reply,
                 } => {
-                    reserved_midi_controls.replace(&bindings);
+                    reserved_midi_controls.replace(&bindings, &[]);
                     println!(
                         "HOST_CONTROLS_REGISTERED controller={controller_id} count={}",
                         bindings.len()
+                    );
+                    let _ = reply.send(Ok(()));
+                }
+                AudioControlCommand::RegisterHostBindings {
+                    controller_id,
+                    controls,
+                    actions,
+                    reply,
+                } => {
+                    reserved_midi_controls.replace(&controls, &actions);
+                    println!(
+                        "HOST_BINDINGS_REGISTERED controller={controller_id} controls={} actions={}",
+                        controls.len(),
+                        actions.len()
                     );
                     let _ = reply.send(Ok(()));
                 }
@@ -914,6 +1048,46 @@ fn audio_loop<'plugin>(
                     }
                     replay_controller_state |= result.is_ok();
                     let _ = reply.send(result.map_err(|error| error.to_string()));
+                }
+                AudioControlCommand::CaptureState { instance_id, reply } => {
+                    let result = if instance_id.as_str() == DEFAULT_LIVE_INSTANCE_ID {
+                        instance.save_state().map_err(|error| error.to_string())
+                    } else {
+                        Err(format!("unknown plugin instance {instance_id}"))
+                    };
+                    let _ = reply.send(result);
+                }
+                AudioControlCommand::RestoreState {
+                    instance_id,
+                    bytes,
+                    reply,
+                } => {
+                    let result = if instance_id.as_str() == DEFAULT_LIVE_INSTANCE_ID {
+                        instance
+                            .load_state(&bytes)
+                            .map_err(|error| error.to_string())
+                    } else {
+                        Err(format!("unknown plugin instance {instance_id}"))
+                    };
+                    if result.is_ok() {
+                        render_mode = AudioRenderMode::Plugin;
+                        replay_controller_state = true;
+                    }
+                    let _ = reply.send(result);
+                }
+                AudioControlCommand::MaterializeState { program_id, reply } => {
+                    let result = (|| -> Result<Vec<u8>, String> {
+                        let mut snapshot = plugin
+                            .create_instance()
+                            .map_err(|error| error.to_string())?;
+                        if let Some(program_id) = program_id {
+                            snapshot
+                                .load_preset(&program_id)
+                                .map_err(|error| error.to_string())?;
+                        }
+                        snapshot.save_state().map_err(|error| error.to_string())
+                    })();
+                    let _ = reply.send(result);
                 }
                 AudioControlCommand::ActivateRack {
                     rack_id,
@@ -1167,7 +1341,7 @@ fn audio_loop<'plugin>(
         }
         while let Ok(event) = receiver.try_recv() {
             let plugin_event = plugin_midi_event(event.packet);
-            if reserved_midi_controls.contains(plugin_event) {
+            if reserved_midi_controls.consume(event.source, plugin_event) {
                 continue;
             }
             controller_states.observe(event.source, plugin_event);
@@ -1183,12 +1357,17 @@ fn audio_loop<'plugin>(
                 }
                 AudioRenderMode::Rack => {
                     for voice in &mut rack_voices {
-                        if !matches_midi_input_channel(event.packet, voice.midi_input_channel) {
-                            continue;
-                        }
-                        if let Some(routed) = play_route.route(event) {
+                        if let Some(routed) = route_rack_event(
+                            event,
+                            voice.midi_input_channel,
+                            voice.midi_note_low,
+                            voice.midi_note_high,
+                            voice.midi_transpose,
+                            voice.keyboard_parts,
+                            play_route,
+                        ) {
                             if voice.events.len() < MAX_EVENTS_PER_BLOCK {
-                                voice.events.push(plugin_midi_event(routed.packet));
+                                voice.events.push(routed);
                             } else {
                                 dropped_events += 1;
                             }
@@ -1420,6 +1599,58 @@ fn matches_midi_input_channel(packet: MidiPacket, channel: Option<u8>) -> bool {
     channel.is_none_or(|channel| packet.channel().user_number() == channel)
 }
 
+fn route_rack_event(
+    event: IngressMidiEvent,
+    midi_input_channel: Option<u8>,
+    midi_note_low: u8,
+    midi_note_high: u8,
+    midi_transpose: i8,
+    keyboard_parts: Option<RackKeyboardParts>,
+    play_route: &CompiledMidiRoute,
+) -> Option<MidiEventV1> {
+    let status = event.packet.data[0] & 0xf0;
+    let keyed_message = matches!(status, 0x80 | 0x90 | 0xa0) && event.packet.length >= 2;
+    let part_transpose = if let Some(parts) = keyboard_parts {
+        let part = if keyed_message {
+            let note = event.packet.data[1];
+            match parts.split_key {
+                Some(split) if note >= split => parts.part_2,
+                _ => parts.part_1,
+            }
+        } else if parts.split_key.is_some() && midi_input_channel == Some(parts.part_2.midi_channel)
+        {
+            parts.part_2
+        } else {
+            parts.part_1
+        };
+        if midi_input_channel.is_some_and(|channel| channel != part.midi_channel) {
+            return None;
+        }
+        part.transpose
+    } else {
+        if !matches_midi_input_channel(event.packet, midi_input_channel) {
+            return None;
+        }
+        0
+    };
+    if keyed_message {
+        let note = event.packet.data[1];
+        if !(midi_note_low..=midi_note_high).contains(&note) {
+            return None;
+        }
+    }
+    let mut packet = play_route.route(event)?.packet;
+    if keyed_message {
+        let transposed =
+            i16::from(packet.data[1]) + i16::from(part_transpose) + i16::from(midi_transpose);
+        if !(0..=127).contains(&transposed) {
+            return None;
+        }
+        packet.data[1] = transposed as u8;
+    }
+    Some(plugin_midi_event(packet))
+}
+
 fn restore_after_audition(instance: &mut PluginInstance<'_>, lease: &AuditionLease) -> Result<()> {
     instance.reset()?;
     if let Some(previous) = &lease.previous_sound_id {
@@ -1454,7 +1685,11 @@ fn write_period(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rackforge_session_api::{HostControlTarget, MidiControlChangeBinding};
+    use rackforge_performance_api::RackKeyboardPart;
+    use rackforge_session_api::{
+        HostActionBinding, HostActionTarget, HostControlTarget, MidiButtonBinding,
+        MidiControlChangeBinding,
+    };
 
     fn midi(length: u8, data: [u8; 3]) -> MidiEventV1 {
         MidiEventV1 {
@@ -1606,6 +1841,137 @@ mod tests {
     }
 
     #[test]
+    fn rack_slot_route_applies_channel_zone_and_transposition_before_the_plugin() {
+        let mut sources = MidiSourceRegistry::default();
+        sources
+            .register(
+                MidiSourceKey::new(0),
+                MidiSourceDescriptor {
+                    id: MidiSourceId::new("controller.primary").unwrap(),
+                    name: "Primary".into(),
+                    primary: true,
+                },
+            )
+            .unwrap();
+        let route = compile_default_play_route(&sources, PluginChannelModel::SinglePart).unwrap();
+        let event = |message: &[u8]| IngressMidiEvent {
+            source: MidiSourceKey::new(0),
+            packet: MidiPacket::new(0, message).unwrap(),
+        };
+
+        let routed = route_rack_event(event(&[0x91, 48, 100]), Some(2), 36, 59, 12, None, &route)
+            .expect("note inside the Part should be routed");
+        assert_eq!(routed.data, [0x90, 60, 100]);
+
+        assert!(
+            route_rack_event(event(&[0x91, 60, 100]), Some(2), 36, 59, 12, None, &route).is_none()
+        );
+        assert!(
+            route_rack_event(event(&[0x90, 48, 100]), Some(2), 36, 59, 12, None, &route).is_none()
+        );
+
+        let modulation = route_rack_event(event(&[0xb1, 1, 64]), Some(2), 36, 59, 12, None, &route)
+            .expect("non-note expression should follow the Part channel");
+        assert_eq!(modulation.data, [0xb0, 1, 64]);
+    }
+
+    #[test]
+    fn keyboard_parts_split_and_remap_before_slot_channel_filtering() {
+        let mut sources = MidiSourceRegistry::default();
+        sources
+            .register(
+                MidiSourceKey::new(0),
+                MidiSourceDescriptor {
+                    id: MidiSourceId::new("controller.primary").unwrap(),
+                    name: "Primary".into(),
+                    primary: true,
+                },
+            )
+            .unwrap();
+        let route = compile_default_play_route(&sources, PluginChannelModel::SinglePart).unwrap();
+        let event = |message: &[u8]| IngressMidiEvent {
+            source: MidiSourceKey::new(0),
+            packet: MidiPacket::new(0, message).unwrap(),
+        };
+        let parts = RackKeyboardParts {
+            split_key: Some(60),
+            part_1: RackKeyboardPart {
+                midi_channel: 1,
+                transpose: 0,
+            },
+            part_2: RackKeyboardPart {
+                midi_channel: 2,
+                transpose: 12,
+            },
+        };
+
+        assert!(
+            route_rack_event(
+                event(&[0x95, 48, 100]),
+                Some(1),
+                0,
+                127,
+                0,
+                Some(parts),
+                &route
+            )
+            .is_some()
+        );
+        assert!(
+            route_rack_event(
+                event(&[0x95, 48, 100]),
+                Some(2),
+                0,
+                127,
+                0,
+                Some(parts),
+                &route
+            )
+            .is_none()
+        );
+        assert!(
+            route_rack_event(
+                event(&[0x95, 64, 100]),
+                Some(1),
+                0,
+                127,
+                0,
+                Some(parts),
+                &route
+            )
+            .is_none()
+        );
+        let piano = route_rack_event(
+            event(&[0x95, 64, 100]),
+            Some(2),
+            0,
+            127,
+            0,
+            Some(parts),
+            &route,
+        )
+        .expect("right Part should reach the CH2 Slot");
+        assert_eq!(piano.data, [0x90, 76, 100]);
+
+        let no_split = RackKeyboardParts {
+            split_key: None,
+            ..parts
+        };
+        assert!(
+            route_rack_event(
+                event(&[0x95, 64, 100]),
+                Some(2),
+                0,
+                127,
+                0,
+                Some(no_split),
+                &route,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
     fn master_gain_is_tapered_and_reaches_new_level_without_a_step() {
         let half = MasterLevel::new(500).unwrap();
         assert!((half.amplitude() - 0.25).abs() < f32::EPSILON);
@@ -1641,21 +2007,51 @@ mod tests {
     #[test]
     fn reserved_host_control_never_reaches_plugin_midi() {
         let mut reserved = ReservedMidiControls::default();
-        reserved.replace(&[HostControlBinding {
-            target: HostControlTarget::MasterLevel,
-            midi_cc: MidiControlChangeBinding {
-                channel: 0,
-                controller: 82,
-            },
-        }]);
+        reserved.replace(
+            &[HostControlBinding {
+                target: HostControlTarget::MasterLevel,
+                midi_cc: MidiControlChangeBinding {
+                    channel: 0,
+                    controller: 82,
+                },
+            }],
+            &[],
+        );
 
-        assert!(reserved.contains(midi(3, [0xb0, 82, 64])));
-        assert!(!reserved.contains(midi(3, [0xb0, 83, 64])));
-        assert!(!reserved.contains(midi(3, [0xb1, 82, 64])));
-        assert!(!reserved.contains(midi(3, [0x90, 82, 64])));
+        let source = MidiSourceKey::new(0);
+        assert!(reserved.consume(source, midi(3, [0xb0, 82, 64])));
+        assert!(!reserved.consume(source, midi(3, [0xb0, 83, 64])));
+        assert!(!reserved.consume(source, midi(3, [0xb1, 82, 64])));
+        assert!(!reserved.consume(source, midi(3, [0x90, 82, 64])));
 
-        reserved.replace(&[]);
-        assert!(!reserved.contains(midi(3, [0xb0, 82, 64])));
+        reserved.replace(&[], &[]);
+        assert!(!reserved.consume(source, midi(3, [0xb0, 82, 64])));
+    }
+
+    #[test]
+    fn reserved_host_action_never_reaches_plugin_midi() {
+        let mut reserved = ReservedMidiControls::default();
+        reserved.replace(
+            &[],
+            &[HostActionBinding {
+                target: HostActionTarget::KeyboardParts,
+                midi_cc: MidiButtonBinding {
+                    channel: 0,
+                    controller: 119,
+                    press_value: 127,
+                    release_value: 0,
+                },
+            }],
+        );
+
+        let source = MidiSourceKey::new(0);
+        assert!(reserved.consume(source, midi(3, [0xb0, 119, 127])));
+        assert!(reserved.consume(source, midi(3, [0x90, 60, 100])));
+        assert!(reserved.consume(source, midi(3, [0x80, 60, 0])));
+        assert!(reserved.consume(source, midi(3, [0xb0, 119, 0])));
+        assert!(!reserved.consume(source, midi(3, [0x90, 61, 100])));
+        assert!(!reserved.consume(source, midi(3, [0xb0, 118, 127])));
+        assert!(!reserved.consume(source, midi(3, [0xb1, 119, 127])));
     }
 
     #[test]

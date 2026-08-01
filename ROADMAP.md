@@ -1,5 +1,16 @@
 # Roadmap de RackForge
 
+## Estado completo y presets del host
+
+- [x] Referencias opacas versionadas y blobs direccionados por contenido.
+- [x] Presets nombrados de RackForge filtrados por identidad de plugin.
+- [x] Semántica de copia al cargar en PLAY y en un Slot.
+- [x] Migración automática de IDs de programas antiguos a estados completos.
+- [x] RF-DLS state v3 captura layers, síntesis, envelope, FX y ganancias.
+- [ ] Edición ligada a una instancia de Slot con recovery snapshots automáticos.
+- [ ] Manifiestos portables para recursos externos como samples y bancos.
+- [ ] Adaptadores de formatos nativos con estado complete/partial explícito.
+
 ## Visión
 
 RackForge debe convertirse en un runtime musical autónomo y multiplataforma.

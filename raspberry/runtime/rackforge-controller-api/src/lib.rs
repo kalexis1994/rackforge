@@ -14,6 +14,12 @@ pub enum HostControlTarget {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostActionTarget {
+    KeyboardParts,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MidiControlChangeBinding {
     pub channel: u8,
@@ -47,6 +53,61 @@ impl MidiControlChangeBinding {
 pub struct HostControlBinding {
     pub target: HostControlTarget,
     pub midi_cc: MidiControlChangeBinding,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ButtonPhase {
+    Press,
+    Release,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MidiButtonBinding {
+    pub channel: u8,
+    pub controller: u8,
+    pub press_value: u8,
+    pub release_value: u8,
+}
+
+impl MidiButtonBinding {
+    pub fn validate(self) -> Result<(), String> {
+        MidiControlChangeBinding {
+            channel: self.channel,
+            controller: self.controller,
+        }
+        .validate()?;
+        if self.press_value > 127 || self.release_value > 127 {
+            return Err("MIDI button values must be within 0..127".into());
+        }
+        if self.press_value == self.release_value {
+            return Err("MIDI button press and release values must differ".into());
+        }
+        Ok(())
+    }
+
+    pub fn phase(self, message: &[u8]) -> Option<ButtonPhase> {
+        let value = MidiControlChangeBinding {
+            channel: self.channel,
+            controller: self.controller,
+        }
+        .value(message)?;
+        if value == self.press_value {
+            Some(ButtonPhase::Press)
+        } else if value == self.release_value {
+            Some(ButtonPhase::Release)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostActionBinding {
+    pub target: HostActionTarget,
+    pub midi_cc: MidiButtonBinding,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -147,6 +208,8 @@ pub struct ControllerProfile {
     pub surfaces: Vec<SurfaceImplementation>,
     #[serde(default)]
     pub host_controls: Vec<HostControlBinding>,
+    #[serde(default)]
+    pub host_actions: Vec<HostActionBinding>,
 }
 
 impl ControllerProfile {
@@ -175,6 +238,22 @@ impl ControllerProfile {
             if !targets.insert(binding.target as u8) {
                 return Err(format!(
                     "duplicate reserved host control {:?}",
+                    binding.target
+                ));
+            }
+            if !midi_bindings.insert((binding.midi_cc.channel, binding.midi_cc.controller)) {
+                return Err(format!(
+                    "duplicate reserved MIDI binding ch={} cc={}",
+                    binding.midi_cc.channel, binding.midi_cc.controller
+                ));
+            }
+        }
+        let mut action_targets = BTreeSet::new();
+        for binding in &self.host_actions {
+            binding.midi_cc.validate()?;
+            if !action_targets.insert(binding.target as u8) {
+                return Err(format!(
+                    "duplicate reserved host action {:?}",
                     binding.target
                 ));
             }
@@ -269,6 +348,7 @@ mod tests {
             driver_id: "org.rackforge.example-medium".into(),
             surfaces,
             host_controls: Vec::new(),
+            host_actions: Vec::new(),
         }
     }
 
@@ -323,6 +403,29 @@ mod tests {
             MidiControlChangeBinding {
                 channel: 0,
                 controller: 123
+            }
+            .validate()
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn momentary_host_action_has_explicit_press_and_release_values() {
+        let binding = MidiButtonBinding {
+            channel: 0,
+            controller: 119,
+            press_value: 127,
+            release_value: 0,
+        };
+        assert_eq!(binding.phase(&[0xb0, 119, 127]), Some(ButtonPhase::Press));
+        assert_eq!(binding.phase(&[0xb0, 119, 0]), Some(ButtonPhase::Release));
+        assert_eq!(binding.phase(&[0xb0, 119, 64]), None);
+        assert!(binding.validate().is_ok());
+        assert!(
+            MidiButtonBinding {
+                press_value: 1,
+                release_value: 1,
+                ..binding
             }
             .validate()
             .is_err()

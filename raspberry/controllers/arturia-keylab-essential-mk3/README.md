@@ -14,6 +14,26 @@ CC 104 por el canal 1. Los valores MIDI 60–68 forman una zona de encastre virt
 en el centro; Core conserva el balance en la sesión, lo restaura desde el
 checkpoint y aplica el cambio suavemente después del audio del plugin.
 
+El botón físico `PART` se declara como la acción momentánea reservada
+`keyboard_parts`: en el hardware probado emite CC 119, valor 127 al presionar y
+0 al soltar. Una pulsación corta alterna la vista `PART`: las flechas eligen
+`PART 1/2`, `ENTER` abre su configuración y otra pulsación de `PART` la cierra.
+Mantener `PART` y tocar una nota guarda el split inmediatamente; esa nota es la
+primera de la zona derecha. Mantenerlo 1,5 segundos sin tocar una nota elimina
+el split, deja `PART 1` a rango completo y desactiva `PART 2`. Las notas usadas
+en el gesto se consumen antes del ruteo musical.
+
+La configuración de Part contiene únicamente canal MIDI, split compartido y
+octava. RackForge transforma primero el input físico a CH1/CH2 y recién después
+evalúa los filtros de los Slots. Plugin, volumen, pan y salida de audio siguen
+siendo propiedades del Slot y el orden de los Slots no define las partes.
+
+La ilustración que aparece al mover Mod Wheel es un overlay nativo del firmware
+Arturia, no una imagen dibujada por RackForge. El firmware oficial no muestra su
+editor local de Part mientras la sesión DAW mantiene la pantalla; RackForge
+ofrece esa función con sus propios menús de texto y conserva la configuración
+en el Rack.
+
 Al mover cualquiera de estos controles, el paquete 0.2.1 superpone su valor en
 el header nativo durante 1,5 segundos. Cada movimiento renueva el plazo; después
 se restaura el header de la pantalla actual sin redibujar ni perder el cuerpo o

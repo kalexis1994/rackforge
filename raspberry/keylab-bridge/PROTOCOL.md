@@ -373,6 +373,24 @@ instrumento. La registración ocurre antes de abrir el input y se repite cuando
 cambia la instancia del socket de control. Tanto `master_level` como
 `master_pan` son estado persistente y autoritativo de la sesión.
 
+### Botón PART reservado por el host
+
+La captura directa del puerto MIDI principal en hardware real confirmó que
+`PART` emite CC 119 por el canal 1: valor 127 al presionar y valor 0 al soltar.
+No es un selector interno silencioso. El paquete lo declara como la acción
+momentánea `keyboard_parts`, separada de los controles continuos. Un toque
+corto alterna la vista de partes. Mantenerlo y tocar una nota fija el split en
+esa nota; el driver consume el gesto para que no se transforme además en toque
+corto o largo. Mantener `PART` 1,5 segundos sin nota elimina el split. Core
+reserva tanto el CC como las notas del acorde antes de cualquier ruta de plugin.
+
+Con la pantalla adquirida en `DAW Program`, el firmware no abre su vista local
+de Part, aunque sí sigue mostrando el sofisticado overlay nativo de Mod Wheel.
+Esto demuestra que aquel dibujo no proviene del framebuffer de RackForge. El
+atajo de Part muestra `PART 1` y `PART 2` del Rack activo; las flechas eligen la
+parte y `ENTER` abre sus opciones. La nota de split pertenece a la zona derecha;
+el host deriva el final de la izquierda para impedir huecos o solapamientos.
+
 [^ableton-fader]: Implementación inspeccionada:
     [`elements.py`, revisión `ccfad86`](https://github.com/MrMatch246/KeyLab_Essential_mk3_TGE/blob/ccfad86570a66f419f323a080d6cd20ad1c76f6c/elements.py#L143-L145).
 

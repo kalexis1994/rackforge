@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+rackforge-plugin-api = { path = "../rackforge-plugin-api" }
 serde.workspace = true
 thiserror.workspace = true
 

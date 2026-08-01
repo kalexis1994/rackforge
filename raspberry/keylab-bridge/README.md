@@ -167,6 +167,7 @@ El mapeo capturado en hardware real es:
 | Encoder izquierda | CC 116, valor menor que 64 |
 | Encoder derecha | CC 116, valor mayor que 64 |
 | Encoder press | CC 117, valor 127 |
+| Part | CC 119, valor 127; liberación 0 |
 
 Los valores cero de los botones son liberaciones: no generan una segunda
 acción, pero se conservan para retirar feedback visual al soltar. El valor 64
@@ -192,6 +193,20 @@ con porcentaje o `MASTER PAN` con `L`, `R` o `CENTER`. El último valor permanec
 header más reciente del menú, incluso si la navegación cambió mientras el
 feedback estaba visible. Las ráfagas MIDI se compactan por control para que la
 pantalla no agregue retraso, sin perder el último valor de volumen ni de pan.
+
+El botón `PART` es una acción reservada distinta de la navegación `LITTLE`.
+Un toque alterna la vista `PART`; allí las flechas eligen `PART 1/2`, `ENTER`
+abre la configuración y otro toque la cierra. Mantener `PART` y tocar una nota
+guarda el split usando esa nota como inicio de `PART 2`; mantenerlo 1,5 segundos
+sin nota elimina el split. RackForge consume esas notas de configuración para
+que no suenen. El estado pertenece al Rack y el CC 119 nunca llega al plugin.
+La vista gráfica de Mod Wheel que todavía aparece es un overlay propio del
+firmware oficial, no un render de RackForge.
+
+`PART` no es un alias de Slot: su editor sólo expone canal MIDI, split y
+octava. Core transforma la zona a su canal de Part antes de filtrar los Slots;
+por ejemplo, `PART 2 / CH2` puede alimentar un Piano/CH2 aunque ese Piano sea el
+primer Slot del Rack. Nivel, pan, plugin y salida de audio permanecen en Slot.
 
 Los comandos, límites y resultados observados en hardware se registran en
 [`PROTOCOL.md`](PROTOCOL.md). En particular, `BAR (01)` dibuja una línea

@@ -10,8 +10,9 @@ use rackforge_controller_api::LITTLE_TEXT_COLUMNS;
 use rackforge_performance_api::{
     LibraryRevision, LiveBrowseMode, LiveLocation, LivePerformanceState, MidiOutputRoute,
     PERFORMANCE_SCHEMA_VERSION, PerformanceEdit, PerformanceLibrary, PerformanceSnapshot,
-    RackDefinition, RackId, RackSlot, RackSlotId, SetlistDefinition, SetlistEntry, SetlistEntryId,
-    SetlistId, SongDefinition, SongId, SongPart, SongPartId,
+    RackDefinition, RackId, RackKeyboardPart, RackKeyboardParts, RackSlot, RackSlotId,
+    SetlistDefinition, SetlistEntry, SetlistEntryId, SetlistId, SongDefinition, SongId, SongPart,
+    SongPartId,
 };
 use rackforge_program_api::{
     ProgramEditorField, ProgramEditorFieldKind, ProgramEditorPage, ProgramEditorValue,
@@ -325,6 +326,9 @@ enum Page {
     ConfigRackSlotName,
     ConfigRackSlotPlugin,
     ConfigRackSlotMidiChannel,
+    ConfigRackSlotLowKey,
+    ConfigRackSlotHighKey,
+    ConfigRackSlotOctave,
     ConfigRackSlotMidiOutput,
     ConfigRackSlotAudioOutput,
     ConfigRackSlotLevel,
@@ -346,6 +350,7 @@ enum Page {
     PerformanceDelete,
     PerformanceBusy,
     PerformanceResult,
+    KeyboardParts,
     Plugins,
     System,
     Audio,
@@ -468,6 +473,10 @@ pub struct Menu {
     performance_spinner: Spinner,
     performance_result: Option<(bool, String)>,
     performance_return_page: Page,
+    keyboard_parts_index: usize,
+    keyboard_parts_return_page: Page,
+    keyboard_parts_editing: bool,
+    keyboard_split_quick_action: bool,
     play_index: usize,
     config_index: usize,
     plugin_index: usize,
@@ -545,10 +554,13 @@ const CONFIG_DETAILS: [&str; 6] = [
     "RackForge settings",
 ];
 const RACK_EDITOR_ITEMS: [&str; 5] = ["NAME", "SLOTS", "ENABLED", "SAVE", "DELETE"];
-const RACK_SLOT_EDITOR_ITEMS: [&str; 9] = [
+const RACK_SLOT_EDITOR_ITEMS: [&str; 12] = [
     "NAME",
     "PLUGIN",
     "MIDI CH",
+    "LOW KEY",
+    "HIGH KEY",
+    "OCTAVE",
     "MIDI OUT",
     "AUDIO OUT",
     "LEVEL",
@@ -556,6 +568,7 @@ const RACK_SLOT_EDITOR_ITEMS: [&str; 9] = [
     "ENABLED",
     "DELETE",
 ];
+const KEYBOARD_PART_EDITOR_ITEMS: [&str; 3] = ["MIDI CH", "SPLIT KEY", "OCTAVE"];
 const SONG_EDITOR_ITEMS: [&str; 5] = ["NAME", "PARTS", "ENABLED", "SAVE", "DELETE"];
 const SETLIST_EDITOR_ITEMS: [&str; 5] = ["NAME", "SONGS", "ENABLED", "SAVE", "DELETE"];
 const PART_EDITOR_ITEMS: [&str; 5] = ["NAME", "RACK", "MOVE LEFT", "MOVE RIGHT", "DELETE"];
@@ -641,6 +654,10 @@ impl Default for Menu {
             performance_spinner: Spinner::ascii("performance-loader", "SAVING", "PLEASE WAIT"),
             performance_result: None,
             performance_return_page: Page::Config,
+            keyboard_parts_index: 0,
+            keyboard_parts_return_page: Page::Home,
+            keyboard_parts_editing: false,
+            keyboard_split_quick_action: false,
             play_index: 0,
             config_index: 0,
             plugin_index: 0,
@@ -975,9 +992,7 @@ impl Menu {
     fn plugin_play_selected_sound_id(&self) -> Option<&str> {
         match self.plugin_play_context {
             PluginPlayContext::Standalone => self.plugin_active_sound_id.as_deref(),
-            PluginPlayContext::RackSlot => self
-                .focused_rack_slot()
-                .and_then(|slot| slot.plugin_state_id.as_deref()),
+            PluginPlayContext::RackSlot => self.focused_rack_slot().and_then(rack_slot_sound_hint),
         }
     }
 
@@ -1050,7 +1065,146 @@ impl Menu {
         self.pressed_button = None;
     }
 
+    fn keyboard_parts_rack(&self) -> Option<&RackDefinition> {
+        self.live_performance
+            .active_rack_id
+            .as_ref()
+            .and_then(|id| self.performance_library.rack(id))
+            .or_else(|| self.performance_library.racks.first())
+    }
+
+    fn keyboard_parts_count(&self) -> usize {
+        usize::from(self.keyboard_parts_rack().is_some()) * 2
+    }
+
+    fn keyboard_parts_config(&self) -> RackKeyboardParts {
+        match self.performance_draft.as_ref() {
+            Some(PerformanceDraft::Rack(rack)) => rack.keyboard_parts.unwrap_or_default(),
+            _ => self
+                .keyboard_parts_rack()
+                .and_then(|rack| rack.keyboard_parts)
+                .unwrap_or_default(),
+        }
+    }
+
+    fn keyboard_part_config(&self) -> RackKeyboardPart {
+        self.keyboard_parts_config().part(self.keyboard_parts_index)
+    }
+
+    fn move_keyboard_part(&mut self, delta: isize) {
+        let count = self.keyboard_parts_count();
+        move_wrapped(&mut self.keyboard_parts_index, count, delta);
+    }
+
+    fn move_keyboard_part_draft(&mut self, delta: isize) {
+        let count = match self.performance_draft.as_ref() {
+            Some(PerformanceDraft::Rack(_)) => 2,
+            _ => 0,
+        };
+        move_wrapped(&mut self.keyboard_parts_index, count, delta);
+        self.performance_child_index = self.keyboard_parts_index;
+        self.performance_child_editor_index = 0;
+    }
+
+    fn open_keyboard_parts(&mut self, edit: bool) {
+        if self.page != Page::KeyboardParts && !self.keyboard_parts_editing {
+            self.keyboard_parts_return_page = self.page;
+        }
+        let count = self.keyboard_parts_count();
+        if count == 0 {
+            self.performance_result = Some((false, "NO ACTIVE SLOTS".into()));
+            self.performance_return_page = self.keyboard_parts_return_page;
+            self.page = Page::PerformanceResult;
+            return;
+        }
+        self.keyboard_parts_index = self.keyboard_parts_index.min(count - 1);
+        self.page = Page::KeyboardParts;
+        if edit {
+            self.begin_keyboard_part_edit();
+        }
+    }
+
+    fn begin_keyboard_part_edit(&mut self) {
+        if self.performance_draft.is_some() && !self.keyboard_parts_editing {
+            self.performance_result = Some((false, "EDIT IN PROGRESS".into()));
+            self.page = Page::PerformanceResult;
+            return;
+        }
+        let Some(mut rack) = self.keyboard_parts_rack().cloned() else {
+            return;
+        };
+        let migrated = initialize_keyboard_parts(&mut rack);
+        self.performance_draft = Some(PerformanceDraft::Rack(rack));
+        self.performance_dirty = migrated;
+        self.performance_child_index = self.keyboard_parts_index;
+        self.performance_child_editor_index = 0;
+        self.keyboard_parts_editing = true;
+        self.page = Page::ConfigRackSlotEditor;
+    }
+
+    fn apply_keyboard_parts_input(&mut self, input: Input) {
+        match input.default_navigation() {
+            Some(Action::Previous) => self.move_keyboard_part(-1),
+            Some(Action::Next) => self.move_keyboard_part(1),
+            Some(Action::Select) => self.begin_keyboard_part_edit(),
+            Some(Action::Back) => {
+                self.page = self.keyboard_parts_return_page;
+            }
+            None => {}
+        }
+    }
+
+    fn apply_keyboard_split_gesture(&mut self, split: Option<u8>) {
+        if self.performance_draft.is_some() && !self.keyboard_parts_editing {
+            self.performance_result = Some((false, "EDIT IN PROGRESS".into()));
+            self.page = Page::PerformanceResult;
+            return;
+        }
+        let Some(mut rack) = self.keyboard_parts_rack().cloned() else {
+            self.show_performance_error("NO ACTIVE RACK");
+            return;
+        };
+        if self.page != Page::KeyboardParts {
+            self.keyboard_parts_return_page = self.page;
+        }
+        initialize_keyboard_parts(&mut rack);
+        let mut parts = rack.keyboard_parts.unwrap_or_default();
+        parts.split_key = split.map(|key| key.clamp(1, 127));
+        rack.keyboard_parts = Some(parts);
+        self.keyboard_parts_index = usize::from(split.is_some());
+        self.performance_draft = Some(PerformanceDraft::Rack(rack));
+        self.performance_dirty = true;
+        self.performance_return_page = Page::KeyboardParts;
+        self.keyboard_parts_editing = true;
+        self.keyboard_split_quick_action = true;
+        self.save_performance_draft();
+    }
+
     pub fn apply_input(&mut self, input: Input) {
+        if let Input::KeyboardSplitNote(note) = input {
+            self.apply_keyboard_split_gesture(Some(note));
+            return;
+        }
+        if self.keyboard_parts_editing
+            && matches!(input, Input::KeyboardParts | Input::KeyboardPartsLong)
+        {
+            if input == Input::KeyboardParts && self.page == Page::ConfigRackSlotEditor {
+                self.move_keyboard_part_draft(1);
+            }
+            return;
+        }
+        if input == Input::KeyboardParts {
+            if self.page == Page::KeyboardParts {
+                self.page = self.keyboard_parts_return_page;
+            } else {
+                self.open_keyboard_parts(false);
+            }
+            return;
+        }
+        if input == Input::KeyboardPartsLong {
+            self.apply_keyboard_split_gesture(None);
+            return;
+        }
         if input == Input::HomeChord {
             let cancel_draft_id = self.program_draft.as_ref().map(|draft| draft.draft_id);
             self.audition_lease_id = None;
@@ -1076,6 +1230,8 @@ impl Menu {
         }
         if self.is_performance_config_page() {
             self.apply_performance_input(input);
+        } else if self.page == Page::KeyboardParts {
+            self.apply_keyboard_parts_input(input);
         } else if self.page == Page::ProgramEditorField {
             self.apply_generic_editor_field_input(input);
         } else if self.page == Page::ProgramEditorSound {
@@ -1143,11 +1299,18 @@ impl Menu {
     }
 
     pub fn complete_performance_edit(&mut self, result: Result<PerformanceSnapshot, String>) {
+        let quick_action = self.keyboard_split_quick_action;
+        self.keyboard_split_quick_action = false;
         match result {
             Ok(snapshot) => {
                 self.sync_performance_snapshot(snapshot);
                 self.performance_draft = None;
                 self.performance_dirty = false;
+                if quick_action {
+                    self.keyboard_parts_editing = false;
+                    self.page = Page::KeyboardParts;
+                    return;
+                }
                 self.performance_result = Some((true, "SAVED".into()));
             }
             Err(error) => {
@@ -1169,6 +1332,9 @@ impl Menu {
                 | Page::ConfigRackSlotName
                 | Page::ConfigRackSlotPlugin
                 | Page::ConfigRackSlotMidiChannel
+                | Page::ConfigRackSlotLowKey
+                | Page::ConfigRackSlotHighKey
+                | Page::ConfigRackSlotOctave
                 | Page::ConfigRackSlotMidiOutput
                 | Page::ConfigRackSlotAudioOutput
                 | Page::ConfigRackSlotLevel
@@ -1204,11 +1370,15 @@ impl Menu {
                     .as_ref()
                     .is_some_and(|result| result.0);
                 self.performance_result = None;
-                self.page = if success {
+                let destination = if success {
                     self.performance_return_page
                 } else {
                     self.performance_editor_page()
                 };
+                if success && destination == Page::KeyboardParts {
+                    self.keyboard_parts_editing = false;
+                }
+                self.page = destination;
             }
             return;
         }
@@ -1220,6 +1390,9 @@ impl Menu {
                 ComponentEvent::Activated(_) => {
                     self.performance_draft = None;
                     self.performance_dirty = false;
+                    if self.performance_return_page == Page::KeyboardParts {
+                        self.keyboard_parts_editing = false;
+                    }
                     self.page = self.performance_return_page;
                 }
                 ComponentEvent::ExitRequested(_) => self.page = self.performance_editor_page(),
@@ -1359,7 +1532,8 @@ impl Menu {
                     }
                     let state_id = self
                         .focused_rack_slot()
-                        .and_then(|slot| slot.plugin_state_id.clone());
+                        .and_then(rack_slot_sound_hint)
+                        .map(str::to_owned);
                     self.plugin_play_context = PluginPlayContext::RackSlot;
                     self.focus_plugin_play_sound(state_id.as_deref());
                     self.page = Page::PluginLibrary;
@@ -1367,13 +1541,87 @@ impl Menu {
             }
             Page::ConfigRackSlotMidiChannel => {
                 if previous || next {
-                    move_wrapped(
-                        &mut self.performance_value_index,
-                        17,
-                        if previous { -1 } else { 1 },
-                    );
+                    if self.keyboard_parts_editing {
+                        self.performance_value_index = if previous {
+                            if self.performance_value_index <= 1 {
+                                16
+                            } else {
+                                self.performance_value_index - 1
+                            }
+                        } else if self.performance_value_index >= 16 {
+                            1
+                        } else {
+                            self.performance_value_index + 1
+                        };
+                    } else {
+                        move_wrapped(
+                            &mut self.performance_value_index,
+                            17,
+                            if previous { -1 } else { 1 },
+                        );
+                    }
                 } else if select {
                     self.update_rack_slot_midi_channel();
+                    self.page = Page::ConfigRackSlotEditor;
+                } else if back {
+                    self.page = Page::ConfigRackSlotEditor;
+                }
+            }
+            Page::ConfigRackSlotLowKey => {
+                let (low, high) = if self.keyboard_parts_editing {
+                    (1, 127)
+                } else {
+                    (
+                        0,
+                        self.focused_rack_slot()
+                            .map_or(127, |slot| usize::from(slot.midi_note_high)),
+                    )
+                };
+                if previous || next {
+                    self.performance_value_index = if previous {
+                        self.performance_value_index.saturating_sub(1).max(low)
+                    } else {
+                        (self.performance_value_index + 1).min(high)
+                    };
+                } else if select {
+                    if self.keyboard_parts_editing {
+                        self.update_keyboard_split_key();
+                    } else {
+                        self.update_rack_slot_low_key();
+                    }
+                    self.page = Page::ConfigRackSlotEditor;
+                } else if back {
+                    self.page = Page::ConfigRackSlotEditor;
+                }
+            }
+            Page::ConfigRackSlotHighKey => {
+                let low = self
+                    .focused_rack_slot()
+                    .map_or(0, |slot| slot.midi_note_low);
+                if previous || next {
+                    self.performance_value_index = if previous {
+                        self.performance_value_index
+                            .saturating_sub(1)
+                            .max(usize::from(low))
+                    } else {
+                        (self.performance_value_index + 1).min(127)
+                    };
+                } else if select {
+                    self.update_rack_slot_high_key();
+                    self.page = Page::ConfigRackSlotEditor;
+                } else if back {
+                    self.page = Page::ConfigRackSlotEditor;
+                }
+            }
+            Page::ConfigRackSlotOctave => {
+                if previous || next {
+                    self.performance_value_index = if previous {
+                        self.performance_value_index.saturating_sub(1)
+                    } else {
+                        (self.performance_value_index + 1).min(8)
+                    };
+                } else if select {
+                    self.update_rack_slot_octave();
                     self.page = Page::ConfigRackSlotEditor;
                 } else if back {
                     self.page = Page::ConfigRackSlotEditor;
@@ -1507,6 +1755,7 @@ impl Menu {
                     .unwrap(),
                     name: "NEW RACK".into(),
                     enabled: true,
+                    keyboard_parts: None,
                     slots: Vec::new(),
                 }))
             }
@@ -1681,7 +1930,9 @@ impl Menu {
         let Some(draft) = self.performance_draft.clone() else {
             return;
         };
-        self.performance_return_page = self.performance_list_page();
+        if !self.keyboard_parts_editing {
+            self.performance_return_page = self.performance_list_page();
+        }
         self.pending_command = Some(MenuCommand::EditPerformance {
             expected_revision: self.performance_revision.clone(),
             edit: draft.into_edit(),
@@ -1743,9 +1994,13 @@ impl Menu {
                     id: RackSlotId::new(id).unwrap(),
                     name: format!("SLOT {}", rack.slots.len() + 1),
                     plugin_id: self.active_plugin_id.clone(),
-                    plugin_state_id: state_id,
+                    state: None,
+                    legacy_program_id: state_id,
                     enabled: true,
                     midi_input_channel: None,
+                    midi_note_low: 0,
+                    midi_note_high: 127,
+                    midi_transpose: 0,
                     midi_output: MidiOutputRoute::None,
                     audio_output_bus: "main".into(),
                     level_per_mille: 1_000,
@@ -1768,6 +2023,10 @@ impl Menu {
         select: bool,
         back: bool,
     ) {
+        if self.keyboard_parts_editing {
+            self.apply_keyboard_part_editor_input(previous, next, select, back);
+            return;
+        }
         if previous || next {
             move_wrapped(
                 &mut self.performance_child_editor_index,
@@ -1775,8 +2034,20 @@ impl Menu {
                 if previous { -1 } else { 1 },
             );
         } else if back {
-            self.performance_child_index += 1;
-            self.page = Page::ConfigRackSlots;
+            if self.keyboard_parts_editing {
+                self.performance_return_page = Page::KeyboardParts;
+                if self.performance_dirty {
+                    self.performance_confirm = performance_confirmation();
+                    self.page = Page::PerformanceUnsaved;
+                } else {
+                    self.performance_draft = None;
+                    self.keyboard_parts_editing = false;
+                    self.page = Page::KeyboardParts;
+                }
+            } else {
+                self.performance_child_index += 1;
+                self.page = Page::ConfigRackSlots;
+            }
         } else if select {
             match self.performance_child_editor_index {
                 0 => {
@@ -1795,22 +2066,40 @@ impl Menu {
                     self.page = Page::ConfigRackSlotMidiChannel;
                 }
                 3 => {
+                    self.performance_value_index = self
+                        .focused_rack_slot()
+                        .map_or(0, |slot| usize::from(slot.midi_note_low));
+                    self.page = Page::ConfigRackSlotLowKey;
+                }
+                4 => {
+                    self.performance_value_index = self
+                        .focused_rack_slot()
+                        .map_or(127, |slot| usize::from(slot.midi_note_high));
+                    self.page = Page::ConfigRackSlotHighKey;
+                }
+                5 => {
+                    self.performance_value_index = self.focused_rack_slot().map_or(4, |slot| {
+                        usize::try_from(i16::from(slot.midi_transpose) / 12 + 4).unwrap_or(4)
+                    });
+                    self.page = Page::ConfigRackSlotOctave;
+                }
+                6 => {
                     self.page = Page::ConfigRackSlotMidiOutput;
                 }
-                4 => self.page = Page::ConfigRackSlotAudioOutput,
-                5 => {
+                7 => self.page = Page::ConfigRackSlotAudioOutput,
+                8 => {
                     self.performance_value_index = self
                         .focused_rack_slot()
                         .map_or(100, |slot| usize::from(slot.level_per_mille / 10));
                     self.page = Page::ConfigRackSlotLevel;
                 }
-                6 => {
+                9 => {
                     self.performance_value_index = self.focused_rack_slot().map_or(100, |slot| {
                         (i32::from(slot.pan_per_mille) / 10 + 100) as usize
                     });
                     self.page = Page::ConfigRackSlotPan;
                 }
-                7 => {
+                10 => {
                     if let Some(slot) = self.focused_rack_slot_mut() {
                         slot.enabled = !slot.enabled;
                         self.performance_dirty = true;
@@ -1831,6 +2120,51 @@ impl Menu {
         }
     }
 
+    fn apply_keyboard_part_editor_input(
+        &mut self,
+        previous: bool,
+        next: bool,
+        select: bool,
+        back: bool,
+    ) {
+        if previous || next {
+            move_wrapped(
+                &mut self.performance_child_editor_index,
+                KEYBOARD_PART_EDITOR_ITEMS.len(),
+                if previous { -1 } else { 1 },
+            );
+        } else if back {
+            self.performance_return_page = Page::KeyboardParts;
+            if self.performance_dirty {
+                self.performance_confirm = performance_confirmation();
+                self.page = Page::PerformanceUnsaved;
+            } else {
+                self.performance_draft = None;
+                self.keyboard_parts_editing = false;
+                self.page = Page::KeyboardParts;
+            }
+        } else if select {
+            match self.performance_child_editor_index {
+                0 => {
+                    self.performance_value_index =
+                        usize::from(self.keyboard_part_config().midi_channel);
+                    self.page = Page::ConfigRackSlotMidiChannel;
+                }
+                1 => {
+                    self.performance_value_index = usize::from(self.keyboard_split_key());
+                    self.page = Page::ConfigRackSlotLowKey;
+                }
+                2 => {
+                    self.performance_value_index =
+                        usize::try_from(i16::from(self.keyboard_part_config().transpose) / 12 + 4)
+                            .unwrap_or(4);
+                    self.page = Page::ConfigRackSlotOctave;
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn focused_rack_slot(&self) -> Option<&RackSlot> {
         match self.performance_draft.as_ref() {
             Some(PerformanceDraft::Rack(rack)) => rack.slots.get(self.performance_child_index),
@@ -1847,8 +2181,69 @@ impl Menu {
 
     fn update_rack_slot_midi_channel(&mut self) {
         let value = self.performance_value_index;
+        if self.keyboard_parts_editing {
+            if let Some(PerformanceDraft::Rack(rack)) = self.performance_draft.as_mut() {
+                let parts = rack.keyboard_parts.get_or_insert_default();
+                if self.keyboard_parts_index == 1 {
+                    parts.part_2.midi_channel = value.clamp(1, 16) as u8;
+                } else {
+                    parts.part_1.midi_channel = value.clamp(1, 16) as u8;
+                }
+                self.performance_dirty = true;
+            }
+            return;
+        }
         if let Some(slot) = self.focused_rack_slot_mut() {
             slot.midi_input_channel = (value != 0).then_some(value as u8);
+            self.performance_dirty = true;
+        }
+    }
+
+    fn update_rack_slot_low_key(&mut self) {
+        let value = self.performance_value_index as u8;
+        if let Some(slot) = self.focused_rack_slot_mut() {
+            slot.midi_note_low = value.min(slot.midi_note_high);
+            self.performance_dirty = true;
+        }
+    }
+
+    fn keyboard_split_key(&self) -> u8 {
+        self.keyboard_parts_config().split_key.unwrap_or(60)
+    }
+
+    fn update_keyboard_split_key(&mut self) {
+        let split = (self.performance_value_index as u8).clamp(1, 127);
+        let Some(PerformanceDraft::Rack(rack)) = self.performance_draft.as_mut() else {
+            return;
+        };
+        rack.keyboard_parts.get_or_insert_default().split_key = Some(split);
+        self.performance_dirty = true;
+    }
+
+    fn update_rack_slot_high_key(&mut self) {
+        let value = self.performance_value_index as u8;
+        if let Some(slot) = self.focused_rack_slot_mut() {
+            slot.midi_note_high = value.max(slot.midi_note_low).min(127);
+            self.performance_dirty = true;
+        }
+    }
+
+    fn update_rack_slot_octave(&mut self) {
+        let value = (self.performance_value_index as i8 - 4) * 12;
+        if self.keyboard_parts_editing {
+            if let Some(PerformanceDraft::Rack(rack)) = self.performance_draft.as_mut() {
+                let parts = rack.keyboard_parts.get_or_insert_default();
+                if self.keyboard_parts_index == 1 {
+                    parts.part_2.transpose = value;
+                } else {
+                    parts.part_1.transpose = value;
+                }
+                self.performance_dirty = true;
+            }
+            return;
+        }
+        if let Some(slot) = self.focused_rack_slot_mut() {
+            slot.midi_transpose = value;
             self.performance_dirty = true;
         }
     }
@@ -2266,7 +2661,10 @@ impl Menu {
                     {
                         if self.plugin_play_context == PluginPlayContext::RackSlot {
                             if let Some(slot) = self.focused_rack_slot_mut() {
-                                slot.plugin_state_id = Some(sound.id.clone());
+                                // The selected native program only initializes this draft. Core
+                                // materializes it into an opaque plugin state before persistence.
+                                slot.state = None;
+                                slot.legacy_program_id = Some(sound.id.clone());
                                 self.performance_dirty = true;
                             }
                             if let Some(PerformanceDraft::Rack(rack)) =
@@ -2543,6 +2941,36 @@ impl Menu {
                 },
                 "Input channel",
             ),
+            Page::ConfigRackSlotLowKey => self.render_rack_slot_value(
+                if self.keyboard_parts_editing {
+                    "SPLIT KEY"
+                } else {
+                    "LOW KEY"
+                },
+                midi_note_name(self.performance_value_index as u8),
+                if self.keyboard_parts_editing {
+                    "Right zone starts"
+                } else {
+                    "Lower zone limit"
+                },
+            ),
+            Page::ConfigRackSlotHighKey => self.render_rack_slot_value(
+                "HIGH KEY",
+                midi_note_name(self.performance_value_index as u8),
+                "Upper zone limit",
+            ),
+            Page::ConfigRackSlotOctave => {
+                let octave = self.performance_value_index as i8 - 4;
+                self.render_rack_slot_value(
+                    "OCTAVE",
+                    if octave == 0 {
+                        "ORIGINAL".into()
+                    } else {
+                        format!("{octave:+}")
+                    },
+                    "Zone transpose",
+                )
+            }
             Page::ConfigRackSlotMidiOutput => {
                 self.render_rack_slot_value("MIDI OUT", "N/A", "Plugin has no MIDI output")
             }
@@ -2598,6 +3026,7 @@ impl Menu {
                     message,
                 )
             }
+            Page::KeyboardParts => self.render_keyboard_parts(),
             Page::Plugins => Screen::with_header(
                 indexed_title("PLUGINS", self.plugin_index, 1),
                 &self.active_plugin_name,
@@ -2836,7 +3265,62 @@ impl Menu {
         )
     }
 
+    fn render_keyboard_parts(&self) -> Screen {
+        if self.keyboard_parts_rack().is_none() {
+            return Screen::with_header("KEYBOARD", "NO ACTIVE RACK", "BACK");
+        }
+        let count = 2;
+        let parts = self.keyboard_parts_config();
+        let part = parts.part(self.keyboard_parts_index);
+        let range = match (self.keyboard_parts_index, parts.split_key) {
+            (0, Some(split)) => format!(
+                "{}..{} CH {}",
+                midi_note_name(0),
+                midi_note_name(split - 1),
+                part.midi_channel
+            ),
+            (1, Some(split)) => format!(
+                "{}..{} CH {}",
+                midi_note_name(split),
+                midi_note_name(127),
+                part.midi_channel
+            ),
+            (0, None) => format!("FULL RANGE CH {}", part.midi_channel),
+            _ => format!("NO SPLIT CH {}", part.midi_channel),
+        };
+        Screen::with_header(
+            indexed_title("KEYBOARD", self.keyboard_parts_index, count),
+            format!("PART {}", self.keyboard_parts_index + 1),
+            normalized_display_text(&range, " "),
+        )
+    }
+
     fn render_rack_slot_editor(&self) -> Screen {
+        if self.keyboard_parts_editing {
+            let part = self.keyboard_part_config();
+            let detail = match self.performance_child_editor_index {
+                0 => part.midi_channel.to_string(),
+                1 => midi_note_name(self.keyboard_split_key()),
+                2 => {
+                    let octave = part.transpose / 12;
+                    if octave == 0 {
+                        "ORIGINAL".into()
+                    } else {
+                        format!("{octave:+}")
+                    }
+                }
+                _ => " ".into(),
+            };
+            return Screen::with_header(
+                indexed_title(
+                    &format!("PART {}", self.keyboard_parts_index + 1),
+                    self.performance_child_editor_index,
+                    KEYBOARD_PART_EDITOR_ITEMS.len(),
+                ),
+                KEYBOARD_PART_EDITOR_ITEMS[self.performance_child_editor_index],
+                normalized_display_text(&detail, " "),
+            );
+        }
         let Some(slot) = self.focused_rack_slot() else {
             return Screen::with_header("SLOT", "EMPTY", "BACK");
         };
@@ -2847,13 +3331,23 @@ impl Menu {
             2 => slot
                 .midi_input_channel
                 .map_or("OMNI".into(), |channel| channel.to_string()),
-            3 => match &slot.midi_output {
+            3 => midi_note_name(slot.midi_note_low),
+            4 => midi_note_name(slot.midi_note_high),
+            5 => {
+                let octave = slot.midi_transpose / 12;
+                if octave == 0 {
+                    "ORIGINAL".into()
+                } else {
+                    format!("{octave:+}")
+                }
+            }
+            6 => match &slot.midi_output {
                 MidiOutputRoute::None => "NONE".into(),
                 MidiOutputRoute::Bus { bus_id } => bus_id.clone(),
             },
-            4 => slot.audio_output_bus.clone(),
-            5 => format!("{}%", slot.level_per_mille / 10),
-            6 => {
+            7 => slot.audio_output_bus.clone(),
+            8 => format!("{}%", slot.level_per_mille / 10),
+            9 => {
                 let pan = slot.pan_per_mille / 10;
                 if pan == 0 {
                     "CENTER".into()
@@ -2863,7 +3357,7 @@ impl Menu {
                     format!("R{pan}")
                 }
             }
-            7 => {
+            10 => {
                 if slot.enabled {
                     "ON".into()
                 } else {
@@ -4060,6 +4554,9 @@ impl Menu {
             | Page::ConfigRackSlotName
             | Page::ConfigRackSlotPlugin
             | Page::ConfigRackSlotMidiChannel
+            | Page::ConfigRackSlotLowKey
+            | Page::ConfigRackSlotHighKey
+            | Page::ConfigRackSlotOctave
             | Page::ConfigRackSlotMidiOutput
             | Page::ConfigRackSlotAudioOutput
             | Page::ConfigRackSlotLevel
@@ -4080,7 +4577,8 @@ impl Menu {
             | Page::PerformanceUnsaved
             | Page::PerformanceDelete
             | Page::PerformanceBusy
-            | Page::PerformanceResult => return,
+            | Page::PerformanceResult
+            | Page::KeyboardParts => return,
             Page::PluginTuning
             | Page::PluginPitchEnvelope
             | Page::PluginLayerLevel
@@ -5225,6 +5723,33 @@ fn normalized_display_text(value: &str, fallback: &str) -> String {
     normalized
 }
 
+fn initialize_keyboard_parts(rack: &mut RackDefinition) -> bool {
+    if rack.keyboard_parts.is_some() {
+        return false;
+    }
+    let mut parts = RackKeyboardParts::default();
+    if let [left, right, ..] = rack.slots.as_mut_slice()
+        && left.midi_note_low == 0
+        && right.midi_note_high == 127
+        && left.midi_note_high < 127
+        && left.midi_note_high.saturating_add(1) == right.midi_note_low
+    {
+        parts.split_key = Some(right.midi_note_low);
+        left.midi_note_high = 127;
+        right.midi_note_low = 0;
+    }
+    rack.keyboard_parts = Some(parts);
+    true
+}
+
+fn midi_note_name(note: u8) -> String {
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    let octave = i16::from(note / 12) - 1;
+    format!("{}{octave}", NAMES[usize::from(note % 12)])
+}
+
 fn render_home(selected: usize) -> [String; 2] {
     let mut frame = Frame::new(DISPLAY_COLUMNS, 2);
     for (index, (item, area)) in [
@@ -5688,6 +6213,13 @@ fn move_wrapped(selection: &mut usize, len: usize, delta: isize) {
     }
 }
 
+fn rack_slot_sound_hint(slot: &RackSlot) -> Option<&str> {
+    slot.state
+        .as_ref()
+        .and_then(|state| state.selected_sound_id.as_deref())
+        .or(slot.legacy_program_id.as_deref())
+}
+
 fn next_available_id<'a>(prefix: &str, existing: impl Iterator<Item = &'a str>) -> String {
     let existing = existing.collect::<std::collections::BTreeSet<_>>();
     (1_u32..)
@@ -5814,13 +6346,18 @@ mod tests {
             id: rack_id.clone(),
             name: "Stage Piano".into(),
             enabled: true,
+            keyboard_parts: None,
             slots: vec![RackSlot {
                 id: RackSlotId::new("instrument.main").unwrap(),
                 name: "Main Instrument".into(),
                 plugin_id: "org.rackforge.rf-dls".into(),
-                plugin_state_id: Some("custom.user.stage-piano".into()),
+                state: None,
+                legacy_program_id: Some("custom.user.stage-piano".into()),
                 enabled: true,
                 midi_input_channel: None,
+                midi_note_low: 0,
+                midi_note_high: 127,
+                midi_transpose: 0,
                 midi_output: MidiOutputRoute::None,
                 audio_output_bus: "main".into(),
                 level_per_mille: 1_000,
@@ -5914,6 +6451,70 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_parts_shortcut_opens_and_edits_the_active_rack_zone() {
+        let mut menu = plugin_menu();
+        let mut snapshot = test_performance_snapshot();
+        let mut right = snapshot.library.racks[0].slots[0].clone();
+        right.id = RackSlotId::new("instrument.right").unwrap();
+        right.name = "Bass".into();
+        snapshot.library.racks[0].slots.push(right);
+        menu.sync_performance_snapshot(snapshot);
+
+        menu.apply_input(Input::KeyboardParts);
+        let screen = menu.render();
+        assert!(
+            matches!(screen.header, Header::Visible(ref value) if value.starts_with("KEYBOARD"))
+        );
+        assert_eq!(screen.line_1, "PART 1");
+        assert_eq!(screen.line_2, "FULL RANGE CH 1");
+
+        menu.apply_input(Input::KeyboardParts);
+        assert_eq!(menu.render().header, Header::Visible(HOME_HEADER.into()));
+        menu.apply_input(Input::KeyboardParts);
+        menu.apply_input(Input::EncoderPress);
+        assert_eq!(menu.render().line_1, "MIDI CH");
+        menu.apply_input(Input::Button3);
+        assert_eq!(menu.render().line_1, "SPLIT KEY");
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button1);
+
+        let Some(PerformanceDraft::Rack(rack)) = menu.performance_draft.as_ref() else {
+            panic!("keyboard Part editor did not create a Rack draft");
+        };
+        assert_eq!(rack.keyboard_parts.unwrap().split_key, Some(61));
+        assert_eq!(rack.slots[0].midi_note_low, 0);
+        assert_eq!(rack.slots[0].midi_note_high, 127);
+        assert_eq!(rack.slots[1].midi_note_low, 0);
+        assert_eq!(rack.slots[1].midi_note_high, 127);
+        assert!(menu.performance_dirty);
+    }
+
+    #[test]
+    fn part_note_gesture_saves_one_shared_split_atomically() {
+        let mut menu = plugin_menu();
+        let mut snapshot = test_performance_snapshot();
+        let mut right = snapshot.library.racks[0].slots[0].clone();
+        right.id = RackSlotId::new("instrument.right").unwrap();
+        snapshot.library.racks[0].slots.push(right);
+        menu.sync_performance_snapshot(snapshot);
+
+        menu.apply_input(Input::KeyboardSplitNote(64));
+        let Some(MenuCommand::EditPerformance {
+            edit: PerformanceEdit::PutRack { rack },
+            ..
+        }) = menu.take_command()
+        else {
+            panic!("split gesture did not request an atomic Rack save");
+        };
+        assert_eq!(rack.keyboard_parts.unwrap().split_key, Some(64));
+        assert_eq!(rack.slots[0].midi_note_low, 0);
+        assert_eq!(rack.slots[0].midi_note_high, 127);
+        assert_eq!(rack.slots[1].midi_note_low, 0);
+        assert_eq!(rack.slots[1].midi_note_high, 127);
+    }
+
+    #[test]
     fn rack_configuration_creates_a_transactional_draft() {
         let mut menu = plugin_menu();
         menu.sync_performance_snapshot(test_performance_snapshot());
@@ -5946,7 +6547,7 @@ mod tests {
         assert_eq!(rack.slots.len(), 1);
         assert_eq!(rack.slots[0].plugin_id, "org.rackforge.rf-dls");
         assert_eq!(
-            rack.slots[0].plugin_state_id.as_deref(),
+            rack.slots[0].legacy_program_id.as_deref(),
             Some("dls.b00000000.p00000000")
         );
         assert_eq!(menu.render().line_1.trim(), "SAVING");
@@ -5998,12 +6599,11 @@ mod tests {
         };
         assert_eq!(rack.slots.len(), 1);
         assert_eq!(
-            rack.slots[0].plugin_state_id.as_deref(),
+            rack.slots[0].legacy_program_id.as_deref(),
             Some("custom.user.warm-piano")
         );
         assert_eq!(
-            menu.focused_rack_slot()
-                .and_then(|slot| slot.plugin_state_id.as_deref()),
+            menu.focused_rack_slot().and_then(rack_slot_sound_hint),
             Some("custom.user.warm-piano")
         );
         menu.apply(Action::Back);
@@ -6442,7 +7042,7 @@ mod tests {
     #[test]
     fn exposes_exactly_seven_physical_inputs() {
         assert_eq!(Input::PHYSICAL.len(), 7);
-        assert_eq!(Input::ALL.len(), 12);
+        assert_eq!(Input::ALL.len(), 14);
         assert_eq!(Input::Button1.default_navigation(), Some(Action::Select));
         assert_eq!(Input::Button2.default_navigation(), Some(Action::Previous));
         assert_eq!(Input::Button3.default_navigation(), Some(Action::Next));

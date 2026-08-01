@@ -1,7 +1,7 @@
 use rackforge_controller_api::{
-    ControllerDriver, ControllerProfile, GestureCapabilities, HostControlBinding,
-    HostControlTarget, LITTLE_V1, MidiControlChangeBinding, SurfaceImplementation, SurfaceQuality,
-    negotiate_surface,
+    ControllerDriver, ControllerProfile, GestureCapabilities, HostActionBinding, HostActionTarget,
+    HostControlBinding, HostControlTarget, LITTLE_V1, MidiButtonBinding, MidiControlChangeBinding,
+    SurfaceImplementation, SurfaceQuality, negotiate_surface,
 };
 use std::sync::OnceLock;
 
@@ -39,6 +39,15 @@ impl ControllerDriver for KeyLabEssentialMk3 {
                     },
                 },
             ],
+            host_actions: vec![HostActionBinding {
+                target: HostActionTarget::KeyboardParts,
+                midi_cc: MidiButtonBinding {
+                    channel: 0,
+                    controller: 119,
+                    press_value: 127,
+                    release_value: 0,
+                },
+            }],
         })
     }
 
@@ -138,6 +147,18 @@ mod tests {
                     },
                 },
             ]
+        );
+        assert_eq!(
+            driver.profile().host_actions,
+            vec![HostActionBinding {
+                target: HostActionTarget::KeyboardParts,
+                midi_cc: MidiButtonBinding {
+                    channel: 0,
+                    controller: 119,
+                    press_value: 127,
+                    release_value: 0,
+                },
+            }]
         );
     }
 

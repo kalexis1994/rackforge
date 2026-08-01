@@ -1,3 +1,4 @@
+use crate::PluginStateStore;
 use crate::PluginStorage;
 use crate::performance::PerformanceRepository;
 use crate::session::SharedSessionStore;
@@ -12,16 +13,17 @@ use rackforge_control_api::{
 use rackforge_performance_api::PerformanceLibrary;
 use rackforge_performance_api::{
     LibraryRevision, MidiOutputRoute, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit,
-    PerformanceSnapshot, RackDefinition,
+    PerformanceSnapshot, RackDefinition, RackKeyboardParts,
 };
 use rackforge_plugin_api::{
-    PreparedProgram, PresetCatalog, ProgramDocument, ProgramEditRequest, ProgramEditorView,
-    ProgramFieldEditRequest, SurfaceActivationRequest, SurfaceActivationResponse,
+    Capability, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
+    ProgramEditRequest, ProgramEditorView, ProgramFieldEditRequest, SurfaceActivationRequest,
+    SurfaceActivationResponse,
 };
 use rackforge_session_api::{
-    AuditionEndReason, ClientId, CommandEnvelope, CommandRef, HostControlBinding, InstanceId,
-    MasterLevel, MasterPan, ProgramDraftState, Revision, SESSION_SCHEMA_VERSION, SessionCommand,
-    SessionEvent, SoundSummary,
+    AuditionEndReason, ClientId, CommandEnvelope, CommandRef, HostActionBinding,
+    HostControlBinding, InstanceId, MasterLevel, MasterPan, ProgramDraftState, Revision,
+    SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SoundSummary,
 };
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -41,10 +43,21 @@ const AUDITION_WATCHDOG_PERIOD: Duration = Duration::from_millis(250);
 pub const MAX_ACTIVE_RACK_SLOTS: usize = 8;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RackSlotStateLoad {
+    Default,
+    Opaque(Vec<u8>),
+    LegacyPreset(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RackSlotRuntimeSpec {
     pub slot_id: String,
-    pub plugin_state_id: String,
+    pub state: RackSlotStateLoad,
     pub midi_input_channel: Option<u8>,
+    pub midi_note_low: u8,
+    pub midi_note_high: u8,
+    pub midi_transpose: i8,
+    pub keyboard_parts: Option<RackKeyboardParts>,
     pub level_per_mille: u16,
     pub pan_per_mille: i16,
 }
@@ -57,6 +70,12 @@ pub enum AudioControlCommand {
     RegisterHostControls {
         controller_id: String,
         bindings: Vec<HostControlBinding>,
+        reply: SyncSender<Result<(), String>>,
+    },
+    RegisterHostBindings {
+        controller_id: String,
+        controls: Vec<HostControlBinding>,
+        actions: Vec<HostActionBinding>,
         reply: SyncSender<Result<(), String>>,
     },
     SetMasterLevel {
@@ -121,6 +140,19 @@ pub enum AudioControlCommand {
         request: SurfaceActivationRequest,
         reply: SyncSender<Result<SurfaceActivationResponse, String>>,
     },
+    CaptureState {
+        instance_id: InstanceId,
+        reply: SyncSender<Result<Vec<u8>, String>>,
+    },
+    RestoreState {
+        instance_id: InstanceId,
+        bytes: Vec<u8>,
+        reply: SyncSender<Result<(), String>>,
+    },
+    MaterializeState {
+        program_id: Option<String>,
+        reply: SyncSender<Result<Vec<u8>, String>>,
+    },
 }
 
 struct LeaseDeadline {
@@ -146,6 +178,8 @@ struct ControlContext {
     audio_state: Arc<Mutex<AudioOutputState>>,
     audio_state_path: PathBuf,
     performance_repository: Arc<Mutex<PerformanceRepository>>,
+    state_store: Arc<Mutex<PluginStateStore>>,
+    plugin_manifest: PluginManifest,
     storage: Option<PluginStorage>,
     checkpoint: Option<SessionCheckpointStore>,
     dispatch_lock: Mutex<()>,
@@ -165,6 +199,8 @@ pub fn start(
     audio_state: Arc<Mutex<AudioOutputState>>,
     audio_state_path: PathBuf,
     performance_repository: Arc<Mutex<PerformanceRepository>>,
+    state_store: Arc<Mutex<PluginStateStore>>,
+    plugin_manifest: PluginManifest,
     storage: Option<PluginStorage>,
     checkpoint: Option<SessionCheckpointStore>,
 ) -> Result<ControlServer> {
@@ -206,6 +242,8 @@ pub fn start(
         audio_state,
         audio_state_path,
         performance_repository,
+        state_store,
+        plugin_manifest,
         storage,
         checkpoint,
         dispatch_lock: Mutex::new(()),
@@ -314,6 +352,18 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
                 (_, Err(_)) => internal_error("performance repository lock is poisoned", None),
             }
         }
+        ControlRequest::PluginPresets { plugin_id } => list_plugin_presets(context, &plugin_id),
+        ControlRequest::SavePluginPreset { instance_id, name } => {
+            save_plugin_preset(context, &instance_id, &name)
+        }
+        ControlRequest::LoadPluginPreset {
+            instance_id,
+            preset_id,
+        } => load_plugin_preset(context, &instance_id, &preset_id),
+        ControlRequest::PluginPreset {
+            plugin_id,
+            preset_id,
+        } => get_plugin_preset(context, &plugin_id, &preset_id),
         ControlRequest::EditPerformance {
             expected_revision,
             edit,
@@ -415,16 +465,40 @@ fn edit_performance(
             current_revision(context),
         );
     }
-    let store = match context.store.lock() {
-        Ok(store) => store,
+    let (session_revision, live) = match context.store.lock() {
+        Ok(store) => (store.state().revision, store.state().live.clone()),
         Err(_) => return internal_error("session store lock is poisoned", None),
+    };
+    let current = match context.performance_repository.lock() {
+        Ok(repository) => repository.revision(),
+        Err(_) => {
+            return internal_error(
+                "performance repository lock is poisoned",
+                Some(session_revision),
+            );
+        }
+    };
+    if current != expected_revision {
+        return error_response(
+            ControlErrorCode::Conflict,
+            format!(
+                "performance library changed: expected {}, current {}",
+                expected_revision.as_str(),
+                current.as_str()
+            ),
+            Some(session_revision),
+        );
+    }
+    let edit = match materialize_performance_edit(context, edit, session_revision) {
+        Ok(edit) => edit,
+        Err(failure) => return failure.into_response(),
     };
     let mut repository = match context.performance_repository.lock() {
         Ok(repository) => repository,
         Err(_) => {
             return internal_error(
                 "performance repository lock is poisoned",
-                Some(store.state().revision),
+                Some(session_revision),
             );
         }
     };
@@ -437,24 +511,319 @@ fn edit_performance(
                 expected_revision.as_str(),
                 current.as_str()
             ),
-            Some(store.state().revision),
+            Some(session_revision),
         );
     }
-    if let Err(error) = repository.apply_edit(&expected_revision, edit, &store.state().live) {
+    if let Err(error) = repository.apply_edit(&expected_revision, edit, &live) {
         return error_response(
             ControlErrorCode::Rejected,
             error.to_string(),
-            Some(store.state().revision),
+            Some(session_revision),
         );
     }
     let snapshot = PerformanceSnapshot {
         schema_version: PERFORMANCE_SNAPSHOT_SCHEMA_VERSION,
         revision: repository.revision(),
         library: repository.library().clone(),
-        live: store.state().live.clone(),
+        live,
     };
     ControlResponse::PerformanceEdited {
         snapshot: Box::new(snapshot),
+    }
+}
+
+fn materialize_performance_edit(
+    context: &ControlContext,
+    mut edit: PerformanceEdit,
+    revision: Revision,
+) -> Result<PerformanceEdit, ControlFailure> {
+    let PerformanceEdit::PutRack { rack } = &mut edit else {
+        return Ok(edit);
+    };
+    for slot in &mut rack.slots {
+        if slot.plugin_id != context.plugin_manifest.id {
+            return Err(control_failure(
+                ControlErrorCode::Unavailable,
+                format!(
+                    "plugin {} is not loaded by the current runtime",
+                    slot.plugin_id
+                ),
+                Some(revision),
+            ));
+        }
+        if let Some(reference) = &slot.state {
+            let store = context.state_store.lock().map_err(|_| {
+                control_failure(
+                    ControlErrorCode::Internal,
+                    "plugin state store lock is poisoned",
+                    Some(revision),
+                )
+            })?;
+            store.read(reference).map_err(|error| {
+                control_failure(
+                    ControlErrorCode::Rejected,
+                    format!("Rack Slot {} has unavailable state: {error:#}", slot.id),
+                    Some(revision),
+                )
+            })?;
+            continue;
+        }
+        let program_id = slot.legacy_program_id.clone();
+        let (reply_sender, reply_receiver) = sync_channel(1);
+        send_audio(
+            context,
+            AudioControlCommand::MaterializeState {
+                program_id: program_id.clone(),
+                reply: reply_sender,
+            },
+        )?;
+        let bytes = receive_audio(reply_receiver, "materialize Rack Slot state")?;
+        let mut store = context.state_store.lock().map_err(|_| {
+            control_failure(
+                ControlErrorCode::Internal,
+                "plugin state store lock is poisoned",
+                Some(revision),
+            )
+        })?;
+        slot.state = Some(
+            store
+                .put(
+                    &context.plugin_manifest.id,
+                    &context.plugin_manifest.version,
+                    context.plugin_manifest.state_version,
+                    program_id,
+                    &bytes,
+                )
+                .map_err(|error| {
+                    control_failure(
+                        ControlErrorCode::Rejected,
+                        format!("storing state for Rack Slot {}: {error:#}", slot.id),
+                        Some(revision),
+                    )
+                })?,
+        );
+        slot.legacy_program_id = None;
+    }
+    Ok(edit)
+}
+
+fn list_plugin_presets(context: &ControlContext, plugin_id: &str) -> ControlResponse {
+    match context.state_store.lock() {
+        Ok(store) => match store.list_presets(plugin_id) {
+            Ok(presets) => ControlResponse::PluginPresets {
+                plugin_id: plugin_id.into(),
+                presets,
+            },
+            Err(error) => error_response(
+                ControlErrorCode::InvalidRequest,
+                error.to_string(),
+                current_revision(context),
+            ),
+        },
+        Err(_) => internal_error(
+            "plugin state store lock is poisoned",
+            current_revision(context),
+        ),
+    }
+}
+
+fn get_plugin_preset(
+    context: &ControlContext,
+    plugin_id: &str,
+    preset_id: &str,
+) -> ControlResponse {
+    match context.state_store.lock() {
+        Ok(store) => match store.preset(plugin_id, preset_id) {
+            Ok(preset) => ControlResponse::PluginPreset {
+                preset: Box::new(preset),
+            },
+            Err(error) => error_response(
+                ControlErrorCode::NotFound,
+                error.to_string(),
+                current_revision(context),
+            ),
+        },
+        Err(_) => internal_error(
+            "plugin state store lock is poisoned",
+            current_revision(context),
+        ),
+    }
+}
+
+fn save_plugin_preset(
+    context: &ControlContext,
+    instance_id: &InstanceId,
+    name: &str,
+) -> ControlResponse {
+    let snapshot = match context.store.lock() {
+        Ok(store) => store.snapshot(),
+        Err(_) => return internal_error("session store lock is poisoned", None),
+    };
+    let instance = match require_active_instance(&snapshot, instance_id) {
+        Ok(instance) => instance,
+        Err(failure) => return failure.into_response(),
+    };
+    if instance.plugin_id != context.plugin_manifest.id {
+        return error_response(
+            ControlErrorCode::Rejected,
+            "the active plugin is not hosted by this runtime",
+            Some(snapshot.revision),
+        );
+    }
+    if !context
+        .plugin_manifest
+        .capabilities
+        .contains(&Capability::State)
+    {
+        return error_response(
+            ControlErrorCode::Unavailable,
+            "the plugin does not support complete state snapshots",
+            Some(snapshot.revision),
+        );
+    }
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    if let Err(failure) = send_audio(
+        context,
+        AudioControlCommand::CaptureState {
+            instance_id: instance_id.clone(),
+            reply: reply_sender,
+        },
+    ) {
+        return failure.into_response();
+    }
+    let bytes = match receive_audio(reply_receiver, "capture plugin state") {
+        Ok(bytes) => bytes,
+        Err(failure) => return failure.into_response(),
+    };
+    let mut store = match context.state_store.lock() {
+        Ok(store) => store,
+        Err(_) => {
+            return internal_error(
+                "plugin state store lock is poisoned",
+                Some(snapshot.revision),
+            );
+        }
+    };
+    let state = match store.put(
+        &context.plugin_manifest.id,
+        &context.plugin_manifest.version,
+        context.plugin_manifest.state_version,
+        instance.selected_sound_id.clone(),
+        &bytes,
+    ) {
+        Ok(state) => state,
+        Err(error) => {
+            return error_response(
+                ControlErrorCode::Rejected,
+                format!("storing plugin state: {error:#}"),
+                Some(snapshot.revision),
+            );
+        }
+    };
+    let preset = match store.save_preset(name, state) {
+        Ok(preset) => preset,
+        Err(error) => {
+            return error_response(
+                ControlErrorCode::InvalidRequest,
+                format!("saving RackForge preset: {error:#}"),
+                Some(snapshot.revision),
+            );
+        }
+    };
+    let presets = match store.list_presets(&instance.plugin_id) {
+        Ok(presets) => presets,
+        Err(error) => {
+            return internal_error(error.to_string(), Some(snapshot.revision));
+        }
+    };
+    ControlResponse::PluginPresetSaved {
+        preset: Box::new(preset),
+        presets,
+    }
+}
+
+fn load_plugin_preset(
+    context: &ControlContext,
+    instance_id: &InstanceId,
+    preset_id: &str,
+) -> ControlResponse {
+    let snapshot = match context.store.lock() {
+        Ok(store) => store.snapshot(),
+        Err(_) => return internal_error("session store lock is poisoned", None),
+    };
+    let instance = match require_active_instance(&snapshot, instance_id) {
+        Ok(instance) => instance,
+        Err(failure) => return failure.into_response(),
+    };
+    let (preset, bytes) = {
+        let store = match context.state_store.lock() {
+            Ok(store) => store,
+            Err(_) => {
+                return internal_error(
+                    "plugin state store lock is poisoned",
+                    Some(snapshot.revision),
+                );
+            }
+        };
+        let preset = match store.preset(&instance.plugin_id, preset_id) {
+            Ok(preset) => preset,
+            Err(error) => {
+                return error_response(
+                    ControlErrorCode::NotFound,
+                    error.to_string(),
+                    Some(snapshot.revision),
+                );
+            }
+        };
+        let bytes = match store.read(&preset.state) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    format!("reading RackForge preset state: {error:#}"),
+                    Some(snapshot.revision),
+                );
+            }
+        };
+        (preset, bytes)
+    };
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    if let Err(failure) = send_audio(
+        context,
+        AudioControlCommand::RestoreState {
+            instance_id: instance_id.clone(),
+            bytes,
+            reply: reply_sender,
+        },
+    ) {
+        return failure.into_response();
+    }
+    if let Err(failure) = receive_audio(reply_receiver, "restore plugin state") {
+        return failure.into_response();
+    }
+    let (revision, checkpoint_state) = match context.store.lock() {
+        Ok(mut store) => match store.record(
+            None,
+            SessionEvent::PluginStateRestored {
+                instance_id: instance_id.clone(),
+                selected_sound_id: preset.state.selected_sound_id.clone(),
+            },
+        ) {
+            Ok(event) => (event.revision, store.snapshot()),
+            Err(error) => {
+                return internal_error(error.to_string(), Some(store.state().revision));
+            }
+        },
+        Err(_) => return internal_error("session store lock is poisoned", None),
+    };
+    if let Some(checkpoint) = &context.checkpoint
+        && let Err(error) = checkpoint.save(&checkpoint_state)
+    {
+        eprintln!("SESSION_CHECKPOINT_ERROR {error:#}");
+    }
+    ControlResponse::PluginPresetLoaded {
+        preset: Box::new(preset),
+        revision,
     }
 }
 
@@ -560,6 +929,42 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 Err(failure) => failure.into_response(),
             }
         }
+        SessionCommand::RegisterHostBindings {
+            controller_id,
+            controls,
+            actions,
+        } => {
+            let invalid = ClientId::new(&controller_id).is_err()
+                || controls
+                    .iter()
+                    .any(|binding| binding.midi_cc.validate().is_err())
+                || actions
+                    .iter()
+                    .any(|binding| binding.midi_cc.validate().is_err());
+            if invalid {
+                return error_response(
+                    ControlErrorCode::InvalidRequest,
+                    "invalid reserved host binding registration",
+                    Some(snapshot.revision),
+                );
+            }
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::RegisterHostBindings {
+                    controller_id,
+                    controls,
+                    actions,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "register reserved host bindings") {
+                Ok(()) => command_applied_without_events(context, command_ref),
+                Err(failure) => failure.into_response(),
+            }
+        }
         SessionCommand::SetMasterLevel { level } => {
             let (reply_sender, reply_receiver) = sync_channel(1);
             if let Err(failure) = send_audio(
@@ -658,10 +1063,11 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     );
                 }
             };
-            let (instance_id, slots) = match prepare_rack_runtime(&snapshot, &rack) {
-                Ok(runtime) => runtime,
-                Err(failure) => return failure.into_response(),
-            };
+            let (instance_id, slots) =
+                match prepare_rack_runtime(&snapshot, &rack, &context.state_store) {
+                    Ok(runtime) => runtime,
+                    Err(failure) => return failure.into_response(),
+                };
             let rack_id = rack.id.clone();
             let (reply_sender, reply_receiver) = sync_channel(1);
             if let Err(failure) = send_audio(
@@ -685,10 +1091,11 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             }
         }
         SessionCommand::PreviewRack { rack } => {
-            let (instance_id, slots) = match prepare_rack_runtime(&snapshot, &rack) {
-                Ok(runtime) => runtime,
-                Err(failure) => return failure.into_response(),
-            };
+            let (instance_id, slots) =
+                match prepare_rack_runtime(&snapshot, &rack, &context.state_store) {
+                    Ok(runtime) => runtime,
+                    Err(failure) => return failure.into_response(),
+                };
             let rack_id = rack.id.as_str().to_owned();
             let (reply_sender, reply_receiver) = sync_channel(1);
             if let Err(failure) = send_audio(
@@ -1547,6 +1954,7 @@ fn require_active_instance<'a>(
 fn prepare_rack_runtime(
     snapshot: &rackforge_session_api::SessionState,
     rack: &RackDefinition,
+    state_store: &Arc<Mutex<PluginStateStore>>,
 ) -> Result<(InstanceId, Vec<RackSlotRuntimeSpec>), ControlFailure> {
     rack.validate().map_err(|error| {
         control_failure(
@@ -1617,31 +2025,44 @@ fn prepare_rack_runtime(
                 Some(snapshot.revision),
             ));
         }
-        let plugin_state_id = slot.plugin_state_id.clone().ok_or_else(|| {
-            control_failure(
-                ControlErrorCode::Rejected,
-                format!("Rack Slot {} has no plugin PLAY state", slot.id),
-                Some(snapshot.revision),
-            )
-        })?;
-        if !instance
-            .sounds
-            .iter()
-            .any(|sound| sound.id == plugin_state_id)
-        {
-            return Err(control_failure(
-                ControlErrorCode::NotFound,
-                format!(
-                    "Rack Slot {} references missing plugin state {:?}",
-                    slot.id, plugin_state_id
-                ),
-                Some(snapshot.revision),
-            ));
-        }
+        let state = if let Some(reference) = &slot.state {
+            let store = state_store.lock().map_err(|_| {
+                control_failure(
+                    ControlErrorCode::Internal,
+                    "plugin state store lock is poisoned",
+                    Some(snapshot.revision),
+                )
+            })?;
+            RackSlotStateLoad::Opaque(store.read(reference).map_err(|error| {
+                control_failure(
+                    ControlErrorCode::NotFound,
+                    format!("loading state for Rack Slot {}: {error:#}", slot.id),
+                    Some(snapshot.revision),
+                )
+            })?)
+        } else if let Some(program_id) = &slot.legacy_program_id {
+            if !instance.sounds.iter().any(|sound| sound.id == *program_id) {
+                return Err(control_failure(
+                    ControlErrorCode::NotFound,
+                    format!(
+                        "Rack Slot {} references missing legacy program {:?}",
+                        slot.id, program_id
+                    ),
+                    Some(snapshot.revision),
+                ));
+            }
+            RackSlotStateLoad::LegacyPreset(program_id.clone())
+        } else {
+            RackSlotStateLoad::Default
+        };
         specs.push(RackSlotRuntimeSpec {
             slot_id: slot.id.as_str().to_owned(),
-            plugin_state_id,
+            state,
             midi_input_channel: slot.midi_input_channel,
+            midi_note_low: slot.midi_note_low,
+            midi_note_high: slot.midi_note_high,
+            midi_transpose: slot.midi_transpose,
+            keyboard_parts: rack.keyboard_parts,
             level_per_mille: slot.level_per_mille,
             pan_per_mille: slot.pan_per_mille,
         });
@@ -2053,13 +2474,18 @@ mod tests {
                             id: RackId::new("rack.test").unwrap(),
                             name: "Test Rack".into(),
                             enabled: true,
+                            keyboard_parts: None,
                             slots: vec![RackSlot {
                                 id: RackSlotId::new("instrument.main").unwrap(),
                                 name: "Main Instrument".into(),
                                 plugin_id: "org.rackforge.rf-dls".into(),
-                                plugin_state_id: Some("piano".into()),
+                                state: None,
+                                legacy_program_id: Some("piano".into()),
                                 enabled: true,
                                 midi_input_channel: None,
+                                midi_note_low: 0,
+                                midi_note_high: 127,
+                                midi_transpose: 0,
                                 midi_output: MidiOutputRoute::None,
                                 audio_output_bus: "main".into(),
                                 level_per_mille: 1_000,
@@ -2072,6 +2498,19 @@ mod tests {
                     .unwrap(),
                 )),
                 storage: None,
+                state_store: Arc::new(Mutex::new(PluginStateStore::new(None).unwrap())),
+                plugin_manifest: serde_json::from_value(serde_json::json!({
+                    "schema_version": 1,
+                    "id": "org.rackforge.rf-dls",
+                    "name": "RF-DLS",
+                    "vendor": "RackForge",
+                    "version": "0.1.0",
+                    "api": { "major": 1, "minor": 0 },
+                    "kind": "instrument",
+                    "state_version": 1,
+                    "binaries": { "linux-aarch64": "lib/plugin.so" }
+                }))
+                .unwrap(),
                 checkpoint: None,
                 dispatch_lock: Mutex::new(()),
                 lease_deadline: Mutex::new(None),
@@ -2121,7 +2560,10 @@ mod tests {
                 assert_eq!(rack_id, "rack.test");
                 assert_eq!(instance_id.as_str(), DEFAULT_LIVE_INSTANCE_ID);
                 assert_eq!(slots.len(), 1);
-                assert_eq!(slots[0].plugin_state_id, "piano");
+                assert_eq!(
+                    slots[0].state,
+                    RackSlotStateLoad::LegacyPreset("piano".into())
+                );
                 assert_eq!(slots[0].midi_input_channel, None);
                 assert_eq!(slots[0].level_per_mille, 1_000);
                 assert_eq!(slots[0].pan_per_mille, 0);

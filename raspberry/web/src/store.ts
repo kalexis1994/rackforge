@@ -1,15 +1,23 @@
 import { configureStore, createSlice, type PayloadAction } from "@reduxjs/toolkit";
-import type { ConnectionStatus, SessionSnapshot } from "./types";
+import type {
+  ConnectionStatus,
+  PerformanceSnapshot,
+  SessionSnapshot,
+} from "./types";
 
 interface RackForgeState {
   connection: ConnectionStatus;
   snapshot: SessionSnapshot | null;
+  performance: PerformanceSnapshot | null;
+  performancePending: boolean;
   error: string | null;
 }
 
 const initialState: RackForgeState = {
   connection: "connecting",
   snapshot: null,
+  performance: null,
+  performancePending: false,
   error: null,
 };
 
@@ -28,14 +36,33 @@ const rackForgeSlice = createSlice({
       state.connection = "online";
       state.error = null;
     },
+    performanceReceived(
+      state,
+      action: PayloadAction<{ snapshot: PerformanceSnapshot; edited: boolean }>,
+    ) {
+      state.performance = action.payload.snapshot;
+      if (action.payload.edited) state.performancePending = false;
+      state.connection = "online";
+      state.error = null;
+    },
+    performanceEditStarted(state) {
+      state.performancePending = true;
+      state.error = null;
+    },
     errorReceived(state, action: PayloadAction<string>) {
       state.error = action.payload;
+      state.performancePending = false;
     },
   },
 });
 
-export const { connectionChanged, snapshotReceived, errorReceived } =
-  rackForgeSlice.actions;
+export const {
+  connectionChanged,
+  snapshotReceived,
+  performanceReceived,
+  performanceEditStarted,
+  errorReceived,
+} = rackForgeSlice.actions;
 
 export const store = configureStore({
   reducer: {

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useSelector } from "react-redux";
+import { Blocks, House, Play, RadioTower, Settings2 } from "lucide-react";
 import {
   NavLink,
   Navigate,
@@ -11,12 +12,17 @@ import {
 } from "react-router";
 import {
   connectGateway,
+  deletePluginPreset,
   dispatchCommand,
   loadPluginPreset,
+  requestPluginParameters,
   requestPluginPresets,
+  renamePluginPreset,
   savePluginPreset,
+  setPluginParameter,
   stopGateway,
 } from "./gateway";
+import { RfLoader } from "./components/RfLoader";
 import { LivePage } from "./LivePage";
 import type { RootState } from "./store";
 import type {
@@ -27,7 +33,10 @@ import type {
   ProgramEditorValue,
   PluginWebDescriptor,
   PluginWebSurfaceKind,
+  PluginRepositoryConfig,
+  PluginRepositoryFile,
   SessionSnapshot,
+  StoreCatalogResponse,
   WebAuthStatus,
   WebPublicConfig,
 } from "./types";
@@ -67,11 +76,11 @@ function isProgramEditorValue(value: unknown): value is ProgramEditorValue {
 }
 
 const navItems = [
-  { path: "/", label: "Home", mark: "⌂" },
-  { path: "/live", label: "Live", mark: "◆" },
-  { path: "/play", label: "Play", mark: "▶" },
-  { path: "/plugins", label: "Plugins", mark: "▦" },
-  { path: "/settings", label: "Settings", mark: "⚙" },
+  { path: "/", label: "Home", icon: House },
+  { path: "/live", label: "Live", icon: RadioTower },
+  { path: "/play", label: "Play", icon: Play },
+  { path: "/plugins", label: "Plugins", icon: Blocks },
+  { path: "/settings", label: "Settings", icon: Settings2 },
 ];
 
 export function App() {
@@ -137,26 +146,31 @@ function RackForgeApp() {
   }, []);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${isPluginSurface ? " plugin-surface-active" : ""}`}>
       <aside className="rail">
         <div className="brand-lockup" aria-label="RackForge">
           <span className="brand-mark">RF</span>
           <span className="brand-name">RACKFORGE</span>
         </div>
         <nav className="primary-nav">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              end={item.path === "/"}
-              className={({ isActive }) =>
-                `nav-item${isActive ? " active" : ""}`
-              }
-            >
-              <span className="nav-mark">{item.mark}</span>
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                end={item.path === "/"}
+                className={({ isActive }) =>
+                  `nav-item${isActive ? " active" : ""}`
+                }
+              >
+                <span className="nav-mark">
+                  <Icon aria-hidden="true" strokeWidth={1.9} />
+                </span>
+                <span>{item.label}</span>
+              </NavLink>
+            );
+          })}
         </nav>
         <ConnectionBadge status={connection} />
       </aside>
@@ -202,10 +216,7 @@ function RackForgeApp() {
 function AuthLoading({ message }: { message: string }) {
   return (
     <main className="pairing-shell">
-      <div className="pairing-panel compact">
-        <span className="brand-mark">RF</span>
-        <p>{message}</p>
-      </div>
+      <RfLoader label="RackForge" detail={message} size="large" />
     </main>
   );
 }
@@ -478,7 +489,8 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
     instances.find(
       (instance) => instance.instance_id === snapshot?.active_instance_id,
     ) ?? instances[0];
-  const [view, setView] = useState<"menu" | "start" | "presets">("menu");
+  const [openInstanceId, setOpenInstanceId] = useState<string | null>(null);
+  const [presetsOpen, setPresetsOpen] = useState(false);
   if (!active) {
     return (
       <section className="plugin-surface-shell direct-surface">
@@ -489,77 +501,128 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
       </section>
     );
   }
-  if (view === "start") {
+  const openInstance = instances.find(
+    (instance) => instance.instance_id === openInstanceId,
+  );
+  if (openInstance) {
     return (
       <section className="plugin-surface-shell direct-surface">
-        <div className="play-action-bar">
-          <button onClick={() => setView("menu")}>← {active.plugin_name}</button>
-          <button onClick={() => setView("presets")}>Presets</button>
+        <div className="play-plugin-toolbar">
+          <button
+            className="play-header-button back"
+            onClick={() => {
+              setPresetsOpen(false);
+              setOpenInstanceId(null);
+            }}
+            aria-label="Back to plugin list"
+          >
+            <span aria-hidden="true">←</span>
+            <strong>Plugins</strong>
+          </button>
+          <div className="play-plugin-identity">
+            <span>PLAY</span>
+            <strong>{openInstance.plugin_name}</strong>
+          </div>
+          <button
+            className={`play-header-button presets${presetsOpen ? " active" : ""}`}
+            onClick={() => setPresetsOpen((open) => !open)}
+            aria-expanded={presetsOpen}
+          >
+            <span className="preset-button-mark" aria-hidden="true">P</span>
+            <strong>Presets</strong>
+          </button>
         </div>
-        <PluginFrame key={active.instance_id} instance={active} surface="play" />
+        <PluginFrame
+          key={openInstance.instance_id}
+          instance={openInstance}
+          surface="play"
+        />
+        {presetsOpen && (
+          <PresetModal
+            instance={openInstance}
+            onClose={() => setPresetsOpen(false)}
+          />
+        )}
       </section>
     );
   }
-  if (view === "presets") {
-    return (
-      <PlayPresets
-        instance={active}
-        onBack={() => setView("menu")}
-        onLoaded={() => setView("start")}
-      />
-    );
-  }
+  const orderedInstances = [
+    active,
+    ...instances.filter((instance) => instance.instance_id !== active.instance_id),
+  ];
   return (
     <section className="play-launcher">
       <div className="play-launcher-title">
-        <span className="eyebrow">PLAY · Plugin</span>
-        <h1>{active.plugin_name}</h1>
-        <p>Start from the current state or restore a reusable RackForge preset.</p>
+        <span className="eyebrow">PLAY · Instruments</span>
+        <h1>Select a plugin</h1>
+        <p>The currently selected instrument stays first and is ready to play.</p>
       </div>
-      <div className="play-launcher-actions">
-        <button
-          className="play-launch-card primary"
-          onClick={() => {
-            dispatchCommand({ type: "set_active_mode", mode: "play" });
-            setView("start");
-          }}
-        >
-          <span>01</span><strong>START</strong><small>Open the plugin</small>
-        </button>
-        <button className="play-launch-card" onClick={() => setView("presets")}>
-          <span>02</span><strong>PRESETS</strong><small>Load or save complete state</small>
-        </button>
+      <div className="play-plugin-selector" role="list" aria-label="Instrument plugins">
+        {orderedInstances.map((instance, index) => {
+          const selected = instance.instance_id === active.instance_id;
+          return (
+          <button
+            className={selected ? "active" : ""}
+            key={instance.instance_id}
+            onClick={() => {
+              dispatchCommand({ type: "set_active_mode", mode: "play" });
+              dispatchCommand({
+                type: "select_plugin",
+                instance_id: instance.instance_id,
+              });
+              setOpenInstanceId(instance.instance_id);
+            }}
+          >
+            <span className="play-plugin-number">{String(index + 1).padStart(2, "0")}</span>
+            <span className="play-plugin-copy">
+              <strong>{instance.plugin_name}</strong>
+              <small>{instance.sounds.length} programs · Web instrument</small>
+            </span>
+            <span className="play-plugin-status">
+              {selected ? "PLAYING" : "OPEN"}<i aria-hidden="true">→</i>
+            </span>
+          </button>
+          );
+        })}
       </div>
     </section>
   );
 }
 
-function PlayPresets({
+function PresetModal({
   instance,
-  onBack,
-  onLoaded,
+  onClose,
 }: {
   instance: PluginInstance;
-  onBack: () => void;
-  onLoaded: () => void;
+  onClose: () => void;
 }) {
-  const [mode, setMode] = useState<"load" | "save">("load");
   const [presets, setPresets] = useState<HostPresetSummary[]>([]);
   const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameName, setRenameName] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const refresh = () =>
+  const refresh = useCallback(() =>
     requestPluginPresets(instance.plugin_id)
       .then(setPresets)
-      .catch((error: Error) => setMessage(error.message));
+      .catch((error: Error) => setMessage(error.message)), [instance.plugin_id]);
   useEffect(() => {
     void refresh();
-  }, [instance.plugin_id]);
+  }, [refresh]);
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
   const load = (preset: HostPresetSummary) => {
     setBusy(true);
     setMessage(null);
     loadPluginPreset(instance.instance_id, preset.id)
-      .then(onLoaded)
+      .then(onClose)
       .catch((error: Error) => setMessage(error.message))
       .finally(() => setBusy(false));
   };
@@ -571,46 +634,137 @@ function PlayPresets({
     savePluginPreset(instance.instance_id, name.trim())
       .then((preset) => {
         setName("");
+        setCreating(false);
         setMessage(`Saved ${preset.name}.`);
         return refresh();
       })
       .catch((error: Error) => setMessage(error.message))
       .finally(() => setBusy(false));
   };
+  const rename = (event: FormEvent, preset: HostPresetSummary) => {
+    event.preventDefault();
+    if (!renameName.trim()) return;
+    setBusy(true);
+    setMessage(null);
+    renamePluginPreset(instance.plugin_id, preset.id, renameName.trim())
+      .then((renamed) => {
+        setRenamingId(null);
+        setRenameName("");
+        setMessage(`Renamed to ${renamed.name}.`);
+        return refresh();
+      })
+      .catch((error: Error) => setMessage(error.message))
+      .finally(() => setBusy(false));
+  };
+  const remove = (preset: HostPresetSummary) => {
+    setBusy(true);
+    setMessage(null);
+    deletePluginPreset(instance.plugin_id, preset.id)
+      .then(() => {
+        setDeletingId(null);
+        setMessage(`Deleted ${preset.name}.`);
+        return refresh();
+      })
+      .catch((error: Error) => setMessage(error.message))
+      .finally(() => setBusy(false));
+  };
   return (
-    <section className="preset-workspace">
-      <header className="preset-workspace-header">
-        <button onClick={onBack}>← Back</button>
-        <div><span className="eyebrow">{instance.plugin_name}</span><h1>Presets</h1></div>
-        <div className="preset-mode-tabs">
-          <button className={mode === "load" ? "active" : ""} onClick={() => setMode("load")}>Load</button>
-          <button className={mode === "save" ? "active" : ""} onClick={() => setMode("save")}>Save</button>
+    <div className="preset-modal-backdrop" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <section className="preset-modal" role="dialog" aria-modal="true" aria-labelledby="preset-modal-title">
+        <header className="preset-modal-header">
+          <div>
+            <span className="eyebrow">{instance.plugin_name} · Complete states</span>
+            <h2 id="preset-modal-title">Presets</h2>
+          </div>
+          <button className="preset-modal-close" onClick={onClose} aria-label="Close presets">×</button>
+        </header>
+        <div className="preset-modal-toolbar">
+          <p>Load a captured state or save the instrument exactly as it sounds now.</p>
+          <button className="preset-create-button" onClick={() => setCreating((value) => !value)}>
+            <span aria-hidden="true">＋</span> New preset
+          </button>
         </div>
-      </header>
-      {message && <p className="preset-message">{message}</p>}
-      {mode === "load" ? (
-        <div className="preset-list">
+        {creating && (
+          <form className="preset-create-form" onSubmit={save}>
+            <label>
+              <span>Preset name</span>
+              <input autoFocus maxLength={96} value={name} onChange={(event) => setName(event.target.value)} placeholder="Warm Strings" />
+            </label>
+            <button disabled={busy || !name.trim()} type="submit">{busy ? "Saving…" : "Capture state"}</button>
+          </form>
+        )}
+        {message && <p className="preset-message">{message}</p>}
+        <div className="preset-list modal-list">
           {presets.length === 0 ? (
-            <EmptyState title="No RackForge presets saved for this plugin" />
+            <div className="preset-empty"><span>00</span><strong>No presets yet</strong><small>Capture the current plugin state to create the first one.</small></div>
           ) : presets.map((preset) => (
-            <button disabled={busy} onClick={() => load(preset)} key={preset.id}>
-              <span><strong>{preset.name}</strong><small>State v{preset.state_version} · {preset.plugin_version}</small></span>
-              <i>LOAD →</i>
-            </button>
+            <article className="preset-row" key={preset.id}>
+              {renamingId === preset.id ? (
+                <form className="preset-rename-form" onSubmit={(event) => rename(event, preset)}>
+                  <input autoFocus maxLength={96} value={renameName} onChange={(event) => setRenameName(event.target.value)} />
+                  <button disabled={busy || !renameName.trim()} type="submit">Save</button>
+                  <button type="button" onClick={() => setRenamingId(null)}>Cancel</button>
+                </form>
+              ) : (
+                <>
+                  <button className="preset-load-target" disabled={busy} onClick={() => load(preset)}>
+                    <span><strong>{preset.name}</strong><small>State v{preset.state_version} · Plugin {preset.plugin_version}</small></span>
+                    <i>LOAD →</i>
+                  </button>
+                  <div className="preset-row-actions">
+                    <button disabled={busy} onClick={() => {
+                      setDeletingId(null);
+                      setRenamingId(preset.id);
+                      setRenameName(preset.name);
+                    }}>Rename</button>
+                    <button className="danger" disabled={busy} onClick={() => setDeletingId(preset.id)}>Delete</button>
+                  </div>
+                </>
+              )}
+              {deletingId === preset.id && renamingId !== preset.id && (
+                <div className="preset-delete-confirm">
+                  <span>Delete “{preset.name}”?</span>
+                  <button onClick={() => setDeletingId(null)}>Cancel</button>
+                  <button className="danger" disabled={busy} onClick={() => remove(preset)}>{busy ? "Deleting…" : "Delete"}</button>
+                </div>
+              )}
+            </article>
           ))}
         </div>
-      ) : (
-        <form className="preset-save-form" onSubmit={save}>
-          <label><span>Preset name</span><input autoFocus maxLength={96} value={name} onChange={(event) => setName(event.target.value)} placeholder="Warm Piano" /></label>
-          <p>This captures the plugin exactly as it is now. Existing Slots remain independent.</p>
-          <button disabled={busy || !name.trim()} type="submit">{busy ? "Saving…" : "Save current state"}</button>
-        </form>
-      )}
-    </section>
+      </section>
+    </div>
   );
 }
 
 function PluginsPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
+  const [installed, setInstalled] = useState<PluginWebDescriptor[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/plugins")
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return (await response.json()) as PluginWebDescriptor[];
+      })
+      .then((plugins) => {
+        if (!cancelled) setInstalled(plugins);
+      })
+      .catch(() => {
+        if (!cancelled) setInstalled([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const running = snapshot?.instances ?? [];
+  const runningPluginIds = new Set(running.map((instance) => instance.plugin_id));
+  const available = installed.filter(
+    (plugin) => !runningPluginIds.has(plugin.plugin_id),
+  );
+
   return (
     <>
       <PageHeading
@@ -618,7 +772,39 @@ function PluginsPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
         title="Sound engines"
         detail="Every plugin owns its programs and editor while RackForge provides the host session."
       />
-      <PluginGrid instances={snapshot?.instances ?? []} expanded />
+      <div className="plugin-section-heading">
+        <span className="card-kicker">Running now</span>
+      </div>
+      <PluginGrid instances={running} expanded />
+      {available.length > 0 && (
+        <>
+          <div className="plugin-section-heading">
+            <span className="card-kicker">Installed</span>
+            <small>Ready for a safe host activation</small>
+          </div>
+          <div className="plugin-grid expanded">
+            {available.map((plugin, index) => (
+              <article className="plugin-card installed-plugin-card" key={plugin.plugin_id}>
+                <div className={`plugin-tile tile-${(index + running.length) % 4}`}>
+                  <span>{plugin.plugin_name.slice(0, 2).toUpperCase()}</span>
+                  <i />
+                </div>
+                <div>
+                  <span className="card-kicker">
+                    {plugin.active ? "Active package" : "Installed package"}
+                  </span>
+                  <h3>{plugin.plugin_name}</h3>
+                  <p>
+                    Version {plugin.version}
+                    {plugin.surfaces.length === 0 ? " · No Web view" : " · Web view ready"}
+                  </p>
+                </div>
+                <span className="plugin-installed-mark" aria-label="Installed">✓</span>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -703,7 +889,7 @@ function PluginSurfaceTabs({ instance }: { instance: PluginInstance }) {
       <div className="plugin-surface-toolbar">
         <div className="plugin-surface-identity">
           <NavLink to="/plugins" aria-label="Back to plugins">
-            ←
+            <span className="plugin-back-glyph" aria-hidden="true">←</span>
           </NavLink>
           <strong>{instance.plugin_name}</strong>
         </div>
@@ -818,13 +1004,14 @@ function PluginFrame({
       ) {
         return;
       }
-      const respond = (ok: boolean, error?: string) =>
+      const respond = (ok: boolean, error?: string, result?: unknown) =>
         send({
           protocol: "rackforge.plugin.web@1",
           kind: "response",
           request_id: event.data.request_id,
           ok,
           ...(error ? { error } : {}),
+          ...(result !== undefined ? { result } : {}),
         });
       const params =
         event.data.params && typeof event.data.params === "object"
@@ -835,8 +1022,39 @@ function PluginFrame({
           ? snapshot.program_draft
           : undefined;
       if (
+        event.data.method === "plugin.parameters" &&
+        (surface === "play" || surface === "config")
+      ) {
+        requestPluginParameters(instance.instance_id)
+          .then((result) => respond(true, undefined, result))
+          .catch((error: unknown) =>
+            respond(
+              false,
+              error instanceof Error ? error.message : "Could not read plugin parameters.",
+            ),
+          );
+      } else if (
+        event.data.method === "plugin.set_parameter" &&
+        (surface === "play" || surface === "config") &&
+        Number.isInteger(params.parameter_index) &&
+        typeof params.value === "number" &&
+        Number.isFinite(params.value)
+      ) {
+        setPluginParameter(
+          instance.instance_id,
+          Number(params.parameter_index),
+          params.value,
+        )
+          .then((value) => respond(true, undefined, { value }))
+          .catch((error: unknown) =>
+            respond(
+              false,
+              error instanceof Error ? error.message : "Could not set plugin parameter.",
+            ),
+          );
+      } else if (
         event.data.method === "plugin.select_sound" &&
-        surface === "play" &&
+        (surface === "play" || surface === "config") &&
         typeof params.sound_id === "string" &&
         instance.sounds.some(
           (sound) => sound.id === params.sound_id,
@@ -971,11 +1189,22 @@ function PluginFrame({
     return () => window.clearInterval(timer);
   }, [editLease]);
 
-  if (descriptorStatus === "loading") {
+  if (surface === "config" && !instance.config_available) {
     return (
       <PluginSurfaceState
-        title={`Connecting to ${instance.plugin_name}`}
-        detail="Loading the plugin web interface."
+        title="CONFIG mode unavailable"
+        detail={`${instance.plugin_name} uses PLAY as its complete editor. Save and restore its state with RackForge presets.`}
+      />
+    );
+  }
+
+  if (descriptorStatus === "loading") {
+    return (
+      <RfLoader
+        className="plugin-surface-loader"
+        label={instance.plugin_name}
+        detail="Loading plugin interface…"
+        size="medium"
       />
     );
   }
@@ -1013,12 +1242,91 @@ function PluginFrame({
 
 function SettingsPage() {
   const [config, setConfig] = useState<WebPublicConfig | null>(null);
+  const [repositoryFile, setRepositoryFile] =
+    useState<PluginRepositoryFile | null>(null);
+  const [catalog, setCatalog] = useState<StoreCatalogResponse | null>(null);
+  const [storeBusy, setStoreBusy] = useState(false);
+  const [storeMessage, setStoreMessage] = useState<string | null>(null);
   useEffect(() => {
     fetch("/api/v1/config")
       .then((response) => response.json())
       .then((value: WebPublicConfig) => setConfig(value))
       .catch(() => setConfig(null));
+    fetch("/api/v1/repositories")
+      .then((response) => response.json())
+      .then((value: PluginRepositoryFile) => setRepositoryFile(value))
+      .catch(() => setRepositoryFile(null));
   }, []);
+
+  const updateRepository = (
+    index: number,
+    patch: Partial<PluginRepositoryConfig>,
+  ) => {
+    setRepositoryFile((current) => {
+      if (!current) return current;
+      const repositories = [...current.repositories];
+      repositories[index] = { ...repositories[index], ...patch };
+      return { ...current, repositories };
+    });
+  };
+
+  const saveRepositories = async () => {
+    if (!repositoryFile) return;
+    setStoreBusy(true);
+    setStoreMessage(null);
+    try {
+      const response = await fetch("/api/v1/repositories", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(repositoryFile),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message ?? "Could not save repositories.");
+      setRepositoryFile(body.config);
+      setStoreMessage("Repository configuration saved.");
+    } catch (error) {
+      setStoreMessage(error instanceof Error ? error.message : "Save failed.");
+    } finally {
+      setStoreBusy(false);
+    }
+  };
+
+  const refreshCatalog = async () => {
+    setStoreBusy(true);
+    setStoreMessage(null);
+    try {
+      const response = await fetch("/api/v1/store/catalog");
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message ?? "Could not refresh stores.");
+      setCatalog(body);
+      setStoreMessage("Signed catalogs refreshed.");
+    } catch (error) {
+      setStoreMessage(error instanceof Error ? error.message : "Refresh failed.");
+    } finally {
+      setStoreBusy(false);
+    }
+  };
+
+  const installPlugin = async (repositoryId: string, pluginId: string) => {
+    setStoreBusy(true);
+    setStoreMessage(`Installing ${pluginId}…`);
+    try {
+      const response = await fetch("/api/v1/store/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repository_id: repositoryId, plugin_id: pluginId }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message ?? "Installation failed.");
+      setStoreMessage(
+        `${body.plugin_id} ${body.version} installed. Activation is available after a safe plugin reload.`,
+      );
+    } catch (error) {
+      setStoreMessage(error instanceof Error ? error.message : "Installation failed.");
+    } finally {
+      setStoreBusy(false);
+    }
+  };
 
   return (
     <>
@@ -1070,6 +1378,187 @@ function SettingsPage() {
             Available after controller handshake
           </button>
         </article>
+        <article className="settings-card repository-settings-card">
+          <div className="settings-icon">⬡</div>
+          <div className="settings-copy">
+            <span className="card-kicker">Plugin stores</span>
+            <h2>Signed repositories</h2>
+            <p>
+              Catalog signatures and package hashes are checked before any
+              native plugin is installed.
+            </p>
+          </div>
+          <div className="repository-editor">
+            {repositoryFile?.repositories.map((repository, index) => (
+              <div className="repository-form" key={`${repository.id}-${index}`}>
+                <label>
+                  <span>Name</span>
+                  <input
+                    value={repository.name}
+                    onChange={(event) =>
+                      updateRepository(index, { name: event.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Repository ID</span>
+                  <input
+                    value={repository.id}
+                    onChange={(event) =>
+                      updateRepository(index, { id: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="repository-wide-field">
+                  <span>Base URL</span>
+                  <input
+                    value={repository.base_url}
+                    onChange={(event) =>
+                      updateRepository(index, { base_url: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="repository-wide-field">
+                  <span>Ed25519 public key</span>
+                  <input
+                    value={repository.public_key}
+                    onChange={(event) =>
+                      updateRepository(index, { public_key: event.target.value })
+                    }
+                    spellCheck={false}
+                  />
+                </label>
+                <label className="repository-check">
+                  <input
+                    type="checkbox"
+                    checked={repository.enabled}
+                    onChange={(event) =>
+                      updateRepository(index, { enabled: event.target.checked })
+                    }
+                  />
+                  <span>Enabled</span>
+                </label>
+                <label className="repository-check">
+                  <input
+                    type="checkbox"
+                    checked={repository.allow_insecure_http}
+                    onChange={(event) =>
+                      updateRepository(index, {
+                        allow_insecure_http: event.target.checked,
+                      })
+                    }
+                  />
+                  <span>Allow HTTP for this LAN</span>
+                </label>
+                <button
+                  className="text-button danger-text-button"
+                  disabled={storeBusy}
+                  onClick={() =>
+                    setRepositoryFile((current) =>
+                      current
+                        ? {
+                            ...current,
+                            repositories: current.repositories.filter(
+                              (_, candidate) => candidate !== index,
+                            ),
+                          }
+                        : current,
+                    )
+                  }
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            {repositoryFile?.repositories.length === 0 && (
+              <p className="repository-empty">No plugin repository configured.</p>
+            )}
+            <div className="repository-actions">
+              <button
+                className="secondary-button"
+                disabled={!repositoryFile || storeBusy}
+                onClick={() =>
+                  setRepositoryFile((current) =>
+                    current
+                      ? {
+                          ...current,
+                          repositories: [
+                            ...current.repositories,
+                            {
+                              id: "org.example.community",
+                              name: "Community Store",
+                              base_url: "https://",
+                              public_key: "",
+                              enabled: true,
+                              allow_insecure_http: false,
+                            },
+                          ],
+                        }
+                      : current,
+                  )
+                }
+              >
+                Add repository
+              </button>
+              <button
+                className="secondary-button"
+                disabled={!repositoryFile || storeBusy}
+                onClick={saveRepositories}
+              >
+                Save
+              </button>
+              <button
+                className="primary-button"
+                disabled={storeBusy}
+                onClick={refreshCatalog}
+              >
+                {storeBusy ? "Working…" : "Refresh stores"}
+              </button>
+            </div>
+            {storeMessage && <p className="repository-message">{storeMessage}</p>}
+          </div>
+        </article>
+        {catalog?.repositories.map((repository) => (
+          <article className="settings-card store-catalog-card" key={repository.repository_id}>
+            <div className="settings-copy">
+              <span className="card-kicker">{repository.status}</span>
+              <h2>{repository.name}</h2>
+              {repository.error && <p>{repository.error}</p>}
+            </div>
+            <div className="store-plugin-list">
+              {repository.catalog?.plugins.map((plugin) => (
+                <div className="store-plugin" key={plugin.id}>
+                  <div>
+                    <strong>{plugin.name}</strong>
+                    <span>{plugin.latest_version ?? "No release"}</span>
+                    <p>{plugin.summary}</p>
+                    <small>
+                      {plugin.license}
+                      {plugin.active_version
+                        ? ` · Active ${plugin.active_version}`
+                        : plugin.installed
+                          ? ` · Installed ${plugin.installed_versions.join(", ")}`
+                          : ""}
+                    </small>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    disabled={
+                      storeBusy || (plugin.installed && !plugin.update_available)
+                    }
+                    onClick={() => installPlugin(repository.repository_id, plugin.id)}
+                  >
+                    {plugin.update_available
+                      ? "Update"
+                      : plugin.installed
+                        ? "Installed"
+                        : "Install"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </article>
+        ))}
       </section>
     </>
   );

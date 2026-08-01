@@ -5,6 +5,7 @@ import {
   requestPluginPreset,
   requestPluginPresets,
 } from "./gateway";
+import { RfLoader } from "./components/RfLoader";
 import type {
   LiveBrowseMode,
   LiveLocation,
@@ -119,12 +120,12 @@ export function LivePage({ session, performance, pending }: LivePageProps) {
 
 function LiveLoading() {
   return (
-    <div className="live-loading" role="status">
-      <span className="live-spinner" aria-hidden="true" />
-      <div>
-        <strong>Loading performance library</strong>
-        <p>Synchronizing with RackForge Core…</p>
-      </div>
+    <div className="live-loading">
+      <RfLoader
+        label="Live performance"
+        detail="Synchronizing with RackForge Core…"
+        size="medium"
+      />
     </div>
   );
 }
@@ -154,7 +155,11 @@ function PerformanceBrowser({
           <p>{active.detail}</p>
         </div>
         <span className={`live-state${session?.active_mode === "live" ? " online" : ""}`}>
-          <i /> {session?.active_mode === "live" ? "LIVE ACTIVE" : "PLAY MODE"}
+          <i /> {session?.active_mode === "live"
+            ? "LIVE ACTIVE"
+            : session?.active_mode === "play"
+              ? "PLAY MODE"
+              : "AUDIO STOPPED"}
         </span>
       </article>
 

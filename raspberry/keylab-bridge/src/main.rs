@@ -1508,9 +1508,31 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
     }
     let snapshot = live_snapshot()?;
     menu.sync_active_mode(match snapshot.active_mode {
+        SurfaceMode::Idle => menu::ActiveMode::Idle,
         SurfaceMode::Live => menu::ActiveMode::Live,
         SurfaceMode::Play => menu::ActiveMode::Play,
     });
+    menu.set_play_plugins(
+        snapshot
+            .instances
+            .iter()
+            .filter(|candidate| {
+                candidate
+                    .ui_layouts
+                    .iter()
+                    .any(|layout| layout == LITTLE_V1)
+            })
+            .map(|candidate| {
+                menu::PlayPlugin::new(
+                    candidate.instance_id.as_str(),
+                    &candidate.plugin_id,
+                    &candidate.plugin_name,
+                )
+                .config_available(candidate.config_available)
+            })
+            .collect(),
+        snapshot.active_instance_id.as_ref().map(InstanceId::as_str),
+    );
     let instance = active_plugin_instance(&snapshot)?;
     menu.set_active_plugin(&instance.plugin_id, &instance.plugin_name);
     let selected = instance.selected_sound_id.clone();
@@ -1765,11 +1787,22 @@ fn apply_pending_menu_command(
         menu::MenuCommand::SetActiveMode { mode } => {
             dispatch_session_command(SessionCommand::SetActiveMode {
                 mode: match mode {
+                    menu::ActiveMode::Idle => SurfaceMode::Idle,
                     menu::ActiveMode::Live => SurfaceMode::Live,
                     menu::ActiveMode::Play => SurfaceMode::Play,
                 },
             })?;
             println!("ACTIVE_MODE_SET mode={mode:?}");
+            Ok(true)
+        }
+        menu::MenuCommand::SelectPlugin { instance_id } => {
+            let instance_id = InstanceId::new(instance_id)
+                .map_err(|message| format!("invalid plugin instance: {message}"))?;
+            dispatch_session_command(SessionCommand::SelectPlugin {
+                instance_id: instance_id.clone(),
+            })?;
+            refresh_live_catalog(menu)?;
+            println!("PLUGIN_SELECTED instance={instance_id}");
             Ok(true)
         }
         menu::MenuCommand::SetLiveBrowseMode { mode } => {
@@ -2033,16 +2066,9 @@ fn apply_pending_menu_command(
             start_audio_change(audio_task, menu, profile)?;
             Ok(true)
         }
-        menu::MenuCommand::ForceHome { cancel_draft_id } => {
-            if let Some(draft_id) = cancel_draft_id
-                && let Err(error) =
-                    dispatch_session_command(SessionCommand::CancelProgramEdit { draft_id })
-            {
-                eprintln!(
-                    "HOME_FORCED: el Core no liberó inmediatamente el draft {draft_id}: {error}"
-                );
-            }
-            println!("HOME_FORCED");
+        menu::MenuCommand::ForceHome => {
+            dispatch_session_command(SessionCommand::EmergencyStop)?;
+            println!("HOME_FORCED audio=stopped mode=idle");
             Ok(true)
         }
     }
@@ -2218,11 +2244,15 @@ fn return_to_active_mode(
     mode: menu::ActiveMode,
     selected_sound_id: Option<String>,
 ) -> Result<(), String> {
-    let instance_id = active_plugin_instance_id()?;
     let surface_mode = match mode {
+        menu::ActiveMode::Idle => {
+            menu.complete_return_to_active_mode(mode, None);
+            return Ok(());
+        }
         menu::ActiveMode::Live => SurfaceMode::Live,
         menu::ActiveMode::Play => SurfaceMode::Play,
     };
+    let instance_id = active_plugin_instance_id()?;
     let events = dispatch_session_command(SessionCommand::ActivateSurface {
         instance_id,
         request: SurfaceActivationRequest::return_to(

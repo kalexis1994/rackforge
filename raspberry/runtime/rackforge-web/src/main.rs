@@ -15,11 +15,16 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_plugin_api::{PluginManifest, WebSurfaceKind};
+use rackforge_repository::{
+    InstallationRecord, InstalledPackage, RepositoryFile, RepositoryIndex, RepositoryPlugin,
+    fetch_repository, install_archive, repository_platform_key,
+};
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     env, fs,
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     path::{Component, Path, PathBuf},
@@ -92,8 +97,73 @@ struct RackForgeConfig {
 struct AppState {
     control_socket: PathBuf,
     public_config: Arc<RwLock<WebConfig>>,
-    plugins: PluginWebRegistry,
     auth: Arc<AuthManager>,
+    repository_config_path: PathBuf,
+    repositories: Arc<RwLock<RepositoryFile>>,
+    plugins_root: PathBuf,
+    plugin_store_root: PathBuf,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct RepositoryCatalogResponse {
+    repositories: Vec<RepositoryCatalogEntry>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct RepositoryCatalogEntry {
+    repository_id: String,
+    name: String,
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    catalog: Option<StoreRepositoryCatalog>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct StoreRepositoryCatalog {
+    schema_version: u32,
+    repository_id: String,
+    name: String,
+    generated_at: String,
+    plugins: Vec<StorePluginStatus>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct StorePluginStatus {
+    #[serde(flatten)]
+    plugin: RepositoryPlugin,
+    installed: bool,
+    installed_versions: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    active_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latest_version: Option<String>,
+    update_available: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct InstalledPlugin {
+    versions: BTreeSet<String>,
+    active_version: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallPluginRequest {
+    repository_id: String,
+    plugin_id: String,
+    #[serde(default)]
+    version: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct InstallPluginResponse {
+    plugin_id: String,
+    version: String,
+    path: String,
+    already_installed: bool,
+    activation_required: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -107,6 +177,7 @@ struct PublicPluginWeb {
     plugin_id: String,
     plugin_name: String,
     version: String,
+    active: bool,
     api_version: u16,
     surfaces: Vec<PublicWebSurface>,
 }
@@ -285,6 +356,8 @@ async fn main() -> Result<()> {
     let root = rackforge_root();
     let config_path = root.join("config").join("rackforge.toml");
     let config = load_config(&config_path)?;
+    let repository_config_path = root.join("config").join("repositories.toml");
+    let repositories = load_repository_config(&repository_config_path)?;
     config.web.validate()?;
     let shared_config = Arc::new(RwLock::new(config.web.clone()));
     let auth = Arc::new(AuthManager::load(
@@ -314,8 +387,11 @@ async fn main() -> Result<()> {
     let state = Arc::new(AppState {
         control_socket: root.join("state").join(CONTROL_SOCKET_NAME),
         public_config: shared_config,
-        plugins: PluginWebRegistry::scan(&root.join("plugins"))?,
         auth,
+        repository_config_path,
+        repositories: Arc::new(RwLock::new(repositories)),
+        plugins_root: root.join("plugins"),
+        plugin_store_root: root.join("plugin-store"),
     });
     let static_files = ServeDir::new(&web_root).fallback(ServeFile::new(index));
     let app = Router::new()
@@ -325,6 +401,12 @@ async fn main() -> Result<()> {
         .route("/api/v1/config", get(public_config))
         .route("/api/v1/plugins", get(plugin_web_catalog))
         .route("/api/v1/plugins/{plugin_id}", get(plugin_web_descriptor))
+        .route(
+            "/api/v1/repositories",
+            get(repository_config).put(replace_repository_config),
+        )
+        .route("/api/v1/store/catalog", get(repository_catalog))
+        .route("/api/v1/store/install", post(install_store_plugin))
         .route("/ws/v1/session", get(session_socket))
         .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_web_asset))
         .fallback_service(static_files)
@@ -358,6 +440,19 @@ fn load_config(path: &Path) -> Result<RackForgeConfig> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             Ok(RackForgeConfig::default())
         }
+        Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+fn load_repository_config(path: &Path) -> Result<RepositoryFile> {
+    match fs::read(path) {
+        Ok(bytes) => RepositoryFile::parse_toml(&bytes)
+            .map_err(anyhow::Error::from)
+            .with_context(|| format!("parsing repository config {}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(RepositoryFile {
+            schema_version: 1,
+            repositories: Vec::new(),
+        }),
         Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
     }
 }
@@ -556,6 +651,20 @@ fn persist_web_config(path: &Path, web: &WebConfig) -> Result<()> {
     fs::rename(&temporary, path).with_context(|| format!("installing {}", path.display()))
 }
 
+fn persist_repository_config(path: &Path, repositories: &RepositoryFile) -> Result<()> {
+    repositories
+        .validate()
+        .map_err(anyhow::Error::from)
+        .context("validating repository configuration")?;
+    let text =
+        toml::to_string_pretty(repositories).context("formatting repository configuration")?;
+    let parent = path.parent().context("repository config has no parent")?;
+    fs::create_dir_all(parent)?;
+    let temporary = path.with_extension("toml.new");
+    fs::write(&temporary, text).with_context(|| format!("writing {}", temporary.display()))?;
+    fs::rename(&temporary, path).with_context(|| format!("installing {}", path.display()))
+}
+
 fn local_lan_ipv4() -> Option<Ipv4Addr> {
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
     socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
@@ -566,19 +675,45 @@ fn local_lan_ipv4() -> Option<Ipv4Addr> {
 }
 
 impl PluginWebRegistry {
-    fn scan(plugins_root: &Path) -> Result<Self> {
+    fn scan(plugins_root: &Path, plugin_store_root: &Path) -> Result<Self> {
         let mut packages = BTreeMap::new();
-        let entries = match fs::read_dir(plugins_root) {
+        Self::scan_directory(plugins_root, true, &mut packages)?;
+
+        let store_packages = plugin_store_root.join("packages");
+        let plugin_entries = match fs::read_dir(&store_packages) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Self { packages });
             }
             Err(error) => {
                 return Err(error)
-                    .with_context(|| format!("scanning plugins at {}", plugins_root.display()));
+                    .with_context(|| format!("scanning plugins at {}", store_packages.display()));
             }
         };
 
+        for plugin_entry in plugin_entries {
+            let plugin_entry = plugin_entry.context("reading stored plugin directory entry")?;
+            if !plugin_entry.file_type()?.is_dir() {
+                continue;
+            }
+            Self::scan_directory(&plugin_entry.path(), false, &mut packages)?;
+        }
+        Ok(Self { packages })
+    }
+
+    fn scan_directory(
+        directory: &Path,
+        active: bool,
+        packages: &mut BTreeMap<String, PluginWebPackage>,
+    ) -> Result<()> {
+        let entries = match fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("scanning plugins at {}", directory.display()));
+            }
+        };
         for entry in entries {
             let entry = entry.context("reading plugin directory entry")?;
             if !entry.file_type()?.is_dir() {
@@ -589,18 +724,23 @@ impl PluginWebRegistry {
             if !manifest_path.is_file() {
                 continue;
             }
-            match Self::load_package(&root, &manifest_path) {
-                Ok(Some(package)) => {
-                    if packages
-                        .insert(package.public.plugin_id.clone(), package)
-                        .is_some()
-                    {
-                        bail!(
-                            "more than one installed plugin declares the same web plugin identifier"
-                        );
+            match Self::load_package(&root, &manifest_path, active) {
+                Ok(package) => {
+                    let id = package.public.plugin_id.clone();
+                    let replace = match packages.get(&id) {
+                        None => true,
+                        Some(current) if current.public.active => false,
+                        Some(_) if package.public.active => true,
+                        Some(current) => {
+                            let current_version = Version::parse(&current.public.version).ok();
+                            let candidate_version = Version::parse(&package.public.version).ok();
+                            candidate_version > current_version
+                        }
+                    };
+                    if replace {
+                        packages.insert(id, package);
                     }
                 }
-                Ok(None) => {}
                 Err(error) => {
                     eprintln!(
                         "RACKFORGE_WEB_PLUGIN_IGNORED manifest={} error={error:#}",
@@ -609,46 +749,50 @@ impl PluginWebRegistry {
                 }
             }
         }
-        Ok(Self { packages })
+        Ok(())
     }
 
-    fn load_package(root: &Path, manifest_path: &Path) -> Result<Option<PluginWebPackage>> {
+    fn load_package(root: &Path, manifest_path: &Path, active: bool) -> Result<PluginWebPackage> {
         let text = fs::read_to_string(manifest_path)
             .with_context(|| format!("reading {}", manifest_path.display()))?;
         let manifest: PluginManifest = toml::from_str(&text)
             .with_context(|| format!("parsing {}", manifest_path.display()))?;
         manifest.validate()?;
-        let Some(web_ui) = &manifest.web_ui else {
-            return Ok(None);
-        };
         let root = fs::canonicalize(root)
             .with_context(|| format!("resolving plugin root {}", root.display()))?;
-        let mut surfaces = Vec::with_capacity(web_ui.surfaces.len());
-        for surface in &web_ui.surfaces {
-            let entry = fs::canonicalize(root.join(&surface.entry))
-                .with_context(|| format!("resolving web entry {:?}", surface.entry))?;
-            if !entry.is_file() || !entry.starts_with(&root) {
-                bail!("web entry escapes its plugin package: {:?}", surface.entry);
+        let mut surfaces = Vec::new();
+        if let Some(web_ui) = &manifest.web_ui {
+            surfaces.reserve(web_ui.surfaces.len());
+            for surface in &web_ui.surfaces {
+                let entry = fs::canonicalize(root.join(&surface.entry))
+                    .with_context(|| format!("resolving web entry {:?}", surface.entry))?;
+                if !entry.is_file() || !entry.starts_with(&root) {
+                    bail!("web entry escapes its plugin package: {:?}", surface.entry);
+                }
+                surfaces.push(PublicWebSurface {
+                    kind: surface.kind,
+                    entry_url: format!(
+                        "/plugin-assets/{}/{}",
+                        manifest.id,
+                        surface.entry.replace('\\', "/")
+                    ),
+                });
             }
-            surfaces.push(PublicWebSurface {
-                kind: surface.kind,
-                entry_url: format!(
-                    "/plugin-assets/{}/{}",
-                    manifest.id,
-                    surface.entry.replace('\\', "/")
-                ),
-            });
         }
-        Ok(Some(PluginWebPackage {
+        Ok(PluginWebPackage {
             root,
             public: PublicPluginWeb {
                 plugin_id: manifest.id,
                 plugin_name: manifest.name,
                 version: manifest.version,
-                api_version: web_ui.api_version,
+                active,
+                api_version: manifest
+                    .web_ui
+                    .as_ref()
+                    .map_or(0, |web_ui| web_ui.api_version),
                 surfaces,
             },
-        }))
+        })
     }
 }
 
@@ -718,14 +862,271 @@ async fn public_config(
     ))
 }
 
+async fn repository_config(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<RepositoryFile>, StatusCode> {
+    require_authorized(&state, &headers)?;
+    Ok(Json(
+        state
+            .repositories
+            .read()
+            .expect("repository config lock poisoned")
+            .clone(),
+    ))
+}
+
+async fn replace_repository_config(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(repositories): Json<RepositoryFile>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if let Err(error) = repositories.validate() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"status": "error", "message": error.to_string()})),
+        )
+            .into_response();
+    }
+    let path = state.repository_config_path.clone();
+    let candidate = repositories.clone();
+    match tokio::task::spawn_blocking(move || persist_repository_config(&path, &candidate)).await {
+        Ok(Ok(())) => {
+            *state
+                .repositories
+                .write()
+                .expect("repository config lock poisoned") = repositories.clone();
+            Json(json!({"status": "ok", "config": repositories})).into_response()
+        }
+        Ok(Err(error)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": "error", "message": error.to_string()})),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": "error", "message": error.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+async fn repository_catalog(headers: HeaderMap, State(state): State<Arc<AppState>>) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let repositories = state
+        .repositories
+        .read()
+        .expect("repository config lock poisoned")
+        .repositories
+        .clone();
+    let plugins_root = state.plugins_root.clone();
+    let plugin_store_root = state.plugin_store_root.clone();
+    match tokio::task::spawn_blocking(move || {
+        let installed = scan_installed_plugins(&plugins_root, &plugin_store_root);
+        repositories
+            .into_iter()
+            .map(|repository| {
+                if !repository.enabled {
+                    return RepositoryCatalogEntry {
+                        repository_id: repository.id,
+                        name: repository.name,
+                        status: "disabled",
+                        error: None,
+                        catalog: None,
+                    };
+                }
+                match fetch_repository(&repository) {
+                    Ok(verified) => RepositoryCatalogEntry {
+                        repository_id: repository.id,
+                        name: repository.name,
+                        status: "available",
+                        error: None,
+                        catalog: Some(enrich_repository_catalog(verified.index, &installed)),
+                    },
+                    Err(error) => RepositoryCatalogEntry {
+                        repository_id: repository.id,
+                        name: repository.name,
+                        status: "error",
+                        error: Some(error.to_string()),
+                        catalog: None,
+                    },
+                }
+            })
+            .collect()
+    })
+    .await
+    {
+        Ok(repositories) => Json(RepositoryCatalogResponse { repositories }).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": "error", "message": error.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+fn enrich_repository_catalog(
+    catalog: RepositoryIndex,
+    installed: &BTreeMap<String, InstalledPlugin>,
+) -> StoreRepositoryCatalog {
+    let plugins = catalog
+        .plugins
+        .into_iter()
+        .map(|plugin| {
+            let latest_version = plugin
+                .releases
+                .iter()
+                .filter_map(|release| Version::parse(&release.version).ok())
+                .max()
+                .map(|version| version.to_string());
+            let installation = installed.get(&plugin.id);
+            let installed_versions = installation
+                .map(|entry| entry.versions.iter().cloned().collect())
+                .unwrap_or_default();
+            let active_version = installation.and_then(|entry| entry.active_version.clone());
+            let is_installed = installation.is_some_and(|entry| !entry.versions.is_empty());
+            let update_available = latest_version.as_ref().is_some_and(|latest| {
+                is_installed && installation.is_some_and(|entry| !entry.versions.contains(latest))
+            });
+            StorePluginStatus {
+                plugin,
+                installed: is_installed,
+                installed_versions,
+                active_version,
+                latest_version,
+                update_available,
+            }
+        })
+        .collect();
+    StoreRepositoryCatalog {
+        schema_version: catalog.schema_version,
+        repository_id: catalog.repository_id,
+        name: catalog.name,
+        generated_at: catalog.generated_at,
+        plugins,
+    }
+}
+
+fn scan_installed_plugins(
+    active_root: &Path,
+    store_root: &Path,
+) -> BTreeMap<String, InstalledPlugin> {
+    let mut installed = BTreeMap::new();
+    if let Ok(entries) = fs::read_dir(active_root) {
+        for entry in entries.flatten() {
+            let manifest_path = entry.path().join("rackforge-plugin.toml");
+            let Ok(text) = fs::read_to_string(manifest_path) else {
+                continue;
+            };
+            let Ok(manifest) = toml::from_str::<PluginManifest>(&text) else {
+                continue;
+            };
+            if manifest.validate().is_err() {
+                continue;
+            }
+            let plugin = installed
+                .entry(manifest.id)
+                .or_insert_with(InstalledPlugin::default);
+            plugin.versions.insert(manifest.version.clone());
+            plugin.active_version = Some(manifest.version);
+        }
+    }
+
+    let records_root = store_root.join("records");
+    if let Ok(plugin_directories) = fs::read_dir(records_root) {
+        for plugin_directory in plugin_directories.flatten() {
+            let Ok(records) = fs::read_dir(plugin_directory.path()) else {
+                continue;
+            };
+            for record in records.flatten() {
+                let Ok(bytes) = fs::read(record.path()) else {
+                    continue;
+                };
+                let Ok(record) = serde_json::from_slice::<InstallationRecord>(&bytes) else {
+                    continue;
+                };
+                installed
+                    .entry(record.plugin_id)
+                    .or_insert_with(InstalledPlugin::default)
+                    .versions
+                    .insert(record.version);
+            }
+        }
+    }
+    installed
+}
+
+async fn install_store_plugin(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<InstallPluginRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let repository = state
+        .repositories
+        .read()
+        .expect("repository config lock poisoned")
+        .repositories
+        .iter()
+        .find(|repository| repository.id == request.repository_id && repository.enabled)
+        .cloned();
+    let Some(repository) = repository else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"status": "error", "message": "repository is missing or disabled"})),
+        )
+            .into_response();
+    };
+    let store_root = state.plugin_store_root.clone();
+    match tokio::task::spawn_blocking(move || {
+        let verified = fetch_repository(&repository)?;
+        let platform = repository_platform_key()?;
+        let selected = verified.select(&request.plugin_id, request.version.as_deref(), platform)?;
+        let bytes = verified.download(&selected)?;
+        install_archive(store_root, &selected, &bytes)
+    })
+    .await
+    {
+        Ok(Ok(installed)) => Json(install_response(installed)).into_response(),
+        Ok(Err(error)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"status": "error", "message": error.to_string()})),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": "error", "message": error.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+fn install_response(installed: InstalledPackage) -> InstallPluginResponse {
+    InstallPluginResponse {
+        plugin_id: installed.record.plugin_id,
+        version: installed.record.version,
+        path: installed.path.display().to_string(),
+        already_installed: installed.already_installed,
+        activation_required: true,
+    }
+}
+
 async fn plugin_web_catalog(
     headers: HeaderMap,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<PublicPluginWeb>>, StatusCode> {
     require_authorized(&state, &headers)?;
+    let plugins = PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(
-        state
-            .plugins
+        plugins
             .packages
             .values()
             .map(|package| package.public.clone())
@@ -739,8 +1140,8 @@ async fn plugin_web_descriptor(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<PublicPluginWeb>, StatusCode> {
     require_authorized(&state, &headers)?;
-    state
-        .plugins
+    PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .packages
         .get(&plugin_id)
         .map(|package| Json(package.public.clone()))
@@ -755,7 +1156,11 @@ async fn plugin_web_asset(
     if require_authorized(&state, &headers).is_err() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let Some(package) = state.plugins.packages.get(&plugin_id) else {
+    let plugins = match PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root) {
+        Ok(plugins) => plugins,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let Some(package) = plugins.packages.get(&plugin_id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let relative = Path::new(&asset);
@@ -987,6 +1392,9 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_SERIAL: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn defaults_are_enabled_but_local_only() {
@@ -1020,5 +1428,86 @@ mod tests {
         assert!(constant_time_eq(b"abcdef", b"abcdef"));
         assert!(!constant_time_eq(b"abcdef", b"abcdeg"));
         assert!(!constant_time_eq(b"abc", b"abcd"));
+    }
+
+    #[test]
+    fn active_plugin_identity_marks_the_catalog_plugin_as_installed() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-web-installed-test-{}-{}",
+            std::process::id(),
+            TEST_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let active = root.join("plugins").join("rf-dls");
+        let store = root.join("plugin-store");
+        fs::create_dir_all(&active).unwrap();
+        fs::write(
+            active.join("rackforge-plugin.toml"),
+            r#"schema_version = 1
+id = "org.rackforge.rf-dls"
+name = "RF-DLS"
+vendor = "RackForge"
+version = "0.1.0"
+kind = "instrument"
+state_version = 1
+capabilities = ["audio_output"]
+ui_layouts = ["little@1"]
+
+[api]
+major = 1
+minor = 5
+
+[binaries]
+linux-aarch64 = "lib/rf-dls.so"
+"#,
+        )
+        .unwrap();
+        let inventory = scan_installed_plugins(&root.join("plugins"), &store);
+        let installed = inventory.get("org.rackforge.rf-dls").unwrap();
+        assert!(installed.versions.contains("0.1.0"));
+        assert_eq!(installed.active_version.as_deref(), Some("0.1.0"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installed_native_plugin_without_web_ui_is_discoverable() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-web-registry-test-{}-{}",
+            std::process::id(),
+            TEST_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let plugins = root.join("plugins");
+        let package = root.join("plugin-store/packages/org.rackforge.rf-kr106/0.1.0");
+        fs::create_dir_all(&plugins).unwrap();
+        fs::create_dir_all(package.join("lib")).unwrap();
+        fs::write(package.join("lib/librackforge_rf_kr106.so"), []).unwrap();
+        fs::write(
+            package.join("rackforge-plugin.toml"),
+            r#"schema_version = 1
+id = "org.rackforge.rf-kr106"
+name = "RF-KR106"
+vendor = "RackForge Community"
+version = "0.1.0"
+kind = "instrument"
+state_version = 1
+capabilities = ["audio_output"]
+ui_layouts = ["little@1"]
+
+[api]
+major = 1
+minor = 5
+
+[binaries]
+linux-aarch64 = "lib/librackforge_rf_kr106.so"
+"#,
+        )
+        .unwrap();
+
+        let registry = PluginWebRegistry::scan(&plugins, &root.join("plugin-store")).unwrap();
+        let discovered = registry.packages.get("org.rackforge.rf-kr106").unwrap();
+        assert_eq!(discovered.public.plugin_name, "RF-KR106");
+        assert_eq!(discovered.public.version, "0.1.0");
+        assert!(!discovered.public.active);
+        assert!(discovered.public.surfaces.is_empty());
+        fs::remove_dir_all(root).unwrap();
     }
 }

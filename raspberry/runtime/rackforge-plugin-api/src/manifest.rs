@@ -117,6 +117,8 @@ pub struct PluginManifest {
     #[serde(default)]
     pub ui_layouts: Vec<String>,
     #[serde(default)]
+    pub config_mode: bool,
+    #[serde(default)]
     pub web_ui: Option<WebUi>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub midi: Option<PluginMidiContract>,
@@ -358,6 +360,7 @@ mod tests {
             capabilities: vec![Capability::AudioInput, Capability::AudioOutput],
             resources: Vec::new(),
             ui_layouts: Vec::new(),
+            config_mode: false,
             web_ui: None,
             midi: None,
             binaries: BTreeMap::from([("linux-aarch64".into(), "lib/librackforge_gain.so".into())]),

@@ -136,8 +136,12 @@ matching note-on. Note-off is sent to those exact owners even if routing is
 edited meanwhile.
 
 Disabling a route, changing a rack, losing a source or stopping a plugin must
-flush its owned notes and relevant pedal state. A global emergency action sends
-all-notes-off, resets controller state and clears the ledger.
+flush its owned notes and relevant pedal state. A global emergency action moves
+the host to `IDLE`, destroys every plugin and Rack DSP runtime, and stops
+routing note events. The audio device remains open and receives digital silence.
+The next explicit `LIVE` or `PLAY` transition runs a fresh activation cycle
+before enabling its render path; cached physical control positions may then be
+replayed safely.
 
 ## Controller state
 

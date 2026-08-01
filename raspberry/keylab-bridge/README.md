@@ -105,8 +105,11 @@ Core conserva el estado `dirty` publicado para el draft del plugin. Al intentar
 abandonar un programa modificado, tanto con `BACK` desde sus secciones como con
 `BACK` sostenido, el bridge muestra `SAVE CHANGES?` y permite elegir `SAVE` o
 `DISCARD`; `BACK` cierra el diálogo y continúa editando. El acorde de emergencia
-`OK` + `BACK` es la única excepción deliberada: fuerza `HOME` y libera el draft
-de forma best-effort para que un plugin defectuoso no pueda atrapar al usuario.
+`OK` + `BACK` es la única excepción deliberada: fuerza `HOME`, cancela cualquier
+draft o audición y lleva el motor al modo host `IDLE`. RackForge deja de rutear
+MIDI, desactiva el ciclo de vida del plugin o Rack activo y escribe silencio sin
+depender de que la UI del plugin responda. La siguiente entrada a `LIVE` o
+`PLAY` reactiva el runtime desde un DSP limpio conservando su configuración.
 
 La envolvente no es una configuración global. Sus valores pertenecen al
 programa CUSTOM abierto desde CONFIG. A medida que el menú se conecte con
@@ -155,9 +158,11 @@ reemplazar la navegación.
 
 `OK` + `BACK`, presionados con una diferencia máxima de 250 ms y sostenidos
 650 ms, forman el escape de emergencia. Tiene prioridad sobre las pulsaciones
-largas individuales, lleva inmediatamente a `HOME` y solicita la cancelación
-del draft activo de forma best-effort. La pantalla vuelve a ser controlada por
-RackForge incluso si el plugin no responde.
+largas individuales, lleva inmediatamente a `HOME` y ordena al Core una parada
+global. El estado autoritativo pasa a `IDLE`, se descarta el audio pendiente y
+se cancelan el draft y la audición activos. La salida física permanece abierta
+escribiendo silencio, por lo que volver a `LIVE` o `PLAY` no obliga a renegociar
+la interfaz de audio.
 
 El mapeo capturado en hardware real es:
 

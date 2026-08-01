@@ -14,11 +14,12 @@ import type {
   PerformanceEdit,
   PerformanceSnapshot,
   PerformanceSnapshotMessage,
+  PluginParameterSnapshot,
   SessionCommand,
 } from "./types";
 
 const CLIENT_ID = "web.main";
-const SESSION_SCHEMA_VERSION = 10;
+const SESSION_SCHEMA_VERSION = 13;
 const RECONNECT_DELAY_MS = 1200;
 const PERFORMANCE_REFRESH_MS = 2000;
 
@@ -222,6 +223,56 @@ export function loadPluginPreset(instanceId: string, presetId: string): Promise<
     { op: "load_plugin_preset", instance_id: instanceId, preset_id: presetId },
     "plugin_preset_loaded",
     (message) => message.preset as HostPreset,
+  );
+}
+
+export function renamePluginPreset(
+  pluginId: string,
+  presetId: string,
+  name: string,
+): Promise<HostPreset> {
+  return requestPresetOperation(
+    { op: "rename_plugin_preset", plugin_id: pluginId, preset_id: presetId, name },
+    "plugin_preset_renamed",
+    (message) => message.preset as HostPreset,
+  );
+}
+
+export function deletePluginPreset(
+  pluginId: string,
+  presetId: string,
+): Promise<string> {
+  return requestPresetOperation(
+    { op: "delete_plugin_preset", plugin_id: pluginId, preset_id: presetId },
+    "plugin_preset_deleted",
+    (message) => String(message.preset_id),
+  );
+}
+
+export function requestPluginParameters(
+  instanceId: string,
+): Promise<PluginParameterSnapshot> {
+  return requestPresetOperation(
+    { op: "plugin_parameters", instance_id: instanceId },
+    "plugin_parameters",
+    (message) => message as unknown as PluginParameterSnapshot,
+  );
+}
+
+export function setPluginParameter(
+  instanceId: string,
+  parameterIndex: number,
+  value: number,
+): Promise<number> {
+  return requestPresetOperation(
+    {
+      op: "set_plugin_parameter",
+      instance_id: instanceId,
+      parameter_index: parameterIndex,
+      value,
+    },
+    "plugin_parameter_set",
+    (message) => Number(message.value),
   );
 }
 

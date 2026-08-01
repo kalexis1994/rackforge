@@ -6,8 +6,8 @@ use crate::session_checkpoint::SessionCheckpointStore;
 use anyhow::{Context, Result, bail};
 use rackforge_audio_api::{AudioOutputDocument, AudioOutputProfile, AudioOutputState};
 use rackforge_control_api::{
-    ControlErrorCode, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES, decode_request,
-    encode_line,
+    ControlErrorCode, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES,
+    PluginParameterValue, decode_request, encode_line,
 };
 #[cfg(test)]
 use rackforge_performance_api::PerformanceLibrary;
@@ -16,7 +16,7 @@ use rackforge_performance_api::{
     PerformanceSnapshot, RackDefinition, RackKeyboardParts,
 };
 use rackforge_plugin_api::{
-    Capability, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
+    Capability, ParameterSchema, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
     ProgramEditRequest, ProgramEditorView, ProgramFieldEditRequest, SurfaceActivationRequest,
     SurfaceActivationResponse,
 };
@@ -25,6 +25,7 @@ use rackforge_session_api::{
     HostControlBinding, InstanceId, MasterLevel, MasterPan, ProgramDraftState, Revision,
     SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SoundSummary,
 };
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
@@ -52,6 +53,7 @@ pub enum RackSlotStateLoad {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RackSlotRuntimeSpec {
     pub slot_id: String,
+    pub plugin_id: String,
     pub state: RackSlotStateLoad,
     pub midi_input_channel: Option<u8>,
     pub midi_note_low: u8,
@@ -88,6 +90,13 @@ pub enum AudioControlCommand {
     },
     SetRenderMode {
         mode: rackforge_session_api::SurfaceMode,
+        reply: SyncSender<Result<(), String>>,
+    },
+    EmergencyStop {
+        reply: SyncSender<Result<(), String>>,
+    },
+    SelectPlugin {
+        instance_id: InstanceId,
         reply: SyncSender<Result<(), String>>,
     },
     SelectSound {
@@ -150,8 +159,19 @@ pub enum AudioControlCommand {
         reply: SyncSender<Result<(), String>>,
     },
     MaterializeState {
+        instance_id: InstanceId,
         program_id: Option<String>,
         reply: SyncSender<Result<Vec<u8>, String>>,
+    },
+    PluginParameters {
+        instance_id: InstanceId,
+        reply: SyncSender<Result<(ParameterSchema, Vec<PluginParameterValue>), String>>,
+    },
+    SetPluginParameter {
+        instance_id: InstanceId,
+        parameter_index: u32,
+        value: f64,
+        reply: SyncSender<Result<f64, String>>,
     },
 }
 
@@ -179,7 +199,7 @@ struct ControlContext {
     audio_state_path: PathBuf,
     performance_repository: Arc<Mutex<PerformanceRepository>>,
     state_store: Arc<Mutex<PluginStateStore>>,
-    plugin_manifest: PluginManifest,
+    plugin_manifests: BTreeMap<String, PluginManifest>,
     storage: Option<PluginStorage>,
     checkpoint: Option<SessionCheckpointStore>,
     dispatch_lock: Mutex<()>,
@@ -200,7 +220,7 @@ pub fn start(
     audio_state_path: PathBuf,
     performance_repository: Arc<Mutex<PerformanceRepository>>,
     state_store: Arc<Mutex<PluginStateStore>>,
-    plugin_manifest: PluginManifest,
+    plugin_manifests: BTreeMap<String, PluginManifest>,
     storage: Option<PluginStorage>,
     checkpoint: Option<SessionCheckpointStore>,
 ) -> Result<ControlServer> {
@@ -243,7 +263,7 @@ pub fn start(
         audio_state_path,
         performance_repository,
         state_store,
-        plugin_manifest,
+        plugin_manifests,
         storage,
         checkpoint,
         dispatch_lock: Mutex::new(()),
@@ -360,10 +380,27 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             instance_id,
             preset_id,
         } => load_plugin_preset(context, &instance_id, &preset_id),
+        ControlRequest::RenamePluginPreset {
+            plugin_id,
+            preset_id,
+            name,
+        } => rename_plugin_preset(context, &plugin_id, &preset_id, &name),
+        ControlRequest::DeletePluginPreset {
+            plugin_id,
+            preset_id,
+        } => delete_plugin_preset(context, &plugin_id, &preset_id),
         ControlRequest::PluginPreset {
             plugin_id,
             preset_id,
         } => get_plugin_preset(context, &plugin_id, &preset_id),
+        ControlRequest::PluginParameters { instance_id } => {
+            plugin_parameters(context, &instance_id)
+        }
+        ControlRequest::SetPluginParameter {
+            instance_id,
+            parameter_index,
+            value,
+        } => set_plugin_parameter(context, &instance_id, parameter_index, value),
         ControlRequest::EditPerformance {
             expected_revision,
             edit,
@@ -386,6 +423,76 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
         ControlRequest::Dispatch { envelope } => dispatch_command(context, envelope),
     };
     write_response(&mut stream, &response)
+}
+
+fn plugin_parameters(context: &ControlContext, instance_id: &InstanceId) -> ControlResponse {
+    let snapshot = match context.store.lock() {
+        Ok(store) => store.snapshot(),
+        Err(_) => return internal_error("session store lock is poisoned", None),
+    };
+    if let Err(failure) = require_active_instance(&snapshot, instance_id) {
+        return failure.into_response();
+    }
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    if let Err(failure) = send_audio(
+        context,
+        AudioControlCommand::PluginParameters {
+            instance_id: instance_id.clone(),
+            reply: reply_sender,
+        },
+    ) {
+        return failure.into_response();
+    }
+    match receive_audio(reply_receiver, "read plugin parameters") {
+        Ok((schema, values)) => ControlResponse::PluginParameters {
+            instance_id: instance_id.clone(),
+            schema: Box::new(schema),
+            values,
+        },
+        Err(failure) => failure.into_response(),
+    }
+}
+
+fn set_plugin_parameter(
+    context: &ControlContext,
+    instance_id: &InstanceId,
+    parameter_index: u32,
+    value: f64,
+) -> ControlResponse {
+    if !value.is_finite() {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            "plugin parameter value must be finite",
+            current_revision(context),
+        );
+    }
+    let snapshot = match context.store.lock() {
+        Ok(store) => store.snapshot(),
+        Err(_) => return internal_error("session store lock is poisoned", None),
+    };
+    if let Err(failure) = require_active_instance(&snapshot, instance_id) {
+        return failure.into_response();
+    }
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    if let Err(failure) = send_audio(
+        context,
+        AudioControlCommand::SetPluginParameter {
+            instance_id: instance_id.clone(),
+            parameter_index,
+            value,
+            reply: reply_sender,
+        },
+    ) {
+        return failure.into_response();
+    }
+    match receive_audio(reply_receiver, "set plugin parameter") {
+        Ok(value) => ControlResponse::PluginParameterSet {
+            instance_id: instance_id.clone(),
+            parameter_index,
+            value,
+        },
+        Err(failure) => failure.into_response(),
+    }
 }
 
 fn apply_audio_output(
@@ -541,16 +648,19 @@ fn materialize_performance_edit(
         return Ok(edit);
     };
     for slot in &mut rack.slots {
-        if slot.plugin_id != context.plugin_manifest.id {
-            return Err(control_failure(
-                ControlErrorCode::Unavailable,
-                format!(
-                    "plugin {} is not loaded by the current runtime",
-                    slot.plugin_id
-                ),
-                Some(revision),
-            ));
-        }
+        let manifest = context
+            .plugin_manifests
+            .get(&slot.plugin_id)
+            .ok_or_else(|| {
+                control_failure(
+                    ControlErrorCode::Unavailable,
+                    format!(
+                        "plugin {} is not loaded by the current runtime",
+                        slot.plugin_id
+                    ),
+                    Some(revision),
+                )
+            })?;
         if let Some(reference) = &slot.state {
             let store = context.state_store.lock().map_err(|_| {
                 control_failure(
@@ -573,6 +683,7 @@ fn materialize_performance_edit(
         send_audio(
             context,
             AudioControlCommand::MaterializeState {
+                instance_id: instance_id_for_plugin(context, &slot.plugin_id, revision)?,
                 program_id: program_id.clone(),
                 reply: reply_sender,
             },
@@ -588,9 +699,9 @@ fn materialize_performance_edit(
         slot.state = Some(
             store
                 .put(
-                    &context.plugin_manifest.id,
-                    &context.plugin_manifest.version,
-                    context.plugin_manifest.state_version,
+                    &manifest.id,
+                    &manifest.version,
+                    manifest.state_version,
                     program_id,
                     &bytes,
                 )
@@ -625,6 +736,36 @@ fn list_plugin_presets(context: &ControlContext, plugin_id: &str) -> ControlResp
             current_revision(context),
         ),
     }
+}
+
+fn instance_id_for_plugin(
+    context: &ControlContext,
+    plugin_id: &str,
+    revision: Revision,
+) -> Result<InstanceId, ControlFailure> {
+    let snapshot = context
+        .store
+        .lock()
+        .map_err(|_| {
+            control_failure(
+                ControlErrorCode::Internal,
+                "session store lock is poisoned",
+                Some(revision),
+            )
+        })?
+        .snapshot();
+    snapshot
+        .instances
+        .iter()
+        .find(|instance| instance.plugin_id == plugin_id)
+        .map(|instance| instance.instance_id.clone())
+        .ok_or_else(|| {
+            control_failure(
+                ControlErrorCode::Unavailable,
+                format!("plugin {plugin_id} has no runtime instance"),
+                Some(revision),
+            )
+        })
 }
 
 fn get_plugin_preset(
@@ -663,18 +804,14 @@ fn save_plugin_preset(
         Ok(instance) => instance,
         Err(failure) => return failure.into_response(),
     };
-    if instance.plugin_id != context.plugin_manifest.id {
+    let Some(manifest) = context.plugin_manifests.get(&instance.plugin_id) else {
         return error_response(
-            ControlErrorCode::Rejected,
+            ControlErrorCode::Unavailable,
             "the active plugin is not hosted by this runtime",
             Some(snapshot.revision),
         );
-    }
-    if !context
-        .plugin_manifest
-        .capabilities
-        .contains(&Capability::State)
-    {
+    };
+    if !manifest.capabilities.contains(&Capability::State) {
         return error_response(
             ControlErrorCode::Unavailable,
             "the plugin does not support complete state snapshots",
@@ -705,9 +842,9 @@ fn save_plugin_preset(
         }
     };
     let state = match store.put(
-        &context.plugin_manifest.id,
-        &context.plugin_manifest.version,
-        context.plugin_manifest.state_version,
+        &manifest.id,
+        &manifest.version,
+        manifest.state_version,
         instance.selected_sound_id.clone(),
         &bytes,
     ) {
@@ -738,6 +875,65 @@ fn save_plugin_preset(
     };
     ControlResponse::PluginPresetSaved {
         preset: Box::new(preset),
+        presets,
+    }
+}
+
+fn rename_plugin_preset(
+    context: &ControlContext,
+    plugin_id: &str,
+    preset_id: &str,
+    name: &str,
+) -> ControlResponse {
+    let revision = current_revision(context);
+    let mut store = match context.state_store.lock() {
+        Ok(store) => store,
+        Err(_) => return internal_error("plugin state store lock is poisoned", revision),
+    };
+    let preset = match store.rename_preset(plugin_id, preset_id, name) {
+        Ok(preset) => preset,
+        Err(error) => {
+            return error_response(
+                ControlErrorCode::InvalidRequest,
+                format!("renaming RackForge preset: {error:#}"),
+                revision,
+            );
+        }
+    };
+    let presets = match store.list_presets(plugin_id) {
+        Ok(presets) => presets,
+        Err(error) => return internal_error(error.to_string(), revision),
+    };
+    ControlResponse::PluginPresetRenamed {
+        preset: Box::new(preset),
+        presets,
+    }
+}
+
+fn delete_plugin_preset(
+    context: &ControlContext,
+    plugin_id: &str,
+    preset_id: &str,
+) -> ControlResponse {
+    let revision = current_revision(context);
+    let mut store = match context.state_store.lock() {
+        Ok(store) => store,
+        Err(_) => return internal_error("plugin state store lock is poisoned", revision),
+    };
+    if let Err(error) = store.delete_preset(plugin_id, preset_id) {
+        return error_response(
+            ControlErrorCode::NotFound,
+            format!("deleting RackForge preset: {error:#}"),
+            revision,
+        );
+    }
+    let presets = match store.list_presets(plugin_id) {
+        Ok(presets) => presets,
+        Err(error) => return internal_error(error.to_string(), revision),
+    };
+    ControlResponse::PluginPresetDeleted {
+        plugin_id: plugin_id.into(),
+        preset_id: preset_id.into(),
         presets,
     }
 }
@@ -1021,6 +1217,75 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     context,
                     command_ref,
                     SessionEvent::ActiveModeChanged { mode },
+                ),
+                Err(failure) => failure.into_response(),
+            }
+        }
+        SessionCommand::EmergencyStop => {
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::EmergencyStop {
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            if let Err(failure) = receive_audio(reply_receiver, "perform emergency stop") {
+                return failure.into_response();
+            }
+
+            set_lease_deadline(context, None);
+            let mut events = Vec::with_capacity(3);
+            if let Some(draft) = snapshot.program_draft.as_ref() {
+                events.push(SessionEvent::ProgramEditCancelled {
+                    draft_id: draft.draft_id,
+                    instance_id: draft.instance_id.clone(),
+                });
+            }
+            if let Some(audition) = snapshot.audition.as_ref() {
+                events.push(SessionEvent::AuditionEnded {
+                    lease_id: audition.lease_id,
+                    instance_id: audition.instance_id.clone(),
+                    restored_sound_id: None,
+                    reason: AuditionEndReason::Cancelled,
+                });
+            }
+            events.push(SessionEvent::ActiveModeChanged {
+                mode: rackforge_session_api::SurfaceMode::Idle,
+            });
+            record_command_events(context, command_ref, events)
+        }
+        SessionCommand::SelectPlugin { instance_id } => {
+            if snapshot.instance(&instance_id).is_none() {
+                return error_response(
+                    ControlErrorCode::NotFound,
+                    format!("unknown instance {instance_id}"),
+                    Some(snapshot.revision),
+                );
+            }
+            if snapshot.audition.is_some() || snapshot.program_draft.is_some() {
+                return error_response(
+                    ControlErrorCode::Conflict,
+                    "finish or cancel the active plugin edit before changing plugins",
+                    Some(snapshot.revision),
+                );
+            }
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::SelectPlugin {
+                    instance_id: instance_id.clone(),
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "select plugin") {
+                Ok(()) => record_command_event(
+                    context,
+                    command_ref,
+                    SessionEvent::ActiveInstanceChanged { instance_id },
                 ),
                 Err(failure) => failure.into_response(),
             }
@@ -1986,7 +2251,7 @@ fn prepare_rack_runtime(
             Some(snapshot.revision),
         ));
     }
-    let instance = snapshot.active_instance().ok_or_else(|| {
+    let active_instance = snapshot.active_instance().ok_or_else(|| {
         control_failure(
             ControlErrorCode::Unavailable,
             "the LIVE session has no active plugin instance",
@@ -1995,16 +2260,20 @@ fn prepare_rack_runtime(
     })?;
     let mut specs = Vec::with_capacity(enabled_slots.len());
     for slot in enabled_slots {
-        if instance.plugin_id != slot.plugin_id {
-            return Err(control_failure(
-                ControlErrorCode::Rejected,
-                format!(
-                    "Rack Slot {} requires plugin {}, active plugin is {}",
-                    slot.id, slot.plugin_id, instance.plugin_id
-                ),
-                Some(snapshot.revision),
-            ));
-        }
+        let instance = snapshot
+            .instances
+            .iter()
+            .find(|instance| instance.plugin_id == slot.plugin_id)
+            .ok_or_else(|| {
+                control_failure(
+                    ControlErrorCode::Unavailable,
+                    format!(
+                        "Rack Slot {} requires unavailable plugin {}",
+                        slot.id, slot.plugin_id
+                    ),
+                    Some(snapshot.revision),
+                )
+            })?;
         if !matches!(slot.midi_output, MidiOutputRoute::None) {
             return Err(control_failure(
                 ControlErrorCode::Rejected,
@@ -2057,6 +2326,7 @@ fn prepare_rack_runtime(
         };
         specs.push(RackSlotRuntimeSpec {
             slot_id: slot.id.as_str().to_owned(),
+            plugin_id: slot.plugin_id.clone(),
             state,
             midi_input_channel: slot.midi_input_channel,
             midi_note_low: slot.midi_note_low,
@@ -2067,7 +2337,7 @@ fn prepare_rack_runtime(
             pan_per_mille: slot.pan_per_mille,
         });
     }
-    Ok((instance.instance_id.clone(), specs))
+    Ok((active_instance.instance_id.clone(), specs))
 }
 
 fn send_audio(
@@ -2185,6 +2455,7 @@ fn record_command_events(
             SessionEvent::MasterLevelChanged { .. }
                 | SessionEvent::MasterPanChanged { .. }
                 | SessionEvent::ActiveModeChanged { .. }
+                | SessionEvent::ActiveInstanceChanged { .. }
                 | SessionEvent::LiveBrowseModeChanged { .. }
                 | SessionEvent::LiveTargetActivated { .. }
                 | SessionEvent::SoundSelected { .. }
@@ -2414,6 +2685,7 @@ mod tests {
                 plugin_id: "org.rackforge.rf-dls".into(),
                 plugin_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
+                config_available: true,
                 sounds: vec![SoundSummary {
                     id: "piano".into(),
                     name: "Piano".into(),
@@ -2499,18 +2771,21 @@ mod tests {
                 )),
                 storage: None,
                 state_store: Arc::new(Mutex::new(PluginStateStore::new(None).unwrap())),
-                plugin_manifest: serde_json::from_value(serde_json::json!({
-                    "schema_version": 1,
-                    "id": "org.rackforge.rf-dls",
-                    "name": "RF-DLS",
-                    "vendor": "RackForge",
-                    "version": "0.1.0",
-                    "api": { "major": 1, "minor": 0 },
-                    "kind": "instrument",
-                    "state_version": 1,
-                    "binaries": { "linux-aarch64": "lib/plugin.so" }
-                }))
-                .unwrap(),
+                plugin_manifests: BTreeMap::from([(
+                    "org.rackforge.rf-dls".into(),
+                    serde_json::from_value(serde_json::json!({
+                        "schema_version": 1,
+                        "id": "org.rackforge.rf-dls",
+                        "name": "RF-DLS",
+                        "vendor": "RackForge",
+                        "version": "0.1.0",
+                        "api": { "major": 1, "minor": 0 },
+                        "kind": "instrument",
+                        "state_version": 1,
+                        "binaries": { "linux-aarch64": "lib/plugin.so" }
+                    }))
+                    .unwrap(),
+                )]),
                 checkpoint: None,
                 dispatch_lock: Mutex::new(()),
                 lease_deadline: Mutex::new(None),
@@ -2635,6 +2910,45 @@ mod tests {
         assert_eq!(
             context.store.lock().unwrap().state().active_mode,
             rackforge_session_api::SurfaceMode::Play
+        );
+    }
+
+    #[test]
+    fn emergency_stop_terminates_runtimes_before_publishing_idle_mode() {
+        let (context, receiver) = context();
+        let worker = thread::spawn(move || match receiver.recv().unwrap() {
+            AudioControlCommand::EmergencyStop { reply } => {
+                reply.send(Ok(())).unwrap();
+            }
+            _ => panic!("expected emergency runtime stop"),
+        });
+
+        let response = dispatch_command(
+            &context,
+            CommandEnvelope::new(
+                ClientId::new("test.emergency").unwrap(),
+                3,
+                SessionCommand::EmergencyStop,
+            ),
+        );
+        worker.join().unwrap();
+
+        assert!(matches!(
+            response,
+            ControlResponse::CommandApplied { ref events, .. }
+                if matches!(
+                    events.as_slice(),
+                    [EventEnvelope {
+                        event: SessionEvent::ActiveModeChanged {
+                            mode: rackforge_session_api::SurfaceMode::Idle
+                        },
+                        ..
+                    }]
+                )
+        ));
+        assert_eq!(
+            context.store.lock().unwrap().state().active_mode,
+            rackforge_session_api::SurfaceMode::Idle
         );
     }
 

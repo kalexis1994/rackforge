@@ -13,7 +13,7 @@ pub use rackforge_surface_api::{
     SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const SESSION_SCHEMA_VERSION: u32 = 10;
+pub const SESSION_SCHEMA_VERSION: u32 = 13;
 
 fn default_surface_mode() -> SurfaceMode {
     SurfaceMode::Live
@@ -214,6 +214,8 @@ pub struct PluginInstanceState {
     #[serde(default)]
     pub ui_layouts: Vec<String>,
     #[serde(default)]
+    pub config_available: bool,
+    #[serde(default)]
     pub sounds: Vec<SoundSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_sound_id: Option<String>,
@@ -321,6 +323,12 @@ impl SessionState {
             }
             SessionEvent::ActiveModeChanged { mode } => {
                 self.active_mode = *mode;
+            }
+            SessionEvent::ActiveInstanceChanged { instance_id } => {
+                if self.instance(instance_id).is_none() {
+                    return Err(format!("unknown instance {instance_id}"));
+                }
+                self.active_instance_id = Some(instance_id.clone());
             }
             SessionEvent::LiveBrowseModeChanged { mode } => {
                 self.live.mode = *mode;
@@ -544,6 +552,12 @@ pub enum SessionCommand {
     SetActiveMode {
         mode: SurfaceMode,
     },
+    /// Immediately destroys every running plugin DSP instance and leaves the
+    /// session idle. Runtime termination is independent from the UI focus mode.
+    EmergencyStop,
+    SelectPlugin {
+        instance_id: InstanceId,
+    },
     SetLiveBrowseMode {
         mode: LiveBrowseMode,
     },
@@ -652,6 +666,9 @@ pub enum SessionEvent {
     ActiveModeChanged {
         mode: SurfaceMode,
     },
+    ActiveInstanceChanged {
+        instance_id: InstanceId,
+    },
     LiveBrowseModeChanged {
         mode: LiveBrowseMode,
     },
@@ -747,6 +764,7 @@ mod tests {
                 plugin_id: "org.rackforge.rf-dls".into(),
                 plugin_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
+                config_available: true,
                 sounds: vec![SoundSummary {
                     id: "dls.piano-1".into(),
                     name: "Piano 1".into(),
@@ -860,6 +878,34 @@ mod tests {
         assert_eq!(restored.active_mode, SurfaceMode::Live);
         assert_eq!(restored.master_level, MasterLevel::UNITY);
         assert_eq!(restored.master_pan, MasterPan::CENTER);
+    }
+
+    #[test]
+    fn active_plugin_instance_is_selected_by_event() {
+        let mut state = session();
+        let synth_id = InstanceId::new("play.org.rackforge.rf-kr106").unwrap();
+        state.instances.push(PluginInstanceState {
+            instance_id: synth_id.clone(),
+            plugin_id: "org.rackforge.rf-kr106".into(),
+            plugin_name: "RF-KR106".into(),
+            ui_layouts: vec!["little@1".into()],
+            config_available: false,
+            sounds: Vec::new(),
+            selected_sound_id: None,
+        });
+        state
+            .apply(&event(
+                1,
+                SessionEvent::ActiveInstanceChanged {
+                    instance_id: synth_id.clone(),
+                },
+            ))
+            .unwrap();
+        assert_eq!(state.active_instance_id.as_ref(), Some(&synth_id));
+        assert_eq!(
+            state.active_instance().unwrap().plugin_id,
+            "org.rackforge.rf-kr106"
+        );
     }
 
     #[test]

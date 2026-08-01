@@ -10,7 +10,7 @@ use midir::{Ignore, MidiInput, MidiInputConnection};
 use rackforge_audio_api::{
     AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioOutputProfile, AudioOutputState, AudioSampleFormat,
 };
-use rackforge_control_api::CONTROL_SOCKET_NAME;
+use rackforge_control_api::{CONTROL_SOCKET_NAME, PluginParameterValue};
 use rackforge_midi_api::{
     CompiledMidiRoute, DEFAULT_INPUT_BUS_ID, IngressMidiEvent, MIDI_ROUTING_SCHEMA_VERSION,
     MidiInputBusId, MidiPacket, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget,
@@ -18,19 +18,20 @@ use rackforge_midi_api::{
     MidiTargetId, PluginChannelModel,
 };
 use rackforge_performance_api::RackKeyboardParts;
-use rackforge_plugin_api::PluginKind;
 use rackforge_plugin_api::abi::MidiEventV1;
+use rackforge_plugin_api::{ParameterKind, PluginKind};
 use rackforge_session_api::{
     ButtonPhase, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, HostActionBinding,
     HostActionTarget, HostControlBinding, InstanceId, MasterLevel, MasterPan, MidiButtonBinding,
     PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionId, SessionState, SoundSummary,
     SurfaceMode,
 };
+use semver::Version;
 use std::collections::BTreeMap;
-use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
+use std::{env, fs};
 
 const MAX_EVENTS_PER_BLOCK: usize = 256;
 const MIDI_QUEUE_CAPACITY: usize = 2_048;
@@ -87,6 +88,7 @@ struct MasterBalance {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AudioRenderMode {
+    Silent,
     Rack,
     Plugin,
 }
@@ -94,6 +96,7 @@ enum AudioRenderMode {
 impl From<SurfaceMode> for AudioRenderMode {
     fn from(mode: SurfaceMode) -> Self {
         match mode {
+            SurfaceMode::Idle => Self::Silent,
             SurfaceMode::Live => Self::Rack,
             SurfaceMode::Play => Self::Plugin,
         }
@@ -102,6 +105,7 @@ impl From<SurfaceMode> for AudioRenderMode {
 
 struct RackSlotVoice<'plugin> {
     slot_id: String,
+    plugin: &'plugin LoadedPlugin,
     instance: PluginInstance<'plugin>,
     midi_input_channel: Option<u8>,
     midi_note_low: u8,
@@ -114,8 +118,14 @@ struct RackSlotVoice<'plugin> {
     events: Vec<MidiEventV1>,
 }
 
-fn create_rack_voices<'plugin>(
+struct StandaloneVoice<'plugin> {
+    instance_id: InstanceId,
     plugin: &'plugin LoadedPlugin,
+    instance: PluginInstance<'plugin>,
+}
+
+fn create_rack_voices<'plugin>(
+    plugins: &BTreeMap<String, &'plugin LoadedPlugin>,
     specs: &[RackSlotRuntimeSpec],
     sample_rate_hz: u32,
     period_frames: u32,
@@ -123,6 +133,9 @@ fn create_rack_voices<'plugin>(
 ) -> Result<Vec<RackSlotVoice<'plugin>>> {
     let mut voices = Vec::with_capacity(specs.len());
     for spec in specs {
+        let plugin = plugins
+            .get(&spec.plugin_id)
+            .with_context(|| format!("plugin {} is not loaded", spec.plugin_id))?;
         let mut instance = plugin.create_instance()?;
         match &spec.state {
             RackSlotStateLoad::Default => {}
@@ -143,6 +156,7 @@ fn create_rack_voices<'plugin>(
             .with_context(|| format!("activating Rack Slot {}", spec.slot_id))?;
         voices.push(RackSlotVoice {
             slot_id: spec.slot_id.clone(),
+            plugin,
             instance,
             midi_input_channel: spec.midi_input_channel,
             midi_note_low: spec.midi_note_low,
@@ -449,6 +463,75 @@ pub struct LiveConfig {
     pub audio_state_path: PathBuf,
 }
 
+fn discover_plugin_packages(primary: &Path) -> Result<Vec<PluginPackage>> {
+    let primary = PluginPackage::open(primary)?;
+    let primary_id = primary.manifest().id.clone();
+    let root = env::var_os("RACKFORGE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"));
+    let mut selected = BTreeMap::<String, (Version, PluginPackage)>::new();
+
+    let mut candidates = Vec::new();
+    if let Ok(entries) = fs::read_dir(root.join("plugins")) {
+        candidates.extend(entries.flatten().map(|entry| entry.path()));
+    }
+    if let Ok(plugin_entries) = fs::read_dir(root.join("plugin-store/packages")) {
+        for plugin_entry in plugin_entries.flatten() {
+            if let Ok(version_entries) = fs::read_dir(plugin_entry.path()) {
+                candidates.extend(version_entries.flatten().map(|entry| entry.path()));
+            }
+        }
+    }
+
+    for candidate in candidates {
+        if !candidate.join("rackforge-plugin.toml").is_file() {
+            continue;
+        }
+        let package = match PluginPackage::open(&candidate) {
+            Ok(package) => package,
+            Err(error) => {
+                eprintln!(
+                    "PLUGIN_PACKAGE_IGNORED path={} error={error:#}",
+                    candidate.display()
+                );
+                continue;
+            }
+        };
+        if package.manifest().id == primary_id {
+            continue;
+        }
+        let version = match Version::parse(&package.manifest().version) {
+            Ok(version) => version,
+            Err(error) => {
+                eprintln!(
+                    "PLUGIN_PACKAGE_IGNORED path={} error=invalid-version:{error}",
+                    candidate.display()
+                );
+                continue;
+            }
+        };
+        let replace = selected
+            .get(&package.manifest().id)
+            .is_none_or(|(current, _)| version > *current);
+        if replace {
+            selected.insert(package.manifest().id.clone(), (version, package));
+        }
+    }
+
+    let mut packages = Vec::with_capacity(selected.len() + 1);
+    packages.push(primary);
+    packages.extend(selected.into_values().map(|(_, package)| package));
+    Ok(packages)
+}
+
+fn plugin_instance_id(plugin_id: &str, primary: bool) -> Result<InstanceId> {
+    if primary {
+        return InstanceId::new(DEFAULT_LIVE_INSTANCE_ID)
+            .map_err(|message| anyhow::anyhow!(message));
+    }
+    InstanceId::new(format!("play.{plugin_id}")).map_err(|message| anyhow::anyhow!(message))
+}
+
 pub fn run(config: LiveConfig) -> Result<()> {
     ensure_supported_engine_profile(&config.audio_output)?;
     let output_rate = config.audio_output.sample_rate_hz;
@@ -462,6 +545,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         .map(SessionCheckpointStore::live);
     let (
         persisted_mode,
+        persisted_active_instance_id,
         persisted_sound_id,
         persisted_master_level,
         persisted_master_pan,
@@ -469,19 +553,35 @@ pub fn run(config: LiveConfig) -> Result<()> {
     ) = match checkpoint.as_ref() {
         Some(store) => match (
             store.active_mode(&session_id),
+            store.active_instance_id(&session_id),
             store.selected_sound(&session_id, DEFAULT_LIVE_INSTANCE_ID),
             store.master_level(&session_id),
             store.master_pan(&session_id),
             store.live_state(&session_id),
         ) {
-            (Ok(mode), Ok(sound_id), Ok(master_level), Ok(master_pan), Ok(live)) => {
-                (mode, sound_id, master_level, master_pan, live)
-            }
-            (mode, sound_id, master_level, master_pan, live) => {
+            (
+                Ok(mode),
+                Ok(active_instance),
+                Ok(sound_id),
+                Ok(master_level),
+                Ok(master_pan),
+                Ok(live),
+            ) => (
+                mode,
+                active_instance,
+                sound_id,
+                master_level,
+                master_pan,
+                live,
+            ),
+            (mode, active_instance, sound_id, master_level, master_pan, live) => {
                 if let Err(error) = mode {
                     eprintln!("SESSION_CHECKPOINT_IGNORED {error:#}");
                 }
                 if let Err(error) = sound_id {
+                    eprintln!("SESSION_CHECKPOINT_IGNORED {error:#}");
+                }
+                if let Err(error) = active_instance {
                     eprintln!("SESSION_CHECKPOINT_IGNORED {error:#}");
                 }
                 if let Err(error) = master_level {
@@ -493,97 +593,176 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 if let Err(error) = live {
                     eprintln!("SESSION_CHECKPOINT_IGNORED {error:#}");
                 }
-                (None, None, None, None, None)
+                (None, None, None, None, None, None)
             }
         },
-        None => (None, None, None, None, None),
+        None => (None, None, None, None, None, None),
     };
-    let package = PluginPackage::open(&config.package)?;
-    if package.manifest().kind != PluginKind::Instrument {
-        bail!(
-            "LIVE currently requires an instrument plugin, found {:?}",
-            package.manifest().kind
+    let packages = discover_plugin_packages(&config.package)?;
+    let primary_id = packages
+        .first()
+        .context("no primary plugin package was configured")?
+        .manifest()
+        .id
+        .clone();
+    let mut plugins = BTreeMap::<String, &'static LoadedPlugin>::new();
+    for package in packages {
+        let is_primary = package.manifest().id == primary_id;
+        if package.manifest().kind != PluginKind::Instrument {
+            eprintln!(
+                "PLUGIN_PACKAGE_IGNORED id={} reason=kind:{:?}",
+                package.manifest().id,
+                package.manifest().kind
+            );
+            continue;
+        }
+        let resources = if is_primary {
+            &config.resources
+        } else {
+            &BTreeMap::new()
+        };
+        let binary = is_primary.then_some(config.binary.as_deref()).flatten();
+        // Native libraries remain loaded for the process lifetime. RackForge never
+        // unloads a plugin while an audio instance may still reference its ABI.
+        let loaded = match unsafe {
+            LoadedPlugin::load(&package, binary, resources, config.data_root.as_deref())
+        } {
+            Ok(plugin) => Box::leak(Box::new(plugin)),
+            Err(error) if !is_primary => {
+                eprintln!(
+                    "PLUGIN_RUNTIME_IGNORED id={} error={error:#}",
+                    package.manifest().id
+                );
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        println!(
+            "LIVE_PLUGIN_READY id={} parameters={} presets={}",
+            loaded.descriptor().id,
+            loaded.parameters().parameters.len(),
+            loaded.presets().presets.len()
         );
+        plugins.insert(loaded.manifest().id.clone(), loaded);
     }
-    // SAFETY: LIVE is an explicit command that executes an installed native
-    // plugin package.
-    let plugin = unsafe {
-        LoadedPlugin::load(
-            &package,
-            config.binary.as_deref(),
-            &config.resources,
-            config.data_root.as_deref(),
-        )
-    }?;
-    println!(
-        "LIVE_PLUGIN_READY id={} parameters={} presets={}",
-        plugin.descriptor().id,
-        plugin.parameters().parameters.len(),
-        plugin.presets().presets.len()
-    );
-    let mut instance = plugin.create_instance()?;
-    let presets = instance.preset_catalog()?;
-    let configured_preset = match config.preset.as_deref() {
-        Some(id) => Some(
-            presets
+    let primary_plugin = *plugins
+        .get(&primary_id)
+        .context("primary plugin failed to load")?;
+
+    let mut standalone_voices = Vec::with_capacity(plugins.len());
+    let mut session_instances = Vec::with_capacity(plugins.len());
+    let mut primary_preset_id = None;
+    let mut primary_preset_name = None;
+    for (plugin_id, plugin) in &plugins {
+        let is_primary = plugin_id == &primary_id;
+        let instance_id = plugin_instance_id(plugin_id, is_primary)?;
+        let mut instance = plugin.create_instance()?;
+        let presets = instance.preset_catalog()?;
+        let secondary_persisted = (!is_primary)
+            .then(|| {
+                checkpoint
+                    .as_ref()
+                    .and_then(|store| store.selected_sound(&session_id, instance_id.as_str()).ok())
+                    .flatten()
+            })
+            .flatten();
+        let requested = if is_primary {
+            persisted_sound_id.as_deref().or(config.preset.as_deref())
+        } else {
+            secondary_persisted.as_deref()
+        };
+        let selected = requested
+            .and_then(|id| {
+                presets
+                    .presets
+                    .iter()
+                    .chain(plugin.presets().presets.iter())
+                    .find(|preset| preset.id == id)
+            })
+            .or_else(|| presets.presets.first())
+            .or_else(|| plugin.presets().presets.first());
+        if let Some(preset) = selected {
+            instance.load_preset(&preset.id)?;
+            println!(
+                "LIVE_PRESET_READY plugin={} id={} name={:?}",
+                plugin_id, preset.id, preset.name
+            );
+            if is_primary {
+                primary_preset_id = Some(preset.id.clone());
+                primary_preset_name = Some(preset.name.clone());
+            }
+        }
+        instance.activate(
+            f64::from(output_rate),
+            period_frames as u32,
+            0,
+            channels as u32,
+        )?;
+        session_instances.push(PluginInstanceState {
+            instance_id: instance_id.clone(),
+            plugin_id: plugin.manifest().id.clone(),
+            plugin_name: plugin.manifest().name.clone(),
+            ui_layouts: plugin.manifest().ui_layouts.clone(),
+            config_available: plugin.manifest().config_mode,
+            sounds: presets
                 .presets
                 .iter()
-                .chain(plugin.presets().presets.iter())
-                .find(|preset| preset.id == id)
-                .with_context(|| format!("plugin does not declare preset {id:?}"))?,
-        ),
-        None => presets.presets.first(),
-    };
-    let preset = match persisted_sound_id.as_deref() {
-        Some(id) => match presets
-            .presets
-            .iter()
-            .chain(plugin.presets().presets.iter())
-            .find(|preset| preset.id == id)
-        {
-            Some(preset) => Some(preset),
-            None => {
-                eprintln!("SESSION_CHECKPOINT_SOUND_MISSING id={id:?}; using configured fallback");
-                configured_preset
-            }
-        },
-        None => configured_preset,
-    };
-    if let Some(preset) = preset {
-        instance.load_preset(&preset.id)?;
-        println!("LIVE_PRESET_READY id={} name={:?}", preset.id, preset.name);
+                .map(|preset| SoundSummary {
+                    id: preset.id.clone(),
+                    name: preset.name.clone(),
+                    bank: preset.bank.clone(),
+                    detail: preset
+                        .description
+                        .clone()
+                        .or_else(|| preset.category.clone()),
+                    editable: preset.editable,
+                })
+                .collect(),
+            selected_sound_id: selected.map(|preset| preset.id.clone()),
+        });
+        standalone_voices.push(StandaloneVoice {
+            instance_id,
+            plugin,
+            instance,
+        });
     }
-    let bootstrap_preset = preset
-        .or_else(|| presets.presets.first())
-        .context("LIVE plugin exposes no program for the initial Rack")?;
+    let primary_preset_id =
+        primary_preset_id.context("primary LIVE plugin exposes no program for the initial Rack")?;
+    let primary_preset_name = primary_preset_name
+        .context("primary LIVE plugin exposes no named program for the initial Rack")?;
+    let primary_voice = standalone_voices
+        .iter_mut()
+        .find(|voice| voice.plugin.manifest().id == primary_id)
+        .context("primary plugin instance is unavailable")?;
     let mut state_store = PluginStateStore::new(config.data_root.as_deref())?;
     let bootstrap_state = state_store.put(
-        &plugin.manifest().id,
-        &plugin.manifest().version,
-        plugin.manifest().state_version,
-        Some(bootstrap_preset.id.clone()),
-        &instance
+        &primary_plugin.manifest().id,
+        &primary_plugin.manifest().version,
+        primary_plugin.manifest().state_version,
+        Some(primary_preset_id.clone()),
+        &primary_voice
+            .instance
             .save_state()
             .context("capturing initial plugin state")?,
     )?;
     let mut performance_repository = PerformanceRepository::load_or_bootstrap(
         config.data_root.as_deref(),
         PerformanceBootstrap {
-            plugin_id: plugin.manifest().id.clone(),
+            plugin_id: primary_plugin.manifest().id.clone(),
             state: bootstrap_state,
-            name: bootstrap_preset.name.clone(),
+            name: primary_preset_name,
         },
     )?;
     let migrated = performance_repository.migrate_legacy_plugin_states(
-        &plugin.manifest().id,
+        &primary_plugin.manifest().id,
         |program_id| {
-            let mut migration_instance = plugin.create_instance()?;
+            let mut migration_instance = primary_plugin.create_instance()?;
             migration_instance.load_preset(program_id)?;
             let bytes = migration_instance.save_state()?;
             state_store.put(
-                &plugin.manifest().id,
-                &plugin.manifest().version,
-                plugin.manifest().state_version,
+                &primary_plugin.manifest().id,
+                &primary_plugin.manifest().version,
+                primary_plugin.manifest().state_version,
                 Some(program_id.to_owned()),
                 &bytes,
             )
@@ -622,6 +801,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
             };
             initial_rack_specs.push(RackSlotRuntimeSpec {
                 slot_id: slot.id.as_str().to_owned(),
+                plugin_id: slot.plugin_id.clone(),
                 state,
                 midi_input_channel: slot.midi_input_channel,
                 midi_note_low: slot.midi_note_low,
@@ -633,14 +813,8 @@ pub fn run(config: LiveConfig) -> Result<()> {
             });
         }
     }
-    instance.activate(
-        f64::from(output_rate),
-        period_frames as u32,
-        0,
-        channels as u32,
-    )?;
     let rack_voices = create_rack_voices(
-        &plugin,
+        &plugins,
         &initial_rack_specs,
         output_rate,
         period_frames as u32,
@@ -652,7 +826,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
     println!("MIDI_READY ports={midi_port_names:?}");
     let play_route = compile_default_play_route(
         &midi_sources,
-        plugin
+        primary_plugin
             .manifest()
             .midi
             .as_ref()
@@ -680,17 +854,17 @@ pub fn run(config: LiveConfig) -> Result<()> {
         output.profile.buffer_frames,
         output.profile.nominal_buffer_latency_ms(),
     );
-    let selected_sound_id = preset
-        .and_then(|selected| {
-            presets
-                .presets
-                .iter()
-                .find(|candidate| candidate.id == selected.id)
-        })
-        .map(|selected| selected.id.clone())
-        .or_else(|| presets.presets.first().map(|preset| preset.id.clone()));
-    let instance_id =
+    let primary_instance_id =
         InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).map_err(|message| anyhow::anyhow!(message))?;
+    let active_instance_id = persisted_active_instance_id
+        .as_deref()
+        .and_then(|id| InstanceId::new(id).ok())
+        .filter(|id| {
+            session_instances
+                .iter()
+                .any(|instance| instance.instance_id == *id)
+        })
+        .unwrap_or_else(|| primary_instance_id.clone());
     let initial_surface_mode = persisted_mode.unwrap_or(SurfaceMode::Live);
     let session = SessionState {
         schema_version: SESSION_SCHEMA_VERSION,
@@ -700,28 +874,8 @@ pub fn run(config: LiveConfig) -> Result<()> {
         master_level: persisted_master_level.unwrap_or(MasterLevel::UNITY),
         master_pan: persisted_master_pan.unwrap_or(MasterPan::CENTER),
         live: live_state,
-        active_instance_id: Some(instance_id.clone()),
-        instances: vec![PluginInstanceState {
-            instance_id,
-            plugin_id: plugin.manifest().id.clone(),
-            plugin_name: plugin.manifest().name.clone(),
-            ui_layouts: plugin.manifest().ui_layouts.clone(),
-            sounds: presets
-                .presets
-                .iter()
-                .map(|preset| SoundSummary {
-                    id: preset.id.clone(),
-                    name: preset.name.clone(),
-                    bank: preset.bank.clone(),
-                    detail: preset
-                        .description
-                        .clone()
-                        .or_else(|| preset.category.clone()),
-                    editable: preset.editable,
-                })
-                .collect(),
-            selected_sound_id,
-        }],
+        active_instance_id: Some(active_instance_id.clone()),
+        instances: session_instances,
         audition: None,
         program_draft: None,
     };
@@ -754,7 +908,10 @@ pub fn run(config: LiveConfig) -> Result<()> {
         config.audio_state_path,
         Arc::new(Mutex::new(performance_repository)),
         state_store,
-        plugin.manifest().clone(),
+        plugins
+            .values()
+            .map(|plugin| (plugin.manifest().id.clone(), plugin.manifest().clone()))
+            .collect(),
         control_storage,
         checkpoint,
     )?;
@@ -764,8 +921,9 @@ pub fn run(config: LiveConfig) -> Result<()> {
         output,
         &receiver,
         &control_receiver,
-        &plugin,
-        &mut instance,
+        &plugins,
+        &mut standalone_voices,
+        active_instance_id,
         rack_voices,
         &play_route,
         midi_port_names.len(),
@@ -933,12 +1091,23 @@ fn ensure_supported_engine_profile(profile: &AudioOutputProfile) -> Result<()> {
     Ok(())
 }
 
+fn standalone_voice_mut<'voices, 'plugin>(
+    voices: &'voices mut [StandaloneVoice<'plugin>],
+    instance_id: &InstanceId,
+) -> Result<&'voices mut StandaloneVoice<'plugin>, String> {
+    voices
+        .iter_mut()
+        .find(|voice| &voice.instance_id == instance_id)
+        .ok_or_else(|| format!("unknown plugin instance {instance_id}"))
+}
+
 fn audio_loop<'plugin>(
     initial_output: OpenedAudioOutput,
     receiver: &Receiver<IngressMidiEvent>,
     control_receiver: &Receiver<AudioControlCommand>,
-    plugin: &'plugin LoadedPlugin,
-    instance: &mut PluginInstance<'plugin>,
+    plugins: &BTreeMap<String, &'plugin LoadedPlugin>,
+    standalone_voices: &mut [StandaloneVoice<'plugin>],
+    mut active_instance_id: InstanceId,
     mut rack_voices: Vec<RackSlotVoice<'plugin>>,
     play_route: &CompiledMidiRoute,
     midi_source_count: usize,
@@ -964,6 +1133,7 @@ fn audio_loop<'plugin>(
     let mut next_audition_id = 1_u64;
     let mut controller_states = MidiControllerStates::new(midi_source_count);
     let mut replay_controller_state = false;
+    let mut pending_emergency_stop = false;
     let mut master_gain = MasterGain::new(initial_master_level);
     let mut master_balance = MasterBalance::new(initial_master_pan);
     let mut reserved_midi_controls = ReservedMidiControls::with_sources(midi_source_count);
@@ -974,7 +1144,7 @@ fn audio_loop<'plugin>(
                 AudioControlCommand::ApplyAudioOutput { profile, reply } => {
                     let result = reconfigure_audio_output(
                         &mut output,
-                        instance,
+                        standalone_voices,
                         &mut rack_voices,
                         profile,
                         &audio_state,
@@ -1030,31 +1200,106 @@ fn audio_loop<'plugin>(
                     let _ = reply.send(Ok(()));
                 }
                 AudioControlCommand::SetRenderMode { mode, reply } => {
-                    render_mode = mode.into();
-                    replay_controller_state = true;
+                    let requested_mode = mode.into();
+                    if requested_mode == AudioRenderMode::Silent {
+                        render_mode = AudioRenderMode::Silent;
+                        events.clear();
+                        for voice in &mut rack_voices {
+                            voice.events.clear();
+                        }
+                        replay_controller_state = false;
+                        println!("AUDIO_RENDER_MODE mode={render_mode:?}");
+                        let _ = reply.send(Ok(()));
+                    } else {
+                        let result = if render_mode == AudioRenderMode::Silent {
+                            if pending_emergency_stop {
+                                pending_emergency_stop = false;
+                                if let Err(error) =
+                                    stop_all_plugin_runtimes(standalone_voices, &mut rack_voices)
+                                {
+                                    eprintln!("EMERGENCY_STOP_RUNTIME_FAILED error={error}");
+                                }
+                            }
+                            restart_render_target(
+                                requested_mode,
+                                standalone_voices,
+                                &active_instance_id,
+                                &mut rack_voices,
+                                output_rate as f64,
+                                period_frames as u32,
+                                channels as u32,
+                            )
+                        } else {
+                            Ok(())
+                        };
+                        if result.is_ok() {
+                            render_mode = requested_mode;
+                            replay_controller_state = true;
+                            println!("AUDIO_RENDER_MODE mode={render_mode:?}");
+                        }
+                        let _ = reply.send(result);
+                    }
+                }
+                AudioControlCommand::EmergencyStop { reply } => {
+                    render_mode = AudioRenderMode::Silent;
+                    events.clear();
+                    for voice in &mut rack_voices {
+                        voice.events.clear();
+                    }
+                    audition = None;
+                    replay_controller_state = false;
+                    pending_emergency_stop = true;
+                    println!("AUDIO_EMERGENCY_STOP output=silent runtime_stop=pending");
                     println!("AUDIO_RENDER_MODE mode={render_mode:?}");
                     let _ = reply.send(Ok(()));
+                }
+                AudioControlCommand::SelectPlugin { instance_id, reply } => {
+                    let result = (|| -> Result<(), String> {
+                        if active_instance_id == instance_id {
+                            return Ok(());
+                        }
+                        standalone_voice_mut(standalone_voices, &instance_id)?;
+                        standalone_voice_mut(standalone_voices, &active_instance_id)?
+                            .instance
+                            .reset()
+                            .map_err(|error| error.to_string())?;
+                        active_instance_id = instance_id.clone();
+                        replay_controller_state |= render_mode == AudioRenderMode::Plugin;
+                        println!("LIVE_PLUGIN_SELECTED instance={instance_id}");
+                        Ok(())
+                    })();
+                    let _ = reply.send(result);
                 }
                 AudioControlCommand::SelectSound {
                     instance_id,
                     sound_id,
                     reply,
                 } => {
-                    let result = instance.load_preset(&sound_id).map(|()| {
-                        println!("LIVE_SOUND_SELECTED instance={instance_id} id={sound_id}");
-                    });
+                    let result = standalone_voice_mut(standalone_voices, &instance_id)
+                        .and_then(|voice| {
+                            voice
+                                .instance
+                                .load_preset(&sound_id)
+                                .map_err(|error| error.to_string())
+                        })
+                        .map(|()| {
+                            println!("LIVE_SOUND_SELECTED instance={instance_id} id={sound_id}");
+                        });
                     if result.is_ok() {
+                        active_instance_id = instance_id;
                         render_mode = AudioRenderMode::Plugin;
                     }
                     replay_controller_state |= result.is_ok();
                     let _ = reply.send(result.map_err(|error| error.to_string()));
                 }
                 AudioControlCommand::CaptureState { instance_id, reply } => {
-                    let result = if instance_id.as_str() == DEFAULT_LIVE_INSTANCE_ID {
-                        instance.save_state().map_err(|error| error.to_string())
-                    } else {
-                        Err(format!("unknown plugin instance {instance_id}"))
-                    };
+                    let result =
+                        standalone_voice_mut(standalone_voices, &instance_id).and_then(|voice| {
+                            voice
+                                .instance
+                                .save_state()
+                                .map_err(|error| error.to_string())
+                        });
                     let _ = reply.send(result);
                 }
                 AudioControlCommand::RestoreState {
@@ -1062,21 +1307,27 @@ fn audio_loop<'plugin>(
                     bytes,
                     reply,
                 } => {
-                    let result = if instance_id.as_str() == DEFAULT_LIVE_INSTANCE_ID {
-                        instance
-                            .load_state(&bytes)
-                            .map_err(|error| error.to_string())
-                    } else {
-                        Err(format!("unknown plugin instance {instance_id}"))
-                    };
+                    let result =
+                        standalone_voice_mut(standalone_voices, &instance_id).and_then(|voice| {
+                            voice
+                                .instance
+                                .load_state(&bytes)
+                                .map_err(|error| error.to_string())
+                        });
                     if result.is_ok() {
+                        active_instance_id = instance_id;
                         render_mode = AudioRenderMode::Plugin;
                         replay_controller_state = true;
                     }
                     let _ = reply.send(result);
                 }
-                AudioControlCommand::MaterializeState { program_id, reply } => {
+                AudioControlCommand::MaterializeState {
+                    instance_id,
+                    program_id,
+                    reply,
+                } => {
                     let result = (|| -> Result<Vec<u8>, String> {
+                        let plugin = standalone_voice_mut(standalone_voices, &instance_id)?.plugin;
                         let mut snapshot = plugin
                             .create_instance()
                             .map_err(|error| error.to_string())?;
@@ -1089,6 +1340,70 @@ fn audio_loop<'plugin>(
                     })();
                     let _ = reply.send(result);
                 }
+                AudioControlCommand::PluginParameters { instance_id, reply } => {
+                    let result =
+                        standalone_voice_mut(standalone_voices, &instance_id).and_then(|voice| {
+                            let schema = voice.plugin.parameters().clone();
+                            let values = schema
+                                .parameters
+                                .iter()
+                                .map(|parameter| {
+                                    voice
+                                        .instance
+                                        .get_parameter(parameter.index)
+                                        .map(|value| PluginParameterValue {
+                                            index: parameter.index,
+                                            value,
+                                        })
+                                        .map_err(|error| error.to_string())
+                                })
+                                .collect::<Result<Vec<_>, _>>()?;
+                            Ok((schema, values))
+                        });
+                    let _ = reply.send(result);
+                }
+                AudioControlCommand::SetPluginParameter {
+                    instance_id,
+                    parameter_index,
+                    value,
+                    reply,
+                } => {
+                    let result =
+                        standalone_voice_mut(standalone_voices, &instance_id).and_then(|voice| {
+                            let parameter = voice
+                                .plugin
+                                .parameters()
+                                .parameters
+                                .iter()
+                                .find(|parameter| parameter.index == parameter_index)
+                                .ok_or_else(|| {
+                                    format!("unknown plugin parameter {parameter_index}")
+                                })?;
+                            if parameter.flags.read_only
+                                || matches!(parameter.kind, ParameterKind::Meter { .. })
+                            {
+                                return Err(format!(
+                                    "plugin parameter {} is read-only",
+                                    parameter.id
+                                ));
+                            }
+                            if !parameter_value_is_valid(&parameter.kind, value) {
+                                return Err(format!(
+                                    "invalid value {value} for plugin parameter {}",
+                                    parameter.id
+                                ));
+                            }
+                            voice
+                                .instance
+                                .set_parameter(parameter_index, value)
+                                .map_err(|error| error.to_string())?;
+                            voice
+                                .instance
+                                .get_parameter(parameter_index)
+                                .map_err(|error| error.to_string())
+                        });
+                    let _ = reply.send(result);
+                }
                 AudioControlCommand::ActivateRack {
                     rack_id,
                     instance_id,
@@ -1096,7 +1411,7 @@ fn audio_loop<'plugin>(
                     reply,
                 } => {
                     let result = create_rack_voices(
-                        plugin,
+                        plugins,
                         &slots,
                         output_rate as u32,
                         period_frames as u32,
@@ -1122,7 +1437,10 @@ fn audio_loop<'plugin>(
                         if audition.is_some() {
                             return Err("audition focus is already leased".into());
                         }
-                        instance.reset().map_err(|error| error.to_string())?;
+                        standalone_voice_mut(standalone_voices, &instance_id)?
+                            .instance
+                            .reset()
+                            .map_err(|error| error.to_string())?;
                         let lease_id = next_audition_id;
                         next_audition_id = next_audition_id.wrapping_add(1).max(1);
                         audition = Some(AuditionLease {
@@ -1134,6 +1452,7 @@ fn audio_loop<'plugin>(
                         Ok(lease_id)
                     })();
                     if result.is_ok() {
+                        active_instance_id = instance_id;
                         render_mode = AudioRenderMode::Plugin;
                     }
                     replay_controller_state |= result.is_ok();
@@ -1149,8 +1468,11 @@ fn audio_loop<'plugin>(
                 AudioControlCommand::EndAudition { lease_id, reply } => {
                     let result = match audition.take() {
                         Some(lease) if lease.id == lease_id => {
-                            restore_after_audition(instance, &lease)
-                                .map_err(|error| error.to_string())
+                            standalone_voice_mut(standalone_voices, &lease.instance_id)
+                                .and_then(|voice| {
+                                    restore_after_audition(&mut voice.instance, &lease)
+                                        .map_err(|error| error.to_string())
+                                })
                                 .map(|()| {
                                     println!(
                                         "AUDITION_RELEASED lease={lease_id} instance={}",
@@ -1180,6 +1502,8 @@ fn audio_loop<'plugin>(
                         if audition.is_some() {
                             return Err("audition focus is already leased".into());
                         }
+                        let instance =
+                            &mut standalone_voice_mut(standalone_voices, &instance_id)?.instance;
                         let prepared = instance
                             .begin_program_edit(&request)
                             .map_err(|error| error.to_string())?;
@@ -1208,6 +1532,7 @@ fn audio_loop<'plugin>(
                         Ok((lease_id, prepared, editor))
                     })();
                     if result.is_ok() {
+                        active_instance_id = instance_id;
                         render_mode = AudioRenderMode::Plugin;
                     }
                     replay_controller_state |= result.is_ok();
@@ -1219,6 +1544,8 @@ fn audio_loop<'plugin>(
                     reply,
                 } => {
                     let result = (|| -> Result<_, String> {
+                        let instance =
+                            &mut standalone_voice_mut(standalone_voices, &instance_id)?.instance;
                         let prepared = instance
                             .prepare_program_save(&document)
                             .map_err(|error| error.to_string())?;
@@ -1248,6 +1575,8 @@ fn audio_loop<'plugin>(
                     reply,
                 } => {
                     let result = (|| -> Result<_, String> {
+                        let instance =
+                            &mut standalone_voice_mut(standalone_voices, &instance_id)?.instance;
                         let prepared = instance
                             .apply_program_edit(&request)
                             .map_err(|error| error.to_string())?;
@@ -1279,10 +1608,14 @@ fn audio_loop<'plugin>(
                     prepared,
                     reply,
                 } => {
-                    let result = instance
-                        .install_program(&prepared)
-                        .and_then(|()| instance.preset_catalog())
-                        .map_err(|error| error.to_string())
+                    let result = standalone_voice_mut(standalone_voices, &instance_id)
+                        .and_then(|voice| {
+                            voice
+                                .instance
+                                .install_program(&prepared)
+                                .and_then(|()| voice.instance.preset_catalog())
+                                .map_err(|error| error.to_string())
+                        })
                         .inspect(|_| {
                             println!(
                                 "PROGRAM_INSTALLED instance={instance_id} id={}",
@@ -1296,9 +1629,13 @@ fn audio_loop<'plugin>(
                     request,
                     reply,
                 } => {
-                    let result = instance
-                        .activate_surface(&request)
-                        .map_err(|error| error.to_string())
+                    let result = standalone_voice_mut(standalone_voices, &instance_id)
+                        .and_then(|voice| {
+                            voice
+                                .instance
+                                .activate_surface(&request)
+                                .map_err(|error| error.to_string())
+                        })
                         .inspect(|response| {
                             println!(
                                 "SURFACE_ACTIVATED instance={instance_id} mode={:?} focus={:?}",
@@ -1315,6 +1652,7 @@ fn audio_loop<'plugin>(
         }
         if replay_controller_state {
             let omitted = match render_mode {
+                AudioRenderMode::Silent => 0,
                 AudioRenderMode::Plugin => controller_states.replay_routed_into(
                     play_route,
                     None,
@@ -1346,6 +1684,7 @@ fn audio_loop<'plugin>(
             }
             controller_states.observe(event.source, plugin_event);
             match render_mode {
+                AudioRenderMode::Silent => {}
                 AudioRenderMode::Plugin => {
                     if let Some(routed) = play_route.route(event) {
                         if events.len() < MAX_EVENTS_PER_BLOCK {
@@ -1379,17 +1718,21 @@ fn audio_loop<'plugin>(
 
         mix_output.fill(0.0);
         match render_mode {
+            AudioRenderMode::Silent => {}
             AudioRenderMode::Plugin => {
                 plugin_output.fill(0.0);
-                instance.process_interleaved(
-                    &input,
-                    &mut plugin_output,
-                    period_frames as u32,
-                    0,
-                    channels as u32,
-                    &events,
-                    &[],
-                )?;
+                standalone_voice_mut(standalone_voices, &active_instance_id)
+                    .map_err(anyhow::Error::msg)?
+                    .instance
+                    .process_interleaved(
+                        &input,
+                        &mut plugin_output,
+                        period_frames as u32,
+                        0,
+                        channels as u32,
+                        &events,
+                        &[],
+                    )?;
                 mix_output.copy_from_slice(&plugin_output);
             }
             AudioRenderMode::Rack => {
@@ -1445,8 +1788,17 @@ fn audio_loop<'plugin>(
             channels,
         )?;
 
+        if pending_emergency_stop {
+            pending_emergency_stop = false;
+            if let Err(error) = stop_all_plugin_runtimes(standalone_voices, &mut rack_voices) {
+                eprintln!("EMERGENCY_STOP_RUNTIME_FAILED error={error}");
+            }
+            println!("AUDIO_EMERGENCY_STOP runtime_stop=complete");
+        }
+
         if meter_frames >= output_rate {
             let midi_events = match render_mode {
+                AudioRenderMode::Silent => 0,
                 AudioRenderMode::Plugin => events.len(),
                 AudioRenderMode::Rack => rack_voices.iter().map(|voice| voice.events.len()).sum(),
             };
@@ -1460,6 +1812,115 @@ fn audio_loop<'plugin>(
             meter_clipped = 0;
             dropped_events = 0;
         }
+    }
+}
+
+fn stop_all_plugin_runtimes(
+    standalone_voices: &mut [StandaloneVoice<'_>],
+    rack_voices: &mut [RackSlotVoice<'_>],
+) -> Result<(), String> {
+    let mut failures = Vec::new();
+    for voice in standalone_voices {
+        if let Err(error) = replace_with_stopped_runtime(voice.plugin, &mut voice.instance) {
+            failures.push(format!("instance {}: {error}", voice.instance_id));
+        }
+    }
+    for voice in rack_voices {
+        if let Err(error) = replace_with_stopped_runtime(voice.plugin, &mut voice.instance) {
+            failures.push(format!("slot {}: {error}", voice.slot_id));
+        }
+        voice.events.clear();
+        voice.output.fill(0.0);
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+fn replace_with_stopped_runtime<'plugin>(
+    plugin: &'plugin LoadedPlugin,
+    instance: &mut PluginInstance<'plugin>,
+) -> Result<(), String> {
+    let state = instance.save_state().map_err(|error| error.to_string())?;
+    let mut replacement = plugin
+        .create_instance()
+        .map_err(|error| error.to_string())?;
+    replacement
+        .load_state(&state)
+        .map_err(|error| error.to_string())?;
+    instance.deactivate().map_err(|error| error.to_string())?;
+    *instance = replacement;
+    Ok(())
+}
+
+fn restart_render_target(
+    mode: AudioRenderMode,
+    standalone_voices: &mut [StandaloneVoice<'_>],
+    active_instance_id: &InstanceId,
+    rack_voices: &mut [RackSlotVoice<'_>],
+    sample_rate: f64,
+    maximum_frames: u32,
+    output_channels: u32,
+) -> Result<(), String> {
+    match mode {
+        AudioRenderMode::Silent => Ok(()),
+        AudioRenderMode::Plugin => standalone_voice_mut(standalone_voices, active_instance_id)?
+            .instance
+            .activate(sample_rate, maximum_frames, 0, output_channels)
+            .map_err(|error| error.to_string()),
+        AudioRenderMode::Rack => {
+            for index in 0..rack_voices.len() {
+                let activation = {
+                    let voice = &mut rack_voices[index];
+                    voice
+                        .instance
+                        .activate(sample_rate, maximum_frames, 0, output_channels)
+                        .map_err(|error| format!("reactivating slot {}: {error:#}", voice.slot_id))
+                };
+                if let Err(error) = activation {
+                    for activated in &mut *rack_voices {
+                        let _ = activated.instance.deactivate();
+                    }
+                    return Err(error);
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn parameter_value_is_valid(kind: &ParameterKind, value: f64) -> bool {
+    if !value.is_finite() {
+        return false;
+    }
+    match kind {
+        ParameterKind::Float {
+            minimum, maximum, ..
+        }
+        | ParameterKind::Meter {
+            minimum, maximum, ..
+        } => (*minimum..=*maximum).contains(&value),
+        ParameterKind::Integer {
+            minimum,
+            maximum,
+            step,
+            ..
+        } => {
+            value.fract() == 0.0
+                && value >= *minimum as f64
+                && value <= *maximum as f64
+                && ((value as i64 - *minimum) % *step == 0)
+        }
+        ParameterKind::Boolean { .. } => value == 0.0 || value == 1.0,
+        ParameterKind::Enum { choices, .. } => {
+            value.fract() == 0.0
+                && choices
+                    .iter()
+                    .any(|choice| f64::from(choice.value) == value)
+        }
+        ParameterKind::Trigger => value == 0.0 || value == 1.0,
     }
 }
 
@@ -1478,7 +1939,7 @@ fn mix_rack_slot(mix: &mut [f32], source: &[f32], channels: usize, level: f32, p
 
 fn reconfigure_audio_output(
     output: &mut Option<OpenedAudioOutput>,
-    instance: &mut PluginInstance<'_>,
+    standalone_voices: &mut [StandaloneVoice<'_>],
     rack_voices: &mut [RackSlotVoice<'_>],
     requested: AudioOutputProfile,
     shared_state: &Arc<Mutex<AudioOutputState>>,
@@ -1496,9 +1957,12 @@ fn reconfigure_audio_output(
             .map_err(|_| anyhow::anyhow!("audio state lock is poisoned"));
     }
 
-    instance
-        .deactivate()
-        .context("deactivating plugin for audio change")?;
+    for voice in standalone_voices.iter_mut() {
+        voice
+            .instance
+            .deactivate()
+            .with_context(|| format!("deactivating plugin instance {}", voice.instance_id))?;
+    }
     for voice in rack_voices.iter_mut() {
         voice
             .instance
@@ -1509,14 +1973,17 @@ fn reconfigure_audio_output(
     let apply = (|| -> Result<(OpenedAudioOutput, Vec<_>)> {
         let devices = discover_audio_devices().context("refreshing audio device inventory")?;
         let opened = open_audio_output_from_inventory(&requested, &devices)?;
-        instance
-            .activate(
-                f64::from(requested.sample_rate_hz),
-                requested.period_frames,
-                0,
-                requested.channels,
-            )
-            .context("activating plugin for requested audio profile")?;
+        for voice in standalone_voices.iter_mut() {
+            voice
+                .instance
+                .activate(
+                    f64::from(requested.sample_rate_hz),
+                    requested.period_frames,
+                    0,
+                    requested.channels,
+                )
+                .with_context(|| format!("activating plugin instance {}", voice.instance_id))?;
+        }
         for voice in rack_voices.iter_mut() {
             voice
                 .instance
@@ -1558,12 +2025,14 @@ fn reconfigure_audio_output(
             let rollback = (|| -> Result<OpenedAudioOutput> {
                 let devices = discover_audio_devices()?;
                 let opened = open_audio_output_from_inventory(&previous_profile, &devices)?;
-                instance.activate(
-                    f64::from(previous_profile.sample_rate_hz),
-                    previous_profile.period_frames,
-                    0,
-                    previous_profile.channels,
-                )?;
+                for voice in standalone_voices.iter_mut() {
+                    voice.instance.activate(
+                        f64::from(previous_profile.sample_rate_hz),
+                        previous_profile.period_frames,
+                        0,
+                        previous_profile.channels,
+                    )?;
+                }
                 for voice in rack_voices.iter_mut() {
                     voice.instance.activate(
                         f64::from(previous_profile.sample_rate_hz),
@@ -2075,5 +2544,29 @@ mod tests {
         profile.sample_format = AudioSampleFormat::S32Le;
         profile.channels = 1;
         assert!(ensure_supported_engine_profile(&profile).is_err());
+    }
+
+    #[test]
+    fn web_parameter_values_are_checked_against_the_public_schema() {
+        let float = ParameterKind::Float {
+            minimum: 0.0,
+            maximum: 1.0,
+            default: 0.5,
+            step: 0.01,
+            unit: None,
+        };
+        assert!(parameter_value_is_valid(&float, 0.625));
+        assert!(!parameter_value_is_valid(&float, 1.1));
+        assert!(!parameter_value_is_valid(&float, f64::NAN));
+
+        let integer = ParameterKind::Integer {
+            minimum: 0,
+            maximum: 8,
+            default: 0,
+            step: 2,
+            unit: None,
+        };
+        assert!(parameter_value_is_valid(&integer, 6.0));
+        assert!(!parameter_value_is_valid(&integer, 5.0));
     }
 }

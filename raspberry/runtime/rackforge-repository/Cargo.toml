@@ -1,0 +1,20 @@
+[package]
+name = "rackforge-repository"
+description = "Signed plugin repository protocol and safe RackForge package installer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+base64.workspace = true
+ed25519-dalek.workspace = true
+rackforge-plugin-api = { path = "../rackforge-plugin-api" }
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+ureq.workspace = true
+url.workspace = true
+zip.workspace = true

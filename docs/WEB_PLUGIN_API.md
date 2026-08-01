@@ -11,6 +11,14 @@ hierarchy, component library, visual style or editing flow for either surface.
 A plugin may render any interface suitable for its own engine, use only some
 host capabilities, or omit one or both web surfaces.
 
+`PLAY` may be the plugin's complete instrument editor, matching the
+single-window model used by many native audio plugins. `CONFIG` is optional and
+should be declared only for a genuinely separate settings or plugin-owned
+program-editing workflow. The manifest's `config_mode` flag declares that
+plugin-level capability to controller surfaces such as LITTLE. Hosts keep
+CONFIG discoverable and show an explicit unavailable message when the flag or
+corresponding web surface is absent.
+
 The generic program-editor tree is an optional interoperability mechanism. A
 plugin may use it to keep hardware and web editors backed by the same typed
 state, as RF-DLS does, but RackForge never renders that tree inside the
@@ -100,7 +108,14 @@ from plugin JavaScript.
 
 ## Current v1 methods
 
-- `plugin.select_sound`: available to the plugin's own `PLAY` surface. The
+- `plugin.parameters`: available to `PLAY` and `CONFIG`; returns the active
+  instance's validated parameter schema and current finite values. Plugins use
+  this instead of assuming their factory defaults still match runtime state.
+- `plugin.set_parameter`: available to `PLAY` and `CONFIG`; accepts one public parameter
+  index and finite value. RackForge verifies ownership, writability, type and
+  range before the audio thread calls the plugin ABI.
+- `plugin.select_sound`: available to the plugin's own `PLAY` and `CONFIG`
+  surfaces. The
   `sound_id` must appear in that instance's current catalog.
 - `plugin.begin_program_edit`: available to `CONFIG`; starts a new program when
   `program_id` is `null`, or edits a program from that plugin's `custom`

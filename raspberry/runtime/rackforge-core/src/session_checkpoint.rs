@@ -7,7 +7,7 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-const CHECKPOINT_SCHEMA_VERSION: u32 = 2;
+const CHECKPOINT_SCHEMA_VERSION: u32 = 3;
 const CHECKPOINT_DIRECTORY: &str = "sessions";
 const LIVE_CHECKPOINT_FILE: &str = "live.main.json";
 
@@ -24,6 +24,8 @@ struct SessionCheckpoint {
     #[serde(default)]
     live: LivePerformanceState,
     #[serde(default)]
+    active_instance_id: Option<String>,
+    #[serde(default)]
     selected_sounds: BTreeMap<String, String>,
 }
 
@@ -36,6 +38,10 @@ impl SessionCheckpoint {
             master_level: state.master_level,
             master_pan: state.master_pan,
             live: state.live.clone(),
+            active_instance_id: state
+                .active_instance_id
+                .as_ref()
+                .map(|instance_id| instance_id.as_str().to_owned()),
             selected_sounds: state
                 .instances
                 .iter()
@@ -67,6 +73,12 @@ impl SessionCheckpointStore {
         Ok(self
             .load(session_id)?
             .map(|checkpoint| checkpoint.active_mode))
+    }
+
+    pub fn active_instance_id(&self, session_id: &SessionId) -> Result<Option<String>> {
+        Ok(self
+            .load(session_id)?
+            .and_then(|checkpoint| checkpoint.active_instance_id))
     }
 
     pub fn selected_sound(
@@ -162,7 +174,7 @@ impl SessionCheckpointStore {
         };
         let checkpoint: SessionCheckpoint = serde_json::from_slice(&bytes)
             .with_context(|| format!("parsing session checkpoint {}", self.path.display()))?;
-        if !matches!(checkpoint.schema_version, 1 | CHECKPOINT_SCHEMA_VERSION) {
+        if !matches!(checkpoint.schema_version, 1 | 2 | CHECKPOINT_SCHEMA_VERSION) {
             bail!(
                 "unsupported session checkpoint schema {} in {}",
                 checkpoint.schema_version,
@@ -205,6 +217,7 @@ mod tests {
                 plugin_id: "org.rackforge.rf-dls".into(),
                 plugin_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
+                config_available: true,
                 sounds: vec![SoundSummary {
                     id: selected.into(),
                     name: "Test".into(),

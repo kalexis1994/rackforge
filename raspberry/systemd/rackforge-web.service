@@ -15,7 +15,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/kalex/rackforge/config /home/kalex/rackforge/state
+ReadWritePaths=/home/kalex/rackforge/config /home/kalex/rackforge/state /home/kalex/rackforge/plugin-store
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]

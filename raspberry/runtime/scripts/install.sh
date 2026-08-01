@@ -11,11 +11,13 @@ test -x "$source_root/target/release/rackforge-web"
 test -f "$source_root/target/release/librackforge_roland_scva.so"
 test -f "$source_root/plugins/roland-scva/package/rackforge-plugin.toml"
 test -f "$source_root/config/rackforge.toml"
+test -f "$source_root/config/repositories.toml"
 test -f "$web_source_root/dist/index.html"
 
 install -d \
   "$root/bin" \
   "$root/config" \
+  "$root/plugin-store" \
   "$roland_plugin_root/lib" \
   "$root/state" \
   "$root/logs"
@@ -33,6 +35,12 @@ if [ ! -f "$root/config/rackforge.toml" ]; then
   install -m 0644 \
     "$source_root/config/rackforge.toml" \
     "$root/config/rackforge.toml"
+fi
+
+if [ ! -f "$root/config/repositories.toml" ]; then
+  install -m 0644 \
+    "$source_root/config/repositories.toml" \
+    "$root/config/repositories.toml"
 fi
 
 install -m 0644 \

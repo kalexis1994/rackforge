@@ -140,6 +140,7 @@ mod tests {
                 plugin_id: "org.rackforge.rf-dls".into(),
                 plugin_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
+                config_available: true,
                 sounds: vec![
                     SoundSummary {
                         id: "piano".into(),

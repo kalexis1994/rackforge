@@ -1,0 +1,5 @@
+schema_version = 1
+
+# The official RackForge repository URL and pinned Ed25519 public key will be
+# added here for release builds. Additional repositories are explicit user
+# trust decisions and can be managed from the Web Settings view.

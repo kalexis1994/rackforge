@@ -37,7 +37,9 @@ they use.
 
 ## Package contract
 
-A package is a directory whose name ends in `.rfplugin`:
+A development package is a directory with the following contents. For
+distribution, `rackforge-store pack` turns it into a ZIP archive whose file
+name ends in `.rfplugin`:
 
 ```text
 plugin-name-version.rfplugin/
@@ -51,6 +53,13 @@ plugin-name-version.rfplugin/
 Sound banks, ROMs, credentials, caches, and saved programs are forbidden from
 the package. The installer replaces only the immutable package directory and
 preserves the plugin data directory.
+
+Plugins declare `config_mode = true` only when they own a separate CONFIG
+workflow. A single-window instrument editor belongs in PLAY and leaves the flag
+false. RackForge still exposes the CONFIG entry consistently, but renders an
+explicit unavailable message on LITTLE and Web instead of guessing or opening
+plugin-specific UI. Static Web surfaces are declared independently: a plugin
+with CONFIG mode may provide a CONFIG Web surface, a LITTLE editor, or both.
 
 ## RF-DLS development checkout
 

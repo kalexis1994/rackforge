@@ -1,6 +1,6 @@
 pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
 pub use rackforge_performance_api::{LibraryRevision, PerformanceEdit, PerformanceSnapshot};
-pub use rackforge_plugin_api::{HostPreset, HostPresetSummary};
+pub use rackforge_plugin_api::{HostPreset, HostPresetSummary, ParameterSchema};
 use serde::{Deserialize, Serialize};
 
 pub use rackforge_session_api::{
@@ -10,11 +10,11 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 8;
+pub const CONTROL_SCHEMA_VERSION: u32 = 9;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlRequest {
     Snapshot,
@@ -34,9 +34,26 @@ pub enum ControlRequest {
         instance_id: InstanceId,
         preset_id: String,
     },
+    RenamePluginPreset {
+        plugin_id: String,
+        preset_id: String,
+        name: String,
+    },
+    DeletePluginPreset {
+        plugin_id: String,
+        preset_id: String,
+    },
     PluginPreset {
         plugin_id: String,
         preset_id: String,
+    },
+    PluginParameters {
+        instance_id: InstanceId,
+    },
+    SetPluginParameter {
+        instance_id: InstanceId,
+        parameter_index: u32,
+        value: f64,
     },
     AudioSnapshot,
     ApplyAudioOutput {
@@ -62,7 +79,7 @@ pub enum ControlErrorCode {
     Internal,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlResponse {
     Snapshot {
@@ -86,8 +103,27 @@ pub enum ControlResponse {
         preset: Box<HostPreset>,
         revision: Revision,
     },
+    PluginPresetRenamed {
+        preset: Box<HostPreset>,
+        presets: Vec<HostPresetSummary>,
+    },
+    PluginPresetDeleted {
+        plugin_id: String,
+        preset_id: String,
+        presets: Vec<HostPresetSummary>,
+    },
     PluginPreset {
         preset: Box<HostPreset>,
+    },
+    PluginParameters {
+        instance_id: InstanceId,
+        schema: Box<ParameterSchema>,
+        values: Vec<PluginParameterValue>,
+    },
+    PluginParameterSet {
+        instance_id: InstanceId,
+        parameter_index: u32,
+        value: f64,
     },
     AudioSnapshot {
         snapshot: Box<AudioOutputState>,
@@ -111,6 +147,13 @@ pub enum ControlResponse {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         current_revision: Option<Revision>,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginParameterValue {
+    pub index: u32,
+    pub value: f64,
 }
 
 pub fn encode_line<T: Serialize>(value: &T) -> Result<Vec<u8>, serde_json::Error> {
@@ -168,6 +211,7 @@ mod tests {
                     plugin_id: "org.rackforge.rf-dls".into(),
                     plugin_name: "RF-DLS".into(),
                     ui_layouts: vec!["little@1".into()],
+                    config_available: true,
                     sounds: vec![SoundSummary {
                         id: "dls.b00000000.p00000000".into(),
                         name: "Piano 1".into(),
@@ -204,6 +248,71 @@ mod tests {
         assert_eq!(
             decode_request(&encode_line(&request).unwrap()).unwrap(),
             request
+        );
+    }
+
+    #[test]
+    fn preset_mutation_requests_round_trip() {
+        let rename = ControlRequest::RenamePluginPreset {
+            plugin_id: "org.rackforge.rf-dls".into(),
+            preset_id: "warm-piano-1234".into(),
+            name: "Stage Piano".into(),
+        };
+        assert_eq!(
+            decode_request(&encode_line(&rename).unwrap()).unwrap(),
+            rename
+        );
+
+        let delete = ControlRequest::DeletePluginPreset {
+            plugin_id: "org.rackforge.rf-dls".into(),
+            preset_id: "warm-piano-1234".into(),
+        };
+        assert_eq!(
+            decode_request(&encode_line(&delete).unwrap()).unwrap(),
+            delete
+        );
+    }
+
+    #[test]
+    fn plugin_parameter_requests_round_trip() {
+        let read = ControlRequest::PluginParameters {
+            instance_id: instance_id(),
+        };
+        assert_eq!(decode_request(&encode_line(&read).unwrap()).unwrap(), read);
+
+        let write = ControlRequest::SetPluginParameter {
+            instance_id: instance_id(),
+            parameter_index: 3,
+            value: 0.625,
+        };
+        assert_eq!(
+            decode_request(&encode_line(&write).unwrap()).unwrap(),
+            write
+        );
+
+        let schema: ParameterSchema = serde_json::from_str(
+            r#"{
+              "schema_version":1,
+              "pages":[{"id":"filter","name":"Filter","order":0}],
+              "parameters":[{
+                "index":3,"id":"cutoff","name":"Cutoff","page":"filter","order":0,
+                "kind":{"type":"float","minimum":0.0,"maximum":1.0,"default":0.5,"step":0.01},
+                "flags":{},"suggested_control":"knob"
+              }]
+            }"#,
+        )
+        .unwrap();
+        let response = ControlResponse::PluginParameters {
+            instance_id: instance_id(),
+            schema: Box::new(schema),
+            values: vec![PluginParameterValue {
+                index: 3,
+                value: 0.625,
+            }],
+        };
+        assert_eq!(
+            decode_response(&encode_line(&response).unwrap()).unwrap(),
+            response
         );
     }
 

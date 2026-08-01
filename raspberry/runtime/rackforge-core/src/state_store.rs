@@ -185,6 +185,62 @@ impl PluginStateStore {
         Ok(preset)
     }
 
+    pub fn rename_preset(
+        &mut self,
+        plugin_id: &str,
+        preset_id: &str,
+        name: &str,
+    ) -> Result<HostPreset> {
+        validate_plugin_identifier(plugin_id).context("validating preset plugin")?;
+        validate_preset_id(preset_id).context("validating preset id")?;
+        validate_preset_name(name)?;
+        let name = name.trim();
+        if self
+            .load_presets(plugin_id)?
+            .into_iter()
+            .any(|preset| preset.id != preset_id && preset.name.eq_ignore_ascii_case(name))
+        {
+            bail!("a RackForge preset with that name already exists");
+        }
+        let mut preset = self.preset(plugin_id, preset_id)?;
+        preset.name = name.into();
+        preset.updated_unix_ms = unix_milliseconds()?;
+        preset.validate()?;
+        if let Some(root) = &self.root {
+            let destination = preset_directory(root, plugin_id)?.join(format!("{preset_id}.json"));
+            let mut bytes = serde_json::to_vec_pretty(&preset)?;
+            bytes.push(b'\n');
+            write_replace_atomic(&destination, &bytes)?;
+        } else {
+            self.memory_presets
+                .insert((plugin_id.into(), preset_id.into()), preset.clone());
+        }
+        Ok(preset)
+    }
+
+    pub fn delete_preset(&mut self, plugin_id: &str, preset_id: &str) -> Result<HostPreset> {
+        validate_plugin_identifier(plugin_id).context("validating preset plugin")?;
+        validate_preset_id(preset_id).context("validating preset id")?;
+        let preset = self.preset(plugin_id, preset_id)?;
+        if let Some(root) = &self.root {
+            let path = preset_directory(root, plugin_id)?.join(format!("{preset_id}.json"));
+            let metadata = fs::symlink_metadata(&path)
+                .with_context(|| format!("inspecting {}", path.display()))?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                bail!(
+                    "preset storage path is not a regular file: {}",
+                    path.display()
+                );
+            }
+            fs::remove_file(&path).with_context(|| format!("deleting {}", path.display()))?;
+            sync_parent(&path)?;
+        } else {
+            self.memory_presets
+                .remove(&(plugin_id.into(), preset_id.into()));
+        }
+        Ok(preset)
+    }
+
     fn load_presets(&self, plugin_id: &str) -> Result<Vec<HostPreset>> {
         if let Some(root) = &self.root {
             let directory = preset_directory(root, plugin_id)?;
@@ -425,6 +481,23 @@ mod tests {
             preset
         );
         assert_eq!(store.list_presets("org.rackforge.rf-dls").unwrap().len(), 1);
+
+        let renamed = store
+            .rename_preset("org.rackforge.rf-dls", &preset.id, "Stage Piano")
+            .unwrap();
+        assert_eq!(renamed.name, "Stage Piano");
+        assert_eq!(renamed.id, preset.id);
+        assert_eq!(renamed.state, preset.state);
+        let deleted = store
+            .delete_preset("org.rackforge.rf-dls", &preset.id)
+            .unwrap();
+        assert_eq!(deleted.id, preset.id);
+        assert!(
+            store
+                .list_presets("org.rackforge.rf-dls")
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

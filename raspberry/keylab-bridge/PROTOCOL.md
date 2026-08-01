@@ -340,7 +340,10 @@ larga una vez alcanzados 650 ms. Ambos gestos son mutuamente excluyentes.
   estado de sesión persistido por Core y se resincroniza después de reiniciar o
   reconectar el driver.
 - `OK` + `BACK`, iniciados con una diferencia máxima de 250 ms y sostenidos
-  durante 650 ms, fuerzan `HOME`.
+  durante 650 ms, fuerzan `HOME` y una parada global. Core cambia la sesión a
+  `IDLE`, cancela draft/audición, destruye todos los runtimes sonoros y mantiene
+  la interfaz de audio abierta entregando silencio. Volver a `LIVE` o `PLAY`
+  ejecuta un nuevo ciclo `activate` antes de habilitar la mezcla.
 - El acorde de emergencia tiene prioridad: no genera además `OK LONG` ni
   `BACK LONG`.
 - Estas dos rutas son propiedad del host. Un plugin puede ser notificado después

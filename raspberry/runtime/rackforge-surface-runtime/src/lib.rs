@@ -80,8 +80,40 @@ impl PlaySound {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlayPlugin {
+    pub instance_id: String,
+    pub plugin_id: String,
+    pub name: String,
+    pub config_available: bool,
+}
+
+impl PlayPlugin {
+    pub fn new(
+        instance_id: impl Into<String>,
+        plugin_id: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Self {
+        Self {
+            instance_id: instance_id.into(),
+            plugin_id: plugin_id.into(),
+            name: normalized_display_text(&name.into(), "PLUGIN"),
+            // Preserve the behavior of callers compiled against the original
+            // constructor. Runtime catalogs always override this from the
+            // plugin manifest.
+            config_available: true,
+        }
+    }
+
+    pub fn config_available(mut self, available: bool) -> Self {
+        self.config_available = available;
+        self
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActiveMode {
+    Idle,
     Live,
     Play,
 }
@@ -160,6 +192,9 @@ pub enum MenuCommand {
     SetActiveMode {
         mode: ActiveMode,
     },
+    SelectPlugin {
+        instance_id: String,
+    },
     SetLiveBrowseMode {
         mode: LiveBrowseMode,
     },
@@ -208,9 +243,7 @@ pub enum MenuCommand {
         cancel_draft_id: Option<u64>,
         selected_sound_id: Option<String>,
     },
-    ForceHome {
-        cancel_draft_id: Option<u64>,
-    },
+    ForceHome,
     SetWebEnabled {
         enabled: bool,
     },
@@ -352,6 +385,7 @@ enum Page {
     PerformanceResult,
     KeyboardParts,
     Plugins,
+    PluginConfigUnavailable,
     System,
     Audio,
     AudioOutput,
@@ -478,10 +512,12 @@ pub struct Menu {
     keyboard_parts_editing: bool,
     keyboard_split_quick_action: bool,
     play_index: usize,
+    play_plugins: Vec<PlayPlugin>,
     config_index: usize,
     plugin_index: usize,
     active_plugin_id: String,
     active_plugin_name: String,
+    active_plugin_config_available: bool,
     system_index: usize,
     system_web_index: usize,
     web_settings: WebSystemSettings,
@@ -659,10 +695,12 @@ impl Default for Menu {
             keyboard_parts_editing: false,
             keyboard_split_quick_action: false,
             play_index: 0,
+            play_plugins: Vec::new(),
             config_index: 0,
             plugin_index: 0,
             active_plugin_id: "plugin.unavailable".into(),
             active_plugin_name: "PLUGIN".into(),
+            active_plugin_config_available: false,
             system_index: 0,
             system_web_index: 0,
             web_settings: WebSystemSettings::default(),
@@ -723,6 +761,52 @@ impl Menu {
     pub fn set_active_plugin(&mut self, id: impl Into<String>, name: impl Into<String>) {
         self.active_plugin_id = id.into();
         self.active_plugin_name = normalized_display_text(&name.into(), "PLUGIN");
+        self.active_plugin_config_available = self
+            .play_plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == self.active_plugin_id)
+            .map(|plugin| plugin.config_available)
+            .unwrap_or(false);
+        if self.play_plugins.is_empty() {
+            let plugin = PlayPlugin::new(
+                "",
+                self.active_plugin_id.clone(),
+                self.active_plugin_name.clone(),
+            );
+            self.active_plugin_config_available = plugin.config_available;
+            self.play_plugins.push(plugin);
+            self.play_index = 0;
+        }
+    }
+
+    pub fn set_play_plugins(&mut self, plugins: Vec<PlayPlugin>, active_instance_id: Option<&str>) {
+        let focused = self
+            .play_plugins
+            .get(self.play_index)
+            .map(|plugin| plugin.instance_id.clone());
+        self.play_plugins = plugins;
+        self.play_index = active_instance_id
+            .and_then(|id| {
+                self.play_plugins
+                    .iter()
+                    .position(|plugin| plugin.instance_id == id)
+            })
+            .or_else(|| {
+                focused.as_deref().and_then(|id| {
+                    self.play_plugins
+                        .iter()
+                        .position(|plugin| plugin.instance_id == id)
+                })
+            })
+            .unwrap_or(0)
+            .min(self.play_plugins.len().saturating_sub(1));
+        if let Some(plugin) = self
+            .play_plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == self.active_plugin_id)
+        {
+            self.active_plugin_config_available = plugin.config_available;
+        }
     }
 
     pub fn sync_active_mode(&mut self, mode: ActiveMode) {
@@ -1206,11 +1290,11 @@ impl Menu {
             return;
         }
         if input == Input::HomeChord {
-            let cancel_draft_id = self.program_draft.as_ref().map(|draft| draft.draft_id);
             self.audition_lease_id = None;
             self.program_draft = None;
+            self.active_mode = ActiveMode::Idle;
             self.page = Page::Home;
-            self.pending_command = Some(MenuCommand::ForceHome { cancel_draft_id });
+            self.pending_command = Some(MenuCommand::ForceHome);
             return;
         }
         if input == Input::Button4Long {
@@ -1521,21 +1605,42 @@ impl Menu {
                 self.apply_rack_slot_editor_input(previous, next, select, back)
             }
             Page::ConfigRackSlotPlugin => {
-                if back {
+                if previous || next {
+                    self.move_selection(if previous { -1 } else { 1 });
+                } else if back {
                     self.page = Page::ConfigRackSlotEditor;
                 } else if select {
-                    if let Some(PerformanceDraft::Rack(rack)) = self.performance_draft.as_mut()
+                    let Some(plugin) = self.play_plugins.get(self.play_index).cloned() else {
+                        return;
+                    };
+                    let plugin_changed = if let Some(PerformanceDraft::Rack(rack)) =
+                        self.performance_draft.as_mut()
                         && let Some(slot) = rack.slots.get_mut(self.performance_child_index)
                     {
-                        slot.plugin_id = self.active_plugin_id.clone();
-                        self.performance_dirty = true;
-                    }
+                        let plugin_changed = slot.plugin_id != plugin.plugin_id;
+                        if plugin_changed {
+                            slot.plugin_id = plugin.plugin_id.clone();
+                            slot.state = None;
+                            slot.legacy_program_id = None;
+                            self.performance_dirty = true;
+                        }
+                        plugin_changed
+                    } else {
+                        false
+                    };
                     let state_id = self
                         .focused_rack_slot()
                         .and_then(rack_slot_sound_hint)
                         .map(str::to_owned);
                     self.plugin_play_context = PluginPlayContext::RackSlot;
                     self.focus_plugin_play_sound(state_id.as_deref());
+                    if plugin.plugin_id != self.active_plugin_id {
+                        self.pending_command = Some(MenuCommand::SelectPlugin {
+                            instance_id: plugin.instance_id,
+                        });
+                    } else if plugin_changed {
+                        self.focus_plugin_play_sound(None);
+                    }
                     self.page = Page::PluginLibrary;
                 }
             }
@@ -2057,7 +2162,17 @@ impl Menu {
                     }
                     self.page = Page::ConfigRackSlotName;
                 }
-                1 => self.page = Page::ConfigRackSlotPlugin,
+                1 => {
+                    let plugin_id = self.focused_rack_slot().map(|slot| slot.plugin_id.clone());
+                    if let Some(index) = plugin_id.and_then(|id| {
+                        self.play_plugins
+                            .iter()
+                            .position(|plugin| plugin.plugin_id == id)
+                    }) {
+                        self.play_index = index;
+                    }
+                    self.page = Page::ConfigRackSlotPlugin;
+                }
                 2 => {
                     self.performance_value_index = self
                         .focused_rack_slot()
@@ -2606,7 +2721,7 @@ impl Menu {
                         Page::ConfigRackSlotPlugin
                     }
                     Page::PluginLibrary => Page::Play,
-                    Page::PluginCustomPrograms => Page::Plugins,
+                    Page::PluginCustomPrograms | Page::PluginConfigUnavailable => Page::Plugins,
                     Page::PluginName | Page::PluginSharedFx | Page::PluginProgramOutput => {
                         Page::PluginProgramSections
                     }
@@ -2707,7 +2822,14 @@ impl Menu {
                         }
                         _ => Page::Config,
                     },
-                    Page::Play if self.play_index == 0 => {
+                    Page::Play if !self.play_plugins.is_empty() => {
+                        if let Some(plugin) = self.play_plugins.get(self.play_index) {
+                            if plugin.plugin_id != self.active_plugin_id {
+                                self.pending_command = Some(MenuCommand::SelectPlugin {
+                                    instance_id: plugin.instance_id.clone(),
+                                });
+                            }
+                        }
                         self.plugin_play_context = PluginPlayContext::Standalone;
                         Page::PluginLibrary
                     }
@@ -2752,7 +2874,13 @@ impl Menu {
                     Page::Config if self.config_index == 3 => Page::Plugins,
                     Page::Config if self.config_index == 4 => Page::Audio,
                     Page::Config if self.config_index == 5 => Page::System,
-                    Page::Plugins if self.plugin_index == 0 => Page::PluginCustomPrograms,
+                    Page::Plugins if self.plugin_index == 0 => {
+                        if self.active_plugin_config_available {
+                            Page::PluginCustomPrograms
+                        } else {
+                            Page::PluginConfigUnavailable
+                        }
+                    }
                     Page::System if self.system_index == 0 => Page::SystemWeb,
                     Page::System if self.system_index == 1 && self.wifi_settings.available => {
                         Page::SystemWifi
@@ -2848,6 +2976,9 @@ impl Menu {
     ) {
         self.active_mode = mode;
         match mode {
+            ActiveMode::Idle => {
+                self.page = Page::Home;
+            }
             ActiveMode::Live => {
                 self.page = match self.live_performance.mode {
                     LiveBrowseMode::Rack if !self.live_racks().is_empty() => Page::LiveRacks,
@@ -2896,8 +3027,12 @@ impl Menu {
             Page::LiveSetlists => self.render_live_setlists(),
             Page::LiveSetlistEntries => self.render_live_setlist_entries(),
             Page::Play => Screen::with_header(
-                indexed_title("PLAY", self.play_index, 1),
-                &self.active_plugin_name,
+                indexed_title("PLAY", self.play_index, self.play_plugins.len().max(1)),
+                self.play_plugins
+                    .get(self.play_index)
+                    .map_or(self.active_plugin_name.as_str(), |plugin| {
+                        plugin.name.as_str()
+                    }),
                 "Plugin PLAY",
             ),
             Page::Config => {
@@ -3031,6 +3166,11 @@ impl Menu {
                 indexed_title("PLUGINS", self.plugin_index, 1),
                 &self.active_plugin_name,
                 "Plugin settings",
+            ),
+            Page::PluginConfigUnavailable => Screen::with_header(
+                &self.active_plugin_name,
+                "CONFIG UNAVAILABLE",
+                "USE PLAY + PRESETS",
             ),
             Page::System => {
                 let (item, detail) = self.system_item();
@@ -3378,9 +3518,12 @@ impl Menu {
     }
 
     fn render_rack_slot_plugin(&self) -> Screen {
+        let Some(plugin) = self.play_plugins.get(self.play_index) else {
+            return Screen::with_header("PLUGIN", "NO PLUGINS", "BACK");
+        };
         Screen::with_header(
-            "PLUGIN       1/1",
-            &self.active_plugin_name,
+            indexed_title("PLUGIN", self.play_index, self.play_plugins.len()),
+            &plugin.name,
             "OK opens PLAY",
         )
     }
@@ -4507,9 +4650,11 @@ impl Menu {
                 }
                 (&mut self.live_setlist_entry_index, len)
             }
-            Page::Play => (&mut self.play_index, 1),
+            Page::Play if self.play_plugins.is_empty() => return,
+            Page::Play => (&mut self.play_index, self.play_plugins.len()),
             Page::Config => (&mut self.config_index, CONFIG_ITEMS.len()),
             Page::Plugins => (&mut self.plugin_index, 1),
+            Page::PluginConfigUnavailable => return,
             Page::System => {
                 let len = self.system_item_count();
                 (&mut self.system_index, len)
@@ -4546,13 +4691,14 @@ impl Menu {
                 (&mut self.plugin_timbre_index, len)
             }
             Page::PluginName => return,
+            Page::ConfigRackSlotPlugin if self.play_plugins.is_empty() => return,
+            Page::ConfigRackSlotPlugin => (&mut self.play_index, self.play_plugins.len()),
             Page::ConfigRacks
             | Page::ConfigRackEditor
             | Page::ConfigRackName
             | Page::ConfigRackSlots
             | Page::ConfigRackSlotEditor
             | Page::ConfigRackSlotName
-            | Page::ConfigRackSlotPlugin
             | Page::ConfigRackSlotMidiChannel
             | Page::ConfigRackSlotLowKey
             | Page::ConfigRackSlotHighKey
@@ -6282,6 +6428,80 @@ mod tests {
     };
     use rackforge_session_api::InstanceId;
 
+    #[test]
+    fn play_plugin_carousel_selects_a_real_runtime_instance() {
+        let mut menu = Menu::default();
+        menu.set_play_plugins(
+            vec![
+                PlayPlugin::new("live.main.instrument.1", "org.rackforge.rf-dls", "RF-DLS"),
+                PlayPlugin::new(
+                    "play.org.rackforge.rf-kr106",
+                    "org.rackforge.rf-kr106",
+                    "RF-KR106",
+                ),
+            ],
+            Some("live.main.instrument.1"),
+        );
+        menu.set_active_plugin("org.rackforge.rf-dls", "RF-DLS");
+        menu.page = Page::Play;
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "RF-KR106");
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SelectPlugin {
+                instance_id: "play.org.rackforge.rf-kr106".into(),
+            })
+        );
+        assert_eq!(menu.page, Page::PluginLibrary);
+    }
+
+    #[test]
+    fn plugin_without_config_mode_shows_an_explicit_little_message() {
+        let mut menu = Menu::default();
+        menu.set_play_plugins(
+            vec![
+                PlayPlugin::new(
+                    "play.org.rackforge.rf-kr106",
+                    "org.rackforge.rf-kr106",
+                    "RF-KR106",
+                )
+                .config_available(false),
+            ],
+            Some("play.org.rackforge.rf-kr106"),
+        );
+        menu.set_active_plugin("org.rackforge.rf-kr106", "RF-KR106");
+        menu.page = Page::Plugins;
+
+        menu.apply(Action::Select);
+
+        assert_eq!(menu.page, Page::PluginConfigUnavailable);
+        let screen = menu.render();
+        assert_eq!(screen.line_1, "CONFIG UNAVAILABLE");
+        assert_eq!(screen.line_2, "USE PLAY + PRESETS");
+
+        menu.apply(Action::Back);
+        assert_eq!(menu.page, Page::Plugins);
+    }
+
+    #[test]
+    fn plugin_with_config_mode_keeps_its_little_editor() {
+        let mut menu = Menu::default();
+        menu.set_play_plugins(
+            vec![
+                PlayPlugin::new("live.main.instrument.1", "org.rackforge.rf-dls", "RF-DLS")
+                    .config_available(true),
+            ],
+            Some("live.main.instrument.1"),
+        );
+        menu.set_active_plugin("org.rackforge.rf-dls", "RF-DLS");
+        menu.page = Page::Plugins;
+
+        menu.apply(Action::Select);
+
+        assert_eq!(menu.page, Page::PluginCustomPrograms);
+    }
+
     fn plugin_menu() -> Menu {
         let mut menu = Menu::default();
         menu.set_active_plugin("org.rackforge.rf-dls", "RF-DLS");
@@ -6613,6 +6833,56 @@ mod tests {
         );
         menu.apply(Action::Back);
         assert_eq!(menu.render().line_1, "RF-DLS");
+    }
+
+    #[test]
+    fn rack_slot_plugin_carousel_lists_every_little_plugin() {
+        let mut menu = plugin_menu();
+        menu.sync_performance_snapshot(test_performance_snapshot());
+        menu.set_play_plugins(
+            vec![
+                PlayPlugin::new("live.main.instrument.1", "org.rackforge.rf-dls", "RF-DLS"),
+                PlayPlugin::new(
+                    "play.org.rackforge.rf-kr106",
+                    "org.rackforge.rf-kr106",
+                    "RF-KR106",
+                ),
+            ],
+            Some("live.main.instrument.1"),
+        );
+        menu.page = Page::ConfigRacks;
+        menu.performance_list_index = 1;
+        menu.begin_performance_draft();
+        menu.page = Page::ConfigRackSlotPlugin;
+
+        assert_eq!(menu.render().line_1, "RF-DLS");
+        assert!(matches!(
+            menu.render().header,
+            Header::Visible(ref value) if value.contains("1/2")
+        ));
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "RF-KR106");
+
+        // A background catalog refresh must not snap the slot carousel back
+        // to the currently sounding plugin while the user is choosing.
+        menu.set_active_plugin("org.rackforge.rf-dls", "RF-DLS");
+        assert_eq!(menu.render().line_1, "RF-KR106");
+
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SelectPlugin {
+                instance_id: "play.org.rackforge.rf-kr106".into(),
+            })
+        );
+        let Some(PerformanceDraft::Rack(rack)) = menu.performance_draft.as_ref() else {
+            panic!("Rack draft disappeared while selecting its plugin");
+        };
+        assert_eq!(rack.slots[0].plugin_id, "org.rackforge.rf-kr106");
+        assert_eq!(rack.slots[0].state, None);
+        assert_eq!(rack.slots[0].legacy_program_id, None);
+        assert!(menu.performance_dirty);
+        assert_eq!(menu.page, Page::PluginLibrary);
     }
 
     #[test]
@@ -7713,12 +7983,8 @@ mod tests {
         open_new_program_editor(&mut menu);
         menu.apply_input(Input::HomeChord);
         assert_eq!(menu.render().header, Header::Visible(HOME_HEADER.into()));
-        assert!(matches!(
-            menu.take_command(),
-            Some(MenuCommand::ForceHome {
-                cancel_draft_id: Some(17)
-            })
-        ));
+        assert!(matches!(menu.take_command(), Some(MenuCommand::ForceHome)));
+        assert_eq!(menu.active_mode, ActiveMode::Idle);
         assert!(menu.program_draft.is_none());
         assert!(menu.audition_lease_id.is_none());
     }

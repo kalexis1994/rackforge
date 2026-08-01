@@ -13,6 +13,7 @@ export interface PluginInstance {
   plugin_id: string;
   plugin_name: string;
   ui_layouts: string[];
+  config_available: boolean;
   sounds: SoundSummary[];
   selected_sound_id?: string;
 }
@@ -21,7 +22,7 @@ export interface SessionSnapshot {
   schema_version: number;
   session_id: string;
   revision: number;
-  active_mode: "live" | "play";
+  active_mode: "idle" | "live" | "play";
   master_level: number;
   master_pan: number;
   live: LivePerformanceState;
@@ -257,6 +258,65 @@ export interface WebPublicConfig {
   port: number;
 }
 
+export interface PluginRepositoryConfig {
+  id: string;
+  name: string;
+  base_url: string;
+  public_key: string;
+  enabled: boolean;
+  allow_insecure_http: boolean;
+}
+
+export interface PluginRepositoryFile {
+  schema_version: number;
+  repositories: PluginRepositoryConfig[];
+}
+
+export interface StoreArtifact {
+  platform: string;
+  url: string;
+  size: number;
+  sha256: string;
+}
+
+export interface StoreRelease {
+  version: string;
+  published_at: string;
+  artifacts: StoreArtifact[];
+}
+
+export interface StorePlugin {
+  id: string;
+  name: string;
+  summary: string;
+  license: string;
+  homepage?: string;
+  releases: StoreRelease[];
+  installed: boolean;
+  installed_versions: string[];
+  active_version?: string;
+  latest_version?: string;
+  update_available: boolean;
+}
+
+export interface StoreRepositoryCatalog {
+  repository_id: string;
+  name: string;
+  status: "available" | "disabled" | "error";
+  error?: string;
+  catalog?: {
+    schema_version: number;
+    repository_id: string;
+    name: string;
+    generated_at: string;
+    plugins: StorePlugin[];
+  };
+}
+
+export interface StoreCatalogResponse {
+  repositories: StoreRepositoryCatalog[];
+}
+
 export interface WebAuthStatus {
   status: "ok";
   requires_pairing: boolean;
@@ -270,11 +330,70 @@ export interface PluginWebDescriptor {
   plugin_id: string;
   plugin_name: string;
   version: string;
+  active: boolean;
   api_version: number;
   surfaces: Array<{
     kind: PluginWebSurfaceKind;
     entry_url: string;
   }>;
+}
+
+export type PluginParameterKind =
+  | {
+      type: "float";
+      minimum: number;
+      maximum: number;
+      default: number;
+      step: number;
+      unit?: string;
+    }
+  | {
+      type: "integer";
+      minimum: number;
+      maximum: number;
+      default: number;
+      step: number;
+      unit?: string;
+    }
+  | { type: "boolean"; default: boolean }
+  | {
+      type: "enum";
+      default: number;
+      choices: Array<{ value: number; name: string }>;
+    }
+  | { type: "trigger" }
+  | { type: "meter"; minimum: number; maximum: number; unit?: string };
+
+export interface PluginParameterDescriptor {
+  index: number;
+  id: string;
+  name: string;
+  page: string;
+  group?: string;
+  order: number;
+  kind: PluginParameterKind;
+  flags: {
+    automatable: boolean;
+    modulatable: boolean;
+    read_only: boolean;
+    advanced: boolean;
+  };
+  suggested_control: string;
+}
+
+export interface PluginParameterSnapshot {
+  instance_id: string;
+  schema: {
+    schema_version: number;
+    pages: Array<{
+      id: string;
+      name: string;
+      order: number;
+      header?: string;
+    }>;
+    parameters: PluginParameterDescriptor[];
+  };
+  values: Array<{ index: number; value: number }>;
 }
 
 export interface SessionCommand {

@@ -17,6 +17,12 @@ Changing or deleting a preset cannot change an existing Rack. Slot edits do not
 modify the source preset unless the user explicitly saves a new snapshot under
 that preset name.
 
+Preset rename preserves the stable preset id, creation timestamp and immutable
+state reference while updating only its display name and modification time.
+Preset deletion removes the named metadata document; it never mutates a loaded
+instance or a Rack Slot that previously copied the state. Unreferenced state
+blobs remain eligible for a future host-owned garbage-collection pass.
+
 ## Storage model
 
 State payloads are immutable content-addressed blobs under `data/states/blobs`.

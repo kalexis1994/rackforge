@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const SURFACE_ACTIVATION_SCHEMA_VERSION: u32 = 1;
+pub const SURFACE_ACTIVATION_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceMode {
+    #[serde(alias = "none")]
+    Idle,
     Live,
     Play,
 }

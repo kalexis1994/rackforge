@@ -4,9 +4,22 @@ set -euo pipefail
 root="${RACKFORGE_ROOT:-/home/kalex/rackforge}"
 source_root="${RACKFORGE_SOURCE:-$root/current}"
 host_binary="$source_root/runtime/target/release/rackforge-controller-host"
+driver_manifest="$source_root/keylab-bridge/Cargo.toml"
 package_builder="$source_root/controllers/arturia-keylab-essential-mk3/build-package.sh"
 service_source="$source_root/systemd/rackforge-controller-host.service"
 temporary_root=""
+
+test -f "$driver_manifest"
+
+# The process driver statically links RackForge's shared API crates. Always
+# rebuild it from the same source tree as the host so a session schema bump
+# cannot leave an apparently healthy controller service in a retry loop.
+cargo build --release \
+  --manifest-path "$driver_manifest" \
+  --bin rackforge-arturia-keylab-essential-mk3-driver
+cargo build --release \
+  --manifest-path "$source_root/runtime/Cargo.toml" \
+  --bin rackforge-controller-host
 
 cleanup() {
   case "$temporary_root" in

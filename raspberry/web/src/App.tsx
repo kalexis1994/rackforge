@@ -9,10 +9,19 @@ import {
   useNavigate,
   useParams,
 } from "react-router";
-import { connectGateway, dispatchCommand, stopGateway } from "./gateway";
+import {
+  connectGateway,
+  dispatchCommand,
+  loadPluginPreset,
+  requestPluginPresets,
+  savePluginPreset,
+  stopGateway,
+} from "./gateway";
+import { LivePage } from "./LivePage";
 import type { RootState } from "./store";
 import type {
   PluginInstance,
+  HostPresetSummary,
   ProgramEditorField,
   ProgramEditorPage,
   ProgramEditorValue,
@@ -59,6 +68,7 @@ function isProgramEditorValue(value: unknown): value is ProgramEditorValue {
 
 const navItems = [
   { path: "/", label: "Home", mark: "⌂" },
+  { path: "/live", label: "Live", mark: "◆" },
   { path: "/play", label: "Play", mark: "▶" },
   { path: "/plugins", label: "Plugins", mark: "▦" },
   { path: "/settings", label: "Settings", mark: "⚙" },
@@ -113,7 +123,7 @@ export function App() {
 }
 
 function RackForgeApp() {
-  const { connection, snapshot, error } = useSelector(
+  const { connection, snapshot, performance, performancePending, error } = useSelector(
     (state: RootState) => state.rackforge,
   );
   const location = useLocation();
@@ -161,6 +171,16 @@ function RackForgeApp() {
         >
           <Routes>
             <Route path="/" element={<HomePage snapshot={snapshot} />} />
+            <Route
+              path="/live"
+              element={
+                <LivePage
+                  session={snapshot}
+                  performance={performance}
+                  pending={performancePending}
+                />
+              }
+            />
             <Route path="/play" element={<PlayPage snapshot={snapshot} />} />
             <Route
               path="/plugins"
@@ -458,19 +478,133 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
     instances.find(
       (instance) => instance.instance_id === snapshot?.active_instance_id,
     ) ?? instances[0];
-  return (
-    <section className="plugin-surface-shell direct-surface">
-      {active ? (
-        <PluginFrame
-          key={active.instance_id}
-          instance={active}
-          surface="play"
-        />
-      ) : (
+  const [view, setView] = useState<"menu" | "start" | "presets">("menu");
+  if (!active) {
+    return (
+      <section className="plugin-surface-shell direct-surface">
         <PluginSurfaceState
           title="No instrument available"
           detail="RackForge Core has not registered an active instrument."
         />
+      </section>
+    );
+  }
+  if (view === "start") {
+    return (
+      <section className="plugin-surface-shell direct-surface">
+        <div className="play-action-bar">
+          <button onClick={() => setView("menu")}>← {active.plugin_name}</button>
+          <button onClick={() => setView("presets")}>Presets</button>
+        </div>
+        <PluginFrame key={active.instance_id} instance={active} surface="play" />
+      </section>
+    );
+  }
+  if (view === "presets") {
+    return (
+      <PlayPresets
+        instance={active}
+        onBack={() => setView("menu")}
+        onLoaded={() => setView("start")}
+      />
+    );
+  }
+  return (
+    <section className="play-launcher">
+      <div className="play-launcher-title">
+        <span className="eyebrow">PLAY · Plugin</span>
+        <h1>{active.plugin_name}</h1>
+        <p>Start from the current state or restore a reusable RackForge preset.</p>
+      </div>
+      <div className="play-launcher-actions">
+        <button
+          className="play-launch-card primary"
+          onClick={() => {
+            dispatchCommand({ type: "set_active_mode", mode: "play" });
+            setView("start");
+          }}
+        >
+          <span>01</span><strong>START</strong><small>Open the plugin</small>
+        </button>
+        <button className="play-launch-card" onClick={() => setView("presets")}>
+          <span>02</span><strong>PRESETS</strong><small>Load or save complete state</small>
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function PlayPresets({
+  instance,
+  onBack,
+  onLoaded,
+}: {
+  instance: PluginInstance;
+  onBack: () => void;
+  onLoaded: () => void;
+}) {
+  const [mode, setMode] = useState<"load" | "save">("load");
+  const [presets, setPresets] = useState<HostPresetSummary[]>([]);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const refresh = () =>
+    requestPluginPresets(instance.plugin_id)
+      .then(setPresets)
+      .catch((error: Error) => setMessage(error.message));
+  useEffect(() => {
+    void refresh();
+  }, [instance.plugin_id]);
+  const load = (preset: HostPresetSummary) => {
+    setBusy(true);
+    setMessage(null);
+    loadPluginPreset(instance.instance_id, preset.id)
+      .then(onLoaded)
+      .catch((error: Error) => setMessage(error.message))
+      .finally(() => setBusy(false));
+  };
+  const save = (event: FormEvent) => {
+    event.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    setMessage(null);
+    savePluginPreset(instance.instance_id, name.trim())
+      .then((preset) => {
+        setName("");
+        setMessage(`Saved ${preset.name}.`);
+        return refresh();
+      })
+      .catch((error: Error) => setMessage(error.message))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <section className="preset-workspace">
+      <header className="preset-workspace-header">
+        <button onClick={onBack}>← Back</button>
+        <div><span className="eyebrow">{instance.plugin_name}</span><h1>Presets</h1></div>
+        <div className="preset-mode-tabs">
+          <button className={mode === "load" ? "active" : ""} onClick={() => setMode("load")}>Load</button>
+          <button className={mode === "save" ? "active" : ""} onClick={() => setMode("save")}>Save</button>
+        </div>
+      </header>
+      {message && <p className="preset-message">{message}</p>}
+      {mode === "load" ? (
+        <div className="preset-list">
+          {presets.length === 0 ? (
+            <EmptyState title="No RackForge presets saved for this plugin" />
+          ) : presets.map((preset) => (
+            <button disabled={busy} onClick={() => load(preset)} key={preset.id}>
+              <span><strong>{preset.name}</strong><small>State v{preset.state_version} · {preset.plugin_version}</small></span>
+              <i>LOAD →</i>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <form className="preset-save-form" onSubmit={save}>
+          <label><span>Preset name</span><input autoFocus maxLength={96} value={name} onChange={(event) => setName(event.target.value)} placeholder="Warm Piano" /></label>
+          <p>This captures the plugin exactly as it is now. Existing Slots remain independent.</p>
+          <button disabled={busy || !name.trim()} type="submit">{busy ? "Saving…" : "Save current state"}</button>
+        </form>
       )}
     </section>
   );

@@ -109,8 +109,9 @@ The processing order is:
 backend input
   -> validate channel-voice packet
   -> attach runtime source key
-  -> intercept reserved host controls
+  -> intercept reserved host controls and actions
   -> update state for source + input channel
+  -> apply Rack keyboard Part split, channel and octave transform
   -> match every active route
   -> key/velocity/message filters
   -> transpose and output-channel transform
@@ -148,6 +149,26 @@ state merely because they use the same MIDI channel.
 Host-reserved controls are intercepted before plugin routes. A future binding
 may be source-specific; channel plus CC alone is insufficient when multiple
 controllers are connected.
+
+Continuous `host_controls` (for example master level and pan) and momentary
+`host_actions` (for example a hardware keyboard-parts shortcut) are declared
+separately by controller packages. An action binding includes explicit press
+and release values; both are reserved before plugin routing so its physical CC
+can never accidentally modulate a plugin.
+
+An optional Rack-level `keyboard_parts` configuration owns `PART 1`, `PART 2`,
+their output channels, octave transforms and the shared split key. The split
+note is the first note of Part 2. With no split, Part 1 owns the full keyboard
+and Part 2 is inactive. Part processing happens before Slot filters, so Parts
+never depend on Slot order or on the channel emitted by vendor firmware.
+
+Rack Slots independently store their plugin state, input-channel filter,
+advanced key range, transpose, level, pan and audio destination. This permits
+`PART 1 / CH1` to target any number of CH1 Slots for layering while preserving
+the same keyboard configuration. Older Rack documents without
+`keyboard_parts` keep their legacy Slot-only routing until the Part surface is
+used; complementary ranges created by the experimental implementation are
+migrated into one Rack split without changing Slot channel assignments.
 
 ## Plugin contract evolution
 

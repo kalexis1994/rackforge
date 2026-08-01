@@ -9,6 +9,9 @@ pub enum Input {
     Button3Long,
     Button4Long,
     HomeChord,
+    KeyboardParts,
+    KeyboardPartsLong,
+    KeyboardSplitNote(u8),
     EncoderLeft,
     EncoderRight,
     EncoderPress,
@@ -33,7 +36,7 @@ impl Input {
         Self::EncoderPress,
     ];
 
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 14] = [
         Self::Button1,
         Self::Button2,
         Self::Button3,
@@ -43,6 +46,8 @@ impl Input {
         Self::Button3Long,
         Self::Button4Long,
         Self::HomeChord,
+        Self::KeyboardParts,
+        Self::KeyboardPartsLong,
         Self::EncoderLeft,
         Self::EncoderRight,
         Self::EncoderPress,
@@ -54,6 +59,7 @@ impl Input {
             Self::Button2 => Some(Self::Button2Long),
             Self::Button3 => Some(Self::Button3Long),
             Self::Button4 => Some(Self::Button4Long),
+            Self::KeyboardParts => Some(Self::KeyboardPartsLong),
             _ => None,
         }
     }
@@ -61,7 +67,11 @@ impl Input {
     pub const fn is_long_press(self) -> bool {
         matches!(
             self,
-            Self::Button1Long | Self::Button2Long | Self::Button3Long | Self::Button4Long
+            Self::Button1Long
+                | Self::Button2Long
+                | Self::Button3Long
+                | Self::Button4Long
+                | Self::KeyboardPartsLong
         )
     }
 
@@ -77,6 +87,8 @@ impl Input {
             | Self::Button3Long
             | Self::Button4Long
             | Self::HomeChord => None,
+            Self::KeyboardParts | Self::KeyboardPartsLong => None,
+            Self::KeyboardSplitNote(_) => None,
         }
     }
 }

@@ -5,6 +5,7 @@ use rackforge_performance_api::{
     RackSlot, RackSlotId, SetlistDefinition, SetlistEntry, SetlistEntryId, SetlistId,
     SongDefinition, SongId, SongPart, SongPartId,
 };
+use rackforge_plugin_api::PluginStateReference;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
@@ -19,7 +20,7 @@ const MAX_DOCUMENT_BYTES: u64 = 64 * 1024;
 #[derive(Clone, Debug)]
 pub struct PerformanceBootstrap {
     pub plugin_id: String,
-    pub plugin_state_id: String,
+    pub state: PluginStateReference,
     pub name: String,
 }
 
@@ -105,6 +106,42 @@ impl PerformanceRepository {
         state
     }
 
+    pub fn migrate_legacy_plugin_states(
+        &mut self,
+        plugin_id: &str,
+        mut migrate: impl FnMut(&str) -> Result<PluginStateReference>,
+    ) -> Result<usize> {
+        let mut migrated = 0;
+        let mut changed_racks = Vec::new();
+        for rack in &mut self.library.racks {
+            let mut changed = false;
+            for slot in &mut rack.slots {
+                if slot.plugin_id != plugin_id || slot.state.is_some() {
+                    continue;
+                }
+                let Some(program_id) = slot.legacy_program_id.as_deref() else {
+                    continue;
+                };
+                slot.state = Some(migrate(program_id).with_context(|| {
+                    format!("migrating legacy state for Rack Slot {}", slot.id)
+                })?);
+                slot.legacy_program_id = None;
+                changed = true;
+                migrated += 1;
+            }
+            if changed {
+                rack.validate()?;
+                changed_racks.push(rack.clone());
+            }
+        }
+        if let Some(root) = &self.root {
+            for rack in changed_racks {
+                write_document(&root.join("racks"), rack.id.as_str(), &rack)?;
+            }
+        }
+        Ok(migrated)
+    }
+
     fn load(&mut self) -> Result<()> {
         let Some(root) = &self.root else {
             return Ok(());
@@ -175,13 +212,18 @@ fn bootstrap_library(bootstrap: PerformanceBootstrap) -> Result<PerformanceLibra
             id: rack_id.clone(),
             name: bootstrap.name.clone(),
             enabled: true,
+            keyboard_parts: None,
             slots: vec![RackSlot {
                 id: RackSlotId::new("instrument.main")?,
                 name: "Main Instrument".into(),
                 plugin_id: bootstrap.plugin_id,
-                plugin_state_id: Some(bootstrap.plugin_state_id),
+                state: Some(bootstrap.state),
+                legacy_program_id: None,
                 enabled: true,
                 midi_input_channel: None,
+                midi_note_low: 0,
+                midi_note_high: 127,
+                midi_transpose: 0,
                 midi_output: MidiOutputRoute::None,
                 audio_output_bus: "main".into(),
                 level_per_mille: 1_000,
@@ -340,7 +382,15 @@ mod tests {
     fn bootstrap() -> PerformanceBootstrap {
         PerformanceBootstrap {
             plugin_id: "org.rackforge.rf-dls".into(),
-            plugin_state_id: "dls.b00000000.p00000002".into(),
+            state: PluginStateReference {
+                schema_version: rackforge_plugin_api::PLUGIN_STATE_REFERENCE_SCHEMA_VERSION,
+                plugin_id: "org.rackforge.rf-dls".into(),
+                plugin_version: "0.1.0".into(),
+                state_version: 3,
+                blob_sha256: "a".repeat(64),
+                byte_length: 16,
+                selected_sound_id: Some("dls.b00000000.p00000002".into()),
+            },
             name: "Piano 3".into(),
         }
     }

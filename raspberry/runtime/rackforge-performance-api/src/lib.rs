@@ -1,3 +1,4 @@
+use rackforge_plugin_api::PluginStateReference;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
@@ -78,12 +79,26 @@ pub struct RackSlot {
     #[serde(default = "default_slot_name")]
     pub name: String,
     pub plugin_id: String,
-    #[serde(default, alias = "program_id", skip_serializing_if = "Option::is_none")]
-    pub plugin_state_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<PluginStateReference>,
+    /// Temporary migration input for Racks created before opaque state snapshots.
+    #[serde(
+        default,
+        alias = "program_id",
+        alias = "plugin_state_id",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub legacy_program_id: Option<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
     pub midi_input_channel: Option<u8>,
+    #[serde(default)]
+    pub midi_note_low: u8,
+    #[serde(default = "default_midi_note_high")]
+    pub midi_note_high: u8,
+    #[serde(default)]
+    pub midi_transpose: i8,
     #[serde(default)]
     pub midi_output: MidiOutputRoute,
     #[serde(default = "default_audio_output_bus")]
@@ -98,14 +113,31 @@ impl RackSlot {
     fn validate(&self) -> Result<(), PerformanceError> {
         validate_name(&self.name)?;
         validate_plugin_id(&self.plugin_id)?;
-        if let Some(state_id) = &self.plugin_state_id {
-            validate_reference(state_id, "plugin state id")?;
+        if let Some(state) = &self.state {
+            state
+                .validate()
+                .map_err(|_| PerformanceError::InvalidPluginState)?;
+            if state.plugin_id != self.plugin_id {
+                return Err(PerformanceError::PluginStateMismatch);
+            }
+        }
+        if let Some(program_id) = &self.legacy_program_id {
+            validate_reference(program_id, "legacy program id")?;
+        }
+        if self.state.is_some() && self.legacy_program_id.is_some() {
+            return Err(PerformanceError::AmbiguousPluginState);
         }
         if self
             .midi_input_channel
             .is_some_and(|channel| !(1..=16).contains(&channel))
         {
             return Err(PerformanceError::InvalidMidiChannel);
+        }
+        if self.midi_note_low > self.midi_note_high || self.midi_note_high > 127 {
+            return Err(PerformanceError::InvalidMidiNoteRange);
+        }
+        if !(-48..=48).contains(&self.midi_transpose) {
+            return Err(PerformanceError::InvalidMidiTranspose);
         }
         self.midi_output.validate()?;
         validate_reference(&self.audio_output_bus, "audio output bus")?;
@@ -135,6 +167,65 @@ impl MidiOutputRoute {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RackKeyboardPart {
+    pub midi_channel: u8,
+    #[serde(default)]
+    pub transpose: i8,
+}
+
+impl RackKeyboardPart {
+    fn validate(&self) -> Result<(), PerformanceError> {
+        if !(1..=16).contains(&self.midi_channel) {
+            return Err(PerformanceError::InvalidMidiChannel);
+        }
+        if !(-48..=48).contains(&self.transpose) {
+            return Err(PerformanceError::InvalidMidiTranspose);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RackKeyboardParts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split_key: Option<u8>,
+    pub part_1: RackKeyboardPart,
+    pub part_2: RackKeyboardPart,
+}
+
+impl Default for RackKeyboardParts {
+    fn default() -> Self {
+        Self {
+            split_key: None,
+            part_1: RackKeyboardPart {
+                midi_channel: 1,
+                transpose: 0,
+            },
+            part_2: RackKeyboardPart {
+                midi_channel: 2,
+                transpose: 0,
+            },
+        }
+    }
+}
+
+impl RackKeyboardParts {
+    pub fn part(self, index: usize) -> RackKeyboardPart {
+        if index == 1 { self.part_2 } else { self.part_1 }
+    }
+
+    fn validate(&self) -> Result<(), PerformanceError> {
+        if self.split_key.is_some_and(|key| !(1..=127).contains(&key)) {
+            return Err(PerformanceError::InvalidKeyboardSplit);
+        }
+        self.part_1.validate()?;
+        self.part_2.validate()
+    }
+}
+
 #[deprecated(note = "use RackSlotId")]
 pub type RackItemId = RackSlotId;
 #[deprecated(note = "use RackSlot")]
@@ -152,6 +243,8 @@ pub struct RackDefinition {
     pub name: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keyboard_parts: Option<RackKeyboardParts>,
     #[serde(alias = "items", alias = "nodes")]
     pub slots: Vec<RackSlot>,
 }
@@ -160,6 +253,9 @@ impl RackDefinition {
     pub fn validate(&self) -> Result<(), PerformanceError> {
         validate_schema(self.schema_version)?;
         validate_name(&self.name)?;
+        if let Some(parts) = &self.keyboard_parts {
+            parts.validate()?;
+        }
         validate_count("rack slots", self.slots.len(), 1, MAX_RACK_SLOTS)?;
         unique(self.slots.iter().map(|slot| slot.id.as_str()), "rack slot")?;
         for slot in &self.slots {
@@ -532,6 +628,10 @@ fn default_slot_level() -> u16 {
     1_000
 }
 
+fn default_midi_note_high() -> u8 {
+    127
+}
+
 fn validate_schema(schema_version: u32) -> Result<(), PerformanceError> {
     if schema_version != PERFORMANCE_SCHEMA_VERSION {
         return Err(PerformanceError::UnsupportedSchema(schema_version));
@@ -634,8 +734,20 @@ pub enum PerformanceError {
     NoEnabledRackSlot,
     #[error("MIDI channel must be between 1 and 16")]
     InvalidMidiChannel,
+    #[error("Rack Slot MIDI note range must be ordered within 0..127")]
+    InvalidMidiNoteRange,
+    #[error("Rack Slot MIDI transpose must be within -48..48 semitones")]
+    InvalidMidiTranspose,
+    #[error("keyboard split must start Part 2 on a MIDI note within 1..127")]
+    InvalidKeyboardSplit,
     #[error("Rack Slot level or pan is outside its supported range")]
     InvalidSlotMix,
+    #[error("Rack Slot plugin state reference is invalid")]
+    InvalidPluginState,
+    #[error("Rack Slot state belongs to a different plugin")]
+    PluginStateMismatch,
+    #[error("Rack Slot cannot contain both an opaque state and a legacy program")]
+    AmbiguousPluginState,
     #[error("rack {0} does not exist")]
     MissingRack(RackId),
     #[error("song {0} does not exist")]
@@ -666,13 +778,18 @@ mod tests {
                 id: rack_id.clone(),
                 name: "Stage Piano".into(),
                 enabled: true,
+                keyboard_parts: None,
                 slots: vec![RackSlot {
                     id: RackSlotId::new("instrument.main").unwrap(),
                     name: "Main Instrument".into(),
                     plugin_id: "org.rackforge.rf-dls".into(),
-                    plugin_state_id: Some("custom.user.stage-piano".into()),
+                    state: None,
+                    legacy_program_id: Some("custom.user.stage-piano".into()),
                     enabled: true,
                     midi_input_channel: None,
+                    midi_note_low: 0,
+                    midi_note_high: 127,
+                    midi_transpose: 0,
                     midi_output: MidiOutputRoute::None,
                     audio_output_bus: "main".into(),
                     level_per_mille: 1_000,
@@ -742,6 +859,43 @@ mod tests {
     }
 
     #[test]
+    fn validates_keyboard_zone_and_transposition_bounds() {
+        let mut invalid_range = library();
+        invalid_range.racks[0].slots[0].midi_note_low = 61;
+        invalid_range.racks[0].slots[0].midi_note_high = 60;
+        assert_eq!(
+            invalid_range.validate(),
+            Err(PerformanceError::InvalidMidiNoteRange)
+        );
+
+        let mut invalid_transpose = library();
+        invalid_transpose.racks[0].slots[0].midi_transpose = 49;
+        assert_eq!(
+            invalid_transpose.validate(),
+            Err(PerformanceError::InvalidMidiTranspose)
+        );
+
+        let mut invalid_split = library();
+        invalid_split.racks[0].keyboard_parts = Some(RackKeyboardParts {
+            split_key: Some(0),
+            ..RackKeyboardParts::default()
+        });
+        assert_eq!(
+            invalid_split.validate(),
+            Err(PerformanceError::InvalidKeyboardSplit)
+        );
+
+        let mut invalid_part_channel = library();
+        let mut parts = RackKeyboardParts::default();
+        parts.part_2.midi_channel = 17;
+        invalid_part_channel.racks[0].keyboard_parts = Some(parts);
+        assert_eq!(
+            invalid_part_channel.validate(),
+            Err(PerformanceError::InvalidMidiChannel)
+        );
+    }
+
+    #[test]
     fn live_state_keeps_independent_mode_positions() {
         let library = library();
         let rack = LiveLocation::Rack {
@@ -795,12 +949,18 @@ mod tests {
         rack.validate().unwrap();
         assert_eq!(rack.slots[0].name, "Instrument");
         assert_eq!(rack.slots[0].midi_input_channel, None);
-        assert_eq!(rack.slots[0].plugin_state_id.as_deref(), Some("dls.piano"));
+        assert_eq!(rack.slots[0].midi_note_low, 0);
+        assert_eq!(rack.slots[0].midi_note_high, 127);
+        assert_eq!(rack.slots[0].midi_transpose, 0);
+        assert_eq!(
+            rack.slots[0].legacy_program_id.as_deref(),
+            Some("dls.piano")
+        );
         let migrated = serde_json::to_value(rack).unwrap();
         assert!(migrated.get("slots").is_some());
         assert!(migrated.get("items").is_none());
         assert!(migrated.get("nodes").is_none());
-        assert!(migrated["slots"][0].get("plugin_state_id").is_some());
+        assert!(migrated["slots"][0].get("legacy_program_id").is_some());
         assert!(migrated["slots"][0].get("program_id").is_none());
     }
 
@@ -822,6 +982,10 @@ mod tests {
         let rack: RackDefinition = serde_json::from_str(json).unwrap();
         rack.validate().unwrap();
         assert_eq!(rack.slots.len(), 1);
+        assert_eq!(
+            rack.slots[0].legacy_program_id.as_deref(),
+            Some("dls.piano")
+        );
         assert!(serde_json::to_value(rack).unwrap().get("slots").is_some());
     }
 }

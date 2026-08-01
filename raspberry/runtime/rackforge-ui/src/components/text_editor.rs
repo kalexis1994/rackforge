@@ -187,7 +187,11 @@ impl Component for TextEditor {
             Input::Button1Long => self.delete(),
             Input::Button2Long => self.move_cursor(-1),
             Input::Button3Long => self.move_cursor(1),
-            Input::Button4Long | Input::HomeChord => ComponentEvent::Ignored,
+            Input::Button4Long
+            | Input::HomeChord
+            | Input::KeyboardParts
+            | Input::KeyboardPartsLong
+            | Input::KeyboardSplitNote(_) => ComponentEvent::Ignored,
         }
     }
 

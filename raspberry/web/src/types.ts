@@ -24,11 +24,152 @@ export interface SessionSnapshot {
   active_mode: "live" | "play";
   master_level: number;
   master_pan: number;
+  live: LivePerformanceState;
   active_instance_id?: string;
   instances: PluginInstance[];
   audition?: AuditionState;
   program_draft?: ProgramDraftState;
 }
+
+export type LiveBrowseMode = "rack" | "song" | "setlist";
+
+export type LiveLocation =
+  | { kind: "rack"; rack_id: string }
+  | { kind: "song"; song_id: string; part_id: string }
+  | {
+      kind: "setlist";
+      setlist_id: string;
+      entry_id: string;
+      part_id: string;
+    };
+
+export interface LivePerformanceState {
+  mode: LiveBrowseMode;
+  rack?: LiveLocation;
+  song?: LiveLocation;
+  setlist?: LiveLocation;
+  active?: LiveLocation;
+  active_rack_id?: string;
+}
+
+export type MidiOutputRoute =
+  | { kind: "none" }
+  | { kind: "bus"; bus_id: string };
+
+export interface RackSlot {
+  id: string;
+  name: string;
+  plugin_id: string;
+  state?: PluginStateReference;
+  legacy_program_id?: string;
+  enabled: boolean;
+  midi_input_channel?: number;
+  midi_note_low: number;
+  midi_note_high: number;
+  midi_transpose: number;
+  midi_output: MidiOutputRoute;
+  audio_output_bus: string;
+  level_per_mille: number;
+  pan_per_mille: number;
+}
+
+export interface RackKeyboardPart {
+  midi_channel: number;
+  transpose: number;
+}
+
+export interface RackKeyboardParts {
+  split_key?: number;
+  part_1: RackKeyboardPart;
+  part_2: RackKeyboardPart;
+}
+
+export interface PluginStateReference {
+  schema_version: number;
+  plugin_id: string;
+  plugin_version: string;
+  state_version: number;
+  blob_sha256: string;
+  byte_length: number;
+  selected_sound_id?: string;
+}
+
+export interface HostPresetSummary {
+  id: string;
+  name: string;
+  plugin_id: string;
+  plugin_version: string;
+  state_version: number;
+  updated_unix_ms: number;
+}
+
+export interface HostPreset {
+  schema_version: number;
+  id: string;
+  name: string;
+  plugin_id: string;
+  created_unix_ms: number;
+  updated_unix_ms: number;
+  state: PluginStateReference;
+}
+
+export interface RackDefinition {
+  schema_version: number;
+  id: string;
+  name: string;
+  enabled: boolean;
+  keyboard_parts?: RackKeyboardParts;
+  slots: RackSlot[];
+}
+
+export interface SongPart {
+  id: string;
+  name: string;
+  rack_id: string;
+}
+
+export interface SongDefinition {
+  schema_version: number;
+  id: string;
+  name: string;
+  enabled: boolean;
+  parts: SongPart[];
+}
+
+export interface SetlistEntry {
+  id: string;
+  song_id: string;
+}
+
+export interface SetlistDefinition {
+  schema_version: number;
+  id: string;
+  name: string;
+  enabled: boolean;
+  entries: SetlistEntry[];
+}
+
+export interface PerformanceLibrary {
+  schema_version: number;
+  racks: RackDefinition[];
+  songs: SongDefinition[];
+  setlists: SetlistDefinition[];
+}
+
+export interface PerformanceSnapshot {
+  schema_version: number;
+  revision: string;
+  library: PerformanceLibrary;
+  live: LivePerformanceState;
+}
+
+export type PerformanceEdit =
+  | { kind: "put_rack"; rack: RackDefinition }
+  | { kind: "delete_rack"; rack_id: string }
+  | { kind: "put_song"; song: SongDefinition }
+  | { kind: "delete_song"; song_id: string }
+  | { kind: "put_setlist"; setlist: SetlistDefinition }
+  | { kind: "delete_setlist"; setlist_id: string };
 
 export interface AuditionState {
   lease_id: number;
@@ -99,9 +240,15 @@ export interface CoreSnapshotMessage {
   snapshot: SessionSnapshot;
 }
 
+export interface PerformanceSnapshotMessage {
+  status: "performance_snapshot" | "performance_edited";
+  snapshot: PerformanceSnapshot;
+}
+
 export interface CoreErrorMessage {
   status: "error" | "gateway_error";
   message: string;
+  code?: string;
 }
 
 export interface WebPublicConfig {

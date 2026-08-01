@@ -67,5 +67,11 @@ bash tools/install-package.sh ./rf-dls-0.1.0.rfplugin
 ```
 
 RF-DLS owns the DLS engine and all plugin-specific views. RackForge receives a
-generic preset catalog; its `editable` flag is the only fact the host needs to
-offer the plugin's program editor for CUSTOM entries.
+generic native-program catalog; its `editable` flag is the only fact the host
+needs to offer the plugin's program editor for CUSTOM entries. This catalog is
+separate from named RackForge presets, which are host-managed opaque state
+snapshots described in `architecture/plugin-state-and-presets.md`.
+
+A plugin declaring the `state` capability must serialize every user-visible
+setting through `save_state` and restore or reject it atomically through
+`load_state`. A native program identifier alone is not a complete state.

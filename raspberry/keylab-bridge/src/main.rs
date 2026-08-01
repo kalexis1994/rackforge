@@ -12,6 +12,7 @@ use rackforge_control_api::{
 };
 #[cfg(target_os = "linux")]
 use rackforge_controller_api::LITTLE_V1;
+use rackforge_controller_api::{ButtonPhase, HostActionBinding, HostActionTarget};
 use rackforge_controller_package::{
     CONTROLLER_DRIVER_API_VERSION, PROCESS_DRIVER_PROTOCOL_VERSION, ProcessDriverInfo,
 };
@@ -62,6 +63,7 @@ const CLEAR_SCREEN: &[u8] = &[
 const USB_BOOT_STABILITY: Duration = Duration::from_secs(5);
 const ACQUIRE_RETRY_DELAY: Duration = Duration::from_secs(2);
 const LONG_PRESS_THRESHOLD: Duration = Duration::from_millis(650);
+const PART_CLEAR_HOLD_THRESHOLD: Duration = Duration::from_millis(1_500);
 const HOME_CHORD_SIMULTANEITY: Duration = Duration::from_millis(250);
 const HOST_CONTROL_HEADER_TIMEOUT: Duration = Duration::from_millis(1_500);
 const SPINNER_FRAME_INTERVAL: Duration = Duration::from_millis(125);
@@ -168,6 +170,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                         .map(|surface| surface.layout_id.clone())
                         .collect(),
                     host_controls: profile.host_controls.clone(),
+                    host_actions: profile.host_actions.clone(),
                 })?
             );
             return Ok(());
@@ -477,13 +480,13 @@ struct HeldButton {
 
 #[derive(Debug, Default)]
 struct ButtonGestureTracker {
-    held: [Option<HeldButton>; 4],
+    held: [Option<HeldButton>; 5],
     home_chord_emitted: bool,
 }
 
 impl ButtonGestureTracker {
     fn press(&mut self, input: menu::Input, now: Instant) -> bool {
-        let Some(index) = soft_button_index(input) else {
+        let Some(index) = gesture_button_index(input) else {
             return false;
         };
         self.held[index].get_or_insert(HeldButton {
@@ -494,11 +497,11 @@ impl ButtonGestureTracker {
     }
 
     fn release(&mut self, input: menu::Input, now: Instant) -> Option<menu::Input> {
-        let index = soft_button_index(input)?;
+        let index = gesture_button_index(input)?;
         let held = self.held[index].take()?;
         let gesture = if held.long_emitted {
             None
-        } else if now.saturating_duration_since(held.pressed_at) >= LONG_PRESS_THRESHOLD {
+        } else if now.saturating_duration_since(held.pressed_at) >= gesture_threshold(input) {
             input.long_press()
         } else {
             Some(input)
@@ -533,29 +536,54 @@ impl ButtonGestureTracker {
             let Some(held) = held else {
                 continue;
             };
+            let input = [
+                menu::Input::Button1,
+                menu::Input::Button2,
+                menu::Input::Button3,
+                menu::Input::Button4,
+                menu::Input::KeyboardParts,
+            ][index];
             if !held.long_emitted
-                && now.saturating_duration_since(held.pressed_at) >= LONG_PRESS_THRESHOLD
+                && now.saturating_duration_since(held.pressed_at) >= gesture_threshold(input)
             {
                 held.long_emitted = true;
-                let input = [
-                    menu::Input::Button1,
-                    menu::Input::Button2,
-                    menu::Input::Button3,
-                    menu::Input::Button4,
-                ][index];
-                gestures.push(input.long_press().expect("soft buttons have long gestures"));
+                gestures.push(
+                    input
+                        .long_press()
+                        .expect("tracked buttons have long gestures"),
+                );
             }
         }
         gestures
     }
+
+    fn consume(&mut self, input: menu::Input) -> bool {
+        let Some(index) = gesture_button_index(input) else {
+            return false;
+        };
+        let consumed = self.held[index].take().is_some();
+        if self.held.iter().all(Option::is_none) {
+            self.home_chord_emitted = false;
+        }
+        consumed
+    }
 }
 
-fn soft_button_index(input: menu::Input) -> Option<usize> {
+fn gesture_threshold(input: menu::Input) -> Duration {
+    if input == menu::Input::KeyboardParts {
+        PART_CLEAR_HOLD_THRESHOLD
+    } else {
+        LONG_PRESS_THRESHOLD
+    }
+}
+
+fn gesture_button_index(input: menu::Input) -> Option<usize> {
     match input {
         menu::Input::Button1 => Some(0),
         menu::Input::Button2 => Some(1),
         menu::Input::Button3 => Some(2),
         menu::Input::Button4 => Some(3),
+        menu::Input::KeyboardParts => Some(4),
         _ => None,
     }
 }
@@ -1074,6 +1102,9 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
             match input.input_receiver.recv_timeout(Duration::from_millis(20)) {
                 Ok(event) => {
                     let mut navigation_input = None;
+                    if matches!(event.input, menu::Input::KeyboardSplitNote(_)) {
+                        button_gestures.consume(menu::Input::KeyboardParts);
+                    }
                     match event.phase {
                         InputPhase::Press => {
                             if button_gestures.press(event.input, Instant::now()) {
@@ -1380,14 +1411,16 @@ fn dispatch_session_command(command: SessionCommand) -> Result<Vec<EventEnvelope
 #[cfg(target_os = "linux")]
 fn register_host_controls() -> Result<(), String> {
     let profile = controller::package_profile();
-    dispatch_session_command(SessionCommand::RegisterHostControls {
+    dispatch_session_command(SessionCommand::RegisterHostBindings {
         controller_id: profile.driver_id.clone(),
-        bindings: profile.host_controls.clone(),
+        controls: profile.host_controls.clone(),
+        actions: profile.host_actions.clone(),
     })?;
     println!(
-        "HOST_CONTROLS_RESERVED controller={} count={}",
+        "HOST_BINDINGS_RESERVED controller={} controls={} actions={}",
         profile.driver_id,
-        profile.host_controls.len()
+        profile.host_controls.len(),
+        profile.host_actions.len()
     );
     Ok(())
 }
@@ -2275,6 +2308,9 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
     let (input_sender, input_receiver) = mpsc::channel();
     let (host_control_sender, host_control_receiver) = mpsc::channel();
     let host_controls = controller::package_profile().host_controls.clone();
+    let host_actions = controller::package_profile().host_actions.clone();
+    let mut keyboard_parts_held = false;
+    let mut split_note_sent = false;
     let connection = midi.connect(
         &port.handle,
         "rackforge KeyLab DAW ACK",
@@ -2284,6 +2320,25 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
             }
             if let Some(input) = parse_physical_input(message) {
                 let _ = input_sender.send(input);
+            }
+            if let Some(input) = parse_host_action(message, &host_actions) {
+                if input.input == menu::Input::KeyboardParts {
+                    keyboard_parts_held = input.phase == InputPhase::Press;
+                    if keyboard_parts_held {
+                        split_note_sent = false;
+                    }
+                }
+                let _ = input_sender.send(input);
+            }
+            if keyboard_parts_held
+                && !split_note_sent
+                && let Some(note) = parse_split_note(message)
+            {
+                split_note_sent = true;
+                let _ = input_sender.send(input_event(
+                    menu::Input::KeyboardSplitNote(note),
+                    InputPhase::Turn,
+                ));
             }
             if let Some(input) = parse_host_control(message, &host_controls) {
                 let _ = host_control_sender.send(input);
@@ -2296,6 +2351,27 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
         ack_receiver,
         input_receiver,
         host_control_receiver,
+    })
+}
+
+fn parse_split_note(message: &[u8]) -> Option<u8> {
+    if message.len() == 3 && message[0] & 0xf0 == 0x90 && message[2] > 0 {
+        Some(message[1])
+    } else {
+        None
+    }
+}
+
+fn parse_host_action(message: &[u8], bindings: &[HostActionBinding]) -> Option<PhysicalInputEvent> {
+    bindings.iter().find_map(|binding| {
+        let input = match binding.target {
+            HostActionTarget::KeyboardParts => menu::Input::KeyboardParts,
+        };
+        let phase = match binding.midi_cc.phase(message)? {
+            ButtonPhase::Press => InputPhase::Press,
+            ButtonPhase::Release => InputPhase::Release,
+        };
+        Some(input_event(input, phase))
     })
 }
 
@@ -2762,6 +2838,59 @@ mod tests {
         );
         assert_eq!(parse_physical_input(&[0xB0, 116, 64]), None);
         assert_eq!(parse_physical_input(&[0x90, 60, 100]), None);
+    }
+
+    #[test]
+    fn part_button_is_a_declared_momentary_host_action() {
+        let bindings = &controller::package_profile().host_actions;
+        assert_eq!(
+            parse_host_action(&[0xb0, 119, 127], bindings),
+            Some(input_event(menu::Input::KeyboardParts, InputPhase::Press))
+        );
+        assert_eq!(
+            parse_host_action(&[0xb0, 119, 0], bindings),
+            Some(input_event(menu::Input::KeyboardParts, InputPhase::Release))
+        );
+        assert_eq!(parse_host_action(&[0xb0, 119, 64], bindings), None);
+    }
+
+    #[test]
+    fn part_button_supports_short_and_long_gestures() {
+        let started = Instant::now();
+        let mut tracker = ButtonGestureTracker::default();
+        assert!(tracker.press(menu::Input::KeyboardParts, started));
+        assert_eq!(
+            tracker.release(
+                menu::Input::KeyboardParts,
+                started + Duration::from_millis(100)
+            ),
+            Some(menu::Input::KeyboardParts)
+        );
+        assert!(tracker.press(menu::Input::KeyboardParts, started));
+        assert!(tracker.poll(started + LONG_PRESS_THRESHOLD).is_empty());
+        assert_eq!(
+            tracker.poll(started + PART_CLEAR_HOLD_THRESHOLD),
+            vec![menu::Input::KeyboardPartsLong]
+        );
+    }
+
+    #[test]
+    fn part_note_consumes_the_pending_button_gesture() {
+        let started = Instant::now();
+        let mut tracker = ButtonGestureTracker::default();
+        assert!(tracker.press(menu::Input::KeyboardParts, started));
+        assert_eq!(parse_split_note(&[0x92, 64, 100]), Some(64));
+        assert_eq!(parse_split_note(&[0x92, 64, 0]), None);
+        assert_eq!(parse_split_note(&[0x82, 64, 0]), None);
+        assert!(tracker.consume(menu::Input::KeyboardParts));
+        assert_eq!(
+            tracker.release(
+                menu::Input::KeyboardParts,
+                started + PART_CLEAR_HOLD_THRESHOLD
+            ),
+            None
+        );
+        assert!(tracker.poll(started + PART_CLEAR_HOLD_THRESHOLD).is_empty());
     }
 
     #[test]

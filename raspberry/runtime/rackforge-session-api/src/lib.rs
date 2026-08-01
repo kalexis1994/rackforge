@@ -6,13 +6,14 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
 pub use rackforge_controller_api::{
-    HostControlBinding, HostControlTarget, MidiControlChangeBinding,
+    ButtonPhase, HostActionBinding, HostActionTarget, HostControlBinding, HostControlTarget,
+    MidiButtonBinding, MidiControlChangeBinding,
 };
 pub use rackforge_surface_api::{
     SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const SESSION_SCHEMA_VERSION: u32 = 9;
+pub const SESSION_SCHEMA_VERSION: u32 = 10;
 
 fn default_surface_mode() -> SurfaceMode {
     SurfaceMode::Live
@@ -343,6 +344,27 @@ impl SessionState {
                 }
                 instance.selected_sound_id = Some(sound_id.clone());
             }
+            SessionEvent::PluginStateRestored {
+                instance_id,
+                selected_sound_id,
+            } => {
+                let instance = self
+                    .instances
+                    .iter_mut()
+                    .find(|instance| &instance.instance_id == instance_id)
+                    .ok_or_else(|| format!("unknown instance {instance_id}"))?;
+                // A host preset embeds complete plugin state. Its native-program hint may
+                // legitimately disappear later, so it must never invalidate restoration.
+                instance.selected_sound_id = selected_sound_id
+                    .as_ref()
+                    .filter(|sound_id| {
+                        instance
+                            .sounds
+                            .iter()
+                            .any(|sound| sound.id == sound_id.as_str())
+                    })
+                    .cloned();
+            }
             SessionEvent::AuditionStarted {
                 lease_id,
                 instance_id,
@@ -508,6 +530,11 @@ pub enum SessionCommand {
         controller_id: String,
         bindings: Vec<HostControlBinding>,
     },
+    RegisterHostBindings {
+        controller_id: String,
+        controls: Vec<HostControlBinding>,
+        actions: Vec<HostActionBinding>,
+    },
     SetMasterLevel {
         level: MasterLevel,
     },
@@ -635,6 +662,11 @@ pub enum SessionEvent {
     SoundSelected {
         instance_id: InstanceId,
         sound_id: String,
+    },
+    PluginStateRestored {
+        instance_id: InstanceId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selected_sound_id: Option<String>,
     },
     AuditionStarted {
         lease_id: u64,
@@ -828,6 +860,23 @@ mod tests {
         assert_eq!(restored.active_mode, SurfaceMode::Live);
         assert_eq!(restored.master_level, MasterLevel::UNITY);
         assert_eq!(restored.master_pan, MasterPan::CENTER);
+    }
+
+    #[test]
+    fn complete_state_restore_does_not_depend_on_a_native_program_still_existing() {
+        let mut state = session();
+        let instance_id = state.active_instance_id.clone().unwrap();
+        let event = EventEnvelope {
+            schema_version: SESSION_SCHEMA_VERSION,
+            revision: state.revision.next().unwrap(),
+            command: None,
+            event: SessionEvent::PluginStateRestored {
+                instance_id,
+                selected_sound_id: Some("custom.deleted-later".into()),
+            },
+        };
+        state.apply(&event).unwrap();
+        assert_eq!(state.active_instance().unwrap().selected_sound_id, None);
     }
 
     #[test]

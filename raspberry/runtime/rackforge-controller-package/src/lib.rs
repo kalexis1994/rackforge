@@ -1,4 +1,6 @@
-use rackforge_controller_api::{ControllerProfile, HostControlBinding, SurfaceImplementation};
+use rackforge_controller_api::{
+    ControllerProfile, HostActionBinding, HostControlBinding, SurfaceImplementation,
+};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -9,7 +11,7 @@ use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
 
 pub const CONTROLLER_PACKAGE_SCHEMA_VERSION: u32 = 1;
-pub const CONTROLLER_DRIVER_API_VERSION: &str = "1.0.0";
+pub const CONTROLLER_DRIVER_API_VERSION: &str = "1.1.0";
 pub const CONTROLLER_MANIFEST_FILE: &str = "rackforge-controller.toml";
 pub const INSTALL_RECORD_SCHEMA_VERSION: u32 = 1;
 pub const PROCESS_DRIVER_PROTOCOL_VERSION: u32 = 1;
@@ -211,6 +213,8 @@ pub struct ControllerPackageManifest {
     #[serde(default)]
     pub host_controls: Vec<HostControlBinding>,
     #[serde(default)]
+    pub host_actions: Vec<HostActionBinding>,
+    #[serde(default)]
     pub integrity: Option<ArtifactIntegrity>,
 }
 
@@ -223,6 +227,8 @@ pub struct ProcessDriverInfo {
     pub layouts: Vec<String>,
     #[serde(default)]
     pub host_controls: Vec<HostControlBinding>,
+    #[serde(default)]
+    pub host_actions: Vec<HostActionBinding>,
 }
 
 impl ProcessDriverInfo {
@@ -272,6 +278,11 @@ impl ProcessDriverInfo {
         if self.host_controls != manifest.host_controls {
             return Err(PackageError::DriverContract(
                 "driver reserved host controls do not match the manifest".into(),
+            ));
+        }
+        if self.host_actions != manifest.host_actions {
+            return Err(PackageError::DriverContract(
+                "driver reserved host actions do not match the manifest".into(),
             ));
         }
         Ok(())
@@ -335,6 +346,7 @@ impl ControllerPackageManifest {
             driver_id: self.id.clone(),
             surfaces: self.surfaces.clone(),
             host_controls: self.host_controls.clone(),
+            host_actions: self.host_actions.clone(),
         }
         .validate()
         .map_err(PackageError::InvalidManifest)?;
@@ -362,6 +374,7 @@ impl ControllerPackageManifest {
             driver_id: self.id.clone(),
             surfaces: self.surfaces.clone(),
             host_controls: self.host_controls.clone(),
+            host_actions: self.host_actions.clone(),
         }
     }
 
@@ -875,6 +888,7 @@ mod tests {
                 },
             }],
             host_controls: Vec::new(),
+            host_actions: Vec::new(),
             integrity: None,
         }
     }
@@ -1007,6 +1021,7 @@ mod tests {
             controller_api: CONTROLLER_DRIVER_API_VERSION.into(),
             layouts: vec!["little@1".into()],
             host_controls: Vec::new(),
+            host_actions: Vec::new(),
         };
         info.validate_against(&package_manifest).unwrap();
 

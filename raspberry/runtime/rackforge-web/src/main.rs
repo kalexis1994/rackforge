@@ -317,7 +317,7 @@ async fn main() -> Result<()> {
         plugins: PluginWebRegistry::scan(&root.join("plugins"))?,
         auth,
     });
-    let static_files = ServeDir::new(&web_root).not_found_service(ServeFile::new(index));
+    let static_files = ServeDir::new(&web_root).fallback(ServeFile::new(index));
     let app = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/auth/status", get(auth_status))
@@ -907,7 +907,10 @@ async fn handle_session_socket(socket: axum::extract::ws::WebSocket, state: Arc<
                         match core_request(&state.control_socket, &request).await {
                             Ok(response) => {
                                 if sender.send(Message::Text(response.to_string().into())).await.is_err() { break; }
-                                if request.get("op").and_then(Value::as_str) == Some("dispatch") {
+                                if matches!(
+                                    request.get("op").and_then(Value::as_str),
+                                    Some("dispatch" | "load_plugin_preset")
+                                ) {
                                     if let Ok(snapshot) = core_request(&state.control_socket, &json!({"op":"snapshot"})).await {
                                         last_revision = snapshot.pointer("/snapshot/revision").and_then(Value::as_u64);
                                         if sender.send(Message::Text(snapshot.to_string().into())).await.is_err() { break; }

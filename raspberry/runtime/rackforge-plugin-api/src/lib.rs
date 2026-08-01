@@ -8,6 +8,7 @@ pub mod manifest;
 pub mod parameter;
 pub mod preset;
 pub mod program;
+pub mod state;
 
 pub use manifest::{
     ApiRequirement, Capability, MidiInputBus, MidiProgramChangePolicy, PluginKind, PluginManifest,
@@ -29,6 +30,11 @@ pub use rackforge_midi_api::{MidiInputBusId, PluginChannelModel};
 pub use rackforge_surface_api::{
     SURFACE_ACTIVATION_SCHEMA_VERSION, SurfaceActivationReason, SurfaceActivationRequest,
     SurfaceActivationResponse, SurfaceError, SurfaceMode,
+};
+pub use state::{
+    HOST_PRESET_SCHEMA_VERSION, HostPreset, HostPresetSummary,
+    PLUGIN_STATE_REFERENCE_SCHEMA_VERSION, PluginStateError, PluginStateReference,
+    validate_preset_id, validate_preset_name,
 };
 
 pub const MANIFEST_SCHEMA_VERSION: u32 = 1;

@@ -1,5 +1,6 @@
 pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
 pub use rackforge_performance_api::{LibraryRevision, PerformanceEdit, PerformanceSnapshot};
+pub use rackforge_plugin_api::{HostPreset, HostPresetSummary};
 use serde::{Deserialize, Serialize};
 
 pub use rackforge_session_api::{
@@ -9,7 +10,7 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 7;
+pub const CONTROL_SCHEMA_VERSION: u32 = 8;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 
@@ -21,6 +22,21 @@ pub enum ControlRequest {
     EditPerformance {
         expected_revision: LibraryRevision,
         edit: PerformanceEdit,
+    },
+    PluginPresets {
+        plugin_id: String,
+    },
+    SavePluginPreset {
+        instance_id: InstanceId,
+        name: String,
+    },
+    LoadPluginPreset {
+        instance_id: InstanceId,
+        preset_id: String,
+    },
+    PluginPreset {
+        plugin_id: String,
+        preset_id: String,
     },
     AudioSnapshot,
     ApplyAudioOutput {
@@ -57,6 +73,21 @@ pub enum ControlResponse {
     },
     PerformanceEdited {
         snapshot: Box<PerformanceSnapshot>,
+    },
+    PluginPresets {
+        plugin_id: String,
+        presets: Vec<HostPresetSummary>,
+    },
+    PluginPresetSaved {
+        preset: Box<HostPreset>,
+        presets: Vec<HostPresetSummary>,
+    },
+    PluginPresetLoaded {
+        preset: Box<HostPreset>,
+        revision: Revision,
+    },
+    PluginPreset {
+        preset: Box<HostPreset>,
     },
     AudioSnapshot {
         snapshot: Box<AudioOutputState>,

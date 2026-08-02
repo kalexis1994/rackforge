@@ -1222,9 +1222,14 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                     eprintln!("Could not show audio operation result: {error}");
                     break;
                 }
-            } else if (wifi_task.is_some() || audio_task.is_some()) && now >= next_spinner_frame {
+            } else if (wifi_task.is_some() || audio_task.is_some() || menu.is_plugin_loading())
+                && now >= next_spinner_frame
+            {
                 next_spinner_frame = now + SPINNER_FRAME_INTERVAL;
-                if menu.advance_wifi_spinner() || menu.advance_audio_spinner() {
+                if menu.advance_wifi_spinner()
+                    || menu.advance_audio_spinner()
+                    || menu.advance_plugin_spinner()
+                {
                     messages = render_menu_messages(&menu)?;
                     if let Err(error) = session.send(&messages.body) {
                         eprintln!("Could not advance async loader: {error}");
@@ -1534,7 +1539,6 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
         snapshot.active_instance_id.as_ref().map(InstanceId::as_str),
     );
     let instance = active_plugin_instance(&snapshot)?;
-    menu.set_active_plugin(&instance.plugin_id, &instance.plugin_name);
     let selected = instance.selected_sound_id.clone();
     let audition_lease_id = snapshot
         .audition
@@ -1545,24 +1549,29 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
         .program_draft
         .clone()
         .filter(|draft| draft.instance_id == instance.instance_id);
-    menu.sync_program_edit(program_draft, audition_lease_id);
-    menu.set_play_sounds(
-        instance
-            .sounds
-            .iter()
-            .cloned()
-            .map(|sound| {
-                menu::PlaySound::new(
-                    sound.id,
-                    sound.name,
-                    sound.bank.unwrap_or_else(|| "default".into()),
-                    sound.detail.unwrap_or_else(|| " ".into()),
-                )
-                .editable(sound.editable)
-            })
-            .collect(),
+    let sounds = instance
+        .sounds
+        .iter()
+        .cloned()
+        .map(|sound| {
+            menu::PlaySound::new(
+                sound.id,
+                sound.name,
+                sound.bank.unwrap_or_else(|| "default".into()),
+                sound.detail.unwrap_or_else(|| " ".into()),
+            )
+            .editable(sound.editable)
+        })
+        .collect();
+    if menu.sync_active_plugin(
+        instance.instance_id.as_str(),
+        &instance.plugin_id,
+        &instance.plugin_name,
+        sounds,
         selected.as_deref(),
-    );
+    ) {
+        menu.sync_program_edit(program_draft, audition_lease_id);
+    }
     Ok(())
 }
 

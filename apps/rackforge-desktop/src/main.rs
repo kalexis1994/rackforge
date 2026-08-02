@@ -107,8 +107,13 @@ impl DesktopApp {
             active_instance_id,
         );
         if let Some(plugin) = plugins.first() {
-            menu.set_active_plugin(&plugin.plugin_id, &plugin.name);
-            menu.set_play_sounds(plugin.sounds.clone(), plugin.selected_sound_id.as_deref());
+            menu.sync_active_plugin(
+                &plugin.instance_id,
+                &plugin.plugin_id,
+                &plugin.name,
+                plugin.sounds.clone(),
+                plugin.selected_sound_id.as_deref(),
+            );
         }
 
         {
@@ -178,9 +183,13 @@ impl DesktopApp {
                     return;
                 };
                 let plugin = &self.plugins[index];
-                self.menu.set_active_plugin(&plugin.plugin_id, &plugin.name);
-                self.menu
-                    .set_play_sounds(plugin.sounds.clone(), plugin.selected_sound_id.as_deref());
+                self.menu.sync_active_plugin(
+                    &plugin.instance_id,
+                    &plugin.plugin_id,
+                    &plugin.name,
+                    plugin.sounds.clone(),
+                    plugin.selected_sound_id.as_deref(),
+                );
                 let mut session = self.session.write().expect("session lock poisoned");
                 session.active_instance_id = Some(
                     InstanceId::new(plugin.instance_id.clone()).expect("validated instance id"),

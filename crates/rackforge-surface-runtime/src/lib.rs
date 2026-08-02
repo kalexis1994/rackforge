@@ -515,9 +515,12 @@ pub struct Menu {
     play_plugins: Vec<PlayPlugin>,
     config_index: usize,
     plugin_index: usize,
+    active_plugin_instance_id: Option<String>,
+    pending_plugin_instance_id: Option<String>,
     active_plugin_id: String,
     active_plugin_name: String,
     active_plugin_config_available: bool,
+    plugin_spinner: Spinner,
     system_index: usize,
     system_web_index: usize,
     web_settings: WebSystemSettings,
@@ -698,9 +701,12 @@ impl Default for Menu {
             play_plugins: Vec::new(),
             config_index: 0,
             plugin_index: 0,
+            active_plugin_instance_id: None,
+            pending_plugin_instance_id: None,
             active_plugin_id: "plugin.unavailable".into(),
             active_plugin_name: "PLUGIN".into(),
             active_plugin_config_available: false,
+            plugin_spinner: Spinner::ascii("plugin-loader", "LOADING PLUGIN", "PLEASE WAIT"),
             system_index: 0,
             system_web_index: 0,
             web_settings: WebSystemSettings::default(),
@@ -777,6 +783,13 @@ impl Menu {
             self.play_plugins.push(plugin);
             self.play_index = 0;
         }
+        if self.pending_plugin_instance_id.is_none() && self.active_plugin_instance_id.is_none() {
+            self.active_plugin_instance_id = self
+                .play_plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == self.active_plugin_id)
+                .map(|plugin| plugin.instance_id.clone());
+        }
     }
 
     pub fn set_play_plugins(&mut self, plugins: Vec<PlayPlugin>, active_instance_id: Option<&str>) {
@@ -785,11 +798,20 @@ impl Menu {
             .get(self.play_index)
             .map(|plugin| plugin.instance_id.clone());
         self.play_plugins = plugins;
-        self.play_index = active_instance_id
+        self.play_index = self
+            .pending_plugin_instance_id
+            .as_deref()
             .and_then(|id| {
                 self.play_plugins
                     .iter()
                     .position(|plugin| plugin.instance_id == id)
+            })
+            .or_else(|| {
+                active_instance_id.and_then(|id| {
+                    self.play_plugins
+                        .iter()
+                        .position(|plugin| plugin.instance_id == id)
+                })
             })
             .or_else(|| {
                 focused.as_deref().and_then(|id| {
@@ -800,6 +822,9 @@ impl Menu {
             })
             .unwrap_or(0)
             .min(self.play_plugins.len().saturating_sub(1));
+        if self.pending_plugin_instance_id.is_none() {
+            self.active_plugin_instance_id = active_instance_id.map(str::to_owned);
+        }
         if let Some(plugin) = self
             .play_plugins
             .iter()
@@ -807,6 +832,55 @@ impl Menu {
         {
             self.active_plugin_config_available = plugin.config_available;
         }
+    }
+
+    pub fn sync_active_plugin(
+        &mut self,
+        instance_id: impl Into<String>,
+        plugin_id: impl Into<String>,
+        name: impl Into<String>,
+        sounds: Vec<PlaySound>,
+        selected_sound_id: Option<&str>,
+    ) -> bool {
+        let instance_id = instance_id.into();
+        if self
+            .pending_plugin_instance_id
+            .as_deref()
+            .is_some_and(|pending| pending != instance_id)
+        {
+            return false;
+        }
+        self.active_plugin_instance_id = Some(instance_id.clone());
+        self.set_active_plugin(plugin_id, name);
+        self.set_play_sounds(sounds, selected_sound_id);
+        if self.pending_plugin_instance_id.as_deref() == Some(instance_id.as_str()) {
+            self.pending_plugin_instance_id = None;
+        }
+        true
+    }
+
+    pub fn advance_plugin_spinner(&mut self) -> bool {
+        if self.pending_plugin_instance_id.is_none() || !self.is_plugin_browser_page() {
+            return false;
+        }
+        self.plugin_spinner.advance();
+        true
+    }
+
+    pub fn is_plugin_loading(&self) -> bool {
+        self.pending_plugin_instance_id.is_some() && self.is_plugin_browser_page()
+    }
+
+    fn begin_plugin_loading(&mut self, instance_id: impl Into<String>) {
+        self.pending_plugin_instance_id = Some(instance_id.into());
+        self.plugin_spinner.reset("LOADING PLUGIN");
+        self.plugin_spinner.set_detail("PLEASE WAIT");
+        self.plugin_library_index = 0;
+        self.plugin_play_index = 0;
+    }
+
+    fn is_plugin_browser_page(&self) -> bool {
+        matches!(self.page, Page::PluginLibrary | Page::PluginPlay)
     }
 
     pub fn sync_active_mode(&mut self, mode: ActiveMode) {
@@ -1297,6 +1371,9 @@ impl Menu {
             self.pending_command = Some(MenuCommand::ForceHome);
             return;
         }
+        if self.is_plugin_loading() {
+            return;
+        }
         if input == Input::Button4Long {
             if self.program_draft.as_ref().is_some_and(|draft| draft.dirty) {
                 self.open_unsaved_changes(ProgramExitDestination::ActiveMode {
@@ -1634,10 +1711,13 @@ impl Menu {
                         .map(str::to_owned);
                     self.plugin_play_context = PluginPlayContext::RackSlot;
                     self.focus_plugin_play_sound(state_id.as_deref());
-                    if plugin.plugin_id != self.active_plugin_id {
+                    if self.active_plugin_instance_id.as_deref()
+                        != Some(plugin.instance_id.as_str())
+                    {
                         self.pending_command = Some(MenuCommand::SelectPlugin {
-                            instance_id: plugin.instance_id,
+                            instance_id: plugin.instance_id.clone(),
                         });
+                        self.begin_plugin_loading(plugin.instance_id);
                     } else if plugin_changed {
                         self.focus_plugin_play_sound(None);
                     }
@@ -2595,6 +2675,9 @@ impl Menu {
     }
 
     pub fn apply(&mut self, action: Action) {
+        if self.is_plugin_loading() {
+            return;
+        }
         if self.is_performance_config_page() {
             let input = match action {
                 Action::Previous => Input::Button2,
@@ -2823,12 +2906,14 @@ impl Menu {
                         _ => Page::Config,
                     },
                     Page::Play if !self.play_plugins.is_empty() => {
-                        if let Some(plugin) = self.play_plugins.get(self.play_index) {
-                            if plugin.plugin_id != self.active_plugin_id {
-                                self.pending_command = Some(MenuCommand::SelectPlugin {
-                                    instance_id: plugin.instance_id.clone(),
-                                });
-                            }
+                        if let Some(plugin) = self.play_plugins.get(self.play_index).cloned()
+                            && self.active_plugin_instance_id.as_deref()
+                                != Some(plugin.instance_id.as_str())
+                        {
+                            self.pending_command = Some(MenuCommand::SelectPlugin {
+                                instance_id: plugin.instance_id.clone(),
+                            });
+                            self.begin_plugin_loading(plugin.instance_id);
                         }
                         self.plugin_play_context = PluginPlayContext::Standalone;
                         Page::PluginLibrary
@@ -3204,6 +3289,9 @@ impl Menu {
                 Screen::with_header("WI-FI", line_1, line_2)
             }
             Page::SystemWifiResult => self.render_wifi_result(),
+            Page::PluginLibrary | Page::PluginPlay if self.pending_plugin_instance_id.is_some() => {
+                self.render_plugin_loading()
+            }
             Page::PluginLibrary => self.render_plugin_library(),
             Page::PluginPlay => self.render_plugin_play(),
             Page::PluginCustomPrograms => self.render_custom_programs(),
@@ -5377,6 +5465,20 @@ impl Menu {
         )
     }
 
+    fn render_plugin_loading(&self) -> Screen {
+        let [line_1, line_2] = component_lines(&self.plugin_spinner, false);
+        let header = self
+            .pending_plugin_instance_id
+            .as_deref()
+            .and_then(|id| {
+                self.play_plugins
+                    .iter()
+                    .find(|plugin| plugin.instance_id == id)
+            })
+            .map_or("PLUGIN", |plugin| plugin.name.as_str());
+        Screen::with_header(header, line_1, line_2)
+    }
+
     fn render_plugin_library(&self) -> Screen {
         let banks = self.plugin_banks();
         if banks.is_empty() {
@@ -6454,6 +6556,73 @@ mod tests {
             })
         );
         assert_eq!(menu.page, Page::PluginLibrary);
+    }
+
+    #[test]
+    fn plugin_switch_hides_stale_content_and_blocks_input_until_target_snapshot_arrives() {
+        let mut menu = Menu::default();
+        let plugins = vec![
+            PlayPlugin::new("play.piano", "org.example.piano", "PIANO"),
+            PlayPlugin::new("play.synth", "org.example.synth", "SYNTH"),
+        ];
+        menu.set_play_plugins(plugins.clone(), Some("play.piano"));
+        assert!(menu.sync_active_plugin(
+            "play.piano",
+            "org.example.piano",
+            "PIANO",
+            vec![PlaySound::new("piano.old", "OLD PIANO", "keys", "STALE")],
+            Some("piano.old"),
+        ));
+        menu.page = Page::Play;
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SelectPlugin {
+                instance_id: "play.synth".into(),
+            })
+        );
+        assert!(menu.is_plugin_loading());
+        let loading = menu.render();
+        assert_eq!(loading.header, Header::Visible("SYNTH".into()));
+        assert_eq!(loading.line_1.trim(), "LOADING PLUGIN");
+        assert!(loading.line_2.contains("PLEASE WAIT"));
+        assert!(!loading.line_1.contains("OLD PIANO"));
+
+        let page = menu.page;
+        menu.apply_input(Input::Button3);
+        menu.apply_input(Input::Button1);
+        menu.apply_input(Input::Button4);
+        assert_eq!(menu.page, page);
+        assert_eq!(menu.take_command(), None);
+        assert!(menu.advance_plugin_spinner());
+        assert_ne!(menu.render().line_2, loading.line_2);
+
+        // A late snapshot for the old instance cannot reveal stale programs or unlock input.
+        menu.set_play_plugins(plugins.clone(), Some("play.piano"));
+        assert!(!menu.sync_active_plugin(
+            "play.piano",
+            "org.example.piano",
+            "PIANO",
+            vec![PlaySound::new("piano.old", "OLD PIANO", "keys", "STALE")],
+            Some("piano.old"),
+        ));
+        assert!(menu.is_plugin_loading());
+        assert_eq!(menu.render().line_1.trim(), "LOADING PLUGIN");
+
+        menu.set_play_plugins(plugins, Some("play.synth"));
+        assert!(menu.sync_active_plugin(
+            "play.synth",
+            "org.example.synth",
+            "SYNTH",
+            vec![PlaySound::new("synth.new", "NEW SYNTH", "leads", "READY")],
+            Some("synth.new"),
+        ));
+        assert!(!menu.is_plugin_loading());
+        assert_eq!(menu.render().line_1.trim(), "LEADS");
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1.trim(), "[NEW SYNTH]");
     }
 
     #[test]

@@ -1,0 +1,9 @@
+[package]
+name = "rackforge-plugin-sdk"
+description = "Safe Rust guest SDK for portable RackForge plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["rlib"]

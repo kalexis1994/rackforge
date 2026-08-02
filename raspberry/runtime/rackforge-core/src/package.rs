@@ -48,6 +48,13 @@ impl PluginPackage {
         Ok(self.root.join(relative))
     }
 
+    pub fn component_path(&self) -> Result<Option<PathBuf>> {
+        let Some(component) = self.manifest.portable_component() else {
+            return Ok(None);
+        };
+        Ok(Some(self.root.join(&component.path)))
+    }
+
     pub fn resolve_resources(
         &self,
         overrides: &BTreeMap<String, PathBuf>,

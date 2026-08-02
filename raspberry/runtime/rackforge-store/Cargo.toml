@@ -10,6 +10,8 @@ base64.workspace = true
 ed25519-dalek.workspace = true
 getrandom.workspace = true
 rackforge-repository = { path = "../rackforge-repository" }
+rackforge-plugin-api = { path = "../rackforge-plugin-api" }
 serde_json.workspace = true
 sha2.workspace = true
+toml.workspace = true
 zip.workspace = true

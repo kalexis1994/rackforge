@@ -1,0 +1,405 @@
+#![no_std]
+
+//! Guest-side contract for `wasm-v1` RackForge processors.
+//!
+//! Plugin authors implement [`Processor`] and export it with
+//! [`export_processor!`]. The SDK owns the raw WebAssembly ABI and its linear
+//! memory buffers so plugin code does not handle pointers or host platforms.
+
+pub const ABI_VERSION_V1: u32 = 0x0001_0001;
+pub const STATUS_OK: i32 = 0;
+pub const STATUS_INVALID_ARGUMENT: i32 = -1;
+pub const STATUS_UNKNOWN_PARAMETER: i32 = -2;
+pub const STATUS_INVALID_STATE: i32 = -3;
+
+/// One MIDI 1.0 channel/system-common message delivered at an exact sample
+/// offset inside the current audio block. SysEx uses the control plane and is
+/// intentionally excluded from the real-time ABI.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MidiEvent {
+    pub frame: u32,
+    pub data: [u8; 3],
+    pub length: u8,
+}
+
+impl MidiEvent {
+    pub const fn new(frame: u32, data: [u8; 3], length: u8) -> Option<Self> {
+        if length == 0 || length > 3 {
+            return None;
+        }
+        Some(Self {
+            frame,
+            data,
+            length,
+        })
+    }
+
+    #[doc(hidden)]
+    pub const fn from_packed(value: u64) -> Self {
+        Self {
+            frame: value as u32,
+            data: [
+                (value >> 32) as u8,
+                (value >> 40) as u8,
+                (value >> 48) as u8,
+            ],
+            length: (value >> 56) as u8,
+        }
+    }
+}
+
+pub trait Processor: Default {
+    fn prepare(&mut self, _sample_rate: f64, _maximum_frames: u32, _channels: u32) -> bool {
+        true
+    }
+
+    fn set_parameter(&mut self, index: u32, value: f64) -> bool;
+
+    fn reset(&mut self) {}
+
+    /// Starts delivery of one manifest-declared resource on the control thread.
+    fn begin_resource(&mut self, _id: &str, _total_bytes: u64) -> bool {
+        false
+    }
+
+    fn write_resource(&mut self, _offset: u64, _bytes: &[u8]) -> bool {
+        false
+    }
+
+    fn end_resource(&mut self) -> bool {
+        false
+    }
+
+    fn load_preset(&mut self, _id: &str) -> bool {
+        false
+    }
+
+    fn save_state(&self, _destination: &mut [u8]) -> Option<usize> {
+        None
+    }
+
+    fn load_state(&mut self, _state: &[u8]) -> bool {
+        false
+    }
+
+    fn process(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        midi: &[MidiEvent],
+        frames: u32,
+        channels: u32,
+    );
+}
+
+#[macro_export]
+macro_rules! export_processor {
+    ($processor:ty, max_frames = $max_frames:expr, max_channels = $max_channels:expr, max_midi_events = $max_midi_events:expr, max_transfer_bytes = $max_transfer_bytes:expr) => {
+        const RF_MAX_FRAMES: usize = $max_frames;
+        const RF_MAX_CHANNELS: usize = $max_channels;
+        const RF_MAX_SAMPLES: usize = RF_MAX_FRAMES * RF_MAX_CHANNELS;
+        const RF_MAX_MIDI_EVENTS: usize = $max_midi_events;
+        const RF_MAX_TRANSFER_BYTES: usize = $max_transfer_bytes;
+
+        static mut RF_INPUT: [f32; RF_MAX_SAMPLES] = [0.0; RF_MAX_SAMPLES];
+        static mut RF_OUTPUT: [f32; RF_MAX_SAMPLES] = [0.0; RF_MAX_SAMPLES];
+        static mut RF_MIDI: [u64; RF_MAX_MIDI_EVENTS] = [0; RF_MAX_MIDI_EVENTS];
+        static mut RF_TRANSFER: [u8; RF_MAX_TRANSFER_BYTES] = [0; RF_MAX_TRANSFER_BYTES];
+        static mut RF_PROCESSOR: core::mem::MaybeUninit<$processor> =
+            core::mem::MaybeUninit::uninit();
+        static mut RF_INITIALIZED: bool = false;
+        static mut RF_PREPARED: bool = false;
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_abi_version() -> i32 {
+            $crate::ABI_VERSION_V1 as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_input_ptr() -> i32 {
+            core::ptr::addr_of_mut!(RF_INPUT).cast::<f32>() as usize as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_output_ptr() -> i32 {
+            core::ptr::addr_of_mut!(RF_OUTPUT).cast::<f32>() as usize as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_capacity_samples() -> i32 {
+            RF_MAX_SAMPLES as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_midi_ptr() -> i32 {
+            core::ptr::addr_of_mut!(RF_MIDI).cast::<u64>() as usize as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_capacity_midi_events() -> i32 {
+            RF_MAX_MIDI_EVENTS as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_transfer_ptr() -> i32 {
+            core::ptr::addr_of_mut!(RF_TRANSFER).cast::<u8>() as usize as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_capacity_transfer_bytes() -> i32 {
+            RF_MAX_TRANSFER_BYTES as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_prepare(
+            sample_rate: f64,
+            maximum_frames: i32,
+            channels: i32,
+        ) -> i32 {
+            if !sample_rate.is_finite()
+                || sample_rate <= 0.0
+                || maximum_frames <= 0
+                || channels <= 0
+                || maximum_frames as usize > RF_MAX_FRAMES
+                || channels as usize > RF_MAX_CHANNELS
+            {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            // SAFETY: each WebAssembly instance is single-threaded at this ABI
+            // boundary and owns one isolated linear memory.
+            unsafe {
+                if !RF_INITIALIZED {
+                    core::ptr::addr_of_mut!(RF_PROCESSOR)
+                        .cast::<$processor>()
+                        .write(<$processor as Default>::default());
+                    RF_INITIALIZED = true;
+                }
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                RF_PREPARED =
+                    processor.prepare(sample_rate, maximum_frames as u32, channels as u32);
+                if RF_PREPARED {
+                    $crate::STATUS_OK
+                } else {
+                    $crate::STATUS_INVALID_STATE
+                }
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_set_parameter(index: i32, value: f64) -> i32 {
+            if index < 0 || !value.is_finite() {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                if processor.set_parameter(index as u32, value) {
+                    $crate::STATUS_OK
+                } else {
+                    $crate::STATUS_UNKNOWN_PARAMETER
+                }
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_reset() -> i32 {
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                processor.reset();
+                $crate::STATUS_OK
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_resource_begin(id_length: i32, total_bytes: i64) -> i32 {
+            if id_length <= 0 || id_length as usize > RF_MAX_TRANSFER_BYTES || total_bytes < 0 {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            unsafe {
+                if !RF_INITIALIZED {
+                    core::ptr::addr_of_mut!(RF_PROCESSOR)
+                        .cast::<$processor>()
+                        .write(<$processor as Default>::default());
+                    RF_INITIALIZED = true;
+                }
+                let bytes = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_TRANSFER).cast::<u8>(),
+                    id_length as usize,
+                );
+                let Ok(id) = core::str::from_utf8(bytes) else {
+                    return $crate::STATUS_INVALID_ARGUMENT;
+                };
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                if processor.begin_resource(id, total_bytes as u64) {
+                    $crate::STATUS_OK
+                } else {
+                    $crate::STATUS_INVALID_STATE
+                }
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_resource_write(offset: i64, length: i32) -> i32 {
+            if offset < 0 || length < 0 || length as usize > RF_MAX_TRANSFER_BYTES {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let bytes = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_TRANSFER).cast::<u8>(),
+                    length as usize,
+                );
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                if processor.write_resource(offset as u64, bytes) {
+                    $crate::STATUS_OK
+                } else {
+                    $crate::STATUS_INVALID_STATE
+                }
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_resource_end() -> i32 {
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                if processor.end_resource() {
+                    $crate::STATUS_OK
+                } else {
+                    $crate::STATUS_INVALID_STATE
+                }
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_load_preset(length: i32) -> i32 {
+            if length <= 0 || length as usize > RF_MAX_TRANSFER_BYTES {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let bytes = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_TRANSFER).cast::<u8>(),
+                    length as usize,
+                );
+                let Ok(id) = core::str::from_utf8(bytes) else {
+                    return $crate::STATUS_INVALID_ARGUMENT;
+                };
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                if processor.load_preset(id) {
+                    $crate::STATUS_OK
+                } else {
+                    $crate::STATUS_INVALID_STATE
+                }
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_save_state() -> i32 {
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let processor = &*core::ptr::addr_of!(RF_PROCESSOR).cast::<$processor>();
+                let destination = core::slice::from_raw_parts_mut(
+                    core::ptr::addr_of_mut!(RF_TRANSFER).cast::<u8>(),
+                    RF_MAX_TRANSFER_BYTES,
+                );
+                match processor.save_state(destination) {
+                    Some(length) if length <= RF_MAX_TRANSFER_BYTES => length as i32,
+                    _ => $crate::STATUS_INVALID_STATE,
+                }
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_load_state(length: i32) -> i32 {
+            if length < 0 || length as usize > RF_MAX_TRANSFER_BYTES {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let state = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_TRANSFER).cast::<u8>(),
+                    length as usize,
+                );
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                if processor.load_state(state) {
+                    $crate::STATUS_OK
+                } else {
+                    $crate::STATUS_INVALID_STATE
+                }
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_process(
+            frames: i32,
+            channels: i32,
+            midi_event_count: i32,
+        ) -> i32 {
+            if frames <= 0 || channels <= 0 || midi_event_count < 0 {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            let Some(samples) = (frames as usize).checked_mul(channels as usize) else {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            };
+            if samples > RF_MAX_SAMPLES || midi_event_count as usize > RF_MAX_MIDI_EVENTS {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            unsafe {
+                if !RF_PREPARED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                let input = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_INPUT).cast::<f32>(),
+                    samples,
+                );
+                let output = core::slice::from_raw_parts_mut(
+                    core::ptr::addr_of_mut!(RF_OUTPUT).cast::<f32>(),
+                    samples,
+                );
+                let packed_midi = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_MIDI).cast::<u64>(),
+                    midi_event_count as usize,
+                );
+                let mut events = [$crate::MidiEvent {
+                    frame: 0,
+                    data: [0; 3],
+                    length: 1,
+                }; RF_MAX_MIDI_EVENTS];
+                for (destination, packed) in events.iter_mut().zip(packed_midi) {
+                    *destination = $crate::MidiEvent::from_packed(*packed);
+                    if destination.frame >= frames as u32
+                        || destination.length == 0
+                        || destination.length > 3
+                    {
+                        return $crate::STATUS_INVALID_ARGUMENT;
+                    }
+                }
+                processor.process(
+                    input,
+                    output,
+                    &events[..midi_event_count as usize],
+                    frames as u32,
+                    channels as u32,
+                );
+                $crate::STATUS_OK
+            }
+        }
+    };
+}

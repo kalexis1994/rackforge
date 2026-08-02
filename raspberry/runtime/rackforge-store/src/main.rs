@@ -1,5 +1,6 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signer, SigningKey};
+use rackforge_plugin_api::PluginManifest;
 use rackforge_repository::{
     RepositoryConfig, RepositoryFile, fetch_repository, install_archive, repository_platform_key,
     verify_catalog,
@@ -52,6 +53,9 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
             install(config, repository_id, plugin_id, store_root, Some(version))
         }
         [command, package, output] if command == "pack" => pack(package, output),
+        [command, package, component, output] if command == "pack-wasm" => {
+            pack_wasm(package, component, output)
+        }
         _ => Err(usage().into()),
     }
 }
@@ -128,7 +132,7 @@ fn install(
         .map_err(|error| error.to_string())?;
     println!(
         "PLUGIN_DOWNLOAD id={} version={} platform={} bytes={}",
-        plugin_id, selected.release.version, platform, selected.artifact.size
+        plugin_id, selected.release.version, selected.artifact.platform, selected.artifact.size
     );
     let bytes = verified
         .download(&selected)
@@ -178,6 +182,73 @@ fn pack(package_path: &str, output_path: &str) -> Result<(), String> {
     println!(
         "RFPLUGIN_PACKED path={} bytes={} sha256={}",
         output_path,
+        bytes.len(),
+        hex_digest(&Sha256::digest(&bytes))
+    );
+    Ok(())
+}
+
+fn pack_wasm(package_path: &str, component_path: &str, output_path: &str) -> Result<(), String> {
+    let package = fs::canonicalize(package_path).map_err(|error| error.to_string())?;
+    let manifest_path = package.join("rackforge-plugin.toml");
+    if !package.is_dir() || !manifest_path.is_file() {
+        return Err("package must be a directory containing rackforge-plugin.toml".into());
+    }
+    if !output_path.ends_with(".rfplugin") {
+        return Err("package output must end in .rfplugin".into());
+    }
+    let manifest_text = fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?;
+    let manifest: PluginManifest =
+        toml::from_str(&manifest_text).map_err(|error| format!("invalid manifest: {error}"))?;
+    manifest
+        .validate()
+        .map_err(|error| format!("invalid manifest: {error}"))?;
+    let declared = manifest
+        .portable_component()
+        .ok_or("manifest does not declare a portable component")?;
+    let component = fs::canonicalize(component_path).map_err(|error| error.to_string())?;
+    if !component.is_file() {
+        return Err("portable component must be a file".into());
+    }
+    let component_bytes = fs::read(&component).map_err(|error| error.to_string())?;
+    if !component_bytes.starts_with(b"\0asm") {
+        return Err("portable component is not a WebAssembly binary".into());
+    }
+
+    let declared_path = PathBuf::from(&declared.path);
+    let mut files = Vec::new();
+    collect_files(&package, &package, &mut files)?;
+    files.retain(|relative| relative != &declared_path);
+    files.sort();
+    let output = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(output_path)
+        .map_err(|error| error.to_string())?;
+    let mut archive = ZipWriter::new(output);
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+    for relative in files {
+        let name = relative.to_string_lossy().replace('\\', "/");
+        archive
+            .start_file(name, options)
+            .map_err(|error| error.to_string())?;
+        let mut source = File::open(package.join(&relative)).map_err(|error| error.to_string())?;
+        std::io::copy(&mut source, &mut archive).map_err(|error| error.to_string())?;
+    }
+    archive
+        .start_file(declared.path.replace('\\', "/"), options)
+        .map_err(|error| error.to_string())?;
+    archive
+        .write_all(&component_bytes)
+        .map_err(|error| error.to_string())?;
+    archive.finish().map_err(|error| error.to_string())?;
+    let bytes = fs::read(output_path).map_err(|error| error.to_string())?;
+    println!(
+        "RFPLUGIN_WASM_PACKED path={} component={} bytes={} sha256={}",
+        output_path,
+        component.display(),
         bytes.len(),
         hex_digest(&Sha256::digest(&bytes))
     );
@@ -260,5 +331,5 @@ fn hex_digest(bytes: &[u8]) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  rackforge-store keygen SECRET_KEY PUBLIC_KEY\n  rackforge-store sign INDEX_JSON SECRET_KEY INDEX_SIG\n  rackforge-store verify INDEX_JSON INDEX_SIG REPOSITORIES_TOML REPOSITORY_ID\n  rackforge-store list REPOSITORIES_TOML\n  rackforge-store install REPOSITORIES_TOML REPOSITORY_ID PLUGIN_ID STORE_ROOT [VERSION]\n  rackforge-store pack PACKAGE_DIRECTORY OUTPUT.rfplugin"
+    "usage:\n  rackforge-store keygen SECRET_KEY PUBLIC_KEY\n  rackforge-store sign INDEX_JSON SECRET_KEY INDEX_SIG\n  rackforge-store verify INDEX_JSON INDEX_SIG REPOSITORIES_TOML REPOSITORY_ID\n  rackforge-store list REPOSITORIES_TOML\n  rackforge-store install REPOSITORIES_TOML REPOSITORY_ID PLUGIN_ID STORE_ROOT [VERSION]\n  rackforge-store pack PACKAGE_DIRECTORY OUTPUT.rfplugin\n  rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin"
 }

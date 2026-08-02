@@ -372,7 +372,13 @@ impl VerifiedRepository {
                 release
                     .artifacts
                     .iter()
-                    .find(|artifact| artifact.platform == platform)
+                    .find(|artifact| artifact.platform == "wasm-v1")
+                    .or_else(|| {
+                        release
+                            .artifacts
+                            .iter()
+                            .find(|artifact| artifact.platform == platform)
+                    })
                     .and_then(|artifact| {
                         Version::parse(&release.version)
                             .ok()
@@ -768,19 +774,38 @@ fn validate_extracted_package(
             "manifest identity does not match signed catalog".into(),
         ));
     }
-    let binary = manifest
-        .binaries
-        .get(&selected.artifact.platform)
-        .ok_or_else(|| {
-            RepositoryError::InvalidPackage("package has no binary for this platform".into())
-        })?;
-    let binary_path = root.join(binary);
-    let canonical = fs::canonicalize(&binary_path)
+    let payload = if selected.artifact.platform == "wasm-v1" {
+        manifest
+            .portable_component()
+            .map(|component| component.path.as_str())
+            .ok_or_else(|| {
+                RepositoryError::InvalidPackage("portable artifact has no wasm-v1 component".into())
+            })?
+    } else {
+        manifest
+            .binaries
+            .get(&selected.artifact.platform)
+            .map(String::as_str)
+            .ok_or_else(|| {
+                RepositoryError::InvalidPackage("package has no binary for this platform".into())
+            })?
+    };
+    let payload_path = root.join(payload);
+    let canonical = fs::canonicalize(&payload_path)
         .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
     if !canonical.starts_with(root) || !canonical.is_file() {
         return Err(RepositoryError::InvalidPackage(
-            "native binary is missing or escaped the package".into(),
+            "plugin executable is missing or escaped the package".into(),
         ));
+    }
+    if selected.artifact.platform == "wasm-v1" {
+        let bytes = fs::read(&canonical)
+            .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+        if !bytes.starts_with(b"\0asm") {
+            return Err(RepositoryError::InvalidPackage(
+                "portable component is not a WebAssembly binary".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -921,6 +946,27 @@ linux-aarch64 = "lib/synth.so"
 "#
     }
 
+    fn portable_manifest() -> &'static [u8] {
+        br#"schema_version = 1
+id = "org.rackforge.synth"
+name = "Test Synth"
+vendor = "RackForge Test"
+version = "1.2.3"
+kind = "instrument"
+state_version = 1
+capabilities = ["audio_output", "midi_input"]
+ui_layouts = ["little@1"]
+
+[api]
+major = 1
+minor = 5
+
+[component]
+abi = "wasm-v1"
+path = "component.wasm"
+"#
+    }
+
     #[test]
     fn verifies_exact_catalog_bytes_and_rejects_tampering() {
         let bytes = serde_json::to_vec(&index()).unwrap();
@@ -954,6 +1000,30 @@ linux-aarch64 = "lib/synth.so"
     }
 
     #[test]
+    fn prefers_one_portable_artifact_on_every_host() {
+        let mut catalog = index();
+        catalog.plugins[0].releases[0].artifacts.insert(
+            0,
+            PluginArtifact {
+                platform: "wasm-v1".into(),
+                url: "../packages/synth-portable.rfplugin".into(),
+                size: 8,
+                sha256: hex_digest(Sha256::digest(b"portable").as_slice()),
+            },
+        );
+        let repository = VerifiedRepository {
+            config: config(),
+            index_url: Url::parse("http://127.0.0.1:8788/v1/index.json").unwrap(),
+            index: catalog,
+        };
+        let selected = repository
+            .select("org.rackforge.synth", None, "linux-aarch64")
+            .unwrap();
+        assert_eq!(selected.artifact.platform, "wasm-v1");
+        assert!(selected.url.as_str().ends_with("synth-portable.rfplugin"));
+    }
+
+    #[test]
     fn refuses_plain_http_without_explicit_lan_permission() {
         let mut repository = config();
         repository.allow_insecure_http = false;
@@ -980,6 +1050,28 @@ linux-aarch64 = "lib/synth.so"
         assert!(!root.join("active").exists());
         let repeated = install_archive(&root, &selected, &bytes).unwrap();
         assert!(repeated.already_installed);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installs_a_verified_portable_package() {
+        let wasm = b"\0asm\x01\0\0\0";
+        let bytes = archive(&[
+            ("rackforge-plugin.toml", portable_manifest()),
+            ("component.wasm", wasm),
+        ]);
+        let mut selected = selected_for(&bytes);
+        selected.artifact.platform = "wasm-v1".into();
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-portable-{}-{}",
+            std::process::id(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let installed = install_archive(&root, &selected, &bytes).unwrap();
+        assert_eq!(
+            fs::read(installed.path.join("component.wasm")).unwrap(),
+            wasm
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

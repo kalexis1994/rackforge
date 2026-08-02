@@ -1,0 +1,13 @@
+[package]
+name = "rackforge-plugin-runtime"
+description = "Host runtime for portable wasm-v1 RackForge plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+wasmtime.workspace = true
+
+[dev-dependencies]
+wat = "1.245"

@@ -1,0 +1,514 @@
+use crate::{PluginPackage, loader::NativeLoadedPlugin};
+use anyhow::{Context, Result, bail};
+use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
+use rackforge_plugin_api::{
+    Capability, ParameterSchema, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
+    ProgramEditRequest, ProgramEditorView, ProgramFieldEditRequest, ResourceKind,
+    RuntimeDescriptor, SurfaceActivationRequest, SurfaceActivationResponse,
+};
+use rackforge_plugin_runtime::{
+    MidiEvent, ParameterEvent, PortableEngine, PortableInstance as WasmInstance, PortableModule,
+    RuntimeLimits,
+};
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+const MAX_REALTIME_EVENTS: usize = 4096;
+const MAX_STATIC_METADATA_BYTES: u64 = 1024 * 1024;
+
+/// One validated RackForge plugin, independent of its execution backend.
+pub struct LoadedPlugin {
+    backend: LoadedBackend,
+}
+
+enum LoadedBackend {
+    Native(NativeLoadedPlugin),
+    Portable(PortableLoadedPlugin),
+}
+
+impl LoadedPlugin {
+    /// Loads either the legacy trusted native ABI or the sandboxed portable
+    /// ABI selected by the package manifest.
+    ///
+    /// # Safety
+    ///
+    /// Native packages execute code in the host process. Portable packages do
+    /// not require caller trust, but share this entry point so callers cannot
+    /// accidentally bypass the package's declared runtime.
+    pub unsafe fn load(
+        package: &PluginPackage,
+        binary_override: Option<&Path>,
+        resource_overrides: &BTreeMap<String, PathBuf>,
+        data_root: Option<&Path>,
+    ) -> Result<Self> {
+        if package.manifest().portable_component().is_some() {
+            if binary_override.is_some() {
+                bail!("a binary override cannot replace a portable component");
+            }
+            Ok(Self {
+                backend: LoadedBackend::Portable(PortableLoadedPlugin::load(
+                    package,
+                    resource_overrides,
+                    data_root,
+                )?),
+            })
+        } else {
+            // SAFETY: forwarded from this function's native-package contract.
+            Ok(Self {
+                backend: LoadedBackend::Native(unsafe {
+                    NativeLoadedPlugin::load(
+                        package,
+                        binary_override,
+                        resource_overrides,
+                        data_root,
+                    )?
+                }),
+            })
+        }
+    }
+
+    pub fn manifest(&self) -> &PluginManifest {
+        match &self.backend {
+            LoadedBackend::Native(plugin) => plugin.manifest(),
+            LoadedBackend::Portable(plugin) => &plugin.manifest,
+        }
+    }
+
+    pub fn descriptor(&self) -> &RuntimeDescriptor {
+        match &self.backend {
+            LoadedBackend::Native(plugin) => plugin.descriptor(),
+            LoadedBackend::Portable(plugin) => &plugin.descriptor,
+        }
+    }
+
+    pub fn parameters(&self) -> &ParameterSchema {
+        match &self.backend {
+            LoadedBackend::Native(plugin) => plugin.parameters(),
+            LoadedBackend::Portable(plugin) => &plugin.parameters,
+        }
+    }
+
+    pub fn presets(&self) -> &PresetCatalog {
+        match &self.backend {
+            LoadedBackend::Native(plugin) => plugin.presets(),
+            LoadedBackend::Portable(plugin) => &plugin.presets,
+        }
+    }
+
+    pub fn create_instance(&self) -> Result<PluginInstance<'_>> {
+        let backend = match &self.backend {
+            LoadedBackend::Native(plugin) => {
+                PluginInstanceBackend::Native(plugin.create_instance()?)
+            }
+            LoadedBackend::Portable(plugin) => {
+                PluginInstanceBackend::Portable(plugin.create_instance()?)
+            }
+        };
+        Ok(PluginInstance { backend })
+    }
+}
+
+pub struct PortableLoadedPlugin {
+    manifest: PluginManifest,
+    descriptor: RuntimeDescriptor,
+    parameters: ParameterSchema,
+    presets: PresetCatalog,
+    resources: BTreeMap<String, Vec<u8>>,
+    module: PortableModule,
+}
+
+impl PortableLoadedPlugin {
+    fn load(
+        package: &PluginPackage,
+        resource_overrides: &BTreeMap<String, PathBuf>,
+        data_root: Option<&Path>,
+    ) -> Result<Self> {
+        let component = package
+            .manifest()
+            .portable_component()
+            .context("portable package has no component declaration")?;
+        let descriptor: RuntimeDescriptor = read_json(
+            &package.root().join(&component.runtime_descriptor),
+            "runtime descriptor",
+        )?;
+        descriptor
+            .validate_against(package.manifest())
+            .context("validating portable runtime descriptor")?;
+        let parameters: ParameterSchema = read_json(
+            &package.root().join(&component.parameter_schema),
+            "parameter schema",
+        )?;
+        parameters
+            .validate()
+            .context("validating portable parameter schema")?;
+        let presets: PresetCatalog = read_json(
+            &package.root().join(&component.preset_catalog),
+            "preset catalog",
+        )?;
+        presets
+            .validate()
+            .context("validating portable preset catalog")?;
+        let declares_presets = package
+            .manifest()
+            .capabilities
+            .contains(&Capability::Presets);
+        if declares_presets != !presets.presets.is_empty() {
+            bail!(
+                "preset capability and catalog disagree: capability={declares_presets} presets={}",
+                presets.presets.len()
+            );
+        }
+
+        let mut resources = BTreeMap::new();
+        for (id, path) in package.resolve_resources(resource_overrides)? {
+            let requirement = package
+                .manifest()
+                .resources
+                .iter()
+                .find(|resource| resource.id == id)
+                .context("resolved undeclared resource")?;
+            if requirement.kind == ResourceKind::Directory {
+                bail!(
+                    "portable resource {id:?} is a directory; wasm-v1 currently accepts files only"
+                );
+            }
+            let bytes = fs::read(&path)
+                .with_context(|| format!("reading portable resource {}", path.display()))?;
+            resources.insert(id, bytes);
+        }
+
+        let component_path = package
+            .component_path()?
+            .context("portable component path is unavailable")?;
+        let component_bytes = fs::read(&component_path)
+            .with_context(|| format!("reading {}", component_path.display()))?;
+        let engine = match data_root {
+            Some(root) => PortableEngine::with_cache(
+                RuntimeLimits::default(),
+                root.join(".cache/portable-code"),
+            )?,
+            None => PortableEngine::new(RuntimeLimits::default())?,
+        };
+        let module = engine.compile(&component_bytes)?;
+        Ok(Self {
+            manifest: package.manifest().clone(),
+            descriptor,
+            parameters,
+            presets,
+            resources,
+            module,
+        })
+    }
+
+    fn create_instance(&self) -> Result<PortablePluginInstance> {
+        let mut instance = self.module.instantiate()?;
+        for (id, bytes) in &self.resources {
+            instance
+                .load_resource(id, bytes)
+                .with_context(|| format!("delivering portable resource {id:?}"))?;
+        }
+        Ok(PortablePluginInstance {
+            instance,
+            presets: self.presets.clone(),
+            active: false,
+            midi_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
+            parameter_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
+        })
+    }
+}
+
+pub struct PluginInstance<'plugin> {
+    backend: PluginInstanceBackend<'plugin>,
+}
+
+enum PluginInstanceBackend<'plugin> {
+    Native(crate::loader::NativePluginInstance<'plugin>),
+    Portable(PortablePluginInstance),
+}
+
+impl PluginInstance<'_> {
+    pub fn supports_program_editing(&self) -> bool {
+        match &self.backend {
+            PluginInstanceBackend::Native(instance) => instance.supports_program_editing(),
+            PluginInstanceBackend::Portable(_) => false,
+        }
+    }
+
+    pub fn activate_surface(
+        &mut self,
+        request: &SurfaceActivationRequest,
+    ) -> Result<SurfaceActivationResponse> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.activate_surface(request),
+            PluginInstanceBackend::Portable(_) => {
+                request
+                    .validate()
+                    .context("validating surface activation request")?;
+                Ok(SurfaceActivationResponse::focus(None))
+            }
+        }
+    }
+
+    pub fn begin_program_edit(&mut self, request: &ProgramEditRequest) -> Result<PreparedProgram> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.begin_program_edit(request),
+            PluginInstanceBackend::Portable(_) => {
+                bail!("portable plugin does not expose program editing")
+            }
+        }
+    }
+
+    pub fn prepare_program_save(&mut self, document: &ProgramDocument) -> Result<PreparedProgram> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.prepare_program_save(document),
+            PluginInstanceBackend::Portable(_) => {
+                bail!("portable plugin does not expose program editing")
+            }
+        }
+    }
+
+    pub fn install_program(&mut self, prepared: &PreparedProgram) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.install_program(prepared),
+            PluginInstanceBackend::Portable(_) => {
+                bail!("portable plugin does not expose program editing")
+            }
+        }
+    }
+
+    pub fn preview_program(&mut self, prepared: &PreparedProgram) -> Result<bool> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.preview_program(prepared),
+            PluginInstanceBackend::Portable(_) => {
+                bail!("portable plugin does not expose program editing")
+            }
+        }
+    }
+
+    pub fn program_editor_view(&mut self, document: &ProgramDocument) -> Result<ProgramEditorView> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.program_editor_view(document),
+            PluginInstanceBackend::Portable(_) => {
+                bail!("portable plugin does not expose program editing")
+            }
+        }
+    }
+
+    pub fn apply_program_edit(
+        &mut self,
+        request: &ProgramFieldEditRequest,
+    ) -> Result<PreparedProgram> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.apply_program_edit(request),
+            PluginInstanceBackend::Portable(_) => {
+                bail!("portable plugin does not expose program editing")
+            }
+        }
+    }
+
+    pub fn preset_catalog(&self) -> Result<PresetCatalog> {
+        match &self.backend {
+            PluginInstanceBackend::Native(instance) => instance.preset_catalog(),
+            PluginInstanceBackend::Portable(instance) => Ok(instance.presets.clone()),
+        }
+    }
+
+    pub fn activate(
+        &mut self,
+        sample_rate: f64,
+        maximum_frames: u32,
+        input_channels: u32,
+        output_channels: u32,
+    ) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => {
+                instance.activate(sample_rate, maximum_frames, input_channels, output_channels)
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.prepare(
+                    sample_rate,
+                    maximum_frames,
+                    input_channels,
+                    output_channels,
+                )?;
+                instance.active = true;
+                Ok(())
+            }
+        }
+    }
+
+    pub fn deactivate(&mut self) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.deactivate(),
+            PluginInstanceBackend::Portable(instance) => {
+                if instance.active {
+                    instance.instance.reset()?;
+                    instance.active = false;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    pub fn reset(&mut self) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.reset(),
+            PluginInstanceBackend::Portable(instance) => instance.instance.reset(),
+        }
+    }
+
+    pub fn set_parameter(&mut self, index: u32, value: f64) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.set_parameter(index, value),
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.set_parameter(index, value)
+            }
+        }
+    }
+
+    pub fn get_parameter(&mut self, index: u32) -> Result<f64> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.get_parameter(index),
+            PluginInstanceBackend::Portable(instance) => instance.instance.get_parameter(index),
+        }
+    }
+
+    pub fn save_state(&mut self) -> Result<Vec<u8>> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.save_state(),
+            PluginInstanceBackend::Portable(instance) => instance.instance.save_state(),
+        }
+    }
+
+    pub fn load_state(&mut self, bytes: &[u8]) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.load_state(bytes),
+            PluginInstanceBackend::Portable(instance) => instance.instance.load_state(bytes),
+        }
+    }
+
+    pub fn load_preset(&mut self, preset_id: &str) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.load_preset(preset_id),
+            PluginInstanceBackend::Portable(instance) => {
+                if !instance
+                    .presets
+                    .presets
+                    .iter()
+                    .any(|preset| preset.id == preset_id)
+                {
+                    bail!("plugin does not declare preset {preset_id:?}");
+                }
+                instance.instance.load_preset(preset_id)
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn process_interleaved(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        frames: u32,
+        input_channels: u32,
+        output_channels: u32,
+        midi_events: &[MidiEventV1],
+        parameter_events: &[ParameterEventV1],
+    ) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(instance) => instance.process_interleaved(
+                input,
+                output,
+                frames,
+                input_channels,
+                output_channels,
+                midi_events,
+                parameter_events,
+            ),
+            PluginInstanceBackend::Portable(instance) => instance.process_interleaved(
+                input,
+                output,
+                frames,
+                input_channels,
+                output_channels,
+                midi_events,
+                parameter_events,
+            ),
+        }
+    }
+}
+
+pub struct PortablePluginInstance {
+    instance: WasmInstance,
+    presets: PresetCatalog,
+    active: bool,
+    midi_scratch: Vec<MidiEvent>,
+    parameter_scratch: Vec<ParameterEvent>,
+}
+
+impl PortablePluginInstance {
+    #[allow(clippy::too_many_arguments)]
+    fn process_interleaved(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        frames: u32,
+        input_channels: u32,
+        output_channels: u32,
+        midi_events: &[MidiEventV1],
+        parameter_events: &[ParameterEventV1],
+    ) -> Result<()> {
+        if !self.active {
+            bail!("plugin instance is not active");
+        }
+        if midi_events.len() > MAX_REALTIME_EVENTS || parameter_events.len() > MAX_REALTIME_EVENTS {
+            bail!("process block exceeds RackForge's real-time event limit");
+        }
+        self.midi_scratch.clear();
+        for event in midi_events {
+            let length = event.length as usize;
+            if length == 0 || length > event.data.len() {
+                bail!("MIDI event has an invalid length");
+            }
+            self.midi_scratch
+                .push(MidiEvent::new(event.frame, &event.data[..length])?);
+        }
+        self.parameter_scratch.clear();
+        self.parameter_scratch
+            .extend(parameter_events.iter().map(|event| ParameterEvent {
+                frame: event.frame,
+                index: event.parameter_index,
+                value: event.value,
+            }));
+        if input.len() != frames as usize * input_channels as usize
+            || output.len() != frames as usize * output_channels as usize
+        {
+            bail!("audio buffers do not match the declared process block");
+        }
+        self.instance.process_interleaved_with_events(
+            input,
+            output,
+            frames,
+            &self.midi_scratch,
+            &self.parameter_scratch,
+        )
+    }
+}
+
+impl Drop for PortablePluginInstance {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = self.instance.reset();
+        }
+    }
+}
+
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path, label: &str) -> Result<T> {
+    let metadata = fs::metadata(path).with_context(|| format!("reading {label} metadata"))?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_STATIC_METADATA_BYTES {
+        bail!("portable plugin {label} has an invalid size");
+    }
+    let bytes = fs::read(path).with_context(|| format!("reading {label} {}", path.display()))?;
+    serde_json::from_slice(&bytes).with_context(|| format!("parsing portable {label}"))
+}

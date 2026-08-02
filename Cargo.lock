@@ -2791,6 +2791,7 @@ dependencies = [
  "rackforge-midi-api",
  "rackforge-performance-api",
  "rackforge-plugin-api",
+ "rackforge-plugin-runtime",
  "rackforge-session-api",
  "semver",
  "serde",

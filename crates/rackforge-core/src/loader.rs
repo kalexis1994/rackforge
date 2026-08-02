@@ -25,7 +25,7 @@ use std::sync::Mutex;
 
 const MAX_METADATA_BYTES: usize = 1024 * 1024;
 
-pub struct LoadedPlugin {
+pub(crate) struct NativeLoadedPlugin {
     manifest: PluginManifest,
     descriptor: RuntimeDescriptor,
     parameters: ParameterSchema,
@@ -38,7 +38,7 @@ pub struct LoadedPlugin {
     _library: Library,
 }
 
-impl LoadedPlugin {
+impl NativeLoadedPlugin {
     /// Loads and validates a native plugin package.
     ///
     /// # Safety
@@ -219,14 +219,14 @@ impl LoadedPlugin {
         &self.presets
     }
 
-    pub fn create_instance(&self) -> Result<PluginInstance<'_>> {
+    pub fn create_instance(&self) -> Result<NativePluginInstance<'_>> {
         // SAFETY: host_api is boxed for a stable address and remains alive for
         // at least as long as the returned borrowing instance.
         let handle = unsafe { (self.api.create)(self.host_api.as_ref()) };
         if handle.is_null() {
             bail!("plugin failed to create an instance");
         }
-        Ok(PluginInstance {
+        Ok(NativePluginInstance {
             plugin: self,
             handle,
             active: false,
@@ -240,13 +240,13 @@ struct HostContext {
     dynamic_presets: Mutex<Option<PresetCatalog>>,
 }
 
-pub struct PluginInstance<'plugin> {
-    plugin: &'plugin LoadedPlugin,
+pub(crate) struct NativePluginInstance<'plugin> {
+    plugin: &'plugin NativeLoadedPlugin,
     handle: *mut c_void,
     active: bool,
 }
 
-impl PluginInstance<'_> {
+impl NativePluginInstance<'_> {
     pub fn supports_program_editing(&self) -> bool {
         self.plugin.program_extension.is_some()
     }
@@ -577,7 +577,7 @@ impl PluginInstance<'_> {
     }
 }
 
-impl Drop for PluginInstance<'_> {
+impl Drop for NativePluginInstance<'_> {
     fn drop(&mut self) {
         if self.active {
             unsafe {

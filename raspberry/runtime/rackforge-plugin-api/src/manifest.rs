@@ -54,6 +54,19 @@ pub struct ApiRequirement {
     pub minor: u16,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum PortableAbi {
+    #[serde(rename = "wasm-v1")]
+    WasmV1,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PortableComponent {
+    pub abi: PortableAbi,
+    pub path: String,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WebSurfaceKind {
@@ -122,6 +135,9 @@ pub struct PluginManifest {
     pub web_ui: Option<WebUi>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub midi: Option<PluginMidiContract>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<PortableComponent>,
+    #[serde(default)]
     pub binaries: BTreeMap<String, String>,
 }
 
@@ -150,8 +166,15 @@ impl PluginManifest {
         if unique.len() != self.capabilities.len() {
             return Err(ManifestError::DuplicateCapability);
         }
-        if self.binaries.is_empty() {
-            return Err(ManifestError::NoBinaries);
+        match (&self.component, self.binaries.is_empty()) {
+            (None, true) => return Err(ManifestError::NoRuntime),
+            (Some(_), false) => return Err(ManifestError::AmbiguousRuntime),
+            _ => {}
+        }
+        if let Some(component) = &self.component
+            && !is_safe_relative_path(&component.path)
+        {
+            return Err(ManifestError::UnsafeComponentPath(component.path.clone()));
         }
         let mut layouts = BTreeSet::new();
         for layout in &self.ui_layouts {
@@ -236,6 +259,10 @@ impl PluginManifest {
             .map(String::as_str)
             .ok_or_else(|| ManifestError::MissingPlatform(platform.to_owned()))
     }
+
+    pub fn portable_component(&self) -> Option<&PortableComponent> {
+        self.component.as_ref()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -305,8 +332,12 @@ pub enum ManifestError {
     UnsupportedApi { major: u16, minor: u16 },
     #[error("capability appears more than once")]
     DuplicateCapability,
-    #[error("manifest declares no binaries")]
-    NoBinaries,
+    #[error("manifest declares neither a portable component nor native binaries")]
+    NoRuntime,
+    #[error("manifest cannot mix a portable component with native binaries")]
+    AmbiguousRuntime,
+    #[error("portable component path must be a safe relative path: {0:?}")]
+    UnsafeComponentPath(String),
     #[error("invalid resource id {0:?}")]
     InvalidResourceId(String),
     #[error("resource {0} has an empty display name")]
@@ -363,6 +394,7 @@ mod tests {
             config_mode: false,
             web_ui: None,
             midi: None,
+            component: None,
             binaries: BTreeMap::from([("linux-aarch64".into(), "lib/librackforge_gain.so".into())]),
         }
     }
@@ -382,6 +414,27 @@ mod tests {
             candidate.validate(),
             Err(ManifestError::UnsafeBinaryPath(_))
         ));
+    }
+
+    #[test]
+    fn accepts_one_platform_independent_component() {
+        let mut candidate = manifest();
+        candidate.binaries.clear();
+        candidate.component = Some(PortableComponent {
+            abi: PortableAbi::WasmV1,
+            path: "component.wasm".into(),
+        });
+        assert_eq!(candidate.validate(), Ok(()));
+    }
+
+    #[test]
+    fn rejects_ambiguous_native_and_portable_payloads() {
+        let mut candidate = manifest();
+        candidate.component = Some(PortableComponent {
+            abi: PortableAbi::WasmV1,
+            path: "component.wasm".into(),
+        });
+        assert_eq!(candidate.validate(), Err(ManifestError::AmbiguousRuntime));
     }
 
     #[test]

@@ -4,6 +4,7 @@ target/
 *.exe
 *.elf
 firmware/tmp/
+/tmp/
 
 # Local credentials and machine-specific overrides
 .env

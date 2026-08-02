@@ -1,0 +1,48 @@
+package rackforge:plugin@0.1.0;
+
+interface types {
+    record audio-config {
+        sample-rate: float64,
+        maximum-frames: u32,
+        input-channels: u32,
+        output-channels: u32,
+    }
+
+    record midi-event {
+        frame: u32,
+        port: u32,
+        data: list<u8>,
+    }
+
+    variant plugin-error {
+        invalid-argument(string),
+        invalid-state(string),
+        unsupported(string),
+        internal(string),
+    }
+}
+
+interface lifecycle {
+    use types.{audio-config, plugin-error};
+    prepare: func(config: audio-config) -> result<_, plugin-error>;
+    reset: func() -> result<_, plugin-error>;
+    set-parameter: func(index: u32, value: float64) -> result<_, plugin-error>;
+    save-state: func() -> result<list<u8>, plugin-error>;
+    load-state: func(state: list<u8>) -> result<_, plugin-error>;
+}
+
+interface resources {
+    use types.{plugin-error};
+    load-resource: func(id: string, contents: list<u8>) -> result<_, plugin-error>;
+}
+
+interface programs {
+    use types.{plugin-error};
+    load-preset: func(id: string) -> result<_, plugin-error>;
+}
+
+world rackforge-plugin {
+    export lifecycle;
+    export resources;
+    export programs;
+}

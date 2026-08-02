@@ -1,0 +1,16 @@
+schema_version = 1
+id = "org.rackforge.gain-portable"
+name = "RackForge Portable Gain"
+vendor = "RackForge"
+version = "0.1.0"
+kind = "effect"
+state_version = 1
+capabilities = ["audio_input", "audio_output", "presets", "state"]
+
+[api]
+major = 1
+minor = 5
+
+[component]
+abi = "wasm-v1"
+path = "component.wasm"

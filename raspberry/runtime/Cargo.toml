@@ -7,12 +7,15 @@ members = [
     "rackforge-controller-api",
     "rackforge-controller-package",
     "rackforge-controller-host",
+    "rackforge-desktop",
     "rackforge-dsp",
     "rackforge-midi-api",
     "rackforge-platform-api",
     "rackforge-platform-host",
     "rackforge-performance-api",
     "rackforge-plugin-api",
+    "rackforge-plugin-runtime",
+    "rackforge-plugin-sdk",
     "rackforge-program-api",
     "rackforge-repository",
     "rackforge-session-api",
@@ -22,6 +25,7 @@ members = [
     "rackforge-web",
     "rackforge-store",
     "plugins/gain",
+    "plugins/gain-portable",
     "plugins/roland-scva",
 ]
 
@@ -48,3 +52,4 @@ ureq = "3.3"
 url = "2.5"
 zeroize = "1.8"
 zip = { version = "8.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+wasmtime = { version = "47.0.3", default-features = false, features = ["anyhow", "cache", "cranelift", "runtime", "std"] }

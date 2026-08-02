@@ -12,8 +12,8 @@ pub mod state;
 
 pub use manifest::{
     ApiRequirement, Capability, MidiInputBus, MidiProgramChangePolicy, PluginKind, PluginManifest,
-    PluginMidiContract, ResourceKind, ResourceRequirement, RuntimeDescriptor, WebSurface,
-    WebSurfaceKind, WebUi,
+    PluginMidiContract, PortableAbi, PortableComponent, ResourceKind, ResourceRequirement,
+    RuntimeDescriptor, WebSurface, WebSurfaceKind, WebUi,
 };
 pub use parameter::{
     EnumChoice, PageDescriptor, ParameterDescriptor, ParameterFlags, ParameterKind,

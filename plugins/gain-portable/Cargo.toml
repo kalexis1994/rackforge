@@ -1,0 +1,12 @@
+[package]
+name = "rackforge-gain-portable"
+description = "Portable wasm-v1 RackForge conformance plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rackforge-plugin-sdk = { path = "../../crates/rackforge-plugin-sdk" }

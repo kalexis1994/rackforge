@@ -1,0 +1,27 @@
+[package]
+name = "rackforge-desktop"
+description = "Portable RackForge desktop host with a simulated LITTLE surface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum = { version = "0.8", features = ["ws"] }
+eframe = { version = "0.32", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+futures-util = "0.3"
+include_dir = "0.7"
+mime_guess = "2.0"
+rackforge-control-api = { path = "../../crates/rackforge-control-api" }
+rackforge-core = { path = "../../crates/rackforge-core" }
+rackforge-performance-api = { path = "../../crates/rackforge-performance-api" }
+rackforge-plugin-api = { path = "../../crates/rackforge-plugin-api" }
+rackforge-session-api = { path = "../../crates/rackforge-session-api" }
+rackforge-surface-api = { path = "../../crates/rackforge-surface-api" }
+rackforge-surface-runtime = { path = "../../crates/rackforge-surface-runtime" }
+serde_json.workspace = true
+tokio.workspace = true
+webbrowser = "1.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }

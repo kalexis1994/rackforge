@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repository = Split-Path -Parent $PSScriptRoot
-$runtime = Join-Path $repository "raspberry/runtime"
+$runtime = $repository
 $output = Join-Path $repository $OutputDirectory
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
 

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "banks": [
+    { "id": "factory", "name": "Factory", "order": 0 }
+  ],
+  "presets": [
+    {
+      "id": "mute",
+      "name": "Mute",
+      "bank": "factory",
+      "category": "Utility",
+      "order": 0,
+      "tags": ["silence"]
+    },
+    {
+      "id": "half",
+      "name": "Half",
+      "bank": "factory",
+      "category": "Utility",
+      "order": 1,
+      "tags": ["attenuation"]
+    },
+    {
+      "id": "unity",
+      "name": "Unity",
+      "bank": "factory",
+      "category": "Utility",
+      "order": 2,
+      "tags": ["neutral"]
+    }
+  ]
+}

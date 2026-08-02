@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "pages": [
+    { "id": "level", "name": "Level", "order": 0 }
+  ],
+  "parameters": [
+    {
+      "index": 0,
+      "id": "gain",
+      "name": "Gain",
+      "page": "level",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 2.0,
+        "default": 1.0,
+        "step": 0.01,
+        "unit": "x"
+      },
+      "flags": {
+        "automatable": true,
+        "modulatable": true,
+        "read_only": false,
+        "advanced": false
+      },
+      "suggested_control": "knob"
+    }
+  ]
+}

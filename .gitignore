@@ -17,11 +17,12 @@ firmware/tmp/
 credentials.*
 secrets.*
 
-# Runtime data belongs on the Raspberry, not in source control
-raspberry/local/
-raspberry/banks/
-raspberry/performances/
-raspberry/state/
-raspberry/logs/
-raspberry/roms/
+# Runtime and workstation-local data never belongs in source control.
+/local/
+/data/
+/banks/
+/performances/
+/state/
+/logs/
+/roms/
 *.dls

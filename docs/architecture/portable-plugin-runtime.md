@@ -21,13 +21,18 @@ memory
 rackforge_abi_version() -> i32  # 0x0001_0001
 rackforge_input_ptr() -> i32
 rackforge_output_ptr() -> i32
-rackforge_capacity_samples() -> i32
+rackforge_capacity_input_samples() -> i32
+rackforge_capacity_output_samples() -> i32
 rackforge_midi_ptr() -> i32
 rackforge_capacity_midi_events() -> i32
+rackforge_parameter_ptr() -> i32
+rackforge_capacity_parameter_events() -> i32
 rackforge_transfer_ptr() -> i32
 rackforge_capacity_transfer_bytes() -> i32
-rackforge_prepare(sample_rate: f64, maximum_frames: i32, channels: i32) -> i32
+rackforge_prepare(sample_rate: f64, maximum_frames: i32,
+                  input_channels: i32, output_channels: i32) -> i32
 rackforge_set_parameter(index: i32, value: f64) -> i32
+rackforge_get_parameter(index: i32) -> f64
 rackforge_reset() -> i32
 rackforge_resource_begin(id_length: i32, total_bytes: i64) -> i32
 rackforge_resource_write(offset: i64, length: i32) -> i32
@@ -35,15 +40,18 @@ rackforge_resource_end() -> i32
 rackforge_load_preset(length: i32) -> i32
 rackforge_save_state() -> i32
 rackforge_load_state(length: i32) -> i32
-rackforge_process(frames: i32, channels: i32, midi_event_count: i32) -> i32
+rackforge_process(frames: i32, input_channels: i32, output_channels: i32,
+                  midi_event_count: i32, parameter_event_count: i32) -> i32
 ```
 
 The Rust guest SDK owns these exports. Plugin authors implement a safe
 `Processor` trait and never manipulate linear-memory addresses.
 
-MIDI 1.0 messages of one to three bytes use fixed-size packed events containing
-their sample offset. This covers notes, controllers, program changes and pitch
-bend without allocating. SysEx is deliberately kept off this real-time path.
+MIDI 1.0 messages of one to three bytes and parameter changes use fixed-size
+events containing their sample offset. This covers notes, controllers, program
+changes, pitch bend and sample-accurate automation without allocating. Audio
+input and output capacities are independent, so an instrument may declare zero
+inputs and a stereo output. SysEx is deliberately kept off this real-time path.
 `reset` is lifecycle, not UI state: the host can force every voice and tail to
 stop while independently placing the application in its idle navigation mode.
 

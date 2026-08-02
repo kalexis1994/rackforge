@@ -1,0 +1,63 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/rackforge-core",
+    "crates/rackforge-audio-api",
+    "crates/rackforge-control-api",
+    "crates/rackforge-controller-api",
+    "crates/rackforge-controller-package",
+    "crates/rackforge-controller-host",
+    "apps/rackforge-desktop",
+    "crates/rackforge-dsp",
+    "crates/rackforge-midi-api",
+    "crates/rackforge-platform-api",
+    "crates/rackforge-platform-host",
+    "crates/rackforge-performance-api",
+    "crates/rackforge-plugin-api",
+    "crates/rackforge-plugin-runtime",
+    "crates/rackforge-plugin-sdk",
+    "crates/rackforge-program-api",
+    "crates/rackforge-repository",
+    "crates/rackforge-session-api",
+    "crates/rackforge-surface-api",
+    "crates/rackforge-surface-runtime",
+    "crates/rackforge-ui",
+    "apps/rackforge-web",
+    "crates/rackforge-store",
+    "hardware/keylab-bridge",
+    "plugins/gain",
+    "plugins/gain-portable",
+    "plugins/roland-scva",
+]
+exclude = [
+    "firmware/keylab",
+    "firmware/patch/hook",
+    "platforms/raspberry-pi/engines/nuked-sc55/tools/scva-inspect",
+    "platforms/raspberry-pi/engines/nuked-sc55/tools/scva-render",
+    "platforms/raspberry-pi/engines/scva-arm64",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-2.0-or-later"
+
+[workspace.dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+ed25519-dalek = "3.0"
+getrandom = "0.3"
+libloading = "0.8"
+hound = "3.5"
+semver = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+thiserror = "2.0"
+toml = "0.9"
+tokio = { version = "1.47", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+ureq = "3.3"
+url = "2.5"
+zeroize = "1.8"
+zip = { version = "8.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+wasmtime = { version = "47.0.3", default-features = false, features = ["anyhow", "cache", "cranelift", "runtime", "std"] }

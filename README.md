@@ -1,17 +1,24 @@
 # RackForge
 
-RackForge convierte un Arturia KeyLab Essential 61 mk3 y una Raspberry Pi 4B en
-un instrumento autónomo, sin escritorio, monitor ni DAW.
+RackForge convierte controladores MIDI y computadoras de propósito general o
+embebidas en instrumentos autónomos, sin exigir un escritorio, monitor ni DAW.
+El KeyLab Essential 61 mk3 con Raspberry Pi 4B es la primera implementación de
+referencia, no el límite arquitectónico del proyecto.
 
 La dirección multiplataforma, el runtime portable de plugins, el SDK y las
 superficies futuras están definidos en el [roadmap técnico](ROADMAP.md).
 
-El proyecto tiene dos subsistemas:
+El repositorio separa el producto portable de sus adaptaciones:
 
 | Área | Responsabilidad |
 |---|---|
-| `raspberry/` | Cerebro: motores de sonido, bancos, presets, mezcla y salida de audio. |
-| `firmware/` | Interfaz: teclado, pads, controles, pantalla y vínculo con la Raspberry. |
+| `crates/` | Core, APIs, SDK y runtime portable de plugins. |
+| `apps/` | Ejecutables desktop y headless/web. |
+| `platforms/` | Integraciones específicas, comenzando por Raspberry Pi. |
+| `hardware/` | Drivers y paquetes para controladores MIDI conocidos. |
+| `plugins/` | Plugins de referencia y pruebas de conformidad. |
+| `web/` | SPA adaptable de RackForge. |
+| `firmware/` | Investigación y firmware de dispositivos. |
 
 ## Flujo
 
@@ -25,7 +32,7 @@ Firmware KeyLab
   • presenta menús/estado
            │ USB
            ▼
-Software Raspberry
+RackForge Core
   • fuente de verdad musical
   • plugins y motores
   • bancos y performances
@@ -35,10 +42,10 @@ Software Raspberry
       DAC USB / Scarlett
 ```
 
-La Raspberry conserva el estado autoritativo de motores, bancos y
-performances. El firmware envía eventos físicos y renderiza el estado que
-recibe. Si uno de los dos reinicia, un handshake reconstruye toda la pantalla
-sin depender de estado implícito.
+El host conserva el estado autoritativo de motores, bancos y performances. El
+controlador envía eventos físicos y su driver renderiza el estado que recibe.
+Si uno de los dos reinicia, un handshake reconstruye la superficie sin depender
+de estado implícito.
 
 ## Desarrollo remoto
 
@@ -49,7 +56,8 @@ ssh rackforge
 ```
 
 No se guardan contraseñas en el repositorio. Las herramientas reproducibles de
-conexión, sincronización y diagnóstico viven en `raspberry/dev/`.
+conexión, sincronización y diagnóstico viven en
+`platforms/raspberry-pi/dev/`.
 
 ## Estado
 

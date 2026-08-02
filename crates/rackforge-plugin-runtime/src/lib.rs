@@ -159,6 +159,8 @@ impl PortableModule {
         let midi_offset = midi_ptr.call(&mut store, ())?;
         let parameter_offset = parameter_ptr.call(&mut store, ())?;
         let transfer_offset = transfer_ptr.call(&mut store, ())?;
+        let initialize = typed::<(), i32>(&instance, &mut store, "rackforge_initialize")?;
+        check_status(initialize.call(&mut store, ())?, "initialize")?;
         let prepare = typed(&instance, &mut store, "rackforge_prepare")?;
         let set_parameter = typed(&instance, &mut store, "rackforge_set_parameter")?;
         let get_parameter = typed(&instance, &mut store, "rackforge_get_parameter")?;
@@ -636,6 +638,7 @@ mod tests {
           (func (export "rackforge_capacity_parameter_events") (result i32) i32.const 64)
           (func (export "rackforge_transfer_ptr") (result i32) i32.const 8192)
           (func (export "rackforge_capacity_transfer_bytes") (result i32) i32.const 1024)
+          (func (export "rackforge_initialize") (result i32) i32.const 0)
           (func (export "rackforge_prepare") (param f64 i32 i32 i32) (result i32) i32.const 0)
           (func (export "rackforge_set_parameter") (param $index i32) (param $value f64) (result i32)
             local.get $value f32.demote_f64 global.set $gain i32.const 0)

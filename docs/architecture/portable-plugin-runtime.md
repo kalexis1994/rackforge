@@ -29,6 +29,7 @@ rackforge_parameter_ptr() -> i32
 rackforge_capacity_parameter_events() -> i32
 rackforge_transfer_ptr() -> i32
 rackforge_capacity_transfer_bytes() -> i32
+rackforge_initialize() -> i32
 rackforge_prepare(sample_rate: f64, maximum_frames: i32,
                   input_channels: i32, output_channels: i32) -> i32
 rackforge_set_parameter(index: i32, value: f64) -> i32

@@ -195,6 +195,19 @@ macro_rules! export_processor {
         }
 
         #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_initialize() -> i32 {
+            unsafe {
+                if !RF_INITIALIZED {
+                    core::ptr::addr_of_mut!(RF_PROCESSOR)
+                        .cast::<$processor>()
+                        .write(<$processor as Default>::default());
+                    RF_INITIALIZED = true;
+                }
+            }
+            $crate::STATUS_OK
+        }
+
+        #[unsafe(no_mangle)]
         pub extern "C" fn rackforge_prepare(
             sample_rate: f64,
             maximum_frames: i32,
@@ -215,11 +228,8 @@ macro_rules! export_processor {
             // SAFETY: each WebAssembly instance is single-threaded at this ABI
             // boundary and owns one isolated linear memory.
             unsafe {
-                if !RF_INITIALIZED {
-                    core::ptr::addr_of_mut!(RF_PROCESSOR)
-                        .cast::<$processor>()
-                        .write(<$processor as Default>::default());
-                    RF_INITIALIZED = true;
+                if rackforge_initialize() != $crate::STATUS_OK {
+                    return $crate::STATUS_INVALID_STATE;
                 }
                 let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
                 RF_PREPARED = processor.prepare(
@@ -286,11 +296,8 @@ macro_rules! export_processor {
                 return $crate::STATUS_INVALID_ARGUMENT;
             }
             unsafe {
-                if !RF_INITIALIZED {
-                    core::ptr::addr_of_mut!(RF_PROCESSOR)
-                        .cast::<$processor>()
-                        .write(<$processor as Default>::default());
-                    RF_INITIALIZED = true;
+                if rackforge_initialize() != $crate::STATUS_OK {
+                    return $crate::STATUS_INVALID_STATE;
                 }
                 let bytes = core::slice::from_raw_parts(
                     core::ptr::addr_of!(RF_TRANSFER).cast::<u8>(),

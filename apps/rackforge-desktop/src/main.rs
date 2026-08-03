@@ -1,5 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(windows)]
+mod audio_settings;
+#[cfg(windows)]
+mod desktop_audio;
+#[cfg(windows)]
+mod desktop_webview;
+#[cfg(windows)]
+mod native_menu;
+mod paths;
+mod setup;
 mod web;
 
 use anyhow::{Context, Result, bail};
@@ -9,6 +19,10 @@ use eframe::egui::{
 };
 use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage};
 use rackforge_plugin_api::PluginKind;
+use rackforge_repository::{
+    InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, inspect_local_archive,
+    install_local_archive,
+};
 use rackforge_session_api::{
     DEFAULT_LIVE_SESSION_ID, InstanceId, PluginInstanceState, Revision, SessionId, SessionState,
     SoundSummary,
@@ -17,11 +31,14 @@ use rackforge_surface_api::SurfaceMode;
 use rackforge_surface_runtime::{
     ActiveMode, Header, Input, Menu, MenuCommand, PlayPlugin, PlaySound,
 };
-use std::collections::{BTreeMap, BTreeSet};
-use std::env;
-use std::fs;
+use semver::Version;
+use std::collections::BTreeMap;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, RwLock};
+use std::thread;
 use std::time::{Duration, Instant};
 
 const LONG_PRESS: Duration = Duration::from_millis(700);
@@ -64,21 +81,192 @@ impl LittleGeometry {
     }
 }
 
+#[derive(Clone, Debug)]
 struct Options {
     port: u16,
     lan: bool,
+    rackforge_root: PathBuf,
     plugins_root: PathBuf,
+    plugin_store_root: Option<PathBuf>,
     data_root: PathBuf,
+    install_archives: Vec<PathBuf>,
+}
+
+#[derive(Debug)]
+struct CliOptions {
+    port: u16,
+    lan: bool,
+    rackforge_root: Option<PathBuf>,
+    plugins_root: Option<PathBuf>,
+    data_root: Option<PathBuf>,
+    install_archives: Vec<PathBuf>,
+}
+
+enum Startup {
+    Ready(Options),
+    FirstStart {
+        port: u16,
+        lan: bool,
+        default_root: PathBuf,
+        executable_directory: PathBuf,
+        install_archives: Vec<PathBuf>,
+    },
+}
+
+enum AppMode {
+    Setup {
+        state: Box<setup::SetupState>,
+        port: u16,
+        lan: bool,
+        install_archives: Vec<PathBuf>,
+    },
+    Desktop(Box<DesktopApp>),
+    Error(String),
+}
+
+struct RackForgeApp {
+    mode: AppMode,
+    #[cfg(windows)]
+    audio_settings: Option<audio_settings::AudioSettingsState>,
+    #[cfg(windows)]
+    webview: desktop_webview::DesktopWebView,
+    #[cfg(windows)]
+    native_menu: native_menu::NativeMenu,
 }
 
 struct DesktopPlugin {
     instance_id: String,
     plugin_id: String,
     name: String,
+    version: Version,
+    runtime: &'static LoadedPlugin,
     config_available: bool,
     sounds: Vec<PlaySound>,
     selected_sound_id: Option<String>,
     instance: PluginInstance<'static>,
+}
+
+enum PluginInstallEvent {
+    Inspected {
+        archive: PathBuf,
+        bytes: Vec<u8>,
+        inspection: LocalPackageInspection,
+    },
+    Installed {
+        archive: PathBuf,
+        inspection: LocalPackageInspection,
+        installed: InstalledPackage,
+        activation: PluginInstallActivation,
+    },
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum PluginInstallActivation {
+    Reload,
+    Restart,
+    KeepCurrent { active_version: String },
+}
+
+fn plugin_install_activation(
+    active_version: Option<&Version>,
+    incoming_version: &Version,
+) -> PluginInstallActivation {
+    active_version.map_or(PluginInstallActivation::Reload, |active_version| {
+        if incoming_version > active_version {
+            PluginInstallActivation::Restart
+        } else {
+            PluginInstallActivation::KeepCurrent {
+                active_version: active_version.to_string(),
+            }
+        }
+    })
+}
+
+#[derive(Clone, Copy)]
+enum PluginInstallPhase {
+    Inspecting,
+    Installing,
+}
+
+struct PluginInstallTask {
+    phase: PluginInstallPhase,
+    receiver: Receiver<Result<PluginInstallEvent, String>>,
+}
+
+impl PluginInstallPhase {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Inspecting => "inspection",
+            Self::Installing => "installation",
+        }
+    }
+}
+
+fn validate_selected_archive(path: &Path) -> Result<(), String> {
+    if !path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("rfplugin"))
+    {
+        return Err(format!("{} is not a .rfplugin package", path.display()));
+    }
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("Could not inspect {}: {error}", path.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("{} is not a regular file", path.display()));
+    }
+    if metadata.len() == 0 {
+        return Err(format!("{} is empty", path.display()));
+    }
+    if metadata.len() > MAX_PACKAGE_BYTES {
+        return Err(format!(
+            "{} is too large (maximum {})",
+            path.display(),
+            format_file_size(MAX_PACKAGE_BYTES)
+        ));
+    }
+    Ok(())
+}
+
+fn read_plugin_archive_limited(path: &Path) -> Result<Vec<u8>, String> {
+    validate_selected_archive(path)?;
+    let file =
+        File::open(path).map_err(|error| format!("Could not open {}: {error}", path.display()))?;
+    let initial_size = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+    let mut bytes = Vec::with_capacity(initial_size.min(MAX_PACKAGE_BYTES) as usize);
+    file.take(MAX_PACKAGE_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    if bytes.is_empty() {
+        return Err(format!("{} became empty while reading", path.display()));
+    }
+    if bytes.len() as u64 > MAX_PACKAGE_BYTES {
+        return Err(format!(
+            "{} exceeded the {} limit while reading",
+            path.display(),
+            format_file_size(MAX_PACKAGE_BYTES)
+        ));
+    }
+    Ok(bytes)
+}
+
+fn plugin_kind_label(kind: PluginKind) -> &'static str {
+    match kind {
+        PluginKind::Instrument => "Instrument",
+        PluginKind::Effect => "Effect",
+        PluginKind::MidiProcessor => "MIDI processor",
+    }
+}
+
+fn format_file_size(bytes: u64) -> String {
+    const MIB: f64 = 1024.0 * 1024.0;
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MiB", bytes as f64 / MIB)
+    } else if bytes >= 1024 {
+        format!("{:.1} KiB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} bytes")
+    }
 }
 
 struct DesktopApp {
@@ -89,11 +277,66 @@ struct DesktopApp {
     web_url: String,
     status: String,
     plugins: Vec<DesktopPlugin>,
+    options: Options,
+    plugin_install: Option<PluginInstallTask>,
+    #[cfg(windows)]
+    audio: Option<desktop_audio::DesktopAudio>,
+    #[cfg(windows)]
+    audio_preferences: Option<desktop_audio::AudioPreferences>,
+    #[cfg(windows)]
+    audio_config_path: PathBuf,
 }
 
 impl DesktopApp {
     fn new(session: Arc<RwLock<SessionState>>, options: &Options) -> Result<Self> {
-        let (plugins, warnings) = load_desktop_plugins(&options.plugins_root, &options.data_root)?;
+        let (plugins, mut warnings) = load_desktop_plugins(options)?;
+        #[cfg(windows)]
+        let audio_config_path = options.rackforge_root.join("config/audio.toml");
+        #[cfg(windows)]
+        let (audio_preferences, audio) = match desktop_audio::AudioInventory::scan() {
+            Ok(inventory) => match inventory.default_preferences() {
+                Ok(defaults) => {
+                    let preferences = match desktop_audio::AudioPreferences::load(
+                        &audio_config_path,
+                    ) {
+                        Ok(Some(saved)) => match inventory.validate(&saved) {
+                            Ok(()) => saved,
+                            Err(error) => {
+                                warnings.push(format!(
+                                    "Saved audio configuration is unavailable ({error:#}); using the system default"
+                                ));
+                                defaults
+                            }
+                        },
+                        Ok(None) => defaults,
+                        Err(error) => {
+                            warnings.push(format!(
+                                "Could not load audio configuration ({error:#}); using the system default"
+                            ));
+                            defaults
+                        }
+                    };
+                    let active = plugins.first().map(|plugin| plugin.instance_id.as_str());
+                    match start_desktop_audio(&plugins, &preferences, active) {
+                        Ok(audio) => (Some(preferences), Some(audio)),
+                        Err(error) => {
+                            let message = format!("Audio/MIDI unavailable: {error:#}");
+                            eprintln!("DESKTOP_AUDIO_UNAVAILABLE {message}");
+                            warnings.push(message.clone());
+                            (Some(preferences), None)
+                        }
+                    }
+                }
+                Err(error) => {
+                    warnings.push(format!("Audio/MIDI unavailable: {error:#}"));
+                    (None, None)
+                }
+            },
+            Err(error) => {
+                warnings.push(format!("Audio/MIDI discovery failed: {error:#}"));
+                (None, None)
+            }
+        };
         let mut menu = Menu::default();
         let active_instance_id = plugins.first().map(|plugin| plugin.instance_id.as_str());
         menu.set_play_plugins(
@@ -149,7 +392,460 @@ impl DesktopApp {
             web_url: format!("http://127.0.0.1:{}", options.port),
             status,
             plugins,
+            options: options.clone(),
+            plugin_install: None,
+            #[cfg(windows)]
+            audio,
+            #[cfg(windows)]
+            audio_preferences,
+            #[cfg(windows)]
+            audio_config_path,
         })
+    }
+
+    fn reload_plugins(&mut self) -> Result<Vec<String>> {
+        let previous_active = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .active_instance_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned());
+        let (plugins, mut warnings) = load_desktop_plugins(&self.options)?;
+        #[cfg(windows)]
+        {
+            self.audio = None;
+            if let Some(preferences) = self.audio_preferences.as_ref() {
+                match start_desktop_audio(&plugins, preferences, previous_active.as_deref()) {
+                    Ok(audio) => self.audio = Some(audio),
+                    Err(error) => warnings.push(format!("Audio/MIDI unavailable: {error:#}")),
+                }
+            }
+        }
+        let mut menu = Menu::default();
+        let active_instance_id = previous_active
+            .as_deref()
+            .and_then(|previous| plugins.iter().find(|plugin| plugin.instance_id == previous))
+            .or_else(|| plugins.first())
+            .map(|plugin| plugin.instance_id.as_str());
+        menu.set_play_plugins(
+            plugins
+                .iter()
+                .map(|plugin| {
+                    PlayPlugin::new(&plugin.instance_id, &plugin.plugin_id, &plugin.name)
+                        .config_available(plugin.config_available)
+                })
+                .collect(),
+            active_instance_id,
+        );
+        if let Some(plugin) = active_instance_id
+            .and_then(|active| plugins.iter().find(|plugin| plugin.instance_id == active))
+        {
+            menu.sync_active_plugin(
+                &plugin.instance_id,
+                &plugin.plugin_id,
+                &plugin.name,
+                plugin.sounds.clone(),
+                plugin.selected_sound_id.as_deref(),
+            );
+        }
+        {
+            let mut state = self.session.write().expect("session lock poisoned");
+            state.active_instance_id = active_instance_id
+                .map(InstanceId::new)
+                .transpose()
+                .map_err(anyhow::Error::msg)?;
+            state.instances = plugins.iter().map(plugin_session_state).collect();
+            state.revision = Revision::new(state.revision.get().saturating_add(1));
+        }
+        self.menu = menu;
+        self.plugins = plugins;
+        Ok(warnings)
+    }
+
+    #[cfg(windows)]
+    fn show_audio_error(message: &str) {
+        rfd::MessageDialog::new()
+            .set_title("RackForge audio is unavailable")
+            .set_description(message)
+            .set_level(rfd::MessageLevel::Error)
+            .show();
+    }
+
+    #[cfg(windows)]
+    fn poll_audio_error(&mut self) {
+        if let Some(error) = self.audio.as_ref().and_then(|audio| audio.take_error()) {
+            self.status = error.clone();
+            Self::show_audio_error(&error);
+        }
+    }
+
+    #[cfg(windows)]
+    fn audio_summary(&self) -> &str {
+        self.audio
+            .as_ref()
+            .map_or("Audio/MIDI unavailable", |audio| audio.summary())
+    }
+
+    #[cfg(windows)]
+    fn audio_settings_state(&self) -> Result<audio_settings::AudioSettingsState> {
+        let inventory = desktop_audio::AudioInventory::scan()?;
+        let preferences = self
+            .audio_preferences
+            .clone()
+            .map_or_else(|| inventory.default_preferences(), Ok)?;
+        Ok(audio_settings::AudioSettingsState::new(
+            inventory,
+            preferences,
+        ))
+    }
+
+    #[cfg(windows)]
+    fn apply_audio_preferences(
+        &mut self,
+        preferences: desktop_audio::AudioPreferences,
+    ) -> Result<String> {
+        let inventory = desktop_audio::AudioInventory::scan()?;
+        inventory.validate(&preferences)?;
+        let previous = self.audio_preferences.clone();
+        let active = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .active_instance_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned());
+        self.audio = None;
+        let candidate = match start_desktop_audio(&self.plugins, &preferences, active.as_deref()) {
+            Ok(audio) => audio,
+            Err(error) => {
+                return match self.restore_audio(previous.as_ref(), active.as_deref()) {
+                    Ok(()) => Err(anyhow::anyhow!(
+                        "Could not apply audio settings: {error:#}. The previous settings were restored"
+                    )),
+                    Err(rollback) => Err(anyhow::anyhow!(
+                        "Could not apply audio settings: {error:#}. Reopening the previous audio settings also failed: {rollback:#}"
+                    )),
+                };
+            }
+        };
+        if let Err(error) = preferences.persist(&self.audio_config_path) {
+            drop(candidate);
+            return match self.restore_audio(previous.as_ref(), active.as_deref()) {
+                Ok(()) => Err(anyhow::anyhow!(
+                    "The new audio stream opened, but its settings could not be saved: {error:#}. The previous settings were restored"
+                )),
+                Err(rollback) => Err(anyhow::anyhow!(
+                    "The new audio stream opened, but its settings could not be saved: {error:#}. Reopening the previous audio settings also failed: {rollback:#}"
+                )),
+            };
+        }
+        let summary = candidate.summary().to_owned();
+        self.audio = Some(candidate);
+        self.audio_preferences = Some(preferences);
+        self.status = format!("Audio settings applied · {summary}");
+        Ok(format!("Settings applied · {summary}"))
+    }
+
+    #[cfg(windows)]
+    fn restore_audio(
+        &mut self,
+        preferences: Option<&desktop_audio::AudioPreferences>,
+        active_instance_id: Option<&str>,
+    ) -> Result<()> {
+        self.audio = preferences
+            .map(|preferences| {
+                start_desktop_audio(&self.plugins, preferences, active_instance_id)
+                    .context("reopening the previous audio stream")
+            })
+            .transpose()?;
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn test_audio_note(&mut self) -> Result<()> {
+        let audio = self
+            .audio
+            .as_ref()
+            .context("Audio is not running; apply a valid configuration first")?;
+        audio.test_note()?;
+        self.status = "Playing audio test note".into();
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn choose_plugin_archive() -> Option<PathBuf> {
+        rfd::FileDialog::new()
+            .set_title("Install RackForge plugin")
+            .add_filter("RackForge plugin", &["rfplugin"])
+            .pick_file()
+    }
+
+    #[cfg(not(windows))]
+    fn choose_plugin_archive() -> Option<PathBuf> {
+        None
+    }
+
+    fn begin_plugin_install(&mut self) {
+        if self.plugin_install.is_some() {
+            self.status = "A plugin installation is already in progress".into();
+            return;
+        }
+        let Some(store_root) = self.options.plugin_store_root.clone() else {
+            self.status =
+                "Local install requires --rackforge-root instead of legacy path flags".into();
+            Self::show_install_error(&self.status);
+            return;
+        };
+        let Some(archive) = Self::choose_plugin_archive() else {
+            return;
+        };
+        if let Err(error) = validate_selected_archive(&archive) {
+            self.status = error;
+            Self::show_install_error(&self.status);
+            return;
+        }
+        let (sender, receiver) = mpsc::channel();
+        let worker_archive = archive.clone();
+        let spawn = thread::Builder::new()
+            .name("rackforge-plugin-inspection".into())
+            .spawn(move || {
+                let result = (|| {
+                    let bytes = read_plugin_archive_limited(&worker_archive)?;
+                    let inspection = inspect_local_archive(&store_root, &bytes)
+                        .map_err(|error| format!("Package validation failed: {error}"))?;
+                    Ok(PluginInstallEvent::Inspected {
+                        archive: worker_archive,
+                        bytes,
+                        inspection,
+                    })
+                })();
+                let _ = sender.send(result);
+            });
+        match spawn {
+            Ok(_) => {
+                self.status = format!("Inspecting {}…", archive.display());
+                self.plugin_install = Some(PluginInstallTask {
+                    phase: PluginInstallPhase::Inspecting,
+                    receiver,
+                });
+            }
+            Err(error) => {
+                self.status = format!("Could not start package inspection: {error}");
+                Self::show_install_error(&self.status);
+            }
+        }
+    }
+
+    fn begin_validated_install(
+        &mut self,
+        archive: PathBuf,
+        bytes: Vec<u8>,
+        inspection: LocalPackageInspection,
+    ) {
+        let store_root = self
+            .options
+            .plugin_store_root
+            .clone()
+            .expect("validated local installation requires a plugin store");
+        let incoming_version = Version::parse(&inspection.version)
+            .expect("validated plugin manifest contains a semantic version");
+        let active_version = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == inspection.plugin_id)
+            .map(|plugin| &plugin.version);
+        let activation = plugin_install_activation(active_version, &incoming_version);
+        let label = format!("{} {}", inspection.plugin_name, inspection.version);
+        let archive_label = archive.display().to_string();
+        let (sender, receiver) = mpsc::channel();
+        let spawn = thread::Builder::new()
+            .name("rackforge-plugin-installation".into())
+            .spawn(move || {
+                let result = install_local_archive(&store_root, &bytes)
+                    .map(|installed| PluginInstallEvent::Installed {
+                        archive,
+                        inspection,
+                        installed,
+                        activation,
+                    })
+                    .map_err(|error| format!("Could not install {archive_label}: {error}"));
+                let _ = sender.send(result);
+            });
+        match spawn {
+            Ok(_) => {
+                self.status = format!("Installing {label}…");
+                self.plugin_install = Some(PluginInstallTask {
+                    phase: PluginInstallPhase::Installing,
+                    receiver,
+                });
+            }
+            Err(error) => {
+                self.status = format!("Could not start package installation: {error}");
+                Self::show_install_error(&self.status);
+            }
+        }
+    }
+
+    fn poll_plugin_install(&mut self, context: &egui::Context) -> bool {
+        let Some(task) = self.plugin_install.take() else {
+            return false;
+        };
+        let phase = task.phase;
+        match task.receiver.try_recv() {
+            Err(TryRecvError::Empty) => {
+                self.plugin_install = Some(task);
+                context.request_repaint_after(Duration::from_millis(50));
+                false
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.status = format!("The plugin {} worker stopped unexpectedly", phase.label());
+                Self::show_install_error(&self.status);
+                false
+            }
+            Ok(Err(error)) => {
+                self.status = error;
+                Self::show_install_error(&self.status);
+                false
+            }
+            Ok(Ok(PluginInstallEvent::Inspected {
+                archive,
+                bytes,
+                inspection,
+            })) => {
+                if Self::confirm_plugin_install(&archive, &inspection) {
+                    self.begin_validated_install(archive, bytes, inspection);
+                } else {
+                    self.status = "Plugin installation cancelled".into();
+                }
+                false
+            }
+            Ok(Ok(PluginInstallEvent::Installed {
+                archive,
+                inspection,
+                installed,
+                activation,
+            })) => self.finish_plugin_install(&archive, &inspection, installed, activation),
+        }
+    }
+
+    fn finish_plugin_install(
+        &mut self,
+        archive: &Path,
+        inspection: &LocalPackageInspection,
+        installed: InstalledPackage,
+        activation: PluginInstallActivation,
+    ) -> bool {
+        let label = format!("{} {}", inspection.plugin_name, inspection.version);
+        if installed.already_installed {
+            self.status = format!("{label} is already installed");
+            Self::show_install_info("Plugin already installed", &self.status);
+            return false;
+        }
+        match activation {
+            PluginInstallActivation::Restart => {
+                self.status = format!(
+                    "{label} was installed. Restart RackForge to activate this version safely."
+                );
+                Self::show_install_info("Plugin installed", &self.status);
+                false
+            }
+            PluginInstallActivation::KeepCurrent { active_version } => {
+                self.status = format!(
+                    "{label} was installed side by side. Version {active_version} remains active because it is the same or newer."
+                );
+                Self::show_install_info("Plugin installed", &self.status);
+                false
+            }
+            PluginInstallActivation::Reload => match self.reload_plugins() {
+                Ok(warnings) => {
+                    self.status = if warnings.is_empty() {
+                        format!("{label} installed and ready")
+                    } else {
+                        format!("{label} installed · {}", warnings.join(" · "))
+                    };
+                    Self::show_install_info("Plugin installed", &self.status);
+                    true
+                }
+                Err(error) => {
+                    self.status = format!(
+                        "{label} was installed from {}, but could not be activated: {error:#}. Restart RackForge to try again.",
+                        archive.display()
+                    );
+                    Self::show_install_error(&self.status);
+                    false
+                }
+            },
+        }
+    }
+
+    fn install_in_progress(&self) -> bool {
+        self.plugin_install.is_some()
+    }
+
+    fn window_title(&self) -> &'static str {
+        match self.plugin_install.as_ref().map(|task| task.phase) {
+            Some(PluginInstallPhase::Inspecting) => "RackForge — Inspecting Plugin…",
+            Some(PluginInstallPhase::Installing) => "RackForge — Installing Plugin…",
+            None => "RackForge Desktop",
+        }
+    }
+
+    #[cfg(windows)]
+    fn show_install_error(message: &str) {
+        rfd::MessageDialog::new()
+            .set_title("RackForge could not install the plugin")
+            .set_description(message)
+            .set_level(rfd::MessageLevel::Error)
+            .show();
+    }
+
+    #[cfg(not(windows))]
+    fn show_install_error(_message: &str) {}
+
+    #[cfg(windows)]
+    fn show_install_info(title: &str, message: &str) {
+        rfd::MessageDialog::new()
+            .set_title(title)
+            .set_description(message)
+            .set_level(rfd::MessageLevel::Info)
+            .show();
+    }
+
+    #[cfg(not(windows))]
+    fn show_install_info(_title: &str, _message: &str) {}
+
+    #[cfg(windows)]
+    fn confirm_plugin_install(archive: &Path, inspection: &LocalPackageInspection) -> bool {
+        let trust = if inspection.portable {
+            "Portable WASM package (the same package can run on supported RackForge platforms)."
+        } else {
+            "Native code package. It will run inside RackForge with your user permissions; install only if you trust its source."
+        };
+        let description = format!(
+            "Install this plugin?\n\nName: {}\nID: {}\nVersion: {}\nType: {}\nPlatform: {}\nSize: {}\nSHA-256: {}\nFile: {}\n\nLocal package: its structure and payload are validated, but its publisher identity is not verified.\n\n{}",
+            inspection.plugin_name,
+            inspection.plugin_id,
+            inspection.version,
+            plugin_kind_label(inspection.kind),
+            inspection.platform,
+            format_file_size(inspection.archive_bytes),
+            inspection.artifact_sha256,
+            archive.display(),
+            trust
+        );
+        rfd::MessageDialog::new()
+            .set_title("Install RackForge plugin")
+            .set_description(description)
+            .set_level(rfd::MessageLevel::Warning)
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show()
+            == rfd::MessageDialogResult::Yes
+    }
+
+    #[cfg(not(windows))]
+    fn confirm_plugin_install(_archive: &Path, _inspection: &LocalPackageInspection) -> bool {
+        false
     }
 
     fn apply_input(&mut self, input: Input) {
@@ -196,6 +892,13 @@ impl DesktopApp {
                 );
                 session.revision = Revision::new(session.revision.get().saturating_add(1));
                 self.status = format!("{} selected", plugin.name);
+                drop(session);
+                #[cfg(windows)]
+                if let Some(audio) = &self.audio
+                    && let Err(error) = audio.select_plugin(&plugin.instance_id)
+                {
+                    self.status = format!("Plugin selected, but audio did not switch: {error:#}");
+                }
             }
             MenuCommand::SelectSound { id } => {
                 let Some(active_id) = self
@@ -232,6 +935,14 @@ impl DesktopApp {
                         }
                         session.revision = Revision::new(session.revision.get().saturating_add(1));
                         self.status = format!("Loaded {id}");
+                        drop(session);
+                        #[cfg(windows)]
+                        if let Some(audio) = &self.audio
+                            && let Err(error) = audio.select_sound(&active_id, &id)
+                        {
+                            self.status =
+                                format!("Loaded {id}, but audio did not switch: {error:#}");
+                        }
                     }
                     Err(error) => self.status = format!("Could not load {id}: {error:#}"),
                 }
@@ -434,6 +1145,9 @@ impl DesktopApp {
 
 impl eframe::App for DesktopApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(windows)]
+        self.poll_audio_error();
+        let _ = self.poll_plugin_install(context);
         self.keyboard(context);
         context.request_repaint_after(Duration::from_millis(16));
         egui::TopBottomPanel::top("desktop-toolbar").show(context, |ui| {
@@ -447,6 +1161,15 @@ impl eframe::App for DesktopApp {
                             Err(error) => self.status = format!("Could not open browser: {error}"),
                         }
                     }
+                    if ui
+                        .add_enabled(
+                            !self.install_in_progress(),
+                            egui::Button::new("Install .rfplugin"),
+                        )
+                        .clicked()
+                    {
+                        self.begin_plugin_install();
+                    }
                     ui.monospace(&self.web_url);
                 });
             });
@@ -459,6 +1182,14 @@ impl eframe::App for DesktopApp {
                 self.virtual_buttons(ui);
                 ui.add_space(18.0);
                 ui.label(RichText::new(&self.status).weak());
+                ui.label(
+                    RichText::new(format!(
+                        "RackForge Root · {}",
+                        self.options.rackforge_root.display()
+                    ))
+                    .small()
+                    .weak(),
+                );
             });
         });
     }
@@ -505,17 +1236,88 @@ fn plugin_session_state(plugin: &DesktopPlugin) -> PluginInstanceState {
     }
 }
 
-fn load_desktop_plugins(
-    plugins_root: &Path,
-    data_root: &Path,
-) -> Result<(Vec<DesktopPlugin>, Vec<String>)> {
-    fs::create_dir_all(plugins_root)
-        .with_context(|| format!("creating plugin directory {}", plugins_root.display()))?;
-    fs::create_dir_all(data_root)
-        .with_context(|| format!("creating plugin data directory {}", data_root.display()))?;
+#[cfg(windows)]
+fn start_desktop_audio(
+    plugins: &[DesktopPlugin],
+    preferences: &desktop_audio::AudioPreferences,
+    active_instance_id: Option<&str>,
+) -> Result<desktop_audio::DesktopAudio> {
+    desktop_audio::DesktopAudio::start(
+        plugins
+            .iter()
+            .map(|plugin| desktop_audio::VoiceSpec {
+                instance_id: plugin.instance_id.clone(),
+                plugin: plugin.runtime,
+                preset_id: plugin.selected_sound_id.clone(),
+            })
+            .collect(),
+        preferences,
+        active_instance_id,
+    )
+}
 
-    let mut package_roots = fs::read_dir(plugins_root)
-        .with_context(|| format!("reading plugin directory {}", plugins_root.display()))?
+fn load_desktop_plugins(options: &Options) -> Result<(Vec<DesktopPlugin>, Vec<String>)> {
+    fs::create_dir_all(&options.plugins_root).with_context(|| {
+        format!(
+            "creating plugin directory {}",
+            options.plugins_root.display()
+        )
+    })?;
+    fs::create_dir_all(&options.data_root).with_context(|| {
+        format!(
+            "creating plugin data directory {}",
+            options.data_root.display()
+        )
+    })?;
+
+    let mut package_roots = direct_package_roots(&options.plugins_root)?;
+    if let Some(store_root) = options.plugin_store_root.as_deref() {
+        package_roots.extend(versioned_package_roots(store_root)?);
+    }
+    package_roots.sort();
+
+    let mut selected = BTreeMap::<String, (Version, PluginPackage)>::new();
+    let mut warnings = Vec::new();
+    for root in package_roots {
+        let package = match PluginPackage::open(&root) {
+            Ok(package) => package,
+            Err(error) => {
+                warnings.push(format!("{}: {error:#}", root.display()));
+                continue;
+            }
+        };
+        let version = match Version::parse(&package.manifest().version) {
+            Ok(version) => version,
+            Err(error) => {
+                warnings.push(format!(
+                    "{}: invalid plugin version {:?}: {error}",
+                    root.display(),
+                    package.manifest().version
+                ));
+                continue;
+            }
+        };
+        let replace = selected
+            .get(&package.manifest().id)
+            .is_none_or(|(current, _)| version >= *current);
+        if replace {
+            selected.insert(package.manifest().id.clone(), (version, package));
+        }
+    }
+
+    let mut plugins = Vec::new();
+    for (_, package) in selected.into_values() {
+        match load_desktop_plugin(&package, &options.data_root) {
+            Ok(plugin) => plugins.push(plugin),
+            Err(error) => warnings.push(format!("{}: {error:#}", package.root().display())),
+        }
+    }
+    Ok((plugins, warnings))
+}
+
+fn direct_package_roots(root: &Path) -> Result<Vec<PathBuf>> {
+    Ok(fs::read_dir(root)
+        .with_context(|| format!("reading plugin directory {}", root.display()))?
         .filter_map(|entry| entry.ok())
         .filter_map(|entry| {
             entry
@@ -525,24 +1327,35 @@ fn load_desktop_plugins(
                 .map(|_| entry.path())
         })
         .filter(|root| root.join("rackforge-plugin.toml").is_file())
-        .collect::<Vec<_>>();
-    package_roots.sort();
-
-    let mut plugins = Vec::new();
-    let mut warnings = Vec::new();
-    let mut ids = BTreeSet::new();
-    for root in package_roots {
-        match load_desktop_plugin(&root, data_root) {
-            Ok(plugin) if ids.insert(plugin.plugin_id.clone()) => plugins.push(plugin),
-            Ok(plugin) => warnings.push(format!("Duplicate plugin {} ignored", plugin.plugin_id)),
-            Err(error) => warnings.push(format!("{}: {error:#}", root.display())),
-        }
-    }
-    Ok((plugins, warnings))
+        .collect())
 }
 
-fn load_desktop_plugin(root: &Path, data_root: &Path) -> Result<DesktopPlugin> {
-    let package = PluginPackage::open(root)?;
+fn versioned_package_roots(store_root: &Path) -> Result<Vec<PathBuf>> {
+    let packages_root = store_root.join("packages");
+    fs::create_dir_all(&packages_root)
+        .with_context(|| format!("creating plugin store {}", packages_root.display()))?;
+    let mut roots = Vec::new();
+    for plugin in fs::read_dir(&packages_root)
+        .with_context(|| format!("reading plugin store {}", packages_root.display()))?
+        .flatten()
+    {
+        if !plugin.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        roots.extend(
+            fs::read_dir(plugin.path())
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+                .map(|entry| entry.path())
+                .filter(|root| root.join("rackforge-plugin.toml").is_file()),
+        );
+    }
+    Ok(roots)
+}
+
+fn load_desktop_plugin(package: &PluginPackage, data_root: &Path) -> Result<DesktopPlugin> {
     if package.manifest().kind != PluginKind::Instrument {
         bail!(
             "Desktop PLAY currently accepts instrument plugins, found {:?}",
@@ -551,10 +1364,12 @@ fn load_desktop_plugin(root: &Path, data_root: &Path) -> Result<DesktopPlugin> {
     }
     let instance_id = format!("desktop.{}", package.manifest().id);
     InstanceId::new(instance_id.clone()).map_err(anyhow::Error::msg)?;
+    let version = Version::parse(&package.manifest().version)
+        .with_context(|| format!("invalid plugin version {:?}", package.manifest().version))?;
 
     // SAFETY: Desktop only scans the user's installed RackForge plugin root.
     // Native packages are trusted by the same boundary as the appliance host.
-    let loaded = unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), Some(data_root)) }?;
+    let loaded = unsafe { LoadedPlugin::load(package, None, &BTreeMap::new(), Some(data_root)) }?;
     // Native plugin libraries are process-lifetime objects. Leaking this box is
     // intentional: unloading while an instance may hold ABI pointers is unsafe.
     let loaded: &'static LoadedPlugin = Box::leak(Box::new(loaded));
@@ -593,6 +1408,8 @@ fn load_desktop_plugin(root: &Path, data_root: &Path) -> Result<DesktopPlugin> {
         instance_id,
         plugin_id: package.manifest().id.clone(),
         name: package.manifest().name.clone(),
+        version,
+        runtime: loaded,
         config_available: package.manifest().config_mode,
         sounds,
         selected_sound_id,
@@ -600,22 +1417,20 @@ fn load_desktop_plugin(root: &Path, data_root: &Path) -> Result<DesktopPlugin> {
     })
 }
 
-fn default_desktop_root() -> Result<PathBuf> {
-    if let Some(local) = env::var_os("LOCALAPPDATA") {
-        return Ok(PathBuf::from(local).join("RackForge"));
-    }
-    Ok(env::current_dir()?.join(".rackforge"))
+fn parse_startup() -> Result<Startup> {
+    resolve_options(parse_cli_options(std::env::args().skip(1))?)
 }
 
-fn parse_options() -> Result<Options> {
-    let desktop_root = default_desktop_root()?;
-    let mut options = Options {
+fn parse_cli_options(arguments: impl IntoIterator<Item = String>) -> Result<CliOptions> {
+    let mut options = CliOptions {
         port: 8787,
         lan: false,
-        plugins_root: desktop_root.join("plugins"),
-        data_root: desktop_root.join("data"),
+        rackforge_root: None,
+        plugins_root: None,
+        data_root: None,
+        install_archives: Vec::new(),
     };
-    let mut arguments = env::args().skip(1);
+    let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--port" => {
@@ -629,24 +1444,375 @@ fn parse_options() -> Result<Options> {
                 }
             }
             "--lan" => options.lan = true,
+            "--rackforge-root" => {
+                options.rackforge_root = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .context("--rackforge-root requires a directory")?,
+                ));
+            }
             "--plugins-root" => {
-                options.plugins_root = PathBuf::from(
+                options.plugins_root = Some(PathBuf::from(
                     arguments
                         .next()
                         .context("--plugins-root requires a directory")?,
-                );
+                ));
             }
             "--data-root" => {
-                options.data_root = PathBuf::from(
+                options.data_root = Some(PathBuf::from(
                     arguments
                         .next()
                         .context("--data-root requires a directory")?,
-                );
+                ));
+            }
+            "--install-plugin" => {
+                options.install_archives.push(PathBuf::from(
+                    arguments
+                        .next()
+                        .context("--install-plugin requires an .rfplugin file")?,
+                ));
             }
             _ => bail!("unknown argument: {argument}"),
         }
     }
     Ok(options)
+}
+
+fn resolve_options(cli: CliOptions) -> Result<Startup> {
+    let default_root = paths::default_root()?;
+    let executable_directory = paths::executable_directory()?;
+    let uses_legacy_paths =
+        cli.rackforge_root.is_none() && (cli.plugins_root.is_some() || cli.data_root.is_some());
+
+    let layout = if let Some(root) = cli.rackforge_root.as_deref() {
+        paths::DesktopPaths::initialize(root)?
+    } else if uses_legacy_paths {
+        paths::DesktopPaths::initialize(&default_root)?
+    } else if let Some(choice) = paths::load_choice(&default_root, &executable_directory)? {
+        paths::DesktopPaths::initialize(choice.root)?
+    } else {
+        return Ok(Startup::FirstStart {
+            port: cli.port,
+            lan: cli.lan,
+            default_root,
+            executable_directory,
+            install_archives: cli.install_archives,
+        });
+    };
+
+    Ok(Startup::Ready(Options {
+        port: cli.port,
+        lan: cli.lan,
+        rackforge_root: layout.root,
+        plugins_root: cli.plugins_root.unwrap_or(layout.legacy_plugins_root),
+        plugin_store_root: (!uses_legacy_paths).then_some(layout.plugin_store_root),
+        data_root: cli.data_root.unwrap_or(layout.data_root),
+        install_archives: cli.install_archives,
+    }))
+}
+
+fn options_from_layout(
+    port: u16,
+    lan: bool,
+    layout: paths::DesktopPaths,
+    install_archives: Vec<PathBuf>,
+) -> Options {
+    Options {
+        port,
+        lan,
+        rackforge_root: layout.root,
+        plugins_root: layout.legacy_plugins_root,
+        plugin_store_root: Some(layout.plugin_store_root),
+        data_root: layout.data_root,
+        install_archives,
+    }
+}
+
+fn create_desktop(options: Options) -> Result<DesktopApp> {
+    if !options.install_archives.is_empty() {
+        let store_root = options
+            .plugin_store_root
+            .as_deref()
+            .context("--install-plugin requires a RackForge Root with a plugin store")?;
+        for archive in &options.install_archives {
+            let bytes = read_plugin_archive_limited(archive).map_err(anyhow::Error::msg)?;
+            install_local_archive(store_root, &bytes)
+                .with_context(|| format!("installing plugin archive {}", archive.display()))?;
+        }
+    }
+
+    let session = Arc::new(RwLock::new(SessionState::new(
+        SessionId::new(DEFAULT_LIVE_SESSION_ID).expect("valid live session id"),
+    )));
+    let app = DesktopApp::new(Arc::clone(&session), &options)?;
+    web::start(Arc::clone(&session), &options)?;
+    Ok(app)
+}
+
+impl RackForgeApp {
+    fn initial_mode(startup: Startup) -> Result<AppMode> {
+        let mode = match startup {
+            Startup::Ready(options) => AppMode::Desktop(Box::new(create_desktop(options)?)),
+            Startup::FirstStart {
+                port,
+                lan,
+                default_root,
+                executable_directory,
+                install_archives,
+            } => AppMode::Setup {
+                state: Box::new(setup::SetupState::new(default_root, executable_directory)),
+                port,
+                lan,
+                install_archives,
+            },
+        };
+        Ok(mode)
+    }
+
+    #[cfg(windows)]
+    fn new(startup: Startup, creation: &eframe::CreationContext<'_>) -> Result<Self> {
+        Ok(Self {
+            mode: Self::initial_mode(startup)?,
+            audio_settings: None,
+            webview: desktop_webview::DesktopWebView::new(creation)?,
+            native_menu: native_menu::NativeMenu::new(creation)?,
+        })
+    }
+
+    #[cfg(not(windows))]
+    fn new(startup: Startup, _creation: &eframe::CreationContext<'_>) -> Result<Self> {
+        Ok(Self {
+            mode: Self::initial_mode(startup)?,
+        })
+    }
+}
+
+impl eframe::App for RackForgeApp {
+    fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        let transition = match &mut self.mode {
+            AppMode::Setup {
+                state,
+                port,
+                lan,
+                install_archives,
+            } => {
+                #[cfg(windows)]
+                {
+                    let _ = self.webview.hide();
+                    let _ = self.native_menu.hide();
+                }
+                state.update(context).map(|result| {
+                    result.and_then(|layout| {
+                        let options = options_from_layout(
+                            *port,
+                            *lan,
+                            layout,
+                            std::mem::take(install_archives),
+                        );
+                        create_desktop(options)
+                    })
+                })
+            }
+            AppMode::Desktop(app) => {
+                #[cfg(windows)]
+                app.poll_audio_error();
+                let mut install_plugin = false;
+                let mut reload_web = false;
+                let mut open_browser = false;
+                let mut open_root = false;
+                let mut open_settings = false;
+                #[cfg(windows)]
+                {
+                    if let Err(error) = self.native_menu.show() {
+                        app.status = format!("Could not show application menu: {error:#}");
+                    }
+                    for command in self.native_menu.drain() {
+                        match command {
+                            native_menu::NativeMenuCommand::InstallPlugin => install_plugin = true,
+                            native_menu::NativeMenuCommand::OpenRoot => open_root = true,
+                            native_menu::NativeMenuCommand::Settings => open_settings = true,
+                            native_menu::NativeMenuCommand::Exit => {
+                                context.send_viewport_cmd(egui::ViewportCommand::Close)
+                            }
+                            native_menu::NativeMenuCommand::Reload => reload_web = true,
+                            native_menu::NativeMenuCommand::OpenBrowser => open_browser = true,
+                            native_menu::NativeMenuCommand::DeveloperTools => {
+                                self.webview.open_devtools()
+                            }
+                            native_menu::NativeMenuCommand::AudioMidiStatus => {
+                                rfd::MessageDialog::new()
+                                    .set_title("RackForge Audio & MIDI")
+                                    .set_description(app.audio_summary())
+                                    .set_level(rfd::MessageLevel::Info)
+                                    .show();
+                            }
+                            native_menu::NativeMenuCommand::About => {
+                                rfd::MessageDialog::new()
+                                    .set_title("About RackForge")
+                                    .set_description(format!(
+                                        "RackForge Desktop\nRust host · Embedded Web workspace\n\n{}",
+                                        app.audio_summary()
+                                    ))
+                                    .set_level(rfd::MessageLevel::Info)
+                                    .show();
+                            }
+                        }
+                    }
+                }
+
+                if install_plugin {
+                    app.begin_plugin_install();
+                }
+                reload_web |= app.poll_plugin_install(context);
+                context.send_viewport_cmd(egui::ViewportCommand::Title(app.window_title().into()));
+                #[cfg(windows)]
+                self.native_menu
+                    .set_install_enabled(!app.install_in_progress());
+                if open_browser {
+                    match webbrowser::open(&app.web_url) {
+                        Ok(()) => app.status = format!("Opened {}", app.web_url),
+                        Err(error) => app.status = format!("Could not open browser: {error}"),
+                    }
+                }
+                if open_root {
+                    match std::process::Command::new("explorer.exe")
+                        .arg(&app.options.rackforge_root)
+                        .spawn()
+                    {
+                        Ok(_) => {
+                            app.status = format!(
+                                "Opened RackForge Root {}",
+                                app.options.rackforge_root.display()
+                            )
+                        }
+                        Err(error) => {
+                            app.status = format!("Could not open RackForge Root: {error}")
+                        }
+                    }
+                }
+
+                #[cfg(windows)]
+                if open_settings {
+                    match app.audio_settings_state() {
+                        Ok(state) => self.audio_settings = Some(state),
+                        Err(error) => {
+                            app.status = format!("Could not open Audio & MIDI settings: {error:#}");
+                            DesktopApp::show_audio_error(&app.status);
+                        }
+                    }
+                }
+
+                #[cfg(windows)]
+                let settings_action = self
+                    .audio_settings
+                    .as_mut()
+                    .map(|settings| settings.show(context));
+                #[cfg(windows)]
+                if let Some(action) = settings_action {
+                    match action {
+                        audio_settings::AudioSettingsAction::None => {}
+                        audio_settings::AudioSettingsAction::Close => {
+                            self.audio_settings = None;
+                            context.request_repaint();
+                        }
+                        audio_settings::AudioSettingsAction::Rescan => {
+                            match desktop_audio::AudioInventory::scan() {
+                                Ok(inventory) => {
+                                    if let Some(settings) = self.audio_settings.as_mut() {
+                                        settings.replace_inventory(inventory);
+                                    }
+                                }
+                                Err(error) => {
+                                    if let Some(settings) = self.audio_settings.as_mut() {
+                                        settings.error(format!("Device rescan failed: {error:#}"));
+                                    }
+                                }
+                            }
+                        }
+                        audio_settings::AudioSettingsAction::TestNote => {
+                            if let Err(error) = app.test_audio_note()
+                                && let Some(settings) = self.audio_settings.as_mut()
+                            {
+                                settings.error(format!("Could not play test note: {error:#}"));
+                            }
+                        }
+                        audio_settings::AudioSettingsAction::Apply(preferences) => {
+                            match app.apply_audio_preferences(preferences.clone()) {
+                                Ok(message) => {
+                                    if let Some(settings) = self.audio_settings.as_mut() {
+                                        settings.applied(preferences, message);
+                                    }
+                                }
+                                Err(error) => {
+                                    if let Some(settings) = self.audio_settings.as_mut() {
+                                        settings.error(format!("{error:#}"));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                #[cfg(windows)]
+                {
+                    if self.audio_settings.is_some() {
+                        if let Err(error) = self.webview.hide() {
+                            app.status = format!("Could not hide embedded Web UI: {error:#}");
+                        }
+                    } else {
+                        let web_rect = egui::CentralPanel::default()
+                            .frame(egui::Frame::NONE)
+                            .show(context, |ui| ui.available_rect_before_wrap())
+                            .inner;
+                        if reload_web && let Err(error) = self.webview.reload() {
+                            app.status = format!("Could not reload Web UI: {error:#}");
+                        }
+                        if let Err(error) = self.webview.show(&app.web_url, web_rect) {
+                            app.status = format!("Could not show embedded Web UI: {error:#}");
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                egui::CentralPanel::default().show(context, |ui| {
+                    ui.centered_and_justified(|ui| {
+                        ui.label(format!("Open RackForge Web at {}", app.web_url));
+                    });
+                });
+                None
+            }
+            AppMode::Error(message) => {
+                #[cfg(windows)]
+                {
+                    let _ = self.webview.hide();
+                    let _ = self.native_menu.hide();
+                }
+                egui::CentralPanel::default().show(context, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(80.0);
+                        ui.heading(
+                            RichText::new("RACKFORGE COULD NOT START")
+                                .color(Color32::from_rgb(235, 105, 105)),
+                        );
+                        ui.add_space(16.0);
+                        ui.label(message.as_str());
+                        ui.add_space(16.0);
+                        if ui.button("Close").clicked() {
+                            context.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    });
+                });
+                None
+            }
+        };
+
+        if let Some(result) = transition {
+            self.mode = match result {
+                Ok(app) => AppMode::Desktop(Box::new(app)),
+                Err(error) => AppMode::Error(format!("{error:#}")),
+            };
+            context.request_repaint();
+        }
+    }
 }
 
 fn main() {
@@ -656,23 +1822,18 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let options = parse_options()?;
-    let session = Arc::new(RwLock::new(SessionState::new(
-        SessionId::new(DEFAULT_LIVE_SESSION_ID).expect("valid live session id"),
-    )));
-    let app = DesktopApp::new(Arc::clone(&session), &options)?;
-    web::start(Arc::clone(&session), options.port, options.lan)?;
+    let startup = parse_startup()?;
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("RackForge Desktop")
-            .with_inner_size([920.0, 620.0])
-            .with_min_inner_size([720.0, 520.0]),
+            .with_inner_size([1280.0, 800.0])
+            .with_min_inner_size([900.0, 600.0]),
         ..Default::default()
     };
     eframe::run_native(
         "RackForge Desktop",
         native,
-        Box::new(move |_creation| Ok(Box::new(app))),
+        Box::new(move |creation| Ok(Box::new(RackForgeApp::new(startup, creation)?))),
     )
     .map_err(|error| anyhow::anyhow!(error.to_string()))
 }
@@ -704,4 +1865,67 @@ fn show_startup_error(message: &str) {
 #[cfg(not(windows))]
 fn show_startup_error(message: &str) {
     eprintln!("RackForge could not start: {message}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_root_and_repeatable_plugin_install_arguments() {
+        let parsed = parse_cli_options([
+            "--port".to_owned(),
+            "9123".to_owned(),
+            "--lan".to_owned(),
+            "--rackforge-root".to_owned(),
+            "D:\\RackForge".to_owned(),
+            "--install-plugin".to_owned(),
+            "one.rfplugin".to_owned(),
+            "--install-plugin".to_owned(),
+            "two.rfplugin".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(parsed.port, 9123);
+        assert!(parsed.lan);
+        assert_eq!(parsed.rackforge_root, Some(PathBuf::from("D:\\RackForge")));
+        assert_eq!(
+            parsed.install_archives,
+            vec![PathBuf::from("one.rfplugin"), PathBuf::from("two.rfplugin")]
+        );
+    }
+
+    #[test]
+    fn keeps_legacy_plugin_and_data_arguments() {
+        let parsed = parse_cli_options([
+            "--plugins-root".to_owned(),
+            "legacy-plugins".to_owned(),
+            "--data-root".to_owned(),
+            "legacy-data".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(parsed.plugins_root, Some(PathBuf::from("legacy-plugins")));
+        assert_eq!(parsed.data_root, Some(PathBuf::from("legacy-data")));
+        assert!(parsed.rackforge_root.is_none());
+    }
+
+    #[test]
+    fn chooses_safe_activation_for_plugin_versions() {
+        let current = Version::parse("2.0.0").unwrap();
+        assert_eq!(
+            plugin_install_activation(None, &Version::parse("1.0.0").unwrap()),
+            PluginInstallActivation::Reload
+        );
+        assert_eq!(
+            plugin_install_activation(Some(&current), &Version::parse("2.1.0").unwrap()),
+            PluginInstallActivation::Restart
+        );
+        assert_eq!(
+            plugin_install_activation(Some(&current), &Version::parse("1.9.0").unwrap()),
+            PluginInstallActivation::KeepCurrent {
+                active_version: "2.0.0".into()
+            }
+        );
+    }
 }

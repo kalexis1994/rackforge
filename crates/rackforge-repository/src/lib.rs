@@ -6,7 +6,7 @@
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signature, VerifyingKey};
-use rackforge_plugin_api::{PluginManifest, validate_plugin_identifier};
+use rackforge_plugin_api::{PluginKind, PluginManifest, validate_plugin_identifier};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -119,6 +119,20 @@ pub struct InstalledPackage {
     pub path: PathBuf,
     pub record: InstallationRecord,
     pub already_installed: bool,
+}
+
+/// Metadata obtained by fully extracting and validating a user-selected
+/// `.rfplugin`, without making it an installed package.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LocalPackageInspection {
+    pub plugin_id: String,
+    pub plugin_name: String,
+    pub version: String,
+    pub kind: PluginKind,
+    pub platform: String,
+    pub portable: bool,
+    pub artifact_sha256: String,
+    pub archive_bytes: u64,
 }
 
 #[derive(Debug, Error)]
@@ -509,6 +523,130 @@ pub fn install_archive(
     result
 }
 
+/// Installs a user-selected `.rfplugin` without requiring a signed repository
+/// catalog. Archive safety, manifest validation and immutable version semantics
+/// are identical to repository installations; the record explicitly marks the
+/// package as local.
+pub fn install_local_archive(
+    store_root: impl AsRef<Path>,
+    bytes: &[u8],
+) -> Result<InstalledPackage, RepositoryError> {
+    if bytes.is_empty() || bytes.len() as u64 > MAX_PACKAGE_BYTES {
+        return Err(RepositoryError::Integrity(
+            "local artifact size is outside supported limits".into(),
+        ));
+    }
+    let root = ensure_real_directory(store_root.as_ref())?;
+    let packages_root = ensure_real_child(&root, "packages")?;
+    let records_root = ensure_real_child(&root, "records")?;
+    let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
+    let stage = root.join(format!(".install-local-{}-{serial}", std::process::id()));
+    if stage.exists() {
+        return Err(RepositoryError::UnsafeArchive(
+            "staging path already exists".into(),
+        ));
+    }
+    fs::create_dir(&stage)?;
+    let result = (|| {
+        extract_archive(bytes, &stage)?;
+        let manifest = read_extracted_manifest(&stage)?;
+        let platform = if manifest.portable_component().is_some() {
+            "wasm-v1"
+        } else {
+            repository_platform_key()?
+        };
+        validate_extracted_payload(&stage, &manifest, platform)?;
+
+        let plugin_root = ensure_real_child(&packages_root, &manifest.id)?;
+        let plugin_records = ensure_real_child(&records_root, &manifest.id)?;
+        let destination = plugin_root.join(&manifest.version);
+        let record_path = plugin_records.join(format!("{}.json", manifest.version));
+        let record = InstallationRecord {
+            schema_version: 1,
+            plugin_id: manifest.id,
+            version: manifest.version,
+            platform: platform.into(),
+            repository_id: "local".into(),
+            artifact_sha256: hex_digest(Sha256::digest(bytes).as_slice()),
+        };
+
+        if destination.exists() {
+            let existing = read_installation_record(&record_path)?;
+            if existing == record {
+                return Ok(InstalledPackage {
+                    path: destination,
+                    record,
+                    already_installed: true,
+                });
+            }
+            return Err(RepositoryError::ImmutableConflict);
+        }
+
+        fs::rename(&stage, &destination)?;
+        if let Err(error) = write_json_atomic(&record_path, &record) {
+            let _ = fs::remove_dir_all(&destination);
+            return Err(error);
+        }
+        Ok(InstalledPackage {
+            path: destination,
+            record,
+            already_installed: false,
+        })
+    })();
+    if stage.exists() {
+        let _ = fs::remove_dir_all(&stage);
+    }
+    result
+}
+
+/// Fully validates a user-selected `.rfplugin` and returns the identity of the
+/// package that would be installed. The temporary extraction is always
+/// removed, including when validation fails.
+pub fn inspect_local_archive(
+    store_root: impl AsRef<Path>,
+    bytes: &[u8],
+) -> Result<LocalPackageInspection, RepositoryError> {
+    if bytes.is_empty() || bytes.len() as u64 > MAX_PACKAGE_BYTES {
+        return Err(RepositoryError::Integrity(
+            "local artifact size is outside supported limits".into(),
+        ));
+    }
+    let root = ensure_real_directory(store_root.as_ref())?;
+    let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
+    let stage = root.join(format!(".inspect-local-{}-{serial}", std::process::id()));
+    if stage.exists() {
+        return Err(RepositoryError::UnsafeArchive(
+            "inspection staging path already exists".into(),
+        ));
+    }
+    fs::create_dir(&stage)?;
+    let result = (|| {
+        extract_archive(bytes, &stage)?;
+        let manifest = read_extracted_manifest(&stage)?;
+        let portable = manifest.portable_component().is_some();
+        let platform = if portable {
+            "wasm-v1"
+        } else {
+            repository_platform_key()?
+        };
+        validate_extracted_payload(&stage, &manifest, platform)?;
+        Ok(LocalPackageInspection {
+            plugin_id: manifest.id,
+            plugin_name: manifest.name,
+            version: manifest.version,
+            kind: manifest.kind,
+            platform: platform.into(),
+            portable,
+            artifact_sha256: hex_digest(Sha256::digest(bytes).as_slice()),
+            archive_bytes: bytes.len() as u64,
+        })
+    })();
+    if stage.exists() {
+        let _ = fs::remove_dir_all(&stage);
+    }
+    result
+}
+
 pub fn repository_platform_key() -> Result<&'static str, RepositoryError> {
     if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
         Ok("linux-aarch64")
@@ -759,6 +897,16 @@ fn validate_extracted_package(
     root: &Path,
     selected: &SelectedArtifact,
 ) -> Result<(), RepositoryError> {
+    let manifest = read_extracted_manifest(root)?;
+    if manifest.id != selected.plugin.id || manifest.version != selected.release.version {
+        return Err(RepositoryError::InvalidPackage(
+            "manifest identity does not match signed catalog".into(),
+        ));
+    }
+    validate_extracted_payload(root, &manifest, &selected.artifact.platform)
+}
+
+fn read_extracted_manifest(root: &Path) -> Result<PluginManifest, RepositoryError> {
     let manifest_path = root.join("rackforge-plugin.toml");
     let mut text = String::new();
     File::open(&manifest_path)
@@ -769,12 +917,15 @@ fn validate_extracted_package(
     manifest
         .validate()
         .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
-    if manifest.id != selected.plugin.id || manifest.version != selected.release.version {
-        return Err(RepositoryError::InvalidPackage(
-            "manifest identity does not match signed catalog".into(),
-        ));
-    }
-    let payload = if selected.artifact.platform == "wasm-v1" {
+    Ok(manifest)
+}
+
+fn validate_extracted_payload(
+    root: &Path,
+    manifest: &PluginManifest,
+    platform: &str,
+) -> Result<(), RepositoryError> {
+    let payload = if platform == "wasm-v1" {
         manifest
             .portable_component()
             .map(|component| component.path.as_str())
@@ -784,7 +935,7 @@ fn validate_extracted_package(
     } else {
         manifest
             .binaries
-            .get(&selected.artifact.platform)
+            .get(platform)
             .map(String::as_str)
             .ok_or_else(|| {
                 RepositoryError::InvalidPackage("package has no binary for this platform".into())
@@ -798,7 +949,7 @@ fn validate_extracted_package(
             "plugin executable is missing or escaped the package".into(),
         ));
     }
-    if selected.artifact.platform == "wasm-v1" {
+    if platform == "wasm-v1" {
         let bytes = fs::read(&canonical)
             .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
         if !bytes.starts_with(b"\0asm") {
@@ -1091,6 +1242,72 @@ preset_catalog = "metadata/presets.json"
         assert_eq!(
             fs::read(installed.path.join("component.wasm")).unwrap(),
             wasm
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installs_a_local_portable_package_with_an_explicit_local_record() {
+        let wasm = b"\0asm\x01\0\0\0";
+        let bytes = archive(&[
+            ("rackforge-plugin.toml", portable_manifest()),
+            ("component.wasm", wasm),
+            ("metadata/runtime.json", b"{}"),
+            ("metadata/parameters.json", b"{}"),
+            ("metadata/presets.json", b"{}"),
+        ]);
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-local-{}-{}",
+            std::process::id(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let installed = install_local_archive(&root, &bytes).unwrap();
+        assert_eq!(installed.record.plugin_id, "org.rackforge.synth");
+        assert_eq!(installed.record.version, "1.2.3");
+        assert_eq!(installed.record.platform, "wasm-v1");
+        assert_eq!(installed.record.repository_id, "local");
+        assert_eq!(
+            fs::read(installed.path.join("component.wasm")).unwrap(),
+            wasm
+        );
+        assert!(
+            install_local_archive(&root, &bytes)
+                .unwrap()
+                .already_installed
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn inspects_a_local_package_without_installing_it() {
+        let bytes = archive(&[
+            ("rackforge-plugin.toml", portable_manifest()),
+            ("component.wasm", b"\0asm\x01\0\0\0"),
+            ("metadata/runtime.json", b"{}"),
+            ("metadata/parameters.json", b"{}"),
+            ("metadata/presets.json", b"{}"),
+        ]);
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-inspect-{}-{}",
+            std::process::id(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let inspection = inspect_local_archive(&root, &bytes).unwrap();
+        assert_eq!(inspection.plugin_id, "org.rackforge.synth");
+        assert_eq!(inspection.plugin_name, "Test Synth");
+        assert_eq!(inspection.version, "1.2.3");
+        assert_eq!(inspection.kind, PluginKind::Instrument);
+        assert_eq!(inspection.platform, "wasm-v1");
+        assert!(inspection.portable);
+        assert_eq!(inspection.archive_bytes, bytes.len() as u64);
+        assert_eq!(
+            inspection.artifact_sha256,
+            hex_digest(Sha256::digest(&bytes).as_slice())
+        );
+        assert!(!root.join("packages").exists());
+        assert!(
+            fs::read_dir(&root).unwrap().next().is_none(),
+            "inspection staging directory must be removed"
         );
         fs::remove_dir_all(root).unwrap();
     }

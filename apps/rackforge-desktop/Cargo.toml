@@ -1,6 +1,6 @@
 [package]
 name = "rackforge-desktop"
-description = "Portable RackForge desktop host with a simulated LITTLE surface"
+description = "RackForge desktop host with the embedded Web workspace"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,12 +16,20 @@ rackforge-control-api = { path = "../../crates/rackforge-control-api" }
 rackforge-core = { path = "../../crates/rackforge-core" }
 rackforge-performance-api = { path = "../../crates/rackforge-performance-api" }
 rackforge-plugin-api = { path = "../../crates/rackforge-plugin-api" }
+rackforge-repository = { path = "../../crates/rackforge-repository" }
 rackforge-session-api = { path = "../../crates/rackforge-session-api" }
 rackforge-surface-api = { path = "../../crates/rackforge-surface-api" }
 rackforge-surface-runtime = { path = "../../crates/rackforge-surface-runtime" }
 serde_json.workspace = true
+serde.workspace = true
+semver.workspace = true
 tokio.workspace = true
+toml.workspace = true
 webbrowser = "1.0"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }
+cpal = "0.16.0"
+midir = "0.11"
+rfd = "0.17.2"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_UI_WindowsAndMessaging"] }
+wry = { version = "0.56.0", default-features = false, features = ["os-webview"] }

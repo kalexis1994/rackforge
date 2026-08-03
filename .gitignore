@@ -3,6 +3,7 @@ __pycache__/
 target/
 *.exe
 *.elf
+*.WebView2/
 firmware/tmp/
 /tmp/
 

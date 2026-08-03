@@ -1,3 +1,4 @@
+use crate::PluginStorage;
 use anyhow::{Context, Result, bail};
 use rackforge_plugin_api::{PluginManifest, ResourceKind};
 use std::collections::{BTreeMap, BTreeSet};
@@ -58,6 +59,7 @@ impl PluginPackage {
     pub fn resolve_resources(
         &self,
         overrides: &BTreeMap<String, PathBuf>,
+        data_root: Option<&Path>,
     ) -> Result<BTreeMap<String, PathBuf>> {
         let declared: BTreeSet<_> = self
             .manifest
@@ -71,9 +73,19 @@ impl PluginPackage {
             }
         }
 
+        let plugin_data = data_root
+            .map(|root| PluginStorage::new(root).ensure_plugin(&self.manifest.id))
+            .transpose()?;
         let mut resolved = BTreeMap::new();
         for requirement in &self.manifest.resources {
-            let Some(path) = overrides.get(&requirement.id) else {
+            let from_private_data = !overrides.contains_key(&requirement.id);
+            let candidate = overrides.get(&requirement.id).cloned().or_else(|| {
+                let relative = requirement.data_path.as_deref()?;
+                let root = plugin_data.as_ref()?;
+                let path = root.root.join(relative);
+                path.exists().then_some(path)
+            });
+            let Some(path) = candidate else {
                 if requirement.required {
                     bail!(
                         "plugin requires resource {:?} ({})",
@@ -83,8 +95,23 @@ impl PluginPackage {
                 }
                 continue;
             };
-            let canonical = fs::canonicalize(path)
+            let canonical = fs::canonicalize(&path)
                 .with_context(|| format!("resolving resource {}", path.display()))?;
+            if from_private_data {
+                let root = plugin_data
+                    .as_ref()
+                    .context("private resource has no plugin data root")?;
+                let canonical_root = fs::canonicalize(&root.root).with_context(|| {
+                    format!("resolving plugin data directory {}", root.root.display())
+                })?;
+                if !canonical.starts_with(&canonical_root) {
+                    bail!(
+                        "resource {:?} escaped plugin data directory {}",
+                        requirement.id,
+                        canonical_root.display()
+                    );
+                }
+            }
             let valid_kind = match requirement.kind {
                 ResourceKind::File => canonical.is_file(),
                 ResourceKind::Directory => canonical.is_dir(),
@@ -121,10 +148,68 @@ pub fn platform_key() -> Result<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static SERIAL: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn identifies_the_development_platform() {
         let platform = platform_key().unwrap();
         assert!(platform.contains('-'));
+    }
+
+    #[test]
+    fn resolves_declared_resources_from_private_plugin_data() {
+        let base = std::env::temp_dir().join(format!(
+            "rackforge-private-resource-{}-{}",
+            std::process::id(),
+            SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package_root = base.join("package");
+        let data_root = base.join("data");
+        fs::create_dir_all(&package_root).unwrap();
+        fs::write(
+            package_root.join(MANIFEST_FILE),
+            r#"
+schema_version = 1
+id = "org.rackforge.private-resource-test"
+name = "Private resource test"
+vendor = "RackForge"
+version = "0.1.0"
+kind = "instrument"
+state_version = 1
+
+[api]
+major = 1
+minor = 5
+
+[[resources]]
+id = "program-rom"
+name = "Program ROM"
+kind = "file"
+required = false
+data_path = "roms/program.bin"
+
+[binaries]
+windows-x86_64 = "plugin.dll"
+"#,
+        )
+        .unwrap();
+        let private = PluginStorage::new(&data_root)
+            .ensure_plugin("org.rackforge.private-resource-test")
+            .unwrap();
+        fs::create_dir_all(private.root.join("roms")).unwrap();
+        let expected = private.root.join("roms/program.bin");
+        fs::write(&expected, b"ROM").unwrap();
+
+        let package = PluginPackage::open(&package_root).unwrap();
+        let resolved = package
+            .resolve_resources(&BTreeMap::new(), Some(&data_root))
+            .unwrap();
+        assert_eq!(
+            resolved.get("program-rom"),
+            Some(&fs::canonicalize(expected).unwrap())
+        );
+        fs::remove_dir_all(base).unwrap();
     }
 }

@@ -82,14 +82,22 @@ id = "rendered-bank"
 name = "Rendered SCVA Bank"
 kind = "directory"
 required = true
+data_path = "banks/rendered"
 ```
 
-El host resuelve y valida cada recurso antes de cargar la biblioteca. El plugin
-solo solicita su ruta mediante `get_resource_path`; no conoce ubicaciones
-específicas de la Raspberry. Esto mantiene bancos, ROMs y muestras fuera de
-Git y permite que la misma biblioteca funcione en distintas instalaciones.
+`data_path` es opcional y siempre se interpreta dentro de
+`<data-root>/plugins/<plugin-id>/`. Una asignación explícita del usuario tiene
+prioridad; si no existe, RackForge prueba esa ubicación privada declarada. Las
+rutas absolutas, `..` y los enlaces que escapen del namespace son rechazados.
 
-El host conserva compatibilidad binaria con plugins API 1.0–1.3. Los plugins
+El host resuelve y valida cada recurso antes de crear la instancia. Un plugin
+nativo recibe una ruta mediante `get_resource_path`; un componente portátil no
+recibe acceso al sistema de archivos: RackForge lee el archivo y entrega sus
+bytes mediante el ABI `wasm-v1`. Esto mantiene bancos, ROMs y muestras fuera de
+Git, evita rutas específicas de la Raspberry y permite instalar el mismo
+`.rfplugin` en Windows, Linux x86-64 o Linux ARM64.
+
+El host conserva compatibilidad binaria con plugins API 1.0–1.6. Los plugins
 de referencia se compilan contra la API vigente para probar el contrato
 completo.
 
@@ -124,7 +132,7 @@ contenido en ambos lados.
 Los recursos declarados y los datos del plugin son conceptos distintos:
 
 - un recurso es una dependencia externa seleccionada por RackForge, como una ROM
-  o un banco renderizado;
+  o un banco renderizado; puede sugerir una ubicación mediante `data_path`;
 - la raíz privada contiene todo lo que el plugin decida crear o guardar.
 
 ## Catálogos dinámicos
@@ -133,6 +141,22 @@ API 1.3 permite que un plugin publique su catálogo después de crear la instanc
 y abrir sus recursos. Esto resuelve bancos externos cuyo contenido no se conoce
 al compilar el plugin. La publicación usa JSON validado por Core y una extensión
 compatible de `HostApiV1`; la tabla exportada por plugins 1.0–1.2 no cambia.
+
+El SDK portátil ofrece el equivalente mediante la exportación opcional
+`rackforge_preset_catalog`. Core la consulta después de entregar todos los
+recursos, valida el mismo `PresetCatalog` y lo asocia a esa instancia. Si el
+componente no exporta la función o devuelve cero bytes, se conserva el catálogo
+estático incluido en el paquete. Así, paquetes `wasm-v1` anteriores siguen
+funcionando sin recompilación.
+
+La inicialización, carga de recursos, estado y catálogo usan un presupuesto de
+combustible de control independiente. El callback de audio conserva un límite
+menor y determinista para que una reconstrucción costosa al abrir una ROM no
+debilite la protección del hilo de audio.
+
+La API 1.6 incorpora `data_path` y el catálogo dinámico portátil. Un paquete que
+dependa de cualquiera de ellos debe declarar `minor = 6`; así un host anterior
+lo rechaza de forma explícita en vez de abrirlo sin sus recursos o programas.
 
 RF-DLS usa esta capacidad para convertir cada instrumento encontrado en el DLS
 en un preset dinámico con ID opaco y estable, nombre y detalle. Core conserva la

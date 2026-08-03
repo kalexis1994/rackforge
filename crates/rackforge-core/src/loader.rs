@@ -51,7 +51,7 @@ impl NativeLoadedPlugin {
         resource_overrides: &BTreeMap<String, PathBuf>,
         data_root: Option<&Path>,
     ) -> Result<Self> {
-        let resources = package.resolve_resources(resource_overrides)?;
+        let resources = package.resolve_resources(resource_overrides, data_root)?;
         let resource_paths = resources
             .into_iter()
             .map(|(id, path)| {

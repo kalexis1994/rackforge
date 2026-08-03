@@ -44,15 +44,48 @@ name ends in `.rfplugin`:
 ```text
 plugin-name-version.rfplugin/
 ├── rackforge-plugin.toml
-├── lib/
-│   └── <platform native library>
+├── component.wasm
+├── metadata/
+│   ├── runtime.json
+│   ├── parameters.json
+│   └── presets.json
 └── web/
     └── <static plugin-owned surfaces>
 ```
 
+The preferred format is `wasm-v1`: a plugin is compiled once against
+`rackforge-plugin-sdk`, and RackForge runs the same component on every
+compatible host. Native libraries remain supported during the transition, but
+they are platform-specific artifacts.
+
 Sound banks, ROMs, credentials, caches, and saved programs are forbidden from
 the package. The installer replaces only the immutable package directory and
 preserves the plugin data directory.
+
+External files may declare a portable default location without hard-coding a
+host path:
+
+```toml
+[[resources]]
+id = "program-rom"
+name = "Program ROM"
+kind = "file"
+required = false
+data_path = "roms/program.bin"
+```
+
+RackForge resolves this as
+`<data-root>/plugins/<plugin-id>/roms/program.bin`. Explicit user overrides win,
+and the host rejects any path that escapes the private plugin directory. A
+portable component receives only the resource bytes through the SDK lifecycle;
+it never opens that path itself.
+
+Plugins whose program list depends on those bytes implement
+`Processor::write_preset_catalog`. RackForge calls it on the control thread
+after resource delivery, validates the returned `PresetCatalog`, and falls back
+to `metadata/presets.json` when the optional export is absent or empty. The
+static catalog should therefore contain a useful bootstrap/unavailable entry,
+not duplicate every private-bank name.
 
 Plugins declare `config_mode = true` only when they own a separate CONFIG
 workflow. A single-window instrument editor belongs in PLAY and leaves the flag

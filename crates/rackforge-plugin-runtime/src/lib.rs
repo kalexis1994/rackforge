@@ -14,7 +14,11 @@ const STATUS_OK: i32 = 0;
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeLimits {
     pub maximum_memory_bytes: usize,
+    /// Fuel available to one real-time audio call.
     pub fuel_per_call: u64,
+    /// Fuel available to one bounded control-plane call such as resource
+    /// validation or dynamic catalog construction.
+    pub control_fuel_per_call: u64,
 }
 
 impl Default for RuntimeLimits {
@@ -22,6 +26,7 @@ impl Default for RuntimeLimits {
         Self {
             maximum_memory_bytes: 64 * 1024 * 1024,
             fuel_per_call: 50_000_000,
+            control_fuel_per_call: 5_000_000_000,
         }
     }
 }
@@ -110,7 +115,7 @@ impl PortableModule {
             },
         );
         store.limiter(|state| &mut state.limits);
-        store.set_fuel(self.limits.fuel_per_call)?;
+        store.set_fuel(self.limits.control_fuel_per_call)?;
         let instance = Instance::new(&mut store, &self.module, &[]).map_err(|error| {
             anyhow::anyhow!("instantiating RackForge WebAssembly plugin: {error}")
         })?;
@@ -168,6 +173,7 @@ impl PortableModule {
         let resource_begin = typed(&instance, &mut store, "rackforge_resource_begin")?;
         let resource_write = typed(&instance, &mut store, "rackforge_resource_write")?;
         let resource_end = typed(&instance, &mut store, "rackforge_resource_end")?;
+        let preset_catalog = optional_typed(&instance, &mut store, "rackforge_preset_catalog")?;
         let load_preset = typed(&instance, &mut store, "rackforge_load_preset")?;
         let save_state = typed(&instance, &mut store, "rackforge_save_state")?;
         let load_state = typed(&instance, &mut store, "rackforge_load_state")?;
@@ -192,11 +198,13 @@ impl PortableModule {
             resource_begin,
             resource_write,
             resource_end,
+            preset_catalog,
             load_preset,
             save_state,
             load_state,
             process,
             fuel_per_call: self.limits.fuel_per_call,
+            control_fuel_per_call: self.limits.control_fuel_per_call,
             prepared_input_channels: 0,
             prepared_output_channels: 0,
             maximum_frames: 0,
@@ -224,11 +232,13 @@ pub struct PortableInstance {
     resource_begin: TypedFunc<(i32, i64), i32>,
     resource_write: TypedFunc<(i64, i32), i32>,
     resource_end: TypedFunc<(), i32>,
+    preset_catalog: Option<TypedFunc<(), i32>>,
     load_preset: TypedFunc<i32, i32>,
     save_state: TypedFunc<(), i32>,
     load_state: TypedFunc<i32, i32>,
     process: TypedFunc<(i32, i32, i32, i32, i32), i32>,
     fuel_per_call: u64,
+    control_fuel_per_call: u64,
     prepared_input_channels: u32,
     prepared_output_channels: u32,
     maximum_frames: u32,
@@ -256,7 +266,7 @@ impl PortableInstance {
                 self.capacity_output_samples
             );
         }
-        self.reset_fuel()?;
+        self.reset_control_fuel()?;
         check_status(
             self.prepare.call(
                 &mut self.store,
@@ -276,7 +286,7 @@ impl PortableInstance {
     }
 
     pub fn set_parameter(&mut self, index: u32, value: f64) -> Result<()> {
-        self.reset_fuel()?;
+        self.reset_control_fuel()?;
         check_status(
             self.set_parameter
                 .call(&mut self.store, (index as i32, value))?,
@@ -285,7 +295,7 @@ impl PortableInstance {
     }
 
     pub fn get_parameter(&mut self, index: u32) -> Result<f64> {
-        self.reset_fuel()?;
+        self.reset_control_fuel()?;
         let value = self.get_parameter.call(&mut self.store, index as i32)?;
         if !value.is_finite() {
             bail!("portable plugin does not expose parameter {index}");
@@ -294,7 +304,7 @@ impl PortableInstance {
     }
 
     pub fn reset(&mut self) -> Result<()> {
-        self.reset_fuel()?;
+        self.reset_control_fuel()?;
         check_status(self.reset.call(&mut self.store, ())?, "reset")
     }
 
@@ -305,7 +315,7 @@ impl PortableInstance {
             bail!("resource id does not fit the portable transfer buffer");
         }
         self.write_transfer(id.as_bytes())?;
-        self.reset_fuel()?;
+        self.reset_control_fuel()?;
         check_status(
             self.resource_begin
                 .call(&mut self.store, (id.len() as i32, bytes.len() as i64))?,
@@ -316,15 +326,33 @@ impl PortableInstance {
             let offset = chunk_index
                 .checked_mul(self.capacity_transfer_bytes)
                 .context("resource offset overflow")?;
-            self.reset_fuel()?;
+            self.reset_control_fuel()?;
             check_status(
                 self.resource_write
                     .call(&mut self.store, (offset as i64, chunk.len() as i32))?,
                 "resource_write",
             )?;
         }
-        self.reset_fuel()?;
+        self.reset_control_fuel()?;
         check_status(self.resource_end.call(&mut self.store, ())?, "resource_end")
+    }
+
+    /// Returns an optional instance-specific preset catalog produced after
+    /// resource delivery. Components built with an older SDK simply fall back
+    /// to their package metadata.
+    pub fn preset_catalog(&mut self) -> Result<Option<Vec<u8>>> {
+        let Some(function) = self.preset_catalog.clone() else {
+            return Ok(None);
+        };
+        self.reset_control_fuel()?;
+        let length = function.call(&mut self.store, ())?;
+        if length == 0 {
+            return Ok(None);
+        }
+        if length < 0 || length as usize > self.capacity_transfer_bytes {
+            bail!("portable plugin returned an invalid preset catalog length {length}");
+        }
+        Ok(Some(self.read_transfer(length as usize)?.to_vec()))
     }
 
     pub fn load_preset(&mut self, id: &str) -> Result<()> {
@@ -332,7 +360,7 @@ impl PortableInstance {
             bail!("preset id must not be empty");
         }
         self.write_transfer(id.as_bytes())?;
-        self.reset_fuel()?;
+        self.reset_control_fuel()?;
         check_status(
             self.load_preset.call(&mut self.store, id.len() as i32)?,
             "load_preset",
@@ -340,7 +368,7 @@ impl PortableInstance {
     }
 
     pub fn save_state(&mut self) -> Result<Vec<u8>> {
-        self.reset_fuel()?;
+        self.reset_control_fuel()?;
         let length = self.save_state.call(&mut self.store, ())?;
         if length < 0 || length as usize > self.capacity_transfer_bytes {
             bail!("portable plugin returned an invalid state length {length}");
@@ -350,7 +378,7 @@ impl PortableInstance {
 
     pub fn load_state(&mut self, state: &[u8]) -> Result<()> {
         self.write_transfer(state)?;
-        self.reset_fuel()?;
+        self.reset_control_fuel()?;
         check_status(
             self.load_state.call(&mut self.store, state.len() as i32)?,
             "load_state",
@@ -444,7 +472,7 @@ impl PortableInstance {
             parameter_range,
             parameters,
         );
-        self.reset_fuel()?;
+        self.reset_realtime_fuel()?;
         check_status(
             self.process.call(
                 &mut self.store,
@@ -462,8 +490,13 @@ impl PortableInstance {
         Ok(())
     }
 
-    fn reset_fuel(&mut self) -> Result<()> {
+    fn reset_realtime_fuel(&mut self) -> Result<()> {
         self.store.set_fuel(self.fuel_per_call)?;
+        Ok(())
+    }
+
+    fn reset_control_fuel(&mut self) -> Result<()> {
+        self.store.set_fuel(self.control_fuel_per_call)?;
         Ok(())
     }
 
@@ -543,6 +576,23 @@ where
     instance
         .get_typed_func(store, name)
         .map_err(|error| anyhow::anyhow!("wasm-v1 plugin is missing export {name}: {error}"))
+}
+
+fn optional_typed<Params, Results>(
+    instance: &Instance,
+    store: &mut Store<HostState>,
+    name: &str,
+) -> Result<Option<TypedFunc<Params, Results>>>
+where
+    Params: wasmtime::WasmParams,
+    Results: wasmtime::WasmResults,
+{
+    let Some(function) = instance.get_func(&mut *store, name) else {
+        return Ok(None);
+    };
+    function.typed(&mut *store).map(Some).map_err(|error| {
+        anyhow::anyhow!("wasm-v1 plugin export {name} has the wrong type: {error}")
+    })
 }
 
 fn checked_samples(frames: u32, channels: u32) -> Result<usize> {
@@ -687,6 +737,27 @@ mod tests {
             .process_interleaved(&input, &mut output, 2)
             .unwrap();
         assert_eq!(output, [0.5, -0.5, 0.125, -0.125]);
+    }
+
+    #[test]
+    fn dynamic_preset_catalog_is_optional_and_uses_the_transfer_buffer() {
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let legacy = engine.compile(&wat::parse_str(GAIN).unwrap()).unwrap();
+        assert_eq!(
+            legacy.instantiate().unwrap().preset_catalog().unwrap(),
+            None
+        );
+
+        let source = GAIN.replace(
+            "          (func (export \"rackforge_load_preset\")",
+            "          (data (i32.const 8192) \"catalog\")\n          (func (export \"rackforge_preset_catalog\") (result i32) i32.const 7)\n          (func (export \"rackforge_load_preset\")",
+        );
+        let module = engine.compile(&wat::parse_str(source).unwrap()).unwrap();
+        let mut instance = module.instantiate().unwrap();
+        assert_eq!(
+            instance.preset_catalog().unwrap(),
+            Some(b"catalog".to_vec())
+        );
     }
 
     #[test]

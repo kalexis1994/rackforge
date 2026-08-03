@@ -161,7 +161,7 @@ impl PortableLoadedPlugin {
         }
 
         let mut resources = BTreeMap::new();
-        for (id, path) in package.resolve_resources(resource_overrides)? {
+        for (id, path) in package.resolve_resources(resource_overrides, data_root)? {
             let requirement = package
                 .manifest()
                 .resources
@@ -208,9 +208,25 @@ impl PortableLoadedPlugin {
                 .load_resource(id, bytes)
                 .with_context(|| format!("delivering portable resource {id:?}"))?;
         }
+        let presets = match instance.preset_catalog()? {
+            Some(bytes) => {
+                let catalog: PresetCatalog = serde_json::from_slice(&bytes)
+                    .context("parsing portable dynamic preset catalog")?;
+                catalog
+                    .validate()
+                    .context("validating portable dynamic preset catalog")?;
+                if !self.manifest.capabilities.contains(&Capability::Presets)
+                    && !catalog.presets.is_empty()
+                {
+                    bail!("portable plugin published presets without declaring the capability");
+                }
+                catalog
+            }
+            None => self.presets.clone(),
+        };
         Ok(PortablePluginInstance {
             instance,
-            presets: self.presets.clone(),
+            presets,
             active: false,
             midi_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
             parameter_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),

@@ -88,6 +88,13 @@ pub trait Processor: Default {
         false
     }
 
+    /// Writes an instance-specific preset catalog as RackForge Preset Catalog
+    /// JSON after resources have been delivered. Returning `None` keeps the
+    /// package's static catalog. This runs on the control thread.
+    fn write_preset_catalog(&mut self, _destination: &mut [u8]) -> Option<usize> {
+        None
+    }
+
     fn load_preset(&mut self, _id: &str) -> bool {
         false
     }
@@ -348,6 +355,25 @@ macro_rules! export_processor {
                     $crate::STATUS_OK
                 } else {
                     $crate::STATUS_INVALID_STATE
+                }
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_preset_catalog() -> i32 {
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                let destination = core::slice::from_raw_parts_mut(
+                    core::ptr::addr_of_mut!(RF_TRANSFER).cast::<u8>(),
+                    RF_MAX_TRANSFER_BYTES,
+                );
+                match processor.write_preset_catalog(destination) {
+                    Some(length) if length > 0 && length <= RF_MAX_TRANSFER_BYTES => length as i32,
+                    Some(_) => $crate::STATUS_INVALID_STATE,
+                    None => 0,
                 }
             }
         }

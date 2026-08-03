@@ -45,6 +45,11 @@ pub struct ResourceRequirement {
     pub kind: ResourceKind,
     #[serde(default)]
     pub required: bool,
+    /// Optional path inside this plugin's private data directory. Hosts may
+    /// resolve it automatically when no explicit resource override was
+    /// supplied. The guest receives bytes, never this filesystem path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_path: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -210,6 +215,14 @@ impl PluginManifest {
             if !resource_ids.insert(resource.id.as_str()) {
                 return Err(ManifestError::DuplicateResource(resource.id.clone()));
             }
+            if let Some(path) = &resource.data_path
+                && !is_safe_relative_path(path)
+            {
+                return Err(ManifestError::UnsafeResourcePath {
+                    id: resource.id.clone(),
+                    path: path.clone(),
+                });
+            }
         }
         for (platform, path) in &self.binaries {
             validate_identifier(platform, false)
@@ -354,6 +367,8 @@ pub enum ManifestError {
     EmptyResourceName(String),
     #[error("duplicate resource {0}")]
     DuplicateResource(String),
+    #[error("resource {id} data path must be a safe relative path: {path:?}")]
+    UnsafeResourcePath { id: String, path: String },
     #[error("invalid or duplicate UI layout {0:?}")]
     InvalidUiLayout(String),
     #[error("invalid platform identifier {0:?}")]
@@ -423,6 +438,24 @@ mod tests {
         assert!(matches!(
             candidate.validate(),
             Err(ManifestError::UnsafeBinaryPath(_))
+        ));
+    }
+
+    #[test]
+    fn validates_private_resource_data_paths() {
+        let mut candidate = manifest();
+        candidate.resources.push(ResourceRequirement {
+            id: "sample-bank".into(),
+            name: "Sample bank".into(),
+            kind: ResourceKind::File,
+            required: false,
+            data_path: Some("roms/bank.bin".into()),
+        });
+        assert_eq!(candidate.validate(), Ok(()));
+        candidate.resources[0].data_path = Some("../outside.bin".into());
+        assert!(matches!(
+            candidate.validate(),
+            Err(ManifestError::UnsafeResourcePath { .. })
         ));
     }
 

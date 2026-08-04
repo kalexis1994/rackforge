@@ -88,6 +88,26 @@ binary into source control.
 - a failed or exhausted instance is silenced and removed at a safe graph
   boundary rather than retried inside the callback.
 
+The live host enforces that last invariant independently for each scope. A
+standalone PLAY runtime failure moves audio rendering to silence without
+terminating MIDI, control or the process. A failed Rack Slot is quarantined
+while the remaining Slots continue rendering. The structured
+`PLUGIN_PROCESS_QUARANTINED` diagnostic identifies the affected instance or
+Slot. The runtime records the fuel consumed by the last process call even when
+Wasmtime traps, so failures can be reproduced without raising the production
+limit.
+
+Portable instruments can be exercised outside the device audio loop with the
+same sandbox and budget:
+
+```text
+rackforge-core stress PACKAGE --resource ID=PATH --preset PRESET_ID \
+  --voices 28 --blocks 96 --frames 256
+```
+
+The command reports maximum fuel, peak and render-time ratio. It is a bounded
+diagnostic and never grants a plugin additional execution budget.
+
 The current host uses Wasmtime/Cranelift behind `rackforge-plugin-runtime`.
 Core will depend on a RackForge-owned runtime trait so another compiler or a
 non-JIT interpreter can be selected without changing plugin packages or the

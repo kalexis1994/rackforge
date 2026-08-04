@@ -116,6 +116,7 @@ struct RackSlotVoice<'plugin> {
     pan: f32,
     output: Vec<f32>,
     events: Vec<MidiEventV1>,
+    process_faulted: bool,
 }
 
 struct StandaloneVoice<'plugin> {
@@ -167,6 +168,7 @@ fn create_rack_voices<'plugin>(
             pan: f32::from(spec.pan_per_mille) / 1_000.0,
             output: vec![0.0; period_frames as usize * channels as usize],
             events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
+            process_faulted: false,
         });
     }
     Ok(voices)
@@ -1721,7 +1723,7 @@ fn audio_loop<'plugin>(
             AudioRenderMode::Silent => {}
             AudioRenderMode::Plugin => {
                 plugin_output.fill(0.0);
-                standalone_voice_mut(standalone_voices, &active_instance_id)
+                let process_result = standalone_voice_mut(standalone_voices, &active_instance_id)
                     .map_err(anyhow::Error::msg)?
                     .instance
                     .process_interleaved(
@@ -1732,13 +1734,24 @@ fn audio_loop<'plugin>(
                         channels as u32,
                         &events,
                         &[],
-                    )?;
-                mix_output.copy_from_slice(&plugin_output);
+                    );
+                if quarantine_failed_process(
+                    process_result,
+                    &mut plugin_output,
+                    &format!("standalone:{active_instance_id}"),
+                ) {
+                    render_mode = AudioRenderMode::Silent;
+                } else {
+                    mix_output.copy_from_slice(&plugin_output);
+                }
             }
             AudioRenderMode::Rack => {
                 for voice in &mut rack_voices {
                     voice.output.fill(0.0);
-                    voice.instance.process_interleaved(
+                    if voice.process_faulted {
+                        continue;
+                    }
+                    let process_result = voice.instance.process_interleaved(
                         &input,
                         &mut voice.output,
                         period_frames as u32,
@@ -1746,7 +1759,15 @@ fn audio_loop<'plugin>(
                         channels as u32,
                         &voice.events,
                         &[],
-                    )?;
+                    );
+                    if quarantine_failed_process(
+                        process_result,
+                        &mut voice.output,
+                        &format!("rack-slot:{}", voice.slot_id),
+                    ) {
+                        voice.process_faulted = true;
+                        continue;
+                    }
                     mix_rack_slot(
                         &mut mix_output,
                         &voice.output,
@@ -1815,6 +1836,19 @@ fn audio_loop<'plugin>(
     }
 }
 
+fn quarantine_failed_process<E: std::fmt::Display>(
+    result: std::result::Result<(), E>,
+    output: &mut [f32],
+    context: &str,
+) -> bool {
+    let Err(error) = result else {
+        return false;
+    };
+    output.fill(0.0);
+    eprintln!("PLUGIN_PROCESS_QUARANTINED context={context} action=silence error={error}");
+    true
+}
+
 fn stop_all_plugin_runtimes(
     standalone_voices: &mut [StandaloneVoice<'_>],
     rack_voices: &mut [RackSlotVoice<'_>],
@@ -1831,6 +1865,7 @@ fn stop_all_plugin_runtimes(
         }
         voice.events.clear();
         voice.output.fill(0.0);
+        voice.process_faulted = false;
     }
     if failures.is_empty() {
         Ok(())
@@ -2166,6 +2201,25 @@ mod tests {
             length,
             data,
         }
+    }
+
+    #[test]
+    fn plugin_process_failure_is_silenced_and_quarantined() {
+        let mut output = [0.25_f32, -0.5, 0.75, -1.0];
+        assert!(quarantine_failed_process(
+            Err("all fuel consumed"),
+            &mut output,
+            "test"
+        ));
+        assert_eq!(output, [0.0; 4]);
+
+        let mut successful = [0.25_f32, -0.5];
+        assert!(!quarantine_failed_process(
+            Ok::<(), &str>(()),
+            &mut successful,
+            "test"
+        ));
+        assert_eq!(successful, [0.25, -0.5]);
     }
 
     #[test]

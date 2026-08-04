@@ -12,6 +12,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::env;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 fn main() {
     if let Err(error) = run() {
@@ -36,6 +37,20 @@ fn run() -> Result<()> {
                 data_root.as_deref(),
             )
         }
+        "stress" => {
+            let (plugin, voices, blocks, frames) = parse_stress_arguments(&arguments[1..])?;
+            let (package, binary, resources, preset, data_root) = plugin;
+            stress(
+                &package,
+                binary.as_deref(),
+                &resources,
+                preset.as_deref(),
+                data_root.as_deref(),
+                voices,
+                blocks,
+                frames,
+            )
+        }
         "live" => run_live(&arguments[1..]),
         "resume" if arguments.len() == 2 => resume(Path::new(&arguments[1])),
         #[cfg(target_os = "linux")]
@@ -52,6 +67,9 @@ fn run() -> Result<()> {
             "usage:\n  rackforge-core inspect PACKAGE\n  \
              rackforge-core smoke PACKAGE [--library FILE] [--resource ID=PATH]... \
              [--preset ID] [--data-root DIRECTORY]\n  \
+             rackforge-core stress PACKAGE [--library FILE] [--resource ID=PATH]... \
+             [--preset ID] [--data-root DIRECTORY] [--voices COUNT] \
+             [--blocks COUNT] [--frames COUNT]\n  \
              rackforge-core live PACKAGE [--library FILE] [--resource ID=PATH]... \
              [--preset ID] [--data-root DIRECTORY]\n  \
              rackforge-core resume STARTUP_CONFIG\n  \
@@ -294,6 +312,53 @@ fn parse_plugin_arguments(command: &str, arguments: &[String]) -> Result<PluginA
     Ok((PathBuf::from(package), binary, resources, preset, data_root))
 }
 
+fn parse_stress_arguments(arguments: &[String]) -> Result<(PluginArguments, u8, u32, u32)> {
+    let mut common = Vec::new();
+    let mut voices = 28_u8;
+    let mut blocks = 32_u32;
+    let mut frames = 256_u32;
+    let mut index = 0;
+    while index < arguments.len() {
+        let option = arguments[index].as_str();
+        if matches!(option, "--voices" | "--blocks" | "--frames") {
+            index += 1;
+            let value = arguments
+                .get(index)
+                .with_context(|| format!("{option} requires an integer"))?;
+            match option {
+                "--voices" => {
+                    voices = value.parse().context("--voices must be an integer")?;
+                    if voices == 0 || voices > 128 {
+                        bail!("--voices must be in 1..=128");
+                    }
+                }
+                "--blocks" => {
+                    blocks = value.parse().context("--blocks must be an integer")?;
+                    if blocks == 0 || blocks > 10_000 {
+                        bail!("--blocks must be in 1..=10000");
+                    }
+                }
+                "--frames" => {
+                    frames = value.parse().context("--frames must be an integer")?;
+                    if frames == 0 || frames > 4_096 {
+                        bail!("--frames must be in 1..=4096");
+                    }
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            common.push(arguments[index].clone());
+        }
+        index += 1;
+    }
+    Ok((
+        parse_plugin_arguments("stress", &common)?,
+        voices,
+        blocks,
+        frames,
+    ))
+}
+
 fn inspect(path: &Path) -> Result<()> {
     let package = PluginPackage::open(path)?;
     let manifest = package.manifest();
@@ -421,6 +486,79 @@ fn smoke(
     instance.load_state(&state)?;
     instance.deactivate()?;
     println!("PLUGIN_SMOKE_OK peak={peak:.6} state_bytes={}", state.len());
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stress(
+    package_path: &Path,
+    binary: Option<&Path>,
+    resources: &BTreeMap<String, PathBuf>,
+    requested_preset: Option<&str>,
+    data_root: Option<&Path>,
+    voices: u8,
+    blocks: u32,
+    frames: u32,
+) -> Result<()> {
+    let package = PluginPackage::open(package_path)?;
+    // SAFETY: stress is an explicit plugin execution command.
+    let plugin = unsafe { LoadedPlugin::load(&package, binary, resources, data_root) }?;
+    if plugin.manifest().kind != PluginKind::Instrument {
+        bail!("stress currently requires an instrument plugin");
+    }
+    let mut instance = plugin.create_instance()?;
+    let presets = instance.preset_catalog()?;
+    let preset = match requested_preset {
+        Some(id) => presets
+            .presets
+            .iter()
+            .chain(plugin.presets().presets.iter())
+            .find(|preset| preset.id == id)
+            .with_context(|| format!("plugin does not declare preset {id:?}"))?,
+        None => presets
+            .presets
+            .first()
+            .context("instrument does not expose a stress-test preset")?,
+    };
+    instance.load_preset(&preset.id)?;
+    instance.activate(48_000.0, frames, 0, 2)?;
+
+    let note_ons = (0..voices)
+        .map(|voice| MidiEventV1 {
+            frame: 0,
+            length: 3,
+            data: [0x90, 36 + voice % 60, 100],
+        })
+        .collect::<Vec<_>>();
+    let mut output = vec![0.0_f32; frames as usize * 2];
+    let mut peak = 0.0_f32;
+    let mut maximum_fuel = 0_u64;
+    let started = Instant::now();
+    for block in 0..blocks {
+        output.fill(0.0);
+        let events = if block == 0 { note_ons.as_slice() } else { &[] };
+        let result = instance.process_interleaved(&[], &mut output, frames, 0, 2, events, &[]);
+        let fuel = instance.last_realtime_fuel_consumed().unwrap_or(0);
+        maximum_fuel = maximum_fuel.max(fuel);
+        result
+            .with_context(|| format!("stress block {block} failed after consuming {fuel} fuel"))?;
+        peak = output
+            .iter()
+            .fold(peak, |maximum, sample| maximum.max(sample.abs()));
+    }
+    let elapsed = started.elapsed();
+    let rendered_seconds = f64::from(blocks) * f64::from(frames) / 48_000.0;
+    let realtime_ratio = elapsed.as_secs_f64() / rendered_seconds;
+    instance.deactivate()?;
+    println!(
+        "PLUGIN_STRESS_OK id={} preset={} voices={} blocks={} frames={} max_fuel={} peak={peak:.6} realtime_ratio={realtime_ratio:.3}",
+        plugin.descriptor().id,
+        preset.id,
+        voices,
+        blocks,
+        frames,
+        maximum_fuel,
+    );
     Ok(())
 }
 

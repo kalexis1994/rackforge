@@ -453,6 +453,17 @@ impl PluginInstance<'_> {
             ),
         }
     }
+
+    /// Reports the fuel consumed by the most recent portable process call.
+    /// Native plugins are not metered by the WebAssembly sandbox.
+    pub fn last_realtime_fuel_consumed(&self) -> Option<u64> {
+        match &self.backend {
+            PluginInstanceBackend::Native(_) => None,
+            PluginInstanceBackend::Portable(instance) => {
+                Some(instance.instance.last_realtime_fuel_consumed())
+            }
+        }
+    }
 }
 
 pub struct PortablePluginInstance {

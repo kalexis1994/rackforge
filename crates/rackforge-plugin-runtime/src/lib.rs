@@ -205,6 +205,7 @@ impl PortableModule {
             process,
             fuel_per_call: self.limits.fuel_per_call,
             control_fuel_per_call: self.limits.control_fuel_per_call,
+            last_realtime_fuel_consumed: 0,
             prepared_input_channels: 0,
             prepared_output_channels: 0,
             maximum_frames: 0,
@@ -239,6 +240,7 @@ pub struct PortableInstance {
     process: TypedFunc<(i32, i32, i32, i32, i32), i32>,
     fuel_per_call: u64,
     control_fuel_per_call: u64,
+    last_realtime_fuel_consumed: u64,
     prepared_input_channels: u32,
     prepared_output_channels: u32,
     maximum_frames: u32,
@@ -473,21 +475,28 @@ impl PortableInstance {
             parameters,
         );
         self.reset_realtime_fuel()?;
-        check_status(
-            self.process.call(
-                &mut self.store,
-                (
-                    frames as i32,
-                    self.prepared_input_channels as i32,
-                    self.prepared_output_channels as i32,
-                    midi.len() as i32,
-                    parameters.len() as i32,
-                ),
-            )?,
-            "process",
-        )?;
+        let result = self.process.call(
+            &mut self.store,
+            (
+                frames as i32,
+                self.prepared_input_channels as i32,
+                self.prepared_output_channels as i32,
+                midi.len() as i32,
+                parameters.len() as i32,
+            ),
+        );
+        self.last_realtime_fuel_consumed = self
+            .fuel_per_call
+            .saturating_sub(self.store.get_fuel().unwrap_or(0));
+        check_status(result?, "process")?;
         read_f32(self.memory.data(&self.store), output_range, output);
         Ok(())
+    }
+
+    /// Returns the Wasmtime fuel consumed by the most recent real-time call.
+    /// This is diagnostic telemetry and does not alter the next call's budget.
+    pub const fn last_realtime_fuel_consumed(&self) -> u64 {
+        self.last_realtime_fuel_consumed
     }
 
     fn reset_realtime_fuel(&mut self) -> Result<()> {
@@ -807,5 +816,29 @@ mod tests {
             .process_interleaved_with_events(&input, &mut output, 2, &[], &[event])
             .unwrap();
         assert_eq!(output, [0.25; 4]);
+    }
+
+    #[test]
+    fn fuel_trap_is_measured_and_control_calls_remain_recoverable() {
+        let source = GAIN.replace(
+            "            local.get $parameters i32.const 0 i32.gt_s",
+            "            (loop $spin br $spin)\n            local.get $parameters i32.const 0 i32.gt_s",
+        );
+        let limits = RuntimeLimits {
+            fuel_per_call: 10_000,
+            ..RuntimeLimits::default()
+        };
+        let engine = PortableEngine::new(limits).unwrap();
+        let module = engine.compile(&wat::parse_str(source).unwrap()).unwrap();
+        let mut instance = module.instantiate().unwrap();
+        instance.prepare(48_000.0, 64, 2, 2).unwrap();
+        let input = [0.0; 4];
+        let mut output = [0.0; 4];
+        let error = instance
+            .process_interleaved(&input, &mut output, 2)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("fuel"));
+        assert_eq!(instance.last_realtime_fuel_consumed(), 10_000);
+        instance.reset().unwrap();
     }
 }

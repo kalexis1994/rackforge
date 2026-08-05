@@ -6,9 +6,11 @@ pub mod hosted;
 #[cfg(target_os = "linux")]
 pub mod live;
 pub mod loader;
+pub mod midi_hotplug;
 pub mod package;
 #[cfg(target_os = "linux")]
 pub mod performance;
+pub mod realtime;
 pub mod session;
 #[cfg(target_os = "linux")]
 pub mod session_checkpoint;

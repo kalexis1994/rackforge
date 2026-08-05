@@ -20,7 +20,15 @@ require_ssh_host_keys = true
 require_network_profile = true
 
 [services]
-disable_after_provisioning = ["NetworkManager-wait-online.service"]
+# Swap providers vary by image generation; each is probed, never assumed.
+# `mlockall` already pins the audio path, so what is actually being avoided is
+# the zram writeback timer's scheduled I/O to the SD card.
+disable_after_provisioning = [
+  "NetworkManager-wait-online.service",
+  "dphys-swapfile.service",
+  "systemd-zram-setup@zram0.service",
+  "rpi-zram-writeback.timer",
+]
 keep = [
   "NetworkManager.service",
   "ssh.service",
@@ -36,6 +44,17 @@ netplan_policy_mode = "0600"
 camera_auto_detect = false
 dsi_display_auto_detect = false
 preserve_hdmi_kms = true
+
+# The platform grants these limits; the host must still request them. Both
+# halves are required, and the host reports which one is missing at startup.
+[realtime]
+audio_scheduler = "SCHED_FIFO"
+audio_priority = 75
+audio_priority_ceiling = 95
+lock_audio_memory = true
+cpu_governor = "performance"
+swap = false
+degraded_start_is_allowed = true
 
 [rollback]
 state_root = "/var/lib/rackforge/appliance"

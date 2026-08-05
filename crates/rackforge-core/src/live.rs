@@ -1,12 +1,16 @@
 use crate::audio::{OpenedAudioOutput, discover_audio_devices, open_audio_output_from_inventory};
 use crate::control::{self, AudioControlCommand, RackSlotRuntimeSpec, RackSlotStateLoad};
+use crate::midi_hotplug::{
+    self, SupervisedSource, is_performance_midi_input, stable_alsa_source_id,
+};
 use crate::performance::{PerformanceBootstrap, PerformanceRepository};
+use crate::realtime::{self, XrunMonitor};
 use crate::session::SessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
 use crate::{LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore};
 use alsa::pcm::PCM;
 use anyhow::{Context, Result, bail};
-use midir::{Ignore, MidiInput, MidiInputConnection};
+use midir::MidiInput;
 use rackforge_audio_api::{
     AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioOutputProfile, AudioOutputState, AudioSampleFormat,
 };
@@ -14,8 +18,8 @@ use rackforge_control_api::{CONTROL_SOCKET_NAME, PluginParameterValue};
 use rackforge_midi_api::{
     CompiledMidiRoute, DEFAULT_INPUT_BUS_ID, IngressMidiEvent, MIDI_ROUTING_SCHEMA_VERSION,
     MidiInputBusId, MidiPacket, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget,
-    MidiRouteTransform, MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry,
-    MidiTargetId, PluginChannelModel,
+    MidiRouteTransform, MidiSourceDescriptor, MidiSourceKey, MidiSourceRegistry, MidiTargetId,
+    PluginChannelModel,
 };
 use rackforge_performance_api::RackKeyboardParts;
 use rackforge_plugin_api::abi::MidiEventV1;
@@ -824,7 +828,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
     )?;
 
     let (sender, receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
-    let (_midi_connections, midi_port_names, midi_sources) = connect_midi_sources(sender)?;
+    let (midi_port_names, midi_sources) = connect_midi_sources(sender)?;
     println!("MIDI_READY ports={midi_port_names:?}");
     let play_route = compile_default_play_route(
         &midi_sources,
@@ -947,17 +951,6 @@ fn control_socket_path() -> PathBuf {
         })
 }
 
-fn is_performance_midi_input(name: &str) -> bool {
-    let folded = name.to_ascii_lowercase();
-    folded.contains("midi")
-        && !folded.contains("midi through")
-        && !folded.contains("dinthru")
-        && !folded.contains("mcu")
-        && !folded.contains("hui")
-        && !folded.contains(" alv")
-        && !folded.contains("rackforge")
-}
-
 fn performance_midi_names(midi: &MidiInput) -> Result<Vec<String>> {
     let mut matches = BTreeMap::new();
     for port in midi.ports() {
@@ -972,86 +965,45 @@ fn performance_midi_names(midi: &MidiInput) -> Result<Vec<String>> {
     Ok(matches.into_values().collect())
 }
 
+/// Enumerates the performance keyboards and hands them to a supervisor.
+///
+/// Discovery stays here, on the startup path, because the compiled routes need
+/// the registry before the audio loop exists — and because failing when no
+/// keyboard is present is deliberate: systemd restarts the unit, which is how a
+/// board that boots before its USB devices enumerate recovers on its own.
+///
+/// Connections themselves move to [`midi_hotplug`], which keeps them alive
+/// across replugging for the rest of the session.
 fn connect_midi_sources(
     sender: SyncSender<IngressMidiEvent>,
-) -> Result<(
-    Vec<MidiInputConnection<()>>,
-    Vec<String>,
-    MidiSourceRegistry,
-)> {
+) -> Result<(Vec<String>, MidiSourceRegistry)> {
     let discovery = MidiInput::new("rackforge-core-discovery")?;
     let names = performance_midi_names(&discovery)?;
-    let mut connections = Vec::with_capacity(names.len());
     let mut registry = MidiSourceRegistry::default();
+    let mut supervised = Vec::with_capacity(names.len());
     for (index, name) in names.iter().enumerate() {
-        let source = MidiSourceKey::new(index as u32);
+        let key = MidiSourceKey::new(index as u32);
+        let id = stable_alsa_source_id(name)?;
         registry.register(
-            source,
+            key,
             MidiSourceDescriptor {
-                id: stable_alsa_source_id(name)?,
+                id: id.clone(),
                 name: name.clone(),
                 primary: index == 0,
             },
         )?;
-        let mut midi = MidiInput::new(&format!("rackforge-core-live-{index}"))?;
-        midi.ignore(Ignore::None);
-        let port = midi
-            .ports()
-            .into_iter()
-            .find(|port| midi.port_name(port).as_deref() == Ok(name.as_str()))
-            .with_context(|| format!("MIDI input {name:?} disappeared during connection"))?;
-        let source_sender = sender.clone();
-        let connection = midi
-            .connect(
-                &port,
-                &format!("rackforge-core-input-{index}"),
-                move |_timestamp, message, _| {
-                    if let Ok(packet) = MidiPacket::new(0, message) {
-                        let _ = source_sender.try_send(IngressMidiEvent { source, packet });
-                    }
-                },
-                (),
-            )
-            .map_err(|error| anyhow::anyhow!("connecting MIDI input {name:?}: {error}"))?;
-        connections.push(connection);
-    }
-    Ok((connections, names, registry))
-}
-
-fn stable_alsa_source_id(name: &str) -> Result<MidiSourceId> {
-    let stable_name = name
-        .rsplit_once(' ')
-        .filter(|(_, suffix)| {
-            suffix.split_once(':').is_some_and(|(client, port)| {
-                !client.is_empty()
-                    && !port.is_empty()
-                    && client.bytes().all(|byte| byte.is_ascii_digit())
-                    && port.bytes().all(|byte| byte.is_ascii_digit())
-            })
-        })
-        .map_or(name, |(stable, _)| stable);
-    let mut slug = String::with_capacity(stable_name.len());
-    let mut separator = false;
-    for byte in stable_name.bytes() {
-        if byte.is_ascii_alphanumeric() {
-            if separator && !slug.is_empty() {
-                slug.push('-');
-            }
-            slug.push(char::from(byte.to_ascii_lowercase()));
-            separator = false;
-        } else {
-            separator = true;
-        }
-    }
-    if slug.is_empty() {
-        slug.push_str("unnamed");
-    }
-    let hash = stable_name
-        .bytes()
-        .fold(0xcbf29ce484222325_u64, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+        supervised.push(SupervisedSource {
+            key,
+            id,
+            // Every source starts disconnected so the supervisor's first pass
+            // performs the initial connection through the same path it will
+            // use for every later reconnection. One code path, exercised from
+            // the first second rather than only after a failure.
+            connected: false,
         });
-    MidiSourceId::new(format!("alsa.{slug}-{hash:016x}")).map_err(Into::into)
+    }
+    midi_hotplug::spawn(sender, supervised, midi_hotplug::DEFAULT_POLL_INTERVAL)?;
+    Ok((names, registry))
 }
 
 fn play_route_id() -> &'static str {
@@ -1140,6 +1092,16 @@ fn audio_loop<'plugin>(
     let mut master_balance = MasterBalance::new(initial_master_pan);
     let mut reserved_midi_controls = ReservedMidiControls::with_sources(midi_source_count);
 
+    // Engaged here, not during setup: `SCHED_FIFO` is a per-thread property and
+    // this is the thread that runs the audio loop. Setup work stays on the
+    // ordinary scheduler, where blocking on the filesystem is harmless.
+    let realtime_status = realtime::engage(realtime::DEFAULT_AUDIO_PRIORITY);
+    println!("{realtime_status}");
+    if let Some(remedy) = realtime_status.remedy() {
+        eprintln!("REALTIME_REMEDY {remedy}");
+    }
+    let mut xruns = XrunMonitor::new(output_rate as u32, period_frames);
+
     loop {
         while let Ok(command) = control_receiver.try_recv() {
             match command {
@@ -1155,6 +1117,7 @@ fn audio_loop<'plugin>(
                         period_frames = snapshot.active_profile.period_frames as usize;
                         channels = snapshot.active_profile.channels as usize;
                         output_rate = snapshot.active_profile.sample_rate_hz as usize;
+                        xruns.reconfigure(output_rate as u32, period_frames);
                         plugin_output.resize(period_frames * channels, 0.0);
                         mix_output.resize(period_frames * channels, 0.0);
                         for voice in &mut rack_voices {
@@ -1807,7 +1770,11 @@ fn audio_loop<'plugin>(
             &device_output,
             period_frames,
             channels,
+            &mut xruns,
         )?;
+        if let Some(report) = xruns.tick() {
+            eprintln!("{report}");
+        }
 
         if pending_emergency_stop {
             pending_emergency_stop = false;
@@ -2169,6 +2136,7 @@ fn write_period(
     output: &[i32],
     period_frames: usize,
     channels: usize,
+    xruns: &mut XrunMonitor,
 ) -> Result<()> {
     let mut frame_offset = 0;
     while frame_offset < period_frames {
@@ -2176,7 +2144,9 @@ fn write_period(
             Ok(0) => bail!("audio output accepted zero frames"),
             Ok(frames) => frame_offset += frames,
             Err(error) if error.errno() == libc::EPIPE => {
-                eprintln!("XRUN_RECOVERED");
+                // Counted rather than printed: a dropout storm that logs per
+                // underrun blocks this thread on stderr and causes the next one.
+                xruns.record();
                 pcm.prepare()?;
                 frame_offset = 0;
             }
@@ -2189,6 +2159,7 @@ fn write_period(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackforge_midi_api::MidiSourceId;
     use rackforge_performance_api::RackKeyboardPart;
     use rackforge_session_api::{
         HostActionBinding, HostActionTarget, HostControlTarget, MidiButtonBinding,
@@ -2220,19 +2191,6 @@ mod tests {
             "test"
         ));
         assert_eq!(successful, [0.25, -0.5]);
-    }
-
-    #[test]
-    fn accepts_unknown_musical_midi_without_treating_auxiliary_ports_as_sources() {
-        assert!(is_performance_midi_input("KL Essential 61 mk3 MIDI 28:0"));
-        assert!(is_performance_midi_input("Unknown USB MIDI 31:0"));
-        assert!(!is_performance_midi_input(
-            "KL Essential 61 mk3 DINTHRU 28:1"
-        ));
-        assert!(!is_performance_midi_input(
-            "KL Essential 61 mk3 MCU/HUI 28:2"
-        ));
-        assert!(!is_performance_midi_input("Midi Through MIDI 0:1"));
     }
 
     #[test]
@@ -2314,16 +2272,6 @@ mod tests {
         assert!(matches_midi_input_channel(channel_one, Some(1)));
         assert!(!matches_midi_input_channel(channel_two, Some(1)));
         assert!(matches_midi_input_channel(channel_two, Some(2)));
-    }
-
-    #[test]
-    fn stable_alsa_source_identity_ignores_the_ephemeral_client_port() {
-        let first =
-            stable_alsa_source_id("KL Essential 61 mk3:KL Essential 61 mk3 MIDI 24:0").unwrap();
-        let second =
-            stable_alsa_source_id("KL Essential 61 mk3:KL Essential 61 mk3 MIDI 28:0").unwrap();
-        assert_eq!(first, second);
-        assert!(first.as_str().starts_with("alsa.kl-essential-61-mk3"));
     }
 
     #[test]

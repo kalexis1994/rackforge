@@ -1,7 +1,7 @@
 [Unit]
 Description=RackForge supervised low-latency audio engine
-After=local-fs.target sound.target
-Wants=sound.target
+After=local-fs.target sound.target rackforge-cpu-performance.service
+Wants=sound.target rackforge-cpu-performance.service
 StartLimitIntervalSec=0
 ConditionPathExists=/home/kalex/rackforge/config/audio.toml
 
@@ -9,8 +9,20 @@ ConditionPathExists=/home/kalex/rackforge/config/audio.toml
 Type=simple
 User=kalex
 Group=kalex
-SupplementaryGroups=audio
+SupplementaryGroups=audio rackforge
 Environment=RACKFORGE_ROOT=/home/kalex/rackforge
+
+# Real-time grant. The host requests SCHED_FIFO and mlockall on its audio
+# thread; without these limits that request is refused and the engine keeps
+# playing on the ordinary scheduler, where a page fault or a scheduling delay
+# becomes an audible dropout. The host reports REALTIME_ENGAGED or
+# REALTIME_DEGRADED at startup so the outcome is never silent.
+#
+# The ceiling is 95 rather than infinity: interrupt and watchdog kernel threads
+# must still be able to preempt a runaway audio callback, otherwise one stuck
+# buffer takes the whole board down mid-performance.
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
 ExecStart=/home/kalex/rackforge/bin/rackforge-core resume /home/kalex/rackforge/config/audio.toml
 Restart=always
 RestartSec=1

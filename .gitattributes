@@ -10,5 +10,6 @@
 *.ld text eol=lf
 *.md text eol=lf
 *.service text eol=lf
+*.conf text eol=lf
 *.ps1 text eol=crlf
 ssh_config.example text eol=lf

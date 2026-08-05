@@ -50,6 +50,32 @@ marcas o modelos.
 `audio/` contiene el perfil ALSA inicial de la Scarlett Solo y un diagnóstico
 de hardware que no reproduce sonido ni modifica el mezclador.
 
+## Tiempo real
+
+La ruta de audio necesita dos mitades independientes, y ninguna sirve sola: la
+plataforma debe **conceder** los límites y el host debe **pedirlos**.
+
+| Mitad | Dónde vive |
+|---|---|
+| Concesión | `LimitRTPRIO` y `LimitMEMLOCK` en `systemd/rackforge-audio.service`; `etc/security/limits.d/rackforge-audio.conf` para ejecuciones manuales. |
+| Solicitud | `rackforge_core::realtime::engage`, invocado sobre el hilo que corre el bucle de audio. |
+
+`sbin/rackforge-cpu-performance.sh` fija el governor antes de que arranque el
+audio y guarda el anterior para poder restaurarlo. `optimize-appliance.sh apply`
+instala ambas mitades, desactiva swap y deja todo revertible con `rollback`.
+
+Un arranque sin privilegios de tiempo real **no es un error**: el host sigue
+sonando, pero queda expuesto a dropouts bajo carga. Como esa diferencia es
+inaudible hasta el peor momento posible, el host publica su estado en el
+arranque y la auditoría lo expone:
+
+```bash
+sudo platforms/raspberry-pi/scripts/optimize-appliance.sh audit
+```
+
+Las líneas `realtime_status`, `cpu_governor`, `swap_active` y
+`xruns_since_boot` describen la postura real de la máquina, no la configurada.
+
 RF-DLS y su motor DLS viven en el repositorio independiente
 `rackforge-plugin-rf-dls`. Los bancos `.dls` aportados por el usuario continúan
 en `data/plugins/rf-dls`, fuera de Git y de cualquier paquete distribuible.

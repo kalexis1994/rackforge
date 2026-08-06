@@ -1493,6 +1493,27 @@ struct PanFollower {
 /// one exact value among two thousand and cannot be found by hand.
 const PAN_DETENT: i16 = 60;
 
+/// The pan a true position reports, with the middle widened into a detent.
+///
+/// The band around centre is not thrown away, it is folded in: what remains
+/// on either side is stretched back over the whole range. Discarding it
+/// instead made the pan leave the detent already at six or seven per cent,
+/// because the first value outside the band is the width of the band.
+///
+/// Stretching keeps both ends reachable, which subtracting alone would not:
+/// the travel lost to the detent has to come back somewhere.
+fn through_detent(position: i16) -> i16 {
+    let limit = i32::from(MasterPan::MAX);
+    let detent = i32::from(PAN_DETENT);
+    let magnitude = i32::from(position.abs());
+    if magnitude <= detent {
+        return 0;
+    }
+    let scaled = (magnitude - detent) * limit / (limit - detent);
+    let scaled = scaled.min(limit) as i16;
+    if position < 0 { -scaled } else { scaled }
+}
+
 impl PanFollower {
     /// The pan this reading moves to, or nothing when it moves nowhere.
     fn advance(&mut self, value: u8) -> Option<MasterPan> {
@@ -1517,10 +1538,7 @@ impl PanFollower {
         let limit = i32::from(MasterPan::MAX);
         let next = (i32::from(pan) + moved).clamp(-limit, limit) as i16;
         self.pan = Some(next);
-        // Reported through the detent, so the middle is a place the knob can
-        // land on rather than a value it has to hit exactly.
-        let reported = if next.abs() <= PAN_DETENT { 0 } else { next };
-        MasterPan::new(reported).ok()
+        MasterPan::new(through_detent(next)).ok()
     }
 }
 
@@ -2893,6 +2911,23 @@ mod pan_tests {
         follower.advance(64);
         let nudged = follower.advance(65).unwrap();
         assert_eq!(nudged.get(), 0, "a notch off centre still reads as centre");
+    }
+
+    #[test]
+    fn leaving_the_detent_starts_from_nothing_and_not_from_its_width() {
+        // Discarding the band meant the first value outside it was the width
+        // of it, so the pan jumped straight to six or seven per cent.
+        assert_eq!(through_detent(PAN_DETENT), 0, "the edge is still centre");
+        let just_out = through_detent(PAN_DETENT + 1);
+        assert!(just_out > 0 && just_out < 10, "left the detent at {just_out}");
+        let mirrored = through_detent(-(PAN_DETENT + 1));
+        assert_eq!(mirrored, -just_out, "both sides behave the same");
+    }
+
+    #[test]
+    fn widening_the_middle_does_not_cost_the_ends() {
+        assert_eq!(through_detent(MasterPan::MAX), MasterPan::MAX);
+        assert_eq!(through_detent(-MasterPan::MAX), -MasterPan::MAX);
     }
 
     #[test]

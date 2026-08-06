@@ -730,8 +730,19 @@ pub fn run(config: LiveConfig) -> Result<()> {
                         .description
                         .clone()
                         .or_else(|| preset.category.clone()),
-                    category: preset.category.clone(),
-                    tags: preset.tags.clone(),
+                    // Deliberately not carried. A session snapshot holds
+                    // every preset of every loaded plugin — six hundred and
+                    // sixty-seven of them here — and the control socket that
+                    // delivers it to the controller accepts sixty-four
+                    // kilobytes. Tagging all of them cost twenty-one
+                    // kilobytes and put the snapshot over, which left the
+                    // KeyLab unable to read its own sound list.
+                    //
+                    // A surface that wants to know more about a sound should
+                    // ask for that sound, not receive the details of six
+                    // hundred it will never draw.
+                    category: None,
+                    tags: Vec::new(),
                     editable: preset.editable,
                 })
                 .collect(),

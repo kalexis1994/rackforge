@@ -4,7 +4,14 @@ set -euo pipefail
 source_root="${RACKFORGE_SOURCE:-/home/kalex/rackforge/current}"
 output="${1:-/home/kalex/rackforge/build/org.rackforge.arturia-keylab-essential-mk3.rfcontroller}"
 template="$source_root/hardware/controllers/arturia-keylab-essential-mk3/package/rackforge-controller.toml"
-binary="$source_root/hardware/keylab-bridge/target/release/rackforge-arturia-keylab-essential-mk3-driver"
+# The driver is a member of the root workspace, so cargo writes it to the
+# shared target directory rather than beside its own manifest. This pointed at
+# the latter, which only existed while the driver was a standalone package: the
+# sanctioned install path has been failing at this line ever since it joined
+# the workspace, which is how hand-copied binaries came to be the way anything
+# reached the device.
+target_root="${CARGO_TARGET_DIR:-$source_root/target}"
+binary="$target_root/release/rackforge-arturia-keylab-essential-mk3-driver"
 
 test -f "$template"
 test -x "$binary"

@@ -1221,7 +1221,8 @@ fn plugin_session_state(plugin: &DesktopPlugin) -> PluginInstanceState {
         plugin_name: plugin.name.clone(),
         ui_layouts: vec!["little@1".into()],
         config_available: plugin.config_available,
-        sounds: plugin
+        banks: Vec::new(),
+            sounds: plugin
             .sounds
             .iter()
             .map(|sound| SoundSummary {
@@ -1229,7 +1230,9 @@ fn plugin_session_state(plugin: &DesktopPlugin) -> PluginInstanceState {
                 name: sound.name.clone(),
                 bank: Some(sound.bank.clone()),
                 detail: Some(sound.detail.clone()),
-                editable: sound.editable,
+                category: None,
+            tags: Vec::new(),
+            editable: sound.editable,
             })
             .collect(),
         selected_sound_id: plugin.selected_sound_id.clone(),

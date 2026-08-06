@@ -141,20 +141,25 @@ mod tests {
                 plugin_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
                 config_available: true,
-                sounds: vec![
+                banks: Vec::new(),
+            sounds: vec![
                     SoundSummary {
                         id: "piano".into(),
                         name: "Piano".into(),
                         bank: None,
                         detail: None,
-                        editable: false,
+                        category: None,
+            tags: Vec::new(),
+            editable: false,
                     },
                     SoundSummary {
                         id: "strings".into(),
                         name: "Strings".into(),
                         bank: None,
                         detail: None,
-                        editable: false,
+                        category: None,
+            tags: Vec::new(),
+            editable: false,
                     },
                 ],
                 selected_sound_id: Some("piano".into()),

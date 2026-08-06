@@ -19,7 +19,7 @@ import type {
 } from "./types";
 
 const CLIENT_ID = "web.main";
-const SESSION_SCHEMA_VERSION = 13;
+const SESSION_SCHEMA_VERSION = 14;
 const RECONNECT_DELAY_MS = 1200;
 const PERFORMANCE_REFRESH_MS = 2000;
 

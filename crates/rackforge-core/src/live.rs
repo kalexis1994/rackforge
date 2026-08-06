@@ -710,6 +710,15 @@ pub fn run(config: LiveConfig) -> Result<()> {
             plugin_name: plugin.manifest().name.clone(),
             ui_layouts: plugin.manifest().ui_layouts.clone(),
             config_available: plugin.manifest().config_mode,
+            banks: presets
+                .banks
+                .iter()
+                .map(|bank| BankSummary {
+                    id: bank.id.clone(),
+                    name: bank.name.clone(),
+                    order: bank.order,
+                })
+                .collect(),
             sounds: presets
                 .presets
                 .iter()
@@ -721,6 +730,8 @@ pub fn run(config: LiveConfig) -> Result<()> {
                         .description
                         .clone()
                         .or_else(|| preset.category.clone()),
+                    category: preset.category.clone(),
+                    tags: preset.tags.clone(),
                     editable: preset.editable,
                 })
                 .collect(),

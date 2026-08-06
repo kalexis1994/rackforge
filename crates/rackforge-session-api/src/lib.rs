@@ -13,7 +13,7 @@ pub use rackforge_surface_api::{
     SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const SESSION_SCHEMA_VERSION: u32 = 13;
+pub const SESSION_SCHEMA_VERSION: u32 = 14;
 
 fn default_surface_mode() -> SurfaceMode {
     SurfaceMode::Live
@@ -190,6 +190,22 @@ impl Revision {
     }
 }
 
+/// One bank a plugin groups its sounds into.
+///
+/// Sounds name their bank by identifier, and an identifier is not a label: it
+/// is lowercase and punctuation-free by rule, so `Acordeon Hohner Corona II`
+/// reaches a surface as `acordeon-hohner-corona-ii` and cannot be turned back.
+/// Carrying the bank list alongside the sounds is what lets a surface print
+/// the name the plugin actually chose.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BankSummary {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub order: i32,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoundSummary {
@@ -199,6 +215,18 @@ pub struct SoundSummary {
     pub bank: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// What kind of thing this sound is, as the plugin classifies it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Free-form marks the plugin attaches to the sound.
+    ///
+    /// The plugin API has always modelled these and the host used to drop
+    /// them, which left a surface with one line of display text and no way to
+    /// learn anything else about a sound. Nothing here interprets them: they
+    /// mean whatever the plugin that wrote them and the surface that reads
+    /// them agree they mean.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     #[serde(default)]
     pub editable: bool,
 }
@@ -215,6 +243,9 @@ pub struct PluginInstanceState {
     pub ui_layouts: Vec<String>,
     #[serde(default)]
     pub config_available: bool,
+    /// The banks the sounds are grouped into, in the plugin's own order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub banks: Vec<BankSummary>,
     #[serde(default)]
     pub sounds: Vec<SoundSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -765,12 +796,15 @@ mod tests {
                 plugin_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
                 config_available: true,
-                sounds: vec![SoundSummary {
+                banks: Vec::new(),
+            sounds: vec![SoundSummary {
                     id: "dls.piano-1".into(),
                     name: "Piano 1".into(),
                     bank: Some("dls".into()),
                     detail: None,
-                    editable: false,
+                    category: None,
+            tags: Vec::new(),
+            editable: false,
                 }],
                 selected_sound_id: None,
             }],
@@ -890,6 +924,7 @@ mod tests {
             plugin_name: "RF-KR106".into(),
             ui_layouts: vec!["little@1".into()],
             config_available: false,
+            banks: Vec::new(),
             sounds: Vec::new(),
             selected_sound_id: None,
         });
@@ -923,6 +958,59 @@ mod tests {
         };
         state.apply(&event).unwrap();
         assert_eq!(state.active_instance().unwrap().selected_sound_id, None);
+    }
+
+    #[test]
+    fn a_bank_keeps_the_name_its_identifier_cannot_carry() {
+        // An identifier is lowercase and punctuation-free by rule, so a label
+        // does not survive being turned into one. This is the whole reason
+        // banks travel as a list of their own rather than as bare ids on the
+        // sounds that belong to them.
+        let bank = BankSummary {
+            id: "acordeon-hohner-corona-ii".into(),
+            name: "Acordeon Hohner Corona II".into(),
+            order: 3,
+        };
+        let text = serde_json::to_string(&bank).unwrap();
+        let read: BankSummary = serde_json::from_str(&text).unwrap();
+        assert_eq!(read.name, "Acordeon Hohner Corona II");
+        assert_ne!(read.name, read.id);
+    }
+
+    #[test]
+    fn a_sound_carries_the_marks_its_plugin_attached() {
+        let sound = SoundSummary {
+            id: "sfz.trompetas-trompeta-x".into(),
+            name: "TROMPETA X".into(),
+            bank: Some("trompetas".into()),
+            detail: Some("3 MiB".into()),
+            category: Some("Instrument".into()),
+            tags: vec!["sfz".into(), "keys:0-108".into(), "zones:15".into()],
+            editable: false,
+        };
+        let text = serde_json::to_string(&sound).unwrap();
+        let read: SoundSummary = serde_json::from_str(&text).unwrap();
+        assert_eq!(read, sound);
+    }
+
+    #[test]
+    fn a_sound_without_marks_writes_none_of_the_new_fields() {
+        // Absent rather than empty, so a plugin that says nothing extra costs
+        // nothing extra on the wire.
+        let sound = SoundSummary {
+            id: "dls.b00000000.p00000000".into(),
+            name: "Piano 1".into(),
+            bank: None,
+            detail: None,
+            category: None,
+            tags: Vec::new(),
+            editable: false,
+        };
+        let text = serde_json::to_string(&sound).unwrap();
+        assert!(!text.contains("tags"), "{text}");
+        assert!(!text.contains("category"), "{text}");
+        let read: SoundSummary = serde_json::from_str(&text).unwrap();
+        assert_eq!(read, sound);
     }
 
     #[test]
@@ -1089,7 +1177,9 @@ mod tests {
                         name: "CUSTOM 001".into(),
                         bank: Some("custom".into()),
                         detail: Some("CUSTOM 001".into()),
-                        editable: true,
+                        category: None,
+            tags: Vec::new(),
+            editable: true,
                     },
                 },
             ))

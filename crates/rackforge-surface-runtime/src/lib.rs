@@ -131,7 +131,13 @@ pub struct WebSystemSettings {
     pub port: u16,
     pub lan_ip: Option<[u8; 4]>,
     pub service_online: bool,
-    pub pairing_available: bool,
+    /// Whether an access PIN has been chosen yet.
+    ///
+    /// The controller reports this and does not offer to change it. A PIN is
+    /// entered in a browser, and a device that showed its own PIN on a screen
+    /// would be back to needing a screen — which was the whole reason the code
+    /// on this display stopped being how access works.
+    pub pin_set: bool,
 }
 
 impl Default for WebSystemSettings {
@@ -142,7 +148,7 @@ impl Default for WebSystemSettings {
             port: 8787,
             lan_ip: None,
             service_online: false,
-            pairing_available: false,
+            pin_set: false,
         }
     }
 }
@@ -253,7 +259,6 @@ pub enum MenuCommand {
     SetWebPort {
         port: u16,
     },
-    BeginWebPairing,
     ActivateSavedWifi {
         connection_id: String,
     },
@@ -394,7 +399,6 @@ enum Page {
     AudioBusy,
     AudioResult,
     SystemWeb,
-    SystemWebPairing,
     SystemWifi,
     SystemWifiNetworks,
     SystemWifiKnown,
@@ -526,7 +530,6 @@ pub struct Menu {
     web_settings: WebSystemSettings,
     web_edit_candidate: WebSystemSettings,
     system_web_editing: bool,
-    pairing_code: Option<String>,
     wifi_settings: WifiSystemSettings,
     system_wifi_index: usize,
     wifi_networks_index: usize,
@@ -612,14 +615,14 @@ const SONG_EDITOR_ITEMS: [&str; 5] = ["NAME", "PARTS", "ENABLED", "SAVE", "DELET
 const SETLIST_EDITOR_ITEMS: [&str; 5] = ["NAME", "SONGS", "ENABLED", "SAVE", "DELETE"];
 const PART_EDITOR_ITEMS: [&str; 5] = ["NAME", "RACK", "MOVE LEFT", "MOVE RIGHT", "DELETE"];
 const ENTRY_EDITOR_ITEMS: [&str; 4] = ["SONG", "MOVE LEFT", "MOVE RIGHT", "DELETE"];
-const SYSTEM_WEB_ITEM: (&str, &str) = ("WEB INTERFACE", "Browser & pairing");
+const SYSTEM_WEB_ITEM: (&str, &str) = ("WEB INTERFACE", "Browser access");
 const SYSTEM_WIFI_ITEM: (&str, &str) = ("WI-FI", "Wireless network");
 const SYSTEM_WEB_ITEMS: [&str; 6] = [
     "ENABLED",
     "ACCESS",
     "ADDRESS",
     "PORT",
-    "PAIR DEVICE",
+    "ACCESS PIN",
     "STATUS",
 ];
 const SYSTEM_WIFI_ITEMS: [&str; 3] = ["STATUS", "NETWORKS", "RADIO"];
@@ -712,7 +715,6 @@ impl Default for Menu {
             web_settings: WebSystemSettings::default(),
             web_edit_candidate: WebSystemSettings::default(),
             system_web_editing: false,
-            pairing_code: None,
             wifi_settings: WifiSystemSettings::default(),
             system_wifi_index: 0,
             wifi_networks_index: 0,
@@ -1095,14 +1097,6 @@ impl Menu {
         }
     }
 
-    pub fn show_pairing_code(&mut self, code: impl Into<String>) {
-        let code = code.into();
-        if code.len() == 6 && code.bytes().all(|byte| byte.is_ascii_digit()) {
-            self.pairing_code = Some(code);
-            self.page = Page::SystemWebPairing;
-        }
-    }
-
     pub fn set_play_sounds(&mut self, sounds: Vec<PlaySound>, selected_sound_id: Option<&str>) {
         let browsed_sound_id = self
             .filtered_sounds()
@@ -1435,10 +1429,6 @@ impl Menu {
                 | Page::SystemWifiResult
         ) {
             self.apply_wifi_network_input(input);
-        } else if self.page == Page::SystemWebPairing {
-            if matches!(input, Input::Button4 | Input::EncoderPress) {
-                self.page = Page::SystemWeb;
-            }
         } else if self.is_layer_parameter_page() {
             self.apply_layer_parameter_input(input);
         } else if let Some(action) = input.default_navigation() {
@@ -2835,7 +2825,6 @@ impl Menu {
                     Page::AudioOutput | Page::AudioRate | Page::AudioLatency => Page::Audio,
                     Page::AudioBusy | Page::AudioResult => Page::Audio,
                     Page::SystemWeb => Page::System,
-                    Page::SystemWebPairing => Page::SystemWeb,
                     Page::SystemWifi => Page::System,
                     Page::SystemWifiNetworks | Page::SystemWifiBusy | Page::SystemWifiResult => {
                         Page::SystemWifi
@@ -3273,7 +3262,6 @@ impl Menu {
             }
             Page::AudioResult => self.render_audio_result(),
             Page::SystemWeb => self.render_system_web(),
-            Page::SystemWebPairing => self.render_pairing_code(),
             Page::SystemWifi => self.render_system_wifi(),
             Page::SystemWifiNetworks => self.render_wifi_networks(),
             Page::SystemWifiKnown => self.render_wifi_known(),
@@ -4076,10 +4064,10 @@ impl Menu {
             },
             3 => settings.port.to_string(),
             4 => {
-                if settings.pairing_available {
-                    "READY".to_owned()
+                if settings.pin_set {
+                    "SET".to_owned()
                 } else {
-                    "LOCKED".to_owned()
+                    "NOT SET".to_owned()
                 }
             }
             _ => {
@@ -4100,14 +4088,6 @@ impl Menu {
             SYSTEM_WEB_ITEMS[self.system_web_index],
             value,
         )
-    }
-
-    fn render_pairing_code(&self) -> Screen {
-        let line_1 = self.pairing_code.as_ref().map_or_else(
-            || "NO ACTIVE CODE".to_owned(),
-            |code| format!("CODE {code}"),
-        );
-        Screen::with_header("PAIR DEVICE", line_1, "VALID FOR 2 MIN")
     }
 
     fn render_system_wifi(&self) -> Screen {
@@ -4467,9 +4447,6 @@ impl Menu {
                     self.web_edit_candidate = self.web_settings;
                     self.system_web_editing = true;
                 }
-                4 if self.web_settings.pairing_available => {
-                    self.pending_command = Some(MenuCommand::BeginWebPairing);
-                }
                 _ => {}
             },
             _ => {}
@@ -4826,7 +4803,6 @@ impl Menu {
             | Page::ProgramEditorPage
             | Page::ProgramEditorField
             | Page::ProgramEditorSound
-            | Page::SystemWebPairing
             | Page::SystemWifi
             | Page::SystemWifiNetworks
             | Page::SystemWifiKnown
@@ -8204,7 +8180,7 @@ mod tests {
             port: 8787,
             lan_ip: Some([192, 168, 1, 17]),
             service_online: true,
-            pairing_available: false,
+            pin_set: false,
         });
 
         menu.apply(Action::Previous);
@@ -8251,8 +8227,12 @@ mod tests {
         assert_eq!(menu.render().line_1, "PORT");
         assert_eq!(menu.render().line_2, "8787");
         menu.apply(Action::Next);
-        assert_eq!(menu.render().line_1, "PAIR DEVICE");
-        assert_eq!(menu.render().line_2, "LOCKED");
+        // The controller reports whether the device has been claimed and
+        // offers no way to change it. A PIN shown on this display would put a
+        // screen back in the path of getting in, which is what taking pairing
+        // off it was for.
+        assert_eq!(menu.render().line_1, "ACCESS PIN");
+        assert_eq!(menu.render().line_2, "NOT SET");
 
         menu.sync_web_settings(WebSystemSettings {
             enabled: true,
@@ -8260,15 +8240,11 @@ mod tests {
             port: 8787,
             lan_ip: Some([192, 168, 1, 17]),
             service_online: true,
-            pairing_available: true,
+            pin_set: true,
         });
+        assert_eq!(menu.render().line_2, "SET");
         menu.apply_input(Input::Button1);
-        assert_eq!(menu.take_command(), Some(MenuCommand::BeginWebPairing));
-        menu.show_pairing_code("123456");
-        assert_eq!(menu.render().header, Header::Visible("PAIR DEVICE".into()));
-        assert_eq!(menu.render().line_1, "CODE 123456");
-        menu.apply_input(Input::Button4);
-        assert_eq!(menu.render().line_1, "PAIR DEVICE");
+        assert_eq!(menu.take_command(), None, "the display cannot set a PIN");
 
         menu.apply(Action::Next);
         assert_eq!(menu.render().line_1, "STATUS");

@@ -118,12 +118,12 @@ export function App() {
   if (!auth) {
     return <AuthLoading message="Connecting to RackForge…" />;
   }
-  if (auth.requires_pairing) {
+  if (auth.requires_pin) {
     return (
-      <PairDevicePage
-        pairingActive={auth.pairing_active}
-        onPaired={() =>
-          setAuth({ ...auth, paired: true, requires_pairing: false })
+      <PinGatePage
+        status={auth}
+        onUnlocked={() =>
+          setAuth({ ...auth, unlocked: true, requires_pin: false })
         }
       />
     );
@@ -221,35 +221,70 @@ function AuthLoading({ message }: { message: string }) {
   );
 }
 
-function PairDevicePage({
-  pairingActive,
-  onPaired,
+function PinGatePage({
+  status,
+  onUnlocked,
 }: {
-  pairingActive: boolean;
-  onPaired: () => void;
+  status: WebAuthStatus;
+  onUnlocked: () => void;
 }) {
-  const [code, setCode] = useState("");
+  const digits = status.pin_digits || 4;
+  const enrolling = status.pin_state === "enrolling";
+  const unclaimed = status.pin_state === "unclaimed";
+  const [pin, setPin] = useState("");
+  const [confirmation, setConfirmation] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lockedFor, setLockedFor] = useState(status.locked_for);
+
+  // The wait counts itself down rather than sitting on a stale number, so a
+  // player standing in front of a locked device can see it clearing.
+  useEffect(() => {
+    setLockedFor(status.locked_for);
+  }, [status.locked_for]);
+  useEffect(() => {
+    if (lockedFor <= 0) return;
+    const timer = window.setInterval(
+      () => setLockedFor((left) => Math.max(0, left - 1)),
+      1000,
+    );
+    return () => window.clearInterval(timer);
+  }, [lockedFor]);
+
+  const complete =
+    pin.length === digits && (!enrolling || confirmation === pin);
+  const blocked = submitting || lockedFor > 0 || unclaimed;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (code.length !== 6) return;
+    if (!complete || blocked) return;
     setSubmitting(true);
     setError(null);
-    fetch("/api/v1/auth/pair", {
+    const endpoint = enrolling ? "/api/v1/auth/pin" : "/api/v1/auth/unlock";
+    fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ pin }),
     })
       .then(async (response) => {
-        if (!response.ok) throw new Error("Invalid or expired pairing code.");
-        return response.json();
+        const body = await response.json().catch(() => null);
+        if (!response.ok) {
+          if (body?.locked_for) setLockedFor(body.locked_for);
+          throw new Error(body?.message ?? "That PIN was not accepted.");
+        }
+        return body;
       })
-      .then(() => onPaired())
-      .catch((reason: Error) => setError(reason.message))
+      .then(() => onUnlocked())
+      .catch((reason: Error) => {
+        setError(reason.message);
+        setPin("");
+        setConfirmation("");
+      })
       .finally(() => setSubmitting(false));
   };
+
+  const onlyDigits = (value: string) =>
+    value.replace(/\D/g, "").slice(0, digits);
 
   return (
     <main className="pairing-shell">
@@ -258,34 +293,54 @@ function PairDevicePage({
           <span className="brand-mark">RF</span>
           <span>RACKFORGE</span>
         </div>
-        <span className="eyebrow accent">Secure device access</span>
-        <h1>Pair this browser</h1>
+        <span className="eyebrow accent">Device access</span>
+        <h1>{enrolling ? "Choose a PIN" : "Enter the PIN"}</h1>
         <p>
-          {pairingActive
-            ? "Enter the six-digit code shown on the Arturia display."
-            : "On the Arturia, open CONFIG → SYSTEM → WEB INTERFACE → PAIR DEVICE and press OK."}
+          {enrolling
+            ? `This device has not been claimed yet. Pick a ${digits}-digit PIN and it will be needed from any browser from now on.`
+            : unclaimed
+              ? "No PIN has been set and this device no longer accepts one over the network. Set one from the machine itself, then reload."
+              : "This device is protected by a PIN chosen when it was set up."}
         </p>
         <form onSubmit={submit}>
           <input
-            value={code}
-            onChange={(event) =>
-              setCode(event.target.value.replace(/\D/g, "").slice(0, 6))
-            }
+            value={pin}
+            onChange={(event) => setPin(onlyDigits(event.target.value))}
             inputMode="numeric"
-            autoComplete="one-time-code"
-            placeholder="000000"
-            aria-label="Six-digit pairing code"
-            disabled={!pairingActive || submitting}
+            autoComplete={enrolling ? "new-password" : "current-password"}
+            placeholder={"0".repeat(digits)}
+            aria-label={`${digits}-digit PIN`}
+            disabled={blocked}
           />
-          <button
-            className="primary-button"
-            disabled={!pairingActive || code.length !== 6 || submitting}
-          >
-            {submitting ? "Pairing…" : "Pair device"}
+          {enrolling && (
+            <input
+              value={confirmation}
+              onChange={(event) =>
+                setConfirmation(onlyDigits(event.target.value))
+              }
+              inputMode="numeric"
+              autoComplete="new-password"
+              placeholder="Repeat"
+              aria-label="Repeat the PIN"
+              disabled={blocked}
+            />
+          )}
+          <button className="primary-button" disabled={!complete || blocked}>
+            {lockedFor > 0
+              ? `Wait ${lockedFor}s`
+              : submitting
+                ? "Checking…"
+                : enrolling
+                  ? "Set PIN"
+                  : "Unlock"}
           </button>
         </form>
         {error && <div className="pairing-error">{error}</div>}
-        <small>Codes expire after two minutes and allow five attempts.</small>
+        <small>
+          {enrolling
+            ? "You can change it later from Settings."
+            : "Wrong PINs are allowed a few times, then the wait grows."}
+        </small>
       </section>
     </main>
   );
@@ -1240,6 +1295,102 @@ function PluginFrame({
   );
 }
 
+/// Changing the access PIN, which needs the current one.
+///
+/// Asking for the PIN somebody already has may look redundant inside a session
+/// that is already authorised. It is not: a browser left open on a borrowed
+/// laptop should not be enough to take the device over, and every other
+/// session is dropped when the PIN changes, so this is also how somebody who
+/// should not be here is put out.
+function ChangePinCard() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [repeat, setRepeat] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const digits = 4;
+  const clean = (value: string) => value.replace(/\D/g, "").slice(0, digits);
+  const ready =
+    current.length === digits && next.length === digits && next === repeat;
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!ready || busy) return;
+    setBusy(true);
+    setNote(null);
+    fetch("/api/v1/auth/pin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: next, current_pin: current }),
+    })
+      .then(async (response) => {
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.message ?? "The PIN was not changed.");
+      })
+      .then(() => {
+        setNote({
+          ok: true,
+          text: "PIN changed. Every other browser has been signed out.",
+        });
+        setCurrent("");
+        setNext("");
+        setRepeat("");
+      })
+      .catch((reason: Error) => setNote({ ok: false, text: reason.message }))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <article className="settings-card pairing-card">
+      <div className="settings-icon">••</div>
+      <div className="settings-copy">
+        <span className="card-kicker">Security</span>
+        <h2>Access PIN</h2>
+        <p>
+          Asked for whenever this interface is opened from another machine.
+          Changing it signs out every other browser.
+        </p>
+      </div>
+      <form className="pin-form" onSubmit={submit}>
+        <input
+          value={current}
+          onChange={(event) => setCurrent(clean(event.target.value))}
+          inputMode="numeric"
+          autoComplete="current-password"
+          placeholder="Current"
+          aria-label="Current PIN"
+          disabled={busy}
+        />
+        <input
+          value={next}
+          onChange={(event) => setNext(clean(event.target.value))}
+          inputMode="numeric"
+          autoComplete="new-password"
+          placeholder="New"
+          aria-label="New PIN"
+          disabled={busy}
+        />
+        <input
+          value={repeat}
+          onChange={(event) => setRepeat(clean(event.target.value))}
+          inputMode="numeric"
+          autoComplete="new-password"
+          placeholder="Repeat"
+          aria-label="Repeat the new PIN"
+          disabled={busy}
+        />
+        <button className="secondary-button" disabled={!ready || busy}>
+          {busy ? "Changing…" : "Change PIN"}
+        </button>
+      </form>
+      {note && (
+        <div className={note.ok ? "pin-note" : "pairing-error"}>{note.text}</div>
+      )}
+    </article>
+  );
+}
+
 function SettingsPage() {
   const [config, setConfig] = useState<WebPublicConfig | null>(null);
   const [repositoryFile, setRepositoryFile] =
@@ -1342,8 +1493,8 @@ function SettingsPage() {
             <span className="card-kicker">Web interface</span>
             <h2>Local access</h2>
             <p>
-              The interface is bound to this Raspberry Pi only while secure
-              pairing is being configured.
+              Where the interface can be reached from. Anything beyond this
+              machine asks for the access PIN.
             </p>
           </div>
           <dl className="settings-values">
@@ -1364,20 +1515,7 @@ function SettingsPage() {
             </div>
           </dl>
         </article>
-        <article className="settings-card pairing-card">
-          <div className="settings-icon">••</div>
-          <div className="settings-copy">
-            <span className="card-kicker">Security</span>
-            <h2>Pair a device</h2>
-            <p>
-              A one-time code shown on the controller will authorize a phone,
-              tablet or computer on your network.
-            </p>
-          </div>
-          <button className="secondary-button" disabled>
-            Available after controller handshake
-          </button>
-        </article>
+        <ChangePinCard />
         <article className="settings-card repository-settings-card">
           <div className="settings-icon">⬡</div>
           <div className="settings-copy">

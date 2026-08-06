@@ -3078,3 +3078,31 @@ body {
       0 7px 24px rgba(50, 211, 237, 0.28);
   }
 }
+
+/* The three boxes of a PIN change, side by side on a desktop and stacked on a
+   phone. Narrow because a PIN is four characters and a full-width field
+   invites the wrong kind of typing. */
+.pin-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.pin-form input {
+  width: 6.5rem;
+  text-align: center;
+  letter-spacing: 0.3em;
+}
+
+.pin-note {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: var(--accent, #55e7ff);
+}
+
+@media (max-width: 480px) {
+  .pin-form input {
+    width: 100%;
+  }
+}

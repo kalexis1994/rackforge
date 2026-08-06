@@ -41,8 +41,19 @@ const DEFAULT_PORT: u16 = 8787;
 const WEB_CONTROL_SOCKET_NAME: &str = "web-control.sock";
 const WEB_AUTH_FILE_NAME: &str = "web-auth.json";
 const SESSION_COOKIE_NAME: &str = "rackforge_session";
-const PAIRING_LIFETIME_SECONDS: u64 = 120;
-const MAX_PAIRING_ATTEMPTS: u8 = 5;
+/// Digits an access PIN has.
+const PIN_DIGITS: usize = 4;
+/// Rounds the PIN is stretched over before it is stored.
+const PIN_ROUNDS: u32 = 100_000;
+/// How long after start-up an unclaimed device will accept a chosen PIN.
+///
+/// Bounded rather than open. A device that lets anyone on the network claim it
+/// at any moment is a device that eventually gets claimed by somebody else.
+const ENROLMENT_WINDOW_SECONDS: u64 = 15 * 60;
+/// Wrong PINs allowed before the waiting starts. People mistype.
+const FREE_ATTEMPTS: u32 = 5;
+const LOCKOUT_STEP_SECONDS: u64 = 5;
+const LOCKOUT_CAP_SECONDS: u64 = 15 * 60;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -197,26 +208,65 @@ struct PluginWebRegistry {
 #[serde(default, deny_unknown_fields)]
 struct AuthStore {
     session_hashes: Vec<String>,
-    pending: Option<PairingChallenge>,
+    /// The access PIN, salted and stretched. Absent until somebody sets one.
+    pin: Option<StoredPin>,
+    /// Consecutive wrong PINs, which decide how long the next wait is.
+    failures: u32,
+    /// Unix second before which no PIN will be accepted at all.
+    locked_until: u64,
 }
 
+/// A PIN as it is kept on disk.
+///
+/// Salted so the same PIN on two machines does not store the same hash, and
+/// stretched so recovering it from the file is not instant. Four digits is ten
+/// thousand possibilities, which a plain hash gives up in the time it takes to
+/// write the loop.
+///
+/// This is the second line of defence and not the first. Anyone reading this
+/// file is already on the machine.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct PairingChallenge {
-    code_hash: String,
-    expires_at: u64,
-    remaining_attempts: u8,
+struct StoredPin {
+    salt: String,
+    hash: String,
+    rounds: u32,
 }
 
 struct AuthManager {
     path: PathBuf,
     store: Mutex<AuthStore>,
+    /// When this process came up, which is what bounds the enrolment window.
+    started_at: u64,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct PairRequest {
-    code: String,
+struct UnlockRequest {
+    pin: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetPinRequest {
+    pin: String,
+    /// Required once a PIN exists. Absent only during first-run enrolment.
+    #[serde(default)]
+    current_pin: Option<String>,
+}
+
+/// What may be done about the PIN right now.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum PinState {
+    /// No PIN yet and the window is open: whoever reaches the page may claim
+    /// the device by choosing one.
+    Enrolling,
+    /// No PIN and the window has closed. Nothing on the network can set one
+    /// now; it has to be done from the machine itself.
+    Unclaimed,
+    /// A PIN exists, and it is what gets a browser in.
+    Set,
 }
 
 impl AuthManager {
@@ -233,57 +283,110 @@ impl AuthManager {
         Ok(Self {
             path,
             store: Mutex::new(store),
+            started_at: unix_now(),
         })
     }
 
-    fn begin_pairing(&self) -> Result<String> {
-        let mut random = [0_u8; 4];
-        getrandom::fill(&mut random).context("generating pairing code")?;
-        let code = 100_000 + u32::from_le_bytes(random) % 900_000;
-        let code = format!("{code:06}");
-        let mut store = self.store.lock().expect("web auth mutex poisoned");
-        store.pending = Some(PairingChallenge {
-            code_hash: hash_secret(&code),
-            expires_at: unix_now().saturating_add(PAIRING_LIFETIME_SECONDS),
-            remaining_attempts: MAX_PAIRING_ATTEMPTS,
-        });
-        self.persist(&store)?;
-        Ok(code)
+    fn pin_state(&self) -> PinState {
+        let store = self.store.lock().expect("web auth mutex poisoned");
+        if store.pin.is_some() {
+            return PinState::Set;
+        }
+        drop(store);
+        if self.enrolment_open() {
+            PinState::Enrolling
+        } else {
+            PinState::Unclaimed
+        }
     }
 
-    fn pair(&self, code: &str) -> Result<String> {
-        if code.len() != 6 || !code.bytes().all(|byte| byte.is_ascii_digit()) {
-            bail!("pairing code is invalid or expired");
-        }
+    fn enrolment_open(&self) -> bool {
+        unix_now() < self.started_at.saturating_add(ENROLMENT_WINDOW_SECONDS)
+    }
+
+    /// Seconds before another PIN may be tried, or zero.
+    fn locked_for(&self) -> u64 {
+        let store = self.store.lock().expect("web auth mutex poisoned");
+        store.locked_until.saturating_sub(unix_now())
+    }
+
+    /// Trades a correct PIN for a browser session.
+    ///
+    /// Four digits are only worth anything because guessing is slowed down.
+    /// The first few misses are free, because people mistype, and after that
+    /// every further miss doubles the wait up to a quarter of an hour. Ten
+    /// thousand possibilities stop being a minute of work and become weeks.
+    fn unlock(&self, pin: &str) -> Result<String> {
         let mut store = self.store.lock().expect("web auth mutex poisoned");
         let now = unix_now();
-        let Some(challenge) = store.pending.as_mut() else {
-            bail!("pairing code is invalid or expired");
+        if now < store.locked_until {
+            bail!("too many attempts; wait before trying again");
+        }
+        let Some(stored) = store.pin.clone() else {
+            bail!("no PIN has been set on this device");
         };
-        if challenge.expires_at < now || challenge.remaining_attempts == 0 {
-            store.pending = None;
+        if !verify_pin(&stored, pin) {
+            store.failures = store.failures.saturating_add(1);
+            store.locked_until = now.saturating_add(lockout_seconds(store.failures));
             self.persist(&store)?;
-            bail!("pairing code is invalid or expired");
+            bail!("that PIN is not correct");
         }
-        if !constant_time_eq(challenge.code_hash.as_bytes(), hash_secret(code).as_bytes()) {
-            challenge.remaining_attempts = challenge.remaining_attempts.saturating_sub(1);
-            if challenge.remaining_attempts == 0 {
-                store.pending = None;
-            }
-            self.persist(&store)?;
-            bail!("pairing code is invalid or expired");
-        }
-
-        let mut token = [0_u8; 32];
-        getrandom::fill(&mut token).context("generating browser session")?;
-        let token = hex_encode(&token);
-        let token_hash = hash_secret(&token);
-        if !store.session_hashes.contains(&token_hash) {
-            store.session_hashes.push(token_hash);
-        }
-        store.pending = None;
+        store.failures = 0;
+        store.locked_until = 0;
+        let token = Self::issue(&mut store);
         self.persist(&store)?;
         Ok(token)
+    }
+
+    /// Sets or replaces the PIN, returning a session for the caller.
+    ///
+    /// Replacing one needs the old one even from an already authorised
+    /// browser: a session left open on a borrowed laptop should not be enough
+    /// to take the device over. Every other session is dropped, so changing
+    /// the PIN is also how somebody is put out.
+    fn set_pin(&self, pin: &str, current: Option<&str>) -> Result<String> {
+        if pin.len() != PIN_DIGITS || !pin.bytes().all(|byte| byte.is_ascii_digit()) {
+            bail!("a PIN is {PIN_DIGITS} digits");
+        }
+        let open = self.enrolment_open();
+        let mut store = self.store.lock().expect("web auth mutex poisoned");
+        match store.pin.clone() {
+            Some(stored) => {
+                let now = unix_now();
+                if now < store.locked_until {
+                    bail!("too many attempts; wait before trying again");
+                }
+                let Some(current) = current else {
+                    bail!("changing the PIN needs the current one");
+                };
+                if !verify_pin(&stored, current) {
+                    store.failures = store.failures.saturating_add(1);
+                    store.locked_until = now.saturating_add(lockout_seconds(store.failures));
+                    self.persist(&store)?;
+                    bail!("that PIN is not correct");
+                }
+            }
+            None if !open => {
+                bail!("the enrolment window has closed; set a PIN from the machine itself")
+            }
+            None => {}
+        }
+        store.pin = Some(build_pin(pin)?);
+        store.failures = 0;
+        store.locked_until = 0;
+        // Everything issued under the previous PIN stops working.
+        store.session_hashes.clear();
+        let token = Self::issue(&mut store);
+        self.persist(&store)?;
+        Ok(token)
+    }
+
+    fn issue(store: &mut AuthStore) -> String {
+        let mut token = [0_u8; 32];
+        getrandom::fill(&mut token).expect("generating browser session");
+        let token = hex_encode(&token);
+        store.session_hashes.push(hash_secret(&token));
+        token
     }
 
     fn is_authorized(&self, token: &str) -> bool {
@@ -296,17 +399,6 @@ impl AuthManager {
             .any(|stored| constant_time_eq(stored.as_bytes(), candidate.as_bytes()))
     }
 
-    fn pairing_active(&self) -> bool {
-        self.store
-            .lock()
-            .expect("web auth mutex poisoned")
-            .pending
-            .as_ref()
-            .is_some_and(|challenge| {
-                challenge.expires_at >= unix_now() && challenge.remaining_attempts > 0
-            })
-    }
-
     fn persist(&self, store: &AuthStore) -> Result<()> {
         let parent = self.path.parent().context("web auth path has no parent")?;
         fs::create_dir_all(parent)?;
@@ -316,6 +408,42 @@ impl AuthManager {
         fs::rename(&temporary, &self.path)
             .with_context(|| format!("installing {}", self.path.display()))
     }
+}
+
+/// How long the next attempt waits after `failures` wrong PINs.
+fn lockout_seconds(failures: u32) -> u64 {
+    let over = failures.saturating_sub(FREE_ATTEMPTS);
+    if over == 0 {
+        return 0;
+    }
+    LOCKOUT_STEP_SECONDS
+        .saturating_mul(1_u64 << over.min(12))
+        .min(LOCKOUT_CAP_SECONDS)
+}
+
+fn build_pin(pin: &str) -> Result<StoredPin> {
+    let mut salt = [0_u8; 16];
+    getrandom::fill(&mut salt).context("generating PIN salt")?;
+    let salt = hex_encode(&salt);
+    Ok(StoredPin {
+        hash: stretch(&salt, pin, PIN_ROUNDS),
+        salt,
+        rounds: PIN_ROUNDS,
+    })
+}
+
+fn verify_pin(stored: &StoredPin, candidate: &str) -> bool {
+    let hashed = stretch(&stored.salt, candidate, stored.rounds);
+    constant_time_eq(stored.hash.as_bytes(), hashed.as_bytes())
+}
+
+/// Hashes `secret` against `salt` enough times to make guessing expensive.
+fn stretch(salt: &str, secret: &str, rounds: u32) -> String {
+    let mut digest = Sha256::digest(format!("{salt}:{secret}").as_bytes());
+    for _ in 1..rounds.max(1) {
+        digest = Sha256::digest(digest);
+    }
+    hex_encode(&digest)
 }
 
 fn unix_now() -> u64 {
@@ -397,7 +525,8 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/auth/status", get(auth_status))
-        .route("/api/v1/auth/pair", post(pair_browser))
+        .route("/api/v1/auth/unlock", post(unlock_browser))
+        .route("/api/v1/auth/pin", post(set_pin))
         .route("/api/v1/config", get(public_config))
         .route("/api/v1/plugins", get(plugin_web_catalog))
         .route("/api/v1/plugins/{plugin_id}", get(plugin_web_descriptor))
@@ -512,29 +641,14 @@ fn start_system_control(
                                 "status": "ok",
                                 "config": config.read().expect("web config lock poisoned").clone(),
                                 "lan_ip": local_lan_ipv4().map(|address| address.to_string()),
-                                "pairing_available": matches!(
-                                    config.read().expect("web config lock poisoned").access,
-                                    WebAccess::Lan
-                                )
+                                // What a controller can usefully say about
+                                // access now: whether a PIN exists yet, and
+                                // whether one can still be chosen over the
+                                // network. There is no code to show, because
+                                // there is no longer a screen in the loop.
+                                "pin_state": auth.pin_state(),
+                                "pin_digits": PIN_DIGITS,
                             }),
-                            Some("begin_pairing")
-                                if matches!(
-                                    config.read().expect("web config lock poisoned").access,
-                                    WebAccess::Lan
-                                ) =>
-                            {
-                                match auth.begin_pairing() {
-                                    Ok(code) => json!({
-                                        "status": "ok",
-                                        "pairing_code": code,
-                                        "expires_in": PAIRING_LIFETIME_SECONDS
-                                    }),
-                                    Err(error) => json!({
-                                        "status": "error",
-                                        "message": error.to_string()
-                                    }),
-                                }
-                            }
                             Some("set") => {
                                 let mut next =
                                     config.read().expect("web config lock poisoned").clone();
@@ -805,47 +919,84 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
 }
 
 async fn auth_status(headers: HeaderMap, State(state): State<Arc<AppState>>) -> Json<Value> {
-    let requires_pairing = access_requires_auth(&state) && !request_is_authorized(&state, &headers);
+    let requires_pin = access_requires_auth(&state) && !request_is_authorized(&state, &headers);
     Json(json!({
         "status": "ok",
-        "requires_pairing": requires_pairing,
-        "paired": !requires_pairing,
-        "pairing_active": state.auth.pairing_active()
+        "requires_pin": requires_pin,
+        "unlocked": !requires_pin,
+        "pin_state": state.auth.pin_state(),
+        "pin_digits": PIN_DIGITS,
+        "locked_for": state.auth.locked_for(),
     }))
 }
 
-async fn pair_browser(
+/// Hands out a session to whoever knows the PIN.
+async fn unlock_browser(
     headers: HeaderMap,
     State(state): State<Arc<AppState>>,
-    Json(request): Json<PairRequest>,
+    Json(request): Json<UnlockRequest>,
 ) -> Response {
     if !valid_same_origin(&headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
     if !access_requires_auth(&state) {
-        return Json(json!({"status":"ok","paired":true})).into_response();
+        return Json(json!({"status":"ok","unlocked":true})).into_response();
     }
-    match state.auth.pair(request.code.trim()) {
-        Ok(token) => {
-            let mut response = Json(json!({"status":"ok","paired":true})).into_response();
-            let cookie = format!(
-                "{SESSION_COOKIE_NAME}={token}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict"
-            );
-            response.headers_mut().insert(
-                SET_COOKIE,
-                HeaderValue::from_str(&cookie).expect("session cookie is valid ASCII"),
-            );
-            response
-        }
-        Err(_) => (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({
-                "status":"error",
-                "message":"The pairing code is invalid or expired."
-            })),
-        )
-            .into_response(),
+    match state.auth.unlock(request.pin.trim()) {
+        Ok(token) => session_response(json!({"status":"ok","unlocked":true}), &token),
+        Err(error) => auth_refusal(&state, &error),
     }
+}
+
+/// Chooses the PIN, or replaces it for somebody who already knows it.
+///
+/// Deliberately reachable without a session: the first run has nobody holding
+/// one, and refusing the request would leave a device nobody can ever get
+/// into. What guards it instead is the enrolment window for a new device and
+/// the current PIN for one already claimed.
+async fn set_pin(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<SetPinRequest>,
+) -> Response {
+    if !valid_same_origin(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let current = request.current_pin.as_deref().map(str::trim);
+    match state.auth.set_pin(request.pin.trim(), current) {
+        Ok(token) => session_response(json!({"status":"ok","unlocked":true}), &token),
+        Err(error) => auth_refusal(&state, &error),
+    }
+}
+
+/// A reply carrying the session cookie a browser is identified by.
+fn session_response(body: Value, token: &str) -> Response {
+    let mut response = Json(body).into_response();
+    let cookie = format!(
+        "{SESSION_COOKIE_NAME}={token}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict"
+    );
+    response.headers_mut().insert(
+        SET_COOKIE,
+        HeaderValue::from_str(&cookie).expect("session cookie is valid ASCII"),
+    );
+    response
+}
+
+/// Says no, and says how long the caller has to wait before asking again.
+///
+/// The message is the one the manager produced. It distinguishes a wrong PIN
+/// from a closed window from a lockout, and a player standing in front of a
+/// machine that will not let them in deserves to know which.
+fn auth_refusal(state: &AppState, error: &anyhow::Error) -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(json!({
+            "status": "error",
+            "message": error.to_string(),
+            "locked_for": state.auth.locked_for(),
+        })),
+    )
+        .into_response()
 }
 
 async fn public_config(
@@ -1395,6 +1546,126 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_SERIAL: AtomicU64 = AtomicU64::new(0);
+
+    /// A manager over a scratch file, with no PIN yet.
+    fn fresh_auth() -> (AuthManager, PathBuf) {
+        let serial = TEST_SERIAL.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "rackforge-auth-{}-{serial}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        (AuthManager::load(path.clone()).unwrap(), path)
+    }
+
+    #[test]
+    fn an_unclaimed_device_lets_the_first_arrival_choose_a_pin() {
+        let (auth, path) = fresh_auth();
+        assert_eq!(auth.pin_state(), PinState::Enrolling);
+        let token = auth.set_pin("4271", None).unwrap();
+        assert!(auth.is_authorized(&token));
+        assert_eq!(auth.pin_state(), PinState::Set);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn the_enrolment_window_does_not_stay_open_forever() {
+        // A device that would accept a PIN from anyone at any time is a device
+        // that eventually gets claimed by somebody who is not its owner.
+        let (mut auth, path) = fresh_auth();
+        auth.started_at = unix_now().saturating_sub(ENROLMENT_WINDOW_SECONDS + 1);
+        assert_eq!(auth.pin_state(), PinState::Unclaimed);
+        let error = auth.set_pin("4271", None).unwrap_err().to_string();
+        assert!(error.contains("enrolment window"), "{error}");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_claimed_device_is_opened_only_by_its_pin() {
+        let (auth, path) = fresh_auth();
+        auth.set_pin("4271", None).unwrap();
+        assert!(auth.unlock("0000").is_err());
+        let token = auth.unlock("4271").unwrap();
+        assert!(auth.is_authorized(&token));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn guessing_gets_slower_and_then_very_slow() {
+        // Four digits is ten thousand possibilities. Without this it is a
+        // minute of somebody's time; with it the tenth wrong guess already
+        // costs more than the first nine together.
+        let (auth, path) = fresh_auth();
+        auth.set_pin("4271", None).unwrap();
+        for _ in 0..FREE_ATTEMPTS {
+            assert!(auth.unlock("0000").is_err());
+        }
+        assert_eq!(auth.locked_for(), 0, "the first few misses are free");
+        assert!(auth.unlock("0000").is_err());
+        let first = auth.locked_for();
+        assert!(first > 0, "a wait starts once the free tries are gone");
+
+        assert_eq!(lockout_seconds(FREE_ATTEMPTS), 0);
+        assert!(lockout_seconds(FREE_ATTEMPTS + 2) > lockout_seconds(FREE_ATTEMPTS + 1));
+        assert_eq!(lockout_seconds(FREE_ATTEMPTS + 60), LOCKOUT_CAP_SECONDS);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_correct_pin_clears_the_waiting() {
+        let (auth, path) = fresh_auth();
+        auth.set_pin("4271", None).unwrap();
+        for _ in 0..FREE_ATTEMPTS {
+            assert!(auth.unlock("0000").is_err());
+        }
+        auth.unlock("4271").unwrap();
+        assert_eq!(auth.locked_for(), 0);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn changing_the_pin_needs_the_old_one_and_ends_other_sessions() {
+        let (auth, path) = fresh_auth();
+        let first = auth.set_pin("4271", None).unwrap();
+        assert!(auth.is_authorized(&first));
+
+        assert!(auth.set_pin("9999", None).is_err(), "no PIN, no change");
+        assert!(auth.set_pin("9999", Some("0000")).is_err(), "wrong PIN");
+        assert!(auth.is_authorized(&first), "a failed change changes nothing");
+
+        let second = auth.set_pin("9999", Some("4271")).unwrap();
+        assert!(!auth.is_authorized(&first), "the old session is over");
+        assert!(auth.is_authorized(&second));
+        assert!(auth.unlock("9999").is_ok());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_pin_is_stored_salted_and_stretched() {
+        // Ten thousand possibilities against a bare hash is a lookup table
+        // somebody builds once. The salt makes the table per-machine and the
+        // rounds make building it cost something.
+        let (auth, path) = fresh_auth();
+        auth.set_pin("4271", None).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("4271"), "the PIN itself is not on disk");
+        let stored: AuthStore = serde_json::from_str(&text).unwrap();
+        let pin = stored.pin.unwrap();
+        assert_eq!(pin.rounds, PIN_ROUNDS);
+        assert_ne!(pin.hash, hash_secret("4271"), "not a plain hash");
+        assert_ne!(build_pin("4271").unwrap().hash, pin.hash, "salted per store");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_pin_has_to_be_four_digits() {
+        let (auth, path) = fresh_auth();
+        for bad in ["", "123", "12345", "abcd", "12 4"] {
+            assert!(auth.set_pin(bad, None).is_err(), "{bad:?} was accepted");
+        }
+        assert!(auth.set_pin("0000", None).is_ok());
+        let _ = fs::remove_file(path);
+    }
 
     #[test]
     fn defaults_are_enabled_but_local_only() {

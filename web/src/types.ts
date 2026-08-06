@@ -319,9 +319,14 @@ export interface StoreCatalogResponse {
 
 export interface WebAuthStatus {
   status: "ok";
-  requires_pairing: boolean;
-  paired: boolean;
-  pairing_active: boolean;
+  requires_pin: boolean;
+  unlocked: boolean;
+  /// `enrolling` while an unclaimed device will still accept a chosen PIN,
+  /// `unclaimed` once that window has closed, `set` once one exists.
+  pin_state: "enrolling" | "unclaimed" | "set";
+  pin_digits: number;
+  /// Seconds before another PIN may be tried, or zero.
+  locked_for: number;
 }
 
 export type PluginWebSurfaceKind = "play" | "config";

@@ -111,7 +111,15 @@ async fn health() -> Json<Value> {
 }
 
 async fn auth_status() -> Json<Value> {
-    Json(json!({"status":"ok", "requires_pairing":false, "paired":true, "pairing_active":false}))
+    // The desktop app serves itself over loopback, so nothing has to be
+    // unlocked to reach it.
+    Json(json!({
+        "status": "ok",
+        "requires_pin": false,
+        "unlocked": true,
+        "pin_state": "set",
+        "locked_for": 0
+    }))
 }
 
 async fn config(State(state): State<WebState>) -> Json<Value> {

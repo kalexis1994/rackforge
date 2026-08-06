@@ -1,7 +1,7 @@
 # RackForge Web Plugin API
 
 RackForge owns the web shell: global navigation, active session, security,
-device pairing and host controls. A plugin owns its `PLAY` and `CONFIG`
+device access and host controls. A plugin owns its `PLAY` and `CONFIG`
 surfaces. The host never reconstructs plugin-specific pages from assumptions.
 
 ## UI ownership

@@ -1724,10 +1724,13 @@ fn refresh_web_settings(menu: &mut menu::Menu) -> Result<(), String> {
         port,
         lan_ip,
         service_online: true,
-        pairing_available: response
-            .get("pairing_available")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        // A string, not a flag: the host distinguishes a device with no PIN
+        // that will still accept one from a device whose enrolment window has
+        // closed. The display only needs to know whether one exists.
+        pin_set: response
+            .get("pin_state")
+            .and_then(Value::as_str)
+            .is_some_and(|state| state == "set"),
     });
     Ok(())
 }
@@ -1995,16 +1998,6 @@ fn apply_pending_menu_command(
                 "value": port
             }))?;
             println!("WEB_SETTING_SET field=port value={port}");
-            Ok(true)
-        }
-        menu::MenuCommand::BeginWebPairing => {
-            let response = web_control_request(&serde_json::json!({"op": "begin_pairing"}))?;
-            let code = response
-                .get("pairing_code")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "RackForge Web no devolvió el código".to_owned())?;
-            menu.show_pairing_code(code);
-            println!("WEB_PAIRING_STARTED");
             Ok(true)
         }
         menu::MenuCommand::ActivateSavedWifi { connection_id } => {

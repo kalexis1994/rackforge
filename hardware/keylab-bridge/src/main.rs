@@ -1061,7 +1061,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let mut wifi_task: Option<WifiTask> = None;
         let mut audio_task: Option<AudioTask> = None;
         let mut next_spinner_frame = Instant::now();
-        let mut pan_pickup = Pickup::default();
+        let mut pan_follower = PanFollower::default();
         'surface: loop {
             if control_socket_generation() != control_generation {
                 eprintln!("Core cambió; cerrando MIDI para renovar los controles reservados...");
@@ -1076,10 +1076,16 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 coalesce_host_control_events(input.host_control_receiver.try_iter());
             let mut latest_feedback = None;
             for event in host_control_events {
-                if event.target == HostControlTarget::MasterPan
-                    && let Some(waiting) = pan_pickup.hold(event.value)
-                {
-                    latest_feedback = Some(waiting);
+                // The pan encoder is followed rather than obeyed, so its
+                // event carries a distance turned and not a destination.
+                if event.target == HostControlTarget::MasterPan {
+                    match pan_follower.advance(event.value) {
+                        Some(pan) => match apply_master_pan(pan) {
+                            Ok(()) => latest_feedback = Some(pan_header_text(pan)),
+                            Err(error) => eprintln!("No se pudo aplicar el pan: {error}"),
+                        },
+                        None => println!("PAN_ANCHOR value={}", event.value),
+                    }
                     continue;
                 }
                 match apply_host_control(event) {
@@ -1442,91 +1448,115 @@ fn register_host_controls() -> Result<(), String> {
     Ok(())
 }
 
-/// Holds a knob back until it reaches the value it is supposed to be moving.
+/// Moves the pan by how far the knob turned, not by where the knob sits.
 ///
-/// The pan encoder reports its own position rather than a change, and its
-/// position is not the one RackForge holds: after a restart the encoder sits
-/// at zero while the pan sits at centre, so the first touch used to send `1`
-/// and slam the mix to the far left. That is the encoder telling the truth
-/// about itself and the host believing it about something else.
+/// The encoder reports an absolute position, and its position is not the one
+/// RackForge holds: after a restart it sits near zero while the pan sits
+/// wherever the session left it. Obeying that first reading slammed the mix to
+/// whatever the knob happened to be pointing at.
 ///
-/// So the first movements are read and not obeyed. Once the knob passes
-/// through the value the host already has, the two agree about where they are
-/// and it takes over from there. Until then the display says which way to
-/// turn, because a control that silently does nothing is worse than one that
-/// jumps.
+/// Waiting for the knob to pass through the current value was the first
+/// attempt and it was worse. With the pan at -283 the knob had to be hunted
+/// down to a particular notch, and turning the wrong way did nothing at all
+/// and said so only on a display nobody was looking at.
 ///
-/// The fader has the same mismatch and is deliberately left alone: a fader is
-/// a position, and a player who pushes it up expects the sound to follow.
+/// So the first reading is taken as a starting point and changes nothing.
+/// Every reading after it moves the pan by the distance turned. The knob
+/// starts from where the pan already is, which is what it looked like it
+/// should do all along.
+///
+/// The fader is deliberately left alone. A fader is a position, and a player
+/// who pushes it up expects the sound to follow it.
 #[derive(Default)]
-struct Pickup {
-    /// Where the host is, in the encoder's own units.
-    target: Option<u8>,
-    /// The previous reading, which is what makes crossing detectable.
+struct PanFollower {
+    /// The previous reading, which is what a distance is measured from.
     previous: Option<u8>,
-    caught: bool,
+    /// Where the pan is, tracked here so that a sweep does not ask the core
+    /// where it stands between every notch.
+    ///
+    /// This is the true position and not the reported one: inside the detent
+    /// the pan is reported as centre while this keeps moving, which is what
+    /// lets the knob pass through the middle instead of sticking to it.
+    pan: Option<i16>,
+    /// What was lost to division on previous notches, carried forward.
+    ///
+    /// A notch is worth 2000/127 of the range, which is not a whole number.
+    /// Dropping the fraction each time costs about six per cent over a full
+    /// sweep, and the pan could never be driven to either end.
+    remainder: i32,
 }
 
-impl Pickup {
-    /// Returns the message to show while the knob is still out of step, or
-    /// nothing once it has caught up and the event should be applied.
-    fn hold(&mut self, value: u8) -> Option<String> {
-        if self.caught {
+/// How far either side of centre still counts as centre.
+///
+/// Roughly six per cent of the travel, which is about four notches and close
+/// to the dead zone the absolute reading used to have. Without it centre is
+/// one exact value among two thousand and cannot be found by hand.
+const PAN_DETENT: i16 = 60;
+
+impl PanFollower {
+    /// The pan this reading moves to, or nothing when it moves nowhere.
+    fn advance(&mut self, value: u8) -> Option<MasterPan> {
+        let Some(previous) = self.previous.replace(value) else {
+            // The first touch only says where the knob was. Acting on it is
+            // exactly the jump this exists to prevent.
+            self.pan = Some(current_pan().unwrap_or(0));
             return None;
-        }
-        let target = match self.target {
-            Some(target) => target,
-            None => {
-                // Asked for once, on the first touch, because it costs a round
-                // trip and the answer cannot change while nobody is turning.
-                let target = current_pan_position().unwrap_or(64);
-                self.target = Some(target);
-                target
-            }
         };
-        let crossed = self.previous.is_some_and(|previous| {
-            (previous <= target && value >= target) || (previous >= target && value <= target)
-        });
-        if value == target || crossed {
-            self.caught = true;
+        let turned = i32::from(value) - i32::from(previous);
+        if turned == 0 {
             return None;
         }
-        self.previous = Some(value);
-        let arrow = if value < target { "->" } else { "<-" };
-        Some(format!("MASTER PAN  {arrow} PICK UP"))
+        let span = 2 * i32::from(MasterPan::MAX);
+        // The carry is what makes a full sweep arrive at a full pan. Rust
+        // keeps the sign of the dividend, so a remainder from turning one way
+        // does not push the other way on the next notch.
+        let scaled = turned * span + self.remainder;
+        let moved = scaled / 127;
+        self.remainder = scaled % 127;
+        let pan = self.pan.unwrap_or(0);
+        let limit = i32::from(MasterPan::MAX);
+        let next = (i32::from(pan) + moved).clamp(-limit, limit) as i16;
+        self.pan = Some(next);
+        // Reported through the detent, so the middle is a place the knob can
+        // land on rather than a value it has to hit exactly.
+        let reported = if next.abs() <= PAN_DETENT { 0 } else { next };
+        MasterPan::new(reported).ok()
     }
 }
 
-/// Where the host's pan sits, expressed as the encoder would report it.
-///
-/// The inverse of the reading in `MasterPan::from_midi_with_center_snap`,
-/// including its dead zone: every value from sixty to sixty-eight means
-/// centre, so centre is answered as the middle of that band and a knob
-/// arriving from either side meets it.
+/// The header shown while the pan is being turned.
+fn pan_header_text(pan: MasterPan) -> String {
+    let value = pan.get();
+    let label = if value == 0 {
+        "CENTER".to_owned()
+    } else {
+        let side = if value < 0 { 'L' } else { 'R' };
+        format!("{side} {}%", (u32::from(value.unsigned_abs()) + 5) / 10)
+    };
+    format!("MASTER PAN {label:>7}")
+}
+
 #[cfg(target_os = "linux")]
-fn current_pan_position() -> Option<u8> {
-    let pan = live_snapshot().ok()?.master_pan.get();
-    Some(pan_to_position(pan))
+fn apply_master_pan(pan: MasterPan) -> Result<(), String> {
+    dispatch_session_command(SessionCommand::SetMasterPan { pan })?;
+    println!("MASTER_PAN normalized={}/{}", pan.get(), MasterPan::MAX);
+    Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
-fn current_pan_position() -> Option<u8> {
-    None
+fn apply_master_pan(_pan: MasterPan) -> Result<(), String> {
+    Ok(())
 }
 
-fn pan_to_position(pan: i16) -> u8 {
-    const LOW: i32 = MasterPan::MIDI_SNAP_LOW as i32;
-    const HIGH: i32 = MasterPan::MIDI_SNAP_HIGH as i32;
-    let maximum = i32::from(MasterPan::MAX);
-    // Rounded, not truncated. The forward reading divides too, so truncating
-    // here lands a step short and the answer reads back as a different pan —
-    // which would leave the knob chasing a value it can never match.
-    let scale = |numerator: i32, span: i32| (numerator * span + maximum / 2) / maximum;
-    match pan {
-        0 => ((LOW + HIGH) / 2) as u8,
-        pan if pan < 0 => (LOW - scale(i32::from(-pan), LOW)).clamp(0, 127) as u8,
-        pan => (HIGH + scale(i32::from(pan), 127 - HIGH)).clamp(0, 127) as u8,
-    }
+/// Where the host's pan stands right now.
+#[cfg(target_os = "linux")]
+fn current_pan() -> Option<i16> {
+    Some(live_snapshot().ok()?.master_pan.get())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn current_pan() -> Option<i16> {
+    None
 }
 
 fn coalesce_host_control_events(
@@ -2775,75 +2805,128 @@ fn run_led_demo(midi: MidiOutput, port: &PortInfo, execute: bool) -> Result<(), 
 }
 
 #[cfg(test)]
-mod pickup_tests {
+mod pan_tests {
     use super::*;
 
-    /// A pickup already told where the host is, so the tests do not need a
-    /// running core to answer for it.
-    fn waiting_at(target: u8) -> Pickup {
-        Pickup {
-            target: Some(target),
+    /// A follower that already knows where the pan is, so the tests do not
+    /// need a running core to answer for it.
+    fn following_from(pan: i16) -> PanFollower {
+        PanFollower {
             previous: None,
-            caught: false,
+            pan: Some(pan),
+            remainder: 0,
         }
     }
 
     #[test]
-    fn a_knob_below_the_host_is_ignored_until_it_arrives() {
-        // The encoder reports zero after a restart while the pan sits at
-        // centre. Obeying that first reading is what threw the mix hard left.
-        let mut pickup = waiting_at(64);
-        assert!(pickup.hold(1).is_some(), "1 is nowhere near centre");
-        assert!(pickup.hold(20).is_some());
-        assert!(pickup.hold(63).is_some());
-        assert!(pickup.hold(64).is_none(), "it has arrived");
-        assert!(pickup.hold(9).is_none(), "and now it leads");
+    fn the_first_touch_moves_nothing() {
+        // This is the whole bug: the encoder sat near zero while the pan sat
+        // elsewhere, and obeying that first reading threw the mix across.
+        let mut follower = following_from(-283);
+        assert!(follower.advance(1).is_none(), "the first reading only anchors");
+        assert!(
+            follower.advance(2).is_some(),
+            "and every reading after it moves the pan"
+        );
     }
 
     #[test]
-    fn a_knob_that_jumps_over_the_host_still_catches() {
-        // Turned quickly, consecutive readings can straddle the target without
-        // ever landing on it.
-        let mut pickup = waiting_at(64);
-        assert!(pickup.hold(40).is_some());
-        assert!(pickup.hold(80).is_none(), "it crossed between readings");
+    fn turning_moves_from_where_the_pan_already_was() {
+        let mut follower = following_from(0);
+        follower.advance(100);
+        let pan = follower.advance(127).unwrap();
+        assert!(pan.get() > 0, "turning up moved right: {}", pan.get());
     }
 
     #[test]
-    fn the_display_says_which_way_to_turn() {
-        let mut pickup = waiting_at(64);
-        assert!(pickup.hold(10).unwrap().contains("->"), "turn up to reach it");
-        let mut pickup = waiting_at(64);
-        assert!(pickup.hold(120).unwrap().contains("<-"), "turn down");
+    fn a_knob_far_from_the_pan_still_works_immediately() {
+        // The pickup attempt failed here: with the pan at -283 the knob had
+        // to be hunted down to one notch, and turning the wrong way did
+        // nothing. Now any movement moves the pan.
+        let mut follower = following_from(-283);
+        follower.advance(120);
+        let pan = follower.advance(121).unwrap();
+        assert!(pan.get() > -283, "it moved right from -283: {}", pan.get());
     }
 
     #[test]
-    fn a_position_round_trips_through_the_reading_that_made_it() {
-        // Whatever the encoder sends, asking where the host now sits has to
-        // answer with something that reads back as the same pan. Otherwise the
-        // knob could never catch what it just set.
-        for value in 0..=127_u8 {
-            let pan = MasterPan::from_midi_with_center_snap(value);
-            let position = pan_to_position(pan.get());
-            let again = MasterPan::from_midi_with_center_snap(position);
+    fn turning_back_returns_where_it_came_from() {
+        let mut follower = following_from(0);
+        follower.advance(60);
+        let out = follower.advance(70).unwrap().get();
+        let back = follower.advance(60).unwrap().get();
+        assert!(out > 0, "{out}");
+        assert_eq!(back, 0, "went to {out} and came back to {back}");
+    }
+
+    #[test]
+    fn a_full_sweep_reaches_a_full_pan() {
+        // A notch is worth 2000/127, which is not whole. Dropping the fraction
+        // each time left the pan short of both ends — it stopped around 98%
+        // and would not go further however long the knob was turned.
+        for direction in [1_i32, -1] {
+            let mut follower = following_from(0);
+            let start = if direction > 0 { 0_u8 } else { 127 };
+            follower.advance(start);
+            let mut last = 0;
+            for step in 1..=127_i32 {
+                let reading = (i32::from(start) + direction * step).clamp(0, 127) as u8;
+                if let Some(pan) = follower.advance(reading) {
+                    last = pan.get();
+                }
+            }
             assert_eq!(
-                again.get(),
-                pan.get(),
-                "reading {value} gave pan {} which came back as {position}",
-                pan.get()
+                last.abs(),
+                MasterPan::MAX,
+                "sweeping {} ended at {last}",
+                if direction > 0 { "up" } else { "down" }
             );
         }
     }
 
     #[test]
-    fn centre_is_answered_inside_the_dead_zone() {
-        // Sixty to sixty-eight all mean centre, so a knob coming from either
-        // side meets it rather than passing through.
-        let position = pan_to_position(0);
+    fn the_middle_is_a_place_the_knob_can_land_on() {
+        // Centre is one value in two thousand. Without a detent it cannot be
+        // found by hand, which is what the absolute reading's dead zone used
+        // to provide.
+        let mut follower = following_from(0);
+        follower.advance(64);
+        let nudged = follower.advance(65).unwrap();
+        assert_eq!(nudged.get(), 0, "a notch off centre still reads as centre");
+    }
+
+    #[test]
+    fn the_knob_passes_through_the_middle_rather_than_sticking_to_it() {
+        // The detent reports centre while the true position keeps moving, so
+        // turning far enough comes out the other side.
+        let mut follower = following_from(0);
+        follower.advance(64);
+        let mut seen = Vec::new();
+        for reading in 65..=76_u8 {
+            if let Some(pan) = follower.advance(reading) {
+                seen.push(pan.get());
+            }
+        }
+        assert!(seen.contains(&0), "it held centre for a while: {seen:?}");
         assert!(
-            (MasterPan::MIDI_SNAP_LOW..=MasterPan::MIDI_SNAP_HIGH).contains(&position),
-            "{position}"
+            seen.last().is_some_and(|last| *last > 0),
+            "and then left it: {seen:?}"
         );
+    }
+
+    #[test]
+    fn the_pan_cannot_be_pushed_past_its_ends() {
+        let mut follower = following_from(MasterPan::MAX - 10);
+        follower.advance(0);
+        let pan = follower.advance(127).unwrap();
+        assert_eq!(pan.get(), MasterPan::MAX);
+    }
+
+    #[test]
+    fn a_still_knob_says_nothing() {
+        let mut follower = following_from(0);
+        follower.advance(64);
+        assert!(follower.advance(64).is_none());
     }
 }
 

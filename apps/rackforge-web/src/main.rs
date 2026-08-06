@@ -214,6 +214,15 @@ struct AuthStore {
     failures: u32,
     /// Unix second before which no PIN will be accepted at all.
     locked_until: u64,
+    /// The half-finished pairing an older version may have left behind.
+    ///
+    /// Read and thrown away. This struct refuses fields it does not know, so
+    /// without somewhere for this to land a device that had ever started
+    /// pairing would refuse to boot after the update — the service would fail
+    /// to parse its own state file and restart forever. It is never written
+    /// back, so the first save after an upgrade removes it for good.
+    #[serde(default, skip_serializing)]
+    pending: Option<serde_json::Value>,
 }
 
 /// A PIN as it is kept on disk.
@@ -1654,6 +1663,40 @@ mod tests {
         assert_eq!(pin.rounds, PIN_ROUNDS);
         assert_ne!(pin.hash, hash_secret("4271"), "not a plain hash");
         assert_ne!(build_pin("4271").unwrap().hash, pin.hash, "salted per store");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_device_that_had_started_pairing_still_boots() {
+        // The state file from a version that used pairing carries a field this
+        // one has never heard of, and the struct refuses unknown fields. With
+        // nowhere for it to land the service cannot parse its own state and
+        // restarts forever, which is a device bricked by an update.
+        let serial = TEST_SERIAL.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "rackforge-auth-legacy-{}-{serial}.json",
+            std::process::id()
+        ));
+        fs::write(
+            &path,
+            r#"{
+              "session_hashes": ["abc"],
+              "pending": {
+                "code_hash": "def",
+                "expires_at": 1,
+                "remaining_attempts": 5
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let auth = AuthManager::load(path.clone()).unwrap();
+        assert_eq!(auth.pin_state(), PinState::Enrolling);
+        auth.set_pin("4271", None).unwrap();
+
+        // And the first save is what finally clears it out.
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("pending"), "{text}");
         let _ = fs::remove_file(path);
     }
 

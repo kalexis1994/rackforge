@@ -25,7 +25,7 @@ use rackforge_performance_api::RackKeyboardParts;
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{ParameterKind, PluginKind};
 use rackforge_session_api::{
-    ButtonPhase, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, HostActionBinding,
+    BankSummary, ButtonPhase, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, HostActionBinding,
     HostActionTarget, HostControlBinding, InstanceId, MasterLevel, MasterPan, MidiButtonBinding,
     PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionId, SessionState, SoundSummary,
     SurfaceMode,

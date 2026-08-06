@@ -2,7 +2,7 @@ schema_version = 1
 kind = "controller"
 id = "org.rackforge.arturia-keylab-essential-mk3"
 name = "Arturia KeyLab Essential 61 mk3"
-version = "0.2.27"
+version = "0.2.28"
 controller_api = "^1.0"
 
 [runtime]

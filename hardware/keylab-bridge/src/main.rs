@@ -1061,6 +1061,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let mut wifi_task: Option<WifiTask> = None;
         let mut audio_task: Option<AudioTask> = None;
         let mut next_spinner_frame = Instant::now();
+        let mut pan_pickup = Pickup::default();
         'surface: loop {
             if control_socket_generation() != control_generation {
                 eprintln!("Core cambió; cerrando MIDI para renovar los controles reservados...");
@@ -1075,6 +1076,12 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 coalesce_host_control_events(input.host_control_receiver.try_iter());
             let mut latest_feedback = None;
             for event in host_control_events {
+                if event.target == HostControlTarget::MasterPan
+                    && let Some(waiting) = pan_pickup.hold(event.value)
+                {
+                    latest_feedback = Some(waiting);
+                    continue;
+                }
                 match apply_host_control(event) {
                     Ok(()) => {
                         latest_feedback = Some(event.header_text());
@@ -1433,6 +1440,93 @@ fn register_host_controls() -> Result<(), String> {
 #[cfg(not(target_os = "linux"))]
 fn register_host_controls() -> Result<(), String> {
     Ok(())
+}
+
+/// Holds a knob back until it reaches the value it is supposed to be moving.
+///
+/// The pan encoder reports its own position rather than a change, and its
+/// position is not the one RackForge holds: after a restart the encoder sits
+/// at zero while the pan sits at centre, so the first touch used to send `1`
+/// and slam the mix to the far left. That is the encoder telling the truth
+/// about itself and the host believing it about something else.
+///
+/// So the first movements are read and not obeyed. Once the knob passes
+/// through the value the host already has, the two agree about where they are
+/// and it takes over from there. Until then the display says which way to
+/// turn, because a control that silently does nothing is worse than one that
+/// jumps.
+///
+/// The fader has the same mismatch and is deliberately left alone: a fader is
+/// a position, and a player who pushes it up expects the sound to follow.
+#[derive(Default)]
+struct Pickup {
+    /// Where the host is, in the encoder's own units.
+    target: Option<u8>,
+    /// The previous reading, which is what makes crossing detectable.
+    previous: Option<u8>,
+    caught: bool,
+}
+
+impl Pickup {
+    /// Returns the message to show while the knob is still out of step, or
+    /// nothing once it has caught up and the event should be applied.
+    fn hold(&mut self, value: u8) -> Option<String> {
+        if self.caught {
+            return None;
+        }
+        let target = match self.target {
+            Some(target) => target,
+            None => {
+                // Asked for once, on the first touch, because it costs a round
+                // trip and the answer cannot change while nobody is turning.
+                let target = current_pan_position().unwrap_or(64);
+                self.target = Some(target);
+                target
+            }
+        };
+        let crossed = self.previous.is_some_and(|previous| {
+            (previous <= target && value >= target) || (previous >= target && value <= target)
+        });
+        if value == target || crossed {
+            self.caught = true;
+            return None;
+        }
+        self.previous = Some(value);
+        let arrow = if value < target { "->" } else { "<-" };
+        Some(format!("MASTER PAN  {arrow} PICK UP"))
+    }
+}
+
+/// Where the host's pan sits, expressed as the encoder would report it.
+///
+/// The inverse of the reading in `MasterPan::from_midi_with_center_snap`,
+/// including its dead zone: every value from sixty to sixty-eight means
+/// centre, so centre is answered as the middle of that band and a knob
+/// arriving from either side meets it.
+#[cfg(target_os = "linux")]
+fn current_pan_position() -> Option<u8> {
+    let pan = live_snapshot().ok()?.master_pan.get();
+    Some(pan_to_position(pan))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn current_pan_position() -> Option<u8> {
+    None
+}
+
+fn pan_to_position(pan: i16) -> u8 {
+    const LOW: i32 = MasterPan::MIDI_SNAP_LOW as i32;
+    const HIGH: i32 = MasterPan::MIDI_SNAP_HIGH as i32;
+    let maximum = i32::from(MasterPan::MAX);
+    // Rounded, not truncated. The forward reading divides too, so truncating
+    // here lands a step short and the answer reads back as a different pan —
+    // which would leave the knob chasing a value it can never match.
+    let scale = |numerator: i32, span: i32| (numerator * span + maximum / 2) / maximum;
+    match pan {
+        0 => ((LOW + HIGH) / 2) as u8,
+        pan if pan < 0 => (LOW - scale(i32::from(-pan), LOW)).clamp(0, 127) as u8,
+        pan => (HIGH + scale(i32::from(pan), 127 - HIGH)).clamp(0, 127) as u8,
+    }
 }
 
 fn coalesce_host_control_events(
@@ -2678,6 +2772,79 @@ fn run_led_demo(midi: MidiOutput, port: &PortInfo, execute: bool) -> Result<(), 
     result?;
     println!("Prueba LED finalizada; CC 44–47 quedaron en cero.");
     Ok(())
+}
+
+#[cfg(test)]
+mod pickup_tests {
+    use super::*;
+
+    /// A pickup already told where the host is, so the tests do not need a
+    /// running core to answer for it.
+    fn waiting_at(target: u8) -> Pickup {
+        Pickup {
+            target: Some(target),
+            previous: None,
+            caught: false,
+        }
+    }
+
+    #[test]
+    fn a_knob_below_the_host_is_ignored_until_it_arrives() {
+        // The encoder reports zero after a restart while the pan sits at
+        // centre. Obeying that first reading is what threw the mix hard left.
+        let mut pickup = waiting_at(64);
+        assert!(pickup.hold(1).is_some(), "1 is nowhere near centre");
+        assert!(pickup.hold(20).is_some());
+        assert!(pickup.hold(63).is_some());
+        assert!(pickup.hold(64).is_none(), "it has arrived");
+        assert!(pickup.hold(9).is_none(), "and now it leads");
+    }
+
+    #[test]
+    fn a_knob_that_jumps_over_the_host_still_catches() {
+        // Turned quickly, consecutive readings can straddle the target without
+        // ever landing on it.
+        let mut pickup = waiting_at(64);
+        assert!(pickup.hold(40).is_some());
+        assert!(pickup.hold(80).is_none(), "it crossed between readings");
+    }
+
+    #[test]
+    fn the_display_says_which_way_to_turn() {
+        let mut pickup = waiting_at(64);
+        assert!(pickup.hold(10).unwrap().contains("->"), "turn up to reach it");
+        let mut pickup = waiting_at(64);
+        assert!(pickup.hold(120).unwrap().contains("<-"), "turn down");
+    }
+
+    #[test]
+    fn a_position_round_trips_through_the_reading_that_made_it() {
+        // Whatever the encoder sends, asking where the host now sits has to
+        // answer with something that reads back as the same pan. Otherwise the
+        // knob could never catch what it just set.
+        for value in 0..=127_u8 {
+            let pan = MasterPan::from_midi_with_center_snap(value);
+            let position = pan_to_position(pan.get());
+            let again = MasterPan::from_midi_with_center_snap(position);
+            assert_eq!(
+                again.get(),
+                pan.get(),
+                "reading {value} gave pan {} which came back as {position}",
+                pan.get()
+            );
+        }
+    }
+
+    #[test]
+    fn centre_is_answered_inside_the_dead_zone() {
+        // Sixty to sixty-eight all mean centre, so a knob coming from either
+        // side meets it rather than passing through.
+        let position = pan_to_position(0);
+        assert!(
+            (MasterPan::MIDI_SNAP_LOW..=MasterPan::MIDI_SNAP_HIGH).contains(&position),
+            "{position}"
+        );
+    }
 }
 
 #[cfg(test)]

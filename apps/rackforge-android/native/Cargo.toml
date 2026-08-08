@@ -15,3 +15,4 @@ rackforge-core = { path = "../../../crates/rackforge-core" }
 rackforge-plugin-api = { path = "../../../crates/rackforge-plugin-api" }
 rackforge-repository = { path = "../../../crates/rackforge-repository" }
 serde_json.workspace = true
+semver.workspace = true

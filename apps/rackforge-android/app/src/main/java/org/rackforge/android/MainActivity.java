@@ -4,7 +4,10 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.database.Cursor;
+import android.net.Uri;
 import android.content.res.Configuration;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -22,6 +25,7 @@ import android.media.midi.MidiOutputPort;
 import android.media.midi.MidiReceiver;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.util.Log;
 import android.webkit.JavascriptInterface;
 import android.webkit.MimeTypeMap;
@@ -48,6 +52,7 @@ import android.widget.Toast;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -59,6 +64,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 public final class MainActivity extends Activity {
     static {
@@ -66,6 +72,8 @@ public final class MainActivity extends Activity {
     }
 
     private static final int SAMPLE_RATE = 48_000;
+    private static final int REQUEST_INSTALL_PLUGIN = 4101;
+    private static final long MAX_PLUGIN_BYTES = 512L * 1024L * 1024L;
     private WebView webView;
     private Spinner audioOutputSpinner;
     private volatile boolean audioRunning;
@@ -83,8 +91,15 @@ public final class MainActivity extends Activity {
     private volatile boolean engineStarting;
     private File pluginPackageRoot;
     private String pluginWebEntry;
+    private String activePluginName = "Plugin";
+    private String activePluginVersion = "";
+    private TextView activePluginLabel;
+    private AlertDialog installedPluginsDialog;
 
     private static native boolean initializeEngine(byte[] archive, String storeRoot, String dataRoot);
+    private static native String installPluginFile(String archivePath, String storeRoot);
+    private static native String installedPlugins(String storeRoot);
+    private static native boolean activateInstalledPlugin(String packageRoot, String storeRoot, String dataRoot);
     private static native String pluginPackageRoot();
     private static native String pluginWebEntry();
     private static native String pluginWebContext();
@@ -286,11 +301,11 @@ public final class MainActivity extends Activity {
             TextView spacer = new TextView(this);
             bar.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1));
         }
-        TextView plugin = new TextView(this);
-        plugin.setText("RF-XP10");
-        plugin.setTextColor(0xFFB8CDD3);
-        plugin.setPadding(dp(8), 0, dp(8), 0);
-        bar.addView(plugin);
+        activePluginLabel = new TextView(this);
+        activePluginLabel.setText(activePluginName);
+        activePluginLabel.setTextColor(0xFFB8CDD3);
+        activePluginLabel.setPadding(dp(8), 0, dp(8), 0);
+        bar.addView(activePluginLabel);
         if (!wide) bar.addView(toolbarButton("⚙", view -> showSettingsDialog()));
         return bar;
     }
@@ -347,7 +362,12 @@ public final class MainActivity extends Activity {
         panel.addView(menuAction("⚙", "Audio & MIDI", "Output, latency, gain and controllers", () -> {
             menu.dismiss(); showSettingsDialog();
         }));
-        panel.addView(menuAction("＋", "Install plugin", "Coming soon · portable .rfplugin", null));
+        panel.addView(menuAction("＋", "Install plugin", "Choose a portable .rfplugin package", () -> {
+            menu.dismiss(); choosePluginFile();
+        }));
+        panel.addView(menuAction("▤", "Installed plugins", "Manage versions and active instrument", () -> {
+            menu.dismiss(); showInstalledPluginsDialog();
+        }));
         panel.addView(menuAction("i", "About RackForge", "Version and runtime information", () -> {
             menu.dismiss(); showAbout();
         }));
@@ -419,12 +439,330 @@ public final class MainActivity extends Activity {
 
     private void showFileMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
-        menu.getMenu().add("Install .rfplugin…").setEnabled(false);
+        menu.getMenu().add("Install .rfplugin…").setOnMenuItemClickListener(item -> {
+            choosePluginFile();
+            return true;
+        });
         menu.getMenu().add("Installed plugins").setOnMenuItemClickListener(item -> {
-            Toast.makeText(this, "RF-XP10 0.1.3", Toast.LENGTH_SHORT).show();
+            showInstalledPluginsDialog();
             return true;
         });
         menu.show();
+    }
+
+    private void choosePluginFile() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/octet-stream");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
+                "application/octet-stream", "application/zip", "application/x-zip-compressed"
+        });
+        startActivityForResult(intent, REQUEST_INSTALL_PLUGIN);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_INSTALL_PLUGIN || resultCode != RESULT_OK || data == null) return;
+        Uri uri = data.getData();
+        if (uri == null) return;
+        try {
+            int flags = data.getFlags();
+            if ((flags & Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) != 0
+                    && (flags & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
+                getContentResolver().takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+        } catch (SecurityException ignored) {
+            // The temporary read grant remains valid for this immediate import.
+        }
+        importPlugin(uri);
+    }
+
+    private void importPlugin(Uri uri) {
+        String displayName = selectedFileName(uri);
+        if (displayName == null || !displayName.toLowerCase(Locale.ROOT).endsWith(".rfplugin")) {
+            Toast.makeText(this, "Choose a file ending in .rfplugin", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Toast.makeText(this, "Validating " + displayName + "…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            File temporary = null;
+            try {
+                temporary = copyPluginToPrivateCache(uri);
+                String descriptorText = installPluginFile(
+                        temporary.getAbsolutePath(), pluginStoreRoot().getAbsolutePath());
+                JSONObject descriptor = new JSONObject(descriptorText);
+                String installedName = descriptor.getString("plugin_name");
+                String version = descriptor.getString("version");
+                boolean alreadyInstalled = descriptor.optBoolean("already_installed");
+                runOnUiThread(() -> {
+                    Toast.makeText(this,
+                            installedName + " " + version +
+                                    (alreadyInstalled ? " is already installed" : " installed"),
+                            Toast.LENGTH_LONG).show();
+                    showInstalledPluginsDialog();
+                });
+            } catch (Throwable error) {
+                Log.e("RackForge", "Portable plugin installation failed", error);
+                runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("Plugin was not installed")
+                        .setMessage(error.getMessage() == null ? error.toString() : error.getMessage())
+                        .setPositiveButton("Close", null)
+                        .show());
+            } finally {
+                if (temporary != null && temporary.isFile() && !temporary.delete()) {
+                    Log.w("RackForge", "Could not remove temporary plugin import " + temporary);
+                }
+            }
+        }, "rackforge-plugin-install").start();
+    }
+
+    private String selectedFileName(Uri uri) {
+        try (Cursor cursor = getContentResolver().query(
+                uri, new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) return cursor.getString(0);
+        } catch (Exception error) {
+            Log.w("RackForge", "Could not read selected plugin name", error);
+        }
+        return uri.getLastPathSegment();
+    }
+
+    private File copyPluginToPrivateCache(Uri uri) throws Exception {
+        File temporary = File.createTempFile("rackforge-import-", ".rfplugin", getCacheDir());
+        long total = 0;
+        try (InputStream input = getContentResolver().openInputStream(uri);
+             FileOutputStream output = new FileOutputStream(temporary)) {
+            if (input == null) throw new IllegalStateException("The selected file cannot be opened");
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                total += read;
+                if (total > MAX_PLUGIN_BYTES) {
+                    throw new IllegalStateException("The plugin exceeds the 512 MB package limit");
+                }
+                output.write(buffer, 0, read);
+            }
+            if (total == 0) throw new IllegalStateException("The selected plugin is empty");
+            output.flush();
+            output.getFD().sync();
+        } catch (Throwable error) {
+            if (temporary.isFile() && !temporary.delete()) temporary.deleteOnExit();
+            throw error;
+        }
+        return temporary;
+    }
+
+    private void showInstalledPluginsDialog() {
+        try {
+            if (installedPluginsDialog != null && installedPluginsDialog.isShowing()) {
+                installedPluginsDialog.dismiss();
+            }
+            JSONObject catalog = new JSONObject(installedPlugins(pluginStoreRoot().getAbsolutePath()));
+            JSONArray plugins = catalog.getJSONArray("plugins");
+            ScrollView scroll = new ScrollView(this);
+            LinearLayout content = new LinearLayout(this);
+            content.setOrientation(LinearLayout.VERTICAL);
+            content.setPadding(dp(20), dp(22), dp(20), dp(26));
+            scroll.addView(content);
+
+            TextView title = new TextView(this);
+            title.setText("Installed plugins");
+            title.setTextColor(0xFFF2FAFC);
+            title.setTextSize(27);
+            title.setTypeface(null, android.graphics.Typeface.BOLD);
+            content.addView(title);
+            TextView subtitle = new TextView(this);
+            subtitle.setText("Portable packages are immutable by plugin ID and version");
+            subtitle.setTextColor(0xFF91A9B1);
+            subtitle.setPadding(0, dp(2), 0, dp(14));
+            content.addView(subtitle);
+
+            Button install = toolbarButton("＋  Install .rfplugin", view -> {
+                if (installedPluginsDialog != null) installedPluginsDialog.dismiss();
+                choosePluginFile();
+            });
+            install.setTextColor(0xFF5CE2F5);
+            LinearLayout.LayoutParams installParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
+            installParams.bottomMargin = dp(14);
+            content.addView(install, installParams);
+
+            if (plugins.length() == 0) {
+                content.addView(settingsValue("Status", "No portable plugins installed"));
+            }
+            for (int index = 0; index < plugins.length(); index++) {
+                JSONObject plugin = plugins.getJSONObject(index);
+                content.addView(installedPluginCard(plugin));
+            }
+            JSONArray warnings = catalog.optJSONArray("warnings");
+            if (warnings != null && warnings.length() > 0) {
+                TextView warning = settingsHeading("Store warnings");
+                content.addView(warning);
+                for (int index = 0; index < warnings.length(); index++) {
+                    content.addView(settingsValue("Package", warnings.getString(index)));
+                }
+            }
+
+            AlertDialog dialog = new AlertDialog.Builder(this)
+                    .setView(scroll)
+                    .setPositiveButton("Close", null)
+                    .create();
+            installedPluginsDialog = dialog;
+            dialog.setOnDismissListener(unused -> {
+                if (installedPluginsDialog == dialog) installedPluginsDialog = null;
+            });
+            dialog.setOnShowListener(unused -> styleFullHeightDialog(dialog));
+            dialog.show();
+        } catch (Throwable error) {
+            Log.e("RackForge", "Could not list installed plugins", error);
+            Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private View installedPluginCard(JSONObject plugin) throws Exception {
+        LinearLayout card = settingsCard();
+        TextView name = settingsHeading(plugin.getString("plugin_name"));
+        card.addView(name);
+        String latestVersion = plugin.getString("version");
+        card.addView(settingsValue("Latest version", latestVersion));
+        card.addView(settingsValue("Package", plugin.getString("plugin_id")));
+        boolean active = plugin.optBoolean("active");
+        boolean compatible = plugin.optBoolean("compatible");
+        String activeVersion = plugin.isNull("active_version")
+                ? null : plugin.optString("active_version", null);
+        JSONArray installed = plugin.optJSONArray("installed_versions");
+        if (installed != null && installed.length() > 1) {
+            List<String> versionNames = new ArrayList<>();
+            for (int index = 0; index < installed.length(); index++) {
+                versionNames.add(installed.getString(index));
+            }
+            card.addView(settingsValue("Installed versions", String.join(" · ", versionNames)));
+        }
+        String status = active ? "Active"
+                : activeVersion != null ? "Update available · active " + activeVersion
+                : compatible ? "Ready" : "Installed · incompatible";
+        card.addView(settingsValue("Status", status));
+        if (!compatible) {
+            card.addView(settingsValue("Reason", plugin.optString("incompatibility", "Unsupported plugin")));
+        }
+        Button activate = button(active ? "Active" : activeVersion != null ? "Activate latest" : "Activate");
+        activate.setEnabled(compatible && !active);
+        String root = plugin.getString("package_root");
+        String pluginName = plugin.getString("plugin_name");
+        String version = plugin.getString("version");
+        activate.setOnClickListener(view -> {
+            if (installedPluginsDialog != null) installedPluginsDialog.dismiss();
+            activatePlugin(root, pluginName, version);
+        });
+        card.addView(activate, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return card;
+    }
+
+    private void styleFullHeightDialog(AlertDialog dialog) {
+        Window window = dialog.getWindow();
+        if (window == null) return;
+        window.setBackgroundDrawable(surface(0xFF0A1B24, 24, 0xFF2A4B57, 1));
+        window.setDimAmount(0.72f);
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        window.setGravity(android.view.Gravity.BOTTOM);
+        window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
+                (int) (getResources().getDisplayMetrics().heightPixels * 0.92f));
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(0xFF5CE2F5);
+    }
+
+    private File pluginStoreRoot() {
+        return new File(getFilesDir(), "plugin-store");
+    }
+
+    private File pluginDataRoot() {
+        File external = getExternalFilesDir(null);
+        if (external == null) throw new IllegalStateException("External app storage unavailable");
+        File data = new File(external, "data");
+        if (!data.mkdirs() && !data.isDirectory()) {
+            throw new IllegalStateException("Cannot create plugin data root");
+        }
+        return data;
+    }
+
+    private void refreshActivePluginMetadata() throws Exception {
+        pluginPackageRoot = new File(pluginPackageRoot());
+        pluginWebEntry = pluginWebEntry();
+        JSONObject context = new JSONObject(pluginWebContext());
+        JSONObject instance = context.getJSONObject("instance");
+        activePluginName = instance.getString("plugin_name");
+        activePluginVersion = instance.optString("plugin_version", "");
+    }
+
+    private void activatePlugin(String root, String name, String version) {
+        if (engineStarting) {
+            Toast.makeText(this, "RackForge is already changing plugins", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        engineStarting = true;
+        currentPage = "rack";
+        showEngineState("Loading " + name, "Activating portable plugin " + version + "…");
+        new Thread(() -> {
+            File previousRoot = pluginPackageRoot;
+            String previousEntry = pluginWebEntry;
+            String previousName = activePluginName;
+            String previousVersion = activePluginVersion;
+            boolean restored = false;
+            try {
+                closeMidi();
+                stopNativeAudio();
+                audioRunning = false;
+                if (!activateInstalledPlugin(root, pluginStoreRoot().getAbsolutePath(),
+                        pluginDataRoot().getAbsolutePath())) {
+                    throw new IllegalStateException("The runtime rejected the selected plugin");
+                }
+                refreshActivePluginMetadata();
+                startAudio();
+                openMidiInputs();
+                preferences.edit().putString("plugin.active_root", pluginPackageRoot.getAbsolutePath()).apply();
+                runOnUiThread(() -> {
+                    engineStarting = false;
+                    if (activePluginLabel != null) activePluginLabel.setText(activePluginName);
+                    showRack();
+                    Toast.makeText(this, activePluginName + " " + activePluginVersion + " active",
+                            Toast.LENGTH_LONG).show();
+                });
+                return;
+            } catch (Throwable error) {
+                Log.e("RackForge", "Plugin activation failed", error);
+                if (previousRoot != null) {
+                    try {
+                        if (!activateInstalledPlugin(previousRoot.getAbsolutePath(),
+                                pluginStoreRoot().getAbsolutePath(), pluginDataRoot().getAbsolutePath())) {
+                            throw new IllegalStateException("The previous plugin could not be restored");
+                        }
+                        pluginPackageRoot = previousRoot;
+                        pluginWebEntry = previousEntry;
+                        activePluginName = previousName;
+                        activePluginVersion = previousVersion;
+                        startAudio();
+                        openMidiInputs();
+                        restored = true;
+                    } catch (Throwable rollbackError) {
+                        error.addSuppressed(rollbackError);
+                        Log.e("RackForge", "Plugin activation rollback failed", rollbackError);
+                    }
+                }
+                boolean finalRestored = restored;
+                runOnUiThread(() -> {
+                    engineStarting = false;
+                    if (activePluginLabel != null) activePluginLabel.setText(activePluginName);
+                    if (finalRestored) showRack();
+                    else showEngineState("Plugin activation failed", "The audio engine must be restarted");
+                    new AlertDialog.Builder(this)
+                            .setTitle("Could not activate " + name)
+                            .setMessage(error.getMessage() == null ? error.toString() : error.getMessage())
+                            .setPositiveButton("Close", null)
+                            .show();
+                });
+            }
+        }, "rackforge-plugin-activate").start();
     }
 
     private void showViewMenu(View anchor) {
@@ -459,7 +797,7 @@ public final class MainActivity extends Activity {
             webView.loadUrl("https://rackforge.local/plugin/" + pluginWebEntry);
             return;
         }
-        showEngineState("Loading RF-XP10", "Installing the portable plugin and starting AAudio…");
+        showEngineState("Loading plugin", "Validating the portable package and starting AAudio…");
     }
 
     private void showEngineState(String title, String detail) {
@@ -695,13 +1033,10 @@ public final class MainActivity extends Activity {
         Thread loader = new Thread(() -> {
             try {
                 byte[] archive = readAsset("plugins/rf-xp10.rfplugin");
-                File store = new File(getFilesDir(), "plugin-store");
-                File external = getExternalFilesDir(null);
-                if (external == null) throw new IllegalStateException("External app storage unavailable");
-                File data = new File(external, "data");
+                File store = pluginStoreRoot();
+                File data = pluginDataRoot();
                 File legacyAddons = new File(data, "addons");
                 if (!store.mkdirs() && !store.isDirectory()) throw new IllegalStateException("Cannot create plugin store");
-                if (!data.mkdirs() && !data.isDirectory()) throw new IllegalStateException("Cannot create plugin data root");
                 // Android's scoped external storage may report EACCES instead of ENOENT
                 // when the core probes this legacy migration directory.
                 if (!legacyAddons.mkdirs() && !legacyAddons.isDirectory()) {
@@ -710,20 +1045,31 @@ public final class MainActivity extends Activity {
                 if (!initializeEngine(archive, store.getAbsolutePath(), data.getAbsolutePath())) {
                     throw new IllegalStateException("Native engine rejected initialization");
                 }
-                pluginPackageRoot = new File(pluginPackageRoot());
-                pluginWebEntry = pluginWebEntry();
+                String preferredRoot = preferences.getString("plugin.active_root", null);
+                if (preferredRoot != null && !preferredRoot.equals(pluginPackageRoot())) {
+                    try {
+                        if (!activateInstalledPlugin(preferredRoot, store.getAbsolutePath(), data.getAbsolutePath())) {
+                            throw new IllegalStateException("The saved plugin could not be activated");
+                        }
+                    } catch (Throwable restoreError) {
+                        Log.w("RackForge", "Saved plugin is unavailable; using bundled RF-XP10", restoreError);
+                        preferences.edit().remove("plugin.active_root").apply();
+                    }
+                }
+                refreshActivePluginMetadata();
                 startAudio();
                 openMidiInputs();
                 runOnUiThread(() -> {
                     engineStarting = false;
+                    if (activePluginLabel != null) activePluginLabel.setText(activePluginName);
                     showRack();
-                    Toast.makeText(this, "RF-XP10 ready · 48 kHz", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, activePluginName + " ready · 48 kHz", Toast.LENGTH_SHORT).show();
                 });
             } catch (Throwable error) {
-                Log.e("RackForge", "RF-XP10 engine initialization failed", error);
+                Log.e("RackForge", "Plugin engine initialization failed", error);
                 runOnUiThread(() -> {
                     engineStarting = false;
-                    showEngineState("RF-XP10 could not start",
+                    showEngineState("Plugin could not start",
                             error.getMessage() == null ? "Unknown engine error" : error.getMessage());
                     Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
                 });

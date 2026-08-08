@@ -3,11 +3,11 @@ use jni::JNIEnv;
 use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
 use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage};
-use rackforge_plugin_api::{PresetCatalog, WebSurfaceKind, abi::MidiEventV1};
+use rackforge_plugin_api::{PluginKind, PresetCatalog, WebSurfaceKind, abi::MidiEventV1};
 use rackforge_repository::install_local_archive;
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{CStr, c_char, c_void};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::slice;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -151,9 +151,19 @@ impl AndroidEngine {
     fn open(archive: &[u8], store_root: PathBuf, data_root: PathBuf) -> Result<Self> {
         let installed = install_local_archive(&store_root, archive)
             .context("installing the portable plugin")?;
-        let package = PluginPackage::open(&installed.path)
-            .with_context(|| format!("opening {}", installed.path.display()))?;
+        Self::open_package(&installed.path, data_root)
+    }
+
+    fn open_package(package_root: &Path, data_root: PathBuf) -> Result<Self> {
+        let package = PluginPackage::open(package_root)
+            .with_context(|| format!("opening {}", package_root.display()))?;
         let manifest = package.manifest();
+        if manifest.kind != PluginKind::Instrument {
+            bail!("Android PLAY currently supports instrument plugins only");
+        }
+        manifest
+            .portable_component()
+            .context("Android requires a portable wasm-v1 plugin")?;
         let plugin_id = manifest.id.clone();
         let plugin_name = manifest.name.clone();
         let plugin_version = manifest.version.clone();
@@ -399,6 +409,128 @@ fn report(env: &mut JNIEnv<'_>, error: anyhow::Error) {
     let _ = env.throw_new("java/lang/IllegalStateException", format!("{error:#}"));
 }
 
+fn package_descriptor(
+    package: &PluginPackage,
+    active_plugin: Option<&(String, String)>,
+) -> serde_json::Value {
+    let manifest = package.manifest();
+    let play_entry = manifest.web_ui.as_ref().and_then(|web| {
+        web.surfaces
+            .iter()
+            .find(|surface| surface.kind == WebSurfaceKind::Play)
+            .map(|surface| surface.entry.as_str())
+    });
+    let portable = manifest.portable_component().is_some();
+    let compatible = manifest.kind == PluginKind::Instrument && portable && play_entry.is_some();
+    let incompatibility = if manifest.kind != PluginKind::Instrument {
+        Some("Android PLAY currently supports instrument plugins only")
+    } else if !portable {
+        Some("Android requires a portable wasm-v1 component")
+    } else if play_entry.is_none() {
+        Some("The plugin does not provide a PLAY Web surface")
+    } else {
+        None
+    };
+    let root = package.root();
+    serde_json::json!({
+        "plugin_id": manifest.id,
+        "plugin_name": manifest.name,
+        "version": manifest.version,
+        "kind": manifest.kind,
+        "portable": portable,
+        "compatible": compatible,
+        "incompatibility": incompatibility,
+        "package_root": root.to_string_lossy(),
+        "web_entry": play_entry,
+        "active": active_plugin.is_some_and(|(id, version)| {
+            id == &manifest.id && version == &manifest.version
+        }),
+    })
+}
+
+fn installed_plugins_json(store_root: &Path) -> Result<String> {
+    let packages_root = store_root.join("packages");
+    std::fs::create_dir_all(&packages_root)
+        .with_context(|| format!("creating {}", packages_root.display()))?;
+    let active_plugin = engine().lock().ok().and_then(|guard| {
+        guard
+            .as_ref()
+            .map(|engine| (engine.plugin_id.clone(), engine.plugin_version.clone()))
+    });
+    let mut versions = BTreeMap::<String, Vec<(semver::Version, serde_json::Value)>>::new();
+    let mut warnings = Vec::new();
+    for plugin in std::fs::read_dir(&packages_root)
+        .with_context(|| format!("reading {}", packages_root.display()))?
+        .flatten()
+    {
+        if !plugin.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        for version in std::fs::read_dir(plugin.path())
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            if !version.file_type().is_ok_and(|kind| kind.is_dir()) {
+                continue;
+            }
+            match PluginPackage::open(version.path()) {
+                Ok(package) => match semver::Version::parse(&package.manifest().version) {
+                    Ok(parsed) => versions
+                        .entry(package.manifest().id.clone())
+                        .or_default()
+                        .push((parsed, package_descriptor(&package, active_plugin.as_ref()))),
+                    Err(error) => warnings.push(format!(
+                        "{}: invalid plugin version: {error}",
+                        version.path().display()
+                    )),
+                },
+                Err(error) => warnings.push(format!("{}: {error:#}", version.path().display())),
+            }
+        }
+    }
+    let mut plugins = Vec::new();
+    for (_, mut candidates) in versions {
+        candidates.sort_by(|left, right| left.0.cmp(&right.0));
+        let installed_versions = candidates
+            .iter()
+            .map(|(version, _)| version.to_string())
+            .collect::<Vec<_>>();
+        let active_version = candidates.iter().find_map(|(version, descriptor)| {
+            descriptor["active"]
+                .as_bool()
+                .unwrap_or(false)
+                .then(|| version.to_string())
+        });
+        let (_, mut latest) = candidates.pop().expect("plugin version group is not empty");
+        let latest_version = latest["version"].as_str().unwrap_or_default().to_owned();
+        latest["active"] = active_version
+            .as_deref()
+            .is_some_and(|active| active == latest_version.as_str())
+            .into();
+        latest["active_version"] = active_version.into();
+        latest["installed_versions"] = installed_versions.into();
+        plugins.push(latest);
+    }
+    plugins.sort_by(|left, right| {
+        left["plugin_name"]
+            .as_str()
+            .cmp(&right["plugin_name"].as_str())
+            .then_with(|| left["version"].as_str().cmp(&right["version"].as_str()))
+    });
+    Ok(serde_json::json!({"plugins": plugins, "warnings": warnings}).to_string())
+}
+
+fn result_string(env: &mut JNIEnv<'_>, result: Result<String>) -> jstring {
+    match result.and_then(|value| Ok(env.new_string(value)?.into_raw())) {
+        Ok(value) => value,
+        Err(error) => {
+            report(env, error);
+            ptr::null_mut()
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_rackforge_android_MainActivity_initializeEngine(
     mut env: JNIEnv,
@@ -412,6 +544,80 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_initializeEngine(
         let store_root = PathBuf::from(java_string(&mut env, store_root)?);
         let data_root = PathBuf::from(java_string(&mut env, data_root)?);
         let candidate = AndroidEngine::open(&bytes, store_root, data_root)?;
+        midi_queue()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI queue lock poisoned"))?
+            .clear();
+        *engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))? = Some(candidate);
+        Ok(())
+    })();
+    match result {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_installPluginFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    archive_path: JString,
+    store_root: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let archive_path = PathBuf::from(java_string(&mut env, archive_path)?);
+        let store_root = PathBuf::from(java_string(&mut env, store_root)?);
+        let bytes = std::fs::read(&archive_path)
+            .with_context(|| format!("reading selected plugin {}", archive_path.display()))?;
+        let installed = install_local_archive(&store_root, &bytes)
+            .context("validating and installing the portable plugin")?;
+        let package = PluginPackage::open(&installed.path)
+            .with_context(|| format!("opening installed plugin {}", installed.path.display()))?;
+        let mut descriptor = package_descriptor(&package, None);
+        descriptor["already_installed"] = installed.already_installed.into();
+        descriptor["artifact_sha256"] = installed.record.artifact_sha256.into();
+        Ok(descriptor.to_string())
+    })();
+    result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_installedPlugins(
+    mut env: JNIEnv,
+    _class: JClass,
+    store_root: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let store_root = PathBuf::from(java_string(&mut env, store_root)?);
+        installed_plugins_json(&store_root)
+    })();
+    result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_activateInstalledPlugin(
+    mut env: JNIEnv,
+    _class: JClass,
+    package_root: JString,
+    store_root: JString,
+    data_root: JString,
+) -> jboolean {
+    let result = (|| -> Result<()> {
+        let package_root =
+            std::fs::canonicalize(PathBuf::from(java_string(&mut env, package_root)?))?;
+        let packages_root = std::fs::canonicalize(
+            PathBuf::from(java_string(&mut env, store_root)?).join("packages"),
+        )?;
+        if !package_root.starts_with(&packages_root) || package_root == packages_root {
+            bail!("selected plugin is outside the RackForge package store");
+        }
+        let data_root = PathBuf::from(java_string(&mut env, data_root)?);
+        let candidate = AndroidEngine::open_package(&package_root, data_root)?;
         midi_queue()
             .lock()
             .map_err(|_| anyhow::anyhow!("MIDI queue lock poisoned"))?

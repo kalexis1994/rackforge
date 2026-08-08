@@ -22,7 +22,7 @@ use wry::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 const FILE_INSTALL_PLUGIN: usize = 1001;
 const FILE_OPEN_ROOT: usize = 1002;
 const FILE_EXIT: usize = 1003;
-const FILE_SETTINGS: usize = 1004;
+const SETTINGS_OPEN: usize = 1004;
 const VIEW_RELOAD: usize = 1101;
 const VIEW_OPEN_BROWSER: usize = 1102;
 const VIEW_DEVTOOLS: usize = 1103;
@@ -76,18 +76,24 @@ impl NativeMenu {
         let (handle, file_menu) = unsafe {
             let menu = CreateMenu();
             let file = CreatePopupMenu();
+            let settings = CreatePopupMenu();
             let view = CreatePopupMenu();
             let help = CreatePopupMenu();
-            if menu.is_null() || file.is_null() || view.is_null() || help.is_null() {
+            if menu.is_null()
+                || file.is_null()
+                || settings.is_null()
+                || view.is_null()
+                || help.is_null()
+            {
                 bail!("Windows could not create the RackForge application menu");
             }
 
             append_item(file, FILE_INSTALL_PLUGIN, "Install Plugin…")?;
             append_item(file, FILE_OPEN_ROOT, "Open RackForge Root")?;
             AppendMenuW(file, MF_SEPARATOR, 0, std::ptr::null());
-            append_item(file, FILE_SETTINGS, "Settings…")?;
-            AppendMenuW(file, MF_SEPARATOR, 0, std::ptr::null());
             append_item(file, FILE_EXIT, "Exit")?;
+
+            append_item(settings, SETTINGS_OPEN, "Settings…")?;
 
             append_item(view, VIEW_RELOAD, "Reload")?;
             append_item(view, VIEW_OPEN_BROWSER, "Open in Browser")?;
@@ -98,10 +104,12 @@ impl NativeMenu {
 
             append_item(help, HELP_ABOUT, "About RackForge")?;
             append_popup(menu, file, "File")?;
+            append_popup(menu, settings, "Settings")?;
             append_popup(menu, view, "View")?;
             append_popup(menu, help, "Help")?;
             apply_background(menu)?;
             apply_background(file)?;
+            apply_background(settings)?;
             apply_background(view)?;
             apply_background(help)?;
 
@@ -297,7 +305,7 @@ unsafe extern "system" fn menu_window_proc(
         let command = match wparam & 0xffff {
             FILE_INSTALL_PLUGIN => Some(NativeMenuCommand::InstallPlugin),
             FILE_OPEN_ROOT => Some(NativeMenuCommand::OpenRoot),
-            FILE_SETTINGS => Some(NativeMenuCommand::Settings),
+            SETTINGS_OPEN => Some(NativeMenuCommand::Settings),
             FILE_EXIT => Some(NativeMenuCommand::Exit),
             VIEW_RELOAD => Some(NativeMenuCommand::Reload),
             VIEW_OPEN_BROWSER => Some(NativeMenuCommand::OpenBrowser),

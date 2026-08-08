@@ -7,7 +7,8 @@ not maintain a second UI implementation.
 
 The application menu is native Win32 UI, themed to match RackForge, and stays
 above the embedded workspace. **File → Install Plugin…** opens the Windows
-file picker, while **View** provides reload, external-browser and debug tools.
+file picker, **Settings → Settings…** opens the desktop configuration area,
+and **View** provides reload, external-browser and debug tools.
 
 ## Windows audio and MIDI
 
@@ -17,8 +18,10 @@ directly to the active plugin on the audio callback; plugin and preset changes
 cross a bounded command queue instead of sharing the realtime instance with
 the UI.
 
-Use **File → Settings…** to choose the driver, output device, sample rate,
-buffer size and MIDI inputs. Changes are applied by safely reopening the
+Use **Settings → Settings… → Audio & MIDI** to choose the driver, output device, sample rate,
+buffer size, Desktop output gain and MIDI inputs. Desktop defaults to +6 dB to
+compensate for quiet plugin output, with selectable values up to +12 dB and
+clamping at the final device boundary. Changes are applied by safely reopening the
 stream and are persisted in `config/audio.toml` below the RackForge Root. If a
 new configuration fails, Desktop attempts to restore the previous stream.
 The panel also provides device rescanning and an audio test note. ASIO is
@@ -31,17 +34,24 @@ LITTLE is a surface for external controllers. Its `egui` simulator remains
 available in the source as a development harness, but it is not the Desktop
 product UI.
 
-## Web server
+## HTTP server
 
-The embedded Web UI listens on `127.0.0.1:8787` by default. Use:
+The embedded Web UI uses a private loopback connection chosen at startup. The
+network HTTP server is disabled by default and is configured under
+**Settings → Settings… → HTTP Server**. Its configuration is persisted in
+`config/web.toml` below the RackForge Root.
+
+For command-line launches, `--lan` enables the network server and `--port`
+selects its port:
 
 ```text
 rackforge-desktop.exe --port 9000
 rackforge-desktop.exe --lan --port 8787
 ```
 
-`--lan` binds to all interfaces. Local Desktop sessions currently trust the
-local user and do not require device pairing.
+The network server binds to all interfaces. Local Desktop sessions currently
+trust the local user and do not require device pairing, so network publishing
+should only be enabled on a trusted network.
 
 ## RackForge Root and plugin installation
 

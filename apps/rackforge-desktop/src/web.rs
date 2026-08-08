@@ -1,3 +1,4 @@
+use anyhow::Context;
 use axum::{
     Json, Router,
     body::Body,
@@ -15,13 +16,17 @@ use rackforge_performance_api::{
 };
 use rackforge_session_api::SessionState;
 use semver::Version;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use crate::Options;
 
@@ -32,8 +37,144 @@ struct WebState {
     session: Arc<RwLock<SessionState>>,
     legacy_plugins_root: PathBuf,
     plugin_store_root: Option<PathBuf>,
-    port: u16,
-    lan: bool,
+    public_server: Arc<RwLock<WebServerPreferences>>,
+    control: Sender<DesktopControlCall>,
+}
+
+pub struct DesktopControlCall {
+    pub request: ControlRequest,
+    pub response: Sender<ControlResponse>,
+}
+
+pub fn control_channel() -> (Sender<DesktopControlCall>, Receiver<DesktopControlCall>) {
+    mpsc::channel()
+}
+
+const WEB_SERVER_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebServerPreferences {
+    pub schema_version: u32,
+    pub enabled: bool,
+    pub port: u16,
+}
+
+impl Default for WebServerPreferences {
+    fn default() -> Self {
+        Self {
+            schema_version: WEB_SERVER_SCHEMA_VERSION,
+            enabled: false,
+            port: 8787,
+        }
+    }
+}
+
+impl WebServerPreferences {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.schema_version == WEB_SERVER_SCHEMA_VERSION,
+            "unsupported Web server configuration schema {}",
+            self.schema_version
+        );
+        anyhow::ensure!(
+            self.port >= 1024,
+            "HTTP server port must be in 1024..=65535"
+        );
+        Ok(())
+    }
+
+    pub fn load(path: &std::path::Path) -> anyhow::Result<Option<Self>> {
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let text = fs::read_to_string(path)
+            .with_context(|| format!("reading Web server configuration {}", path.display()))?;
+        let preferences: Self = toml::from_str(&text)
+            .with_context(|| format!("parsing Web server configuration {}", path.display()))?;
+        preferences.validate()?;
+        Ok(Some(preferences))
+    }
+
+    pub fn persist(&self, path: &std::path::Path) -> anyhow::Result<()> {
+        self.validate()?;
+        let parent = path
+            .parent()
+            .context("Web server configuration has no parent")?;
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+        let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+        if temporary.exists() {
+            fs::remove_file(&temporary)
+                .with_context(|| format!("removing stale {}", temporary.display()))?;
+        }
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)
+            .with_context(|| format!("creating {}", temporary.display()))?;
+        file.write_all(toml::to_string_pretty(self)?.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        if path.exists() {
+            fs::remove_file(path).with_context(|| format!("replacing {}", path.display()))?;
+        }
+        fs::rename(&temporary, path)
+            .with_context(|| format!("activating Web server configuration {}", path.display()))
+    }
+}
+
+struct RunningServer {
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Drop for RunningServer {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+pub struct DesktopWebServers {
+    _local: RunningServer,
+    public: Option<RunningServer>,
+    state: WebState,
+    preferences: Arc<RwLock<WebServerPreferences>>,
+    local_url: String,
+}
+
+impl DesktopWebServers {
+    pub fn local_url(&self) -> &str {
+        &self.local_url
+    }
+
+    pub fn apply(&mut self, preferences: WebServerPreferences) -> anyhow::Result<()> {
+        preferences.validate()?;
+        let current = self
+            .preferences
+            .read()
+            .expect("Web settings lock poisoned")
+            .clone();
+        if current == preferences {
+            return Ok(());
+        }
+
+        let replacement = if preferences.enabled {
+            Some(bind_public_server(self.state.clone(), preferences.port)?)
+        } else {
+            None
+        };
+        *self
+            .preferences
+            .write()
+            .expect("Web settings lock poisoned") = preferences;
+        self.public = replacement;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -57,53 +198,89 @@ struct PluginWebPackage {
     public: PublicPluginWeb,
 }
 
-pub fn start(session: Arc<RwLock<SessionState>>, options: &Options) -> anyhow::Result<()> {
-    let port = options.port;
-    let lan = options.lan;
-    let legacy_plugins_root = options.plugins_root.clone();
-    let plugin_store_root = options.plugin_store_root.clone();
-    let address = SocketAddr::new(
-        if lan {
-            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-        } else {
-            IpAddr::V4(Ipv4Addr::LOCALHOST)
-        },
-        port,
-    );
-    let listener = std::net::TcpListener::bind(address)?;
+pub fn start(
+    session: Arc<RwLock<SessionState>>,
+    options: &Options,
+    preferences: WebServerPreferences,
+    control: Sender<DesktopControlCall>,
+) -> anyhow::Result<DesktopWebServers> {
+    preferences.validate()?;
+    let shared_preferences = Arc::new(RwLock::new(preferences.clone()));
+    let state = WebState {
+        session,
+        legacy_plugins_root: options.plugins_root.clone(),
+        plugin_store_root: options.plugin_store_root.clone(),
+        public_server: Arc::clone(&shared_preferences),
+        control,
+    };
+    let local_listener =
+        std::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))?;
+    let local_port = local_listener.local_addr()?.port();
+    let local = spawn_server(local_listener, state.clone(), "rackforge-desktop-web-local")?;
+    let public = preferences
+        .enabled
+        .then(|| bind_public_server(state.clone(), preferences.port))
+        .transpose()?;
+    Ok(DesktopWebServers {
+        _local: local,
+        public,
+        state,
+        preferences: shared_preferences,
+        local_url: format!("http://127.0.0.1:{local_port}"),
+    })
+}
+
+fn bind_public_server(state: WebState, port: u16) -> anyhow::Result<RunningServer> {
+    let listener =
+        std::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))
+            .with_context(|| format!("opening public HTTP server on port {port}"))?;
+    spawn_server(listener, state, "rackforge-desktop-web-public")
+}
+
+fn spawn_server(
+    listener: std::net::TcpListener,
+    state: WebState,
+    thread_name: &str,
+) -> anyhow::Result<RunningServer> {
     listener.set_nonblocking(true)?;
-    std::thread::Builder::new()
-        .name("rackforge-desktop-web".into())
+    let (shutdown, shutdown_receiver) = tokio::sync::oneshot::channel();
+    let thread = std::thread::Builder::new()
+        .name(thread_name.into())
         .spawn(move || {
             let runtime = tokio::runtime::Runtime::new().expect("create desktop Web runtime");
             runtime.block_on(async move {
-                let state = WebState {
-                    session,
-                    legacy_plugins_root,
-                    plugin_store_root,
-                    port,
-                    lan,
-                };
-                let app = Router::new()
-                    .route("/api/v1/health", get(health))
-                    .route("/api/v1/auth/status", get(auth_status))
-                    .route("/api/v1/config", get(config))
-                    .route("/api/v1/plugins", get(plugin_catalog))
-                    .route("/api/v1/plugins/{plugin_id}", get(plugin_descriptor))
-                    .route("/api/v1/repositories", get(empty_repositories))
-                    .route("/api/v1/store/catalog", get(empty_store))
-                    .route("/ws/v1/session", get(session_socket))
-                    .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_asset))
-                    .fallback(get(static_asset))
-                    .with_state(state);
+                let app = router(state);
                 let listener = tokio::net::TcpListener::from_std(listener)
                     .expect("adopt RackForge Desktop Web listener");
-                if let Err(error) = axum::serve(listener, app).await {
-                    eprintln!("RACKFORGE_DESKTOP_WEB_ERROR {error}");
+                tokio::select! {
+                    result = axum::serve(listener, app) => {
+                        if let Err(error) = result {
+                            eprintln!("RACKFORGE_DESKTOP_WEB_ERROR {error}");
+                        }
+                    }
+                    _ = shutdown_receiver => {}
                 }
             });
         })?;
-    Ok(())
+    Ok(RunningServer {
+        shutdown: Some(shutdown),
+        thread: Some(thread),
+    })
+}
+
+fn router(state: WebState) -> Router {
+    Router::new()
+        .route("/api/v1/health", get(health))
+        .route("/api/v1/auth/status", get(auth_status))
+        .route("/api/v1/config", get(config))
+        .route("/api/v1/plugins", get(plugin_catalog))
+        .route("/api/v1/plugins/{plugin_id}", get(plugin_descriptor))
+        .route("/api/v1/repositories", get(empty_repositories))
+        .route("/api/v1/store/catalog", get(empty_store))
+        .route("/ws/v1/session", get(session_socket))
+        .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_asset))
+        .fallback(get(static_asset))
+        .with_state(state)
 }
 
 async fn health() -> Json<Value> {
@@ -125,10 +302,15 @@ async fn auth_status() -> Json<Value> {
 }
 
 async fn config(State(state): State<WebState>) -> Json<Value> {
+    let preferences = state
+        .public_server
+        .read()
+        .expect("Web settings lock poisoned")
+        .clone();
     Json(json!({
-        "enabled": true,
-        "access": if state.lan { "lan" } else { "local" },
-        "port": state.port
+        "enabled": preferences.enabled,
+        "access": if preferences.enabled { "lan" } else { "local" },
+        "port": preferences.port
     }))
 }
 
@@ -211,7 +393,11 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
     while let Some(Ok(message)) = receiver.next().await {
         match message {
             Message::Text(text) => {
-                let response = serde_json::from_str::<ControlRequest>(&text)
+                let request = serde_json::from_str::<ControlRequest>(&text);
+                let sends_snapshot = request
+                    .as_ref()
+                    .is_ok_and(|request| matches!(request, ControlRequest::Dispatch { .. }));
+                let response = request
                     .map(|request| response_for(request, &state))
                     .unwrap_or_else(
                         |error| json!({"status":"gateway_error", "message":error.to_string()}),
@@ -220,6 +406,15 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
                     .send(Message::Text(response.to_string().into()))
                     .await
                     .is_err()
+                {
+                    break;
+                }
+                if sends_snapshot
+                    && response.get("status").and_then(Value::as_str) == Some("command_applied")
+                    && sender
+                        .send(Message::Text(snapshot_json(&state).into()))
+                        .await
+                        .is_err()
                 {
                     break;
                 }
@@ -253,6 +448,25 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
                 events: Vec::new(),
             })
             .expect("events response")
+        }
+        request @ ControlRequest::Dispatch { .. } => {
+            let (response_sender, response_receiver) = mpsc::channel();
+            if state
+                .control
+                .send(DesktopControlCall {
+                    request,
+                    response: response_sender,
+                })
+                .is_err()
+            {
+                return json!({"status":"error", "code":"unavailable", "message":"The Desktop runtime is shutting down."});
+            }
+            match response_receiver.recv_timeout(Duration::from_secs(2)) {
+                Ok(response) => serde_json::to_value(response).expect("control response"),
+                Err(_) => {
+                    json!({"status":"error", "code":"timeout", "message":"The Desktop runtime did not answer the command in time."})
+                }
+            }
         }
         _ => {
             json!({"status":"error", "code":"unavailable", "message":"This operation is not connected to the Desktop runtime yet."})
@@ -369,4 +583,101 @@ async fn static_asset(uri: axum::http::Uri) -> Response {
         .header(header::CACHE_CONTROL, "no-cache")
         .body(Body::from(asset.contents().to_vec()))
         .expect("valid embedded asset response")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rackforge_session_api::{
+        ClientId, CommandEnvelope, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, InstanceId,
+        Revision, SessionCommand, SessionId,
+    };
+
+    #[test]
+    fn network_http_server_is_disabled_by_default() {
+        let preferences = WebServerPreferences::default();
+        assert!(!preferences.enabled);
+        assert_eq!(preferences.port, 8787);
+        preferences.validate().unwrap();
+    }
+
+    #[test]
+    fn web_server_preferences_round_trip() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-desktop-web-settings-{}",
+            std::process::id()
+        ));
+        let path = root.join("config/web.toml");
+        let preferences = WebServerPreferences {
+            enabled: true,
+            port: 9123,
+            ..WebServerPreferences::default()
+        };
+        preferences.persist(&path).unwrap();
+        assert_eq!(
+            WebServerPreferences::load(&path).unwrap(),
+            Some(preferences)
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn privileged_http_ports_are_rejected() {
+        let preferences = WebServerPreferences {
+            port: 80,
+            ..WebServerPreferences::default()
+        };
+        assert!(preferences.validate().is_err());
+    }
+
+    #[test]
+    fn dispatches_program_changes_to_the_desktop_runtime() {
+        let (control, receiver) = control_channel();
+        let state = WebState {
+            session: Arc::new(RwLock::new(SessionState::new(
+                SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
+            ))),
+            legacy_plugins_root: PathBuf::new(),
+            plugin_store_root: None,
+            public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
+            control,
+        };
+        let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
+        let request = ControlRequest::Dispatch {
+            envelope: CommandEnvelope::new(
+                ClientId::new("test.desktop-web").unwrap(),
+                7,
+                SessionCommand::SelectSound {
+                    instance_id: instance_id.clone(),
+                    sound_id: "xp10.piano".into(),
+                },
+            ),
+        };
+        let responder = std::thread::spawn(move || {
+            let call = receiver.recv().unwrap();
+            assert!(matches!(
+                call.request,
+                ControlRequest::Dispatch {
+                    envelope: CommandEnvelope {
+                        command: SessionCommand::SelectSound { .. },
+                        ..
+                    }
+                }
+            ));
+            call.response
+                .send(ControlResponse::CommandApplied {
+                    client_id: ClientId::new("test.desktop-web").unwrap(),
+                    command_id: 7,
+                    revision: Revision::new(1),
+                    events: Vec::new(),
+                })
+                .unwrap();
+        });
+        let response = response_for(request, &state);
+        responder.join().unwrap();
+        assert_eq!(
+            response.get("status").and_then(Value::as_str),
+            Some("command_applied")
+        );
+    }
 }

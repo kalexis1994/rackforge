@@ -1,4 +1,5 @@
 use crate::desktop_audio::{AudioInventory, AudioPreferences};
+use crate::web::WebServerPreferences;
 use eframe::egui::{
     self, Align, Color32, ComboBox, Key, Layout, RichText, ScrollArea, Stroke, Vec2,
 };
@@ -7,23 +8,40 @@ pub enum AudioSettingsAction {
     None,
     Close,
     Apply(AudioPreferences),
+    ApplyWeb(WebServerPreferences),
     Rescan,
     TestNote,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum SettingsSection {
+    AudioMidi,
+    HttpServer,
 }
 
 pub struct AudioSettingsState {
     inventory: AudioInventory,
     applied: AudioPreferences,
     draft: AudioPreferences,
+    applied_web: WebServerPreferences,
+    draft_web: WebServerPreferences,
+    section: SettingsSection,
     notice: Option<(bool, String)>,
 }
 
 impl AudioSettingsState {
-    pub fn new(inventory: AudioInventory, preferences: AudioPreferences) -> Self {
+    pub fn new(
+        inventory: AudioInventory,
+        preferences: AudioPreferences,
+        web_preferences: WebServerPreferences,
+    ) -> Self {
         Self {
             inventory,
             applied: preferences.clone(),
             draft: preferences,
+            applied_web: web_preferences.clone(),
+            draft_web: web_preferences,
+            section: SettingsSection::AudioMidi,
             notice: None,
         }
     }
@@ -37,6 +55,12 @@ impl AudioSettingsState {
     pub fn applied(&mut self, preferences: AudioPreferences, message: String) {
         self.applied = preferences.clone();
         self.draft = preferences;
+        self.notice = Some((true, message));
+    }
+
+    pub fn web_applied(&mut self, preferences: WebServerPreferences, message: String) {
+        self.applied_web = preferences.clone();
+        self.draft_web = preferences;
         self.notice = Some((true, message));
     }
 
@@ -69,15 +93,13 @@ impl AudioSettingsState {
                             ui.horizontal(|ui| {
                                 ui.vertical(|ui| {
                                     ui.heading(
-                                        RichText::new("Audio & MIDI")
+                                        RichText::new("Settings")
                                             .size(30.0)
                                             .color(Color32::from_rgb(226, 242, 245)),
                                     );
                                     ui.label(
-                                        RichText::new(
-                                            "Configure the desktop audio engine and controllers",
-                                        )
-                                        .color(Color32::from_rgb(126, 151, 160)),
+                                        RichText::new("Configure RackForge Desktop")
+                                            .color(Color32::from_rgb(126, 151, 160)),
                                     );
                                 });
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -88,24 +110,54 @@ impl AudioSettingsState {
                             });
                             ui.add_space(18.0);
 
+                            ui.horizontal(|ui| {
+                                ui.selectable_value(
+                                    &mut self.section,
+                                    SettingsSection::AudioMidi,
+                                    "Audio & MIDI",
+                                );
+                                ui.selectable_value(
+                                    &mut self.section,
+                                    SettingsSection::HttpServer,
+                                    "HTTP Server",
+                                );
+                            });
+                            ui.separator();
+                            ui.add_space(10.0);
+
                             ScrollArea::vertical().show(ui, |ui| {
                                 ui.set_width(width);
-                                self.audio_card(ui);
-                                ui.add_space(14.0);
-                                self.midi_card(ui);
+                                match self.section {
+                                    SettingsSection::AudioMidi => {
+                                        self.audio_card(ui);
+                                        ui.add_space(14.0);
+                                        self.midi_card(ui);
+                                    }
+                                    SettingsSection::HttpServer => self.http_server_card(ui),
+                                }
                                 ui.add_space(14.0);
                                 self.status_card(ui);
                                 ui.add_space(18.0);
                                 ui.horizontal(|ui| {
-                                    if ui.button("Rescan devices").clicked() {
-                                        action = AudioSettingsAction::Rescan;
-                                    }
-                                    if ui.button("Test note").clicked() {
-                                        action = AudioSettingsAction::TestNote;
+                                    if self.section == SettingsSection::AudioMidi {
+                                        if ui.button("Rescan devices").clicked() {
+                                            action = AudioSettingsAction::Rescan;
+                                        }
+                                        if ui.button("Test note").clicked() {
+                                            action = AudioSettingsAction::TestNote;
+                                        }
                                     }
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        let valid = self.inventory.validate(&self.draft).is_ok();
-                                        let changed = self.draft != self.applied;
+                                        let (valid, changed) = match self.section {
+                                            SettingsSection::AudioMidi => (
+                                                self.inventory.validate(&self.draft).is_ok(),
+                                                self.draft != self.applied,
+                                            ),
+                                            SettingsSection::HttpServer => (
+                                                self.draft_web.validate().is_ok(),
+                                                self.draft_web != self.applied_web,
+                                            ),
+                                        };
                                         if ui
                                             .add_enabled(
                                                 valid && changed,
@@ -113,10 +165,26 @@ impl AudioSettingsState {
                                             )
                                             .clicked()
                                         {
-                                            action = AudioSettingsAction::Apply(self.draft.clone());
+                                            action = match self.section {
+                                                SettingsSection::AudioMidi => {
+                                                    AudioSettingsAction::Apply(self.draft.clone())
+                                                }
+                                                SettingsSection::HttpServer => {
+                                                    AudioSettingsAction::ApplyWeb(
+                                                        self.draft_web.clone(),
+                                                    )
+                                                }
+                                            };
                                         }
                                         if changed && ui.button("Discard changes").clicked() {
-                                            self.draft = self.applied.clone();
+                                            match self.section {
+                                                SettingsSection::AudioMidi => {
+                                                    self.draft = self.applied.clone()
+                                                }
+                                                SettingsSection::HttpServer => {
+                                                    self.draft_web = self.applied_web.clone()
+                                                }
+                                            }
                                             self.notice = None;
                                         }
                                     });
@@ -238,6 +306,29 @@ impl AudioSettingsState {
                         }
                     });
             });
+            ui.add_space(6.0);
+            setting_row(ui, "Output gain", |ui| {
+                ComboBox::from_id_salt("audio-output-gain")
+                    .selected_text(format!("{:+} dB", self.draft.output_gain_db))
+                    .width(180.0)
+                    .show_ui(ui, |ui| {
+                        for gain_db in [0, 3, 6, 9, 12] {
+                            ui.selectable_value(
+                                &mut self.draft.output_gain_db,
+                                gain_db,
+                                format!("{gain_db:+} dB"),
+                            );
+                        }
+                    });
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(160.0);
+                ui.label(
+                    RichText::new("Applied only by Desktop; peaks are protected from digital overflow.")
+                        .small()
+                        .color(Color32::from_rgb(146, 157, 163)),
+                );
+            });
             if let Some(output) = output {
                 ui.add_space(8.0);
                 ui.label(
@@ -278,6 +369,46 @@ impl AudioSettingsState {
                     }
                 }
             }
+        });
+    }
+
+    fn http_server_card(&mut self, ui: &mut egui::Ui) {
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.heading(RichText::new("HTTP server").color(accent()));
+            ui.label(
+                RichText::new(
+                    "Publish the RackForge workspace to other devices on this network",
+                )
+                .small()
+                .color(Color32::from_rgb(126, 151, 160)),
+            );
+            ui.add_space(12.0);
+            ui.checkbox(&mut self.draft_web.enabled, "Enable HTTP server");
+            ui.add_space(8.0);
+            ui.add_enabled_ui(self.draft_web.enabled, |ui| {
+                setting_row(ui, "Port", |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.draft_web.port)
+                            .range(1024..=u16::MAX)
+                            .speed(1),
+                    );
+                });
+            });
+            ui.add_space(8.0);
+            let message = if self.draft_web.enabled {
+                format!(
+                    "RackForge will listen on all network interfaces at port {}. Only enable this on a trusted network.",
+                    self.draft_web.port
+                )
+            } else {
+                "Disabled by default. The embedded desktop interface continues to work through its private local connection.".into()
+            };
+            ui.label(
+                RichText::new(message)
+                    .small()
+                    .color(Color32::from_rgb(146, 157, 163)),
+            );
         });
     }
 

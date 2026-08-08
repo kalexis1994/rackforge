@@ -17,6 +17,7 @@ use eframe::egui::{
     self, Align, Align2, Color32, FontId, Key, Layout, Pos2, Rect, RichText, Sense, Stroke,
     StrokeKind, Vec2,
 };
+use rackforge_control_api::{ControlErrorCode, ControlRequest, ControlResponse};
 use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage};
 use rackforge_plugin_api::PluginKind;
 use rackforge_repository::{
@@ -24,8 +25,8 @@ use rackforge_repository::{
     install_local_archive,
 };
 use rackforge_session_api::{
-    DEFAULT_LIVE_SESSION_ID, InstanceId, PluginInstanceState, Revision, SessionId, SessionState,
-    SoundSummary,
+    CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId, PluginInstanceState, Revision,
+    SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SessionId, SessionState, SoundSummary,
 };
 use rackforge_surface_api::SurfaceMode;
 use rackforge_surface_runtime::{
@@ -83,8 +84,7 @@ impl LittleGeometry {
 
 #[derive(Clone, Debug)]
 struct Options {
-    port: u16,
-    lan: bool,
+    web_preferences: web::WebServerPreferences,
     rackforge_root: PathBuf,
     plugins_root: PathBuf,
     plugin_store_root: Option<PathBuf>,
@@ -94,7 +94,7 @@ struct Options {
 
 #[derive(Debug)]
 struct CliOptions {
-    port: u16,
+    port: Option<u16>,
     lan: bool,
     rackforge_root: Option<PathBuf>,
     plugins_root: Option<PathBuf>,
@@ -105,8 +105,7 @@ struct CliOptions {
 enum Startup {
     Ready(Options),
     FirstStart {
-        port: u16,
-        lan: bool,
+        web_preferences: web::WebServerPreferences,
         default_root: PathBuf,
         executable_directory: PathBuf,
         install_archives: Vec<PathBuf>,
@@ -116,8 +115,7 @@ enum Startup {
 enum AppMode {
     Setup {
         state: Box<setup::SetupState>,
-        port: u16,
-        lan: bool,
+        web_preferences: web::WebServerPreferences,
         install_archives: Vec<PathBuf>,
     },
     Desktop(Box<DesktopApp>),
@@ -275,6 +273,10 @@ struct DesktopApp {
     button_down: [Option<Instant>; 4],
     keyboard_down: [Option<Instant>; 4],
     web_url: String,
+    web_servers: web::DesktopWebServers,
+    web_control: Receiver<web::DesktopControlCall>,
+    web_preferences: web::WebServerPreferences,
+    web_config_path: PathBuf,
     status: String,
     plugins: Vec<DesktopPlugin>,
     options: Options,
@@ -288,7 +290,12 @@ struct DesktopApp {
 }
 
 impl DesktopApp {
-    fn new(session: Arc<RwLock<SessionState>>, options: &Options) -> Result<Self> {
+    fn new(
+        session: Arc<RwLock<SessionState>>,
+        options: &Options,
+        web_servers: web::DesktopWebServers,
+        web_control: Receiver<web::DesktopControlCall>,
+    ) -> Result<Self> {
         let (plugins, mut warnings) = load_desktop_plugins(options)?;
         #[cfg(windows)]
         let audio_config_path = options.rackforge_root.join("config/audio.toml");
@@ -384,12 +391,17 @@ impl DesktopApp {
             )
         };
 
+        let web_url = web_servers.local_url().to_owned();
         Ok(Self {
             menu,
             session,
             button_down: [None; 4],
             keyboard_down: [None; 4],
-            web_url: format!("http://127.0.0.1:{}", options.port),
+            web_url,
+            web_servers,
+            web_control,
+            web_preferences: options.web_preferences.clone(),
+            web_config_path: options.rackforge_root.join("config/web.toml"),
             status,
             plugins,
             options: options.clone(),
@@ -497,7 +509,34 @@ impl DesktopApp {
         Ok(audio_settings::AudioSettingsState::new(
             inventory,
             preferences,
+            self.web_preferences.clone(),
         ))
+    }
+
+    #[cfg(windows)]
+    fn apply_web_preferences(&mut self, preferences: web::WebServerPreferences) -> Result<String> {
+        let previous = self.web_preferences.clone();
+        self.web_servers.apply(preferences.clone())?;
+        if let Err(error) = preferences.persist(&self.web_config_path) {
+            let rollback = self.web_servers.apply(previous.clone());
+            return match rollback {
+                Ok(()) => Err(anyhow::anyhow!(
+                    "Could not save HTTP server settings: {error:#}. The previous settings were restored"
+                )),
+                Err(rollback) => Err(anyhow::anyhow!(
+                    "Could not save HTTP server settings: {error:#}. Restoring the previous server also failed: {rollback:#}"
+                )),
+            };
+        }
+        self.web_preferences = preferences.clone();
+        Ok(if preferences.enabled {
+            format!(
+                "HTTP server is available on the network at port {}",
+                preferences.port
+            )
+        } else {
+            "HTTP server is disabled".into()
+        })
     }
 
     #[cfg(windows)]
@@ -855,6 +894,155 @@ impl DesktopApp {
         }
     }
 
+    fn poll_web_control(&mut self) {
+        while let Ok(call) = self.web_control.try_recv() {
+            let response = self.handle_web_control(call.request);
+            let _ = call.response.send(response);
+        }
+    }
+
+    fn handle_web_control(&mut self, request: ControlRequest) -> ControlResponse {
+        let ControlRequest::Dispatch { envelope } = request else {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message: "This Desktop operation is not connected yet.".into(),
+                current_revision: None,
+            };
+        };
+        let current_revision = self.session.read().expect("session lock poisoned").revision;
+        if envelope.schema_version != SESSION_SCHEMA_VERSION {
+            return ControlResponse::Error {
+                code: ControlErrorCode::InvalidRequest,
+                message: format!(
+                    "unsupported session schema {}; expected {}",
+                    envelope.schema_version, SESSION_SCHEMA_VERSION
+                ),
+                current_revision: Some(current_revision),
+            };
+        }
+        if envelope
+            .expected_revision
+            .is_some_and(|expected| expected != current_revision)
+        {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Conflict,
+                message: format!(
+                    "session revision changed from {} to {}",
+                    envelope
+                        .expected_revision
+                        .expect("checked expected revision")
+                        .get(),
+                    current_revision.get()
+                ),
+                current_revision: Some(current_revision),
+            };
+        }
+
+        let client_id = envelope.client_id;
+        let command_id = envelope.command_id;
+        let command_ref = CommandRef {
+            client_id: client_id.clone(),
+            command_id,
+        };
+        let result = match envelope.command {
+            SessionCommand::SelectSound {
+                instance_id,
+                sound_id,
+            } => self.select_sound(&instance_id, &sound_id, Some(command_ref)),
+            other => Err(format!(
+                "Desktop does not support this command yet: {other:?}"
+            )),
+        };
+        match result {
+            Ok(events) => {
+                let revision = self.session.read().expect("session lock poisoned").revision;
+                ControlResponse::CommandApplied {
+                    client_id,
+                    command_id,
+                    revision,
+                    events,
+                }
+            }
+            Err(message) => ControlResponse::Error {
+                code: ControlErrorCode::Rejected,
+                message,
+                current_revision: Some(
+                    self.session.read().expect("session lock poisoned").revision,
+                ),
+            },
+        }
+    }
+
+    fn select_sound(
+        &mut self,
+        instance_id: &InstanceId,
+        sound_id: &str,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        {
+            let session = self.session.read().expect("session lock poisoned");
+            let instance = session
+                .instance(instance_id)
+                .ok_or_else(|| format!("Unknown plugin instance: {instance_id}"))?;
+            if !instance.sounds.iter().any(|sound| sound.id == sound_id) {
+                return Err(format!(
+                    "Unknown program {sound_id:?} for plugin instance {instance_id}"
+                ));
+            }
+        }
+        let index = self
+            .plugins
+            .iter()
+            .position(|plugin| plugin.instance_id == instance_id.as_str())
+            .ok_or_else(|| format!("Unknown plugin instance: {instance_id}"))?;
+        self.plugins[index]
+            .instance
+            .load_preset(sound_id)
+            .map_err(|error| format!("Could not load {sound_id}: {error:#}"))?;
+        self.plugins[index].selected_sound_id = Some(sound_id.to_owned());
+
+        let active = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .active_instance_id
+            .as_ref()
+            == Some(instance_id);
+        if active {
+            self.menu
+                .set_play_sounds(self.plugins[index].sounds.clone(), Some(sound_id));
+        }
+
+        let event = {
+            let mut session = self.session.write().expect("session lock poisoned");
+            let revision = session
+                .revision
+                .next()
+                .map_err(|error| format!("Could not advance session revision: {error}"))?;
+            let event = EventEnvelope {
+                schema_version: SESSION_SCHEMA_VERSION,
+                revision,
+                command,
+                event: SessionEvent::SoundSelected {
+                    instance_id: instance_id.clone(),
+                    sound_id: sound_id.to_owned(),
+                },
+            };
+            session.apply(&event)?;
+            event
+        };
+
+        self.status = format!("Loaded {sound_id}");
+        #[cfg(windows)]
+        if active
+            && let Some(audio) = &self.audio
+            && let Err(error) = audio.select_sound(instance_id.as_str(), sound_id)
+        {
+            self.status = format!("Loaded {sound_id}, but audio did not switch: {error:#}");
+        }
+        Ok(vec![event])
+    }
+
     fn apply_command(&mut self, command: MenuCommand) {
         match command {
             MenuCommand::SetActiveMode { mode } => {
@@ -906,45 +1094,13 @@ impl DesktopApp {
                     .read()
                     .expect("session lock poisoned")
                     .active_instance_id
-                    .as_ref()
-                    .map(|id| id.as_str().to_owned())
+                    .clone()
                 else {
                     self.status = "No active plugin".into();
                     return;
                 };
-                let Some(index) = self
-                    .plugins
-                    .iter()
-                    .position(|plugin| plugin.instance_id == active_id)
-                else {
-                    self.status = format!("Unknown active plugin instance: {active_id}");
-                    return;
-                };
-                match self.plugins[index].instance.load_preset(&id) {
-                    Ok(()) => {
-                        self.plugins[index].selected_sound_id = Some(id.clone());
-                        let sounds = self.plugins[index].sounds.clone();
-                        self.menu.set_play_sounds(sounds, Some(&id));
-                        let mut session = self.session.write().expect("session lock poisoned");
-                        if let Some(instance) = session
-                            .instances
-                            .iter_mut()
-                            .find(|instance| instance.instance_id.as_str() == active_id)
-                        {
-                            instance.selected_sound_id = Some(id.clone());
-                        }
-                        session.revision = Revision::new(session.revision.get().saturating_add(1));
-                        self.status = format!("Loaded {id}");
-                        drop(session);
-                        #[cfg(windows)]
-                        if let Some(audio) = &self.audio
-                            && let Err(error) = audio.select_sound(&active_id, &id)
-                        {
-                            self.status =
-                                format!("Loaded {id}, but audio did not switch: {error:#}");
-                        }
-                    }
-                    Err(error) => self.status = format!("Could not load {id}: {error:#}"),
+                if let Err(error) = self.select_sound(&active_id, &id, None) {
+                    self.status = error;
                 }
             }
             other => {
@@ -1222,7 +1378,7 @@ fn plugin_session_state(plugin: &DesktopPlugin) -> PluginInstanceState {
         ui_layouts: vec!["little@1".into()],
         config_available: plugin.config_available,
         banks: Vec::new(),
-            sounds: plugin
+        sounds: plugin
             .sounds
             .iter()
             .map(|sound| SoundSummary {
@@ -1231,8 +1387,8 @@ fn plugin_session_state(plugin: &DesktopPlugin) -> PluginInstanceState {
                 bank: Some(sound.bank.clone()),
                 detail: Some(sound.detail.clone()),
                 category: None,
-            tags: Vec::new(),
-            editable: sound.editable,
+                tags: Vec::new(),
+                editable: sound.editable,
             })
             .collect(),
         selected_sound_id: plugin.selected_sound_id.clone(),
@@ -1426,7 +1582,7 @@ fn parse_startup() -> Result<Startup> {
 
 fn parse_cli_options(arguments: impl IntoIterator<Item = String>) -> Result<CliOptions> {
     let mut options = CliOptions {
-        port: 8787,
+        port: None,
         lan: false,
         rackforge_root: None,
         plugins_root: None,
@@ -1437,14 +1593,15 @@ fn parse_cli_options(arguments: impl IntoIterator<Item = String>) -> Result<CliO
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--port" => {
-                options.port = arguments
+                let port = arguments
                     .next()
                     .context("--port requires a value")?
                     .parse()
                     .context("invalid --port")?;
-                if options.port < 1024 {
+                if port < 1024 {
                     bail!("--port must be in 1024..=65535");
                 }
+                options.port = Some(port);
             }
             "--lan" => options.lan = true,
             "--rackforge-root" => {
@@ -1494,18 +1651,32 @@ fn resolve_options(cli: CliOptions) -> Result<Startup> {
     } else if let Some(choice) = paths::load_choice(&default_root, &executable_directory)? {
         paths::DesktopPaths::initialize(choice.root)?
     } else {
+        let mut web_preferences = web::WebServerPreferences::default();
+        if let Some(port) = cli.port {
+            web_preferences.port = port;
+        }
+        if cli.lan {
+            web_preferences.enabled = true;
+        }
         return Ok(Startup::FirstStart {
-            port: cli.port,
-            lan: cli.lan,
+            web_preferences,
             default_root,
             executable_directory,
             install_archives: cli.install_archives,
         });
     };
 
+    let web_config_path = layout.root.join("config/web.toml");
+    let mut web_preferences =
+        web::WebServerPreferences::load(&web_config_path)?.unwrap_or_default();
+    if let Some(port) = cli.port {
+        web_preferences.port = port;
+    }
+    if cli.lan {
+        web_preferences.enabled = true;
+    }
     Ok(Startup::Ready(Options {
-        port: cli.port,
-        lan: cli.lan,
+        web_preferences,
         rackforge_root: layout.root,
         plugins_root: cli.plugins_root.unwrap_or(layout.legacy_plugins_root),
         plugin_store_root: (!uses_legacy_paths).then_some(layout.plugin_store_root),
@@ -1515,14 +1686,12 @@ fn resolve_options(cli: CliOptions) -> Result<Startup> {
 }
 
 fn options_from_layout(
-    port: u16,
-    lan: bool,
+    web_preferences: web::WebServerPreferences,
     layout: paths::DesktopPaths,
     install_archives: Vec<PathBuf>,
 ) -> Options {
     Options {
-        port,
-        lan,
+        web_preferences,
         rackforge_root: layout.root,
         plugins_root: layout.legacy_plugins_root,
         plugin_store_root: Some(layout.plugin_store_root),
@@ -1547,8 +1716,14 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
     let session = Arc::new(RwLock::new(SessionState::new(
         SessionId::new(DEFAULT_LIVE_SESSION_ID).expect("valid live session id"),
     )));
-    let app = DesktopApp::new(Arc::clone(&session), &options)?;
-    web::start(Arc::clone(&session), &options)?;
+    let (web_control_sender, web_control) = web::control_channel();
+    let web_servers = web::start(
+        Arc::clone(&session),
+        &options,
+        options.web_preferences.clone(),
+        web_control_sender,
+    )?;
+    let app = DesktopApp::new(Arc::clone(&session), &options, web_servers, web_control)?;
     Ok(app)
 }
 
@@ -1557,15 +1732,13 @@ impl RackForgeApp {
         let mode = match startup {
             Startup::Ready(options) => AppMode::Desktop(Box::new(create_desktop(options)?)),
             Startup::FirstStart {
-                port,
-                lan,
+                web_preferences,
                 default_root,
                 executable_directory,
                 install_archives,
             } => AppMode::Setup {
                 state: Box::new(setup::SetupState::new(default_root, executable_directory)),
-                port,
-                lan,
+                web_preferences,
                 install_archives,
             },
         };
@@ -1595,8 +1768,7 @@ impl eframe::App for RackForgeApp {
         let transition = match &mut self.mode {
             AppMode::Setup {
                 state,
-                port,
-                lan,
+                web_preferences,
                 install_archives,
             } => {
                 #[cfg(windows)]
@@ -1607,8 +1779,7 @@ impl eframe::App for RackForgeApp {
                 state.update(context).map(|result| {
                     result.and_then(|layout| {
                         let options = options_from_layout(
-                            *port,
-                            *lan,
+                            web_preferences.clone(),
                             layout,
                             std::mem::take(install_archives),
                         );
@@ -1619,6 +1790,8 @@ impl eframe::App for RackForgeApp {
             AppMode::Desktop(app) => {
                 #[cfg(windows)]
                 app.poll_audio_error();
+                app.poll_web_control();
+                context.request_repaint_after(Duration::from_millis(16));
                 let mut install_plugin = false;
                 let mut reload_web = false;
                 let mut open_browser = false;
@@ -1744,6 +1917,20 @@ impl eframe::App for RackForgeApp {
                                 Ok(message) => {
                                     if let Some(settings) = self.audio_settings.as_mut() {
                                         settings.applied(preferences, message);
+                                    }
+                                }
+                                Err(error) => {
+                                    if let Some(settings) = self.audio_settings.as_mut() {
+                                        settings.error(format!("{error:#}"));
+                                    }
+                                }
+                            }
+                        }
+                        audio_settings::AudioSettingsAction::ApplyWeb(preferences) => {
+                            match app.apply_web_preferences(preferences.clone()) {
+                                Ok(message) => {
+                                    if let Some(settings) = self.audio_settings.as_mut() {
+                                        settings.web_applied(preferences, message);
                                     }
                                 }
                                 Err(error) => {
@@ -1889,7 +2076,7 @@ mod tests {
         ])
         .unwrap();
 
-        assert_eq!(parsed.port, 9123);
+        assert_eq!(parsed.port, Some(9123));
         assert!(parsed.lan);
         assert_eq!(parsed.rackforge_root, Some(PathBuf::from("D:\\RackForge")));
         assert_eq!(

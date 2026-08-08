@@ -22,6 +22,8 @@ const COMMAND_QUEUE_CAPACITY: usize = 64;
 const MAX_MIDI_EVENTS_PER_BLOCK: usize = 4_096;
 const COMMON_SAMPLE_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
 const COMMON_BUFFER_FRAMES: [u32; 8] = [32, 64, 128, 256, 512, 1_024, 2_048, 4_096];
+const DEFAULT_OUTPUT_GAIN_DB: i8 = 6;
+const MAX_OUTPUT_GAIN_DB: i8 = 12;
 
 pub struct VoiceSpec {
     pub instance_id: String,
@@ -37,6 +39,8 @@ pub struct AudioPreferences {
     pub output_device: String,
     pub sample_rate_hz: u32,
     pub buffer_frames: Option<u32>,
+    #[serde(default = "default_output_gain_db")]
+    pub output_gain_db: i8,
     pub midi_inputs: Vec<String>,
 }
 
@@ -156,6 +160,7 @@ impl AudioInventory {
             output_device: output.name.clone(),
             sample_rate_hz: output.default_sample_rate,
             buffer_frames: None,
+            output_gain_db: DEFAULT_OUTPUT_GAIN_DB,
             midi_inputs: self.midi_inputs.clone(),
         })
     }
@@ -201,6 +206,9 @@ impl AudioInventory {
                 "a {frames}-frame buffer is not supported by {:?}",
                 preferences.output_device
             );
+        }
+        if !(0..=MAX_OUTPUT_GAIN_DB).contains(&preferences.output_gain_db) {
+            bail!("output gain must be between 0 and {MAX_OUTPUT_GAIN_DB} dB");
         }
         Ok(())
     }
@@ -352,6 +360,7 @@ impl DesktopAudio {
             events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
             output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
             device_channels,
+            output_gain: db_to_amplitude(preferences.output_gain_db),
         };
         let stream = device
             .build_output_stream_raw(
@@ -381,8 +390,12 @@ impl DesktopAudio {
             |frames| format!("{frames} frames"),
         );
         let summary = format!(
-            "{} · {} · {} Hz · {buffer} · {} ch · MIDI: {midi_summary}",
-            preferences.driver, preferences.output_device, config.sample_rate.0, config.channels
+            "{} · {} · {} Hz · {buffer} · {} ch · {:+} dB · MIDI: {midi_summary}",
+            preferences.driver,
+            preferences.output_device,
+            config.sample_rate.0,
+            config.channels,
+            preferences.output_gain_db
         );
         println!("DESKTOP_AUDIO_READY {summary}");
         Ok(Self {
@@ -473,6 +486,7 @@ struct AudioProcessor {
     events: Vec<MidiEventV1>,
     output: Vec<f32>,
     device_channels: usize,
+    output_gain: f32,
 }
 
 impl AudioProcessor {
@@ -560,34 +574,47 @@ fn render_output(
 ) -> Result<()> {
     let frames = data.len() / processor.device_channels;
     let device_channels = processor.device_channels;
+    let output_gain = processor.output_gain;
     let rendered = processor.render(frames)?;
     match format {
-        SampleFormat::I8 => copy_samples::<i8>(data, rendered, device_channels),
-        SampleFormat::I16 => copy_samples::<i16>(data, rendered, device_channels),
-        SampleFormat::I24 => copy_samples::<cpal::I24>(data, rendered, device_channels),
-        SampleFormat::I32 => copy_samples::<i32>(data, rendered, device_channels),
-        SampleFormat::I64 => copy_samples::<i64>(data, rendered, device_channels),
-        SampleFormat::U8 => copy_samples::<u8>(data, rendered, device_channels),
-        SampleFormat::U16 => copy_samples::<u16>(data, rendered, device_channels),
-        SampleFormat::U32 => copy_samples::<u32>(data, rendered, device_channels),
-        SampleFormat::U64 => copy_samples::<u64>(data, rendered, device_channels),
-        SampleFormat::F32 => copy_samples::<f32>(data, rendered, device_channels),
-        SampleFormat::F64 => copy_samples::<f64>(data, rendered, device_channels),
+        SampleFormat::I8 => copy_samples::<i8>(data, rendered, device_channels, output_gain),
+        SampleFormat::I16 => copy_samples::<i16>(data, rendered, device_channels, output_gain),
+        SampleFormat::I24 => {
+            copy_samples::<cpal::I24>(data, rendered, device_channels, output_gain)
+        }
+        SampleFormat::I32 => copy_samples::<i32>(data, rendered, device_channels, output_gain),
+        SampleFormat::I64 => copy_samples::<i64>(data, rendered, device_channels, output_gain),
+        SampleFormat::U8 => copy_samples::<u8>(data, rendered, device_channels, output_gain),
+        SampleFormat::U16 => copy_samples::<u16>(data, rendered, device_channels, output_gain),
+        SampleFormat::U32 => copy_samples::<u32>(data, rendered, device_channels, output_gain),
+        SampleFormat::U64 => copy_samples::<u64>(data, rendered, device_channels, output_gain),
+        SampleFormat::F32 => copy_samples::<f32>(data, rendered, device_channels, output_gain),
+        SampleFormat::F64 => copy_samples::<f64>(data, rendered, device_channels, output_gain),
         _ => bail!("unsupported Windows sample format {format:?}"),
     }
 }
 
-fn copy_samples<T>(data: &mut cpal::Data, rendered: &[f32], device_channels: usize) -> Result<()>
+fn copy_samples<T>(
+    data: &mut cpal::Data,
+    rendered: &[f32],
+    device_channels: usize,
+    output_gain: f32,
+) -> Result<()>
 where
     T: SizedSample + FromSample<f32>,
 {
     let output = data
         .as_slice_mut::<T>()
         .context("Windows returned an audio buffer with the wrong sample type")?;
-    write_samples(output, rendered, device_channels)
+    write_samples(output, rendered, device_channels, output_gain)
 }
 
-fn write_samples<T>(output: &mut [T], rendered: &[f32], device_channels: usize) -> Result<()>
+fn write_samples<T>(
+    output: &mut [T],
+    rendered: &[f32],
+    device_channels: usize,
+    output_gain: f32,
+) -> Result<()>
 where
     T: SizedSample + FromSample<f32>,
 {
@@ -596,8 +623,8 @@ where
         bail!("Windows audio buffer changed length during rendering");
     }
     for frame in 0..frames {
-        let left = clean_sample(rendered[frame * 2]);
-        let right = clean_sample(rendered[frame * 2 + 1]);
+        let left = clean_sample(rendered[frame * 2] * output_gain);
+        let right = clean_sample(rendered[frame * 2 + 1] * output_gain);
         if device_channels == 1 {
             output[frame] = T::from_sample((left + right) * 0.5);
         } else {
@@ -610,6 +637,14 @@ where
         }
     }
     Ok(())
+}
+
+fn default_output_gain_db() -> i8 {
+    DEFAULT_OUTPUT_GAIN_DB
+}
+
+fn db_to_amplitude(db: i8) -> f32 {
+    10.0_f32.powf(f32::from(db) / 20.0)
 }
 
 fn clean_sample(sample: f32) -> f32 {
@@ -763,6 +798,7 @@ mod tests {
             output_device: "Speakers".into(),
             sample_rate_hz: 48_000,
             buffer_frames: Some(256),
+            output_gain_db: DEFAULT_OUTPUT_GAIN_DB,
             midi_inputs: vec!["Keyboard".into()],
         };
         let text = toml::to_string(&preferences).unwrap();
@@ -786,6 +822,7 @@ mod tests {
             output_device: "Test output".into(),
             sample_rate_hz: 48_000,
             buffer_frames: None,
+            output_gain_db: DEFAULT_OUTPUT_GAIN_DB,
             midi_inputs: vec!["Test MIDI".into()],
         };
         preferences.persist(&path).unwrap();
@@ -797,7 +834,28 @@ mod tests {
     fn stereo_is_mapped_to_multichannel_without_duplication() {
         let rendered = [0.25, -0.5, 0.75, -1.0];
         let mut target = vec![0.0_f32; 8];
-        write_samples(&mut target, &rendered, 4).unwrap();
+        write_samples(&mut target, &rendered, 4, 1.0).unwrap();
         assert_eq!(target, [0.25, -0.5, 0.0, 0.0, 0.75, -1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn output_gain_is_applied_and_clamped() {
+        let rendered = [0.25, -0.75];
+        let mut target = [0.0_f32; 2];
+        write_samples(&mut target, &rendered, 2, 2.0).unwrap();
+        assert_eq!(target, [0.5, -1.0]);
+    }
+
+    #[test]
+    fn legacy_preferences_receive_the_desktop_gain_default() {
+        let text = r#"
+schema_version = 1
+driver = "WASAPI"
+output_device = "Speakers"
+sample_rate_hz = 48000
+midi_inputs = []
+"#;
+        let preferences: AudioPreferences = toml::from_str(text).unwrap();
+        assert_eq!(preferences.output_gain_db, DEFAULT_OUTPUT_GAIN_DB);
     }
 }

@@ -1517,8 +1517,8 @@ function SettingsPage() {
             <span className="card-kicker">Web interface</span>
             <h2>Local access</h2>
             <p>
-              Where the interface can be reached from. Anything beyond this
-              machine asks for the access PIN.
+              Where the interface can be reached from. Only publish RackForge
+              on a network you trust.
             </p>
           </div>
           <dl className="settings-values">

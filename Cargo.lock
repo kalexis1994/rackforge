@@ -3494,6 +3494,7 @@ dependencies = [
  "rackforge-core",
  "rackforge-plugin-api",
  "rackforge-repository",
+ "serde_json",
 ]
 
 [[package]]

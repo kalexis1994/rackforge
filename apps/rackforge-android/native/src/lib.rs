@@ -1,11 +1,11 @@
 use anyhow::{Context, Result, bail};
 use jni::JNIEnv;
 use jni::objects::{JByteArray, JClass, JString};
-use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint};
+use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
 use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage};
-use rackforge_plugin_api::abi::MidiEventV1;
+use rackforge_plugin_api::{PresetCatalog, WebSurfaceKind, abi::MidiEventV1};
 use rackforge_repository::install_local_archive;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{CStr, c_char, c_void};
 use std::path::PathBuf;
 use std::ptr;
@@ -18,6 +18,7 @@ const MAX_FRAMES: u32 = 4_096;
 
 static ENGINE: OnceLock<Mutex<Option<AndroidEngine>>> = OnceLock::new();
 static AUDIO: OnceLock<Mutex<Option<NativeAudioOutput>>> = OnceLock::new();
+static MIDI_QUEUE: OnceLock<Mutex<VecDeque<MidiEventV1>>> = OnceLock::new();
 static OUTPUT_GAIN_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
 
 const AAUDIO_OK: i32 = 0;
@@ -75,6 +76,13 @@ unsafe extern "C" {
 struct AndroidEngine {
     instance: SendablePluginInstance,
     midi: Vec<MidiEventV1>,
+    plugin_id: String,
+    plugin_name: String,
+    plugin_version: String,
+    package_root: PathBuf,
+    web_entry: String,
+    catalog: PresetCatalog,
+    selected_sound_id: String,
 }
 
 struct SendablePluginInstance(PluginInstance<'static>);
@@ -106,9 +114,7 @@ impl NativeAudioOutput {
                     AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
                 )
                 .map(|stream| Self { stream })
-                .with_context(|| {
-                    format!("exclusive AAudio open also failed: {exclusive_error:#}")
-                }),
+                .with_context(|| format!("exclusive AAudio open also failed: {exclusive_error:#}")),
             },
             1 => open_aaudio_stream(
                 device_id,
@@ -147,6 +153,21 @@ impl AndroidEngine {
             .context("installing the portable plugin")?;
         let package = PluginPackage::open(&installed.path)
             .with_context(|| format!("opening {}", installed.path.display()))?;
+        let manifest = package.manifest();
+        let plugin_id = manifest.id.clone();
+        let plugin_name = manifest.name.clone();
+        let plugin_version = manifest.version.clone();
+        let web_entry = manifest
+            .web_ui
+            .as_ref()
+            .and_then(|web| {
+                web.surfaces
+                    .iter()
+                    .find(|surface| surface.kind == WebSurfaceKind::Play)
+            })
+            .map(|surface| surface.entry.clone())
+            .context("plugin does not expose a PLAY Web surface")?;
+        let package_root = package.root().to_path_buf();
         // SAFETY: Android installs only validated, sandboxed wasm-v1 packages.
         let plugin =
             unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), Some(&data_root)) }
@@ -154,32 +175,82 @@ impl AndroidEngine {
         let plugin: &'static LoadedPlugin = Box::leak(Box::new(plugin));
         let mut instance = plugin.create_instance()?;
         let catalog = instance.preset_catalog()?;
-        let preset = catalog
+        let selected_sound_id = catalog
             .presets
             .first()
             .or_else(|| plugin.presets().presets.first())
-            .context("plugin exposes no playable preset")?;
+            .context("plugin exposes no playable preset")?
+            .id
+            .clone();
         instance
-            .load_preset(&preset.id)
-            .with_context(|| format!("loading preset {:?}", preset.id))?;
+            .load_preset(&selected_sound_id)
+            .with_context(|| format!("loading preset {selected_sound_id:?}"))?;
         instance.activate(SAMPLE_RATE, MAX_FRAMES, 0, 2)?;
         Ok(Self {
             instance: SendablePluginInstance(instance),
             midi: Vec::with_capacity(256),
+            plugin_id,
+            plugin_name,
+            plugin_version,
+            package_root,
+            web_entry,
+            catalog,
+            selected_sound_id,
         })
     }
 
-    fn push_midi(&mut self, bytes: &[u8]) {
-        if bytes.is_empty() || bytes.len() > 3 || self.midi.len() >= 256 {
-            return;
+    fn select_sound(&mut self, sound_id: &str) -> Result<()> {
+        if !self
+            .catalog
+            .presets
+            .iter()
+            .any(|preset| preset.id == sound_id)
+        {
+            bail!("plugin does not expose sound {sound_id:?}");
         }
-        let mut data = [0_u8; 3];
-        data[..bytes.len()].copy_from_slice(bytes);
-        self.midi.push(MidiEventV1 {
-            frame: 0,
-            length: bytes.len() as u8,
-            data,
-        });
+        self.instance.0.load_preset(sound_id)?;
+        self.selected_sound_id = sound_id.to_owned();
+        Ok(())
+    }
+
+    fn web_context_json(&self) -> String {
+        let sounds = self
+            .catalog
+            .presets
+            .iter()
+            .map(|preset| {
+                serde_json::json!({
+                    "id": preset.id,
+                    "name": preset.name,
+                    "bank": preset.bank,
+                    "detail": preset.description,
+                    "editable": preset.editable,
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "protocol": "rackforge.plugin.web@1",
+            "kind": "context",
+            "surface": "play",
+            "instance": {
+                "instance_id": "android-main",
+                "plugin_id": self.plugin_id,
+                "plugin_name": self.plugin_name,
+                "plugin_version": self.plugin_version,
+                "ui_layouts": ["little@1"],
+                "config_available": false,
+                "sounds": sounds,
+                "selected_sound_id": self.selected_sound_id,
+            },
+            "program_draft": null,
+            "audition": null,
+            "host": {
+                "active_mode": "play",
+                "master_level": 0,
+                "master_pan": 0,
+            }
+        })
+        .to_string()
     }
 
     fn render(&mut self, frames: u32, output: &mut [f32]) -> Result<()> {
@@ -188,6 +259,9 @@ impl AndroidEngine {
         }
         if output.len() != frames as usize * 2 {
             bail!("invalid Android stereo output buffer");
+        }
+        if let Ok(mut queue) = midi_queue().try_lock() {
+            self.midi.extend(queue.drain(..));
         }
         self.instance
             .0
@@ -203,6 +277,25 @@ fn engine() -> &'static Mutex<Option<AndroidEngine>> {
 
 fn audio() -> &'static Mutex<Option<NativeAudioOutput>> {
     AUDIO.get_or_init(|| Mutex::new(None))
+}
+
+fn midi_queue() -> &'static Mutex<VecDeque<MidiEventV1>> {
+    MIDI_QUEUE.get_or_init(|| Mutex::new(VecDeque::with_capacity(1024)))
+}
+
+fn enqueue_midi(bytes: &[u8]) {
+    if bytes.is_empty() || bytes.len() > 3 {
+        return;
+    }
+    let mut data = [0_u8; 3];
+    data[..bytes.len()].copy_from_slice(bytes);
+    if let Ok(mut queue) = midi_queue().lock() {
+        queue.push_back(MidiEventV1 {
+            frame: 0,
+            length: bytes.len() as u8,
+            data,
+        });
+    }
 }
 
 fn aaudio_error(operation: &str, result: i32) -> anyhow::Error {
@@ -319,6 +412,10 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_initializeEngine(
         let store_root = PathBuf::from(java_string(&mut env, store_root)?);
         let data_root = PathBuf::from(java_string(&mut env, data_root)?);
         let candidate = AndroidEngine::open(&bytes, store_root, data_root)?;
+        midi_queue()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI queue lock poisoned"))?
+            .clear();
         *engine()
             .lock()
             .map_err(|_| anyhow::anyhow!("engine lock poisoned"))? = Some(candidate);
@@ -339,11 +436,78 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_sendMidi(
     _class: JClass,
     message: JByteArray,
 ) {
-    if let Ok(bytes) = env.convert_byte_array(&message)
-        && let Ok(mut guard) = engine().lock()
-        && let Some(engine) = guard.as_mut()
-    {
-        engine.push_midi(&bytes);
+    if let Ok(bytes) = env.convert_byte_array(&message) {
+        enqueue_midi(&bytes);
+    }
+}
+
+fn engine_string(env: &mut JNIEnv<'_>, value: impl FnOnce(&AndroidEngine) -> String) -> jstring {
+    let result = (|| -> Result<String> {
+        let guard = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+        let engine = guard
+            .as_ref()
+            .context("RackForge engine is not initialized")?;
+        Ok(value(engine))
+    })();
+    match result.and_then(|value| Ok(env.new_string(value)?.into_raw())) {
+        Ok(value) => value,
+        Err(error) => {
+            report(env, error);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginPackageRoot(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    engine_string(&mut env, |engine| {
+        engine.package_root.to_string_lossy().into_owned()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginWebEntry(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    engine_string(&mut env, |engine| engine.web_entry.clone())
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginWebContext(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    engine_string(&mut env, AndroidEngine::web_context_json)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_selectPluginSound(
+    mut env: JNIEnv,
+    _class: JClass,
+    sound_id: JString,
+) -> jboolean {
+    let result = (|| -> Result<()> {
+        let sound_id = java_string(&mut env, sound_id)?;
+        let mut guard = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+        guard
+            .as_mut()
+            .context("RackForge engine is not initialized")?
+            .select_sound(&sound_id)
+    })();
+    match result {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
     }
 }
 

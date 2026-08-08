@@ -23,6 +23,10 @@ import android.media.midi.MidiReceiver;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.webkit.JavascriptInterface;
+import android.webkit.MimeTypeMap;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -43,6 +47,7 @@ import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -53,6 +58,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import org.json.JSONObject;
+
 public final class MainActivity extends Activity {
     static {
         System.loadLibrary("rackforge_android");
@@ -60,9 +67,6 @@ public final class MainActivity extends Activity {
 
     private static final int SAMPLE_RATE = 48_000;
     private WebView webView;
-    private Button startButton;
-    private Button testButton;
-    private Button audioStatusButton;
     private Spinner audioOutputSpinner;
     private volatile boolean audioRunning;
     private volatile int selectedAudioDeviceId;
@@ -76,8 +80,15 @@ public final class MainActivity extends Activity {
     private AudioDeviceCallback audioDeviceCallback;
     private SharedPreferences preferences;
     private String currentPage = "rack";
+    private volatile boolean engineStarting;
+    private File pluginPackageRoot;
+    private String pluginWebEntry;
 
     private static native boolean initializeEngine(byte[] archive, String storeRoot, String dataRoot);
+    private static native String pluginPackageRoot();
+    private static native String pluginWebEntry();
+    private static native String pluginWebContext();
+    private static native boolean selectPluginSound(String soundId);
     private static native void sendMidi(byte[] message);
     private static native boolean startNativeAudio(int deviceId, int latencyMode);
     private static native void setNativeOutputGain(int gainDb);
@@ -93,58 +104,26 @@ public final class MainActivity extends Activity {
         setNativeOutputGain(outputGainDb);
         webView = new WebView(this);
         WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(false);
+        settings.setJavaScriptEnabled(true);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
         settings.setDomStorageEnabled(false);
         webView.setBackgroundColor(0xFF050F16);
-        webView.setWebViewClient(new WebViewClient());
-
-        startButton = button("Start RF-XP10 engine");
-        testButton = button("Play C4 test");
-        testButton.setEnabled(false);
-        startButton.setOnClickListener(view -> startEngine());
-        testButton.setOnClickListener(view -> playTestNote());
+        webView.addJavascriptInterface(new PluginWebBridge(), "RackForgeAndroid");
+        webView.setWebViewClient(pluginWebViewClient());
 
         audioOutputSpinner = new Spinner(this);
-
-        LinearLayout audioControls = new LinearLayout(this);
-        audioControls.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        audioStatusButton = toolbarButton("Audio · System default", view -> showSettingsDialog());
-        audioStatusButton.setGravity(android.view.Gravity.START | android.view.Gravity.CENTER_VERTICAL);
-        audioControls.addView(audioStatusButton, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        LinearLayout controls = new LinearLayout(this);
-        controls.setOrientation(LinearLayout.HORIZONTAL);
-        controls.setPadding(18, 10, 18, 18);
-        controls.setBackgroundColor(0xFF050F16);
-        controls.addView(startButton, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        controls.addView(testButton, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-
-        LinearLayout bottom = new LinearLayout(this);
-        bottom.setOrientation(LinearLayout.VERTICAL);
-        bottom.setBackgroundColor(0xFF050F16);
-        bottom.setOnApplyWindowInsetsListener((view, insets) -> {
-            int navigationBottom = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                    ? insets.getInsets(WindowInsets.Type.navigationBars()).bottom
-                    : insets.getSystemWindowInsetBottom();
-            view.setPadding(0, 0, 0, navigationBottom);
-            return insets;
-        });
-        bottom.addView(audioControls, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        bottom.addView(controls, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(0xFF050F16);
         root.addView(buildTopBar(), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(webView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
-        root.addView(bottom, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(root);
         refreshAudioOutputs();
         registerAudioDeviceUpdates();
         showRack();
+        startEngine();
     }
 
     @Override
@@ -164,6 +143,116 @@ public final class MainActivity extends Activity {
         closeMidi();
         webView.destroy();
         super.onDestroy();
+    }
+
+    private WebViewClient pluginWebViewClient() {
+        return new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                return !"rackforge.local".equals(request.getUrl().getHost());
+            }
+
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                String path = request.getUrl().getPath();
+                if (pluginPackageRoot == null || path == null || !path.startsWith("/plugin/")) {
+                    return null;
+                }
+                try {
+                    String relative = path.substring("/plugin/".length());
+                    File root = pluginPackageRoot.getCanonicalFile();
+                    File asset = new File(root, relative).getCanonicalFile();
+                    if (!asset.getPath().startsWith(root.getPath() + File.separator) || !asset.isFile()) {
+                        return new WebResourceResponse("text/plain", "UTF-8", 404, "Not Found",
+                                java.util.Collections.emptyMap(),
+                                new java.io.ByteArrayInputStream(new byte[0]));
+                    }
+                    String extension = MimeTypeMap.getFileExtensionFromUrl(asset.getName());
+                    String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
+                    if (mime == null) mime = "application/octet-stream";
+                    return new WebResourceResponse(mime, "UTF-8", new FileInputStream(asset));
+                } catch (Exception error) {
+                    Log.e("RackForge", "Could not serve plugin Web asset", error);
+                    return null;
+                }
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                if (url.startsWith("https://rackforge.local/plugin/")) {
+                    view.scrollTo(0, 0);
+                    injectPluginBridge();
+                }
+            }
+        };
+    }
+
+    private void injectPluginBridge() {
+        String script = "(function(){"
+                + "if(!window.__rackforgeAndroidBridge){"
+                + "window.__rackforgeAndroidBridge=true;"
+                + "window.addEventListener('message',function(event){"
+                + "var data=event.data;"
+                + "if(data&&data.protocol==='rackforge.plugin.web@1'&&data.kind==='request'){"
+                + "RackForgeAndroid.postMessage(JSON.stringify(data));"
+                + "}});"
+                + "}"
+                + "window.postMessage(" + pluginWebContext() + ",window.location.origin);"
+                + "})();";
+        webView.evaluateJavascript(script, null);
+    }
+
+    private void sendPluginMessage(String json) {
+        webView.evaluateJavascript(
+                "window.postMessage(" + json + ",window.location.origin);", null);
+    }
+
+    private final class PluginWebBridge {
+        @JavascriptInterface
+        public void postMessage(String payload) {
+            try {
+                JSONObject request = new JSONObject(payload);
+                if (!"request".equals(request.optString("kind"))) return;
+                String requestId = request.getString("request_id");
+                String method = request.optString("method");
+                if (!"plugin.select_sound".equals(method)) {
+                    respondToPlugin(requestId, false, "Method is not available on Android.");
+                    return;
+                }
+                String soundId = request.getJSONObject("params").getString("sound_id");
+                new Thread(() -> {
+                    try {
+                        if (!selectPluginSound(soundId)) {
+                            throw new IllegalStateException("The plugin rejected the selected sound");
+                        }
+                        Log.i("RackForge", "Selected plugin sound " + soundId);
+                        runOnUiThread(() -> {
+                            respondToPlugin(requestId, true, null);
+                            sendPluginMessage(pluginWebContext());
+                        });
+                    } catch (Throwable error) {
+                        Log.e("RackForge", "Plugin Web command failed", error);
+                        runOnUiThread(() -> respondToPlugin(requestId, false, error.getMessage()));
+                    }
+                }, "rackforge-plugin-web-command").start();
+            } catch (Throwable error) {
+                Log.e("RackForge", "Invalid plugin Web message", error);
+            }
+        }
+    }
+
+    private void respondToPlugin(String requestId, boolean ok, String error) {
+        try {
+            JSONObject response = new JSONObject();
+            response.put("protocol", "rackforge.plugin.web@1");
+            response.put("kind", "response");
+            response.put("request_id", requestId);
+            response.put("ok", ok);
+            if (error != null) response.put("error", error);
+            sendPluginMessage(response.toString());
+        } catch (Exception exception) {
+            Log.e("RackForge", "Could not answer plugin Web message", exception);
+        }
     }
 
     private LinearLayout buildTopBar() {
@@ -332,7 +421,7 @@ public final class MainActivity extends Activity {
         PopupMenu menu = new PopupMenu(this, anchor);
         menu.getMenu().add("Install .rfplugin…").setEnabled(false);
         menu.getMenu().add("Installed plugins").setOnMenuItemClickListener(item -> {
-            Toast.makeText(this, "RF-XP10 0.1.1", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "RF-XP10 0.1.3", Toast.LENGTH_SHORT).show();
             return true;
         });
         menu.show();
@@ -359,30 +448,30 @@ public final class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("About RackForge")
-                .setMessage("RackForge Android 0.1.0 prototype\nPortable RF-XP10 0.1.1\nRust + Wasmtime + AAudio")
+                .setMessage("RackForge Android 0.1.0 prototype\nPortable RF-XP10 0.1.3\nRust + Wasmtime + AAudio")
                 .setPositiveButton("Close", null)
                 .show();
     }
 
     private void showRack() {
         currentPage = "rack";
-        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        MidiManager midiManager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
-        int midiCount = midiManager == null ? 0 : midiManager.getDevices().length;
+        if (audioRunning && pluginWebEntry != null) {
+            webView.loadUrl("https://rackforge.local/plugin/" + pluginWebEntry);
+            return;
+        }
+        showEngineState("Loading RF-XP10", "Installing the portable plugin and starting AAudio…");
+    }
+
+    private void showEngineState(String title, String detail) {
         String body = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
                 + "<style>" + css() + "</style></head><body><main>"
-                + "<div class='eyebrow'>RACKFORGE ANDROID</div><h1>RF-XP10</h1>"
-                + "<p class='lead'>Portable instrument host · 48 kHz native AAudio</p>"
-                + card("Current program", row("Plugin", "RF-XP10 0.1.1")
-                        + row("Preset", "factory.tone.000")
-                        + "<div class='ok'>" + (audioRunning ? "Engine running" : "Ready to start") + "</div>")
-                + card("Connections", row("Audio output", selectedAudioOutputLabel())
-                        + row("MIDI devices", Integer.toString(midiCount))
-                        + row("Latency mode", latencyLabel(latencyMode))
-                        + row("Output gain", String.format(Locale.ROOT, "+%d dB", outputGainDb)))
-                + "<p class='foot'>Use Settings for audio and MIDI. Technical inventory is available under View → Diagnostics.</p>"
+                + "<div class='eyebrow'>RACKFORGE ANDROID</div><h1>" + escape(title) + "</h1>"
+                + "<p class='lead'>" + escape(detail) + "</p>"
+                + card("Engine", "<div class='ok'>Automatic startup</div>"
+                        + row("Audio output", selectedAudioOutputLabel())
+                        + row("Latency mode", latencyLabel(latencyMode)))
                 + "</main></body></html>";
-        webView.loadDataWithBaseURL("https://rackforge.local/", body, "text/html", "UTF-8", null);
+        webView.loadDataWithBaseURL("https://rackforge.local/status/", body, "text/html", "UTF-8", null);
     }
 
     private void showDiagnostics() {
@@ -410,6 +499,13 @@ public final class MainActivity extends Activity {
         subtitle.setTextSize(13);
         subtitle.setPadding(0, dp(2), 0, dp(14));
         content.addView(subtitle);
+
+        Button refreshDevices = toolbarButton("↻  Refresh devices", view -> {});
+        refreshDevices.setTextColor(0xFF5CE2F5);
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
+        refreshParams.bottomMargin = dp(14);
+        content.addView(refreshDevices, refreshParams);
 
         LinearLayout audioCard = settingsCard();
         content.addView(audioCard);
@@ -501,6 +597,12 @@ public final class MainActivity extends Activity {
                     showRack();
                 })
                 .create();
+        refreshDevices.setOnClickListener(view -> {
+            refreshAudioOutputs();
+            dialog.dismiss();
+            showSettingsDialog();
+            Toast.makeText(this, "Audio and MIDI devices refreshed", Toast.LENGTH_SHORT).show();
+        });
         dialog.setOnShowListener(unused -> {
             Window window = dialog.getWindow();
             if (window != null) {
@@ -588,8 +690,8 @@ public final class MainActivity extends Activity {
     }
 
     private void startEngine() {
-        startButton.setEnabled(false);
-        startButton.setText("Loading RF-XP10…");
+        if (engineStarting || audioRunning) return;
+        engineStarting = true;
         Thread loader = new Thread(() -> {
             try {
                 byte[] archive = readAsset("plugins/rf-xp10.rfplugin");
@@ -608,19 +710,21 @@ public final class MainActivity extends Activity {
                 if (!initializeEngine(archive, store.getAbsolutePath(), data.getAbsolutePath())) {
                     throw new IllegalStateException("Native engine rejected initialization");
                 }
+                pluginPackageRoot = new File(pluginPackageRoot());
+                pluginWebEntry = pluginWebEntry();
                 startAudio();
                 openMidiInputs();
                 runOnUiThread(() -> {
-                    startButton.setText("RF-XP10 running");
-                    testButton.setEnabled(true);
+                    engineStarting = false;
                     showRack();
-                    Toast.makeText(this, "RackForge audio is running at 48 kHz", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "RF-XP10 ready · 48 kHz", Toast.LENGTH_SHORT).show();
                 });
             } catch (Throwable error) {
                 Log.e("RackForge", "RF-XP10 engine initialization failed", error);
                 runOnUiThread(() -> {
-                    startButton.setEnabled(true);
-                    startButton.setText("Retry RF-XP10 engine");
+                    engineStarting = false;
+                    showEngineState("RF-XP10 could not start",
+                            error.getMessage() == null ? "Unknown engine error" : error.getMessage());
                     Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
                 });
             }
@@ -690,9 +794,6 @@ public final class MainActivity extends Activity {
         audioOutputSpinner.setAdapter(adapter);
         audioOutputSpinner.setSelection(selectedIndex, false);
         refreshingAudioOutputs = false;
-        if (audioStatusButton != null) {
-            audioStatusButton.setText("Audio · " + selectedAudioOutputLabel());
-        }
         if (disappeared && audioRunning) switchAudioOutput();
     }
 
@@ -751,9 +852,86 @@ public final class MainActivity extends Activity {
         @Override public String toString() { return label; }
     }
 
+    private static final class MidiStreamDecoder {
+        private int runningStatus = -1;
+        private int messageStatus = -1;
+        private int expectedDataBytes;
+        private int dataCount;
+        private final byte[] messageData = new byte[2];
+        private boolean inSysEx;
+
+        synchronized void accept(byte[] bytes, int offset, int count) {
+            int end = Math.min(bytes.length, offset + count);
+            for (int index = Math.max(0, offset); index < end; index++) {
+                int value = bytes[index] & 0xFF;
+                if (value >= 0xF8) continue;
+                if ((value & 0x80) != 0) {
+                    acceptStatus(value);
+                } else {
+                    acceptData((byte) value);
+                }
+            }
+        }
+
+        private void acceptStatus(int status) {
+            if (status == 0xF0) {
+                inSysEx = true;
+                resetMessage();
+                runningStatus = -1;
+                return;
+            }
+            if (status == 0xF7) {
+                inSysEx = false;
+                resetMessage();
+                runningStatus = -1;
+                return;
+            }
+            if (inSysEx) return;
+            if (status >= 0x80 && status <= 0xEF) {
+                runningStatus = status;
+                messageStatus = status;
+                expectedDataBytes = channelDataLength(status);
+                dataCount = 0;
+            } else {
+                runningStatus = -1;
+                resetMessage();
+            }
+        }
+
+        private void acceptData(byte value) {
+            if (inSysEx) return;
+            if (messageStatus < 0) {
+                if (runningStatus < 0) return;
+                messageStatus = runningStatus;
+                expectedDataBytes = channelDataLength(runningStatus);
+                dataCount = 0;
+            }
+            if (dataCount < messageData.length) messageData[dataCount] = value;
+            dataCount++;
+            if (dataCount != expectedDataBytes) return;
+            byte[] message = new byte[expectedDataBytes + 1];
+            message[0] = (byte) messageStatus;
+            System.arraycopy(messageData, 0, message, 1, expectedDataBytes);
+            sendMidi(message);
+            messageStatus = runningStatus;
+            dataCount = 0;
+        }
+
+        private void resetMessage() {
+            messageStatus = -1;
+            expectedDataBytes = 0;
+            dataCount = 0;
+        }
+
+        private static int channelDataLength(int status) {
+            int command = status & 0xF0;
+            return command == 0xC0 || command == 0xD0 ? 1 : 2;
+        }
+    }
+
     private void playTestNote() {
         sendMidi(new byte[] {(byte) 0x90, 60, 100});
-        testButton.postDelayed(() -> sendMidi(new byte[] {(byte) 0x80, 60, 0}), 400);
+        webView.postDelayed(() -> sendMidi(new byte[] {(byte) 0x80, 60, 0}), 400);
     }
 
     private void openMidiInputs() {
@@ -771,13 +949,11 @@ public final class MainActivity extends Activity {
                     MidiOutputPort port = device.openOutputPort(portInfo.getPortNumber());
                     if (port == null) continue;
                     port.connect(new MidiReceiver() {
+                        private final MidiStreamDecoder decoder = new MidiStreamDecoder();
+
                         @Override
                         public void onSend(byte[] data, int offset, int count, long timestamp) {
-                            if (count > 0 && count <= 3) {
-                                byte[] message = new byte[count];
-                                System.arraycopy(data, offset, message, 0, count);
-                                sendMidi(message);
-                            }
+                            decoder.accept(data, offset, count);
                         }
                     });
                     synchronized (openMidiPorts) { openMidiPorts.add(port); }
@@ -842,7 +1018,7 @@ public final class MainActivity extends Activity {
                 bytes += read;
             }
             return card("Portable plugin",
-                    row("Package", "RF-XP10 0.1.1")
+                    row("Package", "RF-XP10 0.1.3")
                             + row("Artifact", bytes + " bytes")
                             + "<div class='hash'>SHA-256<br>" + hex(digest.digest()) + "</div>"
                             + "<div class='ok'>Exact .rfplugin packaged successfully</div>");

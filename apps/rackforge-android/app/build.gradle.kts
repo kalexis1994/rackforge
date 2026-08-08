@@ -4,7 +4,7 @@ plugins {
 
 val portablePlugin = providers.gradleProperty("rfplugin").orElse(
     rootProject.layout.projectDirectory.file(
-        "../../../rackforge-plugin-rf-xp10/artifacts/rf-xp10-0.1.1.rfplugin"
+        "../../../rackforge-plugin-rf-xp10/artifacts/rf-xp10-0.1.3.rfplugin"
     ).asFile.absolutePath
 )
 val generatedPluginAssets = layout.buildDirectory.dir("generated/rfplugin-assets")

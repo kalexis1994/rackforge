@@ -111,10 +111,12 @@ async fn health() -> Json<Value> {
 }
 
 async fn auth_status() -> Json<Value> {
-    // The desktop app serves itself over loopback, so nothing has to be
-    // unlocked to reach it.
+    // Desktop serves itself to whoever is already sitting at the machine, so
+    // there is nothing to unlock and no PIN to manage. Saying so keeps the
+    // interface from offering a control that would do nothing here.
     Json(json!({
         "status": "ok",
+        "pin_managed": false,
         "requires_pin": false,
         "unlocked": true,
         "pin_state": "set",

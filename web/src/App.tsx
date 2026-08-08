@@ -1303,6 +1303,26 @@ function PluginFrame({
 /// session is dropped when the PIN changes, so this is also how somebody who
 /// should not be here is put out.
 function ChangePinCard() {
+  // Asked rather than assumed. The same interface is served by a network host
+  // that decides access by PIN and by a desktop window that has no such
+  // notion, and offering to change a PIN that does nothing is worse than
+  // offering nothing at all.
+  const [managed, setManaged] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/auth/status")
+      .then((response) => response.json())
+      .then((status: WebAuthStatus) => {
+        if (!cancelled) setManaged(status.pin_managed === true);
+      })
+      .catch(() => {
+        if (!cancelled) setManaged(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [repeat, setRepeat] = useState("");
@@ -1340,6 +1360,10 @@ function ChangePinCard() {
       .catch((reason: Error) => setNote({ ok: false, text: reason.message }))
       .finally(() => setBusy(false));
   };
+
+  if (managed !== true) {
+    return null;
+  }
 
   return (
     <article className="settings-card pairing-card">

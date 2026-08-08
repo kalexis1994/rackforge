@@ -931,6 +931,11 @@ async fn auth_status(headers: HeaderMap, State(state): State<Arc<AppState>>) -> 
     let requires_pin = access_requires_auth(&state) && !request_is_authorized(&state, &headers);
     Json(json!({
         "status": "ok",
+        // Whether getting in is something this host decides at all. A server
+        // reachable across a network needs an answer; an application window on
+        // somebody's own machine does not, and the interface should not offer
+        // to change something that has no effect there.
+        "pin_managed": true,
         "requires_pin": requires_pin,
         "unlocked": !requires_pin,
         "pin_state": state.auth.pin_state(),

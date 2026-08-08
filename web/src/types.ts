@@ -319,6 +319,10 @@ export interface StoreCatalogResponse {
 
 export interface WebAuthStatus {
   status: "ok";
+  /// Whether this host decides access by PIN at all. Desktop serves the
+  /// person already at the machine and answers false, so the interface can
+  /// leave out a control that would do nothing there.
+  pin_managed: boolean;
   requires_pin: boolean;
   unlocked: boolean;
   /// `enrolling` while an unclaimed device will still accept a chosen PIN,

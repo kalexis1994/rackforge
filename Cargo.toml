@@ -8,6 +8,7 @@ members = [
     "crates/rackforge-controller-package",
     "crates/rackforge-controller-host",
     "apps/rackforge-desktop",
+    "apps/rackforge-android/native",
     "crates/rackforge-dsp",
     "crates/rackforge-midi-api",
     "crates/rackforge-platform-api",

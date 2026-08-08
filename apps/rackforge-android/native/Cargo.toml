@@ -1,0 +1,16 @@
+[package]
+name = "rackforge-android-native"
+description = "Android JNI bridge for the portable RackForge runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow.workspace = true
+jni = "0.21"
+rackforge-core = { path = "../../../crates/rackforge-core" }
+rackforge-plugin-api = { path = "../../../crates/rackforge-plugin-api" }
+rackforge-repository = { path = "../../../crates/rackforge-repository" }

@@ -6,6 +6,10 @@ target/
 *.WebView2/
 firmware/tmp/
 /tmp/
+/dist/
+/apps/rackforge-android/.gradle/
+/apps/rackforge-android/build/
+/apps/rackforge-android/app/build/
 
 # Local credentials and machine-specific overrides
 .env

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.RackForge" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">#050F16</item>
+        <item name="android:colorAccent">#5CE2F5</item>
+        <item name="android:navigationBarColor">#050F16</item>
+        <item name="android:statusBarColor">#050F16</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

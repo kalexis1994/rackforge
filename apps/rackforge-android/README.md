@@ -19,7 +19,9 @@ PLAY opens the active plugin surface directly. LIVE is a separate performance
 overview, so installing or activating a package is no longer part of normal
 sound navigation. USB MIDI device callbacks automatically close stale ports and
 reconnect enabled inputs after hotplug without allocating a byte array for every
-MIDI message.
+MIDI message. When an input disappears, RackForge releases sustain and sends
+All Notes Off on all sixteen channels before reconnecting, matching the
+Raspberry Pi supervisor and preventing notes held during unplug from droning.
 
 While audio is active, a media-playback foreground service keeps RackForge at
 foreground process importance when the screen is locked or the activity is in

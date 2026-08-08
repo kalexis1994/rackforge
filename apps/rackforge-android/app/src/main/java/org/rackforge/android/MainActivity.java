@@ -116,6 +116,7 @@ public final class MainActivity extends Activity {
     private static native String pluginWebContext();
     private static native boolean selectPluginSound(String soundId);
     private static native void sendMidiMessage(int status, int data1, int data2, int length);
+    private static native void releaseMidiNotes();
     private static native boolean startNativeAudio(int deviceId, int latencyMode);
     private static native void setNativeOutputGain(int gainDb);
     static native void stopNativeAudio();
@@ -1477,7 +1478,14 @@ public final class MainActivity extends Activity {
             }
 
             @Override public void onDeviceRemoved(MidiDeviceInfo device) {
-                if (device.getType() == MidiDeviceInfo.TYPE_USB) scheduleMidiReconnect();
+                if (device.getType() != MidiDeviceInfo.TYPE_USB) return;
+                if (audioRunning) {
+                    releaseMidiNotes();
+                    Log.i("RackForge", "MIDI device removed; sustain and active notes released");
+                    Toast.makeText(MainActivity.this,
+                            "MIDI disconnected · notes released", Toast.LENGTH_SHORT).show();
+                }
+                scheduleMidiReconnect();
             }
         };
         manager.registerDeviceCallback(midiDeviceCallback, mainHandler);

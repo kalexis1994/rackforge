@@ -2,7 +2,10 @@ use anyhow::{Context, Result, bail};
 use jni::JNIEnv;
 use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
-use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage};
+use rackforge_core::{
+    LoadedPlugin, PluginInstance, PluginPackage,
+    midi_hotplug::{PanicScope, panic_packets},
+};
 use rackforge_plugin_api::{PluginKind, PresetCatalog, WebSurfaceKind, abi::MidiEventV1};
 use rackforge_repository::install_local_archive;
 use std::collections::{BTreeMap, VecDeque};
@@ -24,6 +27,7 @@ static MIDI_QUEUE: OnceLock<Mutex<VecDeque<MidiEventV1>>> = OnceLock::new();
 static OUTPUT_GAIN_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
 static AUDIO_ERROR: AtomicI32 = AtomicI32::new(AAUDIO_OK);
 static MIDI_DROPPED_EVENTS: AtomicU64 = AtomicU64::new(0);
+static MIDI_PANIC_COUNT: AtomicU64 = AtomicU64::new(0);
 static AUDIO_CALLBACK_COUNT: AtomicU64 = AtomicU64::new(0);
 static AUDIO_CALLBACK_FRAMES: AtomicU64 = AtomicU64::new(0);
 static AUDIO_CALLBACK_TOTAL_NANOS: AtomicU64 = AtomicU64::new(0);
@@ -340,6 +344,32 @@ fn enqueue_midi(bytes: &[u8]) {
     }
 }
 
+fn release_all_midi_notes() {
+    let packets = panic_packets(PanicScope::AllChannels);
+    if let Ok(mut queue) = midi_queue().lock() {
+        // A disconnect panic must never be rejected by a queue full of ordinary
+        // controller traffic. Make room while keeping the queue strictly
+        // bounded; the final panic releases anything an evicted message could
+        // otherwise leave sounding.
+        let keep = MAX_PENDING_MIDI_EVENTS.saturating_sub(packets.len());
+        let evicted = queue.len().saturating_sub(keep);
+        for _ in 0..evicted {
+            queue.pop_front();
+        }
+        if evicted > 0 {
+            MIDI_DROPPED_EVENTS.fetch_add(evicted as u64, Ordering::Relaxed);
+        }
+        for packet in packets {
+            queue.push_back(MidiEventV1 {
+                frame: 0,
+                length: packet.length,
+                data: packet.data,
+            });
+        }
+        MIDI_PANIC_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 fn aaudio_error(operation: &str, result: i32) -> anyhow::Error {
     let detail = unsafe {
         let text = AAudio_convertResultToText(result);
@@ -428,6 +458,7 @@ fn audio_status_json() -> String {
         return serde_json::json!({
             "running": false,
             "midi_dropped_events": MIDI_DROPPED_EVENTS.load(Ordering::Relaxed),
+            "midi_panic_count": MIDI_PANIC_COUNT.load(Ordering::Relaxed),
         })
         .to_string();
     };
@@ -463,6 +494,7 @@ fn audio_status_json() -> String {
             "performance_mode": AAudioStream_getPerformanceMode(output.stream),
             "pending_error": AUDIO_ERROR.load(Ordering::Acquire),
             "midi_dropped_events": MIDI_DROPPED_EVENTS.load(Ordering::Relaxed),
+            "midi_panic_count": MIDI_PANIC_COUNT.load(Ordering::Relaxed),
             "callback_count": callback_count,
             "average_callback_us": average_callback_micros,
             "maximum_callback_us": AUDIO_CALLBACK_MAX_NANOS.load(Ordering::Relaxed) as f64 / 1_000.0,
@@ -759,6 +791,14 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_sendMidiMessage(
     if (1..=3).contains(&length) {
         enqueue_midi(&bytes[..length as usize]);
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_releaseMidiNotes(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    release_all_midi_notes();
 }
 
 fn engine_string(env: &mut JNIEnv<'_>, value: impl FnOnce(&AndroidEngine) -> String) -> jstring {

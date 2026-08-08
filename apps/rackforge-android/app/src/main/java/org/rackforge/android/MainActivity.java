@@ -8,7 +8,6 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
-import android.content.res.Configuration;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
@@ -25,6 +24,9 @@ import android.media.midi.MidiOutputPort;
 import android.media.midi.MidiReceiver;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.PowerManager;
 import android.provider.OpenableColumns;
 import android.util.Log;
 import android.webkit.JavascriptInterface;
@@ -82,18 +84,27 @@ public final class MainActivity extends Activity {
     private int latencyMode;
     private int outputGainDb;
     private boolean refreshingAudioOutputs;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final List<AudioOutputChoice> audioOutputChoices = new ArrayList<>();
     private final List<MidiDevice> openMidiDevices = new ArrayList<>();
     private final List<MidiOutputPort> openMidiPorts = new ArrayList<>();
     private AudioDeviceCallback audioDeviceCallback;
+    private MidiManager.DeviceCallback midiDeviceCallback;
+    private volatile int midiGeneration;
+    private volatile boolean audioRecoveryInProgress;
+    private ThermalMonitor thermalMonitor;
+    private int thermalStatus = PowerManager.THERMAL_STATUS_NONE;
     private SharedPreferences preferences;
-    private String currentPage = "rack";
+    private String currentPage = "play";
     private volatile boolean engineStarting;
     private File pluginPackageRoot;
     private String pluginWebEntry;
     private String activePluginName = "Plugin";
     private String activePluginVersion = "";
     private TextView activePluginLabel;
+    private LinearLayout playToolbar;
+    private TextView playContextLabel;
+    private AlertDialog pluginPickerDialog;
     private AlertDialog installedPluginsDialog;
 
     private static native boolean initializeEngine(byte[] archive, String storeRoot, String dataRoot);
@@ -104,10 +115,30 @@ public final class MainActivity extends Activity {
     private static native String pluginWebEntry();
     private static native String pluginWebContext();
     private static native boolean selectPluginSound(String soundId);
-    private static native void sendMidi(byte[] message);
+    private static native void sendMidiMessage(int status, int data1, int data2, int length);
     private static native boolean startNativeAudio(int deviceId, int latencyMode);
     private static native void setNativeOutputGain(int gainDb);
-    private static native void stopNativeAudio();
+    static native void stopNativeAudio();
+    private static native String nativeAudioStatus();
+    private static native int pollNativeAudioError();
+
+    private final Runnable audioHealthPoll = new Runnable() {
+        @Override public void run() {
+            if (audioRunning) {
+                int error = pollNativeAudioError();
+                if (error != 0) recoverAudioStream(error);
+            }
+            mainHandler.postDelayed(this, 1_000);
+        }
+    };
+
+    private final Runnable midiReconnect = () -> {
+        if (!audioRunning || engineStarting) return;
+        closeMidi();
+        openMidiInputs();
+        if ("live".equals(currentPage)) showLive();
+        else if ("diagnostics".equals(currentPage)) renderDiagnostics();
+    };
 
     @Override
     protected void onCreate(Bundle state) {
@@ -133,11 +164,16 @@ public final class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(0xFF050F16);
         root.addView(buildTopBar(), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(buildPlayToolbar(), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
         root.addView(webView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         setContentView(root);
         refreshAudioOutputs();
         registerAudioDeviceUpdates();
-        showRack();
+        registerMidiDeviceUpdates();
+        registerThermalMonitoring();
+        mainHandler.post(audioHealthPoll);
+        showPlay();
         startEngine();
     }
 
@@ -145,16 +181,25 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refreshAudioOutputs();
+        scheduleMidiReconnect();
         if ("diagnostics".equals(currentPage)) renderDiagnostics();
-        else showRack();
+        else if ("live".equals(currentPage)) showLive();
+        else showPlay();
     }
 
     @Override
     protected void onDestroy() {
         audioRunning = false;
         stopNativeAudio();
+        stopService(new Intent(this, AudioEngineService.class));
+        mainHandler.removeCallbacksAndMessages(null);
         AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         if (audioDeviceCallback != null) audioManager.unregisterAudioDeviceCallback(audioDeviceCallback);
+        MidiManager midiManager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
+        if (midiManager != null && midiDeviceCallback != null) {
+            midiManager.unregisterDeviceCallback(midiDeviceCallback);
+        }
+        if (thermalMonitor != null) thermalMonitor.stop();
         closeMidi();
         webView.destroy();
         super.onDestroy();
@@ -282,32 +327,182 @@ public final class MainActivity extends Activity {
             view.setPadding(dp(12), dp(8) + statusTop, dp(12), dp(8));
             return insets;
         });
-        boolean wide = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE
-                || getResources().getConfiguration().smallestScreenWidthDp >= 600;
-        if (!wide) bar.addView(toolbarButton("☰", this::showMainMenu));
+        bar.addView(toolbarButton("☰", this::showMainMenu));
         TextView title = new TextView(this);
         title.setText("RACKFORGE");
         title.setTextColor(0xFF5CE2F5);
         title.setTextSize(18);
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         title.setPadding(dp(8), 0, dp(12), 0);
-        bar.addView(title, new LinearLayout.LayoutParams(wide ? ViewGroup.LayoutParams.WRAP_CONTENT : 0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, wide ? 0 : 1));
-        if (wide) {
-            bar.addView(toolbarButton("File", this::showFileMenu));
-            bar.addView(toolbarButton("Settings", view -> showSettingsDialog()));
-            bar.addView(toolbarButton("View", this::showViewMenu));
-            bar.addView(toolbarButton("Help", this::showHelpMenu));
-            TextView spacer = new TextView(this);
-            bar.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1));
-        }
+        bar.addView(title, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         activePluginLabel = new TextView(this);
-        activePluginLabel.setText(activePluginName);
+        activePluginLabel.setText(activePluginDisplayName());
         activePluginLabel.setTextColor(0xFFB8CDD3);
         activePluginLabel.setPadding(dp(8), 0, dp(8), 0);
         bar.addView(activePluginLabel);
-        if (!wide) bar.addView(toolbarButton("⚙", view -> showSettingsDialog()));
+        bar.addView(toolbarButton("⚙", view -> showSettingsDialog()));
         return bar;
+    }
+
+    private LinearLayout buildPlayToolbar() {
+        playToolbar = new LinearLayout(this);
+        playToolbar.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        playToolbar.setPadding(dp(16), dp(7), dp(12), dp(7));
+        playToolbar.setBackgroundColor(0xFF081820);
+
+        playContextLabel = new TextView(this);
+        playContextLabel.setText("PLAY · " + activePluginDisplayName());
+        playContextLabel.setTextColor(0xFFF2FAFC);
+        playContextLabel.setTextSize(13);
+        playContextLabel.setTypeface(null, android.graphics.Typeface.BOLD);
+        playContextLabel.setSingleLine(true);
+        playContextLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        playToolbar.addView(playContextLabel, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        Button select = toolbarButton("▦  Select plugin", view -> showPluginPickerDialog());
+        select.setTextColor(0xFF5CE2F5);
+        playToolbar.addView(select, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        updateModeButtons();
+        return playToolbar;
+    }
+
+    private void showPluginPickerDialog() {
+        if (pluginPickerDialog != null && pluginPickerDialog.isShowing()) {
+            pluginPickerDialog.dismiss();
+        }
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(22), dp(20), dp(28));
+        scroll.addView(content);
+
+        TextView title = new TextView(this);
+        title.setText("Select plugin");
+        title.setTextColor(0xFFF2FAFC);
+        title.setTextSize(27);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        content.addView(title);
+        TextView subtitle = new TextView(this);
+        subtitle.setText("Choose the instrument you want to play");
+        subtitle.setTextColor(0xFF91A9B1);
+        subtitle.setTextSize(13);
+        subtitle.setPadding(0, dp(2), 0, dp(16));
+        content.addView(subtitle);
+
+        LinearLayout cards = new LinearLayout(this);
+        cards.setOrientation(LinearLayout.VERTICAL);
+        cards.addView(settingsValue("Status", "Loading installed plugins…"));
+        content.addView(cards);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(scroll)
+                .setPositiveButton("Close", null)
+                .create();
+        pluginPickerDialog = dialog;
+        dialog.setOnDismissListener(unused -> {
+            if (pluginPickerDialog == dialog) pluginPickerDialog = null;
+        });
+        dialog.setOnShowListener(unused -> styleFullHeightDialog(dialog));
+        dialog.show();
+
+        new Thread(() -> {
+            try {
+                JSONObject catalog = new JSONObject(installedPlugins(pluginStoreRoot().getAbsolutePath()));
+                JSONArray plugins = catalog.getJSONArray("plugins");
+                runOnUiThread(() -> renderPluginPickerCards(dialog, cards, plugins));
+            } catch (Throwable error) {
+                Log.e("RackForge", "Could not list Play instruments", error);
+                runOnUiThread(() -> {
+                    if (!dialog.isShowing()) return;
+                    cards.removeAllViews();
+                    cards.addView(settingsValue("Status", "Installed plugins are unavailable"));
+                });
+            }
+        }, "rackforge-plugin-picker").start();
+    }
+
+    private void renderPluginPickerCards(AlertDialog dialog, LinearLayout cards, JSONArray plugins) {
+        if (!dialog.isShowing()) return;
+        try {
+            cards.removeAllViews();
+            for (int index = 0; index < plugins.length(); index++) {
+                View card = pluginPickerCard(dialog, plugins.getJSONObject(index));
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                params.bottomMargin = dp(10);
+                cards.addView(card, params);
+            }
+            if (plugins.length() == 0) {
+                cards.addView(settingsValue("Status", "No plugins installed"));
+            }
+        } catch (Throwable error) {
+            Log.e("RackForge", "Could not render plugin picker", error);
+            cards.removeAllViews();
+            cards.addView(settingsValue("Status", "Plugin list could not be rendered"));
+        }
+    }
+
+    private View pluginPickerCard(AlertDialog dialog, JSONObject plugin) throws Exception {
+        boolean active = plugin.optBoolean("active");
+        boolean compatible = plugin.optBoolean("compatible");
+        String name = plugin.getString("plugin_name");
+        String version = plugin.getString("version");
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(18), dp(16), dp(18), dp(16));
+        card.setBackground(surface(active ? 0xFF153B46 : 0xFF10252E, 16,
+                active ? 0xFF5CE2F5 : 0xFF244650, active ? 2 : 1));
+
+        TextView title = new TextView(this);
+        title.setText(name);
+        title.setTextColor(compatible ? 0xFFF2FAFC : 0xFF718991);
+        title.setTextSize(18);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        card.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView detail = new TextView(this);
+        detail.setText(active ? "●  ACTIVE · " + versionLabel(version)
+                : compatible ? "TAP TO SELECT · " + versionLabel(version)
+                : "UNAVAILABLE · " + versionLabel(version));
+        detail.setTextColor(active ? 0xFF64DCB5 : compatible ? 0xFF91A9B1 : 0xFFF27777);
+        detail.setTextSize(11);
+        detail.setPadding(0, dp(5), 0, 0);
+        detail.setSingleLine(true);
+        card.addView(detail, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        card.setAlpha(compatible ? 1f : 0.62f);
+        card.setEnabled(compatible && !engineStarting);
+        card.setContentDescription(name + " " + versionLabel(version) + (active ? ", active" : ""));
+        if (compatible) {
+            String root = plugin.getString("package_root");
+            card.setOnClickListener(view -> {
+                dialog.dismiss();
+                if (active) {
+                    showPlay();
+                    webView.scrollTo(0, 0);
+                } else {
+                    activatePlugin(root, name, version);
+                }
+            });
+        }
+        return card;
+    }
+
+    private void updateModeButtons() {
+        if (playToolbar != null) playToolbar.setVisibility(
+                "play".equals(currentPage) ? View.VISIBLE : View.GONE);
+        if (playContextLabel != null) playContextLabel.setText(
+                "PLAY · " + activePluginDisplayName());
     }
 
     private Button toolbarButton(String text, android.view.View.OnClickListener listener) {
@@ -352,8 +547,11 @@ public final class MainActivity extends Activity {
         panel.addView(subtitle);
 
         panel.addView(menuLabel("WORKSPACE"));
-        panel.addView(menuAction("▣", "Rack", "Play and control the active instrument", () -> {
-            menu.dismiss(); showRack();
+        panel.addView(menuAction("▶", "Play", "Play and edit the active instrument", () -> {
+            menu.dismiss(); showPlay();
+        }));
+        panel.addView(menuAction("▦", "Live", "Performance rack, routes and hardware status", () -> {
+            menu.dismiss(); showLive();
         }));
         panel.addView(menuAction("⌁", "Diagnostics", "Connected audio, MIDI and USB devices", () -> {
             menu.dismiss(); showDiagnostics();
@@ -498,7 +696,7 @@ public final class MainActivity extends Activity {
                 boolean alreadyInstalled = descriptor.optBoolean("already_installed");
                 runOnUiThread(() -> {
                     Toast.makeText(this,
-                            installedName + " " + version +
+                            installedName + " " + versionLabel(version) +
                                     (alreadyInstalled ? " is already installed" : " installed"),
                             Toast.LENGTH_LONG).show();
                     showInstalledPluginsDialog();
@@ -625,7 +823,7 @@ public final class MainActivity extends Activity {
         TextView name = settingsHeading(plugin.getString("plugin_name"));
         card.addView(name);
         String latestVersion = plugin.getString("version");
-        card.addView(settingsValue("Latest version", latestVersion));
+        card.addView(settingsValue("Latest version", versionLabel(latestVersion)));
         card.addView(settingsValue("Package", plugin.getString("plugin_id")));
         boolean active = plugin.optBoolean("active");
         boolean compatible = plugin.optBoolean("compatible");
@@ -635,25 +833,26 @@ public final class MainActivity extends Activity {
         if (installed != null && installed.length() > 1) {
             List<String> versionNames = new ArrayList<>();
             for (int index = 0; index < installed.length(); index++) {
-                versionNames.add(installed.getString(index));
+                versionNames.add(versionLabel(installed.getString(index)));
             }
             card.addView(settingsValue("Installed versions", String.join(" · ", versionNames)));
         }
         String status = active ? "Active"
-                : activeVersion != null ? "Update available · active " + activeVersion
+                : activeVersion != null ? "Update available · active " + versionLabel(activeVersion)
                 : compatible ? "Ready" : "Installed · incompatible";
         card.addView(settingsValue("Status", status));
         if (!compatible) {
             card.addView(settingsValue("Reason", plugin.optString("incompatibility", "Unsupported plugin")));
         }
-        Button activate = button(active ? "Active" : activeVersion != null ? "Activate latest" : "Activate");
-        activate.setEnabled(compatible && !active);
+        Button activate = button(active ? "Open in Play" : activeVersion != null ? "Activate latest" : "Activate");
+        activate.setEnabled(compatible);
         String root = plugin.getString("package_root");
         String pluginName = plugin.getString("plugin_name");
         String version = plugin.getString("version");
         activate.setOnClickListener(view -> {
             if (installedPluginsDialog != null) installedPluginsDialog.dismiss();
-            activatePlugin(root, pluginName, version);
+            if (active) showPlay();
+            else activatePlugin(root, pluginName, version);
         });
         card.addView(activate, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -701,8 +900,9 @@ public final class MainActivity extends Activity {
             return;
         }
         engineStarting = true;
-        currentPage = "rack";
-        showEngineState("Loading " + name, "Activating portable plugin " + version + "…");
+        currentPage = "play";
+        showEngineState("Loading " + name,
+                "Activating portable plugin " + versionLabel(version) + "…");
         new Thread(() -> {
             File previousRoot = pluginPackageRoot;
             String previousEntry = pluginWebEntry;
@@ -723,9 +923,11 @@ public final class MainActivity extends Activity {
                 preferences.edit().putString("plugin.active_root", pluginPackageRoot.getAbsolutePath()).apply();
                 runOnUiThread(() -> {
                     engineStarting = false;
-                    if (activePluginLabel != null) activePluginLabel.setText(activePluginName);
-                    showRack();
-                    Toast.makeText(this, activePluginName + " " + activePluginVersion + " active",
+                    if (activePluginLabel != null) activePluginLabel.setText(activePluginDisplayName());
+                    if ("diagnostics".equals(currentPage)) renderDiagnostics();
+                    else if ("live".equals(currentPage)) showLive();
+                    else showPlay();
+                    Toast.makeText(this, activePluginDisplayName() + " active",
                             Toast.LENGTH_LONG).show();
                 });
                 return;
@@ -752,8 +954,8 @@ public final class MainActivity extends Activity {
                 boolean finalRestored = restored;
                 runOnUiThread(() -> {
                     engineStarting = false;
-                    if (activePluginLabel != null) activePluginLabel.setText(activePluginName);
-                    if (finalRestored) showRack();
+                    if (activePluginLabel != null) activePluginLabel.setText(activePluginDisplayName());
+                    if (finalRestored) showPlay();
                     else showEngineState("Plugin activation failed", "The audio engine must be restarted");
                     new AlertDialog.Builder(this)
                             .setTitle("Could not activate " + name)
@@ -767,11 +969,14 @@ public final class MainActivity extends Activity {
 
     private void showViewMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
-        menu.getMenu().add("Rack").setOnMenuItemClickListener(item -> { showRack(); return true; });
+        menu.getMenu().add("Play").setOnMenuItemClickListener(item -> { showPlay(); return true; });
+        menu.getMenu().add("Live").setOnMenuItemClickListener(item -> { showLive(); return true; });
         menu.getMenu().add("Audio & MIDI Settings").setOnMenuItemClickListener(item -> { showSettingsDialog(); return true; });
         menu.getMenu().add("Diagnostics").setOnMenuItemClickListener(item -> { showDiagnostics(); return true; });
         menu.getMenu().add("Reload UI").setOnMenuItemClickListener(item -> {
-            if ("diagnostics".equals(currentPage)) renderDiagnostics(); else showRack();
+            if ("diagnostics".equals(currentPage)) renderDiagnostics();
+            else if ("live".equals(currentPage)) showLive();
+            else showPlay();
             return true;
         });
         menu.show();
@@ -791,13 +996,33 @@ public final class MainActivity extends Activity {
                 .show();
     }
 
-    private void showRack() {
-        currentPage = "rack";
+    private void showPlay() {
+        currentPage = "play";
+        updateModeButtons();
         if (audioRunning && pluginWebEntry != null) {
             webView.loadUrl("https://rackforge.local/plugin/" + pluginWebEntry);
             return;
         }
         showEngineState("Loading plugin", "Validating the portable package and starting AAudio…");
+    }
+
+    private void showLive() {
+        currentPage = "live";
+        updateModeButtons();
+        int midiPorts;
+        synchronized (openMidiPorts) { midiPorts = openMidiPorts.size(); }
+        String body = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                + "<style>" + css() + "</style></head><body><main>"
+                + "<div class='eyebrow'>LIVE MODE</div><h1>Performance rack</h1>"
+                + "<p class='lead'>A stable performance view that stays separate from the plugin editor in Play.</p>"
+                + card("Rack 1", row("Instrument", activePluginDisplayName())
+                        + row("Audio", audioRunning ? selectedAudioOutputLabel() : "Starting")
+                        + row("MIDI inputs", Integer.toString(midiPorts)))
+                + card("System health", row("Thermal", thermalLabel(thermalStatus))
+                        + row("Background audio", audioRunning ? "Protected by foreground service" : "Inactive")
+                        + "<div class='ok'>Use PLAY to edit sounds; LIVE keeps the performance overview stable.</div>")
+                + "</main></body></html>";
+        webView.loadDataWithBaseURL("https://rackforge.local/live/", body, "text/html", "UTF-8", null);
     }
 
     private void showEngineState(String title, String detail) {
@@ -814,6 +1039,7 @@ public final class MainActivity extends Activity {
 
     private void showDiagnostics() {
         currentPage = "diagnostics";
+        updateModeButtons();
         renderDiagnostics();
     }
 
@@ -848,7 +1074,7 @@ public final class MainActivity extends Activity {
         LinearLayout audioCard = settingsCard();
         content.addView(audioCard);
         audioCard.addView(settingsHeading("Audio output"));
-        audioCard.addView(settingsValue("Driver", "AAudio"));
+        audioCard.addView(settingsValue("Driver", "AAudio · native callback"));
 
         Spinner output = new Spinner(this);
         ArrayAdapter<AudioOutputChoice> outputs = new ArrayAdapter<>(this,
@@ -867,7 +1093,25 @@ public final class MainActivity extends Activity {
                 new String[] {"Low latency", "Balanced", "Safe"}));
         latency.setSelection(latencyMode);
         audioCard.addView(settingsControl("Latency mode", latency));
-        audioCard.addView(settingsValue("Sample rate", "48000 Hz"));
+        try {
+            JSONObject status = new JSONObject(nativeAudioStatus());
+            int actualRate = status.optInt("sample_rate", SAMPLE_RATE);
+            int burst = status.optInt("frames_per_burst", 0);
+            int buffer = status.optInt("buffer_size_frames", 0);
+            int xruns = status.optInt("xruns", 0);
+            double averageUs = status.optDouble("average_callback_us", 0.0);
+            double maximumUs = status.optDouble("maximum_callback_us", 0.0);
+            double load = status.optDouble("callback_load_percent", 0.0);
+            long droppedMidi = status.optLong("midi_dropped_events", 0);
+            audioCard.addView(settingsValue("Stream", actualRate + " Hz · " + burst + " frames/burst"));
+            audioCard.addView(settingsValue("Buffer", buffer + " frames · " + xruns + " xruns"));
+            audioCard.addView(settingsValue("Callback CPU", String.format(Locale.ROOT,
+                    "%.1f%% · avg %.0f µs · max %.0f µs", load, averageUs, maximumUs)));
+            audioCard.addView(settingsValue("MIDI queue", droppedMidi == 0
+                    ? "No dropped events" : droppedMidi + " dropped events"));
+        } catch (Exception ignored) {
+            audioCard.addView(settingsValue("Stream", SAMPLE_RATE + " Hz · starting"));
+        }
 
         Spinner gain = new Spinner(this);
         String[] gains = {"+0 dB", "+3 dB", "+6 dB", "+9 dB", "+12 dB"};
@@ -932,7 +1176,9 @@ public final class MainActivity extends Activity {
                     if (audioRunning) switchAudioOutput();
                     closeMidi();
                     if (audioRunning) openMidiInputs();
-                    showRack();
+                    if ("diagnostics".equals(currentPage)) renderDiagnostics();
+                    else if ("live".equals(currentPage)) showLive();
+                    else showPlay();
                 })
                 .create();
         refreshDevices.setOnClickListener(view -> {
@@ -1006,6 +1252,30 @@ public final class MainActivity extends Activity {
         };
     }
 
+    private String activePluginDisplayName() {
+        return activePluginName + (activePluginVersion.isBlank()
+                ? "" : " " + versionLabel(activePluginVersion));
+    }
+
+    private static String versionLabel(String version) {
+        if (version == null || version.isBlank()) return "";
+        String clean = version.trim();
+        if (clean.startsWith("v") || clean.startsWith("V")) clean = clean.substring(1);
+        return "v" + clean;
+    }
+
+    private static String thermalLabel(int status) {
+        return switch (status) {
+            case PowerManager.THERMAL_STATUS_LIGHT -> "Light";
+            case PowerManager.THERMAL_STATUS_MODERATE -> "Moderate";
+            case PowerManager.THERMAL_STATUS_SEVERE -> "Severe · reduce workload";
+            case PowerManager.THERMAL_STATUS_CRITICAL -> "Critical";
+            case PowerManager.THERMAL_STATUS_EMERGENCY -> "Emergency";
+            case PowerManager.THERMAL_STATUS_SHUTDOWN -> "Shutdown imminent";
+            default -> "Nominal";
+        };
+    }
+
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
@@ -1061,8 +1331,8 @@ public final class MainActivity extends Activity {
                 openMidiInputs();
                 runOnUiThread(() -> {
                     engineStarting = false;
-                    if (activePluginLabel != null) activePluginLabel.setText(activePluginName);
-                    showRack();
+                    if (activePluginLabel != null) activePluginLabel.setText(activePluginDisplayName());
+                    if ("live".equals(currentPage)) showLive(); else showPlay();
                     Toast.makeText(this, activePluginName + " ready · 48 kHz", Toast.LENGTH_SHORT).show();
                 });
             } catch (Throwable error) {
@@ -1093,6 +1363,39 @@ public final class MainActivity extends Activity {
             throw new IllegalStateException("Native low-latency audio rejected the selected output");
         }
         audioRunning = true;
+        startAudioService();
+    }
+
+    private void startAudioService() {
+        Intent service = new Intent(this, AudioEngineService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service);
+        else startService(service);
+    }
+
+    private void recoverAudioStream(int errorCode) {
+        if (audioRecoveryInProgress || engineStarting) return;
+        audioRecoveryInProgress = true;
+        audioRunning = false;
+        new Thread(() -> {
+            try {
+                stopNativeAudio();
+                if (!startNativeAudio(selectedAudioDeviceId, latencyMode)) {
+                    throw new IllegalStateException("AAudio could not reopen after error " + errorCode);
+                }
+                audioRunning = true;
+                runOnUiThread(() -> {
+                    audioRecoveryInProgress = false;
+                    Toast.makeText(this, "Audio stream reconnected", Toast.LENGTH_SHORT).show();
+                    if ("live".equals(currentPage)) showLive();
+                });
+            } catch (Throwable error) {
+                Log.e("RackForge", "AAudio recovery failed", error);
+                runOnUiThread(() -> {
+                    audioRecoveryInProgress = false;
+                    Toast.makeText(this, "Audio disconnected · open Settings to retry", Toast.LENGTH_LONG).show();
+                });
+            }
+        }, "rackforge-audio-recovery").start();
     }
 
     private void switchAudioOutput() {
@@ -1149,18 +1452,70 @@ public final class MainActivity extends Activity {
             @Override public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
                 runOnUiThread(() -> {
                     refreshAudioOutputs();
-                    if ("diagnostics".equals(currentPage)) renderDiagnostics(); else showRack();
+                    if ("diagnostics".equals(currentPage)) renderDiagnostics();
+                    else if ("live".equals(currentPage)) showLive();
                 });
             }
 
             @Override public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
                 runOnUiThread(() -> {
                     refreshAudioOutputs();
-                    if ("diagnostics".equals(currentPage)) renderDiagnostics(); else showRack();
+                    if ("diagnostics".equals(currentPage)) renderDiagnostics();
+                    else if ("live".equals(currentPage)) showLive();
                 });
             }
         };
         manager.registerAudioDeviceCallback(audioDeviceCallback, null);
+    }
+
+    private void registerMidiDeviceUpdates() {
+        MidiManager manager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
+        if (manager == null) return;
+        midiDeviceCallback = new MidiManager.DeviceCallback() {
+            @Override public void onDeviceAdded(MidiDeviceInfo device) {
+                if (device.getType() == MidiDeviceInfo.TYPE_USB) scheduleMidiReconnect();
+            }
+
+            @Override public void onDeviceRemoved(MidiDeviceInfo device) {
+                if (device.getType() == MidiDeviceInfo.TYPE_USB) scheduleMidiReconnect();
+            }
+        };
+        manager.registerDeviceCallback(midiDeviceCallback, mainHandler);
+    }
+
+    private void scheduleMidiReconnect() {
+        mainHandler.removeCallbacks(midiReconnect);
+        mainHandler.postDelayed(midiReconnect, 300);
+    }
+
+    private void registerThermalMonitoring() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return;
+        thermalMonitor = new ThermalMonitor(this);
+        thermalMonitor.start();
+    }
+
+    private static final class ThermalMonitor {
+        private final MainActivity activity;
+        private final PowerManager power;
+        private final PowerManager.OnThermalStatusChangedListener listener;
+
+        ThermalMonitor(MainActivity activity) {
+            this.activity = activity;
+            power = (PowerManager) activity.getSystemService(Context.POWER_SERVICE);
+            listener = status -> {
+                activity.thermalStatus = status;
+                if ("live".equals(activity.currentPage)) activity.runOnUiThread(activity::showLive);
+            };
+        }
+
+        void start() {
+            activity.thermalStatus = power.getCurrentThermalStatus();
+            power.addThermalStatusListener(listener);
+        }
+
+        void stop() {
+            power.removeThermalStatusListener(listener);
+        }
     }
 
     private String selectedAudioOutputLabel() {
@@ -1255,10 +1610,9 @@ public final class MainActivity extends Activity {
             if (dataCount < messageData.length) messageData[dataCount] = value;
             dataCount++;
             if (dataCount != expectedDataBytes) return;
-            byte[] message = new byte[expectedDataBytes + 1];
-            message[0] = (byte) messageStatus;
-            System.arraycopy(messageData, 0, message, 1, expectedDataBytes);
-            sendMidi(message);
+            sendMidiMessage(messageStatus, messageData[0] & 0x7F,
+                    expectedDataBytes > 1 ? messageData[1] & 0x7F : 0,
+                    expectedDataBytes + 1);
             messageStatus = runningStatus;
             dataCount = 0;
         }
@@ -1276,24 +1630,33 @@ public final class MainActivity extends Activity {
     }
 
     private void playTestNote() {
-        sendMidi(new byte[] {(byte) 0x90, 60, 100});
-        webView.postDelayed(() -> sendMidi(new byte[] {(byte) 0x80, 60, 0}), 400);
+        sendMidiMessage(0x90, 60, 100, 3);
+        webView.postDelayed(() -> sendMidiMessage(0x80, 60, 0, 3), 400);
     }
 
     private void openMidiInputs() {
         MidiManager manager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
         if (manager == null) return;
+        int generation = midiGeneration;
         Set<String> enabledInputs = preferences.getStringSet("midi.inputs", null);
         for (MidiDeviceInfo info : manager.getDevices()) {
             if (info.getType() != MidiDeviceInfo.TYPE_USB) continue;
             if (enabledInputs != null && !enabledInputs.contains(midiDeviceName(info))) continue;
             manager.openDevice(info, device -> {
                 if (device == null) return;
+                if (!audioRunning || generation != midiGeneration) {
+                    try { device.close(); } catch (Exception ignored) { }
+                    return;
+                }
                 synchronized (openMidiDevices) { openMidiDevices.add(device); }
                 for (MidiDeviceInfo.PortInfo portInfo : info.getPorts()) {
                     if (portInfo.getType() != MidiDeviceInfo.PortInfo.TYPE_OUTPUT) continue;
                     MidiOutputPort port = device.openOutputPort(portInfo.getPortNumber());
                     if (port == null) continue;
+                    if (!audioRunning || generation != midiGeneration) {
+                        try { port.close(); } catch (Exception ignored) { }
+                        continue;
+                    }
                     port.connect(new MidiReceiver() {
                         private final MidiStreamDecoder decoder = new MidiStreamDecoder();
 
@@ -1318,6 +1681,7 @@ public final class MainActivity extends Activity {
     }
 
     private void closeMidi() {
+        midiGeneration++;
         synchronized (openMidiPorts) {
             for (MidiOutputPort port : openMidiPorts) try { port.close(); } catch (Exception ignored) { }
             openMidiPorts.clear();

@@ -10,16 +10,24 @@ use std::ffi::{CStr, c_char, c_void};
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::slice;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const MAX_FRAMES: u32 = 4_096;
+const MAX_PENDING_MIDI_EVENTS: usize = 256;
 
 static ENGINE: OnceLock<Mutex<Option<AndroidEngine>>> = OnceLock::new();
 static AUDIO: OnceLock<Mutex<Option<NativeAudioOutput>>> = OnceLock::new();
 static MIDI_QUEUE: OnceLock<Mutex<VecDeque<MidiEventV1>>> = OnceLock::new();
 static OUTPUT_GAIN_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
+static AUDIO_ERROR: AtomicI32 = AtomicI32::new(AAUDIO_OK);
+static MIDI_DROPPED_EVENTS: AtomicU64 = AtomicU64::new(0);
+static AUDIO_CALLBACK_COUNT: AtomicU64 = AtomicU64::new(0);
+static AUDIO_CALLBACK_FRAMES: AtomicU64 = AtomicU64::new(0);
+static AUDIO_CALLBACK_TOTAL_NANOS: AtomicU64 = AtomicU64::new(0);
+static AUDIO_CALLBACK_MAX_NANOS: AtomicU64 = AtomicU64::new(0);
 
 const AAUDIO_OK: i32 = 0;
 const AAUDIO_DIRECTION_OUTPUT: i32 = 0;
@@ -47,6 +55,9 @@ type AAudioDataCallback = unsafe extern "C" fn(
     num_frames: i32,
 ) -> i32;
 
+type AAudioErrorCallback =
+    unsafe extern "C" fn(stream: *mut AAudioStream, user_data: *mut c_void, error: i32);
+
 #[link(name = "aaudio")]
 unsafe extern "C" {
     fn AAudio_createStreamBuilder(builder: *mut *mut AAudioStreamBuilder) -> i32;
@@ -63,6 +74,11 @@ unsafe extern "C" {
         callback: Option<AAudioDataCallback>,
         user_data: *mut c_void,
     );
+    fn AAudioStreamBuilder_setErrorCallback(
+        builder: *mut AAudioStreamBuilder,
+        callback: Option<AAudioErrorCallback>,
+        user_data: *mut c_void,
+    );
     fn AAudioStreamBuilder_openStream(
         builder: *mut AAudioStreamBuilder,
         stream: *mut *mut AAudioStream,
@@ -70,6 +86,14 @@ unsafe extern "C" {
     fn AAudioStream_requestStart(stream: *mut AAudioStream) -> i32;
     fn AAudioStream_requestStop(stream: *mut AAudioStream) -> i32;
     fn AAudioStream_close(stream: *mut AAudioStream) -> i32;
+    fn AAudioStream_getFramesPerBurst(stream: *mut AAudioStream) -> i32;
+    fn AAudioStream_setBufferSizeInFrames(stream: *mut AAudioStream, frames: i32) -> i32;
+    fn AAudioStream_getBufferSizeInFrames(stream: *mut AAudioStream) -> i32;
+    fn AAudioStream_getBufferCapacityInFrames(stream: *mut AAudioStream) -> i32;
+    fn AAudioStream_getXRunCount(stream: *mut AAudioStream) -> i32;
+    fn AAudioStream_getSampleRate(stream: *mut AAudioStream) -> i32;
+    fn AAudioStream_getSharingMode(stream: *mut AAudioStream) -> i32;
+    fn AAudioStream_getPerformanceMode(stream: *mut AAudioStream) -> i32;
     fn AAudio_convertResultToText(result: i32) -> *const c_char;
 }
 
@@ -106,12 +130,14 @@ impl NativeAudioOutput {
                 device_id,
                 AAUDIO_SHARING_MODE_EXCLUSIVE,
                 AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
+                2,
             ) {
                 Ok(stream) => Ok(Self { stream }),
                 Err(exclusive_error) => open_aaudio_stream(
                     device_id,
                     AAUDIO_SHARING_MODE_SHARED,
                     AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
+                    2,
                 )
                 .map(|stream| Self { stream })
                 .with_context(|| format!("exclusive AAudio open also failed: {exclusive_error:#}")),
@@ -120,12 +146,14 @@ impl NativeAudioOutput {
                 device_id,
                 AAUDIO_SHARING_MODE_SHARED,
                 AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
+                3,
             )
             .map(|stream| Self { stream }),
             2 => open_aaudio_stream(
                 device_id,
                 AAUDIO_SHARING_MODE_SHARED,
                 AAUDIO_PERFORMANCE_MODE_NONE,
+                4,
             )
             .map(|stream| Self { stream }),
             _ => bail!("invalid Android latency mode {latency_mode}"),
@@ -290,7 +318,7 @@ fn audio() -> &'static Mutex<Option<NativeAudioOutput>> {
 }
 
 fn midi_queue() -> &'static Mutex<VecDeque<MidiEventV1>> {
-    MIDI_QUEUE.get_or_init(|| Mutex::new(VecDeque::with_capacity(1024)))
+    MIDI_QUEUE.get_or_init(|| Mutex::new(VecDeque::with_capacity(MAX_PENDING_MIDI_EVENTS)))
 }
 
 fn enqueue_midi(bytes: &[u8]) {
@@ -300,6 +328,10 @@ fn enqueue_midi(bytes: &[u8]) {
     let mut data = [0_u8; 3];
     data[..bytes.len()].copy_from_slice(bytes);
     if let Ok(mut queue) = midi_queue().lock() {
+        if queue.len() >= MAX_PENDING_MIDI_EVENTS {
+            MIDI_DROPPED_EVENTS.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
         queue.push_back(MidiEventV1 {
             frame: 0,
             length: bytes.len() as u8,
@@ -332,6 +364,7 @@ fn open_aaudio_stream(
     device_id: i32,
     sharing_mode: i32,
     performance_mode: i32,
+    buffer_bursts: i32,
 ) -> Result<*mut AAudioStream> {
     let mut builder = ptr::null_mut();
     unsafe {
@@ -350,6 +383,7 @@ fn open_aaudio_stream(
         AAudioStreamBuilder_setChannelCount(builder, 2);
         AAudioStreamBuilder_setSampleRate(builder, SAMPLE_RATE as i32);
         AAudioStreamBuilder_setDataCallback(builder, Some(render_callback), ptr::null_mut());
+        AAudioStreamBuilder_setErrorCallback(builder, Some(error_callback), ptr::null_mut());
 
         let mut stream = ptr::null_mut();
         let open_result = AAudioStreamBuilder_openStream(builder, &mut stream);
@@ -360,12 +394,82 @@ fn open_aaudio_stream(
         if stream.is_null() {
             bail!("AAudio returned a null output stream");
         }
+        let frames_per_burst = AAudioStream_getFramesPerBurst(stream);
+        if frames_per_burst > 0 {
+            let requested = frames_per_burst.saturating_mul(buffer_bursts.max(2));
+            let _ = AAudioStream_setBufferSizeInFrames(stream, requested);
+        }
         let start_result = AAudioStream_requestStart(stream);
         if start_result != AAUDIO_OK {
             let _ = AAudioStream_close(stream);
             return Err(aaudio_error("starting AAudio output", start_result));
         }
         Ok(stream)
+    }
+}
+
+unsafe extern "C" fn error_callback(
+    _stream: *mut AAudioStream,
+    _user_data: *mut c_void,
+    error: i32,
+) {
+    AUDIO_ERROR.store(error, Ordering::Release);
+}
+
+fn audio_status_json() -> String {
+    let guard = match audio().lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return serde_json::json!({"running": false, "error": "audio lock poisoned"})
+                .to_string();
+        }
+    };
+    let Some(output) = guard.as_ref() else {
+        return serde_json::json!({
+            "running": false,
+            "midi_dropped_events": MIDI_DROPPED_EVENTS.load(Ordering::Relaxed),
+        })
+        .to_string();
+    };
+    let callback_count = AUDIO_CALLBACK_COUNT.load(Ordering::Relaxed);
+    let callback_frames = AUDIO_CALLBACK_FRAMES.load(Ordering::Relaxed);
+    let callback_nanos = AUDIO_CALLBACK_TOTAL_NANOS.load(Ordering::Relaxed);
+    let average_frames = if callback_count == 0 {
+        0.0
+    } else {
+        callback_frames as f64 / callback_count as f64
+    };
+    let average_callback_micros = if callback_count == 0 {
+        0.0
+    } else {
+        callback_nanos as f64 / callback_count as f64 / 1_000.0
+    };
+    let callback_budget_micros = average_frames / SAMPLE_RATE * 1_000_000.0;
+    let callback_load_percent = if callback_budget_micros == 0.0 {
+        0.0
+    } else {
+        average_callback_micros / callback_budget_micros * 100.0
+    };
+    // SAFETY: AUDIO owns a live stream while the mutex guard is held.
+    unsafe {
+        serde_json::json!({
+            "running": true,
+            "sample_rate": AAudioStream_getSampleRate(output.stream),
+            "frames_per_burst": AAudioStream_getFramesPerBurst(output.stream),
+            "buffer_size_frames": AAudioStream_getBufferSizeInFrames(output.stream),
+            "buffer_capacity_frames": AAudioStream_getBufferCapacityInFrames(output.stream),
+            "xruns": AAudioStream_getXRunCount(output.stream),
+            "sharing_mode": AAudioStream_getSharingMode(output.stream),
+            "performance_mode": AAudioStream_getPerformanceMode(output.stream),
+            "pending_error": AUDIO_ERROR.load(Ordering::Acquire),
+            "midi_dropped_events": MIDI_DROPPED_EVENTS.load(Ordering::Relaxed),
+            "callback_count": callback_count,
+            "average_callback_us": average_callback_micros,
+            "maximum_callback_us": AUDIO_CALLBACK_MAX_NANOS.load(Ordering::Relaxed) as f64 / 1_000.0,
+            "callback_budget_us": callback_budget_micros,
+            "callback_load_percent": callback_load_percent,
+        })
+        .to_string()
     }
 }
 
@@ -379,6 +483,7 @@ unsafe extern "C" fn render_callback(
         return AAUDIO_CALLBACK_RESULT_CONTINUE;
     }
     let sample_count = num_frames as usize * 2;
+    let started = Instant::now();
     // SAFETY: AAudio supplies a writable interleaved stereo float buffer for
     // exactly num_frames because that format was fixed on the builder.
     let output = unsafe { slice::from_raw_parts_mut(audio_data.cast::<f32>(), sample_count) };
@@ -398,6 +503,11 @@ unsafe extern "C" fn render_callback(
             *sample = (*sample * gain).clamp(-1.0, 1.0);
         }
     }
+    let elapsed = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+    AUDIO_CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
+    AUDIO_CALLBACK_FRAMES.fetch_add(num_frames as u64, Ordering::Relaxed);
+    AUDIO_CALLBACK_TOTAL_NANOS.fetch_add(elapsed, Ordering::Relaxed);
+    AUDIO_CALLBACK_MAX_NANOS.fetch_max(elapsed, Ordering::Relaxed);
     AAUDIO_CALLBACK_RESULT_CONTINUE
 }
 
@@ -637,13 +747,17 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_activateInstalled
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_rackforge_android_MainActivity_sendMidi(
-    env: JNIEnv,
+pub extern "system" fn Java_org_rackforge_android_MainActivity_sendMidiMessage(
+    _env: JNIEnv,
     _class: JClass,
-    message: JByteArray,
+    status: jint,
+    data_1: jint,
+    data_2: jint,
+    length: jint,
 ) {
-    if let Ok(bytes) = env.convert_byte_array(&message) {
-        enqueue_midi(&bytes);
+    let bytes = [status as u8, data_1 as u8, data_2 as u8];
+    if (1..=3).contains(&length) {
+        enqueue_midi(&bytes[..length as usize]);
     }
 }
 
@@ -733,6 +847,11 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_startNativeAudio(
             bail!("RackForge engine is not initialized");
         }
         let candidate = NativeAudioOutput::open(device_id, latency_mode)?;
+        AUDIO_ERROR.store(AAUDIO_OK, Ordering::Release);
+        AUDIO_CALLBACK_COUNT.store(0, Ordering::Relaxed);
+        AUDIO_CALLBACK_FRAMES.store(0, Ordering::Relaxed);
+        AUDIO_CALLBACK_TOTAL_NANOS.store(0, Ordering::Relaxed);
+        AUDIO_CALLBACK_MAX_NANOS.store(0, Ordering::Relaxed);
         *audio()
             .lock()
             .map_err(|_| anyhow::anyhow!("audio lock poisoned"))? = Some(candidate);
@@ -745,6 +864,22 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_startNativeAudio(
             JNI_FALSE
         }
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_nativeAudioStatus(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    result_string(&mut env, Ok(audio_status_json()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_pollNativeAudioError(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    AUDIO_ERROR.swap(AAUDIO_OK, Ordering::AcqRel)
 }
 
 #[unsafe(no_mangle)]
@@ -765,4 +900,5 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_stopNativeAudio(
     if let Ok(mut guard) = audio().lock() {
         *guard = None;
     }
+    AUDIO_ERROR.store(AAUDIO_OK, Ordering::Release);
 }

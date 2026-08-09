@@ -1245,6 +1245,9 @@ impl DesktopApp {
                 self.set_master_level(level, Some(command_ref))
             }
             SessionCommand::SetMasterPan { pan } => self.set_master_pan(pan, Some(command_ref)),
+            SessionCommand::SelectPlugin { instance_id } => {
+                self.select_plugin(&instance_id, Some(command_ref))
+            }
             SessionCommand::SelectSound {
                 instance_id,
                 sound_id,
@@ -1332,6 +1335,66 @@ impl DesktopApp {
             let percent = (u32::from(value.unsigned_abs()) + 5) / 10;
             format!("Master pan: {side} {percent}%")
         };
+        Ok(vec![event])
+    }
+
+    fn select_plugin(
+        &mut self,
+        instance_id: &InstanceId,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        {
+            let session = self.session.read().expect("session lock poisoned");
+            if session.instance(instance_id).is_none() {
+                return Err(format!("Unknown plugin instance: {instance_id}"));
+            }
+            if session.audition.is_some() || session.program_draft.is_some() {
+                return Err(
+                    "Finish or cancel the active plugin edit before changing plugins".into(),
+                );
+            }
+        }
+
+        let index = self
+            .plugins
+            .iter()
+            .position(|plugin| plugin.instance_id == instance_id.as_str())
+            .ok_or_else(|| format!("Unknown plugin instance: {instance_id}"))?;
+
+        #[cfg(windows)]
+        if let Some(audio) = &self.audio {
+            audio
+                .select_plugin(instance_id.as_str())
+                .map_err(|error| format!("Could not select plugin audio: {error:#}"))?;
+        }
+
+        let event = {
+            let mut session = self.session.write().expect("session lock poisoned");
+            let revision = session
+                .revision
+                .next()
+                .map_err(|error| format!("Could not advance session revision: {error}"))?;
+            let event = EventEnvelope {
+                schema_version: SESSION_SCHEMA_VERSION,
+                revision,
+                command,
+                event: SessionEvent::ActiveInstanceChanged {
+                    instance_id: instance_id.clone(),
+                },
+            };
+            session.apply(&event)?;
+            event
+        };
+
+        let plugin = &self.plugins[index];
+        self.menu.sync_active_plugin(
+            &plugin.instance_id,
+            &plugin.plugin_id,
+            &plugin.name,
+            plugin.sounds.clone(),
+            plugin.selected_sound_id.as_deref(),
+        );
+        self.status = format!("{} selected", plugin.name);
         Ok(vec![event])
     }
 
@@ -1428,34 +1491,15 @@ impl DesktopApp {
                 }
             }
             MenuCommand::SelectPlugin { instance_id } => {
-                let Some(index) = self
-                    .plugins
-                    .iter()
-                    .position(|plugin| plugin.instance_id == instance_id)
-                else {
-                    self.status = format!("Unknown plugin instance: {instance_id}");
-                    return;
+                let instance_id = match InstanceId::new(instance_id) {
+                    Ok(instance_id) => instance_id,
+                    Err(error) => {
+                        self.status = format!("Invalid plugin instance: {error}");
+                        return;
+                    }
                 };
-                let plugin = &self.plugins[index];
-                self.menu.sync_active_plugin(
-                    &plugin.instance_id,
-                    &plugin.plugin_id,
-                    &plugin.name,
-                    plugin.sounds.clone(),
-                    plugin.selected_sound_id.as_deref(),
-                );
-                let mut session = self.session.write().expect("session lock poisoned");
-                session.active_instance_id = Some(
-                    InstanceId::new(plugin.instance_id.clone()).expect("validated instance id"),
-                );
-                session.revision = Revision::new(session.revision.get().saturating_add(1));
-                self.status = format!("{} selected", plugin.name);
-                drop(session);
-                #[cfg(windows)]
-                if let Some(audio) = &self.audio
-                    && let Err(error) = audio.select_plugin(&plugin.instance_id)
-                {
-                    self.status = format!("Plugin selected, but audio did not switch: {error:#}");
+                if let Err(error) = self.select_plugin(&instance_id, None) {
+                    self.status = error;
                 }
             }
             MenuCommand::SelectSound { id } => {

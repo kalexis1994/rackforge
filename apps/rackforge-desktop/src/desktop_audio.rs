@@ -242,7 +242,9 @@ impl AudioInventory {
         let output = self
             .outputs
             .iter()
-            .find(|output| output.is_default)
+            .find(|output| output.driver == "WASAPI" && output.is_default)
+            .or_else(|| self.outputs.iter().find(|output| output.is_default))
+            .or_else(|| self.outputs.iter().find(|output| output.driver == "WASAPI"))
             .or_else(|| self.outputs.first())
             .context("Windows has no available audio output")?;
         Ok(AudioPreferences {

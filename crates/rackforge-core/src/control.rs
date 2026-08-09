@@ -2069,8 +2069,8 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                                 .clone()
                                 .or_else(|| preset.category.clone()),
                             category: None,
-            tags: Vec::new(),
-            editable: preset.editable,
+                            tags: Vec::new(),
+                            editable: preset.editable,
                         },
                     },
                     SessionEvent::AuditionEnded {
@@ -2689,14 +2689,14 @@ mod tests {
                 ui_layouts: vec!["little@1".into()],
                 config_available: true,
                 banks: Vec::new(),
-            sounds: vec![SoundSummary {
+                sounds: vec![SoundSummary {
                     id: "piano".into(),
                     name: "Piano".into(),
                     bank: None,
                     detail: None,
                     category: None,
-            tags: Vec::new(),
-            editable: false,
+                    tags: Vec::new(),
+                    editable: false,
                 }],
                 selected_sound_id: Some("piano".into()),
             }],

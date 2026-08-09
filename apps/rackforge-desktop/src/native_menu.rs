@@ -2,19 +2,19 @@ use anyhow::{Result, bail};
 use eframe::CreationContext;
 use std::sync::OnceLock;
 use std::sync::mpsc::{self, Receiver, Sender};
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    CreateSolidBrush, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawTextW,
-    FillRect, GetStockObject, InvalidateRect, NULL_PEN, RoundRect, SelectObject, SetBkMode,
-    SetTextColor, TRANSPARENT,
+    ClientToScreen, CreateSolidBrush, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
+    DeleteObject, DrawTextW, FillRect, GetStockObject, InvalidateRect, NULL_PEN, Rectangle,
+    SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows_sys::Win32::UI::Controls::{
     DRAWITEMSTRUCT, MEASUREITEMSTRUCT, ODS_DISABLED, ODS_GRAYED, ODS_SELECTED, ODT_MENU,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CallWindowProcW, CreateMenu, CreatePopupMenu, DrawMenuBar, EnableMenuItem,
-    GWLP_WNDPROC, HMENU, MENUINFO, MF_BYCOMMAND, MF_ENABLED, MF_GRAYED, MF_OWNERDRAW, MF_POPUP,
-    MF_SEPARATOR, MIM_BACKGROUND, SetMenu, SetMenuInfo, SetWindowLongPtrW, WM_COMMAND, WM_DRAWITEM,
+    AppendMenuW, CallWindowProcW, CreateMenu, CreatePopupMenu, EnableMenuItem, GWLP_WNDPROC, HMENU,
+    MENUINFO, MF_BYCOMMAND, MF_ENABLED, MF_GRAYED, MF_OWNERDRAW, MF_POPUP, MF_SEPARATOR,
+    MIM_BACKGROUND, SetMenuInfo, SetWindowLongPtrW, TrackPopupMenuEx, WM_COMMAND, WM_DRAWITEM,
     WM_MEASUREITEM, WNDPROC,
 };
 use wry::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -27,6 +27,8 @@ const VIEW_RELOAD: usize = 1101;
 const VIEW_OPEN_BROWSER: usize = 1102;
 const VIEW_DEVTOOLS: usize = 1103;
 const VIEW_AUDIO_MIDI: usize = 1104;
+const VIEW_PLAY: usize = 1105;
+const VIEW_LIVE: usize = 1106;
 const HELP_ABOUT: usize = 1201;
 
 static MENU_SENDER: OnceLock<Sender<NativeMenuCommand>> = OnceLock::new();
@@ -48,15 +50,27 @@ pub enum NativeMenuCommand {
     OpenBrowser,
     DeveloperTools,
     AudioMidiStatus,
+    Play,
+    Live,
     About,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeMenuSection {
+    File,
+    Settings,
+    View,
+    Help,
 }
 
 pub struct NativeMenu {
     window: HWND,
-    handle: HMENU,
+    _handle: HMENU,
     file_menu: HMENU,
+    settings_menu: HMENU,
+    view_menu: HMENU,
+    help_menu: HMENU,
     receiver: Receiver<NativeMenuCommand>,
-    visible: bool,
     install_enabled: bool,
 }
 
@@ -73,7 +87,7 @@ impl NativeMenu {
 
         // SAFETY: all handles are created and attached on the UI thread. Menu
         // strings remain valid for the duration of each synchronous call.
-        let (handle, file_menu) = unsafe {
+        let (handle, file_menu, settings_menu, view_menu, help_menu) = unsafe {
             let menu = CreateMenu();
             let file = CreatePopupMenu();
             let settings = CreatePopupMenu();
@@ -95,6 +109,9 @@ impl NativeMenu {
 
             append_item(settings, SETTINGS_OPEN, "Settings…")?;
 
+            append_item(view, VIEW_PLAY, "Play")?;
+            append_item(view, VIEW_LIVE, "Live")?;
+            AppendMenuW(view, MF_SEPARATOR, 0, std::ptr::null());
             append_item(view, VIEW_RELOAD, "Reload")?;
             append_item(view, VIEW_OPEN_BROWSER, "Open in Browser")?;
             append_item(view, VIEW_AUDIO_MIDI, "Audio & MIDI Status")?;
@@ -124,40 +141,43 @@ impl NativeMenu {
             ORIGINAL_WINDOW_PROC
                 .set(previous)
                 .map_err(|_| anyhow::anyhow!("RackForge window procedure was initialized twice"))?;
-            (menu, file)
+            (menu, file, settings, view, help)
         };
 
         Ok(Self {
             window,
-            handle,
+            _handle: handle,
             file_menu,
+            settings_menu,
+            view_menu,
+            help_menu,
             receiver,
-            visible: false,
             install_enabled: true,
         })
     }
 
-    pub fn show(&mut self) -> Result<()> {
-        if !self.visible {
-            // SAFETY: window and menu remain owned by this application.
-            if unsafe { SetMenu(self.window, self.handle) } == 0 {
-                bail!("Windows could not display the RackForge application menu");
-            }
-            unsafe { DrawMenuBar(self.window) };
-            self.visible = true;
+    pub fn popup(
+        &self,
+        section: NativeMenuSection,
+        anchor: eframe::egui::Pos2,
+        pixels_per_point: f32,
+    ) -> Result<()> {
+        let menu = match section {
+            NativeMenuSection::File => self.file_menu,
+            NativeMenuSection::Settings => self.settings_menu,
+            NativeMenuSection::View => self.view_menu,
+            NativeMenuSection::Help => self.help_menu,
+        };
+        let mut point = POINT {
+            x: (anchor.x * pixels_per_point).round() as i32,
+            y: (anchor.y * pixels_per_point).round() as i32,
+        };
+        // SAFETY: the anchor is a client coordinate for the live RackForge
+        // window, and the selected popup remains owned by its root menu.
+        if unsafe { ClientToScreen(self.window, &mut point) } == 0 {
+            bail!("Windows could not position the RackForge popup menu");
         }
-        Ok(())
-    }
-
-    pub fn hide(&mut self) -> Result<()> {
-        if self.visible {
-            // SAFETY: detaching a menu from our live top-level window is valid.
-            if unsafe { SetMenu(self.window, std::ptr::null_mut()) } == 0 {
-                bail!("Windows could not hide the RackForge application menu");
-            }
-            unsafe { DrawMenuBar(self.window) };
-            self.visible = false;
-        }
+        unsafe { TrackPopupMenuEx(menu, 0, point.x, point.y, self.window, std::ptr::null()) };
         Ok(())
     }
 
@@ -173,7 +193,6 @@ impl NativeMenu {
         // SAFETY: file_menu belongs to the live menu attached to this window.
         unsafe {
             EnableMenuItem(self.file_menu, FILE_INSTALL_PLUGIN as u32, flags);
-            DrawMenuBar(self.window);
         }
         self.install_enabled = enabled;
     }
@@ -267,15 +286,14 @@ unsafe extern "system" fn menu_window_proc(
                 let old_brush = unsafe { SelectObject(draw.hDC, accent) };
                 let old_pen = unsafe { SelectObject(draw.hDC, GetStockObject(NULL_PEN)) };
                 let inset_x = if label.top_level { 3 } else { 5 };
+                let inset_y = if label.top_level { 0 } else { 3 };
                 unsafe {
-                    RoundRect(
+                    Rectangle(
                         draw.hDC,
                         draw.rcItem.left + inset_x,
-                        draw.rcItem.top + 3,
+                        draw.rcItem.top + inset_y,
                         draw.rcItem.right - inset_x,
-                        draw.rcItem.bottom - 3,
-                        12,
-                        12,
+                        draw.rcItem.bottom - inset_y,
                     );
                     SelectObject(draw.hDC, old_pen);
                     SelectObject(draw.hDC, old_brush);
@@ -311,6 +329,8 @@ unsafe extern "system" fn menu_window_proc(
             VIEW_OPEN_BROWSER => Some(NativeMenuCommand::OpenBrowser),
             VIEW_DEVTOOLS => Some(NativeMenuCommand::DeveloperTools),
             VIEW_AUDIO_MIDI => Some(NativeMenuCommand::AudioMidiStatus),
+            VIEW_PLAY => Some(NativeMenuCommand::Play),
+            VIEW_LIVE => Some(NativeMenuCommand::Live),
             HELP_ABOUT => Some(NativeMenuCommand::About),
             _ => None,
         };

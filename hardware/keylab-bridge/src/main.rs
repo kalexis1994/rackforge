@@ -13,6 +13,7 @@ use rackforge_control_api::{
 #[cfg(target_os = "linux")]
 use rackforge_controller_api::LITTLE_V1;
 use rackforge_controller_api::{ButtonPhase, HostActionBinding, HostActionTarget};
+use rackforge_controller_arturia_keylab_essential_mk3::protocol as keylab_protocol;
 use rackforge_controller_package::{
     CONTROLLER_DRIVER_API_VERSION, PROCESS_DRIVER_PROTOCOL_VERSION, ProcessDriverInfo,
 };
@@ -796,44 +797,32 @@ impl KeyLabSession {
         Ok(())
     }
 
-    fn start(&mut self) -> Result<(), Box<dyn Error>> {
-        self.send(&select_preset(1)?)?;
-        self.switched_to_daw = true;
-        thread::sleep(Duration::from_millis(350));
-        self.send(CONNECT)?;
-        self.connected = true;
-        thread::sleep(Duration::from_millis(150));
+    fn send_messages(
+        &mut self,
+        messages: impl IntoIterator<Item = keylab_protocol::OutboundMessage>,
+    ) -> Result<(), Box<dyn Error>> {
+        for message in messages {
+            self.send(&message.bytes)?;
+            if message.settle_after_ms != 0 {
+                thread::sleep(Duration::from_millis(u64::from(message.settle_after_ms)));
+            }
+        }
         Ok(())
     }
 
+    fn start(&mut self) -> Result<(), Box<dyn Error>> {
+        self.switched_to_daw = true;
+        self.connected = true;
+        self.send_messages(keylab_protocol::acquire_messages()?)
+    }
+
     fn restore(&mut self) -> Result<(), Box<dyn Error>> {
-        let mut failures = Vec::new();
-        if self.connected {
-            if let Err(error) = self.send(CLEAR_SCREEN) {
-                failures.push(format!("limpiar pantalla: {error}"));
-            }
-            if let Err(error) = self.send(DISCONNECT) {
-                failures.push(format!("desconectar DAW: {error}"));
-            }
+        if self.connected || self.switched_to_daw {
+            self.send_messages(keylab_protocol::restore_messages()?)?;
             self.connected = false;
-            thread::sleep(Duration::from_millis(150));
-        }
-        if self.switched_to_daw {
-            match select_preset(0) {
-                Ok(message) => {
-                    if let Err(error) = self.send(&message) {
-                        failures.push(format!("restaurar Arturia: {error}"));
-                    }
-                }
-                Err(error) => failures.push(error),
-            }
             self.switched_to_daw = false;
         }
-        if failures.is_empty() {
-            Ok(())
-        } else {
-            Err(failures.join("; ").into())
-        }
+        Ok(())
     }
 }
 
@@ -2590,6 +2579,7 @@ struct MenuMessages {
     header: Vec<u8>,
     body: Vec<u8>,
     footer: Vec<u8>,
+    button_leds: [Vec<u8>; 4],
 }
 
 fn render_menu_messages(menu: &menu::Menu) -> Result<MenuMessages, String> {
@@ -2601,6 +2591,7 @@ fn render_screen_messages(screen: &menu::Screen) -> Result<MenuMessages, String>
         header: screen_header_message(&screen.header)?,
         body: two_lines(&screen.line_1, &screen.line_2)?,
         footer: footer(&screen.footer)?,
+        button_leds: keylab_protocol::button_led_messages(&screen.footer)?,
     })
 }
 
@@ -2624,7 +2615,11 @@ fn send_menu_with_header_override(
     thread::sleep(Duration::from_millis(20));
     session.send(header_override.unwrap_or(&messages.header))?;
     thread::sleep(Duration::from_millis(20));
-    session.send(&messages.footer)
+    session.send(&messages.footer)?;
+    for message in &messages.button_leds {
+        session.send(message)?;
+    }
+    Ok(())
 }
 
 fn send_menu_frames(
@@ -2788,37 +2783,49 @@ fn run_restore(midi: MidiOutput, port: &PortInfo, execute: bool) -> Result<(), B
 fn run_led_demo(midi: MidiOutput, port: &PortInfo, execute: bool) -> Result<(), Box<dyn Error>> {
     println!("Puerto: [{}] {}", port.index, port.name);
     if !execute {
-        println!("DRY-RUN: se probarían temporalmente CC 44–47 y luego quedarían apagados.");
+        println!(
+            "DRY-RUN: se probarían temporalmente los cuatro LED RGB y luego quedarían apagados."
+        );
         return Ok(());
     }
     if !is_keylab_midi(&port.name) {
         return Err("El puerto seleccionado no es el MIDI principal del KeyLab".into());
     }
 
-    let mut connection = midi.connect(&port.handle, "rackforge KeyLab LED probe")?;
+    let mut session = KeyLabSession::open(midi, port)?;
     let result = (|| -> Result<(), Box<dyn Error>> {
-        for controller in 44..=47 {
-            connection.send(&[0xB0, controller, 0])?;
+        session.start()?;
+        for message in keylab_protocol::clear_button_led_messages() {
+            session.send(&message)?;
         }
-        for controller in 44..=47 {
-            connection.send(&[0xB0, controller, 127])?;
+        for index in 0..4 {
+            session.send(&keylab_protocol::button_led_message(
+                index,
+                [127, 127, 127],
+            )?)?;
             thread::sleep(Duration::from_millis(700));
-            connection.send(&[0xB0, controller, 0])?;
+            session.send(&keylab_protocol::button_led_message(index, [0, 0, 0])?)?;
             thread::sleep(Duration::from_millis(150));
         }
-        for controller in 44..=47 {
-            connection.send(&[0xB0, controller, 127])?;
+        for index in 0..4 {
+            session.send(&keylab_protocol::button_led_message(index, [20, 80, 127])?)?;
         }
         thread::sleep(Duration::from_secs(1));
         Ok(())
     })();
-    for controller in 44..=47 {
-        if let Err(error) = connection.send(&[0xB0, controller, 0]) {
-            eprintln!("No se pudo apagar LED CC {controller}: {error}");
+    for (index, message) in keylab_protocol::clear_button_led_messages()
+        .into_iter()
+        .enumerate()
+    {
+        if let Err(error) = session.send(&message) {
+            eprintln!("No se pudo apagar el LED {}: {error}", index + 1);
         }
     }
+    if let Err(error) = session.restore() {
+        eprintln!("No se pudo restaurar el modo Arturia después de la prueba: {error}");
+    }
     result?;
-    println!("Prueba LED finalizada; CC 44–47 quedaron en cero.");
+    println!("Prueba LED RGB finalizada; los cuatro quedaron apagados.");
     Ok(())
 }
 
@@ -2841,7 +2848,10 @@ mod pan_tests {
         // This is the whole bug: the encoder sat near zero while the pan sat
         // elsewhere, and obeying that first reading threw the mix across.
         let mut follower = following_from(-283);
-        assert!(follower.advance(1).is_none(), "the first reading only anchors");
+        assert!(
+            follower.advance(1).is_none(),
+            "the first reading only anchors"
+        );
         assert!(
             follower.advance(2).is_some(),
             "and every reading after it moves the pan"
@@ -2919,7 +2929,10 @@ mod pan_tests {
         // of it, so the pan jumped straight to six or seven per cent.
         assert_eq!(through_detent(PAN_DETENT), 0, "the edge is still centre");
         let just_out = through_detent(PAN_DETENT + 1);
-        assert!(just_out > 0 && just_out < 10, "left the detent at {just_out}");
+        assert!(
+            just_out > 0 && just_out < 10,
+            "left the detent at {just_out}"
+        );
         let mirrored = through_detent(-(PAN_DETENT + 1));
         assert_eq!(mirrored, -just_out, "both sides behave the same");
     }

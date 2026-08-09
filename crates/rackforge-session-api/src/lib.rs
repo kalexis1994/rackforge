@@ -797,14 +797,14 @@ mod tests {
                 ui_layouts: vec!["little@1".into()],
                 config_available: true,
                 banks: Vec::new(),
-            sounds: vec![SoundSummary {
+                sounds: vec![SoundSummary {
                     id: "dls.piano-1".into(),
                     name: "Piano 1".into(),
                     bank: Some("dls".into()),
                     detail: None,
                     category: None,
-            tags: Vec::new(),
-            editable: false,
+                    tags: Vec::new(),
+                    editable: false,
                 }],
                 selected_sound_id: None,
             }],
@@ -1178,8 +1178,8 @@ mod tests {
                         bank: Some("custom".into()),
                         detail: Some("CUSTOM 001".into()),
                         category: None,
-            tags: Vec::new(),
-            editable: true,
+                        tags: Vec::new(),
+                        editable: true,
                     },
                 },
             ))

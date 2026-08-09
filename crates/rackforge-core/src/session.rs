@@ -142,15 +142,15 @@ mod tests {
                 ui_layouts: vec!["little@1".into()],
                 config_available: true,
                 banks: Vec::new(),
-            sounds: vec![
+                sounds: vec![
                     SoundSummary {
                         id: "piano".into(),
                         name: "Piano".into(),
                         bank: None,
                         detail: None,
                         category: None,
-            tags: Vec::new(),
-            editable: false,
+                        tags: Vec::new(),
+                        editable: false,
                     },
                     SoundSummary {
                         id: "strings".into(),
@@ -158,8 +158,8 @@ mod tests {
                         bank: None,
                         detail: None,
                         category: None,
-            tags: Vec::new(),
-            editable: false,
+                        tags: Vec::new(),
+                        editable: false,
                     },
                 ],
                 selected_sound_id: Some("piano".into()),

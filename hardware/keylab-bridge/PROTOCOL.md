@@ -313,6 +313,29 @@ Captura confirmada en hardware, canal MIDI 1:
 Los releases no ejecutan nuevamente la acción. Sí deben conservarse como
 eventos para retirar feedback visual exactamente al soltar el botón.
 
+### LED RGB de los botones contextuales
+
+Los CC 44–47 son exclusivamente mensajes de entrada y reenviarlos al teclado
+no controla las luces. La integración pública de Ableton usa el comando SysEx:
+
+```text
+04 01 16 <button_id> <r> <g> <b>
+```
+
+Para los cuatro botones contextuales, de izquierda a derecha, `button_id` es
+`18`, `19`, `1A` y `1B`; cada canal RGB acepta `00..7F`. Esta serialización quedó
+confirmada en hardware local el 2026-08-08. El firmware sólo la aplica dentro
+de una sesión DAW adquirida; enviarla mientras el teclado está restaurado en el
+programa Arturia no produce feedback visible.
+
+El runtime portable del controlador RackForge aplica `R=10, G=40, B=64` como
+iluminación ambiental tenue a todo el rango RGB `00..2B`: botones de modo,
+transporte, controles contextuales y los 16 pads. Los botones contextuales
+pueden elevar temporalmente el brillo para foco o pulsación. Al liberar la
+sesión, el runtime apaga el rango completo antes de desconectar DAW y restaurar
+el programa Arturia. Desktop, Raspberry y Android consumen la misma secuencia
+de mensajes y temporizaciones.
+
 ## Contrato de navegación de RackForge
 
 De izquierda a derecha:

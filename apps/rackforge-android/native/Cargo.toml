@@ -12,7 +12,10 @@ crate-type = ["cdylib"]
 anyhow.workspace = true
 jni = "0.21"
 rackforge-core = { path = "../../../crates/rackforge-core" }
+keylab-essential-mk3 = { package = "rackforge-controller-arturia-keylab-essential-mk3", path = "../../../hardware/keylab-bridge" }
 rackforge-plugin-api = { path = "../../../crates/rackforge-plugin-api" }
 rackforge-repository = { path = "../../../crates/rackforge-repository" }
+rackforge-session-api = { path = "../../../crates/rackforge-session-api" }
+rackforge-surface-runtime = { path = "../../../crates/rackforge-surface-runtime" }
 serde_json.workspace = true
 semver.workspace = true

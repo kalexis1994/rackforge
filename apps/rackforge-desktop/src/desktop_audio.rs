@@ -1,29 +1,120 @@
 use anyhow::{Context, Result, bail};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, FromSample, Sample, SampleFormat, SizedSample, SupportedBufferSize};
-use midir::{Ignore, MidiInput, MidiInputConnection};
-use rackforge_core::{LoadedPlugin, PluginInstance};
+use keylab_essential_mk3::{controller as keylab_controller, protocol as keylab_protocol};
+use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
+use rackforge_core::{
+    LoadedPlugin, PluginInstance,
+    midi_hotplug::{PanicScope, panic_packets},
+};
 use rackforge_plugin_api::abi::MidiEventV1;
+use rackforge_session_api::{HostControlTarget, MasterLevel, MasterPan};
+use rackforge_surface_runtime::{Input as SurfaceInput, Screen};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
-use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const AUDIO_SCHEMA_VERSION: u32 = 1;
 const PLUGIN_OUTPUT_CHANNELS: usize = 2;
 const MAX_AUDIO_FRAMES: usize = 4_096;
 const MIDI_QUEUE_CAPACITY: usize = 4_096;
 const COMMAND_QUEUE_CAPACITY: usize = 64;
+const CONTROLLER_QUEUE_CAPACITY: usize = 256;
+const DISPLAY_QUEUE_CAPACITY: usize = 8;
 const MAX_MIDI_EVENTS_PER_BLOCK: usize = 4_096;
 const COMMON_SAMPLE_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
 const COMMON_BUFFER_FRAMES: [u32; 8] = [32, 64, 128, 256, 512, 1_024, 2_048, 4_096];
 const DEFAULT_OUTPUT_GAIN_DB: i8 = 6;
 const MAX_OUTPUT_GAIN_DB: i8 = 12;
+const MIDI_RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
+const MIDI_SUPERVISOR_TICK: Duration = Duration::from_millis(20);
+const MASTER_SMOOTHING_FRAMES: u32 = 480;
+
+#[derive(Default)]
+struct AudioTelemetry {
+    callback_count: AtomicU64,
+    callback_frames: AtomicU64,
+    callback_total_nanos: AtomicU64,
+    callback_max_nanos: AtomicU64,
+    callback_overruns: AtomicU64,
+    midi_dropped_events: AtomicU64,
+    midi_panic_count: AtomicU64,
+    stream_error_count: AtomicU64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AudioRuntimeStatus {
+    pub callback_count: u64,
+    pub average_frames: f64,
+    pub average_callback_us: f64,
+    pub maximum_callback_us: f64,
+    pub callback_budget_us: f64,
+    pub callback_load_percent: f64,
+    pub callback_overruns: u64,
+    pub midi_dropped_events: u64,
+    pub midi_panic_count: u64,
+    pub stream_error_count: u64,
+}
+
+impl AudioTelemetry {
+    fn record_callback(&self, frames: usize, sample_rate: u32, elapsed: Duration) {
+        let nanos = elapsed.as_nanos().min(u128::from(u64::MAX)) as u64;
+        self.callback_count.fetch_add(1, Ordering::Relaxed);
+        self.callback_frames
+            .fetch_add(frames as u64, Ordering::Relaxed);
+        self.callback_total_nanos
+            .fetch_add(nanos, Ordering::Relaxed);
+        self.callback_max_nanos.fetch_max(nanos, Ordering::Relaxed);
+        let budget = (frames as u64)
+            .saturating_mul(1_000_000_000)
+            .checked_div(u64::from(sample_rate))
+            .unwrap_or(0);
+        if budget > 0 && nanos > budget {
+            self.callback_overruns.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn snapshot(&self, sample_rate: u32) -> AudioRuntimeStatus {
+        let callback_count = self.callback_count.load(Ordering::Relaxed);
+        let callback_frames = self.callback_frames.load(Ordering::Relaxed);
+        let callback_nanos = self.callback_total_nanos.load(Ordering::Relaxed);
+        let average_frames = if callback_count == 0 {
+            0.0
+        } else {
+            callback_frames as f64 / callback_count as f64
+        };
+        let average_callback_us = if callback_count == 0 {
+            0.0
+        } else {
+            callback_nanos as f64 / callback_count as f64 / 1_000.0
+        };
+        let callback_budget_us = average_frames / f64::from(sample_rate) * 1_000_000.0;
+        let callback_load_percent = if callback_budget_us == 0.0 {
+            0.0
+        } else {
+            average_callback_us / callback_budget_us * 100.0
+        };
+        AudioRuntimeStatus {
+            callback_count,
+            average_frames,
+            average_callback_us,
+            maximum_callback_us: self.callback_max_nanos.load(Ordering::Relaxed) as f64 / 1_000.0,
+            callback_budget_us,
+            callback_load_percent,
+            callback_overruns: self.callback_overruns.load(Ordering::Relaxed),
+            midi_dropped_events: self.midi_dropped_events.load(Ordering::Relaxed),
+            midi_panic_count: self.midi_panic_count.load(Ordering::Relaxed),
+            stream_error_count: self.stream_error_count.load(Ordering::Relaxed),
+        }
+    }
+}
 
 pub struct VoiceSpec {
     pub instance_id: String,
@@ -252,9 +343,13 @@ impl AudioPreferences {
 
 pub struct DesktopAudio {
     _stream: cpal::Stream,
-    _midi_connections: Vec<MidiInputConnection<()>>,
+    _midi_supervisor: MidiSupervisor,
     command_sender: SyncSender<AudioCommand>,
+    controller_receiver: Receiver<DesktopControllerEvent>,
+    display_sender: SyncSender<Screen>,
     errors: Arc<Mutex<Option<String>>>,
+    telemetry: Arc<AudioTelemetry>,
+    sample_rate: u32,
     summary: String,
 }
 
@@ -345,13 +440,26 @@ impl DesktopAudio {
             .and_then(|active| voices.iter().position(|voice| voice.instance_id == active))
             .unwrap_or(0);
 
+        let telemetry = Arc::new(AudioTelemetry::default());
         let (midi_sender, midi_receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
-        let (midi_connections, midi_names) =
-            connect_midi_inputs(midi_sender, &preferences.midi_inputs)?;
+        let (controller_sender, controller_receiver) =
+            mpsc::sync_channel(CONTROLLER_QUEUE_CAPACITY);
+        let (display_sender, display_receiver) = mpsc::sync_channel(DISPLAY_QUEUE_CAPACITY);
+        let (midi_supervisor, midi_names) = MidiSupervisor::start(
+            midi_sender,
+            preferences.midi_inputs.clone(),
+            Arc::clone(&telemetry),
+            controller_sender,
+            display_receiver,
+        )?;
         let (command_sender, command_receiver) = mpsc::sync_channel(COMMAND_QUEUE_CAPACITY);
         let errors = Arc::new(Mutex::new(None));
         let callback_errors = Arc::clone(&errors);
         let stream_errors = Arc::clone(&errors);
+        let callback_telemetry = Arc::clone(&telemetry);
+        let stream_telemetry = Arc::clone(&telemetry);
+        let callback_sample_rate = config.sample_rate.0;
+        let callback_channels = device_channels;
         let mut processor = AudioProcessor {
             voices,
             active_voice,
@@ -361,18 +469,31 @@ impl DesktopAudio {
             output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
             device_channels,
             output_gain: db_to_amplitude(preferences.output_gain_db),
+            master_gain: MasterGain::new(MasterLevel::UNITY),
+            master_balance: MasterBalance::new(MasterPan::CENTER),
+            stopped: false,
         };
         let stream = device
             .build_output_stream_raw(
                 &config,
                 sample_format,
                 move |data, _| {
+                    let started = Instant::now();
+                    let frames = data.len() / callback_channels;
                     if let Err(error) = render_output(&mut processor, data, sample_format) {
                         silence_output(data, sample_format);
                         publish_error(&callback_errors, error);
                     }
+                    callback_telemetry.record_callback(
+                        frames,
+                        callback_sample_rate,
+                        started.elapsed(),
+                    );
                 },
                 move |error| {
+                    stream_telemetry
+                        .stream_error_count
+                        .fetch_add(1, Ordering::Relaxed);
                     publish_error(&stream_errors, format!("Audio stream failed: {error}"));
                 },
                 None,
@@ -400,15 +521,41 @@ impl DesktopAudio {
         println!("DESKTOP_AUDIO_READY {summary}");
         Ok(Self {
             _stream: stream,
-            _midi_connections: midi_connections,
+            _midi_supervisor: midi_supervisor,
             command_sender,
+            controller_receiver,
+            display_sender,
             errors,
+            telemetry,
+            sample_rate: config.sample_rate.0,
             summary,
         })
     }
 
     pub fn summary(&self) -> &str {
         &self.summary
+    }
+
+    pub fn runtime_status(&self) -> AudioRuntimeStatus {
+        self.telemetry.snapshot(self.sample_rate)
+    }
+
+    pub fn diagnostics(&self) -> String {
+        let status = self.runtime_status();
+        format!(
+            "{}\nCallback: {} blocks · {:.1}% CPU · avg {:.1} µs · max {:.1} µs · budget {:.1} µs · {:.0} frames\nDeadlines missed: {} · MIDI dropped: {} · disconnect panics: {} · stream errors: {}",
+            self.summary,
+            status.callback_count,
+            status.callback_load_percent,
+            status.average_callback_us,
+            status.maximum_callback_us,
+            status.callback_budget_us,
+            status.average_frames,
+            status.callback_overruns,
+            status.midi_dropped_events,
+            status.midi_panic_count,
+            status.stream_error_count,
+        )
     }
 
     pub fn select_plugin(&self, instance_id: &str) -> Result<()> {
@@ -420,6 +567,38 @@ impl DesktopAudio {
             instance_id: instance_id.into(),
             sound_id: sound_id.into(),
         })
+    }
+
+    pub fn set_master_level(&self, level: MasterLevel) -> Result<()> {
+        self.send_command(AudioCommand::SetMasterLevel(level))
+    }
+
+    pub fn set_master_pan(&self, pan: MasterPan) -> Result<()> {
+        self.send_command(AudioCommand::SetMasterPan(pan))
+    }
+
+    pub fn set_running(&self, running: bool) -> Result<()> {
+        self.send_command(AudioCommand::SetRunning(running))
+    }
+
+    pub fn emergency_stop(&self) -> Result<()> {
+        self.send_command(AudioCommand::EmergencyStop)
+    }
+
+    pub fn try_controller_event(&self) -> Option<DesktopControllerEvent> {
+        self.controller_receiver.try_recv().ok()
+    }
+
+    pub fn render_little(&self, screen: Screen) {
+        match self.display_sender.try_send(screen) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Full(screen)) => {
+                // The supervisor will shortly drain the queue. Losing an intermediate
+                // animation frame is preferable to ever blocking the UI/audio path.
+                let _ = screen;
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {}
+        }
     }
 
     pub fn test_note(&self) -> Result<()> {
@@ -458,6 +637,22 @@ enum AudioCommand {
         sound_id: String,
     },
     InjectMidi(MidiPacket),
+    SetMasterLevel(MasterLevel),
+    SetMasterPan(MasterPan),
+    SetRunning(bool),
+    EmergencyStop,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DesktopControllerEvent {
+    Connected,
+    Disconnected,
+    Surface {
+        input: SurfaceInput,
+        phase: keylab_protocol::InputPhase,
+    },
+    MasterLevel(u8),
+    MasterPan(u8),
 }
 
 #[derive(Clone, Copy)]
@@ -478,6 +673,87 @@ struct SendablePluginInstance(PluginInstance<'static>);
 // not share the handle with the UI instance or access it after the move.
 unsafe impl Send for SendablePluginInstance {}
 
+struct MasterGain {
+    current: f32,
+    target: f32,
+    step: f32,
+    remaining: u32,
+}
+
+impl MasterGain {
+    fn new(level: MasterLevel) -> Self {
+        let gain = level.amplitude();
+        Self {
+            current: gain,
+            target: gain,
+            step: 0.0,
+            remaining: 0,
+        }
+    }
+
+    fn set_level(&mut self, level: MasterLevel) {
+        self.target = level.amplitude();
+        self.remaining = MASTER_SMOOTHING_FRAMES;
+        self.step = (self.target - self.current) / self.remaining as f32;
+    }
+
+    fn next(&mut self) -> f32 {
+        if self.remaining > 0 {
+            self.current += self.step;
+            self.remaining -= 1;
+            if self.remaining == 0 {
+                self.current = self.target;
+            }
+        }
+        self.current
+    }
+}
+
+struct MasterBalance {
+    current_left: f32,
+    current_right: f32,
+    target_left: f32,
+    target_right: f32,
+    step_left: f32,
+    step_right: f32,
+    remaining: u32,
+}
+
+impl MasterBalance {
+    fn new(pan: MasterPan) -> Self {
+        let (left, right) = pan.balance();
+        Self {
+            current_left: left,
+            current_right: right,
+            target_left: left,
+            target_right: right,
+            step_left: 0.0,
+            step_right: 0.0,
+            remaining: 0,
+        }
+    }
+
+    fn set_pan(&mut self, pan: MasterPan) {
+        (self.target_left, self.target_right) = pan.balance();
+        self.remaining = MASTER_SMOOTHING_FRAMES;
+        self.step_left = (self.target_left - self.current_left) / self.remaining as f32;
+        self.step_right = (self.target_right - self.current_right) / self.remaining as f32;
+    }
+
+    fn next(&mut self) -> (f32, f32) {
+        if self.remaining > 0 {
+            self.current_left += self.step_left;
+            self.current_right += self.step_right;
+            self.remaining -= 1;
+            if self.remaining == 0 {
+                self.current_left = self.target_left;
+                self.current_right = self.target_right;
+            }
+        }
+        (self.current_left, self.current_right)
+    }
+}
+
 struct AudioProcessor {
     voices: Vec<AudioVoice>,
     active_voice: usize,
@@ -487,6 +763,9 @@ struct AudioProcessor {
     output: Vec<f32>,
     device_channels: usize,
     output_gain: f32,
+    master_gain: MasterGain,
+    master_balance: MasterBalance,
+    stopped: bool,
 }
 
 impl AudioProcessor {
@@ -505,6 +784,9 @@ impl AudioProcessor {
         let samples = frames * PLUGIN_OUTPUT_CHANNELS;
         let output = &mut self.output[..samples];
         output.fill(0.0);
+        if self.stopped {
+            return Ok(output);
+        }
         self.voices[self.active_voice]
             .instance
             .0
@@ -518,6 +800,12 @@ impl AudioProcessor {
                 &[],
             )
             .context("processing RackForge plugin audio")?;
+        for frame in output.chunks_exact_mut(PLUGIN_OUTPUT_CHANNELS) {
+            let gain = self.master_gain.next();
+            let (left, right) = self.master_balance.next();
+            frame[0] *= gain * left;
+            frame[1] *= gain * right;
+        }
         Ok(output)
     }
 
@@ -551,6 +839,15 @@ impl AudioProcessor {
                     }
                 }
                 AudioCommand::InjectMidi(packet) => push_midi_event(&mut self.events, packet),
+                AudioCommand::SetMasterLevel(level) => self.master_gain.set_level(level),
+                AudioCommand::SetMasterPan(pan) => self.master_balance.set_pan(pan),
+                AudioCommand::SetRunning(running) => self.stopped = !running,
+                AudioCommand::EmergencyStop => {
+                    for voice in &mut self.voices {
+                        voice.instance.0.reset()?;
+                    }
+                    self.stopped = true;
+                }
             }
         }
         Ok(())
@@ -692,52 +989,407 @@ fn discover_midi_inputs() -> Result<Vec<String>> {
     Ok(names)
 }
 
-fn connect_midi_inputs(
-    sender: SyncSender<MidiPacket>,
-    selected: &[String],
-) -> Result<(Vec<MidiInputConnection<()>>, Vec<String>)> {
-    let available = discover_midi_inputs()?;
-    let selected = selected.iter().collect::<BTreeSet<_>>();
-    let names = available
-        .into_iter()
-        .filter(|name| selected.contains(name))
-        .collect::<Vec<_>>();
-    let mut connections = Vec::with_capacity(names.len());
-    let mut connected_names = Vec::with_capacity(names.len());
-    for (index, name) in names.into_iter().enumerate() {
-        let mut midi = MidiInput::new(&format!("rackforge-desktop-midi-{index}"))
-            .context("opening a Windows MIDI client")?;
-        midi.ignore(Ignore::None);
-        let Some(port) = midi
-            .ports()
-            .into_iter()
-            .find(|port| midi.port_name(port).as_deref() == Ok(name.as_str()))
-        else {
-            continue;
-        };
-        let input_sender = sender.clone();
-        let connection = midi
-            .connect(
-                &port,
-                &format!("rackforge-desktop-input-{index}"),
-                move |_timestamp, message, _| {
-                    if message.is_empty() || message.len() > 3 {
+struct MidiSupervisor {
+    stop: mpsc::Sender<()>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl MidiSupervisor {
+    fn start(
+        sender: SyncSender<MidiPacket>,
+        selected: Vec<String>,
+        telemetry: Arc<AudioTelemetry>,
+        controller_sender: SyncSender<DesktopControllerEvent>,
+        display_receiver: Receiver<Screen>,
+    ) -> Result<(Self, Vec<String>)> {
+        let selected = selected.into_iter().collect::<BTreeSet<_>>();
+        let (stop_sender, stop_receiver) = mpsc::channel();
+        let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+        let worker = thread::Builder::new()
+            .name("rackforge-desktop-midi-supervisor".into())
+            .spawn(move || {
+                let mut connections = BTreeMap::new();
+                let mut display = None;
+                let mut latest_screen = None;
+                let mut display_dirty = false;
+                match reconcile_midi_inputs(
+                    &selected,
+                    &mut connections,
+                    &sender,
+                    &telemetry,
+                    &controller_sender,
+                ) {
+                    Ok(names) => {
+                        if reconcile_keylab_display(&selected, &mut display, latest_screen.as_ref())
+                        {
+                            reconnect_keylab_inputs(
+                                &selected,
+                                &mut connections,
+                                &sender,
+                                &telemetry,
+                                &controller_sender,
+                            );
+                        }
+                        let _ = ready_sender.send(Ok(names));
+                    }
+                    Err(error) => {
+                        let _ = ready_sender.send(Err(format!("{error:#}")));
                         return;
                     }
-                    let mut data = [0; 3];
-                    data[..message.len()].copy_from_slice(message);
-                    let _ = input_sender.try_send(MidiPacket {
-                        length: message.len() as u8,
-                        data,
-                    });
+                }
+                let mut next_reconcile = Instant::now() + MIDI_RECONNECT_INTERVAL;
+                loop {
+                    match stop_receiver.recv_timeout(MIDI_SUPERVISOR_TICK) {
+                        Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
+                        Err(RecvTimeoutError::Timeout) => {}
+                    }
+                    while let Ok(screen) = display_receiver.try_recv() {
+                        latest_screen = Some(screen);
+                        display_dirty = true;
+                    }
+                    if display_dirty
+                        && let (Some(display), Some(screen)) =
+                            (display.as_mut(), latest_screen.as_ref())
+                        && let Err(error) = display.render(screen)
+                    {
+                        eprintln!("DESKTOP_KEYLAB_DISPLAY_FAILED error={error:#}");
+                        display.restore_best_effort();
+                    }
+                    display_dirty = false;
+                    if display.as_ref().is_some_and(|display| display.failed) {
+                        display = None;
+                    }
+                    if Instant::now() >= next_reconcile {
+                        if let Err(error) = reconcile_midi_inputs(
+                            &selected,
+                            &mut connections,
+                            &sender,
+                            &telemetry,
+                            &controller_sender,
+                        ) {
+                            eprintln!("DESKTOP_MIDI_SCAN_FAILED error={error:#}");
+                        }
+                        if reconcile_keylab_display(&selected, &mut display, latest_screen.as_ref())
+                        {
+                            reconnect_keylab_inputs(
+                                &selected,
+                                &mut connections,
+                                &sender,
+                                &telemetry,
+                                &controller_sender,
+                            );
+                        }
+                        next_reconcile = Instant::now() + MIDI_RECONNECT_INTERVAL;
+                    }
+                }
+                if let Some(mut display) = display {
+                    display.restore_best_effort();
+                }
+            })
+            .context("starting Windows MIDI hotplug supervisor")?;
+        let connected = ready_receiver
+            .recv()
+            .context("Windows MIDI hotplug supervisor stopped during startup")?;
+        match connected {
+            Ok(names) => Ok((
+                Self {
+                    stop: stop_sender,
+                    worker: Some(worker),
                 },
-                (),
-            )
-            .map_err(|error| anyhow::anyhow!("connecting Windows MIDI input {name:?}: {error}"))?;
-        connections.push(connection);
-        connected_names.push(name);
+                names,
+            )),
+            Err(error) => {
+                let _ = stop_sender.send(());
+                let _ = worker.join();
+                bail!("starting Windows MIDI hotplug supervisor: {error}")
+            }
+        }
     }
-    Ok((connections, connected_names))
+}
+
+impl Drop for MidiSupervisor {
+    fn drop(&mut self) {
+        let _ = self.stop.send(());
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn reconcile_midi_inputs(
+    selected: &BTreeSet<String>,
+    connections: &mut BTreeMap<String, MidiInputConnection<()>>,
+    sender: &SyncSender<MidiPacket>,
+    telemetry: &Arc<AudioTelemetry>,
+    controller_sender: &SyncSender<DesktopControllerEvent>,
+) -> Result<Vec<String>> {
+    let present = discover_midi_inputs()?.into_iter().collect::<BTreeSet<_>>();
+    let lost = connections
+        .keys()
+        .filter(|name| !present.contains(*name))
+        .cloned()
+        .collect::<Vec<_>>();
+    for name in lost {
+        connections.remove(&name);
+        eprintln!("DESKTOP_MIDI_SOURCE_LOST name={name:?}");
+        if keylab_controller::little_driver(&name).is_some() {
+            let _ = controller_sender.try_send(DesktopControllerEvent::Disconnected);
+        }
+        release_held_notes(sender, telemetry);
+    }
+    for name in selected {
+        if !present.contains(name) || connections.contains_key(name) {
+            continue;
+        }
+        match connect_midi_input(
+            name,
+            sender.clone(),
+            Arc::clone(telemetry),
+            controller_sender.clone(),
+        ) {
+            Ok(connection) => {
+                connections.insert(name.clone(), connection);
+                println!("DESKTOP_MIDI_SOURCE_CONNECTED name={name:?}");
+                if keylab_controller::little_driver(name).is_some() {
+                    let _ = controller_sender.try_send(DesktopControllerEvent::Connected);
+                }
+            }
+            Err(error) => {
+                eprintln!("DESKTOP_MIDI_CONNECT_FAILED name={name:?} error={error:#}");
+            }
+        }
+    }
+    Ok(connections.keys().cloned().collect())
+}
+
+fn connect_midi_input(
+    name: &str,
+    sender: SyncSender<MidiPacket>,
+    telemetry: Arc<AudioTelemetry>,
+    controller_sender: SyncSender<DesktopControllerEvent>,
+) -> Result<MidiInputConnection<()>> {
+    let mut midi =
+        MidiInput::new("rackforge-desktop-midi").context("opening a Windows MIDI client")?;
+    midi.ignore(Ignore::None);
+    let port = midi
+        .ports()
+        .into_iter()
+        .find(|port| midi.port_name(port).as_deref() == Ok(name))
+        .with_context(|| format!("Windows MIDI input {name:?} disappeared before connection"))?;
+    let keylab = keylab_controller::is_keylab_endpoint(name);
+    midi.connect(
+        &port,
+        "rackforge-desktop-input",
+        move |_timestamp, message, _| {
+            if keylab && let Some(event) = keylab_protocol::parse_input(message) {
+                let event = match event {
+                    keylab_protocol::ControllerEvent::Surface { input, phase } => {
+                        DesktopControllerEvent::Surface { input, phase }
+                    }
+                    keylab_protocol::ControllerEvent::HostControl {
+                        target: HostControlTarget::MasterLevel,
+                        value,
+                    } => DesktopControllerEvent::MasterLevel(value),
+                    keylab_protocol::ControllerEvent::HostControl {
+                        target: HostControlTarget::MasterPan,
+                        value,
+                    } => DesktopControllerEvent::MasterPan(value),
+                };
+                let _ = controller_sender.try_send(event);
+                return;
+            }
+            if message.is_empty() || message.len() > 3 {
+                return;
+            }
+            let mut data = [0; 3];
+            data[..message.len()].copy_from_slice(message);
+            if sender
+                .try_send(MidiPacket {
+                    length: message.len() as u8,
+                    data,
+                })
+                .is_err()
+            {
+                telemetry
+                    .midi_dropped_events
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        },
+        (),
+    )
+    .map_err(|error| anyhow::anyhow!("connecting Windows MIDI input {name:?}: {error}"))
+}
+
+struct KeyLabDisplay {
+    connection: MidiOutputConnection,
+    switched_to_daw: bool,
+    connected: bool,
+    failed: bool,
+}
+
+impl KeyLabDisplay {
+    fn open(port_name: &str) -> Result<Self> {
+        let midi = MidiOutput::new("rackforge-desktop-keylab")
+            .context("opening the Arturia display MIDI client")?;
+        let port = midi
+            .ports()
+            .into_iter()
+            .find(|port| midi.port_name(port).as_deref() == Ok(port_name))
+            .with_context(|| format!("Arturia display output {port_name:?} disappeared"))?;
+        let connection = midi
+            .connect(&port, "rackforge-desktop-keylab-display")
+            .map_err(|error| {
+                anyhow::anyhow!("connecting Arturia display {port_name:?}: {error}")
+            })?;
+        let mut display = Self {
+            connection,
+            switched_to_daw: false,
+            connected: false,
+            failed: false,
+        };
+        display.switched_to_daw = true;
+        display.connected = true;
+        let acquire = keylab_protocol::acquire_messages().map_err(anyhow::Error::msg)?;
+        if let Err(error) = display.send_messages(acquire) {
+            display.restore_best_effort();
+            return Err(error);
+        }
+        println!("DESKTOP_KEYLAB_LITTLE_ACQUIRED name={port_name:?}");
+        Ok(display)
+    }
+
+    fn send(&mut self, message: &[u8]) -> Result<()> {
+        self.connection
+            .send(message)
+            .map_err(|error| anyhow::anyhow!("sending Arturia SysEx: {error}"))
+    }
+
+    fn send_messages(
+        &mut self,
+        messages: impl IntoIterator<Item = keylab_protocol::OutboundMessage>,
+    ) -> Result<()> {
+        for message in messages {
+            self.send(&message.bytes)?;
+            if message.settle_after_ms != 0 {
+                thread::sleep(Duration::from_millis(u64::from(message.settle_after_ms)));
+            }
+        }
+        Ok(())
+    }
+
+    fn render(&mut self, screen: &Screen) -> Result<()> {
+        let messages = keylab_protocol::render_messages(screen).map_err(anyhow::Error::msg)?;
+        if let Err(error) = self.send_messages(messages) {
+            self.failed = true;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn restore_best_effort(&mut self) {
+        if self.connected || self.switched_to_daw {
+            if let Ok(messages) = keylab_protocol::restore_messages() {
+                let _ = self.send_messages(messages);
+            }
+            self.connected = false;
+            self.switched_to_daw = false;
+        }
+    }
+}
+
+fn reconcile_keylab_display(
+    selected: &BTreeSet<String>,
+    display: &mut Option<KeyLabDisplay>,
+    latest_screen: Option<&Screen>,
+) -> bool {
+    if display.is_some() {
+        return false;
+    }
+    let outputs = match discover_midi_outputs() {
+        Ok(outputs) => outputs.into_iter().collect::<BTreeSet<_>>(),
+        Err(error) => {
+            eprintln!("DESKTOP_MIDI_OUTPUT_SCAN_FAILED error={error:#}");
+            return false;
+        }
+    };
+    let Some(name) = selected.iter().find(|name| {
+        keylab_controller::little_driver(name).is_some() && outputs.contains(name.as_str())
+    }) else {
+        return false;
+    };
+    match KeyLabDisplay::open(name) {
+        Ok(mut opened) => {
+            if let Some(screen) = latest_screen
+                && let Err(error) = opened.render(screen)
+            {
+                eprintln!("DESKTOP_KEYLAB_INITIAL_RENDER_FAILED error={error:#}");
+                opened.restore_best_effort();
+                return false;
+            }
+            *display = Some(opened);
+            true
+        }
+        Err(error) => {
+            eprintln!("DESKTOP_KEYLAB_ACQUIRE_FAILED name={name:?} error={error:#}");
+            false
+        }
+    }
+}
+
+fn reconnect_keylab_inputs(
+    selected: &BTreeSet<String>,
+    connections: &mut BTreeMap<String, MidiInputConnection<()>>,
+    sender: &SyncSender<MidiPacket>,
+    telemetry: &Arc<AudioTelemetry>,
+    controller_sender: &SyncSender<DesktopControllerEvent>,
+) {
+    let names = connections
+        .keys()
+        .filter(|name| keylab_controller::is_keylab_endpoint(name))
+        .cloned()
+        .collect::<Vec<_>>();
+    for name in names {
+        connections.remove(&name);
+    }
+    thread::sleep(Duration::from_millis(100));
+    if let Err(error) =
+        reconcile_midi_inputs(selected, connections, sender, telemetry, controller_sender)
+    {
+        eprintln!("DESKTOP_KEYLAB_INPUT_REOPEN_FAILED error={error:#}");
+    } else {
+        println!("DESKTOP_KEYLAB_INPUTS_REOPENED");
+    }
+}
+
+fn discover_midi_outputs() -> Result<Vec<String>> {
+    let discovery = MidiOutput::new("rackforge-desktop-output-discovery")
+        .context("starting Windows MIDI output discovery")?;
+    let mut names = discovery
+        .ports()
+        .iter()
+        .filter_map(|port| discovery.port_name(port).ok())
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+fn release_held_notes(sender: &SyncSender<MidiPacket>, telemetry: &AudioTelemetry) {
+    let packets = panic_packets(PanicScope::AllChannels);
+    let count = packets.len();
+    for packet in packets {
+        if sender
+            .send(MidiPacket {
+                length: packet.length,
+                data: packet.data,
+            })
+            .is_err()
+        {
+            return;
+        }
+    }
+    telemetry.midi_panic_count.fetch_add(1, Ordering::Relaxed);
+    println!("DESKTOP_MIDI_PANIC_SENT packets={count} scope=AllChannels");
 }
 
 fn supported_sample_rates(
@@ -857,5 +1509,33 @@ midi_inputs = []
 "#;
         let preferences: AudioPreferences = toml::from_str(text).unwrap();
         assert_eq!(preferences.output_gain_db, DEFAULT_OUTPUT_GAIN_DB);
+    }
+
+    #[test]
+    fn callback_telemetry_reports_load_and_deadlines() {
+        let telemetry = AudioTelemetry::default();
+        telemetry.record_callback(48, 48_000, Duration::from_micros(500));
+        telemetry.record_callback(48, 48_000, Duration::from_micros(1_500));
+        let status = telemetry.snapshot(48_000);
+        assert_eq!(status.callback_count, 2);
+        assert_eq!(status.average_frames, 48.0);
+        assert_eq!(status.average_callback_us, 1_000.0);
+        assert_eq!(status.maximum_callback_us, 1_500.0);
+        assert_eq!(status.callback_budget_us, 1_000.0);
+        assert_eq!(status.callback_overruns, 1);
+    }
+
+    #[test]
+    fn midi_disconnect_releases_sustain_before_all_notes() {
+        let (sender, receiver) = mpsc::sync_channel(64);
+        let telemetry = AudioTelemetry::default();
+        release_held_notes(&sender, &telemetry);
+        let packets = receiver.try_iter().collect::<Vec<_>>();
+        assert_eq!(packets.len(), 32);
+        for (channel, pair) in packets.chunks_exact(2).enumerate() {
+            assert_eq!(pair[0].data, [0xb0 | channel as u8, 64, 0]);
+            assert_eq!(pair[1].data, [0xb0 | channel as u8, 123, 0]);
+        }
+        assert_eq!(telemetry.midi_panic_count.load(Ordering::Relaxed), 1);
     }
 }

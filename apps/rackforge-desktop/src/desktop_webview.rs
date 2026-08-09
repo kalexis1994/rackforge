@@ -75,6 +75,14 @@ impl DesktopWebView {
         self.view.reload().context("reloading RackForge Web UI")
     }
 
+    pub fn navigate(&mut self, url: &str) -> Result<()> {
+        self.view
+            .load_url(url)
+            .with_context(|| format!("navigating embedded RackForge Web UI to {url}"))?;
+        self.current_url = Some(url.to_owned());
+        Ok(())
+    }
+
     pub fn open_devtools(&self) {
         #[cfg(debug_assertions)]
         self.view.open_devtools();

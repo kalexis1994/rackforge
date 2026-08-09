@@ -19,6 +19,7 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.media.midi.MidiDevice;
 import android.media.midi.MidiDeviceInfo;
+import android.media.midi.MidiInputPort;
 import android.media.midi.MidiManager;
 import android.media.midi.MidiOutputPort;
 import android.media.midi.MidiReceiver;
@@ -64,6 +65,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.json.JSONObject;
 import org.json.JSONArray;
@@ -88,9 +90,12 @@ public final class MainActivity extends Activity {
     private final List<AudioOutputChoice> audioOutputChoices = new ArrayList<>();
     private final List<MidiDevice> openMidiDevices = new ArrayList<>();
     private final List<MidiOutputPort> openMidiPorts = new ArrayList<>();
+    private final List<MidiInputPort> openMidiDestinations = new ArrayList<>();
+    private final List<MidiInputPort> openKeyLabDestinations = new ArrayList<>();
     private AudioDeviceCallback audioDeviceCallback;
     private MidiManager.DeviceCallback midiDeviceCallback;
     private volatile int midiGeneration;
+    private final AtomicInteger keyLabHeaderGeneration = new AtomicInteger();
     private volatile boolean audioRecoveryInProgress;
     private ThermalMonitor thermalMonitor;
     private int thermalStatus = PowerManager.THERMAL_STATUS_NONE;
@@ -117,6 +122,13 @@ public final class MainActivity extends Activity {
     private static native boolean selectPluginSound(String soundId);
     private static native void sendMidiMessage(int status, int data1, int data2, int length);
     private static native void releaseMidiNotes();
+    private static native String keyLabAcquirePlan();
+    private static native String keyLabRestorePlan();
+    private static native String keyLabHandleMidi(int status, int data1, int data2);
+    private static native String keyLabPollLongPress();
+    private static native boolean keyLabSyncPlugins(String storeRoot);
+    private static native boolean keyLabSyncActivePlugin();
+    private static native String keyLabRenderPlan();
     private static native boolean startNativeAudio(int deviceId, int latencyMode);
     private static native void setNativeOutputGain(int gainDb);
     static native void stopNativeAudio();
@@ -185,6 +197,7 @@ public final class MainActivity extends Activity {
         scheduleMidiReconnect();
         if ("diagnostics".equals(currentPage)) renderDiagnostics();
         else if ("live".equals(currentPage)) showLive();
+        else if ("idle".equals(currentPage)) showIdle();
         else showPlay();
     }
 
@@ -286,6 +299,10 @@ public final class MainActivity extends Activity {
                         if (!selectPluginSound(soundId)) {
                             throw new IllegalStateException("The plugin rejected the selected sound");
                         }
+                        if (!keyLabSyncActivePlugin()) {
+                            throw new IllegalStateException("The controller did not accept the selected sound");
+                        }
+                        refreshKeyLabDisplay();
                         Log.i("RackForge", "Selected plugin sound " + soundId);
                         runOnUiThread(() -> {
                             respondToPlugin(requestId, true, null);
@@ -695,6 +712,8 @@ public final class MainActivity extends Activity {
                 String installedName = descriptor.getString("plugin_name");
                 String version = descriptor.getString("version");
                 boolean alreadyInstalled = descriptor.optBoolean("already_installed");
+                keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
+                refreshKeyLabDisplay();
                 runOnUiThread(() -> {
                     Toast.makeText(this,
                             installedName + " " + versionLabel(version) +
@@ -911,7 +930,7 @@ public final class MainActivity extends Activity {
             String previousVersion = activePluginVersion;
             boolean restored = false;
             try {
-                closeMidi();
+                releaseMidiNotes();
                 stopNativeAudio();
                 audioRunning = false;
                 if (!activateInstalledPlugin(root, pluginStoreRoot().getAbsolutePath(),
@@ -919,8 +938,11 @@ public final class MainActivity extends Activity {
                     throw new IllegalStateException("The runtime rejected the selected plugin");
                 }
                 refreshActivePluginMetadata();
+                if (!keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath())) {
+                    throw new IllegalStateException("The controller plugin catalog could not be synchronized");
+                }
                 startAudio();
-                openMidiInputs();
+                refreshKeyLabDisplay();
                 preferences.edit().putString("plugin.active_root", pluginPackageRoot.getAbsolutePath()).apply();
                 runOnUiThread(() -> {
                     engineStarting = false;
@@ -944,8 +966,9 @@ public final class MainActivity extends Activity {
                         pluginWebEntry = previousEntry;
                         activePluginName = previousName;
                         activePluginVersion = previousVersion;
+                        keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
                         startAudio();
-                        openMidiInputs();
+                        refreshKeyLabDisplay();
                         restored = true;
                     } catch (Throwable rollbackError) {
                         error.addSuppressed(rollbackError);
@@ -1005,6 +1028,13 @@ public final class MainActivity extends Activity {
             return;
         }
         showEngineState("Loading plugin", "Validating the portable package and starting AAudio…");
+    }
+
+    private void showIdle() {
+        currentPage = "idle";
+        updateModeButtons();
+        showEngineState("RackForge idle",
+                "No plugin is active. Choose PLAY and select a plugin to start audio again.");
     }
 
     private void showLive() {
@@ -1328,6 +1358,9 @@ public final class MainActivity extends Activity {
                     }
                 }
                 refreshActivePluginMetadata();
+                if (!keyLabSyncPlugins(store.getAbsolutePath())) {
+                    throw new IllegalStateException("The controller plugin catalog could not be synchronized");
+                }
                 startAudio();
                 openMidiInputs();
                 runOnUiThread(() -> {
@@ -1561,13 +1594,25 @@ public final class MainActivity extends Activity {
         @Override public String toString() { return label; }
     }
 
-    private static final class MidiStreamDecoder {
+    private final class MidiStreamDecoder {
+        private final boolean keyLabSurface;
+        private final boolean forwardMidi;
+        private final MidiInputPort keyLabDestination;
+        private final int generation;
         private int runningStatus = -1;
         private int messageStatus = -1;
         private int expectedDataBytes;
         private int dataCount;
         private final byte[] messageData = new byte[2];
         private boolean inSysEx;
+
+        MidiStreamDecoder(boolean keyLabSurface, boolean forwardMidi,
+                MidiInputPort keyLabDestination, int generation) {
+            this.keyLabSurface = keyLabSurface;
+            this.forwardMidi = forwardMidi;
+            this.keyLabDestination = keyLabDestination;
+            this.generation = generation;
+        }
 
         synchronized void accept(byte[] bytes, int offset, int count) {
             int end = Math.min(bytes.length, offset + count);
@@ -1618,9 +1663,22 @@ public final class MainActivity extends Activity {
             if (dataCount < messageData.length) messageData[dataCount] = value;
             dataCount++;
             if (dataCount != expectedDataBytes) return;
-            sendMidiMessage(messageStatus, messageData[0] & 0x7F,
-                    expectedDataBytes > 1 ? messageData[1] & 0x7F : 0,
-                    expectedDataBytes + 1);
+            int data1 = messageData[0] & 0x7F;
+            int data2 = expectedDataBytes > 1 ? messageData[1] & 0x7F : 0;
+            boolean consumed = false;
+            if (keyLabSurface && (messageStatus & 0xF0) == 0xB0) {
+                String response = keyLabHandleMidi(messageStatus, data1, data2);
+                if (response != null) {
+                    consumed = true;
+                    handleKeyLabResponse(response, keyLabDestination, generation);
+                    if (data1 >= 44 && data1 <= 47 && data2 == 127) {
+                        scheduleKeyLabLongPress(keyLabDestination, generation);
+                    }
+                }
+            }
+            if (!consumed && forwardMidi && audioRunning) {
+                sendMidiMessage(messageStatus, data1, data2, expectedDataBytes + 1);
+            }
             messageStatus = runningStatus;
             dataCount = 0;
         }
@@ -1635,6 +1693,90 @@ public final class MainActivity extends Activity {
             int command = status & 0xF0;
             return command == 0xC0 || command == 0xD0 ? 1 : 2;
         }
+    }
+
+    private void handleKeyLabResponse(String json, MidiInputPort destination, int generation) {
+        try {
+            JSONObject response = new JSONObject(json);
+            if (destination != null) {
+                sendControllerPlan(destination, response.getJSONArray("plan").toString(), generation);
+            }
+            JSONObject command = response.optJSONObject("command");
+            if (command != null) handleKeyLabCommand(command);
+            long restoreAfterMs = response.optLong("restore_header_after_ms", 0);
+            int headerGeneration = keyLabHeaderGeneration.incrementAndGet();
+            if (restoreAfterMs > 0) {
+                mainHandler.postDelayed(() -> {
+                    if (generation != midiGeneration
+                            || headerGeneration != keyLabHeaderGeneration.get()) return;
+                    refreshKeyLabDisplay();
+                }, restoreAfterMs);
+            }
+        } catch (Exception error) {
+            Log.e("RackForge", "Invalid KeyLab controller response", error);
+        }
+    }
+
+    private void scheduleKeyLabLongPress(MidiInputPort destination, int generation) {
+        mainHandler.postDelayed(() -> {
+            if (generation != midiGeneration) return;
+            String response = keyLabPollLongPress();
+            if (response != null) handleKeyLabResponse(response, destination, generation);
+        }, 710);
+    }
+
+    private void handleKeyLabCommand(JSONObject command) {
+        String type = command.optString("type");
+        switch (type) {
+            case "set_mode" -> mainHandler.post(() -> showControllerMode(command.optString("mode")));
+            case "select_plugin" -> mainHandler.post(() -> activatePlugin(
+                    command.optString("root"), command.optString("name"),
+                    command.optString("version")));
+            case "select_sound" -> selectControllerSound(command.optString("sound_id"));
+            case "return_mode" -> {
+                String soundId = command.optString("sound_id");
+                if (!soundId.isBlank()) selectControllerSound(soundId);
+                mainHandler.post(() -> showControllerMode(command.optString("mode")));
+            }
+            case "force_home" -> mainHandler.post(this::emergencyControllerHome);
+            default -> Log.d("RackForge", "Unsupported KeyLab menu command " + type);
+        }
+    }
+
+    private void showControllerMode(String mode) {
+        if ("live".equals(mode)) {
+            currentPage = "live";
+            showLive();
+        } else if ("play".equals(mode)) {
+            currentPage = "play";
+            showPlay();
+        }
+    }
+
+    private void emergencyControllerHome() {
+        releaseMidiNotes();
+        audioRunning = false;
+        stopNativeAudio();
+        stopService(new Intent(this, AudioEngineService.class));
+        currentPage = "idle";
+        showIdle();
+        Toast.makeText(this, "Emergency HOME · plugin stopped", Toast.LENGTH_SHORT).show();
+    }
+
+    private void selectControllerSound(String soundId) {
+        if (soundId == null || soundId.isBlank()) return;
+        new Thread(() -> {
+            if (!selectPluginSound(soundId)) {
+                Log.w("RackForge", "KeyLab could not select sound " + soundId);
+                return;
+            }
+            if (!keyLabSyncActivePlugin()) {
+                Log.w("RackForge", "KeyLab could not confirm sound " + soundId);
+                return;
+            }
+            refreshKeyLabDisplay();
+            runOnUiThread(() -> sendPluginMessage(pluginWebContext()));
+        }, "rackforge-keylab-sound").start();
     }
 
     private void playTestNote() {
@@ -1657,16 +1799,26 @@ public final class MainActivity extends Activity {
                     return;
                 }
                 synchronized (openMidiDevices) { openMidiDevices.add(device); }
+                boolean keyLab = isKeyLabDevice(info);
+                MidiInputPort keyLabDestination = keyLab
+                        ? openKeyLabDestination(device, info, generation) : null;
                 for (MidiDeviceInfo.PortInfo portInfo : info.getPorts()) {
                     if (portInfo.getType() != MidiDeviceInfo.PortInfo.TYPE_OUTPUT) continue;
+                    boolean keyLabPrimary = keyLab && isPrimaryKeyLabPort(portInfo);
+                    boolean forwardMidi = !keyLab || keyLabPrimary;
                     MidiOutputPort port = device.openOutputPort(portInfo.getPortNumber());
                     if (port == null) continue;
                     if (!audioRunning || generation != midiGeneration) {
                         try { port.close(); } catch (Exception ignored) { }
                         continue;
                     }
+                    if (keyLab) {
+                        Log.i("RackForge", "KeyLab source port " + portInfo.getPortNumber()
+                                + " " + portInfo.getName() + " primary=" + keyLabPrimary);
+                    }
                     port.connect(new MidiReceiver() {
-                        private final MidiStreamDecoder decoder = new MidiStreamDecoder();
+                        private final MidiStreamDecoder decoder = new MidiStreamDecoder(
+                                keyLabPrimary, forwardMidi, keyLabDestination, generation);
 
                         @Override
                         public void onSend(byte[] data, int offset, int count, long timestamp) {
@@ -1679,6 +1831,114 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private MidiInputPort openKeyLabDestination(MidiDevice device, MidiDeviceInfo info,
+            int generation) {
+        MidiDeviceInfo.PortInfo selected = null;
+        MidiDeviceInfo.PortInfo fallback = null;
+        for (MidiDeviceInfo.PortInfo portInfo : info.getPorts()) {
+            if (portInfo.getType() != MidiDeviceInfo.PortInfo.TYPE_INPUT) continue;
+            if (fallback == null) fallback = portInfo;
+            String name = portInfo.getName();
+            String folded = name == null ? "" : name.toLowerCase(Locale.ROOT);
+            if (folded.contains("mcu") || folded.contains("hui")
+                    || folded.contains("dinthru") || folded.contains("alv")) continue;
+            if (folded.contains("midi") || folded.contains("keylab")
+                    || folded.contains("kl essential")) {
+                selected = portInfo;
+                break;
+            }
+        }
+        if (selected == null) selected = fallback;
+        if (selected == null) {
+            Log.w("RackForge", "KeyLab detected without a MIDI destination port");
+            return null;
+        }
+        MidiInputPort port = device.openInputPort(selected.getPortNumber());
+        if (port == null) {
+            Log.w("RackForge", "Could not open the KeyLab MIDI destination");
+            return null;
+        }
+        if (!audioRunning || generation != midiGeneration) {
+            try { port.close(); } catch (Exception ignored) { }
+            return null;
+        }
+        synchronized (openMidiDestinations) { openMidiDestinations.add(port); }
+        synchronized (openKeyLabDestinations) { openKeyLabDestinations.add(port); }
+        sendControllerPlan(port, keyLabAcquirePlan(), generation);
+        Log.i("RackForge", "KeyLab controller runtime acquired on Android");
+        return port;
+    }
+
+    private void sendControllerPlan(MidiInputPort port, String json, int generation) {
+        try {
+            JSONArray plan = new JSONArray(json);
+            long delayMs = 0;
+            for (int index = 0; index < plan.length(); index++) {
+                JSONObject step = plan.getJSONObject(index);
+                JSONArray values = step.getJSONArray("bytes");
+                byte[] message = new byte[values.length()];
+                for (int byteIndex = 0; byteIndex < values.length(); byteIndex++) {
+                    message[byteIndex] = (byte) values.getInt(byteIndex);
+                }
+                long scheduledAt = delayMs;
+                mainHandler.postDelayed(() -> {
+                    if (generation != midiGeneration) return;
+                    synchronized (openMidiDestinations) {
+                        if (!openMidiDestinations.contains(port)) return;
+                    }
+                    try {
+                        port.send(message, 0, message.length);
+                    } catch (Exception error) {
+                        Log.e("RackForge", "KeyLab MIDI output failed", error);
+                    }
+                }, scheduledAt);
+                delayMs += step.optLong("settle_after_ms", 0);
+            }
+        } catch (Exception error) {
+            Log.e("RackForge", "Invalid KeyLab controller plan", error);
+        }
+    }
+
+    private void refreshKeyLabDisplay() {
+        String plan = keyLabRenderPlan();
+        if (plan == null) return;
+        int generation = midiGeneration;
+        synchronized (openKeyLabDestinations) {
+            for (MidiInputPort port : openKeyLabDestinations) {
+                sendControllerPlan(port, plan, generation);
+            }
+        }
+    }
+
+    private static void sendControllerPlanImmediately(MidiInputPort port, String json) {
+        try {
+            JSONArray plan = new JSONArray(json);
+            for (int index = 0; index < plan.length(); index++) {
+                JSONArray values = plan.getJSONObject(index).getJSONArray("bytes");
+                byte[] message = new byte[values.length()];
+                for (int byteIndex = 0; byteIndex < values.length(); byteIndex++) {
+                    message[byteIndex] = (byte) values.getInt(byteIndex);
+                }
+                port.send(message, 0, message.length);
+            }
+        } catch (Exception error) {
+            Log.w("RackForge", "KeyLab restore was incomplete", error);
+        }
+    }
+
+    private static boolean isKeyLabDevice(MidiDeviceInfo info) {
+        String folded = midiDeviceName(info).toLowerCase(Locale.ROOT);
+        return folded.contains("keylab essential") || folded.contains("kl essential");
+    }
+
+    private static boolean isPrimaryKeyLabPort(MidiDeviceInfo.PortInfo portInfo) {
+        String name = portInfo.getName();
+        String folded = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        if (folded.contains("mcu") || folded.contains("hui")
+                || folded.contains("dinthru") || folded.contains("alv")) return false;
+        return portInfo.getPortNumber() == 0;
+    }
+
     private static String midiDeviceName(MidiDeviceInfo info) {
         Bundle properties = info.getProperties();
         String name = properties.getString(MidiDeviceInfo.PROPERTY_PRODUCT);
@@ -1689,10 +1949,22 @@ public final class MainActivity extends Activity {
     }
 
     private void closeMidi() {
+        synchronized (openKeyLabDestinations) {
+            for (MidiInputPort port : openKeyLabDestinations) {
+                sendControllerPlanImmediately(port, keyLabRestorePlan());
+            }
+            openKeyLabDestinations.clear();
+        }
         midiGeneration++;
         synchronized (openMidiPorts) {
             for (MidiOutputPort port : openMidiPorts) try { port.close(); } catch (Exception ignored) { }
             openMidiPorts.clear();
+        }
+        synchronized (openMidiDestinations) {
+            for (MidiInputPort port : openMidiDestinations) {
+                try { port.close(); } catch (Exception ignored) { }
+            }
+            openMidiDestinations.clear();
         }
         synchronized (openMidiDevices) {
             for (MidiDevice device : openMidiDevices) try { device.close(); } catch (Exception ignored) { }

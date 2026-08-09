@@ -22,6 +22,10 @@ reconnect enabled inputs after hotplug without allocating a byte array for every
 MIDI message. When an input disappears, RackForge releases sustain and sends
 All Notes Off on all sixteen channels before reconnecting, matching the
 Raspberry Pi supervisor and preventing notes held during unplug from droning.
+For the certified KeyLab Essential mk3 profile Android also opens the USB MIDI
+destination owned by the controller runtime, performs the shared DAW handshake,
+applies the same dim RGB profile to every button and pad, and restores Arturia
+mode when the route closes.
 
 While audio is active, a media-playback foreground service keeps RackForge at
 foreground process importance when the screen is locked or the activity is in

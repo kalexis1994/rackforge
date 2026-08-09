@@ -1645,7 +1645,10 @@ mod tests {
 
         assert!(auth.set_pin("9999", None).is_err(), "no PIN, no change");
         assert!(auth.set_pin("9999", Some("0000")).is_err(), "wrong PIN");
-        assert!(auth.is_authorized(&first), "a failed change changes nothing");
+        assert!(
+            auth.is_authorized(&first),
+            "a failed change changes nothing"
+        );
 
         let second = auth.set_pin("9999", Some("4271")).unwrap();
         assert!(!auth.is_authorized(&first), "the old session is over");
@@ -1667,7 +1670,11 @@ mod tests {
         let pin = stored.pin.unwrap();
         assert_eq!(pin.rounds, PIN_ROUNDS);
         assert_ne!(pin.hash, hash_secret("4271"), "not a plain hash");
-        assert_ne!(build_pin("4271").unwrap().hash, pin.hash, "salted per store");
+        assert_ne!(
+            build_pin("4271").unwrap().hash,
+            pin.hash,
+            "salted per store"
+        );
         let _ = fs::remove_file(path);
     }
 

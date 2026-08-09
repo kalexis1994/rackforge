@@ -88,7 +88,7 @@ pub fn little_driver(port_name: &str) -> Option<&'static dyn ControllerDriver> {
     Some(driver)
 }
 
-fn is_main_midi_endpoint(name: &str) -> bool {
+pub fn is_main_midi_endpoint(name: &str) -> bool {
     let trimmed = name.trim();
     let endpoint = trimmed
         .rsplit_once(' ')
@@ -101,6 +101,11 @@ fn is_main_midi_endpoint(name: &str) -> bool {
         && !folded.contains("hui")
         && !folded.contains("dinthru")
         && !folded.contains(" alv")
+}
+
+pub fn is_keylab_endpoint(name: &str) -> bool {
+    let folded = name.trim().to_ascii_lowercase();
+    folded.contains("kl essential") || folded.contains("keylab")
 }
 
 fn is_alsa_address(value: &str) -> bool {

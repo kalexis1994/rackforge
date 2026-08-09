@@ -27,6 +27,7 @@ pub struct AudioSettingsState {
     draft_web: WebServerPreferences,
     section: SettingsSection,
     notice: Option<(bool, String)>,
+    runtime_status: String,
 }
 
 impl AudioSettingsState {
@@ -43,7 +44,12 @@ impl AudioSettingsState {
             draft_web: web_preferences,
             section: SettingsSection::AudioMidi,
             notice: None,
+            runtime_status: "Audio/MIDI unavailable".into(),
         }
+    }
+
+    pub fn set_runtime_status(&mut self, status: String) {
+        self.runtime_status = status;
     }
 
     pub fn replace_inventory(&mut self, inventory: AudioInventory) {
@@ -132,6 +138,8 @@ impl AudioSettingsState {
                                         self.audio_card(ui);
                                         ui.add_space(14.0);
                                         self.midi_card(ui);
+                                        ui.add_space(14.0);
+                                        self.runtime_card(ui);
                                     }
                                     SettingsSection::HttpServer => self.http_server_card(ui),
                                 }
@@ -368,6 +376,26 @@ impl AudioSettingsState {
                         }
                     }
                 }
+            }
+        });
+    }
+
+    fn runtime_card(&self, ui: &mut egui::Ui) {
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.heading(RichText::new("Runtime performance").color(accent()));
+            ui.label(
+                RichText::new("Live measurements from the Windows audio callback")
+                    .small()
+                    .color(Color32::from_rgb(126, 151, 160)),
+            );
+            ui.add_space(10.0);
+            for line in self.runtime_status.lines() {
+                ui.label(
+                    RichText::new(line)
+                        .monospace()
+                        .color(Color32::from_rgb(196, 220, 225)),
+                );
             }
         });
     }

@@ -223,7 +223,10 @@ mod supervisor {
         // Resolved once, off the reconnection path, so a diagnosis run cannot
         // change behaviour halfway through a performance.
         let scope = PanicScope::from_env();
-        println!("MIDI_SUPERVISOR_READY panic_scope={scope:?} interval_ms={}", interval.as_millis());
+        println!(
+            "MIDI_SUPERVISOR_READY panic_scope={scope:?} interval_ms={}",
+            interval.as_millis()
+        );
         thread::Builder::new()
             .name("rackforge-midi-supervisor".into())
             .spawn(move || {
@@ -265,7 +268,11 @@ mod supervisor {
                     Ok(connection) => {
                         connections.insert(key.get(), connection);
                         source.connected = true;
-                        println!("MIDI_SOURCE_CONNECTED source={} id={}", key.get(), source.id);
+                        println!(
+                            "MIDI_SOURCE_CONNECTED source={} id={}",
+                            key.get(),
+                            source.id
+                        );
                     }
                     Err(error) => {
                         // Left disconnected on purpose: the next scan retries.
@@ -355,7 +362,10 @@ mod supervisor {
             &format!("rackforge-core-input-{}", key.get()),
             move |_timestamp, message, _| {
                 if let Ok(packet) = rackforge_midi_api::MidiPacket::new(0, message) {
-                    let _ = sender.try_send(IngressMidiEvent { source: key, packet });
+                    let _ = sender.try_send(IngressMidiEvent {
+                        source: key,
+                        packet,
+                    });
                 }
             },
             (),
@@ -422,7 +432,10 @@ mod tests {
 
     #[test]
     fn each_device_is_reconciled_independently() {
-        let supervised = vec![source(0, "alsa.keylab", true), source(1, "alsa.pads", false)];
+        let supervised = vec![
+            source(0, "alsa.keylab", true),
+            source(1, "alsa.pads", false),
+        ];
         assert_eq!(
             reconcile(&supervised, &[id("alsa.pads")]),
             vec![
@@ -520,8 +533,12 @@ mod tests {
     fn performance_inputs_exclude_surface_and_loopback_ports() {
         assert!(is_performance_midi_input("KL Essential 61 mk3 MIDI 28:0"));
         assert!(is_performance_midi_input("Unknown USB MIDI 31:0"));
-        assert!(!is_performance_midi_input("KL Essential 61 mk3 DINTHRU 28:1"));
-        assert!(!is_performance_midi_input("KL Essential 61 mk3 MCU/HUI 28:2"));
+        assert!(!is_performance_midi_input(
+            "KL Essential 61 mk3 DINTHRU 28:1"
+        ));
+        assert!(!is_performance_midi_input(
+            "KL Essential 61 mk3 MCU/HUI 28:2"
+        ));
         assert!(!is_performance_midi_input("KL Essential 61 mk3 ALV 28:3"));
         assert!(!is_performance_midi_input("Midi Through MIDI 0:1"));
     }

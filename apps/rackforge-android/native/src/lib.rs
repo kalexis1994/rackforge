@@ -2,12 +2,17 @@ use anyhow::{Context, Result, bail};
 use jni::JNIEnv;
 use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
+use keylab_essential_mk3::protocol as keylab_protocol;
 use rackforge_core::{
     LoadedPlugin, PluginInstance, PluginPackage,
     midi_hotplug::{PanicScope, panic_packets},
 };
 use rackforge_plugin_api::{PluginKind, PresetCatalog, WebSurfaceKind, abi::MidiEventV1};
 use rackforge_repository::install_local_archive;
+use rackforge_session_api::{HostControlTarget, MasterLevel, MasterPan};
+use rackforge_surface_runtime::{
+    ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayPlugin, PlaySound,
+};
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{CStr, c_char, c_void};
 use std::path::{Path, PathBuf};
@@ -24,7 +29,14 @@ const MAX_PENDING_MIDI_EVENTS: usize = 256;
 static ENGINE: OnceLock<Mutex<Option<AndroidEngine>>> = OnceLock::new();
 static AUDIO: OnceLock<Mutex<Option<NativeAudioOutput>>> = OnceLock::new();
 static MIDI_QUEUE: OnceLock<Mutex<VecDeque<MidiEventV1>>> = OnceLock::new();
+static CONTROLLER_MENU: OnceLock<Mutex<AndroidControllerMenu>> = OnceLock::new();
 static OUTPUT_GAIN_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
+static MASTER_LEVEL_TARGET_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
+static MASTER_LEVEL_CURRENT_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
+static MASTER_PAN_LEFT_TARGET_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
+static MASTER_PAN_LEFT_CURRENT_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
+static MASTER_PAN_RIGHT_TARGET_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
+static MASTER_PAN_RIGHT_CURRENT_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
 static AUDIO_ERROR: AtomicI32 = AtomicI32::new(AAUDIO_OK);
 static MIDI_DROPPED_EVENTS: AtomicU64 = AtomicU64::new(0);
 static MIDI_PANIC_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -41,6 +53,270 @@ const AAUDIO_FORMAT_PCM_FLOAT: i32 = 2;
 const AAUDIO_PERFORMANCE_MODE_NONE: i32 = 10;
 const AAUDIO_PERFORMANCE_MODE_LOW_LATENCY: i32 = 12;
 const AAUDIO_CALLBACK_RESULT_CONTINUE: i32 = 0;
+const CONTROLLER_LONG_PRESS_MS: u128 = 700;
+const CONTROLLER_HOME_CHORD_MS: u128 = 250;
+const MASTER_SMOOTHING_FACTOR: f32 = 0.02;
+const HOST_CONTROL_HEADER_MS: u64 = 1_500;
+
+struct AndroidControllerMenu {
+    menu: SurfaceMenu,
+    button_down: [Option<Instant>; 4],
+    button_long_fired: [bool; 4],
+    installed_plugins: Vec<PlayPlugin>,
+    plugins: BTreeMap<String, ControllerPluginInfo>,
+}
+
+#[derive(Clone)]
+struct ControllerPluginInfo {
+    root: String,
+    name: String,
+    version: String,
+}
+
+impl Default for AndroidControllerMenu {
+    fn default() -> Self {
+        Self {
+            menu: SurfaceMenu::default(),
+            button_down: [None; 4],
+            button_long_fired: [false; 4],
+            installed_plugins: Vec::new(),
+            plugins: BTreeMap::new(),
+        }
+    }
+}
+
+impl AndroidControllerMenu {
+    fn render_response(&self, command: Option<serde_json::Value>) -> Result<String> {
+        Ok(serde_json::json!({
+            "plan": controller_plan_value(keylab_protocol::render_messages(&self.menu.render()))?,
+            "command": command,
+        })
+        .to_string())
+    }
+
+    fn render_host_control(&self, target: HostControlTarget, value: u8) -> Result<String> {
+        let header = keylab_protocol::host_control_header(target, value);
+        Ok(serde_json::json!({
+            "plan": controller_plan_value(keylab_protocol::transient_header_messages(&header))?,
+            "command": null,
+            "restore_header_after_ms": HOST_CONTROL_HEADER_MS,
+        })
+        .to_string())
+    }
+
+    fn apply(&mut self, input: SurfaceInput) -> Option<serde_json::Value> {
+        self.menu.apply_input(input);
+        let command = self.menu.take_command();
+        if let Some(MenuCommand::ReturnToActiveMode {
+            mode,
+            selected_sound_id,
+            ..
+        }) = command.as_ref()
+        {
+            self.menu
+                .complete_return_to_active_mode(*mode, selected_sound_id.as_deref());
+        }
+        if matches!(command.as_ref(), Some(MenuCommand::ForceHome)) {
+            self.menu
+                .set_play_plugins(self.installed_plugins.clone(), None);
+        }
+        let command = command.and_then(|command| self.command_json(command));
+        while self.menu.take_command().is_some() {}
+        command
+    }
+
+    fn command_json(&self, command: MenuCommand) -> Option<serde_json::Value> {
+        match command {
+            MenuCommand::SetActiveMode { mode } => Some(serde_json::json!({
+                "type": "set_mode",
+                "mode": active_mode_name(mode),
+            })),
+            MenuCommand::SelectPlugin { instance_id } => {
+                let plugin = self.plugins.get(&instance_id)?;
+                Some(serde_json::json!({
+                    "type": "select_plugin",
+                    "root": plugin.root,
+                    "name": plugin.name,
+                    "version": plugin.version,
+                }))
+            }
+            MenuCommand::SelectSound { id } => Some(serde_json::json!({
+                "type": "select_sound",
+                "sound_id": id,
+            })),
+            MenuCommand::ReturnToActiveMode {
+                mode,
+                selected_sound_id,
+                ..
+            } => Some(serde_json::json!({
+                "type": "return_mode",
+                "mode": active_mode_name(mode),
+                "sound_id": selected_sound_id,
+            })),
+            MenuCommand::ForceHome => Some(serde_json::json!({ "type": "force_home" })),
+            _ => None,
+        }
+    }
+
+    fn handle_surface(
+        &mut self,
+        input: SurfaceInput,
+        phase: keylab_protocol::InputPhase,
+    ) -> Result<String> {
+        use keylab_protocol::InputPhase;
+        let mut command = None;
+
+        if let Some(index) = surface_button_index(input) {
+            match phase {
+                InputPhase::Press => {
+                    self.button_down[index] = Some(Instant::now());
+                    self.button_long_fired[index] = false;
+                    self.menu.set_button_pressed(input, true);
+                }
+                InputPhase::Release => {
+                    let now = Instant::now();
+                    let long_fired = std::mem::replace(&mut self.button_long_fired[index], false);
+                    let home_chord = !long_fired
+                        && matches!(index, 0 | 3)
+                        && self.button_down[0].is_some()
+                        && self.button_down[3].is_some()
+                        && controller_home_chord_ready(
+                            self.button_down[0],
+                            self.button_down[3],
+                            now,
+                        );
+                    if home_chord {
+                        self.button_down[0] = None;
+                        self.button_down[3] = None;
+                        self.button_long_fired[0] = false;
+                        self.button_long_fired[3] = false;
+                        self.menu.set_button_pressed(SurfaceInput::Button1, false);
+                        self.menu.set_button_pressed(SurfaceInput::Button4, false);
+                        command = self.apply(SurfaceInput::HomeChord);
+                    } else {
+                        let started = self.button_down[index].take();
+                        self.menu.set_button_pressed(input, false);
+                        if !long_fired && let Some(started) = started {
+                            command = self.apply(
+                                if now.duration_since(started).as_millis()
+                                    >= CONTROLLER_LONG_PRESS_MS
+                                {
+                                    surface_long_input(index)
+                                } else {
+                                    input
+                                },
+                            );
+                        }
+                    }
+                }
+                InputPhase::Turn => {}
+            }
+            return self.render_response(command);
+        }
+
+        match (input, phase) {
+            (SurfaceInput::EncoderLeft | SurfaceInput::EncoderRight, InputPhase::Turn)
+            | (SurfaceInput::EncoderPress, InputPhase::Release)
+            | (SurfaceInput::KeyboardParts, InputPhase::Press) => command = self.apply(input),
+            _ => {}
+        }
+        self.render_response(command)
+    }
+
+    fn poll_long_press(&mut self, now: Instant) -> Result<Option<String>> {
+        if let (Some(first), Some(fourth)) = (self.button_down[0], self.button_down[3]) {
+            let separation = if first >= fourth {
+                first.duration_since(fourth)
+            } else {
+                fourth.duration_since(first)
+            };
+            if separation.as_millis() <= CONTROLLER_HOME_CHORD_MS {
+                if now.duration_since(first.max(fourth)).as_millis() < CONTROLLER_LONG_PRESS_MS {
+                    return Ok(None);
+                }
+                self.button_long_fired[0] = true;
+                self.button_long_fired[3] = true;
+                self.menu.set_button_pressed(SurfaceInput::Button1, false);
+                self.menu.set_button_pressed(SurfaceInput::Button4, false);
+                let command = self.apply(SurfaceInput::HomeChord);
+                return self.render_response(command).map(Some);
+            }
+        }
+
+        let Some(index) = self
+            .button_down
+            .iter()
+            .enumerate()
+            .find_map(|(index, started)| {
+                (!self.button_long_fired[index]
+                    && started.is_some_and(|started| {
+                        now.duration_since(started).as_millis() >= CONTROLLER_LONG_PRESS_MS
+                    }))
+                .then_some(index)
+            })
+        else {
+            return Ok(None);
+        };
+        self.button_long_fired[index] = true;
+        self.menu
+            .set_button_pressed(surface_short_input(index), false);
+        let command = self.apply(surface_long_input(index));
+        self.render_response(command).map(Some)
+    }
+}
+
+fn active_mode_name(mode: ActiveMode) -> &'static str {
+    match mode {
+        ActiveMode::Idle => "idle",
+        ActiveMode::Live => "live",
+        ActiveMode::Play => "play",
+    }
+}
+
+fn surface_button_index(input: SurfaceInput) -> Option<usize> {
+    match input {
+        SurfaceInput::Button1 => Some(0),
+        SurfaceInput::Button2 => Some(1),
+        SurfaceInput::Button3 => Some(2),
+        SurfaceInput::Button4 => Some(3),
+        _ => None,
+    }
+}
+
+fn surface_long_input(index: usize) -> SurfaceInput {
+    [
+        SurfaceInput::Button1Long,
+        SurfaceInput::Button2Long,
+        SurfaceInput::Button3Long,
+        SurfaceInput::Button4Long,
+    ][index]
+}
+
+fn surface_short_input(index: usize) -> SurfaceInput {
+    [
+        SurfaceInput::Button1,
+        SurfaceInput::Button2,
+        SurfaceInput::Button3,
+        SurfaceInput::Button4,
+    ][index]
+}
+
+fn controller_home_chord_ready(
+    first: Option<Instant>,
+    fourth: Option<Instant>,
+    now: Instant,
+) -> bool {
+    let (Some(first), Some(fourth)) = (first, fourth) else {
+        return false;
+    };
+    let separation = if first >= fourth {
+        first.duration_since(fourth)
+    } else {
+        fourth.duration_since(first)
+    };
+    separation.as_millis() <= CONTROLLER_HOME_CHORD_MS
+        && now.duration_since(first.max(fourth)).as_millis() >= CONTROLLER_LONG_PRESS_MS
+}
 
 #[repr(C)]
 struct AAudioStreamBuilder {
@@ -325,6 +601,35 @@ fn midi_queue() -> &'static Mutex<VecDeque<MidiEventV1>> {
     MIDI_QUEUE.get_or_init(|| Mutex::new(VecDeque::with_capacity(MAX_PENDING_MIDI_EVENTS)))
 }
 
+fn controller_menu() -> &'static Mutex<AndroidControllerMenu> {
+    CONTROLLER_MENU.get_or_init(|| Mutex::new(AndroidControllerMenu::default()))
+}
+
+fn apply_master_control(target: HostControlTarget, value: u8) {
+    match target {
+        HostControlTarget::MasterLevel => {
+            MASTER_LEVEL_TARGET_BITS.store(
+                MasterLevel::from_midi(value).amplitude().to_bits(),
+                Ordering::Relaxed,
+            );
+        }
+        HostControlTarget::MasterPan => {
+            let (left, right) = MasterPan::from_midi_with_center_snap(value).balance();
+            MASTER_PAN_LEFT_TARGET_BITS.store(left.to_bits(), Ordering::Relaxed);
+            MASTER_PAN_RIGHT_TARGET_BITS.store(right.to_bits(), Ordering::Relaxed);
+        }
+    }
+}
+
+fn smooth_master_sample(current: &mut f32, target: f32) {
+    let difference = target - *current;
+    *current = if difference.abs() < 0.000_01 {
+        target
+    } else {
+        *current + difference * MASTER_SMOOTHING_FACTOR
+    };
+}
+
 fn enqueue_midi(bytes: &[u8]) {
     if bytes.is_empty() || bytes.len() > 3 {
         return;
@@ -529,12 +834,23 @@ unsafe extern "C" fn render_callback(
     {
         output.fill(0.0);
     }
-    let gain = f32::from_bits(OUTPUT_GAIN_BITS.load(Ordering::Relaxed));
-    if gain != 1.0 {
-        for sample in output {
-            *sample = (*sample * gain).clamp(-1.0, 1.0);
-        }
+    let output_gain = f32::from_bits(OUTPUT_GAIN_BITS.load(Ordering::Relaxed));
+    let level_target = f32::from_bits(MASTER_LEVEL_TARGET_BITS.load(Ordering::Relaxed));
+    let pan_left_target = f32::from_bits(MASTER_PAN_LEFT_TARGET_BITS.load(Ordering::Relaxed));
+    let pan_right_target = f32::from_bits(MASTER_PAN_RIGHT_TARGET_BITS.load(Ordering::Relaxed));
+    let mut level = f32::from_bits(MASTER_LEVEL_CURRENT_BITS.load(Ordering::Relaxed));
+    let mut pan_left = f32::from_bits(MASTER_PAN_LEFT_CURRENT_BITS.load(Ordering::Relaxed));
+    let mut pan_right = f32::from_bits(MASTER_PAN_RIGHT_CURRENT_BITS.load(Ordering::Relaxed));
+    for frame in output.chunks_exact_mut(2) {
+        smooth_master_sample(&mut level, level_target);
+        smooth_master_sample(&mut pan_left, pan_left_target);
+        smooth_master_sample(&mut pan_right, pan_right_target);
+        frame[0] = (frame[0] * output_gain * level * pan_left).clamp(-1.0, 1.0);
+        frame[1] = (frame[1] * output_gain * level * pan_right).clamp(-1.0, 1.0);
     }
+    MASTER_LEVEL_CURRENT_BITS.store(level.to_bits(), Ordering::Relaxed);
+    MASTER_PAN_LEFT_CURRENT_BITS.store(pan_left.to_bits(), Ordering::Relaxed);
+    MASTER_PAN_RIGHT_CURRENT_BITS.store(pan_right.to_bits(), Ordering::Relaxed);
     let elapsed = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
     AUDIO_CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
     AUDIO_CALLBACK_FRAMES.fetch_add(num_frames as u64, Ordering::Relaxed);
@@ -670,6 +986,266 @@ fn result_string(env: &mut JNIEnv<'_>, result: Result<String>) -> jstring {
             report(env, error);
             ptr::null_mut()
         }
+    }
+}
+
+fn controller_plan_json(
+    messages: Result<Vec<keylab_protocol::OutboundMessage>, String>,
+) -> Result<String> {
+    Ok(controller_plan_value(messages)?.to_string())
+}
+
+fn controller_plan_value(
+    messages: Result<Vec<keylab_protocol::OutboundMessage>, String>,
+) -> Result<serde_json::Value> {
+    let messages = messages.map_err(anyhow::Error::msg)?;
+    Ok(serde_json::Value::Array(
+        messages
+            .into_iter()
+            .map(|message| {
+                serde_json::json!({
+                    "bytes": message.bytes,
+                    "settle_after_ms": message.settle_after_ms,
+                })
+            })
+            .collect(),
+    ))
+}
+
+fn controller_play_sounds(catalog: &PresetCatalog) -> Vec<PlaySound> {
+    let banks = catalog
+        .banks
+        .iter()
+        .map(|bank| (bank.id.as_str(), bank.name.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    catalog
+        .presets
+        .iter()
+        .map(|preset| {
+            let bank = preset
+                .bank
+                .as_deref()
+                .and_then(|id| banks.get(id).copied())
+                .unwrap_or("Factory");
+            let detail = preset
+                .category
+                .as_deref()
+                .or(preset.description.as_deref())
+                .unwrap_or("Preset");
+            PlaySound::new(&preset.id, &preset.name, bank, detail).editable(preset.editable)
+        })
+        .collect()
+}
+
+fn sync_controller_plugins(store_root: &Path) -> Result<()> {
+    let catalog: serde_json::Value = serde_json::from_str(&installed_plugins_json(store_root)?)?;
+    let active = engine()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+        .as_ref()
+        .map(|engine| {
+            (
+                engine.package_root.to_string_lossy().into_owned(),
+                engine.plugin_id.clone(),
+                engine.plugin_name.clone(),
+                engine.catalog.clone(),
+                engine.selected_sound_id.clone(),
+            )
+        });
+    let mut plugins = Vec::new();
+    let mut metadata = BTreeMap::new();
+    for descriptor in catalog["plugins"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|plugin| plugin["compatible"].as_bool().unwrap_or(false))
+    {
+        let Some(root) = descriptor["package_root"].as_str() else {
+            continue;
+        };
+        let Some(plugin_id) = descriptor["plugin_id"].as_str() else {
+            continue;
+        };
+        let Some(name) = descriptor["plugin_name"].as_str() else {
+            continue;
+        };
+        let version = descriptor["version"].as_str().unwrap_or_default();
+        plugins.push(PlayPlugin::new(plugin_id, plugin_id, name).config_available(false));
+        metadata.insert(
+            plugin_id.to_owned(),
+            ControllerPluginInfo {
+                root: root.to_owned(),
+                name: name.to_owned(),
+                version: version.to_owned(),
+            },
+        );
+    }
+    let active_instance_id = active.as_ref().map(|active| active.1.as_str());
+    let mut controller = controller_menu()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?;
+    controller.plugins = metadata;
+    controller.installed_plugins = plugins.clone();
+    controller
+        .menu
+        .set_play_plugins(plugins, active_instance_id);
+    if let Some((_root, plugin_id, name, catalog, selected_sound_id)) = active {
+        controller.menu.sync_active_plugin(
+            plugin_id.clone(),
+            plugin_id,
+            name,
+            controller_play_sounds(&catalog),
+            Some(&selected_sound_id),
+        );
+    }
+    Ok(())
+}
+
+fn sync_controller_active_plugin() -> Result<()> {
+    let (plugin_id, name, catalog, selected_sound_id) = engine()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+        .as_ref()
+        .map(|engine| {
+            (
+                engine.plugin_id.clone(),
+                engine.plugin_name.clone(),
+                engine.catalog.clone(),
+                engine.selected_sound_id.clone(),
+            )
+        })
+        .context("RackForge engine is not initialized")?;
+    let mut controller = controller_menu()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?;
+    controller.menu.sync_active_plugin(
+        plugin_id.clone(),
+        plugin_id,
+        name,
+        controller_play_sounds(&catalog),
+        Some(&selected_sound_id),
+    );
+    Ok(())
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabAcquirePlan(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let controller = controller_menu()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?;
+        let mut messages = keylab_protocol::acquire_messages().map_err(anyhow::Error::msg)?;
+        messages.extend(
+            keylab_protocol::render_messages(&controller.menu.render())
+                .map_err(anyhow::Error::msg)?,
+        );
+        controller_plan_json(Ok(messages))
+    })();
+    result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabSyncPlugins(
+    mut env: JNIEnv,
+    _class: JClass,
+    store_root: JString,
+) -> jboolean {
+    let result = (|| -> Result<()> {
+        let store_root = PathBuf::from(java_string(&mut env, store_root)?);
+        sync_controller_plugins(&store_root)
+    })();
+    match result {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabSyncActivePlugin(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jboolean {
+    match sync_controller_active_plugin() {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabRenderPlan(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let result = controller_menu()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
+        .and_then(|controller| {
+            controller_plan_json(keylab_protocol::render_messages(&controller.menu.render()))
+        });
+    result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabRestorePlan(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    result_string(
+        &mut env,
+        controller_plan_json(keylab_protocol::restore_messages()),
+    )
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabHandleMidi(
+    mut env: JNIEnv,
+    _class: JClass,
+    status: jint,
+    data_1: jint,
+    data_2: jint,
+) -> jstring {
+    let message = [status as u8, data_1 as u8, data_2 as u8];
+    let Some(event) = keylab_protocol::parse_input(&message) else {
+        return ptr::null_mut();
+    };
+    let result = match event {
+        keylab_protocol::ControllerEvent::Surface { input, phase } => controller_menu()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
+            .and_then(|mut controller| controller.handle_surface(input, phase)),
+        keylab_protocol::ControllerEvent::HostControl { target, value } => {
+            apply_master_control(target, value);
+            controller_menu()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
+                .and_then(|controller| controller.render_host_control(target, value))
+        }
+    };
+    result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabPollLongPress(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let result = controller_menu()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
+        .and_then(|mut controller| controller.poll_long_press(Instant::now()));
+    match result {
+        Ok(Some(response)) => result_string(&mut env, Ok(response)),
+        Ok(None) => ptr::null_mut(),
+        Err(error) => result_string(&mut env, Err(error)),
     }
 }
 

@@ -25,8 +25,9 @@ use rackforge_repository::{
     install_local_archive,
 };
 use rackforge_session_api::{
-    CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId, PluginInstanceState, Revision,
-    SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SessionId, SessionState, SoundSummary,
+    CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId, MasterLevel, MasterPan,
+    PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SessionId,
+    SessionState, SoundSummary,
 };
 use rackforge_surface_api::SurfaceMode;
 use rackforge_surface_runtime::{
@@ -43,6 +44,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const LONG_PRESS: Duration = Duration::from_millis(700);
+const HOME_CHORD_SIMULTANEITY: Duration = Duration::from_millis(250);
 const LITTLE_WIDTH: f32 = 760.0;
 const LITTLE_HEIGHT: f32 = 270.0;
 
@@ -272,6 +274,16 @@ struct DesktopApp {
     session: Arc<RwLock<SessionState>>,
     button_down: [Option<Instant>; 4],
     keyboard_down: [Option<Instant>; 4],
+    #[cfg(windows)]
+    controller_button_down: [Option<Instant>; 4],
+    #[cfg(windows)]
+    controller_button_long_fired: [bool; 4],
+    #[cfg(windows)]
+    controller_home_chord_emitted: bool,
+    #[cfg(windows)]
+    controller_encoder_down: Option<Instant>,
+    #[cfg(windows)]
+    controller_header_restore_at: Option<Instant>,
     web_url: String,
     web_servers: web::DesktopWebServers,
     web_control: Receiver<web::DesktopControlCall>,
@@ -287,6 +299,10 @@ struct DesktopApp {
     audio_preferences: Option<desktop_audio::AudioPreferences>,
     #[cfg(windows)]
     audio_config_path: PathBuf,
+    #[cfg(windows)]
+    audio_recovery_at: Option<Instant>,
+    #[cfg(windows)]
+    audio_recovery_attempts: u32,
 }
 
 impl DesktopApp {
@@ -365,6 +381,10 @@ impl DesktopApp {
                 plugin.selected_sound_id.as_deref(),
             );
         }
+        #[cfg(windows)]
+        if let Some(audio) = &audio {
+            sync_desktop_audio(audio, &session, &menu)?;
+        }
 
         {
             let mut state = session.write().expect("session lock poisoned");
@@ -392,11 +412,28 @@ impl DesktopApp {
         };
 
         let web_url = web_servers.local_url().to_owned();
+        #[cfg(windows)]
+        let audio_recovery_at =
+            if audio.is_none() && audio_preferences.is_some() && !plugins.is_empty() {
+                Some(Instant::now() + Duration::from_secs(1))
+            } else {
+                None
+            };
         Ok(Self {
             menu,
             session,
             button_down: [None; 4],
             keyboard_down: [None; 4],
+            #[cfg(windows)]
+            controller_button_down: [None; 4],
+            #[cfg(windows)]
+            controller_button_long_fired: [false; 4],
+            #[cfg(windows)]
+            controller_home_chord_emitted: false,
+            #[cfg(windows)]
+            controller_encoder_down: None,
+            #[cfg(windows)]
+            controller_header_restore_at: None,
             web_url,
             web_servers,
             web_control,
@@ -412,6 +449,10 @@ impl DesktopApp {
             audio_preferences,
             #[cfg(windows)]
             audio_config_path,
+            #[cfg(windows)]
+            audio_recovery_at,
+            #[cfg(windows)]
+            audio_recovery_attempts: 0,
         })
     }
 
@@ -429,8 +470,16 @@ impl DesktopApp {
             self.audio = None;
             if let Some(preferences) = self.audio_preferences.as_ref() {
                 match start_desktop_audio(&plugins, preferences, previous_active.as_deref()) {
-                    Ok(audio) => self.audio = Some(audio),
-                    Err(error) => warnings.push(format!("Audio/MIDI unavailable: {error:#}")),
+                    Ok(audio) => {
+                        self.audio = Some(audio);
+                        self.audio_recovery_at = None;
+                        self.audio_recovery_attempts = 0;
+                    }
+                    Err(error) => {
+                        warnings.push(format!("Audio/MIDI unavailable: {error:#}"));
+                        self.audio_recovery_at = Some(Instant::now() + Duration::from_secs(1));
+                        self.audio_recovery_attempts = 0;
+                    }
                 }
             }
         }
@@ -472,6 +521,10 @@ impl DesktopApp {
         }
         self.menu = menu;
         self.plugins = plugins;
+        #[cfg(windows)]
+        if let Some(audio) = &self.audio {
+            sync_desktop_audio(audio, &self.session, &self.menu)?;
+        }
         Ok(warnings)
     }
 
@@ -486,17 +539,69 @@ impl DesktopApp {
 
     #[cfg(windows)]
     fn poll_audio_error(&mut self) {
-        if let Some(error) = self.audio.as_ref().and_then(|audio| audio.take_error()) {
-            self.status = error.clone();
-            Self::show_audio_error(&error);
+        let stream_error = self.audio.as_ref().and_then(|audio| audio.take_error());
+        if let Some(error) = stream_error {
+            self.audio = None;
+            self.audio_recovery_attempts = 0;
+            self.audio_recovery_at = Some(Instant::now() + Duration::from_millis(250));
+            self.status = format!("{error} · reconnecting audio…");
+            eprintln!("DESKTOP_AUDIO_RECOVERY_SCHEDULED error={error}");
+        }
+        let Some(retry_at) = self.audio_recovery_at else {
+            return;
+        };
+        if Instant::now() < retry_at || self.audio.is_some() {
+            return;
+        }
+        let Some(preferences) = self.audio_preferences.clone() else {
+            self.audio_recovery_at = None;
+            return;
+        };
+        let active = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .active_instance_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned());
+        self.audio_recovery_at = None;
+        match start_desktop_audio(&self.plugins, &preferences, active.as_deref()) {
+            Ok(audio) => {
+                if let Err(error) = sync_desktop_audio(&audio, &self.session, &self.menu) {
+                    self.status =
+                        format!("Audio reconnected, but controller sync failed: {error:#}");
+                }
+                let summary = audio.summary().to_owned();
+                self.audio = Some(audio);
+                self.audio_recovery_attempts = 0;
+                self.status = format!("Audio reconnected · {summary}");
+                println!("DESKTOP_AUDIO_RECOVERED {summary}");
+            }
+            Err(error) => {
+                self.audio_recovery_attempts = self.audio_recovery_attempts.saturating_add(1);
+                let exponent = self.audio_recovery_attempts.min(5);
+                let delay = Duration::from_millis(250_u64.saturating_mul(1_u64 << exponent));
+                self.audio_recovery_at = Some(Instant::now() + delay);
+                self.status = format!(
+                    "Audio unavailable · retry {} in {:.1}s · {error:#}",
+                    self.audio_recovery_attempts,
+                    delay.as_secs_f32()
+                );
+                eprintln!(
+                    "DESKTOP_AUDIO_RECOVERY_FAILED attempt={} retry_ms={} error={error:#}",
+                    self.audio_recovery_attempts,
+                    delay.as_millis()
+                );
+            }
         }
     }
 
     #[cfg(windows)]
-    fn audio_summary(&self) -> &str {
-        self.audio
-            .as_ref()
-            .map_or("Audio/MIDI unavailable", |audio| audio.summary())
+    fn audio_summary(&self) -> String {
+        self.audio.as_ref().map_or_else(
+            || "Audio/MIDI unavailable".into(),
+            |audio| audio.diagnostics(),
+        )
     }
 
     #[cfg(windows)]
@@ -506,11 +611,13 @@ impl DesktopApp {
             .audio_preferences
             .clone()
             .map_or_else(|| inventory.default_preferences(), Ok)?;
-        Ok(audio_settings::AudioSettingsState::new(
+        let mut state = audio_settings::AudioSettingsState::new(
             inventory,
             preferences,
             self.web_preferences.clone(),
-        ))
+        );
+        state.set_runtime_status(self.audio_summary());
+        Ok(state)
     }
 
     #[cfg(windows)]
@@ -568,6 +675,7 @@ impl DesktopApp {
                 };
             }
         };
+        sync_desktop_audio(&candidate, &self.session, &self.menu)?;
         if let Err(error) = preferences.persist(&self.audio_config_path) {
             drop(candidate);
             return match self.restore_audio(previous.as_ref(), active.as_deref()) {
@@ -582,6 +690,8 @@ impl DesktopApp {
         let summary = candidate.summary().to_owned();
         self.audio = Some(candidate);
         self.audio_preferences = Some(preferences);
+        self.audio_recovery_at = None;
+        self.audio_recovery_attempts = 0;
         self.status = format!("Audio settings applied · {summary}");
         Ok(format!("Settings applied · {summary}"))
     }
@@ -598,6 +708,11 @@ impl DesktopApp {
                     .context("reopening the previous audio stream")
             })
             .transpose()?;
+        if let Some(audio) = &self.audio {
+            sync_desktop_audio(audio, &self.session, &self.menu)?;
+        }
+        self.audio_recovery_at = None;
+        self.audio_recovery_attempts = 0;
         Ok(())
     }
 
@@ -892,6 +1007,187 @@ impl DesktopApp {
         while let Some(command) = self.menu.take_command() {
             self.apply_command(command);
         }
+        #[cfg(windows)]
+        self.render_controller_screen();
+    }
+
+    #[cfg(windows)]
+    fn render_controller_screen(&self) {
+        if let Some(audio) = &self.audio {
+            audio.render_little(self.menu.render());
+        }
+    }
+
+    #[cfg(windows)]
+    fn poll_controller(&mut self) {
+        loop {
+            let event = self
+                .audio
+                .as_ref()
+                .and_then(desktop_audio::DesktopAudio::try_controller_event);
+            let Some(event) = event else { break };
+            self.handle_controller_event(event);
+        }
+        if !self.controller_home_chord_emitted
+            && let (Some(ok), Some(back)) = (
+                self.controller_button_down[0],
+                self.controller_button_down[3],
+            )
+        {
+            let separation = if ok >= back {
+                ok.duration_since(back)
+            } else {
+                back.duration_since(ok)
+            };
+            let chord_started = ok.max(back);
+            if separation <= HOME_CHORD_SIMULTANEITY && chord_started.elapsed() >= LONG_PRESS {
+                self.controller_home_chord_emitted = true;
+                self.controller_button_long_fired[0] = true;
+                self.controller_button_long_fired[3] = true;
+                self.menu.set_button_pressed(Input::Button1, false);
+                self.menu.set_button_pressed(Input::Button4, false);
+                self.apply_input(Input::HomeChord);
+            }
+        }
+        let long_presses = (0..4)
+            .filter(|index| {
+                !self.controller_button_long_fired[*index]
+                    && self.controller_button_down[*index]
+                        .is_some_and(|started| started.elapsed() >= LONG_PRESS)
+            })
+            .collect::<Vec<_>>();
+        for index in long_presses {
+            self.controller_button_long_fired[index] = true;
+            self.menu.set_button_pressed(short_input(index), false);
+            self.apply_input(long_input(index));
+        }
+        if self
+            .controller_header_restore_at
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.controller_header_restore_at = None;
+            self.render_controller_screen();
+        }
+    }
+
+    #[cfg(windows)]
+    fn handle_controller_event(&mut self, event: desktop_audio::DesktopControllerEvent) {
+        use desktop_audio::DesktopControllerEvent;
+        use keylab_essential_mk3::protocol::InputPhase;
+
+        match event {
+            DesktopControllerEvent::Connected => {
+                self.status = "Arturia KeyLab connected · LITTLE active".into();
+                self.render_controller_screen();
+            }
+            DesktopControllerEvent::Disconnected => {
+                for index in 0..4 {
+                    self.controller_button_down[index] = None;
+                    self.controller_button_long_fired[index] = false;
+                    self.menu.set_button_pressed(short_input(index), false);
+                }
+                self.controller_home_chord_emitted = false;
+                self.controller_encoder_down = None;
+                self.status = "Arturia KeyLab disconnected · held notes stopped".into();
+            }
+            DesktopControllerEvent::MasterLevel(value) => {
+                let level = MasterLevel::from_midi(value);
+                if let Err(error) = self.set_master_level(level, None) {
+                    self.status = error;
+                    return;
+                }
+                self.show_controller_host_value(
+                    keylab_essential_mk3::protocol::host_control_header(
+                        rackforge_session_api::HostControlTarget::MasterLevel,
+                        value,
+                    ),
+                );
+            }
+            DesktopControllerEvent::MasterPan(value) => {
+                let pan = MasterPan::from_midi_with_center_snap(value);
+                if let Err(error) = self.set_master_pan(pan, None) {
+                    self.status = error;
+                    return;
+                }
+                self.show_controller_host_value(
+                    keylab_essential_mk3::protocol::host_control_header(
+                        rackforge_session_api::HostControlTarget::MasterPan,
+                        value,
+                    ),
+                );
+            }
+            DesktopControllerEvent::Surface { input, phase } => match input {
+                Input::Button1 | Input::Button2 | Input::Button3 | Input::Button4 => {
+                    let index = match input {
+                        Input::Button1 => 0,
+                        Input::Button2 => 1,
+                        Input::Button3 => 2,
+                        Input::Button4 => 3,
+                        _ => unreachable!(),
+                    };
+                    match phase {
+                        InputPhase::Press => {
+                            self.controller_button_down[index] = Some(Instant::now());
+                            self.controller_button_long_fired[index] = false;
+                            self.menu.set_button_pressed(short_input(index), true);
+                            self.render_controller_screen();
+                        }
+                        InputPhase::Release => {
+                            let started = self.controller_button_down[index].take();
+                            let long_fired = std::mem::replace(
+                                &mut self.controller_button_long_fired[index],
+                                false,
+                            );
+                            self.menu.set_button_pressed(short_input(index), false);
+                            if self.controller_button_down.iter().all(Option::is_none) {
+                                self.controller_home_chord_emitted = false;
+                            }
+                            if long_fired {
+                                self.render_controller_screen();
+                            } else {
+                                self.apply_input(
+                                    if started.is_some_and(|time| time.elapsed() >= LONG_PRESS) {
+                                        long_input(index)
+                                    } else {
+                                        short_input(index)
+                                    },
+                                );
+                            }
+                        }
+                        InputPhase::Turn => {}
+                    }
+                }
+                Input::EncoderLeft | Input::EncoderRight => {
+                    if phase == InputPhase::Turn {
+                        self.apply_input(input);
+                    }
+                }
+                Input::EncoderPress => match phase {
+                    InputPhase::Press => self.controller_encoder_down = Some(Instant::now()),
+                    InputPhase::Release => {
+                        self.controller_encoder_down = None;
+                        self.apply_input(Input::EncoderPress);
+                    }
+                    InputPhase::Turn => {}
+                },
+                Input::KeyboardParts => {
+                    if phase == InputPhase::Press {
+                        self.apply_input(Input::KeyboardParts);
+                    }
+                }
+                _ => {}
+            },
+        }
+    }
+
+    #[cfg(windows)]
+    fn show_controller_host_value(&mut self, header: String) {
+        let mut screen = self.menu.render();
+        screen.header = Header::Visible(header);
+        if let Some(audio) = &self.audio {
+            audio.render_little(screen);
+        }
+        self.controller_header_restore_at = Some(Instant::now() + Duration::from_millis(1_500));
     }
 
     fn poll_web_control(&mut self) {
@@ -945,6 +1241,10 @@ impl DesktopApp {
             command_id,
         };
         let result = match envelope.command {
+            SessionCommand::SetMasterLevel { level } => {
+                self.set_master_level(level, Some(command_ref))
+            }
+            SessionCommand::SetMasterPan { pan } => self.set_master_pan(pan, Some(command_ref)),
             SessionCommand::SelectSound {
                 instance_id,
                 sound_id,
@@ -971,6 +1271,68 @@ impl DesktopApp {
                 ),
             },
         }
+    }
+
+    fn set_master_level(
+        &mut self,
+        level: MasterLevel,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        #[cfg(windows)]
+        if let Some(audio) = &self.audio {
+            audio
+                .set_master_level(level)
+                .map_err(|error| format!("Could not update master volume: {error:#}"))?;
+        }
+        let event = {
+            let mut session = self.session.write().expect("session lock poisoned");
+            let revision = session.revision.next()?;
+            let event = EventEnvelope {
+                schema_version: SESSION_SCHEMA_VERSION,
+                revision,
+                command,
+                event: SessionEvent::MasterLevelChanged { level },
+            };
+            session.apply(&event)?;
+            event
+        };
+        let percent = (u32::from(level.get()) + 5) / 10;
+        self.status = format!("Master volume: {percent}%");
+        Ok(vec![event])
+    }
+
+    fn set_master_pan(
+        &mut self,
+        pan: MasterPan,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        #[cfg(windows)]
+        if let Some(audio) = &self.audio {
+            audio
+                .set_master_pan(pan)
+                .map_err(|error| format!("Could not update master pan: {error:#}"))?;
+        }
+        let event = {
+            let mut session = self.session.write().expect("session lock poisoned");
+            let revision = session.revision.next()?;
+            let event = EventEnvelope {
+                schema_version: SESSION_SCHEMA_VERSION,
+                revision,
+                command,
+                event: SessionEvent::MasterPanChanged { pan },
+            };
+            session.apply(&event)?;
+            event
+        };
+        let value = pan.get();
+        self.status = if value == 0 {
+            "Master pan: center".into()
+        } else {
+            let side = if value < 0 { 'L' } else { 'R' };
+            let percent = (u32::from(value.unsigned_abs()) + 5) / 10;
+            format!("Master pan: {side} {percent}%")
+        };
+        Ok(vec![event])
     }
 
     fn select_sound(
@@ -1056,6 +1418,14 @@ impl DesktopApp {
                 session.active_mode = surface_mode;
                 session.revision = Revision::new(session.revision.get().saturating_add(1));
                 self.status = format!("Active mode: {mode:?}");
+                drop(session);
+                #[cfg(windows)]
+                if let Some(audio) = &self.audio
+                    && let Err(error) = audio.set_running(mode != ActiveMode::Idle)
+                {
+                    self.status =
+                        format!("Mode changed, but audio state did not follow: {error:#}");
+                }
             }
             MenuCommand::SelectPlugin { instance_id } => {
                 let Some(index) = self
@@ -1102,6 +1472,66 @@ impl DesktopApp {
                 if let Err(error) = self.select_sound(&active_id, &id, None) {
                     self.status = error;
                 }
+            }
+            MenuCommand::ReturnToActiveMode {
+                mode,
+                cancel_draft_id,
+                selected_sound_id,
+            } => {
+                if cancel_draft_id.is_some() {
+                    self.status =
+                        "Program draft cancellation is not available on Desktop yet".into();
+                    return;
+                }
+                let mut focus_sound_id = selected_sound_id;
+                if mode == ActiveMode::Play {
+                    let active_id = self
+                        .session
+                        .read()
+                        .expect("session lock poisoned")
+                        .active_instance_id
+                        .as_ref()
+                        .map(|id| id.as_str().to_owned());
+                    let Some(plugin) = active_id.as_deref().and_then(|active| {
+                        self.plugins
+                            .iter()
+                            .find(|plugin| plugin.instance_id == active)
+                    }) else {
+                        self.status = "No active plugin to return to".into();
+                        return;
+                    };
+                    focus_sound_id = focus_sound_id.or_else(|| plugin.selected_sound_id.clone());
+                    self.menu.sync_active_plugin(
+                        &plugin.instance_id,
+                        &plugin.plugin_id,
+                        &plugin.name,
+                        plugin.sounds.clone(),
+                        focus_sound_id.as_deref(),
+                    );
+                }
+                self.menu
+                    .complete_return_to_active_mode(mode, focus_sound_id.as_deref());
+                self.status = match mode {
+                    ActiveMode::Idle => "Returned to RackForge home".into(),
+                    ActiveMode::Live => "Returned to active LIVE performance".into(),
+                    ActiveMode::Play => "Returned to the active PLAY plugin".into(),
+                };
+            }
+            MenuCommand::ForceHome => {
+                {
+                    let mut session = self.session.write().expect("session lock poisoned");
+                    session.active_mode = SurfaceMode::Idle;
+                    session.revision = Revision::new(session.revision.get().saturating_add(1));
+                }
+                #[cfg(windows)]
+                if let Some(audio) = &self.audio
+                    && let Err(error) = audio.emergency_stop()
+                {
+                    self.status =
+                        format!("Emergency home activated, but audio reset failed: {error:#}");
+                    return;
+                }
+                self.status = "Emergency HOME · audio stopped".into();
             }
             other => {
                 self.status = format!("Desktop bridge pending: {other:?}");
@@ -1295,7 +1725,16 @@ impl DesktopApp {
     }
 
     fn button_is_down(&self, index: usize) -> bool {
-        self.button_down[index].is_some() || self.keyboard_down[index].is_some()
+        self.button_down[index].is_some() || self.keyboard_down[index].is_some() || {
+            #[cfg(windows)]
+            {
+                self.controller_button_down[index].is_some()
+            }
+            #[cfg(not(windows))]
+            {
+                false
+            }
+        }
     }
 }
 
@@ -1303,6 +1742,8 @@ impl eframe::App for DesktopApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         #[cfg(windows)]
         self.poll_audio_error();
+        #[cfg(windows)]
+        self.poll_controller();
         let _ = self.poll_plugin_install(context);
         self.keyboard(context);
         context.request_repaint_after(Duration::from_millis(16));
@@ -1396,23 +1837,42 @@ fn plugin_session_state(plugin: &DesktopPlugin) -> PluginInstanceState {
 }
 
 #[cfg(windows)]
+fn desktop_audio_specs(plugins: &[DesktopPlugin]) -> Vec<desktop_audio::VoiceSpec> {
+    plugins
+        .iter()
+        .map(|plugin| desktop_audio::VoiceSpec {
+            instance_id: plugin.instance_id.clone(),
+            plugin: plugin.runtime,
+            preset_id: plugin.selected_sound_id.clone(),
+        })
+        .collect()
+}
+
+#[cfg(windows)]
 fn start_desktop_audio(
     plugins: &[DesktopPlugin],
     preferences: &desktop_audio::AudioPreferences,
     active_instance_id: Option<&str>,
 ) -> Result<desktop_audio::DesktopAudio> {
     desktop_audio::DesktopAudio::start(
-        plugins
-            .iter()
-            .map(|plugin| desktop_audio::VoiceSpec {
-                instance_id: plugin.instance_id.clone(),
-                plugin: plugin.runtime,
-                preset_id: plugin.selected_sound_id.clone(),
-            })
-            .collect(),
+        desktop_audio_specs(plugins),
         preferences,
         active_instance_id,
     )
+}
+
+#[cfg(windows)]
+fn sync_desktop_audio(
+    audio: &desktop_audio::DesktopAudio,
+    session: &Arc<RwLock<SessionState>>,
+    menu: &Menu,
+) -> Result<()> {
+    let state = session.read().expect("session lock poisoned");
+    audio.set_master_level(state.master_level)?;
+    audio.set_master_pan(state.master_pan)?;
+    drop(state);
+    audio.render_little(menu.render());
+    Ok(())
 }
 
 fn load_desktop_plugins(options: &Options) -> Result<(Vec<DesktopPlugin>, Vec<String>)> {
@@ -1774,7 +2234,6 @@ impl eframe::App for RackForgeApp {
                 #[cfg(windows)]
                 {
                     let _ = self.webview.hide();
-                    let _ = self.native_menu.hide();
                 }
                 state.update(context).map(|result| {
                     result.and_then(|layout| {
@@ -1790,6 +2249,8 @@ impl eframe::App for RackForgeApp {
             AppMode::Desktop(app) => {
                 #[cfg(windows)]
                 app.poll_audio_error();
+                #[cfg(windows)]
+                app.poll_controller();
                 app.poll_web_control();
                 context.request_repaint_after(Duration::from_millis(16));
                 let mut install_plugin = false;
@@ -1798,8 +2259,77 @@ impl eframe::App for RackForgeApp {
                 let mut open_root = false;
                 let mut open_settings = false;
                 #[cfg(windows)]
+                let mut web_route: Option<(&'static str, ActiveMode)> = None;
+                #[cfg(windows)]
                 {
-                    if let Err(error) = self.native_menu.show() {
+                    let mut popup_request = None;
+                    egui::TopBottomPanel::top("rackforge-desktop-menu-bar")
+                        .exact_height(42.0)
+                        .frame(
+                            egui::Frame::new()
+                                .fill(Color32::from_rgb(9, 24, 34))
+                                .inner_margin(egui::Margin::symmetric(8, 4))
+                                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(49, 91, 106))),
+                        )
+                        .show(context, |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.horizontal(|ui| {
+                                for (section, label, width) in [
+                                    (native_menu::NativeMenuSection::File, "File", 70.0),
+                                    (native_menu::NativeMenuSection::Settings, "Settings", 100.0),
+                                    (native_menu::NativeMenuSection::View, "View", 70.0),
+                                    (native_menu::NativeMenuSection::Help, "Help", 70.0),
+                                ] {
+                                    let (rect, response) = ui.allocate_exact_size(
+                                        Vec2::new(width, 34.0),
+                                        Sense::click(),
+                                    );
+                                    response.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::WidgetType::Button,
+                                            true,
+                                            label,
+                                        )
+                                    });
+                                    let selected = response.hovered() || response.has_focus();
+                                    ui.painter().rect(
+                                        rect,
+                                        0.0,
+                                        if selected {
+                                            Color32::from_rgb(92, 226, 245)
+                                        } else {
+                                            Color32::from_rgb(12, 34, 46)
+                                        },
+                                        Stroke::new(1.0_f32, Color32::from_rgb(53, 91, 105)),
+                                        StrokeKind::Inside,
+                                    );
+                                    ui.painter().text(
+                                        rect.center(),
+                                        Align2::CENTER_CENTER,
+                                        label,
+                                        FontId::proportional(13.0),
+                                        if selected {
+                                            Color32::from_rgb(2, 16, 22)
+                                        } else {
+                                            Color32::from_rgb(226, 242, 245)
+                                        },
+                                    );
+                                    let keyboard_open = response.has_focus()
+                                        && ui.input(|input| {
+                                            input.key_pressed(Key::Enter)
+                                                || input.key_pressed(Key::Space)
+                                        });
+                                    if response.clicked() || keyboard_open {
+                                        popup_request = Some((section, rect.left_bottom()));
+                                    }
+                                }
+                            });
+                        });
+                    if let Some((section, anchor)) = popup_request
+                        && let Err(error) =
+                            self.native_menu
+                                .popup(section, anchor, context.pixels_per_point())
+                    {
                         app.status = format!("Could not show application menu: {error:#}");
                     }
                     for command in self.native_menu.drain() {
@@ -1822,6 +2352,12 @@ impl eframe::App for RackForgeApp {
                                     .set_level(rfd::MessageLevel::Info)
                                     .show();
                             }
+                            native_menu::NativeMenuCommand::Play => {
+                                web_route = Some(("play", ActiveMode::Play));
+                            }
+                            native_menu::NativeMenuCommand::Live => {
+                                web_route = Some(("live", ActiveMode::Live));
+                            }
                             native_menu::NativeMenuCommand::About => {
                                 rfd::MessageDialog::new()
                                     .set_title("About RackForge")
@@ -1833,6 +2369,15 @@ impl eframe::App for RackForgeApp {
                                     .show();
                             }
                         }
+                    }
+                }
+
+                #[cfg(windows)]
+                if let Some((route, mode)) = web_route {
+                    app.apply_command(MenuCommand::SetActiveMode { mode });
+                    let url = format!("{}/{route}", app.web_url.trim_end_matches('/'));
+                    if let Err(error) = self.webview.navigate(&url) {
+                        app.status = format!("Could not open {route}: {error:#}");
                     }
                 }
 
@@ -1878,6 +2423,10 @@ impl eframe::App for RackForgeApp {
                     }
                 }
 
+                #[cfg(windows)]
+                if let Some(settings) = self.audio_settings.as_mut() {
+                    settings.set_runtime_status(app.audio_summary());
+                }
                 #[cfg(windows)]
                 let settings_action = self
                     .audio_settings
@@ -1974,7 +2523,6 @@ impl eframe::App for RackForgeApp {
                 #[cfg(windows)]
                 {
                     let _ = self.webview.hide();
-                    let _ = self.native_menu.hide();
                 }
                 egui::CentralPanel::default().show(context, |ui| {
                     ui.vertical_centered(|ui| {

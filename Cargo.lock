@@ -3491,9 +3491,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "jni 0.21.1",
+ "rackforge-controller-arturia-keylab-essential-mk3",
  "rackforge-core",
  "rackforge-plugin-api",
  "rackforge-repository",
+ "rackforge-session-api",
+ "rackforge-surface-runtime",
  "semver",
  "serde_json",
 ]
@@ -3600,6 +3603,7 @@ dependencies = [
  "midir",
  "mime_guess",
  "rackforge-control-api",
+ "rackforge-controller-arturia-keylab-essential-mk3",
  "rackforge-core",
  "rackforge-performance-api",
  "rackforge-plugin-api",

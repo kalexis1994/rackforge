@@ -544,8 +544,29 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
     instances.find(
       (instance) => instance.instance_id === snapshot?.active_instance_id,
     ) ?? instances[0];
-  const [openInstanceId, setOpenInstanceId] = useState<string | null>(null);
+  const [pluginPickerOpen, setPluginPickerOpen] = useState(false);
   const [presetsOpen, setPresetsOpen] = useState(false);
+  const [pluginVersions, setPluginVersions] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/plugins")
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return (await response.json()) as PluginWebDescriptor[];
+      })
+      .then((plugins) => {
+        if (cancelled) return;
+        setPluginVersions(Object.fromEntries(
+          plugins.map((plugin) => [plugin.plugin_id, plugin.version]),
+        ));
+      })
+      .catch(() => {
+        if (!cancelled) setPluginVersions({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   if (!active) {
     return (
       <section className="plugin-surface-shell direct-surface">
@@ -556,92 +577,127 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
       </section>
     );
   }
-  const openInstance = instances.find(
-    (instance) => instance.instance_id === openInstanceId,
-  );
-  if (openInstance) {
-    return (
-      <section className="plugin-surface-shell direct-surface">
-        <div className="play-plugin-toolbar">
-          <button
-            className="play-header-button back"
-            onClick={() => {
-              setPresetsOpen(false);
-              setOpenInstanceId(null);
-            }}
-            aria-label="Back to plugin list"
-          >
-            <span aria-hidden="true">←</span>
-            <strong>Plugins</strong>
-          </button>
-          <div className="play-plugin-identity">
-            <span>PLAY</span>
-            <strong>{openInstance.plugin_name}</strong>
-          </div>
-          <button
-            className={`play-header-button presets${presetsOpen ? " active" : ""}`}
-            onClick={() => setPresetsOpen((open) => !open)}
-            aria-expanded={presetsOpen}
-          >
-            <span className="preset-button-mark" aria-hidden="true">P</span>
-            <strong>Presets</strong>
-          </button>
+  return (
+    <section className="plugin-surface-shell direct-surface">
+      <div className="play-plugin-toolbar">
+        <button
+          className={`play-header-button back${pluginPickerOpen ? " active" : ""}`}
+          onClick={() => {
+            setPresetsOpen(false);
+            setPluginPickerOpen((open) => !open);
+          }}
+          aria-expanded={pluginPickerOpen}
+        >
+          <span aria-hidden="true">▦</span>
+          <strong>Select plugin</strong>
+        </button>
+        <div className="play-plugin-identity">
+          <span>PLAY</span>
+          <strong>{active.plugin_name}{formatPluginVersion(pluginVersions[active.plugin_id])}</strong>
         </div>
-        <PluginFrame
-          key={openInstance.instance_id}
-          instance={openInstance}
-          surface="play"
+        <button
+          className={`play-header-button presets${presetsOpen ? " active" : ""}`}
+          onClick={() => {
+            setPluginPickerOpen(false);
+            setPresetsOpen((open) => !open);
+          }}
+          aria-expanded={presetsOpen}
+        >
+          <span className="preset-button-mark" aria-hidden="true">P</span>
+          <strong>Presets</strong>
+        </button>
+      </div>
+      <PluginFrame key={active.instance_id} instance={active} surface="play" />
+      {pluginPickerOpen && (
+        <PluginPickerModal
+          active={active}
+          instances={instances}
+          versions={pluginVersions}
+          onClose={() => setPluginPickerOpen(false)}
         />
-        {presetsOpen && (
-          <PresetModal
-            instance={openInstance}
-            onClose={() => setPresetsOpen(false)}
-          />
-        )}
-      </section>
-    );
-  }
+      )}
+      {presetsOpen && (
+        <PresetModal instance={active} onClose={() => setPresetsOpen(false)} />
+      )}
+    </section>
+  );
+}
+
+function PluginPickerModal({
+  active,
+  instances,
+  versions,
+  onClose,
+}: {
+  active: PluginInstance;
+  instances: PluginInstance[];
+  versions: Record<string, string>;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
   const orderedInstances = [
     active,
     ...instances.filter((instance) => instance.instance_id !== active.instance_id),
   ];
   return (
-    <section className="play-launcher">
-      <div className="play-launcher-title">
-        <span className="eyebrow">PLAY · Instruments</span>
-        <h1>Select a plugin</h1>
-        <p>The currently selected instrument stays first and is ready to play.</p>
-      </div>
-      <div className="play-plugin-selector" role="list" aria-label="Instrument plugins">
-        {orderedInstances.map((instance, index) => {
-          const selected = instance.instance_id === active.instance_id;
-          return (
-          <button
-            className={selected ? "active" : ""}
-            key={instance.instance_id}
-            onClick={() => {
-              dispatchCommand({ type: "set_active_mode", mode: "play" });
-              dispatchCommand({
-                type: "select_plugin",
-                instance_id: instance.instance_id,
-              });
-              setOpenInstanceId(instance.instance_id);
-            }}
-          >
-            <span className="play-plugin-number">{String(index + 1).padStart(2, "0")}</span>
-            <span className="play-plugin-copy">
-              <strong>{instance.plugin_name}</strong>
-              <small>{instance.sounds.length} programs · Web instrument</small>
-            </span>
-            <span className="play-plugin-status">
-              {selected ? "PLAYING" : "OPEN"}<i aria-hidden="true">→</i>
-            </span>
-          </button>
-          );
-        })}
-      </div>
-    </section>
+    <div className="preset-modal-backdrop" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <section className="preset-modal plugin-picker-modal" role="dialog" aria-modal="true" aria-labelledby="plugin-picker-title">
+        <header className="preset-modal-header">
+          <div>
+            <span className="eyebrow">PLAY · Instruments</span>
+            <h2 id="plugin-picker-title">Select plugin</h2>
+          </div>
+          <button className="preset-modal-close" onClick={onClose} aria-label="Close plugin selector">×</button>
+        </header>
+        <div className="preset-modal-toolbar">
+          <p>Choose the instrument you want to play. The active plugin stays first.</p>
+        </div>
+        <div className="play-plugin-selector modal-list" role="list" aria-label="Instrument plugins">
+          {orderedInstances.map((instance, index) => {
+            const selected = instance.instance_id === active.instance_id;
+            return (
+              <button
+                className={selected ? "active" : ""}
+                key={instance.instance_id}
+                onClick={() => {
+                  dispatchCommand({ type: "set_active_mode", mode: "play" });
+                  if (!selected) {
+                    dispatchCommand({
+                      type: "select_plugin",
+                      instance_id: instance.instance_id,
+                    });
+                  }
+                  onClose();
+                }}
+              >
+                <span className="play-plugin-number">{String(index + 1).padStart(2, "0")}</span>
+                <span className="play-plugin-copy">
+                  <strong>{instance.plugin_name}{formatPluginVersion(versions[instance.plugin_id])}</strong>
+                  <small>{instance.sounds.length} programs · Web instrument</small>
+                </span>
+                <span className="play-plugin-status">
+                  {selected ? "PLAYING" : "SELECT"}<i aria-hidden="true">→</i>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    </div>
   );
+}
+
+function formatPluginVersion(version: string | undefined) {
+  if (!version) return "";
+  return ` v${version.replace(/^[vV]/, "")}`;
 }
 
 function PresetModal({

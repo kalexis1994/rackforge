@@ -219,14 +219,14 @@ mod tests {
                 ui_layouts: vec!["little@1".into()],
                 config_available: true,
                 banks: Vec::new(),
-            sounds: vec![SoundSummary {
+                sounds: vec![SoundSummary {
                     id: selected.into(),
                     name: "Test".into(),
                     bank: None,
                     detail: None,
                     category: None,
-            tags: Vec::new(),
-            editable: false,
+                    tags: Vec::new(),
+                    editable: false,
                 }],
                 selected_sound_id: Some(selected.into()),
             }],

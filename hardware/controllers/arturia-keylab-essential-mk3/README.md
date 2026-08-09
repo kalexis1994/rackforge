@@ -4,6 +4,13 @@ Primer paquete de controlador de RackForge. Implementa el display de texto,
 cuatro soft keys, encoder, LEDs, handshake DAW, health checks y restauración
 usando exclusivamente MIDI/SysEx soportado por el firmware oficial.
 
+La adquisición, el render y la restauración se componen en una máquina de
+estado portable compartida por los hosts. Su perfil RGB mantiene botones,
+transporte y los 16 pads en azul tenue (`10,40,64`), independientemente de si el
+transporte MIDI pertenece a Linux/ALSA, Windows o Android. El paquete sigue
+publicando `process-v1` para Raspberry durante la transición; el mismo núcleo
+sin I/O queda preparado para el runtime portable `wasm-v1`.
+
 El Fader 9 queda reservado para `master_level`: en `DAW Program`, requerido por
 la integración del display, envía CC 113 por el canal 1 y controla la ganancia
 final de RackForge. La reserva forma parte del manifest y del perfil reportado

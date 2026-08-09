@@ -213,14 +213,14 @@ mod tests {
                     ui_layouts: vec!["little@1".into()],
                     config_available: true,
                     banks: Vec::new(),
-            sounds: vec![SoundSummary {
+                    sounds: vec![SoundSummary {
                         id: "dls.b00000000.p00000000".into(),
                         name: "Piano 1".into(),
                         bank: Some("dls".into()),
                         detail: Some("B000 P000".into()),
                         category: None,
-            tags: Vec::new(),
-            editable: false,
+                        tags: Vec::new(),
+                        editable: false,
                     }],
                     selected_sound_id: Some("dls.b00000000.p00000000".into()),
                 }],

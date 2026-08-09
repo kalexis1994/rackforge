@@ -17,5 +17,7 @@ rackforge-controller-package = { path = "../../crates/rackforge-controller-packa
 rackforge-session-api = { path = "../../crates/rackforge-session-api" }
 rackforge-platform-api = { path = "../../crates/rackforge-platform-api" }
 rackforge-surface-runtime = { path = "../../crates/rackforge-surface-runtime" }
-midir = "0.11.0"
 serde_json = "1"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+midir = "0.11.0"

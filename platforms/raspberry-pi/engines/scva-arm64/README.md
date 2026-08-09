@@ -30,7 +30,7 @@ renderizado estable mientras continúa el RE.
 Los bancos se instalan fuera de Git:
 
 ```text
-/home/kalex/rackforge/share/scva/
+$HOME/rackforge/share/scva/
 ├── wave_1994_ver200_8mib.bin
 ├── wave_1996_rom_make_a_8mib.bin
 ├── wave_1996_rom_make_b_4mib.bin
@@ -45,17 +45,17 @@ Los bancos se instalan fuera de Git:
 ## Compilación en la Raspberry
 
 ```bash
-cd /home/kalex/rackforge/current/platforms/raspberry-pi/engines/scva-arm64
+cd "$HOME/rackforge/current/platforms/raspberry-pi/engines/scva-arm64"
 sh ./build.sh
-/home/kalex/rackforge/bin/rackforge-scva-bank \
-  inspect /home/kalex/rackforge/share/scva
+"$HOME/rackforge/bin/rackforge-scva-bank" \
+  inspect "$HOME/rackforge/share/scva"
 ```
 
 Para resolver `Piano 1` (tono 0) y C4 (nota MIDI 60):
 
 ```bash
 rackforge-scva-bank resolve \
-  /home/kalex/rackforge/share/scva/control-v1 0 60
+  "$HOME/rackforge/share/scva/control-v1" 0 60
 ```
 
 El render offline sigue esa resolución, aplica el mapa ROM de SCCore,
@@ -63,8 +63,8 @@ decodifica los rangos completos, afina y mezcla los parciales:
 
 ```bash
 rackforge-scva-bank render-tone \
-  /home/kalex/rackforge/share/scva \
-  /home/kalex/rackforge/share/scva/control-v1 \
+  "$HOME/rackforge/share/scva" \
+  "$HOME/rackforge/share/scva/control-v1" \
   0 60 /tmp/piano1-c4-preview.wav
 ```
 
@@ -73,14 +73,14 @@ Es un preview de investigación, no el sintetizador terminado.
 Para decodificar un rango conocido:
 
 ```bash
-rackforge-scva-bank decode /home/kalex/rackforge/share/scva \
+rackforge-scva-bank decode "$HOME/rackforge/share/scva" \
   sc88-rev200 0 0x8000 0x10000 /tmp/candidate.wav
 ```
 
 Para aplicar el layout utilizado por el runtime de SCCore:
 
 ```bash
-rackforge-scva-bank decode-sccore /home/kalex/rackforge/share/scva \
+rackforge-scva-bank decode-sccore "$HOME/rackforge/share/scva" \
   rom-make-a 1 0x1ff22 48286 /tmp/strings-partial.wav
 ```
 
@@ -117,7 +117,7 @@ En la Raspberry:
 
 ```bash
 rackforge-scva-live \
-  --rendered-bank /home/kalex/rackforge/share/rendered-piano \
+  --rendered-bank "$HOME/rackforge/share/rendered-piano" \
   --gain 1.0
 ```
 

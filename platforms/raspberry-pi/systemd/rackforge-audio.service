@@ -3,14 +3,15 @@ Description=RackForge supervised low-latency audio engine
 After=local-fs.target sound.target rackforge-cpu-performance.service
 Wants=sound.target rackforge-cpu-performance.service
 StartLimitIntervalSec=0
-ConditionPathExists=/home/kalex/rackforge/config/audio.toml
+ConditionPathExists=@RACKFORGE_ROOT@/config/audio.toml
 
 [Service]
 Type=simple
-User=kalex
-Group=kalex
+User=@RACKFORGE_USER@
+Group=@RACKFORGE_GROUP@
 SupplementaryGroups=audio rackforge
-Environment=RACKFORGE_ROOT=/home/kalex/rackforge
+Environment=RACKFORGE_ROOT=@RACKFORGE_ROOT@
+WorkingDirectory=@RACKFORGE_ROOT@
 
 # Real-time grant. The host requests SCHED_FIFO and mlockall on its audio
 # thread; without these limits that request is refused and the engine keeps
@@ -23,7 +24,7 @@ Environment=RACKFORGE_ROOT=/home/kalex/rackforge
 # buffer takes the whole board down mid-performance.
 LimitRTPRIO=95
 LimitMEMLOCK=infinity
-ExecStart=/home/kalex/rackforge/bin/rackforge-core resume /home/kalex/rackforge/config/audio.toml
+ExecStart=@RACKFORGE_ROOT@/bin/rackforge-core resume @RACKFORGE_ROOT@/config/audio.toml
 Restart=always
 RestartSec=1
 TimeoutStopSec=3
@@ -31,7 +32,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/kalex/rackforge/data /home/kalex/rackforge/state /home/kalex/rackforge/logs
+ReadWritePaths=@RACKFORGE_ROOT@/data @RACKFORGE_ROOT@/state @RACKFORGE_ROOT@/logs
 RestrictAddressFamilies=AF_UNIX
 
 [Install]

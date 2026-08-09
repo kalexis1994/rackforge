@@ -36,7 +36,7 @@ detectar xruns y poder degradar a 256/768 frames.
 Después de desplegar el repositorio:
 
 ```bash
-cd /home/kalex/rackforge/current
+cd "$HOME/rackforge/current"
 bash ./audio/probe.sh
 ```
 

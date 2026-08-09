@@ -1304,7 +1304,12 @@ fn control_socket_path() -> PathBuf {
         .unwrap_or_else(|| {
             let root = env::var_os("RACKFORGE_ROOT")
                 .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"));
+                .unwrap_or_else(|| {
+                    env::var_os("HOME")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join("rackforge")
+                });
             root.join("state").join(CONTROL_SOCKET_NAME)
         })
 }
@@ -1870,7 +1875,12 @@ fn refresh_web_settings(menu: &mut menu::Menu) -> Result<(), String> {
 fn web_control_request(request: &Value) -> Result<Value, String> {
     let root = env::var_os("RACKFORGE_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"));
+        .unwrap_or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("rackforge")
+        });
     let path = root.join("state").join(WEB_CONTROL_SOCKET_NAME);
     let mut stream =
         UnixStream::connect(&path).map_err(|error| format!("{}: {error}", path.display()))?;

@@ -226,8 +226,8 @@ vista sin depender de estado implícito.
 Para crear la raíz o guardar un documento desde tooling:
 
 ```bash
-rackforge-core plugin-init /home/kalex/rackforge/data org.rackforge.roland-scva
-rackforge-core program-save /home/kalex/rackforge/data \
+rackforge-core plugin-init "$HOME/rackforge/data" org.rackforge.roland-scva
+rackforge-core program-save "$HOME/rackforge/data" \
   programs/factory/piano-1.json \
   plugins/roland-scva/programs/factory.piano-1.json
 ```
@@ -362,8 +362,8 @@ En Linux, `rackforge-core live` conecta un plugin de instrumento al puerto MIDI
 principal del KeyLab y a la Scarlett. RF-DLS usa el `.dls` como recurso externo:
 
 ```bash
-rackforge-core live /home/kalex/rackforge/plugins/rf-dls \
-  --resource dls-bank=/home/kalex/rackforge/data/plugins/rf-dls/banks/gm.dls \
+rackforge-core live "$HOME/rackforge/plugins/rf-dls" \
+  --resource "dls-bank=$HOME/rackforge/data/plugins/rf-dls/banks/gm.dls" \
   --preset gm.piano-1
 ```
 
@@ -371,8 +371,8 @@ El plugin anterior de bancos renderizados continúa disponible durante la
 migración:
 
 ```bash
-rackforge-core live /home/kalex/rackforge/plugins/roland-scva \
-  --resource rendered-bank=/home/kalex/rackforge/share/rendered-piano-v1 \
+rackforge-core live "$HOME/rackforge/plugins/roland-scva" \
+  --resource "rendered-bank=$HOME/rackforge/share/rendered-piano-v1" \
   --preset scva.piano-1
 ```
 
@@ -411,7 +411,7 @@ Wi-Fi, telemetría y arranque de audio.
 acotado y `rackforge-audio.service`. Core se inicia mediante:
 
 ```bash
-rackforge-core resume /home/kalex/rackforge/config/audio.toml
+rackforge-core resume "$HOME/rackforge/config/audio.toml"
 ```
 
 El documento de inicio es versionado y conserva el paquete, recursos, raíz de

@@ -8,7 +8,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $source = (Resolve-Path -LiteralPath $SourceDirectory).Path
-$remoteDirectory = "/home/kalex/rackforge/share/scva"
+$remoteDirectory = "rackforge/share/scva"
 $expected = [ordered]@{
     "wave_1994_ver200_8mib.bin" = 8MB
     "wave_1996_rom_make_a_8mib.bin" = 8MB

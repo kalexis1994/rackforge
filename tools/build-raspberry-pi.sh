@@ -54,10 +54,15 @@ do
     "$release/target/release/$binary"
 done
 
+install -d "$release/controller-packages"
+RACKFORGE_SOURCE="$repository" bash \
+  "$repository/hardware/controllers/arturia-keylab-essential-mk3/build-package.sh" \
+  "$release/controller-packages/org.rackforge.arturia-keylab-essential-mk3.rfcontroller"
+
 cp -a "$repository/web/dist" "$release/web/dist"
 cp -a "$repository/config/." "$release/config/"
 install -d "$release/platforms/raspberry-pi" "$release/hardware"
-for entry in appliance audio etc provision sbin scripts systemd README.md
+for entry in appliance audio config etc provision sbin scripts systemd README.md
 do
   cp -a "$repository/platforms/raspberry-pi/$entry" \
     "$release/platforms/raspberry-pi/$entry"
@@ -74,18 +79,20 @@ cat >"$release/INSTALL.md" <<'EOF'
 This artifact contains RackForge hosts and Raspberry Pi integration only.
 Instrument plugins are versioned and distributed by their own pipelines.
 
-Extract it into the deployment checkout:
+Extract it for the user who will run RackForge. The installer derives the
+deployment root from that user's home directory; it can also be overridden
+with RACKFORGE_USER and RACKFORGE_ROOT.
 
 ```bash
-mkdir -p /home/kalex/rackforge/current
+mkdir -p "$HOME/rackforge/current"
 tar -xzf RackForge-RaspberryPi-arm64.tar.gz \
-  -C /home/kalex/rackforge/current --strip-components=1
-bash /home/kalex/rackforge/current/platforms/raspberry-pi/scripts/install.sh
-bash /home/kalex/rackforge/current/platforms/raspberry-pi/scripts/install-appliance.sh
+  -C "$HOME/rackforge/current" --strip-components=1
+bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install.sh"
+bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install-appliance.sh"
 ```
 
-Install and configure an instrument `.rfplugin` before enabling the audio
-service for unattended boot.
+Install and configure an instrument `.rfplugin` before creating `audio.toml`
+or starting the audio service for unattended boot.
 EOF
 
 mkdir -p "$output_directory"

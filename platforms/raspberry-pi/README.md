@@ -19,13 +19,13 @@ Raspberry Pi 4B — 8 GiB
 Debian 13 (trixie) arm64
 Kernel Raspberry Pi PREEMPT
 Hostname: rackforge
-Usuario de servicio/desarrollo: kalex
+Usuario de servicio/desarrollo: configurable
 ```
 
 ## Estructura remota
 
 ```text
-/home/kalex/rackforge/
+$HOME/rackforge/
 ├── current/       software desplegado
 ├── banks/         bancos de sonidos
 ├── performances/  configuración musical
@@ -49,6 +49,12 @@ Desde Windows:
 `dist/raspberry-pi/RackForge-RaspberryPi-arm64.tar.gz`. El paquete contiene los
 hosts, la Web y la integración de Raspberry Pi, pero ningún instrumento: cada
 `.rfplugin` se publica desde su propio pipeline.
+
+La instalación no presupone un usuario concreto. Por defecto usa el usuario
+que ejecuta los scripts y despliega en `$HOME/rackforge`; ambos valores pueden
+sobrescribirse mediante `RACKFORGE_USER` y `RACKFORGE_ROOT`. Las unidades
+`systemd/` son plantillas y el instalador sustituye sus valores antes de
+copiarlas a `/etc/systemd/system`.
 
 Los paquetes `.rfcontroller` y el driver Arturia de referencia viven en
 `hardware/`. `rackforge-controller-host` los descubre y supervisa sin conocer

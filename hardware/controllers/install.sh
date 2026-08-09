@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="${RACKFORGE_ROOT:-/home/kalex/rackforge}"
+initial_root="${RACKFORGE_ROOT:-${HOME:?HOME is required}/rackforge}"
+source_root="${RACKFORGE_SOURCE:-$initial_root/current}"
+source "$source_root/platforms/raspberry-pi/scripts/lib/install-env.sh"
+rackforge_resolve_install_environment
+root="$RACKFORGE_ROOT_RESOLVED"
 source_root="${RACKFORGE_SOURCE:-$root/current}"
 host_binary="$source_root/target/release/rackforge-controller-host"
 driver_manifest="$source_root/hardware/keylab-bridge/Cargo.toml"
@@ -48,7 +52,7 @@ bash "$package_builder" "$package_path"
   org.rackforge.arturia-keylab-essential-mk3 \
   --root "$root/controllers"
 
-sudo install -m 0644 \
+rackforge_render_systemd_unit \
   "$service_source" \
   /etc/systemd/system/rackforge-controller-host.service
 sudo systemctl daemon-reload

@@ -3,7 +3,7 @@ set -euo pipefail
 
 mode="${1:-plugin}"
 selection="${2:-}"
-root="${RACKFORGE_ROOT:-/home/kalex/rackforge}"
+root="${RACKFORGE_ROOT:-${HOME:?HOME is required}/rackforge}"
 legacy_pid_file="$root/state/scva-live.pid"
 native_pid_file="$root/state/scva-native-live.pid"
 plugin_pid_file="$root/state/rackforge-core-live.pid"

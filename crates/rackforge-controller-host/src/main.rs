@@ -526,7 +526,12 @@ fn default_store_root() -> PathBuf {
         .unwrap_or_else(|| {
             env::var_os("RACKFORGE_ROOT")
                 .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"))
+                .unwrap_or_else(|| {
+                    env::var_os("HOME")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join("rackforge")
+                })
                 .join("controllers")
         })
 }

@@ -2,10 +2,13 @@
 set -euo pipefail
 
 action="${1:-audit}"
-service_user="${RACKFORGE_USER:-kalex}"
 state_root="${RACKFORGE_APPLIANCE_STATE:-/var/lib/rackforge/appliance}"
 backup_root="$state_root/rollback"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/lib/install-env.sh"
+rackforge_resolve_install_environment
+service_user="$RACKFORGE_USER_RESOLVED"
+rackforge_root="$RACKFORGE_ROOT_RESOLVED"
 source_root="${RACKFORGE_SOURCE_ROOT:-$(cd -- "$script_dir/../../.." && pwd)}"
 systemd_source="$source_root/platforms/raspberry-pi/systemd"
 cloud_disabled=/etc/cloud/cloud-init.disabled
@@ -17,7 +20,7 @@ realtime_marker="$state_root/realtime-tuned"
 limits_policy=/etc/security/limits.d/rackforge-audio.conf
 limits_source="$source_root/platforms/raspberry-pi/etc/security/limits.d/rackforge-audio.conf"
 governor_script_source="$source_root/platforms/raspberry-pi/sbin/rackforge-cpu-performance.sh"
-governor_script=/home/"$service_user"/rackforge/sbin/rackforge-cpu-performance.sh
+governor_script="$rackforge_root/sbin/rackforge-cpu-performance.sh"
 governor_unit=rackforge-cpu-performance.service
 # Swap providers differ by image generation and neither is guaranteed to exist.
 # Debian 13 Raspberry Pi images use rpi-swap, whose units are `static` or
@@ -46,7 +49,7 @@ usage() {
 
 require_root() {
   if [[ "$(id -u)" -ne 0 ]]; then
-    exec sudo --preserve-env=RACKFORGE_USER,RACKFORGE_APPLIANCE_STATE,RACKFORGE_SOURCE_ROOT \
+    exec sudo --preserve-env=RACKFORGE_USER,RACKFORGE_ROOT,RACKFORGE_APPLIANCE_STATE,RACKFORGE_SOURCE_ROOT \
       bash "$0" "$action"
   fi
 }
@@ -156,13 +159,16 @@ apply_realtime_tuning() {
   install -m 0755 "$governor_script_source" "$governor_script"
   install -d -m 0755 "$(dirname "$limits_policy")"
   install -m 0644 "$limits_source" "$limits_policy"
-  install -m 0644 "$systemd_source/$governor_unit" "/etc/systemd/system/$governor_unit"
+  rackforge_render_systemd_unit \
+    "$systemd_source/$governor_unit" \
+    "/etc/systemd/system/$governor_unit"
 
   # Refreshed here because the real-time grant lives in the audio unit itself;
   # leaving a stale unit installed would configure everything except the part
   # that actually takes effect.
   if [[ -f "$systemd_source/rackforge-audio.service" ]]; then
-    install -m 0644 "$systemd_source/rackforge-audio.service" \
+    rackforge_render_systemd_unit \
+      "$systemd_source/rackforge-audio.service" \
       /etc/systemd/system/rackforge-audio.service
   fi
 
@@ -310,9 +316,11 @@ apply_profile() {
     } >"$backup_root/state.env"
     chmod 0600 "$backup_root/state.env"
 
-    install -m 0644 "$systemd_source/rackforge-platform-host.service" \
+    rackforge_render_systemd_unit \
+      "$systemd_source/rackforge-platform-host.service" \
       /etc/systemd/system/rackforge-platform-host.service
-    install -m 0644 "$systemd_source/rackforge-web.service" \
+    rackforge_render_systemd_unit \
+      "$systemd_source/rackforge-web.service" \
       /etc/systemd/system/rackforge-web.service
     install -m 0644 /dev/null "$cloud_disabled"
     cat >"$tmpfiles_policy" <<'EOF'

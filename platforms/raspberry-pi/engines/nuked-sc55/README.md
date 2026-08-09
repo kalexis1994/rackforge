@@ -17,7 +17,7 @@ versiona. Deben proceder de hardware o software que el usuario pueda utilizar
 legítimamente y se guardan solamente en:
 
 ```text
-/home/kalex/rackforge/share/nuked-sc55/
+$HOME/rackforge/share/nuked-sc55/
 ```
 
 Para SC-55mkII se requieren:
@@ -59,17 +59,17 @@ los deja con permisos privados y genera `SHA256SUMS` en la Raspberry.
 Después de desplegar el repositorio:
 
 ```bash
-cd /home/kalex/rackforge/current/platforms/raspberry-pi/engines/nuked-sc55
+cd "$HOME/rackforge/current/platforms/raspberry-pi/engines/nuked-sc55"
 bash ./build.sh
 ```
 
-El resultado se instala en `/home/kalex/rackforge/bin/nuked-sc55`; `back.data` se
+El resultado se instala en `$HOME/rackforge/bin/nuked-sc55`; `back.data` se
 instala junto a las ROMs en `share/nuked-sc55`.
 
 ## Arranque headless
 
 ```bash
-cd /home/kalex/rackforge/current/platforms/raspberry-pi/engines/nuked-sc55
+cd "$HOME/rackforge/current/platforms/raspberry-pi/engines/nuked-sc55"
 bash ./run-headless.sh
 ```
 

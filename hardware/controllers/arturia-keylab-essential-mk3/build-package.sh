@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source_root="${RACKFORGE_SOURCE:-/home/kalex/rackforge/current}"
-output="${1:-/home/kalex/rackforge/build/org.rackforge.arturia-keylab-essential-mk3.rfcontroller}"
+source_root="${RACKFORGE_SOURCE:-${HOME:?HOME is required}/rackforge/current}"
+output="${1:-${RACKFORGE_ROOT:-$HOME/rackforge}/build/org.rackforge.arturia-keylab-essential-mk3.rfcontroller}"
 template="$source_root/hardware/controllers/arturia-keylab-essential-mk3/package/rackforge-controller.toml"
 # The driver is a member of the root workspace, so cargo writes it to the
 # shared target directory rather than beside its own manifest. This pointed at

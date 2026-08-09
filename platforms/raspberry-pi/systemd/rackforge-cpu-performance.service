@@ -8,8 +8,8 @@ ConditionPathIsDirectory=/sys/devices/system/cpu/cpu0/cpufreq
 [Service]
 Type=oneshot
 RemainAfterExit=true
-ExecStart=/home/kalex/rackforge/sbin/rackforge-cpu-performance.sh apply
-ExecStop=/home/kalex/rackforge/sbin/rackforge-cpu-performance.sh restore
+ExecStart=@RACKFORGE_ROOT@/sbin/rackforge-cpu-performance.sh apply
+ExecStop=@RACKFORGE_ROOT@/sbin/rackforge-cpu-performance.sh restore
 Environment=RACKFORGE_APPLIANCE_STATE=/var/lib/rackforge/appliance
 NoNewPrivileges=true
 PrivateTmp=true

@@ -4,11 +4,12 @@ After=local-fs.target
 
 [Service]
 Type=simple
-User=kalex
-Group=kalex
-Environment=RACKFORGE_ROOT=/home/kalex/rackforge
-ExecStart=/home/kalex/rackforge/bin/rackforge-controller-host serve --root /home/kalex/rackforge/controllers
-ExecStopPost=-/home/kalex/rackforge/bin/rackforge-controller-host restore-all --root /home/kalex/rackforge/controllers
+User=@RACKFORGE_USER@
+Group=@RACKFORGE_GROUP@
+SupplementaryGroups=audio rackforge
+Environment=RACKFORGE_ROOT=@RACKFORGE_ROOT@
+ExecStart=@RACKFORGE_ROOT@/bin/rackforge-controller-host serve --root @RACKFORGE_ROOT@/controllers
+ExecStopPost=-@RACKFORGE_ROOT@/bin/rackforge-controller-host restore-all --root @RACKFORGE_ROOT@/controllers
 Restart=always
 RestartSec=1
 KillMode=control-group

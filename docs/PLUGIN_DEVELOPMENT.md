@@ -14,8 +14,8 @@ declarative `little@1` editor, static Web surfaces, tests, and packaging tools.
 Runtime data is never part of a package:
 
 ```text
-/home/kalex/rackforge/plugins/<package>/          immutable installed package
-/home/kalex/rackforge/data/plugins/<plugin-id>/  banks and user documents
+$HOME/rackforge/plugins/<package>/          immutable installed package
+$HOME/rackforge/data/plugins/<plugin-id>/  banks and user documents
 ```
 
 RackForge discovers behavior from the package manifest and runtime descriptors.

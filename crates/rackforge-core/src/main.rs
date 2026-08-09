@@ -154,7 +154,12 @@ fn resume(path: &Path) -> Result<()> {
 fn audio_output_state_path() -> PathBuf {
     env::var_os("RACKFORGE_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"))
+        .unwrap_or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("rackforge")
+        })
         .join("state")
         .join("audio-output.toml")
 }

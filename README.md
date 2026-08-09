@@ -71,6 +71,49 @@ artefactos independientes de plugins:
 Los plugins mantienen repositorios, versiones y pipelines propios. RackForge
 solamente entrega los hosts capaces de instalarlos y ejecutarlos.
 
+## Instalar en Raspberry Pi
+
+La distribución para Raspberry Pi requiere una Raspberry Pi 4 o 5 con
+Raspberry Pi OS Lite de 64 bits. El paquete no contiene instrumentos: los
+`.rfplugin` se instalan por separado desde RackForge.
+
+Hasta que se publique la primera GitHub Release, el paquete de prueba se puede
+descargar desde la ejecución exitosa más reciente de **Build main artifacts**
+en la pestaña Actions. Dentro del artefacto
+`RackForge-RaspberryPi-arm64-<commit>` está
+`RackForge-RaspberryPi-arm64.tar.gz`.
+
+En la Raspberry, como el usuario que ejecutará RackForge:
+
+```bash
+mkdir -p "$HOME/rackforge/current"
+tar -xzf RackForge-RaspberryPi-arm64.tar.gz \
+  -C "$HOME/rackforge/current" --strip-components=1
+bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install.sh"
+bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install-appliance.sh"
+```
+
+El instalador detecta el usuario y su directorio personal, instala el runtime,
+la Web, los hosts de plataforma y controladores, y configura los servicios de
+arranque. No depende de un nombre de usuario específico. Para una ubicación
+personalizada se pueden definir `RACKFORGE_USER` y `RACKFORGE_ROOT`.
+
+Después de la instalación, la interfaz queda disponible en el puerto `8787` de
+la Raspberry. Se puede obtener su dirección con:
+
+```bash
+hostname -I
+```
+
+Desde otro equipo de la misma red se abre `http://DIRECCION_IP:8787`, se
+instala un instrumento `.rfplugin` y se seleccionan los dispositivos MIDI y de
+audio. La optimización reversible para uso como appliance se activa con:
+
+```bash
+bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install-appliance.sh" --optimize
+sudo reboot
+```
+
 ## Estado
 
 - Raspberry Pi OS Lite / Debian 13 arm64, sin entorno gráfico.

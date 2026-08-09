@@ -4,18 +4,18 @@ After=local-fs.target
 
 [Service]
 Type=simple
-User=kalex
-Group=kalex
-Environment=RACKFORGE_ROOT=/home/kalex/rackforge
-Environment=RACKFORGE_WEB_ROOT=/home/kalex/rackforge/web
-ExecStart=/home/kalex/rackforge/bin/rackforge-web
+User=@RACKFORGE_USER@
+Group=@RACKFORGE_GROUP@
+Environment=RACKFORGE_ROOT=@RACKFORGE_ROOT@
+Environment=RACKFORGE_WEB_ROOT=@RACKFORGE_ROOT@/web
+ExecStart=@RACKFORGE_ROOT@/bin/rackforge-web
 Restart=on-failure
 RestartSec=1
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/kalex/rackforge/config /home/kalex/rackforge/state /home/kalex/rackforge/plugin-store
+ReadWritePaths=@RACKFORGE_ROOT@/config @RACKFORGE_ROOT@/state @RACKFORGE_ROOT@/plugin-store
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]

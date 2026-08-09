@@ -1,6 +1,6 @@
 # Acceso y despliegue
 
-El repositorio local es la única fuente de verdad. `/home/kalex/rackforge/current`
+El repositorio local es la única fuente de verdad. `$HOME/rackforge/current`
 en la Raspberry es una copia desplegada y puede reconstruirse en cualquier
 momento.
 
@@ -9,10 +9,11 @@ momento.
 La clave privada permanece fuera del repositorio:
 
 ```text
-C:\Users\kalex\.ssh\rackforge_ed25519
+~/.ssh/rackforge_ed25519
 ```
 
-Copiar `ssh_config.example` a la configuración SSH local permite usar:
+Después de ajustar `HostName` y `User`, copiar `ssh_config.example` a la
+configuración SSH local permite usar:
 
 ```powershell
 ssh rackforge

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$HostAlias = "rackforge",
-    [string]$RemoteRoot = "/home/kalex/rackforge"
+    [string]$RemoteRoot = "rackforge"
 )
 
 $ErrorActionPreference = "Stop"

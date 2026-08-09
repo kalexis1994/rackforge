@@ -1,10 +1,10 @@
 schema_version = 2
-package = "/home/kalex/rackforge/plugins/rf-dls"
-data_root = "/home/kalex/rackforge/data"
+package = "plugins/rf-dls"
+data_root = "data"
 preset = "gm.piano-1"
 
 [resources]
-dls-bank = "/home/kalex/rackforge/data/plugins/rf-dls/banks/gm.dls"
+dls-bank = "data/plugins/rf-dls/banks/gm.dls"
 
 [audio.output]
 fallback = "none"

@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $source = (Resolve-Path -LiteralPath $SourceDirectory).Path
-$remoteDirectory = "/home/kalex/rackforge/share/nuked-sc55"
+$remoteDirectory = "rackforge/share/nuked-sc55"
 
 $sets = @{
     mk2 = @(

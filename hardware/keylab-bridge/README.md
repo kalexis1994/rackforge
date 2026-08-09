@@ -240,7 +240,7 @@ descubre este paquete desde el store versionado, supervisa su proceso y ejecuta
 `restore` durante el cierre, devolviendo el teclado al programa Arturia oficial.
 
 ```bash
-cd /home/kalex/rackforge/current/hardware/keylab-bridge
+cd "$HOME/rackforge/current/hardware/keylab-bridge"
 cargo build --release --bin rackforge-arturia-keylab-essential-mk3-driver
 cd ../..
 cargo build --release --bin rackforge-controller-host

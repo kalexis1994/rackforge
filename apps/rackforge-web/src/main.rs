@@ -568,7 +568,12 @@ async fn main() -> Result<()> {
 fn rackforge_root() -> PathBuf {
     env::var_os("RACKFORGE_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"))
+        .unwrap_or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("rackforge")
+        })
 }
 
 fn load_config(path: &Path) -> Result<RackForgeConfig> {

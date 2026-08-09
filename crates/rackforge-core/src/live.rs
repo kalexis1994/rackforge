@@ -474,7 +474,12 @@ fn discover_plugin_packages(primary: &Path) -> Result<Vec<PluginPackage>> {
     let primary_id = primary.manifest().id.clone();
     let root = env::var_os("RACKFORGE_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"));
+        .unwrap_or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("rackforge")
+        });
     let mut selected = BTreeMap::<String, (Version, PluginPackage)>::new();
 
     let mut candidates = Vec::new();
@@ -968,7 +973,12 @@ fn control_socket_path() -> PathBuf {
         .unwrap_or_else(|| {
             let root = env::var_os("RACKFORGE_ROOT")
                 .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/home/kalex/rackforge"));
+                .unwrap_or_else(|| {
+                    env::var_os("HOME")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join("rackforge")
+                });
             root.join("state").join(CONTROL_SOCKET_NAME)
         })
 }

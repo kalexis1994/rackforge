@@ -305,10 +305,17 @@ mod linux {
             }
         }
         let (bank_directory, control_directory) = match positional.as_slice() {
-            [] => (
-                PathBuf::from("/home/kalex/rackforge/share/scva"),
-                PathBuf::from("/home/kalex/rackforge/share/scva/control-v1"),
-            ),
+            [] => {
+                let root = env::var_os("RACKFORGE_ROOT")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| {
+                        env::var_os("HOME")
+                            .map(PathBuf::from)
+                            .unwrap_or_else(|| PathBuf::from("."))
+                            .join("rackforge")
+                    });
+                (root.join("share/scva"), root.join("share/scva/control-v1"))
+            }
             [banks, controls] => (PathBuf::from(banks), PathBuf::from(controls)),
             _ => bail!(
                 "usage: rackforge-scva-live [--tone INDEX] [--partial both|1|2] \

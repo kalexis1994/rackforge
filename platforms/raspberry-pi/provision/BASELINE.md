@@ -8,7 +8,7 @@ Arquitectura: aarch64
 Sistema: Debian 13 (trixie)
 Kernel: Raspberry Pi PREEMPT
 Hostname: rackforge
-Usuario: kalex
+Usuario: configurable durante la instalación
 Root filesystem: ext4 en microSD de 64 GB
 Acceso: SSH mediante clave dedicada
 ```
@@ -23,7 +23,7 @@ Paquetes de desarrollo instalados por `../dev/bootstrap.sh`:
 - tmux, jq, curl y certificados.
 
 El servicio `rackforge.service` es solamente una plantilla y aún no está instalado
-ni habilitado. El software se despliega en `/home/kalex/rackforge/current`.
+ni habilitado. El software se despliega en `$HOME/rackforge/current`.
 
 ## Periféricos comprobados
 

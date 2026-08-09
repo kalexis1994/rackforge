@@ -21,8 +21,8 @@ archive_tool="$toolchain/llvm-ar"
   printf 'Android NDK %s is not installed below %s.\n' "$ndk_version" "$sdk_root" >&2
   exit 2
 }
-[[ -x "$android_project/gradlew" ]] || {
-  printf 'Gradle wrapper is missing or not executable.\n' >&2
+[[ -f "$android_project/gradlew" ]] || {
+  printf 'Gradle wrapper is missing at %s.\n' "$android_project/gradlew" >&2
   exit 2
 }
 
@@ -49,7 +49,7 @@ install -m 0644 \
   "$native_output/librackforge_android.so"
 
 cd "$android_project"
-./gradlew assembleDebug --no-daemon
+bash ./gradlew assembleDebug --no-daemon
 
 source_apk="$android_project/app/build/outputs/apk/debug/app-debug.apk"
 [[ -f "$source_apk" ]] || {

@@ -26,6 +26,22 @@ if (-not (Test-Path -LiteralPath $vcvars)) {
     throw "vcvars64.bat was not found at $vcvars"
 }
 
+# Resolve the MSVC linker by absolute path. Git for Windows also ships a
+# different program named link.exe, and hosted CI runners may put it before
+# Visual Studio on PATH.
+$msvcLinker = Get-ChildItem -Path (Join-Path $visualStudio "VC/Tools/MSVC") `
+    -Filter "link.exe" -File -Recurse |
+    Where-Object { $_.FullName -match '[\\/]bin[\\/]Hostx64[\\/]x64[\\/]link\.exe$' } |
+    Sort-Object -Property {
+        $versionDirectory = $_.Directory.Parent.Parent.Parent.Name
+        try { [version]$versionDirectory } catch { [version]"0.0" }
+    } -Descending |
+    Select-Object -First 1
+if (-not $msvcLinker) {
+    throw "The Visual Studio x64 MSVC linker was not found below $visualStudio."
+}
+$msvcBin = $msvcLinker.DirectoryName
+
 $clang = Join-Path $llvmBin "clang.exe"
 $libclang = Join-Path $llvmBin "libclang.dll"
 if (-not (Test-Path -LiteralPath $clang) -or -not (Test-Path -LiteralPath $libclang)) {
@@ -42,7 +58,7 @@ try {
         }
     }
 
-    $build = 'call "{0}" && set "PATH={1};%PATH%" && set "LIBCLANG_PATH={1}" && set "RUSTFLAGS=-C target-feature=+crt-static" && cargo +stable-x86_64-pc-windows-msvc build --locked --release -p rackforge-desktop' -f $vcvars, $llvmBin
+    $build = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && cargo +stable-x86_64-pc-windows-msvc build --locked --release -p rackforge-desktop' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName
     & $env:ComSpec /d /s /c $build
     if ($LASTEXITCODE -ne 0) {
         throw "RackForge Desktop build failed."

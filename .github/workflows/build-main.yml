@@ -19,7 +19,7 @@ env:
 jobs:
   windows:
     name: Windows x86-64
-    runs-on: windows-2025
+    runs-on: windows-2022
     timeout-minutes: 60
     steps:
       - name: Check out RackForge
@@ -78,10 +78,25 @@ jobs:
       - name: Install Android SDK components
         shell: bash
         run: |
-          sdkmanager \
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [[ -z "$sdk_root" ]]; then
+            printf 'ANDROID_SDK_ROOT and ANDROID_HOME are both unset\n' >&2
+            exit 1
+          fi
+          sdkmanager_path="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$sdkmanager_path" && -d "$sdk_root/cmdline-tools" ]]; then
+            sdkmanager_path="$(find "$sdk_root/cmdline-tools" -type f -path '*/bin/sdkmanager' -print -quit)"
+          fi
+          if [[ -z "$sdkmanager_path" || ! -x "$sdkmanager_path" ]]; then
+            printf 'sdkmanager was not found below %s\n' "$sdk_root" >&2
+            exit 1
+          fi
+          yes | "$sdkmanager_path" --licenses >/dev/null 2>&1 || true
+          "$sdkmanager_path" \
             "platforms;android-36" \
             "build-tools;36.0.0" \
             "ndk;27.0.12077973"
+          test -x "$sdk_root/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
 
       - name: Build plugin-independent APK
         shell: bash

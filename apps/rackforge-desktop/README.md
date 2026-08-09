@@ -24,9 +24,10 @@ compensate for quiet plugin output, with selectable values up to +12 dB and
 clamping at the final device boundary. Changes are applied by safely reopening the
 stream and are persisted in `config/audio.toml` below the RackForge Root. If a
 new configuration fails, Desktop attempts to restore the previous stream.
-The panel also provides device rescanning and an audio test note. ASIO is
-shown as unavailable unless RackForge was built with ASIO support and a driver
-is installed. **View → Audio & MIDI Status** reports the active stream.
+The panel also provides device rescanning and an audio test note. Release builds
+include WASAPI and ASIO; every registered ASIO driver is enumerated separately.
+ASIO is shown as unavailable only when Windows has no usable ASIO driver.
+**View → Audio & MIDI Status** reports the active stream.
 
 ## Controller surfaces
 

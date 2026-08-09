@@ -16,7 +16,7 @@ El repositorio separa el producto portable de sus adaptaciones:
 | `apps/` | Ejecutables desktop y headless/web. |
 | `platforms/` | Integraciones específicas, comenzando por Raspberry Pi. |
 | `hardware/` | Drivers y paquetes para controladores MIDI conocidos. |
-| `plugins/` | Plugins de referencia y pruebas de conformidad. |
+| `plugins/` | Fixtures mínimos de conformidad; los instrumentos viven en repositorios propios. |
 | `web/` | SPA adaptable de RackForge. |
 | `firmware/` | Investigación y firmware de dispositivos. |
 
@@ -58,6 +58,18 @@ ssh rackforge
 No se guardan contraseñas en el repositorio. Las herramientas reproducibles de
 conexión, sincronización y diagnóstico viven en
 `platforms/raspberry-pi/dev/`.
+
+## Builds automáticos
+
+Cada push a `main` ejecuta `.github/workflows/build-main.yml` y publica tres
+artefactos independientes de plugins:
+
+- `RackForge.exe` para Windows x86-64;
+- `RackForge-debug.apk` para Android ARM64;
+- `RackForge-RaspberryPi-arm64.tar.gz` para Raspberry Pi OS ARM64.
+
+Los plugins mantienen repositorios, versiones y pipelines propios. RackForge
+solamente entrega los hosts capaces de instalarlos y ejecutarlos.
 
 ## Estado
 

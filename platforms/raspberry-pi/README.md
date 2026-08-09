@@ -43,6 +43,13 @@ Desde Windows:
 .\platforms\raspberry-pi\dev\connect.ps1
 ```
 
+## Artefacto ARM64
+
+`tools/build-raspberry-pi.sh` compila nativamente en ARM64 y produce
+`dist/raspberry-pi/RackForge-RaspberryPi-arm64.tar.gz`. El paquete contiene los
+hosts, la Web y la integración de Raspberry Pi, pero ningún instrumento: cada
+`.rfplugin` se publica desde su propio pipeline.
+
 Los paquetes `.rfcontroller` y el driver Arturia de referencia viven en
 `hardware/`. `rackforge-controller-host` los descubre y supervisa sin conocer
 marcas o modelos.

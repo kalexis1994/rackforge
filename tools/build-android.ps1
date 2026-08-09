@@ -1,6 +1,5 @@
 [CmdletBinding()]
 param(
-    [string]$PluginPackage = "",
     [string]$OutputDirectory = "dist/android"
 )
 
@@ -56,15 +55,9 @@ New-Item -ItemType Directory -Force -Path $nativeOutput | Out-Null
 Copy-Item -LiteralPath (Join-Path $repository "target/aarch64-linux-android/release/librackforge_android_native.so") `
     -Destination (Join-Path $nativeOutput "librackforge_android.so") -Force
 
-$arguments = @("assembleDebug", "--no-daemon")
-if ($PluginPackage) {
-    $resolvedPlugin = (Resolve-Path -LiteralPath $PluginPackage).Path
-    $arguments += "-Prfplugin=$resolvedPlugin"
-}
-
 Push-Location $androidProject
 try {
-    & $gradle @arguments
+    & $gradle assembleDebug --no-daemon
     if ($LASTEXITCODE -ne 0) {
         throw "Android build failed."
     }

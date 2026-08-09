@@ -1,11 +1,12 @@
 # RackForge Android prototype
 
-This first Android APK displays Android low-latency capabilities, enumerates
-USB, MIDI and audio devices, and packages the exact portable RF-XP10
-`.rfplugin` used by Windows and Raspberry Pi. Its `arm64-v8a` JNI library loads
-that package with RackForge Core and Wasmtime, accepts USB MIDI and renders a
-48 kHz stereo stream from an AAudio low-latency callback. The screen is
-refreshed whenever the activity resumes.
+This first Android APK displays Android low-latency capabilities and enumerates
+USB, MIDI and audio devices. It intentionally ships without instrument plugins:
+each `.rfplugin` is versioned and distributed by its own project. The app opens
+with an empty store, supports portable package installation, and restores the
+last compatible installed plugin automatically. Its `arm64-v8a` JNI library
+loads the selected package with RackForge Core and Wasmtime, accepts USB MIDI
+and renders a 48 kHz stereo stream from an AAudio low-latency callback.
 
 The output selector follows Android device additions and removals and can open
 the system default, built-in speaker, or a selected USB audio interface without
@@ -37,6 +38,12 @@ Build from the repository root:
 
 ```powershell
 .\tools\build-android.ps1
+```
+
+On Linux and in GitHub Actions:
+
+```bash
+bash tools/build-android.sh
 ```
 
 The local toolchain is stored below ignored `local/android-toolchain`, and the

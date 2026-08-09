@@ -52,12 +52,10 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -104,7 +102,7 @@ public final class MainActivity extends Activity {
     private volatile boolean engineStarting;
     private File pluginPackageRoot;
     private String pluginWebEntry;
-    private String activePluginName = "Plugin";
+    private String activePluginName = "No plugin";
     private String activePluginVersion = "";
     private TextView activePluginLabel;
     private LinearLayout playToolbar;
@@ -112,7 +110,6 @@ public final class MainActivity extends Activity {
     private AlertDialog pluginPickerDialog;
     private AlertDialog installedPluginsDialog;
 
-    private static native boolean initializeEngine(byte[] archive, String storeRoot, String dataRoot);
     private static native String installPluginFile(String archivePath, String storeRoot);
     private static native String installedPlugins(String storeRoot);
     private static native boolean activateInstalledPlugin(String packageRoot, String storeRoot, String dataRoot);
@@ -1015,7 +1012,7 @@ public final class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("About RackForge")
-                .setMessage("RackForge Android 0.1.0 prototype\nPortable RF-XP10 0.1.3\nRust + Wasmtime + AAudio")
+                .setMessage("RackForge Android 0.1.0 prototype\nPortable .rfplugin runtime\nRust + Wasmtime + AAudio")
                 .setPositiveButton("Close", null)
                 .show();
     }
@@ -1027,7 +1024,12 @@ public final class MainActivity extends Activity {
             webView.loadUrl("https://rackforge.local/plugin/" + pluginWebEntry);
             return;
         }
-        showEngineState("Loading plugin", "Validating the portable package and starting AAudio…");
+        if (engineStarting) {
+            showEngineState("Loading plugin", "Validating the portable package and starting AAudio…");
+        } else {
+            showEngineState("No plugin selected",
+                    "Install a portable .rfplugin package, then choose it from Select plugin.");
+        }
     }
 
     private void showIdle() {
@@ -1047,7 +1049,7 @@ public final class MainActivity extends Activity {
                 + "<div class='eyebrow'>LIVE MODE</div><h1>Performance rack</h1>"
                 + "<p class='lead'>A stable performance view that stays separate from the plugin editor in Play.</p>"
                 + card("Rack 1", row("Instrument", activePluginDisplayName())
-                        + row("Audio", audioRunning ? selectedAudioOutputLabel() : "Starting")
+                        + row("Audio", audioRunning ? selectedAudioOutputLabel() : "Inactive")
                         + row("MIDI inputs", Integer.toString(midiPorts)))
                 + card("System health", row("Thermal", thermalLabel(thermalStatus))
                         + row("Background audio", audioRunning ? "Protected by foreground service" : "Inactive")
@@ -1333,7 +1335,6 @@ public final class MainActivity extends Activity {
         engineStarting = true;
         Thread loader = new Thread(() -> {
             try {
-                byte[] archive = readAsset("plugins/rf-xp10.rfplugin");
                 File store = pluginStoreRoot();
                 File data = pluginDataRoot();
                 File legacyAddons = new File(data, "addons");
@@ -1343,21 +1344,48 @@ public final class MainActivity extends Activity {
                 if (!legacyAddons.mkdirs() && !legacyAddons.isDirectory()) {
                     throw new IllegalStateException("Cannot create legacy plugin migration directory");
                 }
-                if (!initializeEngine(archive, store.getAbsolutePath(), data.getAbsolutePath())) {
-                    throw new IllegalStateException("Native engine rejected initialization");
-                }
-                String preferredRoot = preferences.getString("plugin.active_root", null);
-                if (preferredRoot != null && !preferredRoot.equals(pluginPackageRoot())) {
+                List<String> candidates = startupPluginRoots(store);
+                Throwable activationError = null;
+                boolean activated = false;
+                for (String root : candidates) {
                     try {
-                        if (!activateInstalledPlugin(preferredRoot, store.getAbsolutePath(), data.getAbsolutePath())) {
-                            throw new IllegalStateException("The saved plugin could not be activated");
+                        if (!activateInstalledPlugin(root, store.getAbsolutePath(), data.getAbsolutePath())) {
+                            throw new IllegalStateException("The installed plugin could not be activated");
                         }
-                    } catch (Throwable restoreError) {
-                        Log.w("RackForge", "Saved plugin is unavailable; using bundled RF-XP10", restoreError);
-                        preferences.edit().remove("plugin.active_root").apply();
+                        activated = true;
+                        break;
+                    } catch (Throwable candidateError) {
+                        activationError = candidateError;
+                        Log.w("RackForge", "Installed plugin is unavailable: " + root, candidateError);
                     }
                 }
+                if (!activated) {
+                    preferences.edit().remove("plugin.active_root").apply();
+                    if (!keyLabSyncPlugins(store.getAbsolutePath())) {
+                        throw new IllegalStateException("The controller plugin catalog could not be synchronized");
+                    }
+                    String failureDetail = activationError == null
+                            ? "Select another installed plugin."
+                            : activationError.getMessage() == null
+                                    ? activationError.toString()
+                                    : activationError.getMessage();
+                    runOnUiThread(() -> {
+                        engineStarting = false;
+                        activePluginName = "No plugin";
+                        activePluginVersion = "";
+                        pluginPackageRoot = null;
+                        pluginWebEntry = null;
+                        if (activePluginLabel != null) activePluginLabel.setText(activePluginDisplayName());
+                        showEngineState(candidates.isEmpty() ? "No plugins installed" : "No plugin could start",
+                                candidates.isEmpty()
+                                        ? "Install a portable .rfplugin package to begin."
+                                        : failureDetail);
+                    });
+                    return;
+                }
                 refreshActivePluginMetadata();
+                preferences.edit().putString(
+                        "plugin.active_root", pluginPackageRoot.getAbsolutePath()).apply();
                 if (!keyLabSyncPlugins(store.getAbsolutePath())) {
                     throw new IllegalStateException("The controller plugin catalog could not be synchronized");
                 }
@@ -1382,14 +1410,19 @@ public final class MainActivity extends Activity {
         loader.start();
     }
 
-    private byte[] readAsset(String path) throws Exception {
-        try (InputStream input = getAssets().open(path);
-             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[16 * 1024];
-            int read;
-            while ((read = input.read(buffer)) >= 0) output.write(buffer, 0, read);
-            return output.toByteArray();
+    private List<String> startupPluginRoots(File store) throws Exception {
+        List<String> roots = new ArrayList<>();
+        String preferred = preferences.getString("plugin.active_root", null);
+        if (preferred != null && !preferred.isBlank()) roots.add(preferred);
+        JSONObject catalog = new JSONObject(installedPlugins(store.getAbsolutePath()));
+        JSONArray plugins = catalog.getJSONArray("plugins");
+        for (int index = 0; index < plugins.length(); index++) {
+            JSONObject plugin = plugins.getJSONObject(index);
+            if (!plugin.optBoolean("compatible")) continue;
+            String root = plugin.optString("package_root", "");
+            if (!root.isBlank() && !roots.contains(root)) roots.add(root);
         }
+        return roots;
     }
 
     private void startAudio() {
@@ -1983,7 +2016,7 @@ public final class MainActivity extends Activity {
                 + usbCard()
                 + midiCard()
                 + audioCard()
-                + "<p class='foot'>Start the RF-XP10 engine below, test C4, then play the connected USB MIDI controller.</p>"
+                + "<p class='foot'>Install and select a portable plugin, then play the connected USB MIDI controller.</p>"
                 + "</main></body></html>";
         webView.loadDataWithBaseURL("https://rackforge.local/", html, "text/html", "UTF-8", null);
     }
@@ -1998,20 +2031,13 @@ public final class MainActivity extends Activity {
     }
 
     private String pluginCard() {
-        try (InputStream input = getAssets().open("plugins/rf-xp10.rfplugin")) {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] buffer = new byte[16 * 1024];
-            long bytes = 0;
-            int read;
-            while ((read = input.read(buffer)) >= 0) {
-                digest.update(buffer, 0, read);
-                bytes += read;
-            }
+        try {
+            JSONObject catalog = new JSONObject(installedPlugins(pluginStoreRoot().getAbsolutePath()));
+            JSONArray plugins = catalog.getJSONArray("plugins");
             return card("Portable plugin",
-                    row("Package", "RF-XP10 0.1.3")
-                            + row("Artifact", bytes + " bytes")
-                            + "<div class='hash'>SHA-256<br>" + hex(digest.digest()) + "</div>"
-                            + "<div class='ok'>Exact .rfplugin packaged successfully</div>");
+                    row("Installed", Integer.toString(plugins.length()))
+                            + row("Active", audioRunning ? activePluginDisplayName() : "None")
+                            + "<div class='ok'>Plugins are installed independently from RackForge.</div>");
         } catch (Exception error) {
             return card("Portable plugin", "<div class='bad'>" + escape(error.toString()) + "</div>");
         }
@@ -2099,12 +2125,6 @@ public final class MainActivity extends Activity {
             if (index > 0) text.append(", ");
             text.append(values[index]);
         }
-        return text.toString();
-    }
-
-    private static String hex(byte[] bytes) {
-        StringBuilder text = new StringBuilder(bytes.length * 2);
-        for (byte value : bytes) text.append(String.format(Locale.ROOT, "%02x", value));
         return text.toString();
     }
 

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use jni::JNIEnv;
-use jni::objects::{JByteArray, JClass, JString};
+use jni::objects::{JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
 use keylab_essential_mk3::protocol as keylab_protocol;
 use rackforge_core::{
@@ -456,12 +456,6 @@ impl Drop for NativeAudioOutput {
 }
 
 impl AndroidEngine {
-    fn open(archive: &[u8], store_root: PathBuf, data_root: PathBuf) -> Result<Self> {
-        let installed = install_local_archive(&store_root, archive)
-            .context("installing the portable plugin")?;
-        Self::open_package(&installed.path, data_root)
-    }
-
     fn open_package(package_root: &Path, data_root: PathBuf) -> Result<Self> {
         let package = PluginPackage::open(package_root)
             .with_context(|| format!("opening {}", package_root.display()))?;
@@ -1246,37 +1240,6 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabPollLongPre
         Ok(Some(response)) => result_string(&mut env, Ok(response)),
         Ok(None) => ptr::null_mut(),
         Err(error) => result_string(&mut env, Err(error)),
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_org_rackforge_android_MainActivity_initializeEngine(
-    mut env: JNIEnv,
-    _class: JClass,
-    archive: JByteArray,
-    store_root: JString,
-    data_root: JString,
-) -> jboolean {
-    let result = (|| -> Result<()> {
-        let bytes = env.convert_byte_array(&archive)?;
-        let store_root = PathBuf::from(java_string(&mut env, store_root)?);
-        let data_root = PathBuf::from(java_string(&mut env, data_root)?);
-        let candidate = AndroidEngine::open(&bytes, store_root, data_root)?;
-        midi_queue()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("MIDI queue lock poisoned"))?
-            .clear();
-        *engine()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))? = Some(candidate);
-        Ok(())
-    })();
-    match result {
-        Ok(()) => JNI_TRUE,
-        Err(error) => {
-            report(&mut env, error);
-            JNI_FALSE
-        }
     }
 }
 

@@ -1,89 +1,85 @@
 # RackForge
 
-RackForge convierte controladores MIDI y computadoras de propósito general o
-embebidas en instrumentos autónomos, sin exigir un escritorio, monitor ni DAW.
-El KeyLab Essential 61 mk3 con Raspberry Pi 4B es la primera implementación de
-referencia, no el límite arquitectónico del proyecto.
+RackForge turns MIDI controllers and general-purpose or embedded computers
+into self-contained musical instruments, without requiring a desktop, monitor,
+or DAW. The KeyLab Essential 61 mk3 paired with a Raspberry Pi 4B is the first
+reference implementation, not an architectural limitation.
 
-La dirección multiplataforma, el runtime portable de plugins, el SDK y las
-superficies futuras están definidos en el [roadmap técnico](ROADMAP.md).
+The cross-platform direction, portable plugin runtime, SDK, and future control
+surfaces are described in the [technical roadmap](ROADMAP.md).
 
-El repositorio separa el producto portable de sus adaptaciones:
+The repository separates the portable product from its platform adapters:
 
-| Área | Responsabilidad |
-|---|---|
-| `crates/` | Core, APIs, SDK y runtime portable de plugins. |
-| `apps/` | Ejecutables desktop y headless/web. |
-| `platforms/` | Integraciones específicas, comenzando por Raspberry Pi. |
-| `hardware/` | Drivers y paquetes para controladores MIDI conocidos. |
-| `plugins/` | Fixtures mínimos de conformidad; los instrumentos viven en repositorios propios. |
-| `web/` | SPA adaptable de RackForge. |
-| `firmware/` | Investigación y firmware de dispositivos. |
+| Area         | Responsibility                                                            |
+| ------------ | ------------------------------------------------------------------------- |
+| `crates/`    | Core, APIs, SDK, and portable plugin runtime.                             |
+| `apps/`      | Desktop and headless/Web executables.                                     |
+| `platforms/` | Platform-specific integrations, starting with Raspberry Pi.               |
+| `hardware/`  | Drivers and packages for supported MIDI controllers.                      |
+| `plugins/`   | Minimal conformance fixtures; instruments live in their own repositories. |
+| `web/`       | RackForge's adaptive SPA.                                                 |
+| `firmware/`  | Device research and firmware.                                             |
 
-## Flujo
+## Signal flow
 
 ```text
-Teclas, pads y controles
+Keys, pads, and controls
            │
            ▼
-Firmware KeyLab
-  • detecta RackForge
-  • envía intenciones
-  • presenta menús/estado
+KeyLab firmware
+  • detects RackForge
+  • sends user intents
+  • displays menus and status
            │ USB
            ▼
 RackForge Core
-  • fuente de verdad musical
-  • plugins y motores
-  • bancos y performances
-  • mezcla y audio
+  • authoritative musical state
+  • plugins and engines
+  • banks and performances
+  • mixing and audio
            │
            ▼
-      DAC USB / Scarlett
+      USB DAC / Scarlett
 ```
 
-El host conserva el estado autoritativo de motores, bancos y performances. El
-controlador envía eventos físicos y su driver renderiza el estado que recibe.
-Si uno de los dos reinicia, un handshake reconstruye la superficie sin depender
-de estado implícito.
+The host owns the authoritative engine, bank, and performance state. The
+controller sends physical events, and its driver renders the state it receives.
+If either side restarts, a handshake rebuilds the control surface without
+depending on implicit state.
 
-## Desarrollo remoto
+## Remote development
 
-La Raspberry se accede mediante una clave dedicada y un alias local:
+The Raspberry Pi is accessed through a dedicated key and a local SSH alias:
 
 ```powershell
 ssh rackforge
 ```
 
-No se guardan contraseñas en el repositorio. Las herramientas reproducibles de
-conexión, sincronización y diagnóstico viven en
-`platforms/raspberry-pi/dev/`.
+No passwords are stored in the repository. Reproducible connection,
+synchronization, and diagnostic tools live in `platforms/raspberry-pi/dev/`.
 
-## Builds automáticos
+## Automated builds
 
-Cada push a `main` ejecuta `.github/workflows/build-main.yml` y publica tres
-artefactos independientes de plugins:
+Every push to `main` runs `.github/workflows/build-main.yml` and publishes
+three plugin-independent artifacts:
 
-- `RackForge.exe` para Windows x86-64;
-- `RackForge-debug.apk` para Android ARM64;
-- `RackForge-RaspberryPi-arm64.tar.gz` para Raspberry Pi OS ARM64.
+- `RackForge.exe` for Windows x86-64;
+- `RackForge-debug.apk` for Android ARM64;
+- `RackForge-RaspberryPi-arm64.tar.gz` for Raspberry Pi OS ARM64.
 
-Los plugins mantienen repositorios, versiones y pipelines propios. RackForge
-solamente entrega los hosts capaces de instalarlos y ejecutarlos.
+Plugins maintain their own repositories, versions, and pipelines. RackForge
+only ships hosts capable of installing and running them.
 
-## Instalar en Raspberry Pi
+## Install on Raspberry Pi
 
-La distribución para Raspberry Pi requiere una Raspberry Pi 4 o 5 con
-Raspberry Pi OS Lite de 64 bits. El paquete no contiene instrumentos: los
-`.rfplugin` se instalan por separado desde RackForge.
+The Raspberry Pi distribution requires a Raspberry Pi 4 or 5 running the
+64-bit edition of Raspberry Pi OS Lite. Instrument plugins are not bundled;
+`.rfplugin` packages are installed separately from RackForge.
 
-Hasta que se publique la primera GitHub Release, el paquete de prueba se puede
-descargar desde la ejecución exitosa más reciente de **Build main artifacts**
-en la pestaña Actions. Dentro del artefacto
-`RackForge-RaspberryPi-arm64-<commit>` está
-`RackForge-RaspberryPi-arm64.tar.gz`.
-
-En la Raspberry, como el usuario que ejecutará RackForge:
+Download `RackForge-RaspberryPi-arm64.tar.gz` from the
+[GitHub Releases page](https://github.com/kalexis1994/rackforge/releases).
+On the Raspberry Pi, run the following commands as the user who will run
+RackForge:
 
 ```bash
 mkdir -p "$HOME/rackforge/current"
@@ -93,42 +89,43 @@ bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install.sh"
 bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install-appliance.sh"
 ```
 
-El instalador detecta el usuario y su directorio personal, instala el runtime,
-la Web, los hosts de plataforma y controladores, y configura los servicios de
-arranque. No depende de un nombre de usuario específico. Para una ubicación
-personalizada se pueden definir `RACKFORGE_USER` y `RACKFORGE_ROOT`.
+The installer detects the user and home directory, installs the runtime, Web
+interface, platform and controller hosts, and configures the boot services. It
+does not depend on a specific username. Set `RACKFORGE_USER` and
+`RACKFORGE_ROOT` to use a custom identity or installation directory.
 
-Después de la instalación, la interfaz queda disponible en el puerto `8787` de
-la Raspberry. Se puede obtener su dirección con:
+After installation, the Web interface is available on port `8787` of the
+Raspberry Pi. Find its address with:
 
 ```bash
 hostname -I
 ```
 
-Desde otro equipo de la misma red se abre `http://DIRECCION_IP:8787`, se
-instala un instrumento `.rfplugin` y se seleccionan los dispositivos MIDI y de
-audio. La optimización reversible para uso como appliance se activa con:
+From another device on the same network, open
+`http://RASPBERRY_PI_ADDRESS:8787`, install an instrument `.rfplugin`, and
+select the MIDI and audio devices. Enable the reversible appliance
+optimizations with:
 
 ```bash
 bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install-appliance.sh" --optimize
 sudo reboot
 ```
 
-## Estado
+## Current status
 
-- Raspberry Pi OS Lite / Debian 13 arm64, sin entorno gráfico.
-- Toolchain Rust, C/C++, CMake, Ninja, ALSA y udev instalado.
-- Comunicación de pantalla SysEx comprobada con el firmware Arturia actual.
-- Entrada Note on/off del KeyLab comprobada directamente en la Raspberry.
-- Nuked-SC55 compilado nativamente para ARM64; pendiente aportar ROMs propias.
-- ABI de Sound Canvas VA 1.1.2 validado y bancos internos catalogados mediante
-  herramientas Rust; no son ROMs SC-55 compatibles directamente con Nuked.
-- Lector de Wave ROM y decodificador FCE-DPCM compilado y validado nativamente
-  en ARM64 con salida idéntica a Windows.
-- Resolvedor nativo de tonos, mapas y descriptores de muestra de SCVA 1.1.2;
-  `Piano 1/C4` ya produce un preview reproducible por la Scarlett.
-- Scaffold bare-metal seguro para el N32G455.
-- Port de DOOM conservado como banco de pruebas y función futura.
+- Raspberry Pi OS Lite / Debian 13 arm64, without a graphical environment.
+- Rust, C/C++, CMake, Ninja, ALSA, and udev toolchains installed.
+- SysEx display communication verified with the current Arturia firmware.
+- KeyLab note-on/note-off input verified directly on Raspberry Pi.
+- Nuked-SC55 builds natively for ARM64; users must provide their own ROMs.
+- Sound Canvas VA 1.1.2 ABI validated and internal banks cataloged with Rust
+  tools; these are not directly compatible Nuked-SC55 ROMs.
+- Wave ROM reader and FCE-DPCM decoder validated natively on ARM64 with output
+  matching Windows.
+- Native SCVA 1.1.2 tone, map, and sample descriptor resolver; `Piano 1/C4`
+  already produces a reproducible preview through the Scarlett.
+- Safe N32G455 bare-metal scaffold.
+- DOOM port retained as a test bench and potential future feature.
 
-La prioridad inmediata es completar la primera ruta
-KeyLab→Nuked-SC55→Scarlett y luego integrarla en el daemon headless.
+The immediate priority is to complete the first
+KeyLab → Nuked-SC55 → Scarlett path and integrate it into the headless daemon.

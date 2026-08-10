@@ -18,7 +18,6 @@ The repository separates the portable product from its platform adapters:
 | `hardware/`  | Drivers and packages for supported MIDI controllers.                      |
 | `plugins/`   | Minimal conformance fixtures; instruments live in their own repositories. |
 | `web/`       | RackForge's adaptive SPA.                                                 |
-| `firmware/`  | Device research and firmware.                                             |
 
 ## Signal flow
 
@@ -124,8 +123,6 @@ sudo reboot
   matching Windows.
 - Native SCVA 1.1.2 tone, map, and sample descriptor resolver; `Piano 1/C4`
   already produces a reproducible preview through the Scarlett.
-- Safe N32G455 bare-metal scaffold.
-- DOOM port retained as a test bench and potential future feature.
 
 The immediate priority is to complete the first
 KeyLab → Nuked-SC55 → Scarlett path and integrate it into the headless daemon.

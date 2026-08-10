@@ -1,9 +1,3 @@
-[submodule "firmware/vendor/doom-source"]
-	path = firmware/vendor/doom-source
-	url = https://github.com/id-Software/DOOM.git
-[submodule "firmware/vendor/doomgeneric"]
-	path = firmware/vendor/doomgeneric
-	url = https://github.com/ozkl/doomgeneric.git
 [submodule "platforms/raspberry-pi/engines/nuked-sc55/vendor/Nuked-SC55"]
 	path = platforms/raspberry-pi/engines/nuked-sc55/vendor/Nuked-SC55
 	url = https://github.com/nukeykt/Nuked-SC55.git

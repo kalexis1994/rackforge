@@ -31,8 +31,6 @@ members = [
     "plugins/roland-scva",
 ]
 exclude = [
-    "firmware/keylab",
-    "firmware/patch/hook",
     "platforms/raspberry-pi/engines/nuked-sc55/tools/scva-inspect",
     "platforms/raspberry-pi/engines/nuked-sc55/tools/scva-render",
     "platforms/raspberry-pi/engines/scva-arm64",

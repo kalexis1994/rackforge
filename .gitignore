@@ -4,7 +4,6 @@ target/
 *.exe
 *.elf
 *.WebView2/
-firmware/tmp/
 /tmp/
 /dist/
 /apps/rackforge-android/.gradle/

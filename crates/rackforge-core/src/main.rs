@@ -425,7 +425,9 @@ fn smoke(
         println!("PRESET_LOADED id={} name={:?}", preset.id, preset.name);
     }
     if instance.supports_program_editing() {
-        let editable = presets.presets.iter().find(|preset| preset.editable);
+        let editable = preset
+            .filter(|preset| preset.editable)
+            .or_else(|| presets.presets.iter().find(|preset| preset.editable));
         let request = ProgramEditRequest::new(editable.map(|preset| preset.id.clone()));
         let prepared = instance.begin_program_edit(&request)?;
         let editor = instance.program_editor_view(&prepared.document)?;

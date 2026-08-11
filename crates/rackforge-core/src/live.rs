@@ -859,14 +859,14 @@ fn standalone_voice_mut<'voices, 'plugin>(
         .ok_or_else(|| format!("unknown plugin instance {instance_id}"))
 }
 
-fn audio_loop<'plugin>(
+fn audio_loop(
     initial_output: OpenedAudioOutput,
     receiver: &Receiver<IngressMidiEvent>,
     control_receiver: &Receiver<AudioControlCommand>,
-    plugins: &BTreeMap<String, &'plugin LoadedPlugin>,
-    standalone_voices: &mut [StandaloneVoice<'plugin>],
+    plugins: &BTreeMap<String, &'static LoadedPlugin>,
+    standalone_voices: &mut [StandaloneVoice<'static>],
     mut active_instance_id: InstanceId,
-    mut rack_voices: Vec<RackSlotVoice<'plugin>>,
+    mut rack_voices: Vec<RackSlotVoice<'static>>,
     play_route: &CompiledMidiRoute,
     midi_source_count: usize,
     initial_master_level: MasterLevel,

@@ -544,7 +544,7 @@ fn load_plugin_resource(
     };
     let mut replacement = match runtime.0.create_instance() {
         Ok(instance) => instance,
-        Err(error) => return internal_error(error, Some(snapshot.revision)),
+        Err(error) => return internal_error(error.to_string(), Some(snapshot.revision)),
     };
     if let Err(error) = replacement.load_resource_file(resource_id, &path) {
         return error_response(
@@ -575,7 +575,7 @@ fn load_plugin_resource(
         );
     }
     let (reply_sender, reply_receiver) = sync_channel(1);
-    if let Err(failure) = send_audio_command(
+    if let Err(failure) = send_audio(
         context,
         AudioControlCommand::ReplaceStandaloneVoice {
             instance_id: instance_id.clone(),

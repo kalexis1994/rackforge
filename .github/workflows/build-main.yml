@@ -133,6 +133,10 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+      - name: Check Raspberry Pi core
+        shell: bash
+        run: cargo check --locked -p rackforge-core --all-targets
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:

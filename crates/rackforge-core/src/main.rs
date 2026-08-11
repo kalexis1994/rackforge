@@ -6,7 +6,7 @@ use rackforge_audio_api::{
 };
 use rackforge_core::{LoadedPlugin, PluginPackage, PluginStorage};
 use rackforge_plugin_api::abi::MidiEventV1;
-use rackforge_plugin_api::{ParameterKind, PluginKind, ProgramDocument};
+use rackforge_plugin_api::{ParameterKind, PluginKind, ProgramDocument, ProgramEditRequest};
 #[cfg(target_os = "linux")]
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -423,6 +423,18 @@ fn smoke(
     if let Some(preset) = preset {
         instance.load_preset(&preset.id)?;
         println!("PRESET_LOADED id={} name={:?}", preset.id, preset.name);
+    }
+    if instance.supports_program_editing() {
+        let editable = presets.presets.iter().find(|preset| preset.editable);
+        let request = ProgramEditRequest::new(editable.map(|preset| preset.id.clone()));
+        let prepared = instance.begin_program_edit(&request)?;
+        let editor = instance.program_editor_view(&prepared.document)?;
+        println!(
+            "PROGRAM_EDIT_READY source={:?} draft={} pages={}",
+            request.program_id,
+            prepared.document.id,
+            editor.pages.len()
+        );
     }
     let input_channels = match plugin.manifest().kind {
         PluginKind::Effect => 2,

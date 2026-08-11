@@ -43,5 +43,11 @@ The second command installs the supervised appliance services. Optional
 real-time and power optimizations are applied with `--optimize` and can be
 rolled back locally.
 
+Both supervised `resume` startup and manual `live` startup acquire the same
+non-blocking audio-engine lock below `$RACKFORGE_ROOT/state`. A second engine
+prints a clear error and exits before opening MIDI, plugins, or ALSA. The
+kernel releases this lock automatically when the owning process exits or
+crashes; the persistent lock file is not a stale PID-file gate.
+
 Plugins are installed separately as `.rfplugin` packages. Proprietary banks
 and ROMs are never bundled with RackForge.

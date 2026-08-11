@@ -10,6 +10,8 @@ mod desktop_webview;
 mod native_menu;
 mod paths;
 mod setup;
+#[cfg(windows)]
+mod single_instance;
 mod startup;
 mod web;
 
@@ -2608,6 +2610,14 @@ fn main() {
 }
 
 fn run() -> Result<()> {
+    #[cfg(windows)]
+    let _single_instance = match single_instance::acquire()? {
+        single_instance::AcquireOutcome::Acquired(guard) => guard,
+        single_instance::AcquireOutcome::AlreadyRunning => {
+            show_already_running();
+            return Ok(());
+        }
+    };
     let startup = parse_startup()?;
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -2622,6 +2632,31 @@ fn run() -> Result<()> {
         Box::new(move |creation| Ok(Box::new(RackForgeApp::new(startup, creation)?))),
     )
     .map_err(|error| anyhow::anyhow!(error.to_string()))
+}
+
+#[cfg(windows)]
+fn show_already_running() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONINFORMATION, MB_OK, MessageBoxW};
+
+    let title = "RackForge is already running"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let message =
+        "Another RackForge instance is already running. The audio engine was not started."
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+    // SAFETY: both pointers reference NUL-terminated UTF-16 buffers for the
+    // duration of the synchronous MessageBoxW call.
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            message.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONINFORMATION,
+        );
+    }
 }
 
 #[cfg(windows)]

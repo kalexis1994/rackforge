@@ -14,6 +14,9 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+#[cfg(target_os = "linux")]
+mod audio_instance;
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("ERROR: {error:#}");
@@ -107,6 +110,7 @@ struct AudioStartupSection {
 
 #[cfg(target_os = "linux")]
 fn resume(path: &Path) -> Result<()> {
+    let _audio_instance = audio_instance::AudioEngineGuard::acquire(&audio_engine_lock_path())?;
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("reading audio startup config {}", path.display()))?;
     let config: AudioStartupConfig = toml::from_str(&text)
@@ -162,6 +166,11 @@ fn audio_output_state_path() -> PathBuf {
         })
         .join("state")
         .join("audio-output.toml")
+}
+
+#[cfg(target_os = "linux")]
+fn audio_engine_lock_path() -> PathBuf {
+    audio_output_state_path().with_file_name("audio-engine.lock")
 }
 
 #[cfg(target_os = "linux")]
@@ -585,6 +594,7 @@ fn stress(
 fn run_live(arguments: &[String]) -> Result<()> {
     let (package, binary, resources, preset, data_root) =
         parse_plugin_arguments("live", arguments)?;
+    let _audio_instance = audio_instance::AudioEngineGuard::acquire(&audio_engine_lock_path())?;
     rackforge_core::live::run(rackforge_core::live::LiveConfig {
         package,
         binary,

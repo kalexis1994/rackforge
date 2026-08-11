@@ -10,6 +10,11 @@ above the embedded workspace. **File → Install Plugin…** opens the Windows
 file picker, **Settings → Settings…** opens the desktop configuration area,
 and **View** provides reload, external-browser and debug tools.
 
+Desktop permits one RackForge process across Windows sessions. A second launch
+shows an informational dialog and exits before configuration, MIDI, or the
+audio engine is initialized. Windows releases the named mutex automatically if
+the owning process exits or crashes.
+
 ## Windows audio and MIDI
 
 Desktop opens the saved Windows output through WASAPI, or the system default

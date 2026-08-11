@@ -117,3 +117,24 @@ snapshots described in `architecture/plugin-state-and-presets.md`.
 A plugin declaring the `state` capability must serialize every user-visible
 setting through `save_state` and restore or reject it atomically through
 `load_state`. A native program identifier alone is not a complete state.
+
+## Portable individual-program editing
+
+Portable plugins that create or edit individual programs implement the
+program methods on `rackforge_plugin_sdk::Processor`. Return
+`PROGRAM_EDIT_BASIC` from `program_editing_capabilities`, optionally combined
+with `PROGRAM_EDIT_PREVIEW` and `PROGRAM_EDIT_DECLARATIVE`.
+
+The method inputs and outputs are UTF-8 JSON bytes using the same program types
+as the native API. The guest should deserialize the request, update its own
+program model, serialize the resulting `PreparedProgram` or editor view into
+the supplied destination, and return the number of bytes written. Returning
+`None` or `false` rejects the operation atomically. The serialized result and
+every request must fit the package's `max_transfer_bytes`; program editing uses
+one input and one output buffer of that size.
+
+`preview_program` and `install_program` affect the running plugin instance but
+must not open or write files. RackForge owns the final persistence step and
+saves the validated program through `PluginStorage`. Consequently a portable
+plugin never receives platform paths and uses the identical implementation on
+desktop, Android, and Raspberry Pi.

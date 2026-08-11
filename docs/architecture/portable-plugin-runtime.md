@@ -9,16 +9,16 @@ as derived data. Native dynamic libraries remain a migration adapter only.
 
 ## Split contract
 
-The control plane uses versioned WIT types for lifecycle, parameters, state,
-programs and capabilities. The real-time DSP plane uses preallocated regions
-inside the same isolated linear memory. Canonical WIT lists are deliberately
-not lifted and copied for every audio block.
+The control plane uses versioned, bounded byte envelopes for lifecycle,
+parameters, state, programs and capabilities. The real-time DSP plane uses
+preallocated regions inside the same isolated linear memory. Variable-length
+lists are deliberately not lifted and copied for every audio block.
 
 `wasm-v1` currently requires these exports:
 
 ```text
 memory
-rackforge_abi_version() -> i32  # 0x0001_0001
+rackforge_abi_version() -> i32  # 0x0001_0002; 0x0001_0001 remains accepted
 rackforge_input_ptr() -> i32
 rackforge_output_ptr() -> i32
 rackforge_capacity_input_samples() -> i32
@@ -60,6 +60,37 @@ Resources, preset IDs and opaque state use a separate bounded transfer region
 on the control thread. Large ROMs arrive in chunks, so the boundary never
 requires an unbounded shared buffer. RackForge resolves and reads declared
 resources; the guest never receives a host path or filesystem capability.
+
+## Individual program editing
+
+ABI `0x0001_0002` adds an optional program-editing extension. A guest reports
+the operations it implements through `Processor::program_editing_capabilities`:
+
+- `PROGRAM_EDIT_BASIC` enables begin, prepare-save and install;
+- `PROGRAM_EDIT_PREVIEW` adds immediate, non-persistent preview;
+- `PROGRAM_EDIT_DECLARATIVE` adds the host-rendered editor view and field edits.
+
+The basic capability is required whenever either optional capability is set.
+Claiming a capability without exporting its complete function set makes the
+component fail during instantiation.
+
+Program operations use the native contract's bounded JSON envelopes:
+`ProgramEditRequest`, `ProgramDocument`, `PreparedProgram`,
+`ProgramEditorView`, and `ProgramFieldEditRequest`. The portable SDK exposes
+them as byte slices so guests may choose their serializer. RackForge parses and
+validates every returned envelope before it reaches storage or the live engine.
+
+Input is written to `rackforge_exchange_input_ptr`; output is read from
+`rackforge_transfer_ptr`. Both regions have
+`rackforge_capacity_transfer_bytes` bytes. The host validates that they fit in
+linear memory and do not overlap. Calls also receive a bounded control-fuel
+budget.
+
+The boundary intentionally exposes no save path or filesystem operation. The
+guest prepares plugin-owned document data and can install or preview it in its
+engine. RackForge alone commits the validated document through
+`PluginStorage`, which keeps the same behavior on Windows, Android, and
+Raspberry Pi.
 
 ## Package workflow
 

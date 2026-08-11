@@ -10,8 +10,14 @@ use wasmtime::{
     StoreLimitsBuilder, TypedFunc,
 };
 
-pub const ABI_VERSION_V1: i32 = 0x0001_0001;
+pub const ABI_VERSION_V1_1: i32 = 0x0001_0001;
+pub const ABI_VERSION_V1: i32 = 0x0001_0002;
 const STATUS_OK: i32 = 0;
+const PROGRAM_EDIT_BASIC: u32 = 1 << 0;
+const PROGRAM_EDIT_PREVIEW: u32 = 1 << 1;
+const PROGRAM_EDIT_DECLARATIVE: u32 = 1 << 2;
+const PROGRAM_EDIT_KNOWN_CAPABILITIES: u32 =
+    PROGRAM_EDIT_BASIC | PROGRAM_EDIT_PREVIEW | PROGRAM_EDIT_DECLARATIVE;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeLimits {
@@ -126,7 +132,7 @@ impl PortableModule {
             .context("wasm-v1 plugin does not export memory")?;
         let abi_version = typed::<(), i32>(&instance, &mut store, "rackforge_abi_version")?;
         let version = abi_version.call(&mut store, ())?;
-        if version != ABI_VERSION_V1 {
+        if !(ABI_VERSION_V1_1..=ABI_VERSION_V1).contains(&version) {
             bail!("unsupported wasm-v1 ABI version {version:#010x}");
         }
         let input_ptr = typed::<(), i32>(&instance, &mut store, "rackforge_input_ptr")?;
@@ -168,6 +174,87 @@ impl PortableModule {
         let transfer_offset = transfer_ptr.call(&mut store, ())?;
         let initialize = typed::<(), i32>(&instance, &mut store, "rackforge_initialize")?;
         check_status(initialize.call(&mut store, ())?, "initialize")?;
+        let program_api = match optional_typed::<(), i32>(
+            &instance,
+            &mut store,
+            "rackforge_program_editing_capabilities",
+        )? {
+            None => None,
+            Some(capabilities) => {
+                store.set_fuel(self.limits.control_fuel_per_call)?;
+                let capabilities = capabilities.call(&mut store, ())?;
+                if capabilities < 0 {
+                    bail!("portable plugin returned invalid program-editing capabilities");
+                }
+                let capabilities = capabilities as u32;
+                if capabilities & !PROGRAM_EDIT_KNOWN_CAPABILITIES != 0
+                    || capabilities != 0 && capabilities & PROGRAM_EDIT_BASIC == 0
+                {
+                    bail!(
+                        "portable plugin returned unsupported program-editing capabilities {capabilities:#x}"
+                    );
+                }
+                if capabilities == 0 {
+                    None
+                } else {
+                    let exchange_input_ptr =
+                        typed::<(), i32>(&instance, &mut store, "rackforge_exchange_input_ptr")?;
+                    let exchange_input_offset = exchange_input_ptr.call(&mut store, ())?;
+                    let memory_size = memory.data_size(&store);
+                    let transfer_range = byte_range(
+                        transfer_offset,
+                        transfer_capacity as usize,
+                        1,
+                        1,
+                        memory_size,
+                    )?;
+                    let exchange_input_range = byte_range(
+                        exchange_input_offset,
+                        transfer_capacity as usize,
+                        1,
+                        1,
+                        memory_size,
+                    )?;
+                    if ranges_overlap(&transfer_range, &exchange_input_range) {
+                        bail!("portable plugin program input and output buffers must not overlap");
+                    }
+                    Some(PortableProgramApi {
+                        capabilities,
+                        exchange_input_offset,
+                        begin_edit: typed(&instance, &mut store, "rackforge_program_begin_edit")?,
+                        prepare_save: typed(
+                            &instance,
+                            &mut store,
+                            "rackforge_program_prepare_save",
+                        )?,
+                        install: typed(&instance, &mut store, "rackforge_program_install")?,
+                        preview: if capabilities & PROGRAM_EDIT_PREVIEW != 0 {
+                            Some(typed(&instance, &mut store, "rackforge_program_preview")?)
+                        } else {
+                            None
+                        },
+                        editor_view: if capabilities & PROGRAM_EDIT_DECLARATIVE != 0 {
+                            Some(typed(
+                                &instance,
+                                &mut store,
+                                "rackforge_program_editor_view",
+                            )?)
+                        } else {
+                            None
+                        },
+                        apply_edit: if capabilities & PROGRAM_EDIT_DECLARATIVE != 0 {
+                            Some(typed(
+                                &instance,
+                                &mut store,
+                                "rackforge_program_apply_edit",
+                            )?)
+                        } else {
+                            None
+                        },
+                    })
+                }
+            }
+        };
         let prepare = typed(&instance, &mut store, "rackforge_prepare")?;
         let set_parameter = typed(&instance, &mut store, "rackforge_set_parameter")?;
         let get_parameter = typed(&instance, &mut store, "rackforge_get_parameter")?;
@@ -204,6 +291,7 @@ impl PortableModule {
             load_preset,
             save_state,
             load_state,
+            program_api,
             process,
             fuel_per_call: self.limits.fuel_per_call,
             control_fuel_per_call: self.limits.control_fuel_per_call,
@@ -213,6 +301,17 @@ impl PortableModule {
             maximum_frames: 0,
         })
     }
+}
+
+struct PortableProgramApi {
+    capabilities: u32,
+    exchange_input_offset: i32,
+    begin_edit: TypedFunc<i32, i32>,
+    prepare_save: TypedFunc<i32, i32>,
+    install: TypedFunc<i32, i32>,
+    preview: Option<TypedFunc<i32, i32>>,
+    editor_view: Option<TypedFunc<i32, i32>>,
+    apply_edit: Option<TypedFunc<i32, i32>>,
 }
 
 pub struct PortableInstance {
@@ -239,6 +338,7 @@ pub struct PortableInstance {
     load_preset: TypedFunc<i32, i32>,
     save_state: TypedFunc<(), i32>,
     load_state: TypedFunc<i32, i32>,
+    program_api: Option<PortableProgramApi>,
     process: TypedFunc<(i32, i32, i32, i32, i32), i32>,
     fuel_per_call: u64,
     control_fuel_per_call: u64,
@@ -432,6 +532,128 @@ impl PortableInstance {
             self.load_state.call(&mut self.store, state.len() as i32)?,
             "load_state",
         )
+    }
+
+    pub fn supports_program_editing(&self) -> bool {
+        self.program_editing_capabilities() != 0
+    }
+
+    pub fn program_editing_capabilities(&self) -> u32 {
+        self.program_api.as_ref().map_or(0, |api| api.capabilities)
+    }
+
+    pub fn begin_program_edit(&mut self, request: &[u8]) -> Result<Vec<u8>> {
+        let function = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .begin_edit
+            .clone();
+        self.exchange_program_bytes(function, request, "begin_program_edit")
+    }
+
+    pub fn prepare_program_save(&mut self, document: &[u8]) -> Result<Vec<u8>> {
+        let function = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .prepare_save
+            .clone();
+        self.exchange_program_bytes(function, document, "prepare_program_save")
+    }
+
+    pub fn install_program(&mut self, prepared: &[u8]) -> Result<()> {
+        let function = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .install
+            .clone();
+        self.call_program_install(function, prepared, "install_program")
+    }
+
+    pub fn preview_program(&mut self, prepared: &[u8]) -> Result<bool> {
+        let Some(function) = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .preview
+            .clone()
+        else {
+            return Ok(false);
+        };
+        self.call_program_install(function, prepared, "preview_program")?;
+        Ok(true)
+    }
+
+    pub fn program_editor_view(&mut self, document: &[u8]) -> Result<Vec<u8>> {
+        let function = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .editor_view
+            .clone()
+            .context("portable plugin does not expose a declarative program editor")?;
+        self.exchange_program_bytes(function, document, "program_editor_view")
+    }
+
+    pub fn apply_program_edit(&mut self, request: &[u8]) -> Result<Vec<u8>> {
+        let function = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .apply_edit
+            .clone()
+            .context("portable plugin does not expose declarative program edits")?;
+        self.exchange_program_bytes(function, request, "apply_program_edit")
+    }
+
+    fn exchange_program_bytes(
+        &mut self,
+        function: TypedFunc<i32, i32>,
+        source: &[u8],
+        operation: &str,
+    ) -> Result<Vec<u8>> {
+        self.write_program_input(source)?;
+        self.reset_control_fuel()?;
+        let source_length = i32::try_from(source.len()).context("program payload is too large")?;
+        let length = function.call(&mut self.store, source_length)?;
+        if length < 0 || length as usize > self.capacity_transfer_bytes {
+            bail!("portable plugin {operation} returned invalid length {length}");
+        }
+        Ok(self.read_transfer(length as usize)?.to_vec())
+    }
+
+    fn call_program_install(
+        &mut self,
+        function: TypedFunc<i32, i32>,
+        source: &[u8],
+        operation: &str,
+    ) -> Result<()> {
+        self.write_program_input(source)?;
+        self.reset_control_fuel()?;
+        let source_length = i32::try_from(source.len()).context("program payload is too large")?;
+        check_status(function.call(&mut self.store, source_length)?, operation)
+    }
+
+    fn write_program_input(&mut self, bytes: &[u8]) -> Result<()> {
+        if bytes.len() > self.capacity_transfer_bytes {
+            bail!("program payload exceeds plugin transfer capacity");
+        }
+        let offset = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .exchange_input_offset;
+        let range = byte_range(
+            offset,
+            bytes.len(),
+            1,
+            1,
+            self.memory.data_size(&self.store),
+        )?;
+        self.memory.data_mut(&mut self.store)[range].copy_from_slice(bytes);
+        Ok(())
     }
 
     pub fn process_interleaved(
@@ -678,17 +900,23 @@ fn byte_range(
     memory_size: usize,
 ) -> Result<Range<usize>> {
     if offset < 0 || offset as usize % alignment != 0 {
-        bail!("plugin returned an invalid audio buffer pointer");
+        bail!("plugin returned an invalid linear-memory pointer");
     }
     let start = offset as usize;
     let bytes = items
         .checked_mul(item_size)
         .context("buffer byte count overflow")?;
-    let end = start.checked_add(bytes).context("audio pointer overflow")?;
+    let end = start
+        .checked_add(bytes)
+        .context("linear-memory pointer overflow")?;
     if end > memory_size {
-        bail!("plugin audio buffer escapes linear memory");
+        bail!("plugin buffer escapes linear memory");
     }
     Ok(start..end)
+}
+
+fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
+    left.start < right.end && right.start < left.end
 }
 
 fn write_midi(memory: &mut [u8], range: Range<usize>, events: &[MidiEvent]) {
@@ -779,6 +1007,31 @@ mod tests {
             i32.const 0))
     "#;
 
+    fn editable_gain() -> String {
+        GAIN.replace(
+            "          (func (export \"rackforge_abi_version\") (result i32) i32.const 65537)",
+            "          (func (export \"rackforge_abi_version\") (result i32) i32.const 65538)",
+        )
+        .replace(
+            "          (func (export \"rackforge_load_preset\")",
+            r#"          (func (export "rackforge_exchange_input_ptr") (result i32) i32.const 12288)
+          (func (export "rackforge_program_editing_capabilities") (result i32) i32.const 7)
+          (func $exchange (param $length i32) (result i32)
+            i32.const 8192 i32.const 12288 local.get $length memory.copy local.get $length)
+          (func (export "rackforge_program_begin_edit") (param i32) (result i32)
+            local.get 0 call $exchange)
+          (func (export "rackforge_program_prepare_save") (param i32) (result i32)
+            local.get 0 call $exchange)
+          (func (export "rackforge_program_install") (param i32) (result i32) i32.const 0)
+          (func (export "rackforge_program_preview") (param i32) (result i32) i32.const 0)
+          (func (export "rackforge_program_editor_view") (param i32) (result i32)
+            local.get 0 call $exchange)
+          (func (export "rackforge_program_apply_edit") (param i32) (result i32)
+            local.get 0 call $exchange)
+          (func (export "rackforge_load_preset")"#,
+        )
+    }
+
     #[test]
     fn runs_one_portable_gain_module() {
         let bytes = wat::parse_str(GAIN).unwrap();
@@ -814,6 +1067,67 @@ mod tests {
             instance.preset_catalog().unwrap(),
             Some(b"catalog".to_vec())
         );
+    }
+
+    #[test]
+    fn portable_program_editing_uses_separate_bounded_exchange_buffers() {
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let module = engine
+            .compile(&wat::parse_str(editable_gain()).unwrap())
+            .unwrap();
+        let mut instance = module.instantiate().unwrap();
+        assert!(instance.supports_program_editing());
+        assert_eq!(instance.program_editing_capabilities(), 7);
+        assert_eq!(instance.begin_program_edit(b"begin").unwrap(), b"begin");
+        assert_eq!(
+            instance.prepare_program_save(b"prepare").unwrap(),
+            b"prepare"
+        );
+        instance.install_program(b"install").unwrap();
+        assert!(instance.preview_program(b"preview").unwrap());
+        assert_eq!(instance.program_editor_view(b"editor").unwrap(), b"editor");
+        assert_eq!(instance.apply_program_edit(b"edit").unwrap(), b"edit");
+
+        let oversized = vec![0_u8; 1_025];
+        assert!(
+            instance
+                .begin_program_edit(&oversized)
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds")
+        );
+    }
+
+    #[test]
+    fn declared_program_editing_requires_the_complete_basic_contract() {
+        let source = GAIN
+            .replace("i32.const 65537", "i32.const 65538")
+            .replace(
+                "          (func (export \"rackforge_load_preset\")",
+                "          (func (export \"rackforge_program_editing_capabilities\") (result i32) i32.const 1)\n          (func (export \"rackforge_load_preset\")",
+            );
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let module = engine.compile(&wat::parse_str(source).unwrap()).unwrap();
+        let error = match module.instantiate() {
+            Ok(_) => panic!("incomplete program-editing ABI was accepted"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("rackforge_exchange_input_ptr"));
+    }
+
+    #[test]
+    fn rejects_overlapping_program_exchange_buffers() {
+        let source = editable_gain().replace(
+            "(func (export \"rackforge_exchange_input_ptr\") (result i32) i32.const 12288)",
+            "(func (export \"rackforge_exchange_input_ptr\") (result i32) i32.const 8192)",
+        );
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let module = engine.compile(&wat::parse_str(source).unwrap()).unwrap();
+        let error = match module.instantiate() {
+            Ok(_) => panic!("overlapping program exchange buffers were accepted"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("must not overlap"));
     }
 
     #[test]

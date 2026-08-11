@@ -263,7 +263,9 @@ impl PluginInstance<'_> {
     pub fn supports_program_editing(&self) -> bool {
         match &self.backend {
             PluginInstanceBackend::Native(instance) => instance.supports_program_editing(),
-            PluginInstanceBackend::Portable(_) => false,
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.supports_program_editing()
+            }
         }
     }
 
@@ -285,8 +287,19 @@ impl PluginInstance<'_> {
     pub fn begin_program_edit(&mut self, request: &ProgramEditRequest) -> Result<PreparedProgram> {
         match &mut self.backend {
             PluginInstanceBackend::Native(instance) => instance.begin_program_edit(request),
-            PluginInstanceBackend::Portable(_) => {
-                bail!("portable plugin does not expose program editing")
+            PluginInstanceBackend::Portable(instance) => {
+                request
+                    .validate()
+                    .context("validating program edit request")?;
+                let source = serde_json::to_vec(request)
+                    .context("serializing portable program edit request")?;
+                let bytes = instance.instance.begin_program_edit(&source)?;
+                let prepared: PreparedProgram =
+                    serde_json::from_slice(&bytes).context("parsing portable prepared program")?;
+                prepared
+                    .validate()
+                    .context("validating portable prepared program")?;
+                Ok(prepared)
             }
         }
     }
@@ -294,8 +307,17 @@ impl PluginInstance<'_> {
     pub fn prepare_program_save(&mut self, document: &ProgramDocument) -> Result<PreparedProgram> {
         match &mut self.backend {
             PluginInstanceBackend::Native(instance) => instance.prepare_program_save(document),
-            PluginInstanceBackend::Portable(_) => {
-                bail!("portable plugin does not expose program editing")
+            PluginInstanceBackend::Portable(instance) => {
+                document.validate().context("validating program draft")?;
+                let source =
+                    serde_json::to_vec(document).context("serializing portable program draft")?;
+                let bytes = instance.instance.prepare_program_save(&source)?;
+                let prepared: PreparedProgram =
+                    serde_json::from_slice(&bytes).context("parsing portable prepared program")?;
+                prepared
+                    .validate()
+                    .context("validating portable prepared program")?;
+                Ok(prepared)
             }
         }
     }
@@ -303,8 +325,13 @@ impl PluginInstance<'_> {
     pub fn install_program(&mut self, prepared: &PreparedProgram) -> Result<()> {
         match &mut self.backend {
             PluginInstanceBackend::Native(instance) => instance.install_program(prepared),
-            PluginInstanceBackend::Portable(_) => {
-                bail!("portable plugin does not expose program editing")
+            PluginInstanceBackend::Portable(instance) => {
+                prepared
+                    .validate()
+                    .context("validating portable program install")?;
+                let source =
+                    serde_json::to_vec(prepared).context("serializing portable program install")?;
+                instance.instance.install_program(&source)
             }
         }
     }
@@ -312,8 +339,13 @@ impl PluginInstance<'_> {
     pub fn preview_program(&mut self, prepared: &PreparedProgram) -> Result<bool> {
         match &mut self.backend {
             PluginInstanceBackend::Native(instance) => instance.preview_program(prepared),
-            PluginInstanceBackend::Portable(_) => {
-                bail!("portable plugin does not expose program editing")
+            PluginInstanceBackend::Portable(instance) => {
+                prepared
+                    .validate()
+                    .context("validating portable program preview")?;
+                let source =
+                    serde_json::to_vec(prepared).context("serializing portable program preview")?;
+                instance.instance.preview_program(&source)
             }
         }
     }
@@ -321,8 +353,18 @@ impl PluginInstance<'_> {
     pub fn program_editor_view(&mut self, document: &ProgramDocument) -> Result<ProgramEditorView> {
         match &mut self.backend {
             PluginInstanceBackend::Native(instance) => instance.program_editor_view(document),
-            PluginInstanceBackend::Portable(_) => {
-                bail!("portable plugin does not expose program editing")
+            PluginInstanceBackend::Portable(instance) => {
+                document
+                    .validate()
+                    .context("validating portable editor program")?;
+                let source =
+                    serde_json::to_vec(document).context("serializing portable editor program")?;
+                let bytes = instance.instance.program_editor_view(&source)?;
+                let view: ProgramEditorView = serde_json::from_slice(&bytes)
+                    .context("parsing portable program editor view")?;
+                view.validate()
+                    .context("validating portable program editor view")?;
+                Ok(view)
             }
         }
     }
@@ -333,8 +375,19 @@ impl PluginInstance<'_> {
     ) -> Result<PreparedProgram> {
         match &mut self.backend {
             PluginInstanceBackend::Native(instance) => instance.apply_program_edit(request),
-            PluginInstanceBackend::Portable(_) => {
-                bail!("portable plugin does not expose program editing")
+            PluginInstanceBackend::Portable(instance) => {
+                request
+                    .validate()
+                    .context("validating portable program field edit")?;
+                let source = serde_json::to_vec(request)
+                    .context("serializing portable program field edit")?;
+                let bytes = instance.instance.apply_program_edit(&source)?;
+                let prepared: PreparedProgram =
+                    serde_json::from_slice(&bytes).context("parsing portable edited program")?;
+                prepared
+                    .validate()
+                    .context("validating portable edited program")?;
+                Ok(prepared)
             }
         }
     }

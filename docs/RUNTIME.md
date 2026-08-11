@@ -244,6 +244,7 @@ The transition API supports:
 - plugin-versioned opaque state;
 - declared external resources and isolated private data;
 - dynamic catalogs;
+- native and portable individual-program editing with host-owned persistence;
 - stable session instances, commands, events, and revisions;
 - bounded synchronization history;
 - recoverable audition leases;

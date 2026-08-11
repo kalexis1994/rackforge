@@ -6,11 +6,21 @@
 //! [`export_processor!`]. The SDK owns the raw WebAssembly ABI and its linear
 //! memory buffers so plugin code does not handle pointers or host platforms.
 
-pub const ABI_VERSION_V1: u32 = 0x0001_0001;
+pub const ABI_VERSION_V1_1: u32 = 0x0001_0001;
+pub const ABI_VERSION_V1: u32 = 0x0001_0002;
 pub const STATUS_OK: i32 = 0;
 pub const STATUS_INVALID_ARGUMENT: i32 = -1;
 pub const STATUS_UNKNOWN_PARAMETER: i32 = -2;
 pub const STATUS_INVALID_STATE: i32 = -3;
+
+/// The guest can begin, prepare and install individual program documents.
+pub const PROGRAM_EDIT_BASIC: u32 = 1 << 0;
+/// The guest can preview a prepared document without persisting it.
+pub const PROGRAM_EDIT_PREVIEW: u32 = 1 << 1;
+/// The guest exposes a declarative editor view and typed field mutations.
+pub const PROGRAM_EDIT_DECLARATIVE: u32 = 1 << 2;
+pub const PROGRAM_EDIT_KNOWN_CAPABILITIES: u32 =
+    PROGRAM_EDIT_BASIC | PROGRAM_EDIT_PREVIEW | PROGRAM_EDIT_DECLARATIVE;
 
 /// One MIDI 1.0 channel/system-common message delivered at an exact sample
 /// offset inside the current audio block. SysEx uses the control plane and is
@@ -107,6 +117,37 @@ pub trait Processor: Default {
         false
     }
 
+    /// Optional individual-program editing contract. Payloads use the same
+    /// bounded JSON envelopes as native RackForge plugins, but the SDK keeps
+    /// them as bytes so portable guests do not need a particular serializer.
+    fn program_editing_capabilities(&self) -> u32 {
+        0
+    }
+
+    fn begin_program_edit(&mut self, _request: &[u8], _destination: &mut [u8]) -> Option<usize> {
+        None
+    }
+
+    fn prepare_program_save(&mut self, _document: &[u8], _destination: &mut [u8]) -> Option<usize> {
+        None
+    }
+
+    fn install_program(&mut self, _prepared: &[u8]) -> bool {
+        false
+    }
+
+    fn preview_program(&mut self, _prepared: &[u8]) -> bool {
+        false
+    }
+
+    fn program_editor_view(&mut self, _document: &[u8], _destination: &mut [u8]) -> Option<usize> {
+        None
+    }
+
+    fn apply_program_edit(&mut self, _request: &[u8], _destination: &mut [u8]) -> Option<usize> {
+        None
+    }
+
     fn process(
         &mut self,
         input: &[f32],
@@ -141,6 +182,7 @@ macro_rules! export_processor {
                 value: 0.0,
             }; RF_MAX_PARAMETER_EVENTS];
         static mut RF_TRANSFER: [u8; RF_MAX_TRANSFER_BYTES] = [0; RF_MAX_TRANSFER_BYTES];
+        static mut RF_EXCHANGE_INPUT: [u8; RF_MAX_TRANSFER_BYTES] = [0; RF_MAX_TRANSFER_BYTES];
         static mut RF_PROCESSOR: core::mem::MaybeUninit<$processor> =
             core::mem::MaybeUninit::uninit();
         static mut RF_INITIALIZED: bool = false;
@@ -194,6 +236,11 @@ macro_rules! export_processor {
         #[unsafe(no_mangle)]
         pub extern "C" fn rackforge_transfer_ptr() -> i32 {
             core::ptr::addr_of_mut!(RF_TRANSFER).cast::<u8>() as usize as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_exchange_input_ptr() -> i32 {
+            core::ptr::addr_of_mut!(RF_EXCHANGE_INPUT).cast::<u8>() as usize as i32
         }
 
         #[unsafe(no_mangle)]
@@ -441,6 +488,112 @@ macro_rules! export_processor {
                     $crate::STATUS_INVALID_STATE
                 }
             }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_program_editing_capabilities() -> i32 {
+            unsafe {
+                if rackforge_initialize() != $crate::STATUS_OK {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let processor = &*core::ptr::addr_of!(RF_PROCESSOR).cast::<$processor>();
+                let capabilities = processor.program_editing_capabilities();
+                if capabilities & !$crate::PROGRAM_EDIT_KNOWN_CAPABILITIES != 0
+                    || capabilities != 0 && capabilities & $crate::PROGRAM_EDIT_BASIC == 0
+                    || capabilities > i32::MAX as u32
+                {
+                    $crate::STATUS_INVALID_STATE
+                } else {
+                    capabilities as i32
+                }
+            }
+        }
+
+        unsafe fn rackforge_program_exchange(operation: u8, source_length: i32) -> i32 {
+            if source_length < 0 || source_length as usize > RF_MAX_TRANSFER_BYTES {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let source = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_EXCHANGE_INPUT).cast::<u8>(),
+                    source_length as usize,
+                );
+                let destination = core::slice::from_raw_parts_mut(
+                    core::ptr::addr_of_mut!(RF_TRANSFER).cast::<u8>(),
+                    RF_MAX_TRANSFER_BYTES,
+                );
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                let result = match operation {
+                    0 => processor.begin_program_edit(source, destination),
+                    1 => processor.prepare_program_save(source, destination),
+                    2 => processor.program_editor_view(source, destination),
+                    3 => processor.apply_program_edit(source, destination),
+                    _ => return $crate::STATUS_INVALID_ARGUMENT,
+                };
+                match result {
+                    Some(length) if length <= RF_MAX_TRANSFER_BYTES => length as i32,
+                    _ => $crate::STATUS_INVALID_STATE,
+                }
+            }
+        }
+
+        unsafe fn rackforge_program_install_operation(operation: u8, source_length: i32) -> i32 {
+            if source_length < 0 || source_length as usize > RF_MAX_TRANSFER_BYTES {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            unsafe {
+                if !RF_INITIALIZED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let source = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_EXCHANGE_INPUT).cast::<u8>(),
+                    source_length as usize,
+                );
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                let accepted = match operation {
+                    0 => processor.install_program(source),
+                    1 => processor.preview_program(source),
+                    _ => return $crate::STATUS_INVALID_ARGUMENT,
+                };
+                if accepted {
+                    $crate::STATUS_OK
+                } else {
+                    $crate::STATUS_INVALID_STATE
+                }
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_program_begin_edit(source_length: i32) -> i32 {
+            unsafe { rackforge_program_exchange(0, source_length) }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_program_prepare_save(source_length: i32) -> i32 {
+            unsafe { rackforge_program_exchange(1, source_length) }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_program_install(source_length: i32) -> i32 {
+            unsafe { rackforge_program_install_operation(0, source_length) }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_program_preview(source_length: i32) -> i32 {
+            unsafe { rackforge_program_install_operation(1, source_length) }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_program_editor_view(source_length: i32) -> i32 {
+            unsafe { rackforge_program_exchange(2, source_length) }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_program_apply_edit(source_length: i32) -> i32 {
+            unsafe { rackforge_program_exchange(3, source_length) }
         }
 
         #[unsafe(no_mangle)]

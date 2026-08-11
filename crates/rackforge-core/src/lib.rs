@@ -14,7 +14,6 @@ pub mod performance;
 pub mod rack_graph;
 pub mod realtime;
 pub mod session;
-#[cfg(target_os = "linux")]
 pub mod session_checkpoint;
 pub mod state_store;
 pub mod storage;

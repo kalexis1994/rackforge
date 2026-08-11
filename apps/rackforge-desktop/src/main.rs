@@ -22,17 +22,18 @@ use eframe::egui::{
 };
 use rackforge_control_api::{ControlErrorCode, ControlRequest, ControlResponse};
 use rackforge_core::performance::PerformanceRepository;
+use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage};
 use rackforge_performance_api::{PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot};
-use rackforge_plugin_api::PluginKind;
+use rackforge_plugin_api::{PluginKind, PresetCatalog};
 use rackforge_repository::{
     InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, inspect_local_archive,
     install_local_archive,
 };
 use rackforge_session_api::{
-    CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId, MasterLevel, MasterPan,
-    PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SessionId,
-    SessionState, SoundSummary,
+    BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId, MasterLevel,
+    MasterPan, PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent,
+    SessionId, SessionState, SoundSummary,
 };
 use rackforge_surface_api::SurfaceMode;
 use rackforge_surface_runtime::{
@@ -117,6 +118,8 @@ struct DesktopPlugin {
     version: Version,
     runtime: &'static LoadedPlugin,
     config_available: bool,
+    banks: Vec<BankSummary>,
+    sound_summaries: Vec<SoundSummary>,
     sounds: Vec<PlaySound>,
     selected_sound_id: Option<String>,
     instance: PluginInstance<'static>,
@@ -249,6 +252,7 @@ fn format_file_size(bytes: u64) -> String {
 struct DesktopApp {
     menu: Menu,
     session: Arc<RwLock<SessionState>>,
+    session_checkpoint: SessionCheckpointStore,
     button_down: [Option<Instant>; 4],
     keyboard_down: [Option<Instant>; 4],
     #[cfg(windows)]
@@ -290,7 +294,90 @@ impl DesktopApp {
         web_servers: web::DesktopWebServers,
         web_control: Receiver<web::DesktopControlCall>,
     ) -> Result<Self> {
-        let (plugins, mut warnings) = load_desktop_plugins(options)?;
+        let (mut plugins, mut warnings) = load_desktop_plugins(options)?;
+        let session_checkpoint = SessionCheckpointStore::live(&options.data_root);
+        let session_id = session
+            .read()
+            .expect("session lock poisoned")
+            .session_id
+            .clone();
+        let restored_mode = match session_checkpoint.active_mode(&session_id) {
+            Ok(mode) => mode,
+            Err(error) => {
+                warnings.push(format!(
+                    "Could not restore the previous session ({error:#}); using safe defaults"
+                ));
+                None
+            }
+        };
+        let restored_active_instance = if restored_mode.is_some() {
+            session_checkpoint
+                .active_instance_id(&session_id)
+                .unwrap_or_else(|error| {
+                    warnings.push(format!(
+                        "Could not restore the active plugin ({error:#}); using the first available plugin"
+                    ));
+                    None
+                })
+        } else {
+            None
+        };
+        if restored_mode.is_some() {
+            for plugin in &mut plugins {
+                let restored_sound = session_checkpoint
+                    .selected_sound(&session_id, &plugin.instance_id)
+                    .unwrap_or_else(|error| {
+                        warnings.push(format!(
+                            "Could not restore {}'s program ({error:#})",
+                            plugin.name
+                        ));
+                        None
+                    });
+                let Some(sound_id) = restored_sound else {
+                    continue;
+                };
+                if !plugin.sounds.iter().any(|sound| sound.id == sound_id) {
+                    warnings.push(format!(
+                        "{} no longer provides saved program {sound_id:?}; using its first available program",
+                        plugin.name
+                    ));
+                    continue;
+                }
+                match plugin.instance.load_preset(&sound_id) {
+                    Ok(()) => plugin.selected_sound_id = Some(sound_id),
+                    Err(error) => warnings.push(format!(
+                        "Could not restore {} program {sound_id:?} ({error:#}); using its first available program",
+                        plugin.name
+                    )),
+                }
+            }
+        }
+        let active_instance_id = restored_active_instance
+            .as_deref()
+            .and_then(|restored| plugins.iter().find(|plugin| plugin.instance_id == restored))
+            .or_else(|| plugins.first())
+            .map(|plugin| plugin.instance_id.as_str());
+        if let Some(restored) = restored_active_instance.as_deref()
+            && active_instance_id != Some(restored)
+        {
+            warnings.push(format!(
+                "Saved plugin instance {restored:?} is unavailable; using the first available plugin"
+            ));
+        }
+        let restored_master_level =
+            session_checkpoint
+                .master_level(&session_id)
+                .unwrap_or_else(|error| {
+                    warnings.push(format!("Could not restore master volume: {error:#}"));
+                    None
+                });
+        let restored_master_pan =
+            session_checkpoint
+                .master_pan(&session_id)
+                .unwrap_or_else(|error| {
+                    warnings.push(format!("Could not restore master pan: {error:#}"));
+                    None
+                });
         let performance_repository = PerformanceRepository::load_or_empty(Some(&options.data_root))
             .context("loading Desktop performance library")?;
         #[cfg(windows)]
@@ -319,8 +406,7 @@ impl DesktopApp {
                             defaults
                         }
                     };
-                    let active = plugins.first().map(|plugin| plugin.instance_id.as_str());
-                    match start_desktop_audio(&plugins, &preferences, active) {
+                    match start_desktop_audio(&plugins, &preferences, active_instance_id) {
                         Ok(audio) => (Some(preferences), Some(audio)),
                         Err(error) => {
                             let message = format!("Audio/MIDI unavailable: {error:#}");
@@ -341,7 +427,6 @@ impl DesktopApp {
             }
         };
         let mut menu = Menu::default();
-        let active_instance_id = plugins.first().map(|plugin| plugin.instance_id.as_str());
         menu.set_play_plugins(
             plugins
                 .iter()
@@ -352,7 +437,9 @@ impl DesktopApp {
                 .collect(),
             active_instance_id,
         );
-        if let Some(plugin) = plugins.first() {
+        if let Some(plugin) = active_instance_id
+            .and_then(|active| plugins.iter().find(|plugin| plugin.instance_id == active))
+        {
             menu.sync_active_plugin(
                 &plugin.instance_id,
                 &plugin.plugin_id,
@@ -361,18 +448,32 @@ impl DesktopApp {
                 plugin.selected_sound_id.as_deref(),
             );
         }
-        #[cfg(windows)]
-        if let Some(audio) = &audio {
-            sync_desktop_audio(audio, &session, &menu)?;
-        }
-
         {
             let mut state = session.write().expect("session lock poisoned");
+            if let Some(mode) = restored_mode {
+                state.active_mode = mode;
+            }
+            if let Some(level) = restored_master_level {
+                state.master_level = level;
+            }
+            if let Some(pan) = restored_master_pan {
+                state.master_pan = pan;
+            }
             state.active_instance_id = active_instance_id
                 .map(InstanceId::new)
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
             state.instances = plugins.iter().map(plugin_session_state).collect();
+            menu.sync_active_mode(active_mode_from_surface(state.active_mode));
+        }
+        #[cfg(windows)]
+        if let Some(audio) = &audio {
+            sync_desktop_audio(audio, &session, &menu)?;
+        }
+        if let Err(error) =
+            session_checkpoint.save(&session.read().expect("session lock poisoned").clone())
+        {
+            warnings.push(format!("Could not save the restored session: {error:#}"));
         }
 
         let status = if plugins.is_empty() {
@@ -402,6 +503,7 @@ impl DesktopApp {
         Ok(Self {
             menu,
             session,
+            session_checkpoint,
             button_down: [None; 4],
             keyboard_down: [None; 4],
             #[cfg(windows)]
@@ -438,19 +540,51 @@ impl DesktopApp {
     }
 
     fn reload_plugins(&mut self) -> Result<Vec<String>> {
-        let previous_active = self
-            .session
-            .read()
-            .expect("session lock poisoned")
-            .active_instance_id
-            .as_ref()
-            .map(|id| id.as_str().to_owned());
-        let (plugins, mut warnings) = load_desktop_plugins(&self.options)?;
+        let (previous_active, previous_mode, previous_sounds) = {
+            let session = self.session.read().expect("session lock poisoned");
+            (
+                session
+                    .active_instance_id
+                    .as_ref()
+                    .map(|id| id.as_str().to_owned()),
+                session.active_mode,
+                session
+                    .instances
+                    .iter()
+                    .filter_map(|instance| {
+                        instance
+                            .selected_sound_id
+                            .as_ref()
+                            .map(|sound| (instance.instance_id.as_str().to_owned(), sound.clone()))
+                    })
+                    .collect::<BTreeMap<_, _>>(),
+            )
+        };
+        let (mut plugins, mut warnings) = load_desktop_plugins(&self.options)?;
+        for plugin in &mut plugins {
+            let Some(sound_id) = previous_sounds.get(&plugin.instance_id) else {
+                continue;
+            };
+            if plugin.sounds.iter().any(|sound| sound.id == *sound_id) {
+                match plugin.instance.load_preset(sound_id) {
+                    Ok(()) => plugin.selected_sound_id = Some(sound_id.clone()),
+                    Err(error) => warnings.push(format!(
+                        "Could not retain {} program {sound_id:?} after reload: {error:#}",
+                        plugin.name
+                    )),
+                }
+            }
+        }
+        let active_instance_id = previous_active
+            .as_deref()
+            .and_then(|previous| plugins.iter().find(|plugin| plugin.instance_id == previous))
+            .or_else(|| plugins.first())
+            .map(|plugin| plugin.instance_id.as_str());
         #[cfg(windows)]
         {
             self.audio = None;
             if let Some(preferences) = self.audio_preferences.as_ref() {
-                match start_desktop_audio(&plugins, preferences, previous_active.as_deref()) {
+                match start_desktop_audio(&plugins, preferences, active_instance_id) {
                     Ok(audio) => {
                         self.audio = Some(audio);
                         self.audio_recovery_at = None;
@@ -465,11 +599,6 @@ impl DesktopApp {
             }
         }
         let mut menu = Menu::default();
-        let active_instance_id = previous_active
-            .as_deref()
-            .and_then(|previous| plugins.iter().find(|plugin| plugin.instance_id == previous))
-            .or_else(|| plugins.first())
-            .map(|plugin| plugin.instance_id.as_str());
         menu.set_play_plugins(
             plugins
                 .iter()
@@ -491,6 +620,7 @@ impl DesktopApp {
                 plugin.selected_sound_id.as_deref(),
             );
         }
+        menu.sync_active_mode(active_mode_from_surface(previous_mode));
         {
             let mut state = self.session.write().expect("session lock poisoned");
             state.active_instance_id = active_instance_id
@@ -506,6 +636,7 @@ impl DesktopApp {
         if let Some(audio) = &self.audio {
             sync_desktop_audio(audio, &self.session, &self.menu)?;
         }
+        self.persist_session_checkpoint();
         Ok(warnings)
     }
 
@@ -1404,6 +1535,14 @@ impl DesktopApp {
         }
     }
 
+    fn persist_session_checkpoint(&mut self) {
+        let snapshot = self.session.read().expect("session lock poisoned").clone();
+        if let Err(error) = self.session_checkpoint.save(&snapshot) {
+            eprintln!("SESSION_CHECKPOINT_ERROR {error:#}");
+            self.status = format!("Session changed, but could not be saved: {error:#}");
+        }
+    }
+
     fn set_master_level(
         &mut self,
         level: MasterLevel,
@@ -1429,6 +1568,7 @@ impl DesktopApp {
         };
         let percent = (u32::from(level.get()) + 5) / 10;
         self.status = format!("Master volume: {percent}%");
+        self.persist_session_checkpoint();
         Ok(vec![event])
     }
 
@@ -1463,6 +1603,7 @@ impl DesktopApp {
             let percent = (u32::from(value.unsigned_abs()) + 5) / 10;
             format!("Master pan: {side} {percent}%")
         };
+        self.persist_session_checkpoint();
         Ok(vec![event])
     }
 
@@ -1523,6 +1664,7 @@ impl DesktopApp {
             plugin.selected_sound_id.as_deref(),
         );
         self.status = format!("{} selected", plugin.name);
+        self.persist_session_checkpoint();
         Ok(vec![event])
     }
 
@@ -1593,6 +1735,7 @@ impl DesktopApp {
         {
             self.status = format!("Loaded {sound_id}, but audio did not switch: {error:#}");
         }
+        self.persist_session_checkpoint();
         Ok(vec![event])
     }
 
@@ -1617,6 +1760,7 @@ impl DesktopApp {
                     self.status =
                         format!("Mode changed, but audio state did not follow: {error:#}");
                 }
+                self.persist_session_checkpoint();
             }
             MenuCommand::SelectPlugin { instance_id } => {
                 let instance_id = match InstanceId::new(instance_id) {
@@ -1695,6 +1839,7 @@ impl DesktopApp {
                     session.active_mode = SurfaceMode::Idle;
                     session.revision = Revision::new(session.revision.get().saturating_add(1));
                 }
+                self.persist_session_checkpoint();
                 #[cfg(windows)]
                 if let Some(audio) = &self.audio
                     && let Err(error) = audio.emergency_stop()
@@ -1982,6 +2127,14 @@ fn long_input(index: usize) -> Input {
     ][index]
 }
 
+fn active_mode_from_surface(mode: SurfaceMode) -> ActiveMode {
+    match mode {
+        SurfaceMode::Idle => ActiveMode::Idle,
+        SurfaceMode::Live => ActiveMode::Live,
+        SurfaceMode::Play => ActiveMode::Play,
+    }
+}
+
 fn plugin_session_state(plugin: &DesktopPlugin) -> PluginInstanceState {
     PluginInstanceState {
         instance_id: InstanceId::new(plugin.instance_id.clone())
@@ -1990,22 +2143,63 @@ fn plugin_session_state(plugin: &DesktopPlugin) -> PluginInstanceState {
         plugin_name: plugin.name.clone(),
         ui_layouts: vec!["little@1".into()],
         config_available: plugin.config_available,
-        banks: Vec::new(),
-        sounds: plugin
-            .sounds
-            .iter()
-            .map(|sound| SoundSummary {
-                id: sound.id.clone(),
-                name: sound.name.clone(),
-                bank: Some(sound.bank.clone()),
-                detail: Some(sound.detail.clone()),
-                category: None,
-                tags: Vec::new(),
-                editable: sound.editable,
-            })
-            .collect(),
+        banks: plugin.banks.clone(),
+        sounds: plugin.sound_summaries.clone(),
         selected_sound_id: plugin.selected_sound_id.clone(),
     }
+}
+
+fn desktop_catalog_views(
+    catalog: &PresetCatalog,
+) -> (Vec<BankSummary>, Vec<SoundSummary>, Vec<PlaySound>) {
+    let bank_names = catalog
+        .banks
+        .iter()
+        .map(|bank| (bank.id.as_str(), bank.name.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let banks = catalog
+        .banks
+        .iter()
+        .map(|bank| BankSummary {
+            id: bank.id.clone(),
+            name: bank.name.clone(),
+            order: bank.order,
+        })
+        .collect();
+    let sound_summaries = catalog
+        .presets
+        .iter()
+        .map(|preset| SoundSummary {
+            id: preset.id.clone(),
+            name: preset.name.clone(),
+            bank: preset.bank.clone(),
+            detail: preset
+                .description
+                .clone()
+                .or_else(|| preset.category.clone()),
+            category: None,
+            tags: Vec::new(),
+            editable: preset.editable,
+        })
+        .collect();
+    let sounds = catalog
+        .presets
+        .iter()
+        .map(|preset| {
+            let bank = preset
+                .bank
+                .as_deref()
+                .and_then(|id| bank_names.get(id).copied())
+                .unwrap_or("Factory");
+            let detail = preset
+                .category
+                .as_deref()
+                .or(preset.description.as_deref())
+                .unwrap_or("Preset");
+            PlaySound::new(&preset.id, &preset.name, bank, detail).editable(preset.editable)
+        })
+        .collect();
+    (banks, sound_summaries, sounds)
 }
 
 #[cfg(windows)]
@@ -2043,6 +2237,7 @@ fn sync_desktop_audio(
     let state = session.read().expect("session lock poisoned");
     audio.set_master_level(state.master_level)?;
     audio.set_master_pan(state.master_pan)?;
+    audio.set_running(state.active_mode != SurfaceMode::Idle)?;
     drop(state);
     audio.render_little(menu.render());
     Ok(())
@@ -2167,28 +2362,7 @@ fn load_desktop_plugin(package: &PluginPackage, data_root: &Path) -> Result<Desk
     let loaded: &'static LoadedPlugin = Box::leak(Box::new(loaded));
     let mut instance = loaded.create_instance()?;
     let catalog = instance.preset_catalog()?;
-    let banks = catalog
-        .banks
-        .iter()
-        .map(|bank| (bank.id.as_str(), bank.name.as_str()))
-        .collect::<BTreeMap<_, _>>();
-    let sounds = catalog
-        .presets
-        .iter()
-        .map(|preset| {
-            let bank = preset
-                .bank
-                .as_deref()
-                .and_then(|id| banks.get(id).copied())
-                .unwrap_or("Factory");
-            let detail = preset
-                .category
-                .as_deref()
-                .or(preset.description.as_deref())
-                .unwrap_or("Preset");
-            PlaySound::new(&preset.id, &preset.name, bank, detail).editable(preset.editable)
-        })
-        .collect::<Vec<_>>();
+    let (banks, sound_summaries, sounds) = desktop_catalog_views(&catalog);
     let selected_sound_id = sounds.first().map(|sound| sound.id.clone());
     if let Some(id) = selected_sound_id.as_deref() {
         instance
@@ -2203,6 +2377,8 @@ fn load_desktop_plugin(package: &PluginPackage, data_root: &Path) -> Result<Desk
         version,
         runtime: loaded,
         config_available: package.manifest().config_mode,
+        banks,
+        sound_summaries,
         sounds,
         selected_sound_id,
         instance,
@@ -2691,6 +2867,7 @@ fn show_startup_error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackforge_plugin_api::{BankDescriptor, PRESET_CATALOG_SCHEMA_VERSION, PresetDescriptor};
 
     #[test]
     fn chooses_safe_activation_for_plugin_versions() {
@@ -2709,5 +2886,45 @@ mod tests {
                 active_version: "2.0.0".into()
             }
         );
+    }
+
+    #[test]
+    fn desktop_session_keeps_dynamic_bank_ids_and_labels_distinct() {
+        let catalog = PresetCatalog {
+            schema_version: PRESET_CATALOG_SCHEMA_VERSION,
+            banks: vec![
+                BankDescriptor {
+                    id: "factory-programs".into(),
+                    name: "M1 Factory Programs".into(),
+                    order: 0,
+                },
+                BankDescriptor {
+                    id: "plus1-card-combinations".into(),
+                    name: "M1 Plus+1 Card Combinations".into(),
+                    order: 3,
+                },
+            ],
+            presets: vec![PresetDescriptor {
+                id: "plus1.combination.000".into(),
+                name: "C00 The Cutter".into(),
+                description: None,
+                bank: Some("plus1-card-combinations".into()),
+                category: None,
+                order: 0,
+                tags: vec!["plus1".into()],
+                editable: false,
+            }],
+        };
+
+        let (banks, summaries, menu_sounds) = desktop_catalog_views(&catalog);
+
+        assert_eq!(banks.len(), 2);
+        assert_eq!(banks[1].id, "plus1-card-combinations");
+        assert_eq!(banks[1].name, "M1 Plus+1 Card Combinations");
+        assert_eq!(
+            summaries[0].bank.as_deref(),
+            Some("plus1-card-combinations")
+        );
+        assert_eq!(menu_sounds[0].bank, "M1 Plus+1 Card Combinations");
     }
 }

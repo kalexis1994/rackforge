@@ -2,8 +2,11 @@ use anyhow::{Context, Result, bail};
 use rackforge_session_api::{LivePerformanceState, SessionId, SessionState, SurfaceMode};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+#[cfg(unix)]
+use std::fs::File;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -129,18 +132,21 @@ impl SessionCheckpointStore {
         let bytes =
             serde_json::to_vec_pretty(&checkpoint).context("serializing session checkpoint")?;
         let temporary = self.path.with_extension("json.tmp");
-        let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .mode(0o600)
-            .open(&temporary)
-            .with_context(|| {
-                format!(
-                    "opening temporary session checkpoint {}",
-                    temporary.display()
-                )
+        if temporary.exists() {
+            fs::remove_file(&temporary).with_context(|| {
+                format!("removing stale session checkpoint {}", temporary.display())
             })?;
+        }
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options.open(&temporary).with_context(|| {
+            format!(
+                "opening temporary session checkpoint {}",
+                temporary.display()
+            )
+        })?;
         file.write_all(&bytes)
             .context("writing temporary session checkpoint")?;
         file.write_all(b"\n")
@@ -148,17 +154,8 @@ impl SessionCheckpointStore {
         file.sync_all()
             .context("syncing temporary session checkpoint")?;
         drop(file);
-        fs::rename(&temporary, &self.path).with_context(|| {
-            format!(
-                "atomically replacing session checkpoint {}",
-                self.path.display()
-            )
-        })?;
-        File::open(parent)
-            .and_then(|directory| directory.sync_all())
-            .with_context(|| {
-                format!("syncing session checkpoint directory {}", parent.display())
-            })?;
+        replace_file(&temporary, &self.path)?;
+        sync_directory(parent)?;
         Ok(())
     }
 
@@ -190,6 +187,55 @@ impl SessionCheckpointStore {
         }
         Ok(Some(checkpoint))
     }
+}
+
+#[cfg(unix)]
+fn replace_file(temporary: &Path, destination: &Path) -> Result<()> {
+    fs::rename(temporary, destination).with_context(|| {
+        format!(
+            "atomically replacing session checkpoint {}",
+            destination.display()
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn replace_file(temporary: &Path, destination: &Path) -> Result<()> {
+    if !destination.exists() {
+        return fs::rename(temporary, destination)
+            .with_context(|| format!("installing session checkpoint {}", destination.display()));
+    }
+    let backup = destination.with_extension("previous-rackforge-session");
+    if backup.exists() {
+        fs::remove_file(&backup)
+            .with_context(|| format!("removing stale checkpoint backup {}", backup.display()))?;
+    }
+    fs::rename(destination, &backup)
+        .with_context(|| format!("backing up session checkpoint {}", destination.display()))?;
+    if let Err(error) = fs::rename(temporary, destination) {
+        let _ = fs::rename(&backup, destination);
+        return Err(error)
+            .with_context(|| format!("installing session checkpoint {}", destination.display()));
+    }
+    fs::remove_file(&backup)
+        .with_context(|| format!("removing checkpoint backup {}", backup.display()))
+}
+
+#[cfg(unix)]
+fn sync_directory(directory: &Path) -> Result<()> {
+    File::open(directory)
+        .and_then(|file| file.sync_all())
+        .with_context(|| {
+            format!(
+                "syncing session checkpoint directory {}",
+                directory.display()
+            )
+        })
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_directory: &Path) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
@@ -259,6 +305,13 @@ mod tests {
             Some(SurfaceMode::Play)
         );
         assert_eq!(
+            store
+                .active_instance_id(&state.session_id)
+                .unwrap()
+                .as_deref(),
+            Some(DEFAULT_LIVE_INSTANCE_ID)
+        );
+        assert_eq!(
             store.master_level(&state.session_id).unwrap(),
             Some(rackforge_session_api::MasterLevel::new(725).unwrap())
         );
@@ -274,6 +327,36 @@ mod tests {
             Some("custom.user.stage-piano")
         );
         assert!(!store.path.with_extension("json.tmp").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replacing_a_checkpoint_publishes_the_latest_play_context() {
+        let root = temporary_data_root("replace");
+        let store = SessionCheckpointStore::live(&root);
+        let first = session(SurfaceMode::Live, "factory.piano-1");
+        store.save(&first).unwrap();
+
+        let latest = session(SurfaceMode::Play, "factory.piano-3");
+        store.save(&latest).unwrap();
+
+        assert_eq!(
+            store.active_mode(&latest.session_id).unwrap(),
+            Some(SurfaceMode::Play)
+        );
+        assert_eq!(
+            store
+                .selected_sound(&latest.session_id, DEFAULT_LIVE_INSTANCE_ID)
+                .unwrap()
+                .as_deref(),
+            Some("factory.piano-3")
+        );
+        assert!(
+            !store
+                .path
+                .with_extension("previous-rackforge-session")
+                .exists()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

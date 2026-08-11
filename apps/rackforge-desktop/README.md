@@ -15,6 +15,12 @@ shows an informational dialog and exits before configuration, MIDI, or the
 audio engine is initialized. Windows releases the named mutex automatically if
 the owning process exits or crashes.
 
+The active mode, plugin instance, selected program, master level, and master
+pan are checkpointed under `data/sessions/live.main.json`. Desktop restores
+and validates that context before starting audio, then synchronizes LITTLE so
+a long BACK press returns to the sound that is actually playing. Missing
+plugins or programs fall back safely without discarding the remaining session.
+
 ## Windows audio and MIDI
 
 Desktop opens the saved Windows output through WASAPI, or the system default

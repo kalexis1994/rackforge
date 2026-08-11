@@ -116,7 +116,6 @@ public final class MainActivity extends Activity {
     private TextView activePluginLabel;
     private LinearLayout playToolbar;
     private TextView playContextLabel;
-    private Button pluginConfigButton;
     private AlertDialog pluginPickerDialog;
     private AlertDialog installedPluginsDialog;
 
@@ -548,11 +547,6 @@ public final class MainActivity extends Activity {
         playToolbar.addView(playContextLabel, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
-        pluginConfigButton = toolbarButton("Config", view -> showPluginConfig());
-        pluginConfigButton.setVisibility(View.GONE);
-        playToolbar.addView(pluginConfigButton, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
         Button select = toolbarButton("▦  Select plugin", view -> showPluginPickerDialog());
         select.setTextColor(0xFF5CE2F5);
         playToolbar.addView(select, new LinearLayout.LayoutParams(
@@ -694,12 +688,7 @@ public final class MainActivity extends Activity {
         if (playToolbar != null) playToolbar.setVisibility(
                 "play".equals(currentPage) ? View.VISIBLE : View.GONE);
         if (playContextLabel != null) playContextLabel.setText(
-                ("config".equals(pluginWebSurface) ? "CONFIG · " : "PLAY · ")
-                        + activePluginDisplayName());
-        if (pluginConfigButton != null) {
-            pluginConfigButton.setVisibility(pluginConfigWebEntry == null ? View.GONE : View.VISIBLE);
-            pluginConfigButton.setText("config".equals(pluginWebSurface) ? "Play" : "Config");
-        }
+                "PLAY · " + activePluginDisplayName());
     }
 
     private Button toolbarButton(String text, android.view.View.OnClickListener listener) {
@@ -757,6 +746,11 @@ public final class MainActivity extends Activity {
         panel.addView(menuAction("⚙", "Audio & MIDI", "Output, latency, gain and controllers", () -> {
             menu.dismiss(); showSettingsDialog();
         }));
+        if (pluginConfigWebEntry != null) {
+            panel.addView(menuAction("◇", "Plugin settings", "Configure libraries and plugin resources", () -> {
+                menu.dismiss(); showPluginConfig();
+            }));
+        }
         panel.addView(menuAction("＋", "Install plugin", "Choose a portable .rfplugin package", () -> {
             menu.dismiss(); choosePluginFile();
         }));
@@ -1278,6 +1272,15 @@ public final class MainActivity extends Activity {
         });
         card.addView(activate, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (active && pluginConfigWebEntry != null) {
+            Button configure = button("Configure plugin");
+            configure.setOnClickListener(view -> {
+                if (installedPluginsDialog != null) installedPluginsDialog.dismiss();
+                showPluginConfig();
+            });
+            card.addView(configure, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
         return card;
     }
 
@@ -1446,11 +1449,7 @@ public final class MainActivity extends Activity {
 
     private void showPluginConfig() {
         if (pluginConfigWebEntry == null) return;
-        currentPage = "play";
-        if ("config".equals(pluginWebSurface)) {
-            showPlay();
-            return;
-        }
+        currentPage = "plugin-config";
         pluginWebSurface = "config";
         updateModeButtons();
         webView.loadUrl("https://rackforge.local/plugin/" + pluginConfigWebEntry);

@@ -13,11 +13,16 @@ host capabilities, or omit one or both web surfaces.
 
 `PLAY` may be the plugin's complete instrument editor, matching the
 single-window model used by many native audio plugins. `CONFIG` is optional and
-should be declared only for a genuinely separate settings or plugin-owned
-program-editing workflow. The manifest's `config_mode` flag declares that
-plugin-level capability to controller surfaces such as LITTLE. Hosts keep
-CONFIG discoverable and show an explicit unavailable message when the flag or
-corresponding web surface is absent.
+should be declared only for genuinely separate, infrequent setup such as sound
+libraries, resources, compatibility options or diagnostics. Program selection,
+sound design and Custom Program editing belong to `PLAY`. The manifest's
+`config_mode` flag declares the separate settings capability to controller
+surfaces such as LITTLE. Hosts keep CONFIG discoverable and show an explicit
+unavailable message when the flag or corresponding web surface is absent.
+
+RackForge presents the two surfaces in different places rather than exposing a
+PLAY/CONFIG tab switch. PLAY is the performance workspace. Opening a running
+plugin from the Plugins section loads its CONFIG surface directly.
 
 The generic program-editor tree is an optional interoperability mechanism. A
 plugin may use it to keep hardware and web editors backed by the same typed
@@ -132,24 +137,29 @@ from plugin JavaScript.
   `target_resource_id`, `grant_id` and `entry_id`. RackForge prepares a new
   plugin instance away from the real-time audio callback and swaps it at an
   audio block boundary.
-- `plugin.begin_program_edit`: available to `CONFIG`; starts a new program when
-  `program_id` is `null`, or edits a program from that plugin's `custom`
-  collection.
-- `plugin.edit_program_field`: available to `CONFIG`; updates a field published
-  by the active draft's typed editor. The host validates the draft, field and
-  tagged value. `preview: true` is transient; `preview: false` confirms it.
-- `plugin.set_program_name`: available to `CONFIG`; changes the active draft's
-  portable program name without exposing plugin document internals.
-- `plugin.restore_program_preview`: available to `CONFIG`; restores the last
-  confirmed draft after transient previews.
-- `plugin.save_program`: available to `CONFIG`; persists the active draft and
-  releases audition focus.
-- `plugin.cancel_program`: available to `CONFIG`; discards the active draft and
-  releases audition focus.
+- `plugin.begin_program_edit`: available to `PLAY` and `CONFIG`; starts a new
+  program when `program_id` is `null`, or edits a program from that plugin's
+  `custom` collection.
+- `plugin.edit_program_field`: available to `PLAY` and `CONFIG`; updates a field
+  published by the active draft's typed editor. The host validates the draft,
+  field and tagged value. `preview: true` is transient; `preview: false`
+  confirms it.
+- `plugin.set_program_name`: available to `PLAY` and `CONFIG`; changes the
+  active draft's portable program name without exposing plugin document
+  internals.
+- `plugin.restore_program_preview`: available to `PLAY` and `CONFIG`; restores
+  the last confirmed draft after transient previews.
+- `plugin.save_program`: available to `PLAY` and `CONFIG`; persists the active
+  draft and releases audition focus.
+- `plugin.cancel_program`: available to `PLAY` and `CONFIG`; discards the active
+  draft and releases audition focus.
 
 These are optional capabilities, not required controls or required screens.
 The host validates and transports them; the plugin decides whether and how they
-appear.
+appear. New plugin interfaces should keep musical program selection and editing
+in `PLAY`. `CONFIG` is reserved for infrequent setup such as libraries,
+resources, compatibility options and plugin diagnostics. Program methods remain
+available to `CONFIG` so existing plugin packages keep working while migrating.
 
 ## Host-owned resource explorer
 

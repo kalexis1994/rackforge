@@ -21,9 +21,11 @@ interface ResourceExplorerDialogProps {
   onBound: (grant: ResourceGrant) => void;
 }
 
-function toFileManagerEntry(entry: ResourceEntry): IEntity {
+function toFileManagerEntry(entry: ResourceEntry, parentId: string): IEntity {
+  const id = `${parentId === "/" ? "" : parentId}/${entry.name}`;
   return {
-    id: entry.id,
+    id,
+    parent: parentId,
     name: entry.name,
     type: entry.kind === "directory" ? "folder" : "file",
     size: entry.size ?? undefined,
@@ -73,8 +75,11 @@ export function ResourceExplorerDialog({
           ),
         );
         if (cancelled) return;
-        entriesRef.current = new Map(roots.map((entry) => [entry.id, entry]));
-        setData(roots.map(toFileManagerEntry));
+        const entities = roots.map((entry) => toFileManagerEntry(entry, "/"));
+        entriesRef.current = new Map(
+          entities.map((entity, index) => [entity.id, roots[index]]),
+        );
+        setData(entities);
       })
       .catch((reason: unknown) => {
         if (!cancelled) {
@@ -99,14 +104,22 @@ export function ResourceExplorerDialog({
   }, [resource.kind, selected, selectionValid]);
 
   const requestData = ({ id }: { id: string }) => {
+    const parent = entriesRef.current.get(id);
+    if (!parent) {
+      setError("RackForge could not resolve this folder.");
+      return;
+    }
     readJson<ResourceEntry[]>(
-      `/api/v1/resources/entries/${encodeURIComponent(id)}`,
+      `/api/v1/resources/entries/${encodeURIComponent(parent.id)}`,
     )
       .then((entries) => {
-        for (const entry of entries) entriesRef.current.set(entry.id, entry);
+        const entities = entries.map((entry) => toFileManagerEntry(entry, id));
+        entities.forEach((entity, index) =>
+          entriesRef.current.set(entity.id, entries[index]),
+        );
         return apiRef.current?.exec("provide-data", {
           id,
-          data: entries.map(toFileManagerEntry),
+          data: entities,
           skipProvider: true,
         });
       })

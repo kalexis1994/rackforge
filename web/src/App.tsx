@@ -908,9 +908,9 @@ function PluginsPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
   return (
     <>
       <PageHeading
-        eyebrow="Plugin rack"
-        title="Sound engines"
-        detail="Every plugin owns its programs and editor while RackForge provides the host session."
+        eyebrow="Plugin configuration"
+        title="Installed sound engines"
+        detail="Open a running plugin to configure its libraries, resources and compatibility options. Musical controls remain in Play."
       />
       <div className="plugin-section-heading">
         <span className="card-kicker">Running now</span>
@@ -1001,7 +1001,7 @@ function PluginPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
         />
       </section>
     );
-  return <PluginSurfaceTabs instance={instance} />;
+  return <PluginConfigSurface instance={instance} />;
 }
 
 function PluginSurfaceState({
@@ -1022,8 +1022,7 @@ function PluginSurfaceState({
   );
 }
 
-function PluginSurfaceTabs({ instance }: { instance: PluginInstance }) {
-  const [surface, setSurface] = useState<PluginWebSurfaceKind>("play");
+function PluginConfigSurface({ instance }: { instance: PluginInstance }) {
   return (
     <section className="plugin-surface-shell">
       <div className="plugin-surface-toolbar">
@@ -1031,27 +1030,16 @@ function PluginSurfaceTabs({ instance }: { instance: PluginInstance }) {
           <NavLink to="/plugins" aria-label="Back to plugins">
             <span className="plugin-back-glyph" aria-hidden="true">←</span>
           </NavLink>
-          <strong>{instance.plugin_name}</strong>
-        </div>
-        <div className="plugin-surface-tabs" role="tablist">
-          <button
-            className={surface === "play" ? "active" : ""}
-            onClick={() => setSurface("play")}
-          >
-            Play
-          </button>
-          <button
-            className={surface === "config" ? "active" : ""}
-            onClick={() => setSurface("config")}
-          >
-            Config
-          </button>
+          <div>
+            <span className="card-kicker">Plugin configuration</span>
+            <strong>{instance.plugin_name}</strong>
+          </div>
         </div>
       </div>
       <PluginFrame
         key={instance.instance_id}
         instance={instance}
-        surface={surface}
+        surface="config"
       />
     </section>
   );
@@ -1307,7 +1295,7 @@ function PluginFrame({
           );
       } else if (
         event.data.method === "plugin.begin_program_edit" &&
-        surface === "config" &&
+        (surface === "play" || surface === "config") &&
         (params.program_id === null ||
           (typeof params.program_id === "string" &&
             instance.sounds.some(
@@ -1325,7 +1313,7 @@ function PluginFrame({
         respond(true);
       } else if (
         event.data.method === "plugin.edit_program_field" &&
-        surface === "config" &&
+        (surface === "play" || surface === "config") &&
         draft &&
         params.draft_id === draft.draft_id &&
         typeof params.field_id === "string" &&
@@ -1342,7 +1330,7 @@ function PluginFrame({
         respond(true);
       } else if (
         event.data.method === "plugin.set_program_name" &&
-        surface === "config" &&
+        (surface === "play" || surface === "config") &&
         draft &&
         params.draft_id === draft.draft_id &&
         typeof params.name === "string" &&
@@ -1367,7 +1355,7 @@ function PluginFrame({
         }
       } else if (
         event.data.method === "plugin.save_program" &&
-        surface === "config" &&
+        (surface === "play" || surface === "config") &&
         draft &&
         params.draft_id === draft.draft_id
       ) {
@@ -1378,7 +1366,7 @@ function PluginFrame({
         respond(true);
       } else if (
         event.data.method === "plugin.cancel_program" &&
-        surface === "config" &&
+        (surface === "play" || surface === "config") &&
         draft &&
         params.draft_id === draft.draft_id
       ) {
@@ -1389,7 +1377,7 @@ function PluginFrame({
         respond(true);
       } else if (
         event.data.method === "plugin.restore_program_preview" &&
-        surface === "config" &&
+        (surface === "play" || surface === "config") &&
         draft &&
         params.draft_id === draft.draft_id
       ) {
@@ -1413,7 +1401,7 @@ function PluginFrame({
   }, [descriptor, instance, selectedSurface, snapshot, surface]);
 
   const editLease =
-    surface === "config" &&
+    (surface === "play" || surface === "config") &&
     snapshot?.program_draft?.instance_id === instance.instance_id &&
     snapshot.audition?.instance_id === instance.instance_id
       ? snapshot.audition.lease_id

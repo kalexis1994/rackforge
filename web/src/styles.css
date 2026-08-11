@@ -1260,6 +1260,12 @@ body {
   gap: 12px;
 }
 
+.plugin-surface-identity > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
 .plugin-surface-identity a {
   width: 38px;
   height: 38px;
@@ -1299,6 +1305,7 @@ body {
 }
 
 .plugin-surface-identity strong {
+  display: block;
   overflow: hidden;
   font-size: 12px;
   letter-spacing: 0.04em;
@@ -1890,6 +1897,8 @@ body {
   inset: 0;
   z-index: 1000;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   place-items: center;
   padding: 24px;
   background: rgba(1, 7, 11, 0.82);
@@ -1899,8 +1908,12 @@ body {
 .resource-explorer-dialog {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(1040px, 100%);
-  height: min(720px, 100%);
+  width: 100%;
+  max-width: 1040px;
+  min-width: 0;
+  height: 100%;
+  max-height: 720px;
+  min-height: 0;
   overflow: hidden;
   color: var(--ink);
   background: #07131c;
@@ -1929,14 +1942,28 @@ body {
 }
 
 .resource-explorer-body {
+  width: 100%;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
   padding: 10px;
   background: #050e15;
 }
 
 .resource-explorer-body > div,
 .resource-explorer-body .wx-willow-dark-theme {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   height: 100%;
+  overflow: hidden;
+}
+
+.resource-explorer-body .wx-filemanager,
+.resource-explorer-body .wx-content,
+.resource-explorer-body .wx-content-wrapper {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .resource-explorer-empty {

@@ -105,6 +105,52 @@ impl PluginStorage {
         }
         Ok(program)
     }
+
+    /// Loads every saved program in a plugin namespace in deterministic path
+    /// order. Portable plugins cannot read host storage themselves, so the
+    /// host uses this to reinstall their program library for each instance.
+    pub fn list_programs(&self, plugin_id: &str) -> Result<Vec<ProgramDocument>> {
+        let plugin = self.ensure_plugin(plugin_id)?;
+        let mut paths = Vec::new();
+        collect_program_paths(&plugin.root, &mut paths)?;
+        paths.sort();
+        paths
+            .into_iter()
+            .map(|path| {
+                let relative = path
+                    .strip_prefix(&plugin.root)
+                    .context("saved program escaped its plugin namespace")?;
+                self.load_program(plugin_id, relative)
+                    .with_context(|| format!("loading saved program {}", path.display()))
+            })
+            .collect()
+    }
+}
+
+fn collect_program_paths(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in fs::read_dir(directory)
+        .with_context(|| format!("reading program directory {}", directory.display()))?
+    {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            bail!(
+                "program storage cannot contain a symlink: {}",
+                entry.path().display()
+            );
+        }
+        if file_type.is_dir() {
+            collect_program_paths(&entry.path(), paths)?;
+        } else if file_type.is_file()
+            && entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.ends_with(RECOMMENDED_PROGRAM_SUFFIX))
+        {
+            paths.push(entry.path());
+        }
+    }
+    Ok(())
 }
 
 fn ensure_root(path: &Path) -> Result<PathBuf> {
@@ -447,6 +493,37 @@ mod tests {
         let temporary = fs::canonicalize(std::env::temp_dir()).unwrap();
         assert!(absolute.starts_with(temporary));
         fs::remove_dir_all(absolute).unwrap();
+    }
+
+    #[test]
+    fn lists_saved_program_documents_recursively_and_ignores_other_files() {
+        let root = temporary_root();
+        let storage = PluginStorage::new(&root);
+        storage
+            .save_program(
+                Path::new("programs/b.rackforge-program.json"),
+                &program("Second"),
+            )
+            .unwrap();
+        storage
+            .save_program(
+                Path::new("programs/nested/a.rackforge-program.json"),
+                &program("First"),
+            )
+            .unwrap();
+        storage
+            .write_atomic(
+                "org.rackforge.roland-scva",
+                Path::new("programs/readme.txt"),
+                b"not a program",
+            )
+            .unwrap();
+
+        let programs = storage.list_programs("org.rackforge.roland-scva").unwrap();
+        assert_eq!(programs.len(), 2);
+        assert_eq!(programs[0].name, "Second");
+        assert_eq!(programs[1].name, "First");
+        fs::remove_dir_all(fs::canonicalize(root).unwrap()).unwrap();
     }
 
     #[test]

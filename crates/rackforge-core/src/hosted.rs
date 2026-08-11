@@ -1,4 +1,4 @@
-use crate::{PluginPackage, loader::NativeLoadedPlugin};
+use crate::{PluginPackage, PluginStorage, loader::NativeLoadedPlugin};
 use anyhow::{Context, Result, bail};
 use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use rackforge_plugin_api::{
@@ -115,6 +115,7 @@ pub struct PortableLoadedPlugin {
     parameters: ParameterSchema,
     presets: PresetCatalog,
     resources: BTreeMap<String, PathBuf>,
+    data_root: Option<PathBuf>,
     module: PortableModule,
 }
 
@@ -201,6 +202,7 @@ impl PortableLoadedPlugin {
             parameters,
             presets,
             resources,
+            data_root: data_root.map(Path::to_path_buf),
             module,
         })
     }
@@ -211,6 +213,29 @@ impl PortableLoadedPlugin {
             instance
                 .load_resource_file(id, path)
                 .with_context(|| format!("delivering portable resource {id:?}"))?;
+        }
+        let saved_programs = match &self.data_root {
+            Some(root) => PluginStorage::new(root)
+                .list_programs(&self.manifest.id)
+                .context("loading saved portable programs")?,
+            None => Vec::new(),
+        };
+        for document in &saved_programs {
+            let source =
+                serde_json::to_vec(document).context("serializing saved portable program")?;
+            let bytes = instance
+                .prepare_program_save(&source)
+                .with_context(|| format!("preparing saved program {:?}", document.id))?;
+            let prepared: PreparedProgram = serde_json::from_slice(&bytes)
+                .with_context(|| format!("parsing saved program {:?}", document.id))?;
+            prepared
+                .validate()
+                .with_context(|| format!("validating saved program {:?}", document.id))?;
+            let prepared_bytes = serde_json::to_vec(&prepared)
+                .context("serializing prepared saved portable program")?;
+            instance
+                .install_program(&prepared_bytes)
+                .with_context(|| format!("installing saved program {:?}", document.id))?;
         }
         let presets = match instance.preset_catalog()? {
             Some(bytes) => {
@@ -231,6 +256,7 @@ impl PortableLoadedPlugin {
         Ok(PortablePluginInstance {
             instance,
             presets,
+            allows_presets: self.manifest.capabilities.contains(&Capability::Presets),
             active: false,
             midi_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
             parameter_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
@@ -331,7 +357,8 @@ impl PluginInstance<'_> {
                     .context("validating portable program install")?;
                 let source =
                     serde_json::to_vec(prepared).context("serializing portable program install")?;
-                instance.instance.install_program(&source)
+                instance.instance.install_program(&source)?;
+                instance.refresh_presets()
             }
         }
     }
@@ -538,12 +565,29 @@ impl PluginInstance<'_> {
 pub struct PortablePluginInstance {
     instance: WasmInstance,
     presets: PresetCatalog,
+    allows_presets: bool,
     active: bool,
     midi_scratch: Vec<MidiEvent>,
     parameter_scratch: Vec<ParameterEvent>,
 }
 
 impl PortablePluginInstance {
+    fn refresh_presets(&mut self) -> Result<()> {
+        let Some(bytes) = self.instance.preset_catalog()? else {
+            return Ok(());
+        };
+        let catalog: PresetCatalog =
+            serde_json::from_slice(&bytes).context("parsing refreshed portable preset catalog")?;
+        catalog
+            .validate()
+            .context("validating refreshed portable preset catalog")?;
+        if !self.allows_presets && !catalog.presets.is_empty() {
+            bail!("portable plugin published presets without declaring the capability");
+        }
+        self.presets = catalog;
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn process_interleaved(
         &mut self,

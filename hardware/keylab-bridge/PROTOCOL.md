@@ -1,77 +1,62 @@
-# Protocolo del KeyLab Essential mk3
+# KeyLab Essential mk3 protocol
 
-Registro técnico del protocolo MIDI/SysEx usado por RackForge con el firmware
-oficial del Arturia KeyLab Essential 61 mk3. Última actualización:
-2026-07-29.
+Technical record of the MIDI/SysEx protocol used by RackForge with the official
+Arturia KeyLab Essential 61 mk3 firmware.
 
-Este documento separa deliberadamente tres niveles de evidencia:
+Evidence labels:
 
-- **Confirmado en hardware**: observado en el teclado físico del proyecto.
-- **Confirmado en software público**: implementado por integraciones públicas,
-  pero todavía no observado localmente.
-- **Hipótesis**: pendiente de una prueba acotada o de ingeniería inversa.
+- **Hardware confirmed:** observed on the project's physical keyboard.
+- **Public-software confirmed:** implemented by public integrations but not yet
+  reproduced locally.
+- **Hypothesis:** requires a bounded test or further reverse engineering.
 
-## Hardware de referencia
+## Reference hardware
 
-- Modelo: KeyLab Essential 61 mk3.
-- Firmware oficial: 1.2.1.
-- Endpoint usado: `KL Essential 61 mk3 MIDI`, nunca `DINTHRU`, `MCU/HUI` ni
-  `ALV`.
-- Transporte actual: ALSA MIDI desde Raspberry Pi 4B.
+- Arturia KeyLab Essential 61 mk3.
+- Official firmware 1.2.1.
+- Main endpoint whose name ends in `MIDI`.
+- Initially captured over ALSA MIDI on Raspberry Pi 4B; the same messages are
+  now used by Windows and Android transports.
 
-Las operaciones descritas aquí pertenecen a la integración DAW oficial por
-SysEx. No escriben firmware, flash, QSPI, templates ni memorias de usuario.
+These operations belong to the official DAW integration protocol. RackForge
+does not update firmware, write templates, or modify user memories.
 
-## Fuentes públicas
+## Public sources
 
-- [Guía no oficial de programación del KeyLab Essential mk3][guide], obtenida
-  mediante ingeniería inversa de las integraciones de Logic Pro y FL Studio.
-- [Implementación de pantalla de Bitwig][bitwig-display].
-- [Tipos de marco del footer usados por Bitwig][bitwig-context].
-- [Enum de pantallas generado por Arturia para la integración de FL Studio][arturia-displays].
-- [Protocolo de pantalla de Ableton Live extraído de su integración oficial][ableton-display].
+The protocol was cross-checked against public Bitwig, Ableton, FL Studio, and
+Loopy Pro integrations and an unofficial KeyLab Essential mk3 programming
+guide. Public behavior is not marked hardware-confirmed until reproduced on the
+project keyboard.
 
-[guide]: https://github.com/PrzemekBarski/arturia-keylab-essential-mk3-programming-guide
-[bitwig-display]: https://github.com/bitwig/bitwig-extensions/blob/main/src/main/java/com/bitwig/extensions/controllers/arturia/keylab/essentialMk3/display/LcdDisplay.java
-[bitwig-context]: https://github.com/bitwig/bitwig-extensions/blob/main/src/main/java/com/bitwig/extensions/controllers/arturia/keylab/essentialMk3/display/ContextPart.java
-[arturia-displays]: https://github.com/andromika/Arturia-KLE-mk3-FLstudio/blob/master/Displays.py
-[ableton-display]: https://github.com/MrMatch246/KeyLab_Essential_mk3_TGE/blob/master/midi.py
+## SysEx envelope
 
-## Envoltorio SysEx
-
-Todos los comandos usan:
+Every command uses:
 
 ```text
 F0 00 20 6B 7F 42 <PAYLOAD> F7
 ```
 
-El payload sólo puede contener datos MIDI de 7 bits (`00..7F`).
+Payload bytes must be 7-bit MIDI data (`00..7F`).
 
-### Sesión DAW
+### DAW session
 
 ```text
 CONNECT     02 0F 40 5A 01
 DISCONNECT  02 0F 40 5A 00
+DAW PROGRAM 21 11 40 02 00 01
 ```
 
-RackForge selecciona además el programa DAW:
+The keyboard echoes the DAW Program SysEx exactly. RackForge treats that echo
+as the acquisition/heartbeat acknowledgement; a successful MIDI write alone
+does not prove that the surface is healthy.
 
-```text
-21 11 40 02 00 01
-```
-
-El teclado devuelve exactamente ese SysEx. RackForge usa el eco como ACK real para
-la adquisición y el heartbeat; aceptar una escritura ALSA no alcanza para
-considerar saludable la conexión.
-
-La aparición temprana del puerto ALSA no implica que la UI del teclado esté
-lista. Después de observar una carrera real durante el arranque, el servicio
-espera cinco segundos de identidad USB estable antes del primer mensaje y
-separa dos segundos los reintentos de adquisición.
+An ALSA endpoint may appear before the keyboard UI is ready. After reproducing
+that boot race, the driver waits for five seconds of stable USB identity before
+the first message and leaves two seconds between acquisition attempts.
 
 ## Display
 
-### Limpiar
+### Clear
 
 ```text
 04 01 60 61
@@ -80,184 +65,104 @@ separa dos segundos los reintentos de adquisición.
 ### Header
 
 ```text
-04 01 60 01 02 <ASCII, máximo 18> 00 00
+04 01 60 01 02 <ASCII, maximum 18> 00 00
 ```
 
-Confirmado en hardware. RackForge lo usa para la sección actual.
-
-### Cuerpo de dos líneas
+### Two-line body
 
 ```text
-04 01 60 12 01 <LINEA 1> 00 02 <LINEA 2> 00 00
+04 01 60 12 01 <LINE 1> 00 02 <LINE 2> 00 00
 ```
 
-Confirmado en hardware. Cada línea admite hasta 18 caracteres ASCII. El tipo
-`12` permite header y footer nativos.
+Both lines accept at most 18 ASCII characters. Screen type `12` keeps the
+native header and footer available.
 
-#### Jerarquía tipográfica nativa
-
-Confirmado visualmente en el hardware del proyecto el 2026-07-29:
-
-- `LINEA 1` usa el trazo grueso/principal del firmware;
-- `LINEA 2` usa un trazo más fino/secundario;
-- el espesor depende de la región nativa, no de mayúsculas, minúsculas,
-  caracteres ni estilos de RackForge;
-- el protocolo conocido no expone selección de fuente o peso dentro de una
-  misma línea.
-
-La pantalla debe modelarse como tres regiones nativas:
+Hardware inspection confirmed that line 1 uses the firmware's heavier primary
+stroke and line 2 uses a thinner secondary stroke. Weight belongs to the native
+region; case, characters, and RackForge styles do not change it.
 
 ```text
 HEADER
-CUERPO: LINEA 1 (gruesa) + LINEA 2 (fina)
+BODY: LINE 1 (primary) + LINE 2 (secondary)
 FOOTER
 ```
 
-Regla de diseño: reservar `LINEA 1` para el valor o foco principal y usar
-`LINEA 2` para opciones vecinas, contexto o información secundaria. Intentar
-crear jerarquía tipográfica mezclando texto dentro de `LINEA 1` no funciona:
-todo se renderiza con el mismo espesor.
+Use line 1 for the focused value and line 2 for context or neighboring choices.
 
-### Catálogo de pantallas del firmware oficial
+### Official screen catalog
 
-El archivo `Displays.py`, marcado como código auto-generado por Arturia en la
-integración de FL Studio, completa el catálogo que la guía pública sólo
-documenta hasta `1A`:
+Arturia's generated `Displays.py` exposes:
 
-| ID | Nombre del enum | Naturaleza |
+| ID | Enum | Kind |
 | ---: | --- | --- |
-| `10` | `eFS_1Line` | texto |
-| `11` | `e1Line` | texto |
-| `12` | `e2Lines` | texto |
-| `13` | `e2LinesScroll` | texto desplazable |
-| `14` | `eKnob` | widget de perilla |
-| `15` | `eFader` | widget de fader |
-| `16` | `ePad` | widget de pad |
+| `10` | `eFS_1Line` | text |
+| `11` | `e1Line` | text |
+| `12` | `e2Lines` | two-line text |
+| `13` | `e2LinesScroll` | scrolling text |
+| `14` | `eKnob` | knob widget |
+| `15` | `eFader` | fader widget |
+| `16` | `ePad` | pad widget |
 | `17` | `ePopup` | popup |
-| `18` | `eBlinkScreen` | texto intermitente |
-| `19` | `eLeftIcon` | icono predefinido y texto |
-| `1A` | `eTopIcon` | icono predefinido y texto |
-| `1B` | `e1InlineIcon` | icono predefinido en línea |
-| `1C` | `e2InlineIcon` | dos iconos predefinidos |
-| `1D` | `ePartScreen` | pantalla estructurada de partes |
-| `1E` | `eFramedText` | texto enmarcado |
-| `1F` | `e2InlineBlink` | variante intermitente |
-| `20` | `eAutoComponent` | feedback automático de control |
-| `21` | `eForceDefault` | restaura feedback predeterminado |
-| `60` | `eBlankScreen` | pantalla vacía/negra |
-| `61` | `eWhiteScreen` | limpieza/blanco |
-| `62` | `eBorderedScreen` | borde predefinido |
+| `18` | `eBlinkScreen` | blinking text |
+| `19` | `eLeftIcon` | built-in icon and text |
+| `1A` | `eTopIcon` | built-in icon and text |
+| `1B` | `e1InlineIcon` | one inline icon |
+| `1C` | `e2InlineIcon` | two inline icons |
+| `1D` | `ePartScreen` | structured Part screen |
+| `1E` | `eFramedText` | framed text |
+| `1F` | `e2InlineBlink` | blinking inline variant |
+| `20` | `eAutoComponent` | automatic control feedback |
+| `21` | `eForceDefault` | restore default feedback |
+| `60` | `eBlankScreen` | logical blank screen |
+| `61` | `eWhiteScreen` | clear/white logical mode |
+| `62` | `eBorderedScreen` | predefined border |
 
-El `1D` que usa Bitwig en `centerScreen()` no transporta píxeles. Su payload es
-una lista corta de campos numerados y valores, coherente con `ePartScreen`.
+`ePartScreen` receives numbered fields, not pixels. No reviewed public API
+contains a bitmap, image, canvas, or framebuffer upload operation.
 
-No hay una entrada `bitmap`, `image`, `canvas`, `framebuffer` ni equivalente en
-este enum. Tampoco apareció una en las integraciones públicas de Bitwig,
-Ableton, FL Studio y Loopy Pro revisadas.
+### Pixel-control research
 
-### Investigación de control por píxel
+The physical display is a monochrome 128×64 framebuffer: 1,024 bytes using
+`buffer[(y >> 3) * 128 + x]`, bit `y & 7`. Offline analysis of the exact
+1.2.1 binary located internal set/read-pixel and present routines, including a
+page-oriented 8 × 128-byte LCD transfer compatible with the ST7565 family.
 
-Estado de la evidencia para el firmware oficial 1.2.1:
+Those addresses are firmware-version details, not an ABI. The runtime USB
+descriptor exposes MIDI Streaming and DFU runtime, with no HID or proprietary
+bulk graphics endpoint.
 
-| Capa | Resultado | Confianza |
-| --- | --- | --- |
-| Hardware/render interno | framebuffer monocromo `128×64`, 1 bit por píxel | alta |
-| Tamaño de frame | `128 × 64 / 8 = 1024` bytes | alta |
-| Layout interno | `buffer[(y >> 3) * 128 + x]`, bit `y & 7` | alta |
-| API SysEx pública | texto, valores, iconos y widgets estructurados | alta |
-| Carga de bitmap por SysEx | no encontrada | alta como ausencia en APIs conocidas; no es prueba matemática de inexistencia |
-| Endpoint USB gráfico | no existe en la configuración USB de ejecución | alta, confirmado con `lsusb -v` |
+Operational conclusion:
 
-El análisis offline localizó dos primitivas del renderer en el binario oficial:
+- official firmware exposes structured widgets, not verified arbitrary pixels;
+- the display hardware can render a real 128×64 graph internally;
+- host pixel control would require an undiscovered bounded SysEx command or a
+  firmware extension;
+- RackForge does not probe random IDs or payloads on user hardware.
 
-- `0x0802C594`: valida `x <= 127`, `y <= 63` y pone o limpia el bit;
-- `0x0802C690`: valida los mismos límites y lee el bit.
-- `0x080095B8`: presenta el framebuffer completo en ocho páginas de 128 bytes;
-- `0x0802C2A4`: método interno que dispara esa presentación.
+Physical tests of `eWhiteScreen` with the required closing `00` cleared the
+content/returned to the DAW template; they did not fill all pixels. The removed
+`framebuffer-test` and `screen-fill` commands must not be restored unless a
+real transport primitive is proven.
 
-Estas direcciones corresponden al firmware 1.2.1 exacto y no deben tratarse
-como una ABI estable.
-
-La rutina de presentación envía, para cada página, `B0 + page`, `10 04` y luego
-128 bytes de datos. La inicialización del LCD usa comandos compatibles con la
-familia ST7565. Esto cierra la ruta interna `framebuffer -> SPI1 -> LCD`, pero no
-crea por sí solo una ruta desde USB/MIDI al framebuffer.
-
-El descriptor USB de ejecución sólo presenta MIDI Streaming, además de la
-interfaz DFU runtime. No presenta HID ni un endpoint bulk propietario dedicado
-al display. Por tanto, una imagen enviada desde la Raspberry tendría que usar
-un comando SysEx fragmentado que todavía no se ha encontrado, o una extensión
-del firmware.
-
-Conclusión operativa:
-
-- con firmware oficial podemos componer únicamente los widgets que él expone;
-- la pantalla física sí permite una gráfica ADSR real de 128×64;
-- para control absoluto necesitamos encontrar un handler SysEx de bitmap aún
-  desconocido o agregar uno mediante firmware modificado;
-- un firmware extendido sólo necesitaría recibir 1024 bytes acotados y llamar
-  al `present` ya localizado; no necesita reemplazar el renderer ni el driver
-  del LCD;
-- no se explorarán IDs o payloads al azar sobre el teclado.
-
-### Prueba física de los enums de pantalla completa
-
-Los nombres públicos `eBlankScreen (60)`, `eWhiteScreen (61)` y
-`eBorderedScreen (62)` no deben interpretarse como operaciones de framebuffer.
-La integración FL Studio denomina `ClearScreen()` a `eWhiteScreen` y lo
-serializa así:
+### Contextual footer
 
 ```text
-F0 00 20 6B 7F 42 04 01 60 61 00 F7
-                              ^^ cierre de payload
+04 01 60 03 <BUTTON 1> <BUTTON 2> <BUTTON 3> <BUTTON 4>
 ```
 
-Se hicieron dos pruebas físicas el 2026-07-29:
+The high nibble selects position (`10`, `20`, `30`, `40`). The low
+nibble selects:
 
-1. Sin el `00` final, el firmware descartó el mensaje.
-2. Con la serialización exacta, desapareció HOME, apareció la plantilla DAW y
-   luego el servicio recuperó HOME; nunca se encendió la superficie completa.
-
-El comportamiento concuerda con una operación que limpia o abandona la página
-de contenido, no con `memset(framebuffer, 0xFF, 1024)`. El handler interno de
-`0x080234E4` también remapea `61 -> 59` y `62 -> 5A` antes de delegar al
-subsistema de presentación; esos enums son modos lógicos y no bytes del LCD.
-
-Resultado: el firmware oficial sigue sin ofrecer una primitiva comprobada para
-rellenar o cargar píxeles desde el host. Se retiraron los comandos experimentales
-`framebuffer-test` y `screen-fill` para no presentar una capacidad inexistente.
-`CLEAR_SCREEN` se conserva únicamente como parte de la restauración de sesión,
-con el terminador correcto.
-
-### Footer contextual
-
-Comando base:
-
-```text
-04 01 60 03 <BOTON 1> <BOTON 2> <BOTON 3> <BOTON 4>
-```
-
-Cada botón usa el nibble alto como posición:
-
-| Posición física | Base |
-| --- | ---: |
-| Button 1, izquierda | `10` |
-| Button 2 | `20` |
-| Button 3 | `30` |
-| Button 4, derecha | `40` |
-
-El nibble bajo selecciona el atributo:
-
-| Atributo | ID para Button 1 | Datos |
+| Attribute | Button 1 ID | Data |
 | --- | ---: | --- |
-| Estado/marco | `10` | `<frame> 00` |
-| Texto | `11` | `<ASCII> 00` |
-| Icono | `12` | `<icon_id> 00` |
+| State/frame | `10` | `<frame> 00` |
+| Text | `11` | `<ASCII> 00` |
+| Icon | `12` | `<icon_id> 00` |
 
-Para los demás botones se suma `10`, `20` o `30`. El texto admite como máximo
-7 caracteres; si se excede ese límite el botón puede no renderizarse.
+Other buttons add `10`, `20`, or `30`. Text is limited to seven
+characters.
 
-Footer textual mínimo confirmado en hardware:
+Hardware-confirmed minimal footer:
 
 ```text
 04 01 60 03
@@ -267,179 +172,98 @@ Footer textual mínimo confirmado en hardware:
   41 42 41 43 4B 00
 ```
 
-Corresponde a `OK`, `<`, `>` y `BACK`. A diferencia de escribir esos nombres
-como segunda línea del cuerpo, este comando los muestra pequeños y pegados al
-borde inferior.
+This renders `OK`, `<`, `>`, and `BACK`.
 
-## Estados visuales del footer
+Footer frame values:
 
-Bitwig nombra los valores así:
-
-| Valor | Nombre público | Evidencia local |
+| Value | Public name | Local evidence |
 | ---: | --- | --- |
-| `00` | `NONE` | Seleccionado como estado neutro; pendiente de confirmación visual |
-| `01` | `BAR` | Confirmado: dibuja un borde/línea inferior |
-| `02` | `FRAME_SMALL` | Pendiente de observar |
-| `03` | `FRAME_FULL` | Confirmado: dibuja un marco exterior completo |
+| `00` | `NONE` | neutral candidate |
+| `01` | `BAR` | confirmed bottom line |
+| `02` | `FRAME_SMALL` | not yet observed |
+| `03` | `FRAME_FULL` | confirmed outline, not fill |
 
-Hallazgo importante: `FRAME_FULL` **no** significa fondo relleno. En el
-firmware 1.2.1 del teclado del proyecto sólo creó un contorno. `BAR` tampoco es
-un estado neutro invisible: deja una línea inferior aun sin tocar el botón.
+`FRAME_FULL` does not invert/fill the button on firmware 1.2.1. Do not map a
+pressed state to it expecting inversion.
 
-Hasta ahora ninguna fuente pública encontrada documenta un valor que pinte
-toda la superficie negra e invierta el texto. Por tanto:
+## Physical inputs
 
-- no se debe mapear `VisualState::Pressed` a `FRAME_FULL` suponiendo inversión;
-- el estado normal deseado debe probarse con `NONE`;
-- el relleno/inversión requiere comprobar estados adicionales de forma acotada
-  o localizar la rutina correspondiente en el firmware oficial;
-- no se deben recorrer indiscriminadamente los 128 valores.
+Hardware-confirmed messages on MIDI channel 1:
 
-## Entradas físicas
-
-Captura confirmada en hardware, canal MIDI 1:
-
-| Entrada | Press/giro | Release |
+| Input | Press/turn | Release |
 | --- | --- | --- |
 | Button 1 | `B0 2C 7F` | `B0 2C 00` |
 | Button 2 | `B0 2D 7F` | `B0 2D 00` |
 | Button 3 | `B0 2E 7F` | `B0 2E 00` |
 | Button 4 | `B0 2F 7F` | `B0 2F 00` |
-| Encoder izquierda | `B0 74 00..3F` | — |
+| Encoder left | `B0 74 00..3F` | — |
 | Encoder neutral | `B0 74 40` | — |
-| Encoder derecha | `B0 74 41..7F` | — |
+| Encoder right | `B0 74 41..7F` | — |
 | Encoder press | `B0 75 7F` | `B0 75 00` |
 
-Los releases no ejecutan nuevamente la acción. Sí deben conservarse como
-eventos para retirar feedback visual exactamente al soltar el botón.
+Release events do not repeat actions, but they remove pressed visual feedback.
 
-### LED RGB de los botones contextuales
+### RGB LEDs
 
-Los CC 44–47 son exclusivamente mensajes de entrada y reenviarlos al teclado
-no controla las luces. La integración pública de Ableton usa el comando SysEx:
+CC 44–47 are input messages and do not drive the lights. RGB output uses:
 
 ```text
 04 01 16 <button_id> <r> <g> <b>
 ```
 
-Para los cuatro botones contextuales, de izquierda a derecha, `button_id` es
-`18`, `19`, `1A` y `1B`; cada canal RGB acepta `00..7F`. Esta serialización quedó
-confirmada en hardware local el 2026-08-08. El firmware sólo la aplica dentro
-de una sesión DAW adquirida; enviarla mientras el teclado está restaurado en el
-programa Arturia no produce feedback visible.
+Context button IDs are `18`, `19`, `1A`, and `1B`. RGB values are
+`00..7F`. The command is effective only during an acquired DAW session.
 
-El runtime portable del controlador RackForge aplica `R=10, G=40, B=64` como
-iluminación ambiental tenue a todo el rango RGB `00..2B`: botones de modo,
-transporte, controles contextuales y los 16 pads. Los botones contextuales
-pueden elevar temporalmente el brillo para foco o pulsación. Al liberar la
-sesión, el runtime apaga el rango completo antes de desconectar DAW y restaurar
-el programa Arturia. Desktop, Raspberry y Android consumen la misma secuencia
-de mensajes y temporizaciones.
+The portable controller runtime applies dim blue `R=10, G=40, B=64` to RGB
+IDs `00..2B`: mode buttons, transport, context controls, and all 16 pads. It
+turns the range off before releasing DAW mode and restoring the Arturia program.
 
-## Contrato de navegación de RackForge
-
-De izquierda a derecha:
+## RackForge navigation contract
 
 ```text
 Button 1     Button 2     Button 3     Button 4
 OK           <            >            BACK
 ```
 
-En un editor:
+- `OK` starts or confirms editing.
+- `BACK` cancels an active edit, otherwise leaves the current page.
+- `<` and `>` move focus or change the selected value.
+- Encoder turn mirrors previous/next; encoder press mirrors OK.
 
-- `OK` inicia o confirma la edición;
-- `BACK` durante la edición cancela y restaura el valor original;
-- `BACK` fuera de edición sale del editor;
-- `<` y `>` cambian el punto o parámetro seleccionado.
+Short and long presses are mutually exclusive. Long press begins at 650 ms.
 
-### Pulsaciones largas y escape del host
+- Long BACK returns to the active PLAY plugin or LIVE selection and restores
+  the selected sound anchor.
+- OK + BACK, started within 250 ms and held for 650 ms, returns HOME and performs
+  a global stop. Core enters IDLE, cancels drafts/audition, destroys sound
+  runtimes, and keeps the audio device open with silence.
+- The emergency chord has priority and never also emits OK LONG or BACK LONG.
+- Plugins cannot consume or block either host-owned escape route.
 
-Los cuatro botones producen una pulsación corta al soltarse o una pulsación
-larga una vez alcanzados 650 ms. Ambos gestos son mutuamente excluyentes.
+### Reserved master controls
 
-- `BACK` sostenido vuelve al modo activo de RackForge. En `PLAY` regresa al
-  plugin seleccionado y le permite sugerir el programa que debe quedar centrado;
-  en `LIVE` vuelve al rack o instrumento seleccionado. El modo se lee del
-  estado de sesión persistido por Core y se resincroniza después de reiniciar o
-  reconectar el driver.
-- `OK` + `BACK`, iniciados con una diferencia máxima de 250 ms y sostenidos
-  durante 650 ms, fuerzan `HOME` y una parada global. Core cambia la sesión a
-  `IDLE`, cancela draft/audición, destruye todos los runtimes sonoros y mantiene
-  la interfaz de audio abierta entregando silencio. Volver a `LIVE` o `PLAY`
-  ejecuta un nuevo ciclo `activate` antes de habilitar la mezcla.
-- El acorde de emergencia tiene prioridad: no genera además `OK LONG` ni
-  `BACK LONG`.
-- Estas dos rutas son propiedad del host. Un plugin puede ser notificado después
-  de la navegación, pero no puede consumirlas, cancelarlas ni impedirlas.
+In DAW Program, Fader 9 is MIDI channel 1 CC 113 and maps to
+`master_level`. Encoder 9 is CC 104 and maps to `master_pan`.
 
-### Fader y encoder reservados por el host
+The pan encoder is treated as relative movement from authoritative session
+state to avoid jumps after reconnect. A virtual center detent keeps center easy
+to find while preserving both ends of the range.
 
-La definición de una memoria User instalada por MIDI Control Center asigna por
-defecto el Fader 9 a CC 85. Sin embargo, RackForge adquiere la superficie en
-`DAW Program`; el script de integración Ableton para este modo identifica el
-Fader 9 como CC 113 por el puerto MIDI principal.[^ableton-fader] El paquete 0.1.9 declara
-`channel = 0`, `controller = 113` —el canal se expresa en base cero en la API—
-como `master_level`.
+The latest value temporarily replaces the header for 1.5 seconds:
+`MASTER VOL n%`, `MASTER PAN L n%`, `MASTER PAN R n%`, or
+`MASTER PAN CENTER`. The driver sends typed commands and Core removes the
+reserved CC before plugin routing.
 
-Desde el paquete 0.2.0, el Encoder 9 situado encima del fader se declara como
-`master_pan` con `channel = 0`, `controller = 104`. Es un encoder absoluto:
-RackForge convierte 0…127 a -1000…1000 y trata 60…68 como centro exacto. Esta
-zona de encastre virtual facilita recuperar el centro sin depender de que el
-control físico entregue exactamente 64.
+### Reserved PART action
 
-El paquete 0.2.1 superpone el último valor recibido en el header durante 1,5
-segundos: `MASTER VOL n%`, `MASTER PAN L n%`, `MASTER PAN R n%` o
-`MASTER PAN CENTER`. El temporizador se renueva con cada movimiento. Al expirar,
-el driver restaura el header actual del menú; cuerpo y footer permanecen
-intactos durante toda la notificación.
+PART emits channel 1 CC 119: 127 on press and 0 on release. A short press opens
+or toggles keyboard parts. Holding PART while pressing a note sets the split;
+holding it for 1.5 seconds without a note clears the split. Core consumes the
+gesture and split note before plugin routing.
 
-Estos mensajes no son navegación ni MIDI de plugin. El driver los envía al Core
-como un comando tipado y Core descarta el CC original antes de procesar el
-instrumento. La registración ocurre antes de abrir el input y se repite cuando
-cambia la instancia del socket de control. Tanto `master_level` como
-`master_pan` son estado persistente y autoritativo de la sesión.
+## Safe next visual test
 
-### Botón PART reservado por el host
-
-La captura directa del puerto MIDI principal en hardware real confirmó que
-`PART` emite CC 119 por el canal 1: valor 127 al presionar y valor 0 al soltar.
-No es un selector interno silencioso. El paquete lo declara como la acción
-momentánea `keyboard_parts`, separada de los controles continuos. Un toque
-corto alterna la vista de partes. Mantenerlo y tocar una nota fija el split en
-esa nota; el driver consume el gesto para que no se transforme además en toque
-corto o largo. Mantener `PART` 1,5 segundos sin nota elimina el split. Core
-reserva tanto el CC como las notas del acorde antes de cualquier ruta de plugin.
-
-Con la pantalla adquirida en `DAW Program`, el firmware no abre su vista local
-de Part, aunque sí sigue mostrando el sofisticado overlay nativo de Mod Wheel.
-Esto demuestra que aquel dibujo no proviene del framebuffer de RackForge. El
-atajo de Part muestra `PART 1` y `PART 2` del Rack activo; las flechas eligen la
-parte y `ENTER` abre sus opciones. La nota de split pertenece a la zona derecha;
-el host deriva el final de la izquierda para impedir huecos o solapamientos.
-
-[^ableton-fader]: Implementación inspeccionada:
-    [`elements.py`, revisión `ccfad86`](https://github.com/MrMatch246/KeyLab_Essential_mk3_TGE/blob/ccfad86570a66f419f323a080d6cd20ad1c76f6c/elements.py#L143-L145).
-
-El editor de texto reutilizable asigna `OK` corto a entrar o confirmar el texto,
-`<` y `>` cortos a cambiar el carácter, y sus pulsaciones largas a mover el
-cursor. `OK` largo borra el carácter actual y `BACK` corto cancela toda la
-edición restaurando el original. Al mover el cursor a la derecha desde el final
-se crea un nuevo espacio editable. El giro y la presión del encoder replican
-las acciones cortas. `BACK` largo y el acorde de emergencia conservan siempre
-el significado global.
-
-## Próxima prueba visual
-
-La siguiente prueba debe ser reversible y limitada al display:
-
-1. usar `NONE (00)` en reposo para confirmar que elimina la barra;
-2. observar `FRAME_SMALL (02)` una sola vez;
-3. si tampoco rellena, probar únicamente un rango pequeño de valores
-   inmediatamente posterior a los documentados, uno por vez;
-4. restaurar el footer conocido después de cada muestra y ante timeout;
-5. detenerse si el display ignora un valor, parpadea o pierde el layout.
-
-Si ningún estado soportado produce relleno negro, el feedback deberá usar el
-mejor fallback oficial (marco o LED contextual) hasta comprender mejor el
-renderer del firmware. No hace falta reemplazar el firmware para continuar con
-el resto de RackForge.
+1. Confirm `NONE (00)` removes the idle footer bar.
+2. Observe `FRAME_SMALL (02)` once.
+3. Restore the known footer after every sample and on timeout.
+4. Stop immediately if the display ignores a value, blinks, or loses layout.

@@ -1,137 +1,101 @@
-# Roadmap de RackForge
+# RackForge roadmap
 
-## Estado completo y presets del host
+## Current host state and presets
 
-- [x] Referencias opacas versionadas y blobs direccionados por contenido.
-- [x] Presets nombrados de RackForge filtrados por identidad de plugin.
-- [x] Semántica de copia al cargar en PLAY y en un Slot.
-- [x] Migración automática de IDs de programas antiguos a estados completos.
-- [x] RF-DLS state v3 captura layers, síntesis, envelope, FX y ganancias.
-- [ ] Edición ligada a una instancia de Slot con recovery snapshots automáticos.
-- [ ] Manifiestos portables para recursos externos como samples y bancos.
-- [ ] Adaptadores de formatos nativos con estado complete/partial explícito.
+- [x] Versioned opaque references and content-addressed blobs.
+- [x] Named RackForge presets scoped by plugin identity.
+- [x] Copy-on-load semantics for PLAY and Rack Slots.
+- [x] Automatic migration from legacy program IDs to complete state.
+- [x] RF-DLS state v3 captures layers, synthesis, envelopes, effects, and gain.
+- [ ] Slot-bound editing with automatic recovery snapshots.
+- [ ] Portable manifests for external resources such as samples and banks.
+- [ ] Native-format adapters with explicit complete/partial state reporting.
 
-## Visión
+## Vision
 
-RackForge debe convertirse en un runtime musical autónomo y multiplataforma.
-El mismo plugin debe poder ejecutarse en Linux ARM64, Windows, macOS y Android
-sin conocer ALSA, WASAPI, CoreAudio, AAudio, USB, rutas del sistema ni la
-arquitectura del procesador.
-
-La Raspberry Pi es la primera plataforma de producción, no una restricción del
-diseño. RackForge será para los plugins lo que una máquina virtual es para una
-aplicación portable:
+RackForge is a self-contained, cross-platform musical runtime. The same plugin
+must run on Linux ARM64, Windows, macOS, and Android without depending directly
+on ALSA, WASAPI, CoreAudio, AAudio, USB APIs, or operating-system paths.
 
 ```text
-Plugin universal
-      │
-      ▼
-RackForge Runtime + API estable
-      │
-      ├── Linux ARM64
-      ├── Windows x86-64/ARM64
-      ├── macOS ARM64/x86-64
-      └── Android ARM64
+Universal plugin
+      |
+      v
+RackForge Runtime + stable API
+      |
+      +-- Linux ARM64
+      +-- Windows x86-64 / ARM64
+      +-- macOS ARM64 / x86-64
+      +-- Android ARM64
 ```
 
-No se construirá una máquina virtual desde cero. El objetivo es usar
-WebAssembly como formato ejecutable portable y construir encima el runtime,
-las capacidades musicales, el SDK y el formato de distribución de RackForge.
+WebAssembly components are the target portable format. The current C ABI and
+native libraries remain a transition path until the portable runtime reaches
+feature and performance parity.
 
-## Principios no negociables
+## Non-negotiable principles
 
-1. Un plugin consume solamente la API pública de RackForge.
-2. Ningún plugin depende directamente de APIs de una plataforma.
-3. El host es dueño del audio, MIDI, almacenamiento, red, controladores y
-   superficies.
-4. El hilo de audio no asigna memoria, no realiza E/S, no bloquea y no ejecuta
-   lógica de interfaz.
-5. Los plugins reciben capacidades explícitas, no acceso general al sistema.
-6. Toda API pública y todo formato persistente son versionados.
-7. Las instancias, no solamente los tipos de plugin, poseen estado.
-8. LITTLE, MEDIUM y WEB son proyecciones del mismo estado y utilizan los
-   mismos comandos.
-9. Un controlador MIDI desconocido puede tocar, pero nunca recibe SysEx ni
-   control de pantalla sin un driver registrado.
-10. Los layouts nunca se infieren por tamaño o cantidad de controles.
-11. RackForge mantiene compatibilidad mediante negociación explícita, pruebas
-    de conformidad y migraciones.
-12. El formato portable será el camino principal; los plugins nativos actuales
-    existirán solamente durante la transición o como extensión opcional.
-13. `Plugin` es el término público para instrumentos, efectos, procesadores
-    MIDI y utilities; `module` queda reservado para implementación interna.
-14. El payload de un programa pertenece exclusivamente al plugin. Las
-    superficies editan campos opacos mediante un árbol declarativo común y
-    nunca conocen rutas JSON internas.
+1. Plugins consume only the public RackForge API.
+2. The host owns audio, MIDI, storage, networking, controllers, and surfaces.
+3. The audio thread never allocates, blocks, performs I/O, or runs UI logic.
+4. Plugins receive explicit capabilities instead of general system access.
+5. Every public API and persistent format is versioned.
+6. State belongs to plugin instances, not only plugin types.
+7. LITTLE, WEB, desktop, and Android are projections of the same session.
+8. Unknown MIDI devices may play notes but never receive SysEx or display
+   commands without a registered controller driver.
+9. Layout support is explicit and versioned; it is never inferred from size.
+10. Compatibility is maintained through negotiation, migrations, and
+    conformance tests.
+11. A program payload belongs to the plugin. Surfaces address opaque field IDs
+    and never depend on the plugin's internal JSON layout.
+12. Instrument plugins and controller packages are built and released
+    independently from the RackForge host.
 
-## Arquitectura objetivo
+## Target architecture
 
 ```text
-Entradas MIDI ───────────────┐
-Controlador LITTLE ──────────┤
-RackForge WEB ───────────────┤
-Automatización futura ───────┘
-               │
-               ▼
-       Command / Event Bus
-               │
-               ▼
-       Estado de la sesión
-               │
-       ┌───────┴────────┐
-       ▼                ▼
-Plugin Control API   Motor de tiempo real
-       │                │
-       ▼                ▼
-LITTLE / WEB       Backend de audio
-                        │
-                        ▼
-                 Scarlett / DAC
+MIDI inputs -----------+
+LITTLE controller -----+
+RackForge WEB ----------+--> Command / Event Bus --> Session state
+Future automation -----+                              |
+                                                       +--> Control plane
+                                                       +--> Real-time engine
+                                                                |
+                                                                v
+                                                          Audio backend
 ```
 
-El estado de sesión es la única fuente de verdad. Una modificación realizada
-desde WEB debe aparecer en LITTLE, y una modificación hecha con el encoder debe
-llegar a WEB. Ninguna superficie implementa por separado la lógica musical del
-plugin.
+The session is the single source of truth. A change from WEB must appear on
+LITTLE, and an encoder change must reach WEB. Control-plane commands cross into
+the audio engine through bounded, non-blocking queues and are applied at safe
+block boundaries.
 
-## Capas del sistema
+## System layers
 
-### RackForge Core
+### Core
 
-Responsable de:
+Core discovers and validates packages, creates instances, manages sessions and
+performances, persists state, coordinates the real-time engine, and publishes
+events. It must not contain product-specific controller or plugin behavior.
 
-- descubrir, validar, instalar y actualizar plugins;
-- crear y destruir instancias;
-- administrar racks, programas, bancos y recursos;
-- mantener el estado autoritativo de sesión;
-- procesar comandos y publicar eventos;
-- negociar capacidades y layouts;
-- coordinar el motor de audio en tiempo real;
-- aplicar permisos, límites y aislamiento;
-- recuperar el estado después de reinicios.
+### Platform backends
 
-### Backends de plataforma
-
-Cada plataforma implementa adaptadores concretos:
-
-| Área | Linux | Windows | macOS | Android |
-|---|---|---|---|---|
-| Audio | ALSA/PipeWire | WASAPI/ASIO | CoreAudio | AAudio/Oboe |
+| Area | Linux | Windows | macOS | Android |
+| --- | --- | --- | --- | --- |
+| Audio | ALSA / PipeWire | WASAPI / ASIO | CoreAudio | AAudio / Oboe |
 | MIDI | ALSA Sequencer | Windows MIDI | CoreMIDI | Android MIDI |
-| Archivos | Backend POSIX | Backend Windows | Backend macOS | Storage Android |
-| USB/controladores | Driver Linux | Driver Windows | Driver macOS | Driver Android |
-| WEB | Servidor headless | Local/embebido | Local/embebido | WebView/embebido |
+| Controllers | Linux transport | Windows transport | macOS transport | USB MIDI |
+| WEB | Headless server | Embedded/local | Embedded/local | Embedded WebView |
 
-Los backends traducen el sistema operativo al modelo común. Los plugins nunca
-ven estas diferencias.
+Backends translate operating-system facilities into shared contracts. Plugins
+never see the platform-specific implementation.
 
-### Runtime portable
+### Portable runtime
 
-El runtime cargará componentes WebAssembly y expondrá una API RackForge
-versionada. El WebAssembly Component Model y WIT se usarán para ciclo de vida,
-metadatos, estado, catálogos, comandos y capacidades.
-
-La ruta crítica de audio tendrá una ABI mínima y preasignada:
+The Component Model and WIT are intended for lifecycle, metadata, state,
+catalogs, commands, and capabilities. The real-time ABI remains deliberately
+small:
 
 ```text
 activate(sample_rate, max_frames)
@@ -139,226 +103,70 @@ process(frames, midi_events, audio_buffers)
 deactivate()
 ```
 
-El host reservará memoria al activar la instancia. El procesamiento se
-realizará una vez por bloque y no serializará ni copiará muestra por muestra.
-El SDK ocultará la memoria lineal y las llamadas de bajo nivel.
+The host preallocates buffers during activation. Processing occurs once per
+block and never serializes individual samples.
 
-### Runtime nativo de transición
+## Universal plugin API
 
-La ABI C y las bibliotecas `.so`/`.dll` existentes permanecerán disponibles
-mientras se construye la ruta WebAssembly. Un adaptador permitirá que Core
-trate instancias nativas y portables mediante el mismo modelo interno.
+The public contract covers:
 
-No se agregarán dependencias de plataforma nuevas a la API de plugins nativos.
-RF-DLS será el primer plugin migrado y la ABI nativa se declarará heredada cuando
-la implementación portable alcance paridad funcional y de rendimiento.
+- descriptor, identity, version, and capabilities;
+- instance lifecycle and audio configuration;
+- block-based MIDI and audio processing;
+- parameters, program catalogs, banks, and declarative editor pages;
+- state serialization, restoration, and migration;
+- external user-provided resources;
+- plugin-private storage;
+- audition focus;
+- commands, events, revisions, and subscriptions;
+- LITTLE and WEB view contributions;
+- host-provided logging and monotonic time.
 
-## API universal de plugins
+Network access, processes, arbitrary files, and direct devices remain separate
+capabilities and are denied by default.
 
-La API pública debe cubrir, como mínimo:
+## Commands, events, and state
 
-- descriptor y versión del plugin;
-- ciclo de vida de instancias;
-- configuración de audio;
-- procesamiento de audio y MIDI;
-- parámetros y páginas declarativas;
-- catálogos dinámicos;
-- selección y edición de programas;
-- serialización, restauración y migración de estado;
-- recursos externos aportados por el usuario;
-- almacenamiento privado del plugin;
-- solicitud y devolución de foco de audition;
-- comandos, eventos y suscripciones;
-- layouts compatibles;
-- contribuciones opcionales para la superficie WEB;
-- logging y reloj monotónico mediante capacidades.
+Representative commands include `SelectPlugin`, `SelectProgram`,
+`SetParameter`, `SaveProgram`, `BeginAudition`, `EndAudition`,
+`SetMasterLevel`, `SetMasterPan`, and `AllNotesOff`.
 
-El plugin no recibirá rutas arbitrarias ni handles del sistema operativo.
-RackForge entregará identificadores y operaciones acotadas:
+Accepted changes emit typed events with the affected instance and a monotonic
+revision. Clients can reconnect, reject stale edits, and correlate responses
+using stable client and command IDs.
 
-```text
-storage.plugin-data
-storage.package-assets
-resources.read
-audio.render
-midi.input
-ui.little@1
-ui.web
-clock.monotonic
-logging
-```
+## Surfaces and controller packages
 
-Acceso de red saliente, procesos, dispositivos o archivos externos requerirá
-capacidades separadas y estará desactivado por defecto.
+`little@1` defines a header, two body rows, four footer actions, and minimal
+navigation. Other layouts require their own declared and tested contract.
 
-## Command Bus, Event Bus y estado
-
-Todas las entradas se traducirán a comandos tipados:
+MIDI input and control-surface access are separate:
 
 ```text
-SetParameter
-SelectProgram
-CreateProgram
-SaveProgram
-BeginAudition
-EndAudition
-Navigate
-AllNotesOff
+Unknown controller
+  +-- Note / CC / pitch / pressure --> allowed
+  +-- Display / SysEx / host keys --> blocked
 ```
 
-Los cambios aceptados producirán eventos:
+Physical integration is distributed as an immutable `.rfcontroller` package.
+The manifest declares endpoint matchers, layouts, reserved host controls,
+permissions, integrity hashes, and per-platform artifacts. Installation assigns
+the trust level; a package cannot grant trust to itself.
 
-```text
-ParameterChanged
-ProgramSelected
-ProgramSaved
-AuditionStarted
-AuditionEnded
-RouteChanged
-InstanceStateChanged
-```
+`process-v1` is the current isolated-process bridge. `wasm-v1` is the target
+portable boundary, with RackForge retaining ownership of MIDI and USB handles.
 
-Cada evento incluirá la instancia afectada y una revisión monotónica. Esto
-permite sincronizar varias superficies, detectar ediciones obsoletas y
-reconectar clientes WEB sin perder consistencia.
+## WEB surface
 
-Los comandos del plano de control llegarán al motor de audio mediante colas
-acotadas y no bloqueantes. El motor aplicará los cambios en límites seguros de
-bloque.
+RackForge owns the server, authentication, sessions, router, global navigation,
+theme, device state, and Command/Event Bus. Plugin views mount only inside the
+host shell.
 
-## Superficies y controladores
+Custom views run in a sandboxed iframe and communicate through a typed
+`MessagePort` protocol. They never receive the parent DOM, credentials,
+router internals, arbitrary sockets, host storage, or the audio thread.
 
-### Contratos de layout
-
-Los layouts son contratos versionados, no nombres descriptivos inferidos:
-
-- `little@1`: header, cuerpo de dos líneas, footer y navegación mínima;
-- `medium@N`: futura superficie explícitamente adaptada;
-- `web@N`: futura superficie dentro del shell WEB de RackForge.
-
-Un controlador MEDIUM no implementa LITTLE automáticamente. Debe declarar una
-implementación nativa o una compatibilidad certificada y probada.
-
-Los plugins declaran exactamente los layouts que soportan. RackForge negocia
-solamente la intersección explícita entre plugin y controlador.
-
-### Separación entre MIDI y superficie
-
-Un dispositivo puede participar solamente como fuente MIDI:
-
-```text
-Controlador desconocido
-  ├── Note/CC/Pitch/Aftertouch → permitido
-  └── Display/SysEx/botones de superficie → bloqueado
-```
-
-Solo un `ControllerDriver` registrado puede:
-
-- reconocer puertos concretos;
-- abrir una salida de display;
-- enviar SysEx;
-- interpretar botones de navegación;
-- declarar implementaciones certificadas de layouts.
-
-También puede declarar inputs reservados para funciones globales del host.
-RackForge valida esos bindings contra el manifest, los registra de forma
-transitoria para el controlador activo y los retira del flujo MIDI antes de los
-plugins. Los primeros destinos implementados son `master_level` y
-`master_pan`; otros destinos deberán agregarse como capacidades tipadas, no
-como strings arbitrarios.
-
-### Paquetes instalables de controlador
-
-La compatibilidad física se distribuye fuera de Core como `.rfcontroller`.
-Cada paquete incluye un manifest versionado, matchers USB/endpoints,
-implementaciones de layout, permisos y artefactos por plataforma.
-
-El store conserva versiones inmutables y un registro activo separado. El nivel
-de confianza (`official`, `certified`, `community`, `local`) lo asigna la
-instalación y nunca el propio paquete. El host valida SHA-256 y la identidad
-reportada por el driver antes de ejecutarlo.
-
-`process-v1` permite iniciar la modularización usando procesos aislados por el
-sistema operativo. `wasm-v1` será la frontera portable definitiva: RackForge
-abrirá MIDI/USB y el módulo recibirá únicamente capabilities autorizadas.
-
-## Superficie WEB
-
-### Propiedad del shell
-
-RackForge será dueño de:
-
-- servidor HTTP y puerto configurable;
-- autenticación y sesiones;
-- SPA principal;
-- router y URLs;
-- header, navegación global y botón Atrás;
-- estado de conexión, audio y dispositivos;
-- estilos y tokens de tema;
-- autorización;
-- Command/Event Bus;
-- ciclo de montaje y desmontaje de vistas.
-
-Los plugins no abrirán servidores ni puertos. Contribuirán una vista que
-RackForge montará dentro del área de contenido de su SPA:
-
-```text
-RACKFORGE WEB
-├── Header y navegación global
-├── Rutas de RackForge
-└── Área del plugin
-    └── RF-DLS: PLAY / CONFIG / PROGRAMS / ENVELOPE / FX
-```
-
-Las rutas pertenecerán al router de RackForge:
-
-```text
-/live
-/plugins
-/plugins/org.rackforge.rf-dls
-/live/racks/concert/instances/layer-1/config
-/live/racks/concert/instances/layer-1/programs/warm-piano
-```
-
-Las rutas apuntarán a `instance_id` cuando representen estado ejecutable. Dos
-instancias del mismo plugin pueden tener programas y parámetros diferentes.
-
-### Modos de interfaz WEB
-
-Un plugin podrá elegir:
-
-1. **Declarativo:** RackForge genera páginas, formularios y controles usando
-   parámetros, catálogos y programas expuestos por la API.
-2. **Personalizado:** el paquete aporta HTML, CSS y JavaScript para editores
-   especiales, gráficas, secuenciadores o visualizadores.
-
-La interfaz personalizada no reemplazará el shell. Podrá solicitar navegación,
-pero RackForge decidirá la URL y conservará siempre la posibilidad de volver.
-
-### Aislamiento de interfaces personalizadas
-
-Código WEB de terceros no se importará directamente en el contexto de la SPA.
-La primera arquitectura segura utilizará un `iframe sandbox` visualmente
-integrado y un canal tipado basado en `MessagePort`.
-
-El plugin no tendrá acceso directo a:
-
-- DOM superior;
-- credenciales;
-- router interno;
-- sockets;
-- almacenamiento global;
-- APIs administrativas;
-- instancia WebAssembly;
-- hilo de audio.
-
-RackForge entregará solamente el contexto y las capacidades autorizadas. El
-panel enviará comandos y recibirá eventos mediante el protocolo
-`rackforge:web-ui@N`.
-
-### Exposición de red
-
-La configuración inicial será conservadora:
+The conservative default remains:
 
 ```toml
 [web]
@@ -367,52 +175,18 @@ bind = "127.0.0.1"
 port = 7465
 ```
 
-La exposición a la red local requerirá una decisión explícita, autenticación y
-límites de acceso. TLS, roles, sesiones, CSP, protección CSRF, límites de
-mensajes y reconexión deberán formar parte del contrato antes de estabilizar
-`web@1`.
+LAN exposure requires explicit configuration. Authentication, CSP, CSRF
+protection, message limits, and reconnect behavior must be stable before
+`web@1` is declared final.
 
-En sistemas de escritorio o Android, la misma SPA podrá abrirse dentro de una
-WebView. En una Raspberry headless podrá utilizarse desde un teléfono, tablet o
-computadora de la red.
+## SDK and tooling
 
-## SDK de RackForge
+The Rust plugin SDK will provide safe generated bindings, preallocated DSP
+buffers, manifest builders, state migrations, and a real-time test harness.
+The TypeScript WEB SDK will provide typed commands, subscriptions, navigation,
+themes, accessibility, reconnect handling, and an offline simulator.
 
-La API define el contrato binario; el SDK ofrece la experiencia de desarrollo.
-Se crearán dos partes coordinadas.
-
-### SDK de plugins
-
-Inicialmente orientado a Rust:
-
-- traits seguros sobre la ABI WebAssembly;
-- bindings generados desde WIT;
-- buffers preasignados para DSP;
-- tipos para MIDI, audio, parámetros, programas y estado;
-- almacenamiento y recursos mediante capacidades;
-- macros o builders para manifiestos;
-- migraciones de estado;
-- harness de pruebas de tiempo real.
-
-Otros lenguajes podrán generar bindings sin cambiar el runtime.
-
-### SDK WEB
-
-Un paquete TypeScript, por ejemplo `@rackforge/web-sdk`, ofrecerá:
-
-- conexión segura con el shell;
-- acceso a la instancia autorizada;
-- lectura y escritura de parámetros;
-- comandos y suscripciones;
-- navegación solicitada;
-- reconexión;
-- revisiones y resolución de estado obsoleto;
-- temas, idioma y accesibilidad;
-- simulador fuera de RackForge.
-
-### Herramientas
-
-El CLI deberá incluir progresivamente:
+The CLI will progressively expose:
 
 ```text
 rackforge new
@@ -424,231 +198,62 @@ rackforge inspect
 rackforge dev
 ```
 
-También habrá simuladores para layouts, MIDI, audio, WEB y ciclos de
-reconexión, además de una suite de conformidad que todo plugin debe superar.
+## Portable `.rfplugin` format
 
-## Formato `.rfplugin`
+A package contains a versioned manifest, portable component or target-specific
+transition artifacts, optional WEB assets, immutable package assets, integrity
+metadata, and migration information. It never contains user state.
 
-El artefacto portable objetivo será independiente de CPU y sistema operativo:
+One archive must install safely on every supported host. If native transition
+artifacts are required, they live inside the same package under explicit target
+keys. Missing targets fail validation before activation.
 
-```text
-rf-dls.rfplugin
-├── rackforge-plugin.toml
-├── component.wasm
-├── assets/
-├── presets/
-├── schemas/
-├── web/
-└── licenses/
-```
+## Compatibility policy
 
-El manifiesto declarará:
+- Manifest, host API, state, controller, layout, and WEB protocol versions are
+  independent.
+- Hosts reject unsupported major versions before loading executable code.
+- Minor additions require explicit feature negotiation.
+- Persistent schemas require forward migrations and recovery snapshots.
+- Every released plugin and controller package must pass a shared conformance
+  suite on Windows, Android, and Raspberry Pi.
 
-- identidad y versión;
-- versión mínima/máxima de la API;
-- componente ejecutable;
-- capacidades requeridas y opcionales;
-- layouts;
-- recursos externos;
-- esquemas de estado;
-- contribuciones WEB;
-- integridad de archivos;
-- información de licencia.
+## Delivery phases
 
-Los recursos grandes o con licencias propias, como bancos DLS o ROMs, seguirán
-fuera del paquete. Los datos modificables continuarán dentro del namespace:
+### Completed foundations
 
-```text
-data/plugins/<plugin-id>/
-```
+- [x] Versioned API crates and native transition ABI.
+- [x] Authoritative session, commands, events, and monotonic revisions.
+- [x] Plugin package validation and immutable installation.
+- [x] PLAY/LIVE mode shared by desktop, Android, WEB, and LITTLE.
+- [x] Arturia KeyLab Essential mk3 controller package across three platforms.
+- [x] Windows, Android ARM64, and Raspberry Pi ARM64 CI artifacts.
+- [x] MIDI disconnect recovery and held-note release.
 
-Cada plugin decide su estructura interna. RackForge aplica aislamiento,
-escrituras atómicas, cuotas, migraciones y rollback sin imponer nombres como
-`programs` o `banks`.
+### Current stabilization milestone: v0.2.0
 
-## Compatibilidad y versionado
+- [ ] Required CI quality gate: format, lint, unit tests, and package checks.
+- [ ] MIDI burst, hotplug, audio dropout, screen-lock, and soak tests.
+- [ ] Split large orchestration modules along stable responsibility boundaries.
+- [ ] Freeze `.rfplugin v1` and `.rfcontroller v1` conformance rules.
+- [ ] Exportable diagnostics with device inventory and real-time counters.
+- [ ] Release signing, update, and rollback strategy.
+- [ ] Complete English documentation.
 
-Se versionarán por separado:
+### Portable ecosystem
 
-- ABI de ejecución;
-- interfaces WIT;
-- protocolo de comandos y eventos;
-- contratos de layout;
-- protocolo WEB;
-- manifiesto;
-- esquema de programas;
-- estado privado de cada plugin;
-- formato del paquete.
+- [ ] Stabilize WIT contracts and the `wasm-v1` runtime.
+- [ ] Migrate the reference instrument to the portable runtime.
+- [ ] Publish plugin and WEB SDKs with simulators.
+- [ ] Add macOS and additional certified controllers.
+- [ ] Add a signed repository index and controlled update channels.
 
-Una versión mayor indica ruptura deliberada. Una versión menor solo agrega
-capacidades negociables. RackForge no supondrá soporte por semejanza.
+## Deliberately deferred decisions
 
-Cada versión estable tendrá:
+- A VST compatibility bridge is out of scope.
+- Arbitrary plugin network and process access is out of scope.
+- macOS support follows contract stabilization.
+- A public marketplace follows signing, trust, rollback, and conformance.
 
-- vectores de prueba;
-- fixtures;
-- validadores;
-- pruebas en las plataformas soportadas;
-- política de deprecación;
-- guía de migración.
-
-## Fases
-
-### Fase 0 — Fundamentos y vocabulario
-
-Estado: **en curso**
-
-- [x] Separar Core, Plugin API, Control API, UI y bridge del KeyLab.
-- [x] Crear programas, recursos externos y datos privados por plugin.
-- [x] Crear catálogos dinámicos y selección desde LIVE.
-- [x] Separar entrada MIDI de superficie registrada.
-- [x] Crear contratos versionados de controlador/layout.
-- [x] Registrar KeyLab Essential mk3 como `little@1`.
-- [x] Hacer que RF-DLS declare `little@1`.
-- [x] Crear manifests, store versionado y host genérico para `.rfcontroller`.
-- [x] Instalar versiones inmutables y permitir activación/rollback atómico.
-- [x] Extraer el KeyLab como primer paquete instalable con conformance suite.
-- [x] Extraer el estado LITTLE a un Surface Runtime sin MIDI/SysEx.
-- [ ] Mover el cliente de sesión restante fuera del proceso Arturia.
-- [ ] Implementar el runtime `wasm-v1` con capabilities reales.
-- [ ] Consolidar nombres: plugin, instancia, programa, recurso, superficie,
-      driver, comando, evento y sesión.
-- [ ] Documentar invariantes de tiempo real y ownership.
-- [x] Separar primitivas DSP portables y documentar procedencia/licencias.
-
-Criterio de salida: el modelo de dominio puede describir el instrumento actual
-sin mencionar ALSA, KeyLab, Raspberry ni una biblioteca dinámica concreta.
-
-### Fase 1 — Estado, comandos y eventos
-
-Estado: **en curso**
-
-- [x] Crear identificadores estables de instancia.
-- [x] Extraer un `SessionState` autoritativo.
-- [x] Definir comandos y eventos versionados.
-- [x] Agregar revisiones monotónicas.
-- [x] Unificar acciones de LITTLE con el Command Bus.
-- [ ] Llevar edición y guardado de programas al mismo modelo.
-- [x] Crear colas MIDI y de control acotadas hacia el hilo de audio.
-- [x] Probar reconexión y reconstrucción completa de superficies.
-
-Criterio de salida: LITTLE puede reiniciarse y reconstruirse desde el estado;
-una segunda superficie puede observar y modificar la misma instancia sin
-lógica especial en el plugin.
-
-### Fase 2 — Contrato portable
-
-- [ ] Diseñar los paquetes WIT iniciales.
-- [ ] Definir ciclo de vida y negociación de capacidades.
-- [ ] Diseñar la ABI de DSP preasignada.
-- [ ] Seleccionar y encapsular el motor WebAssembly.
-- [ ] Implementar límites de memoria, tiempo y fallos.
-- [ ] Crear el adaptador común para plugins nativos y portables.
-- [ ] Ejecutar un plugin Gain WebAssembly en Linux ARM64.
-- [ ] Medir latencia, CPU, memoria y comportamiento ante fallos.
-
-Criterio de salida: un componente Gain portable procesa audio en la Raspberry
-con restricciones de tiempo real verificadas.
-
-### Fase 3 — SDK y paquete universal
-
-- [ ] Crear el SDK Rust desde WIT.
-- [ ] Implementar `rackforge new/build/test/validate/package`.
-- [ ] Definir la nueva estructura portable de `.rfplugin`.
-- [ ] Implementar instalación atómica, integridad y rollback.
-- [ ] Crear simuladores de audio, MIDI y layouts.
-- [ ] Publicar una suite de conformidad.
-- [ ] Documentar creación y migración de plugins.
-
-Criterio de salida: un desarrollador puede crear, probar y empaquetar un plugin
-sin importar módulos internos de Core ni conocer la memoria WebAssembly.
-
-### Fase 4 — Migración de RF-DLS
-
-- [ ] Portar el lector DLS y el motor de voces al SDK portable.
-- [ ] Migrar programas custom, pitch, modulación, sustain y envelope.
-- [ ] Mantener bancos DLS como recursos externos.
-- [ ] Verificar equivalencia de audio con fixtures reproducibles.
-- [ ] Probar edición y audition mediante Command/Event Bus.
-- [ ] Comparar rendimiento nativo y WebAssembly.
-- [ ] Ejecutar el mismo `.rfplugin` en Linux ARM64 y Windows.
-
-Criterio de salida: un único paquete RF-DLS produce el mismo resultado y carga
-el mismo estado en ambas plataformas.
-
-### Fase 5 — RackForge WEB
-
-- [ ] Crear el servidor configurable propiedad de RackForge.
-- [ ] Crear la SPA, shell, router y navegación global.
-- [ ] Definir el protocolo interno entre SPA y Core.
-- [ ] Crear páginas globales: LIVE, PLUGINS, INSTANCIAS y CONFIG.
-- [ ] Generar vistas declarativas desde la API de parámetros.
-- [ ] Sincronizar WEB y LITTLE mediante eventos.
-- [ ] Crear `@rackforge/web-sdk`.
-- [ ] Prototipar paneles personalizados aislados.
-- [ ] Implementar autenticación y exposición segura en red local.
-- [ ] Estabilizar `web@1` solamente después de las pruebas.
-
-Criterio de salida: RF-DLS puede editarse desde la SPA y el KeyLab refleja cada
-cambio; el navegador puede reconectarse sin alterar ni interrumpir el audio.
-
-### Fase 6 — Hosts de escritorio
-
-- [ ] Implementar backends Windows de audio, MIDI y dispositivos.
-- [ ] Implementar backends macOS.
-- [ ] Embebir la SPA como interfaz local opcional.
-- [ ] Implementar selección de dispositivos y recuperación hot-plug.
-- [ ] Ejecutar la suite de conformidad en x86-64 y ARM64.
-- [ ] Crear instaladores y actualizaciones.
-
-Criterio de salida: el mismo `.rfplugin` certificado funciona en Raspberry,
-Windows y macOS sin cambios del autor.
-
-### Fase 7 — Android
-
-- [ ] Implementar AAudio/Oboe y Android MIDI.
-- [ ] Integrar almacenamiento y permisos Android.
-- [ ] Ejecutar el runtime portable sin JIT obligatorio.
-- [ ] Integrar la SPA en WebView.
-- [ ] Probar suspensión, reanudación, desconexión USB y ahorro de energía.
-- [ ] Crear empaquetado e instalación.
-
-Criterio de salida: un dispositivo Android compatible puede alojar RackForge,
-un controlador MIDI y el mismo plugin portable.
-
-### Fase 8 — Ecosistema
-
-- [ ] Firma opcional y procedencia de plugins.
-- [ ] Repositorio y actualizaciones.
-- [ ] Política de permisos visible al usuario.
-- [ ] Compatibilidad automatizada por plataforma y versión.
-- [ ] Crash isolation y reportes sin datos privados.
-- [ ] Versionado de dependencias entre plugins.
-- [ ] Documentación pública y plantillas.
-- [ ] Política de publicación, licencias y recursos aportados por usuarios.
-
-## Decisiones aplazadas deliberadamente
-
-Se investigarán mediante prototipos antes de congelar una API:
-
-- motor WebAssembly y estrategia AOT/JIT por plataforma;
-- representación exacta de buffers de audio en memoria;
-- formato definitivo de WIT;
-- protocolo y seguridad de `web@1`;
-- distribución y firma de plugins;
-- soporte opcional para aceleradores nativos;
-- compatibilidad o wrappers de estándares como CLAP, LV2 o VST;
-- política de ejecución de interfaces WEB de terceros en Android y escritorio.
-
-Estas decisiones están aplazadas, pero las fronteras que permitirán tomarlas
-forman parte de las fases iniciales.
-
-## Próximo hito
-
-El siguiente trabajo debe ser la **Fase 1: Estado, comandos y eventos**. Esta
-capa es necesaria tanto para WebAssembly como para WEB y evita que las
-superficies actuales acumulen lógica específica de RF-DLS.
-
-Después de estabilizar el modelo de sesión, el primer experimento portable será
-Gain en WebAssembly. RF-DLS se migrará cuando la ruta de tiempo real haya sido
-medida y validada en la Raspberry.
+The immediate goal is reliability and contract stability, not a larger feature
+surface.

@@ -345,6 +345,52 @@ export interface PluginWebDescriptor {
     kind: PluginWebSurfaceKind;
     entry_url: string;
   }>;
+  resources: PluginResourceRequirement[];
+}
+
+export interface PluginResourceRequirement {
+  id: string;
+  name: string;
+  kind: "file" | "directory";
+  required: boolean;
+  data_path?: string;
+  package_path?: string;
+}
+
+export interface ResourceMount {
+  id: string;
+  name: string;
+  read_only: boolean;
+}
+
+export interface ResourceEntry {
+  id: string;
+  mount_id: string;
+  parent_id: string | null;
+  name: string;
+  kind: "file" | "directory";
+  size: number | null;
+  modified_unix_ms: number | null;
+  lazy: boolean;
+  can_read: boolean;
+}
+
+export interface ResourceGrant {
+  grant_id: string;
+  resource_id: string;
+  display_name: string;
+  kind: "file" | "directory";
+}
+
+export interface GrantedResourceEntry {
+  id: string;
+  parent_id: string | null;
+  name: string;
+  kind: "file" | "directory";
+  size: number | null;
+  modified_unix_ms: number | null;
+  lazy: boolean;
+  can_read: boolean;
 }
 
 export type PluginParameterKind =

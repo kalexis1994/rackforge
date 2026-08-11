@@ -18,6 +18,8 @@ rackforge-core = { path = "../../crates/rackforge-core" }
 rackforge-performance-api = { path = "../../crates/rackforge-performance-api" }
 rackforge-plugin-api = { path = "../../crates/rackforge-plugin-api" }
 rackforge-repository = { path = "../../crates/rackforge-repository" }
+rackforge-resource-api = { path = "../../crates/rackforge-resource-api" }
+rackforge-resource-host = { path = "../../crates/rackforge-resource-host" }
 rackforge-session-api = { path = "../../crates/rackforge-session-api" }
 rackforge-surface-api = { path = "../../crates/rackforge-surface-api" }
 rackforge-surface-runtime = { path = "../../crates/rackforge-surface-runtime" }

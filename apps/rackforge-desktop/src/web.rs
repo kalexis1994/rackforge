@@ -5,7 +5,7 @@ use axum::{
     extract::{Path as AxumPath, State, WebSocketUpgrade, ws::Message},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
 use futures_util::{SinkExt, StreamExt};
 use include_dir::{Dir, include_dir};
@@ -14,6 +14,11 @@ use rackforge_core::PluginPackage;
 use rackforge_performance_api::{
     LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceLibrary, PerformanceSnapshot,
 };
+use rackforge_resource_api::{
+    BindResourceRequest, BrowseGrantRequest, ListGrantsRequest, LoadGrantedResourceRequest,
+    ResourceBrowser, ResourceEntryKind, ResourceError,
+};
+use rackforge_resource_host::NativeResourceBrowser;
 use rackforge_session_api::SessionState;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -39,11 +44,20 @@ struct WebState {
     plugin_store_root: Option<PathBuf>,
     public_server: Arc<RwLock<WebServerPreferences>>,
     control: Sender<DesktopControlCall>,
+    resource_browser: Arc<NativeResourceBrowser>,
 }
 
-pub struct DesktopControlCall {
-    pub request: ControlRequest,
-    pub response: Sender<ControlResponse>,
+pub enum DesktopControlCall {
+    Session {
+        request: ControlRequest,
+        response: Sender<ControlResponse>,
+    },
+    LoadResource {
+        plugin_id: String,
+        resource_id: String,
+        path: PathBuf,
+        response: Sender<Result<(), String>>,
+    },
 }
 
 pub fn control_channel() -> (Sender<DesktopControlCall>, Receiver<DesktopControlCall>) {
@@ -191,6 +205,7 @@ struct PublicPluginWeb {
     active: bool,
     api_version: u16,
     surfaces: Vec<PublicWebSurface>,
+    resources: Vec<rackforge_plugin_api::ResourceRequirement>,
 }
 
 struct PluginWebPackage {
@@ -212,11 +227,19 @@ pub fn start(
         plugin_store_root: options.plugin_store_root.clone(),
         public_server: Arc::clone(&shared_preferences),
         control,
+        resource_browser: Arc::new(NativeResourceBrowser::platform_defaults_persistent(
+            options.rackforge_root.join("state/resource-grants.json"),
+        )?),
     };
     let local_listener =
         std::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))?;
     let local_port = local_listener.local_addr()?.port();
-    let local = spawn_server(local_listener, state.clone(), "rackforge-desktop-web-local")?;
+    let local = spawn_server(
+        local_listener,
+        state.clone(),
+        "rackforge-desktop-web-local",
+        true,
+    )?;
     let public = preferences
         .enabled
         .then(|| bind_public_server(state.clone(), preferences.port))
@@ -234,13 +257,14 @@ fn bind_public_server(state: WebState, port: u16) -> anyhow::Result<RunningServe
     let listener =
         std::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))
             .with_context(|| format!("opening public HTTP server on port {port}"))?;
-    spawn_server(listener, state, "rackforge-desktop-web-public")
+    spawn_server(listener, state, "rackforge-desktop-web-public", false)
 }
 
 fn spawn_server(
     listener: std::net::TcpListener,
     state: WebState,
     thread_name: &str,
+    allow_native_resources: bool,
 ) -> anyhow::Result<RunningServer> {
     listener.set_nonblocking(true)?;
     let (shutdown, shutdown_receiver) = tokio::sync::oneshot::channel();
@@ -249,7 +273,7 @@ fn spawn_server(
         .spawn(move || {
             let runtime = tokio::runtime::Runtime::new().expect("create desktop Web runtime");
             runtime.block_on(async move {
-                let app = router(state);
+                let app = router(state, allow_native_resources);
                 let listener = tokio::net::TcpListener::from_std(listener)
                     .expect("adopt RackForge Desktop Web listener");
                 tokio::select! {
@@ -268,8 +292,8 @@ fn spawn_server(
     })
 }
 
-fn router(state: WebState) -> Router {
-    Router::new()
+fn router(state: WebState, allow_native_resources: bool) -> Router {
+    let router = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/auth/status", get(auth_status))
         .route("/api/v1/config", get(config))
@@ -278,9 +302,26 @@ fn router(state: WebState) -> Router {
         .route("/api/v1/repositories", get(empty_repositories))
         .route("/api/v1/store/catalog", get(empty_store))
         .route("/ws/v1/session", get(session_socket))
-        .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_asset))
-        .fallback(get(static_asset))
-        .with_state(state)
+        .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_asset));
+    let router = if allow_native_resources {
+        router
+            .route("/api/v1/resources/mounts", get(resource_mounts))
+            .route(
+                "/api/v1/resources/mounts/{mount_id}/root",
+                get(resource_mount_root),
+            )
+            .route(
+                "/api/v1/resources/entries/{parent_id}",
+                get(resource_entries),
+            )
+            .route("/api/v1/resources/bind", post(bind_resource))
+            .route("/api/v1/resources/grants", post(resource_grants))
+            .route("/api/v1/resources/browse", post(browse_resource_grant))
+            .route("/api/v1/resources/load", post(load_granted_resource))
+    } else {
+        router
+    };
+    router.fallback(get(static_asset)).with_state(state)
 }
 
 async fn health() -> Json<Value> {
@@ -338,6 +379,197 @@ async fn plugin_descriptor(
         ),
         Err(error) => internal_error(error),
     }
+}
+
+async fn resource_mounts(State(state): State<WebState>) -> Response {
+    match state.resource_browser.mounts() {
+        Ok(mounts) => Json(mounts).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn resource_mount_root(
+    State(state): State<WebState>,
+    AxumPath(mount_id): AxumPath<String>,
+) -> Response {
+    match state.resource_browser.mount_root(&mount_id) {
+        Ok(entry) => Json(entry).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn resource_entries(
+    State(state): State<WebState>,
+    AxumPath(parent_id): AxumPath<String>,
+) -> Response {
+    match state.resource_browser.entries(&parent_id) {
+        Ok(entries) => Json(entries).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn bind_resource(
+    State(state): State<WebState>,
+    Json(request): Json<BindResourceRequest>,
+) -> Response {
+    let packages = match discover_web_packages(&state) {
+        Ok(packages) => packages,
+        Err(error) => return internal_error(error),
+    };
+    let Some(package) = packages.get(&request.plugin_id) else {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    };
+    let Some(requirement) = package
+        .public
+        .resources
+        .iter()
+        .find(|resource| resource.id == request.resource_id)
+    else {
+        return resource_error(ResourceError::InvalidRequest(
+            "resource is not declared by this plugin".into(),
+        ));
+    };
+    match state.resource_browser.bind(&request) {
+        Ok(grant)
+            if matches!(
+                (requirement.kind, grant.kind),
+                (
+                    rackforge_plugin_api::ResourceKind::File,
+                    ResourceEntryKind::File
+                ) | (
+                    rackforge_plugin_api::ResourceKind::Directory,
+                    ResourceEntryKind::Directory
+                )
+            ) =>
+        {
+            Json(grant).into_response()
+        }
+        Ok(_) => resource_error(ResourceError::InvalidRequest(
+            "selected entry has the wrong resource kind".into(),
+        )),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn resource_grants(
+    State(state): State<WebState>,
+    Json(request): Json<ListGrantsRequest>,
+) -> Response {
+    if !plugin_is_installed(&state, &request.plugin_id) {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    }
+    match state.resource_browser.grants(&request.plugin_id) {
+        Ok(grants) => Json(grants).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn browse_resource_grant(
+    State(state): State<WebState>,
+    Json(request): Json<BrowseGrantRequest>,
+) -> Response {
+    if !plugin_is_installed(&state, &request.plugin_id) {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    }
+    match state.resource_browser.grant_entries(&request) {
+        Ok(entries) => Json(entries).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn load_granted_resource(
+    State(state): State<WebState>,
+    Json(request): Json<LoadGrantedResourceRequest>,
+) -> Response {
+    let packages = match discover_web_packages(&state) {
+        Ok(packages) => packages,
+        Err(error) => return internal_error(error),
+    };
+    let Some(package) = packages.get(&request.plugin_id) else {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    };
+    let owns_instance = state.session.read().is_ok_and(|session| {
+        session.instances.iter().any(|instance| {
+            instance.instance_id.as_str() == request.instance_id
+                && instance.plugin_id == request.plugin_id
+        })
+    });
+    if !owns_instance {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin does not own this instance".into(),
+        ));
+    }
+    let valid_target = package.public.resources.iter().any(|resource| {
+        resource.id == request.target_resource_id
+            && resource.kind == rackforge_plugin_api::ResourceKind::File
+    });
+    if !valid_target {
+        return resource_error(ResourceError::InvalidRequest(
+            "target is not a declared file resource".into(),
+        ));
+    }
+    let path = match state.resource_browser.resolve_granted_file(
+        &request.plugin_id,
+        &request.grant_id,
+        &request.entry_id,
+    ) {
+        Ok(path) => path,
+        Err(error) => return resource_error(error),
+    };
+    let (response_sender, response_receiver) = mpsc::channel();
+    if state
+        .control
+        .send(DesktopControlCall::LoadResource {
+            plugin_id: request.plugin_id,
+            resource_id: request.target_resource_id,
+            path,
+            response: response_sender,
+        })
+        .is_err()
+    {
+        return resource_error(ResourceError::Backend(
+            "Desktop runtime is shutting down".into(),
+        ));
+    }
+    match tokio::task::spawn_blocking(move || {
+        response_receiver.recv_timeout(Duration::from_secs(30))
+    })
+    .await
+    {
+        Ok(Ok(Ok(()))) => Json(json!({"status":"ok"})).into_response(),
+        Ok(Ok(Err(message))) => resource_error(ResourceError::Backend(message)),
+        _ => resource_error(ResourceError::Backend(
+            "Desktop runtime did not finish loading the resource".into(),
+        )),
+    }
+}
+
+fn plugin_is_installed(state: &WebState, plugin_id: &str) -> bool {
+    discover_web_packages(state).is_ok_and(|packages| packages.contains_key(plugin_id))
+}
+
+fn resource_error(error: ResourceError) -> Response {
+    let status = match &error {
+        ResourceError::UnknownHandle => StatusCode::NOT_FOUND,
+        ResourceError::OutsideMount
+        | ResourceError::NotDirectory
+        | ResourceError::Unreadable
+        | ResourceError::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+        ResourceError::Backend(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (
+        status,
+        Json(json!({"status":"error", "message":error.to_string()})),
+    )
+        .into_response()
 }
 
 async fn plugin_asset(
@@ -453,7 +685,7 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
             let (response_sender, response_receiver) = mpsc::channel();
             if state
                 .control
-                .send(DesktopControlCall {
+                .send(DesktopControlCall::Session {
                     request,
                     response: response_sender,
                 })
@@ -525,6 +757,7 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
                 active: active.contains(&manifest.id),
                 api_version: manifest.web_ui.as_ref().map_or(0, |web| web.api_version),
                 surfaces,
+                resources: manifest.resources.clone(),
             },
         };
         let replace = packages
@@ -641,6 +874,7 @@ mod tests {
             plugin_store_root: None,
             public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
             control,
+            resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
         let request = ControlRequest::Dispatch {
@@ -655,8 +889,11 @@ mod tests {
         };
         let responder = std::thread::spawn(move || {
             let call = receiver.recv().unwrap();
+            let DesktopControlCall::Session { request, response } = call else {
+                panic!("unexpected Desktop control call");
+            };
             assert!(matches!(
-                call.request,
+                request,
                 ControlRequest::Dispatch {
                     envelope: CommandEnvelope {
                         command: SessionCommand::SelectSound { .. },
@@ -664,7 +901,7 @@ mod tests {
                     }
                 }
             ));
-            call.response
+            response
                 .send(ControlResponse::CommandApplied {
                     client_id: ClientId::new("test.desktop-web").unwrap(),
                     command_id: 7,

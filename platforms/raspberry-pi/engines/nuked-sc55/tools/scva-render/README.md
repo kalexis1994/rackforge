@@ -1,73 +1,17 @@
 # scva-render
 
-Prueba aislada del ABI exportado por `SCCore.dll`. Carga la DLL de una copia
-legítima de Sound Canvas VA, envía un Program Change y una nota configurables,
-renderiza cuatro segundos estéreo a 44,1 kHz y escribe un WAV float de 32 bits.
+Isolated Windows x64 probe for the C ABI exported by `SCCore.dll` from a
+legitimate Sound Canvas VA installation. It sends configurable Program Change
+and note events, renders four seconds of 44.1 kHz stereo audio, and writes a
+32-bit float WAV oracle.
 
-El ejecutable es sólo una sonda de investigación para Windows x64. No convierte
-la DLL a ARM ni redistribuye código o bancos propietarios.
+The tool is research-only. It does not translate the DLL to ARM and does not
+redistribute proprietary code, banks, or rendered output.
 
-```powershell
-cargo run --release --bin scva-render -- `
-  "C:\ruta\SCCore.dll" `
-  "C:\ruta\scva-c4.wav"
-```
+`--patch-u32 OFFSET VALUE` creates a temporary DLL copy, changes four bytes
+before loading it, and deletes the copy afterward. It never modifies the
+original installation. Use it only for bounded experiments against known table
+fields.
 
-Para crear oráculos reproducibles de distintos programas y notas:
-
-```powershell
-cargo run --release --bin scva-render -- `
-  --program 0 --note 60 --velocity 100 `
-  "C:\ruta\SCCore.dll" `
-  "C:\ruta\piano-c4.wav"
-```
-
-El modo de investigación `--patch-u32 OFFSET VALUE` nunca modifica el binario
-original: crea una copia temporal junto a la DLL, cambia cuatro bytes antes de
-cargarla y elimina la copia al terminar. Sirve para comprobar qué campos de las
-tablas estáticas afectan al render:
-
-```powershell
-cargo run --release --bin scva-render -- `
-  --patch-u32 0x18f57bc 0x753 `
-  "C:\ruta\SCCore.dll" `
-  "C:\ruta\probe.wav"
-```
-
-Para comparar los primeros cuatro acumuladores DPCM con la rutina interna de
-SCCore 1.1.2 sin reproducir audio:
-
-```powershell
-cargo run --release --bin scva-decode-oracle -- `
-  "C:\ruta\SCCore.dll" "C:\ruta\wave_bank.bin" `
-  2 0x290a0 0x2e8db 0x311df
-```
-
-Se pueden agregar una cantidad de frames y un WAV de salida para ejecutar
-también el avance y el interpolador internos:
-
-```powershell
-cargo run --release --bin scva-decode-oracle -- `
-  "C:\ruta\SCCore.dll" "C:\ruta\wave_bank.bin" `
-  0 0x74ee0 0x7ed23 0x836de 32768 "C:\temp\native-sample-7.wav"
-```
-
-El proceso usa como directorio de trabajo la carpeta de la DLL, para que el
-motor pueda encontrar los archivos auxiliares de la instalación.
-
-Para capturar un rango de memoria interna después del primer bloque de audio:
-
-```powershell
-cargo run --release --bin scva-render -- `
-  --dump-rva 0x1a1b860 0x800 "C:\temp\stage.bin" `
-  "C:\ruta\SCCore.dll" "C:\temp\render.wav"
-```
-
-Para convertir un buffer interno en un WAV continuo, se procesa SCCore en
-bloques del mismo tamaño que el rango capturado:
-
-```powershell
-cargo run --release --bin scva-render -- `
-  --block-size 64 --trace-rva 0x1a1b860 32 "C:\temp\decoder-stage.wav" `
-  "C:\ruta\SCCore.dll" "C:\temp\render.wav"
-```
+The DPCM inspection mode compares selected internal accumulators without
+rendering audio. All resulting files remain local and ignored.

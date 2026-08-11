@@ -29,6 +29,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.OpenableColumns;
+import android.provider.DocumentsContract;
 import android.util.Log;
 import android.webkit.JavascriptInterface;
 import android.webkit.MimeTypeMap;
@@ -56,6 +57,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -64,6 +66,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.UUID;
 
 import org.json.JSONObject;
 import org.json.JSONArray;
@@ -75,6 +78,7 @@ public final class MainActivity extends Activity {
 
     private static final int SAMPLE_RATE = 48_000;
     private static final int REQUEST_INSTALL_PLUGIN = 4101;
+    private static final int REQUEST_SELECT_PLUGIN_RESOURCE = 4102;
     private static final long MAX_PLUGIN_BYTES = 512L * 1024L * 1024L;
     private WebView webView;
     private Spinner audioOutputSpinner;
@@ -102,11 +106,17 @@ public final class MainActivity extends Activity {
     private volatile boolean engineStarting;
     private File pluginPackageRoot;
     private String pluginWebEntry;
+    private String pluginConfigWebEntry;
+    private String pluginWebSurface = "play";
+    private String pendingResourceRequestId;
+    private String pendingResourceId;
+    private String pendingResourceKind;
     private String activePluginName = "No plugin";
     private String activePluginVersion = "";
     private TextView activePluginLabel;
     private LinearLayout playToolbar;
     private TextView playContextLabel;
+    private Button pluginConfigButton;
     private AlertDialog pluginPickerDialog;
     private AlertDialog installedPluginsDialog;
 
@@ -117,6 +127,7 @@ public final class MainActivity extends Activity {
     private static native String pluginWebEntry();
     private static native String pluginWebContext();
     private static native boolean selectPluginSound(String soundId);
+    private static native boolean loadPluginResource(String resourceId, String filePath);
     private static native void sendMidiMessage(int status, int data1, int data2, int length);
     private static native void releaseMidiNotes();
     private static native String keyLabAcquirePlan();
@@ -268,7 +279,7 @@ public final class MainActivity extends Activity {
                 + "RackForgeAndroid.postMessage(JSON.stringify(data));"
                 + "}});"
                 + "}"
-                + "window.postMessage(" + pluginWebContext() + ",window.location.origin);"
+                + "window.postMessage(" + currentPluginWebContext() + ",window.location.origin);"
                 + "})();";
         webView.evaluateJavascript(script, null);
     }
@@ -286,6 +297,111 @@ public final class MainActivity extends Activity {
                 if (!"request".equals(request.optString("kind"))) return;
                 String requestId = request.getString("request_id");
                 String method = request.optString("method");
+                if ("plugin.select_resource".equals(method)) {
+                    String resourceId = request.getJSONObject("params").getString("resource_id");
+                    if (!"config".equals(pluginWebSurface) || pluginResourceKind(resourceId) == null) {
+                        respondToPlugin(requestId, false, "Resource is not available to this surface.");
+                        return;
+                    }
+                    runOnUiThread(() -> choosePluginResource(requestId, resourceId));
+                    return;
+                }
+                if ("plugin.resource_bindings".equals(method)) {
+                    if (!"config".equals(pluginWebSurface)) {
+                        respondToPlugin(requestId, false, "Resource bindings require CONFIG.");
+                        return;
+                    }
+                    respondToPlugin(requestId, true, null, pluginResourceBindings());
+                    return;
+                }
+                if ("plugin.resource_entries".equals(method)) {
+                    if (!"config".equals(pluginWebSurface)) {
+                        respondToPlugin(requestId, false, "Resource browsing requires CONFIG.");
+                        return;
+                    }
+                    JSONObject params = request.getJSONObject("params");
+                    String grantId = params.getString("grant_id");
+                    String parentId = params.isNull("parent_id") ? null : params.optString("parent_id", null);
+                    new Thread(() -> {
+                        try {
+                            JSONArray entries = pluginResourceEntries(grantId, parentId);
+                            runOnUiThread(() -> respondToPlugin(requestId, true, null, entries));
+                        } catch (Throwable error) {
+                            Log.e("RackForge", "Could not browse plugin resource", error);
+                            runOnUiThread(() -> respondToPlugin(requestId, false,
+                                    error.getMessage() == null ? error.toString() : error.getMessage()));
+                        }
+                    }, "rackforge-resource-browser").start();
+                    return;
+                }
+                if ("plugin.load_resource".equals(method)) {
+                    if (!"config".equals(pluginWebSurface)) {
+                        respondToPlugin(requestId, false, "Resource loading requires CONFIG.");
+                        return;
+                    }
+                    JSONObject params = request.getJSONObject("params");
+                    String targetResourceId = params.getString("target_resource_id");
+                    String grantId = params.getString("grant_id");
+                    String entryId = params.getString("entry_id");
+                    if (!"file".equals(pluginResourceKind(targetResourceId))) {
+                        respondToPlugin(requestId, false, "Target is not a declared file resource.");
+                        return;
+                    }
+                    new Thread(() -> {
+                        File destination = null;
+                        File backup = null;
+                        try {
+                            String pluginId = new JSONObject(pluginWebContext())
+                                    .getJSONObject("instance").getString("plugin_id");
+                            destination = privatePluginResourceFile(pluginId, targetResourceId);
+                            if (destination.isFile()) {
+                                backup = new File(destination.getParentFile(),
+                                        destination.getName() + ".backup-" + UUID.randomUUID());
+                                if (!destination.renameTo(backup)) {
+                                    throw new IllegalStateException(
+                                            "Could not preserve the previous plugin resource");
+                                }
+                            }
+                            File resource = copyGrantedResourceToPrivateData(
+                                    grantId, entryId, targetResourceId);
+                            if (!loadPluginResource(targetResourceId, resource.getAbsolutePath())) {
+                                throw new IllegalStateException("Portable runtime rejected the resource");
+                            }
+                            if (backup != null && backup.isFile() && !backup.delete()) {
+                                Log.w("RackForge", "Could not remove old plugin resource " + backup);
+                            }
+                            preferences.edit()
+                                    .putString("resource.active_grant." + pluginId + "." + targetResourceId,
+                                            grantId)
+                                    .putString("resource.active_entry." + pluginId + "." + targetResourceId,
+                                            entryId)
+                                    .apply();
+                            runOnUiThread(() -> respondToPlugin(requestId, true, null,
+                                    new JSONObject()));
+                        } catch (Throwable error) {
+                            Log.e("RackForge", "Could not load plugin resource", error);
+                            if (backup != null) {
+                                if (backup.isFile()) {
+                                    if (destination != null && destination.isFile()
+                                            && !destination.delete()) {
+                                        Log.e("RackForge", "Could not discard rejected plugin resource "
+                                                + destination);
+                                    } else if (destination != null && !backup.renameTo(destination)) {
+                                        Log.e("RackForge", "Could not restore previous plugin resource "
+                                                + backup);
+                                    }
+                                }
+                            } else if (destination != null && destination.isFile()
+                                    && !destination.delete()) {
+                                Log.e("RackForge", "Could not discard rejected plugin resource "
+                                        + destination);
+                            }
+                            runOnUiThread(() -> respondToPlugin(requestId, false,
+                                    error.getMessage() == null ? error.toString() : error.getMessage()));
+                        }
+                    }, "rackforge-resource-loader").start();
+                    return;
+                }
                 if (!"plugin.select_sound".equals(method)) {
                     respondToPlugin(requestId, false, "Method is not available on Android.");
                     return;
@@ -303,7 +419,7 @@ public final class MainActivity extends Activity {
                         Log.i("RackForge", "Selected plugin sound " + soundId);
                         runOnUiThread(() -> {
                             respondToPlugin(requestId, true, null);
-                            sendPluginMessage(pluginWebContext());
+                            sendPluginMessage(currentPluginWebContext());
                         });
                     } catch (Throwable error) {
                         Log.e("RackForge", "Plugin Web command failed", error);
@@ -317,6 +433,10 @@ public final class MainActivity extends Activity {
     }
 
     private void respondToPlugin(String requestId, boolean ok, String error) {
+        respondToPlugin(requestId, ok, error, null);
+    }
+
+    private void respondToPlugin(String requestId, boolean ok, String error, Object result) {
         try {
             JSONObject response = new JSONObject();
             response.put("protocol", "rackforge.plugin.web@1");
@@ -324,10 +444,62 @@ public final class MainActivity extends Activity {
             response.put("request_id", requestId);
             response.put("ok", ok);
             if (error != null) response.put("error", error);
+            if (result != null) response.put("result", result);
             sendPluginMessage(response.toString());
         } catch (Exception exception) {
             Log.e("RackForge", "Could not answer plugin Web message", exception);
         }
+    }
+
+    private String currentPluginWebContext() {
+        try {
+            JSONObject context = new JSONObject(pluginWebContext());
+            context.put("surface", pluginWebSurface);
+            return context.toString();
+        } catch (Exception error) {
+            Log.e("RackForge", "Could not build plugin Web context", error);
+            return pluginWebContext();
+        }
+    }
+
+    private String pluginResourceKind(String resourceId) {
+        try {
+            JSONArray resources = new JSONObject(pluginWebContext()).optJSONArray("resources");
+            if (resources == null) return null;
+            for (int index = 0; index < resources.length(); index++) {
+                JSONObject resource = resources.getJSONObject(index);
+                if (resourceId.equals(resource.optString("id"))) {
+                    return resource.optString("kind", null);
+                }
+            }
+        } catch (Exception error) {
+            Log.e("RackForge", "Could not validate plugin resource", error);
+        }
+        return null;
+    }
+
+    private JSONArray pluginResourceBindings() throws Exception {
+        JSONObject context = new JSONObject(pluginWebContext());
+        String pluginId = context.getJSONObject("instance").getString("plugin_id");
+        JSONArray declared = context.optJSONArray("resources");
+        JSONArray bindings = new JSONArray();
+        if (declared == null) return bindings;
+        for (int index = 0; index < declared.length(); index++) {
+            JSONObject resource = declared.getJSONObject(index);
+            String resourceId = resource.getString("id");
+            String grantId = preferences.getString(
+                    "resource.binding." + pluginId + "." + resourceId, null);
+            if (grantId == null || preferences.getString("resource.uri." + grantId, null) == null) continue;
+            JSONObject grant = new JSONObject();
+            grant.put("grant_id", grantId);
+            grant.put("resource_id", resourceId);
+            grant.put("display_name", preferences.getString(
+                    "resource.name." + grantId, "Authorized storage"));
+            grant.put("kind", preferences.getString(
+                    "resource.kind." + grantId, resource.optString("kind", "directory")));
+            bindings.put(grant);
+        }
+        return bindings;
     }
 
     private LinearLayout buildTopBar() {
@@ -375,6 +547,11 @@ public final class MainActivity extends Activity {
         playContextLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
         playToolbar.addView(playContextLabel, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        pluginConfigButton = toolbarButton("Config", view -> showPluginConfig());
+        pluginConfigButton.setVisibility(View.GONE);
+        playToolbar.addView(pluginConfigButton, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         Button select = toolbarButton("▦  Select plugin", view -> showPluginPickerDialog());
         select.setTextColor(0xFF5CE2F5);
@@ -517,7 +694,12 @@ public final class MainActivity extends Activity {
         if (playToolbar != null) playToolbar.setVisibility(
                 "play".equals(currentPage) ? View.VISIBLE : View.GONE);
         if (playContextLabel != null) playContextLabel.setText(
-                "PLAY · " + activePluginDisplayName());
+                ("config".equals(pluginWebSurface) ? "CONFIG · " : "PLAY · ")
+                        + activePluginDisplayName());
+        if (pluginConfigButton != null) {
+            pluginConfigButton.setVisibility(pluginConfigWebEntry == null ? View.GONE : View.VISIBLE);
+            pluginConfigButton.setText("config".equals(pluginWebSurface) ? "Play" : "Config");
+        }
     }
 
     private Button toolbarButton(String text, android.view.View.OnClickListener listener) {
@@ -673,9 +855,40 @@ public final class MainActivity extends Activity {
         startActivityForResult(intent, REQUEST_INSTALL_PLUGIN);
     }
 
+    private void choosePluginResource(String requestId, String resourceId) {
+        if (pendingResourceRequestId != null) {
+            respondToPlugin(requestId, false, "Another resource selection is already open.");
+            return;
+        }
+        String kind = pluginResourceKind(resourceId);
+        if (!"directory".equals(kind) && !"file".equals(kind)) {
+            respondToPlugin(requestId, false, "Plugin resource has an unsupported kind.");
+            return;
+        }
+        pendingResourceRequestId = requestId;
+        pendingResourceId = resourceId;
+        pendingResourceKind = kind;
+        Intent intent;
+        if ("directory".equals(kind)) {
+            intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            intent.addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        } else {
+            intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/octet-stream");
+        }
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(intent, REQUEST_SELECT_PLUGIN_RESOURCE);
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_SELECT_PLUGIN_RESOURCE) {
+            finishPluginResourceSelection(resultCode, data);
+            return;
+        }
         if (requestCode != REQUEST_INSTALL_PLUGIN || resultCode != RESULT_OK || data == null) return;
         Uri uri = data.getData();
         if (uri == null) return;
@@ -690,6 +903,139 @@ public final class MainActivity extends Activity {
             // The temporary read grant remains valid for this immediate import.
         }
         importPlugin(uri);
+    }
+
+    private void finishPluginResourceSelection(int resultCode, Intent data) {
+        String requestId = pendingResourceRequestId;
+        String resourceId = pendingResourceId;
+        String kind = pendingResourceKind;
+        pendingResourceRequestId = null;
+        pendingResourceId = null;
+        pendingResourceKind = null;
+        if (requestId == null) return;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            respondToPlugin(requestId, false, "Resource selection was cancelled by the user.");
+            return;
+        }
+        Uri uri = data.getData();
+        try {
+            int flags = data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
+            if (flags != 0) getContentResolver().takePersistableUriPermission(uri, flags);
+
+            JSONObject context = new JSONObject(pluginWebContext());
+            String pluginId = context.getJSONObject("instance").getString("plugin_id");
+            String bindingKey = "resource.binding." + pluginId + "." + resourceId;
+            String grantId = preferences.getString(bindingKey, null);
+            String uriKey = grantId == null ? null : "resource.uri." + grantId;
+            if (grantId == null || !uri.toString().equals(preferences.getString(uriKey, null))) {
+                grantId = UUID.randomUUID().toString();
+                uriKey = "resource.uri." + grantId;
+            }
+            String displayName = selectedResourceName(uri, kind);
+            preferences.edit()
+                    .putString(bindingKey, grantId)
+                    .putString(uriKey, uri.toString())
+                    .putString("resource.kind." + grantId, kind)
+                    .putString("resource.name." + grantId, displayName)
+                    .apply();
+
+            JSONObject grant = new JSONObject();
+            grant.put("grant_id", grantId);
+            grant.put("resource_id", resourceId);
+            grant.put("display_name", displayName);
+            grant.put("kind", kind);
+            respondToPlugin(requestId, true, null, grant);
+        } catch (Throwable error) {
+            Log.e("RackForge", "Could not authorize plugin resource", error);
+            respondToPlugin(requestId, false,
+                    error.getMessage() == null ? error.toString() : error.getMessage());
+        }
+    }
+
+    private String selectedResourceName(Uri uri, String kind) {
+        Uri document = uri;
+        if ("directory".equals(kind)) {
+            try {
+                document = DocumentsContract.buildDocumentUriUsingTree(
+                        uri, DocumentsContract.getTreeDocumentId(uri));
+            } catch (Exception ignored) {
+                // Some providers expose a useful name directly on the tree URI.
+            }
+        }
+        String name = selectedFileName(document);
+        return name == null || name.isBlank() ? "Authorized storage" : name;
+    }
+
+    private JSONArray pluginResourceEntries(String grantId, String parentId) throws Exception {
+        boolean owned = false;
+        JSONArray bindings = pluginResourceBindings();
+        for (int index = 0; index < bindings.length(); index++) {
+            if (grantId.equals(bindings.getJSONObject(index).optString("grant_id"))) {
+                owned = true;
+                break;
+            }
+        }
+        if (!owned) throw new IllegalArgumentException("Resource grant belongs to another plugin");
+        String treeText = preferences.getString("resource.uri." + grantId, null);
+        if (treeText == null || !"directory".equals(
+                preferences.getString("resource.kind." + grantId, null))) {
+            throw new IllegalArgumentException("Unknown directory grant");
+        }
+        Uri treeUri = Uri.parse(treeText);
+        Uri parentUri;
+        if (parentId == null) {
+            parentUri = DocumentsContract.buildDocumentUriUsingTree(
+                    treeUri, DocumentsContract.getTreeDocumentId(treeUri));
+        } else {
+            String parentText = preferences.getString(
+                    "resource.entry." + grantId + "." + parentId, null);
+            if (parentText == null) throw new IllegalArgumentException("Unknown resource entry");
+            parentUri = Uri.parse(parentText);
+        }
+        String parentDocumentId = DocumentsContract.getDocumentId(parentUri);
+        Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(
+                treeUri, parentDocumentId);
+        String[] projection = new String[] {
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED
+        };
+        JSONArray entries = new JSONArray();
+        SharedPreferences.Editor entryHandles = preferences.edit();
+        try (Cursor cursor = getContentResolver().query(children, projection, null, null, null)) {
+            if (cursor == null) throw new IllegalStateException("Storage provider returned no entries");
+            int idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+            int nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+            int mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE);
+            int sizeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE);
+            int modifiedColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_LAST_MODIFIED);
+            while (cursor.moveToNext()) {
+                String documentId = cursor.getString(idColumn);
+                Uri documentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId);
+                String entryId = UUID.nameUUIDFromBytes(
+                        documentUri.toString().getBytes(StandardCharsets.UTF_8)).toString();
+                boolean directory = DocumentsContract.Document.MIME_TYPE_DIR.equals(
+                        cursor.getString(mimeColumn));
+                entryHandles.putString(
+                        "resource.entry." + grantId + "." + entryId,
+                        documentUri.toString());
+                JSONObject entry = new JSONObject();
+                entry.put("id", entryId);
+                entry.put("parent_id", parentId == null ? JSONObject.NULL : parentId);
+                entry.put("name", cursor.getString(nameColumn));
+                entry.put("kind", directory ? "directory" : "file");
+                entry.put("size", cursor.isNull(sizeColumn) ? JSONObject.NULL : cursor.getLong(sizeColumn));
+                entry.put("modified_unix_ms", cursor.isNull(modifiedColumn)
+                        ? JSONObject.NULL : cursor.getLong(modifiedColumn));
+                entry.put("lazy", directory);
+                entry.put("can_read", true);
+                entries.put(entry);
+            }
+        }
+        entryHandles.apply();
+        return entries;
     }
 
     private void importPlugin(Uri uri) {
@@ -766,6 +1112,65 @@ public final class MainActivity extends Activity {
             throw error;
         }
         return temporary;
+    }
+
+    private File copyGrantedResourceToPrivateData(
+            String grantId, String entryId, String targetResourceId) throws Exception {
+        boolean owned = false;
+        JSONArray bindings = pluginResourceBindings();
+        for (int index = 0; index < bindings.length(); index++) {
+            if (grantId.equals(bindings.getJSONObject(index).optString("grant_id"))) {
+                owned = true;
+                break;
+            }
+        }
+        if (!owned) throw new IllegalArgumentException("Resource grant belongs to another plugin");
+        String uriText = preferences.getString(
+                "resource.entry." + grantId + "." + entryId, null);
+        if (uriText == null) throw new IllegalArgumentException("Unknown resource entry");
+        JSONObject context = new JSONObject(pluginWebContext());
+        String pluginId = context.getJSONObject("instance").getString("plugin_id");
+        String safeResource = targetResourceId.replaceAll("[^A-Za-z0-9._-]", "_");
+        File destination = privatePluginResourceFile(pluginId, targetResourceId);
+        File directory = destination.getParentFile();
+        if (!directory.mkdirs() && !directory.isDirectory()) {
+            throw new IllegalStateException("Could not create private resource directory");
+        }
+        File temporary = File.createTempFile(safeResource + "-", ".tmp", directory);
+        long total = 0;
+        try (InputStream input = getContentResolver().openInputStream(Uri.parse(uriText));
+             FileOutputStream output = new FileOutputStream(temporary)) {
+            if (input == null) throw new IllegalStateException("The selected resource cannot be opened");
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                total += read;
+                if (total > MAX_PLUGIN_BYTES) {
+                    throw new IllegalStateException("The resource exceeds the 512 MB limit");
+                }
+                output.write(buffer, 0, read);
+            }
+            if (total == 0) throw new IllegalStateException("The selected resource is empty");
+            output.flush();
+            output.getFD().sync();
+        } catch (Throwable error) {
+            if (temporary.isFile() && !temporary.delete()) temporary.deleteOnExit();
+            throw error;
+        }
+        if (destination.exists() && !destination.delete()) {
+            throw new IllegalStateException("Could not replace the previous plugin resource");
+        }
+        if (!temporary.renameTo(destination)) {
+            throw new IllegalStateException("Could not activate the copied plugin resource");
+        }
+        return destination;
+    }
+
+    private File privatePluginResourceFile(String pluginId, String resourceId) {
+        String safePlugin = pluginId.replaceAll("[^A-Za-z0-9._-]", "_");
+        String safeResource = resourceId.replaceAll("[^A-Za-z0-9._-]", "_");
+        return new File(pluginDataRoot(),
+                "resources/" + safePlugin + "/" + safeResource + ".resource");
     }
 
     private void showInstalledPluginsDialog() {
@@ -909,6 +1314,7 @@ public final class MainActivity extends Activity {
         JSONObject instance = context.getJSONObject("instance");
         activePluginName = instance.getString("plugin_name");
         activePluginVersion = instance.optString("plugin_version", "");
+        pluginConfigWebEntry = instance.optString("config_web_entry", null);
     }
 
     private void activatePlugin(String root, String name, String version) {
@@ -918,11 +1324,13 @@ public final class MainActivity extends Activity {
         }
         engineStarting = true;
         currentPage = "play";
+        pluginWebSurface = "play";
         showEngineState("Loading " + name,
                 "Activating portable plugin " + versionLabel(version) + "…");
         new Thread(() -> {
             File previousRoot = pluginPackageRoot;
             String previousEntry = pluginWebEntry;
+            String previousConfigEntry = pluginConfigWebEntry;
             String previousName = activePluginName;
             String previousVersion = activePluginVersion;
             boolean restored = false;
@@ -935,6 +1343,7 @@ public final class MainActivity extends Activity {
                     throw new IllegalStateException("The runtime rejected the selected plugin");
                 }
                 refreshActivePluginMetadata();
+                restoreActivePluginResources();
                 if (!keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath())) {
                     throw new IllegalStateException("The controller plugin catalog could not be synchronized");
                 }
@@ -961,8 +1370,10 @@ public final class MainActivity extends Activity {
                         }
                         pluginPackageRoot = previousRoot;
                         pluginWebEntry = previousEntry;
+                        pluginConfigWebEntry = previousConfigEntry;
                         activePluginName = previousName;
                         activePluginVersion = previousVersion;
+                        restoreActivePluginResources();
                         keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
                         startAudio();
                         refreshKeyLabDisplay();
@@ -1019,6 +1430,7 @@ public final class MainActivity extends Activity {
 
     private void showPlay() {
         currentPage = "play";
+        pluginWebSurface = "play";
         updateModeButtons();
         if (audioRunning && pluginWebEntry != null) {
             webView.loadUrl("https://rackforge.local/plugin/" + pluginWebEntry);
@@ -1030,6 +1442,18 @@ public final class MainActivity extends Activity {
             showEngineState("No plugin selected",
                     "Install a portable .rfplugin package, then choose it from Select plugin.");
         }
+    }
+
+    private void showPluginConfig() {
+        if (pluginConfigWebEntry == null) return;
+        currentPage = "play";
+        if ("config".equals(pluginWebSurface)) {
+            showPlay();
+            return;
+        }
+        pluginWebSurface = "config";
+        updateModeButtons();
+        webView.loadUrl("https://rackforge.local/plugin/" + pluginConfigWebEntry);
     }
 
     private void showIdle() {
@@ -1384,6 +1808,7 @@ public final class MainActivity extends Activity {
                     return;
                 }
                 refreshActivePluginMetadata();
+                restoreActivePluginResources();
                 preferences.edit().putString(
                         "plugin.active_root", pluginPackageRoot.getAbsolutePath()).apply();
                 if (!keyLabSyncPlugins(store.getAbsolutePath())) {
@@ -1408,6 +1833,25 @@ public final class MainActivity extends Activity {
             }
         }, "rackforge-engine-loader");
         loader.start();
+    }
+
+    private void restoreActivePluginResources() throws Exception {
+        JSONObject context = new JSONObject(pluginWebContext());
+        String pluginId = context.getJSONObject("instance").getString("plugin_id");
+        JSONArray resources = context.optJSONArray("resources");
+        if (resources == null) return;
+        for (int index = 0; index < resources.length(); index++) {
+            JSONObject resource = resources.getJSONObject(index);
+            if (!"file".equals(resource.optString("kind"))) continue;
+            String resourceId = resource.getString("id");
+            if (preferences.getString(
+                    "resource.active_entry." + pluginId + "." + resourceId, null) == null) continue;
+            File copy = privatePluginResourceFile(pluginId, resourceId);
+            if (!copy.isFile()) continue;
+            if (!loadPluginResource(resourceId, copy.getAbsolutePath())) {
+                throw new IllegalStateException("Could not restore plugin resource " + resourceId);
+            }
+        }
     }
 
     private List<String> startupPluginRoots(File store) throws Exception {

@@ -774,7 +774,7 @@ function RackEditor({
       >
         {draft.slots.map((slot, index) => (
           <SlotEditor
-            key={slot.id}
+            key={`${slot.id}:${slot.plugin_id}`}
             slot={slot}
             index={index}
             total={draft.slots.length}
@@ -823,16 +823,23 @@ function SlotEditor({
   const [presetError, setPresetError] = useState<string | null>(null);
   const pluginAvailable = instances.some((item) => item.plugin_id === slot.plugin_id);
   useEffect(() => {
-    setPresetId("");
-    setPresetError(null);
-    if (!pluginAvailable) {
-      setPresets([]);
-      return;
-    }
+    if (!pluginAvailable) return;
+    let active = true;
     requestPluginPresets(slot.plugin_id)
-      .then(setPresets)
-      .catch((error: Error) => setPresetError(error.message));
+      .then((items) => {
+        if (!active) return;
+        setPresets(items);
+        setPresetError(null);
+      })
+      .catch((error: Error) => {
+        if (active) setPresetError(error.message);
+      });
+    return () => {
+      active = false;
+    };
   }, [slot.plugin_id, pluginAvailable]);
+  const visiblePresets = pluginAvailable ? presets : [];
+  const visiblePresetError = pluginAvailable ? presetError : null;
   const setPlugin = (pluginId: string) => {
     onChange({
       ...slot,
@@ -884,12 +891,12 @@ function SlotEditor({
             <div>
               <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
                 <option value="">{presets.length ? "Choose a preset" : "No saved presets"}</option>
-                {presets.map((preset) => <option value={preset.id} key={preset.id}>{preset.name}</option>)}
+                {visiblePresets.map((preset) => <option value={preset.id} key={preset.id}>{preset.name}</option>)}
               </select>
               <button type="button" disabled={!presetId || presetBusy} onClick={loadPreset}>{presetBusy ? "Loading…" : "Load"}</button>
             </div>
             <small>{slot.state ? "State copied into this Slot · independent from its preset" : "Default plugin state"}</small>
-            {presetError && <small className="field-error">{presetError}</small>}
+            {visiblePresetError && <small className="field-error">{visiblePresetError}</small>}
           </div>
         )}
         <label>

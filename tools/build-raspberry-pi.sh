@@ -68,6 +68,7 @@ do
     "$release/platforms/raspberry-pi/$entry"
 done
 cp -a "$repository/hardware/controllers" "$release/hardware/controllers"
+cp "$repository/THIRD_PARTY_NOTICES.md" "$release/THIRD_PARTY_NOTICES.md"
 
 revision="${GITHUB_SHA:-$(git rev-parse HEAD)}"
 printf 'revision=%s\narchitecture=linux-aarch64\nplugins=built-separately\n' \

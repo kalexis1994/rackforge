@@ -3,6 +3,11 @@ plugins {
 }
 
 val generatedRustLibraries = layout.buildDirectory.dir("generated/rust-jni")
+val generatedNotices = layout.buildDirectory.dir("generated/notices")
+val copyThirdPartyNotices by tasks.registering(Copy::class) {
+    from(rootProject.layout.projectDirectory.file("../../THIRD_PARTY_NOTICES.md"))
+    into(generatedNotices)
+}
 
 android {
     namespace = "org.rackforge.android"
@@ -18,10 +23,15 @@ android {
 
     sourceSets {
         getByName("main").jniLibs.srcDir(generatedRustLibraries)
+        getByName("main").assets.srcDir(generatedNotices)
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(copyThirdPartyNotices)
 }

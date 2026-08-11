@@ -78,14 +78,20 @@ impl PluginPackage {
             .transpose()?;
         let mut resolved = BTreeMap::new();
         for requirement in &self.manifest.resources {
-            let from_private_data = !overrides.contains_key(&requirement.id);
-            let candidate = overrides.get(&requirement.id).cloned().or_else(|| {
-                let relative = requirement.data_path.as_deref()?;
-                let root = plugin_data.as_ref()?;
+            let source = if let Some(path) = overrides.get(&requirement.id) {
+                Some((path.clone(), ResourceSource::Override))
+            } else if let Some(relative) = requirement.package_path.as_deref() {
+                let path = self.root.join(relative);
+                path.exists().then_some((path, ResourceSource::Package))
+            } else if let (Some(relative), Some(root)) =
+                (requirement.data_path.as_deref(), plugin_data.as_ref())
+            {
                 let path = root.root.join(relative);
-                path.exists().then_some(path)
-            });
-            let Some(path) = candidate else {
+                path.exists().then_some((path, ResourceSource::PrivateData))
+            } else {
+                None
+            };
+            let Some((path, source)) = source else {
                 if requirement.required {
                     bail!(
                         "plugin requires resource {:?} ({})",
@@ -97,16 +103,17 @@ impl PluginPackage {
             };
             let canonical = fs::canonicalize(&path)
                 .with_context(|| format!("resolving resource {}", path.display()))?;
-            if from_private_data {
-                let root = plugin_data
-                    .as_ref()
-                    .context("private resource has no plugin data root")?;
-                let canonical_root = fs::canonicalize(&root.root).with_context(|| {
-                    format!("resolving plugin data directory {}", root.root.display())
-                })?;
+            let confined_root = match source {
+                ResourceSource::Override => None,
+                ResourceSource::Package => Some(&self.root),
+                ResourceSource::PrivateData => plugin_data.as_ref().map(|root| &root.root),
+            };
+            if let Some(root) = confined_root {
+                let canonical_root = fs::canonicalize(root)
+                    .with_context(|| format!("resolving resource root {}", root.display()))?;
                 if !canonical.starts_with(&canonical_root) {
                     bail!(
-                        "resource {:?} escaped plugin data directory {}",
+                        "resource {:?} escaped {}",
                         requirement.id,
                         canonical_root.display()
                     );
@@ -127,6 +134,13 @@ impl PluginPackage {
         }
         Ok(resolved)
     }
+}
+
+#[derive(Clone, Copy)]
+enum ResourceSource {
+    Override,
+    Package,
+    PrivateData,
 }
 
 pub fn platform_key() -> Result<&'static str> {

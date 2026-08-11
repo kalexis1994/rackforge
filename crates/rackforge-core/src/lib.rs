@@ -5,6 +5,8 @@ pub mod control;
 pub mod hosted;
 #[cfg(target_os = "linux")]
 pub mod live;
+#[cfg(any(target_os = "linux", test))]
+mod live_midi_state;
 pub mod loader;
 pub mod midi_hotplug;
 pub mod package;

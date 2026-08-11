@@ -19,6 +19,11 @@ use rackforge_repository::{
     InstallationRecord, InstalledPackage, RepositoryFile, RepositoryIndex, RepositoryPlugin,
     fetch_repository, install_archive, repository_platform_key,
 };
+use rackforge_resource_api::{
+    BindResourceRequest, BrowseGrantRequest, ListGrantsRequest, LoadGrantedResourceRequest,
+    ResourceBrowser, ResourceEntryKind, ResourceError,
+};
+use rackforge_resource_host::NativeResourceBrowser;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -113,6 +118,7 @@ struct AppState {
     repositories: Arc<RwLock<RepositoryFile>>,
     plugins_root: PathBuf,
     plugin_store_root: PathBuf,
+    resource_browser: Arc<NativeResourceBrowser>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -191,6 +197,7 @@ struct PublicPluginWeb {
     active: bool,
     api_version: u16,
     surfaces: Vec<PublicWebSurface>,
+    resources: Vec<rackforge_plugin_api::ResourceRequirement>,
 }
 
 #[derive(Clone)]
@@ -529,6 +536,9 @@ async fn main() -> Result<()> {
         repositories: Arc::new(RwLock::new(repositories)),
         plugins_root: root.join("plugins"),
         plugin_store_root: root.join("plugin-store"),
+        resource_browser: Arc::new(NativeResourceBrowser::platform_defaults_persistent(
+            root.join("state/resource-grants.json"),
+        )?),
     });
     let static_files = ServeDir::new(&web_root).fallback(ServeFile::new(index));
     let app = Router::new()
@@ -539,6 +549,19 @@ async fn main() -> Result<()> {
         .route("/api/v1/config", get(public_config))
         .route("/api/v1/plugins", get(plugin_web_catalog))
         .route("/api/v1/plugins/{plugin_id}", get(plugin_web_descriptor))
+        .route("/api/v1/resources/mounts", get(resource_mounts))
+        .route(
+            "/api/v1/resources/mounts/{mount_id}/root",
+            get(resource_mount_root),
+        )
+        .route(
+            "/api/v1/resources/entries/{parent_id}",
+            get(resource_entries),
+        )
+        .route("/api/v1/resources/bind", post(bind_resource))
+        .route("/api/v1/resources/grants", post(resource_grants))
+        .route("/api/v1/resources/browse", post(browse_resource_grant))
+        .route("/api/v1/resources/load", post(load_granted_resource))
         .route(
             "/api/v1/repositories",
             get(repository_config).put(replace_repository_config),
@@ -919,6 +942,7 @@ impl PluginWebRegistry {
                     .as_ref()
                     .map_or(0, |web_ui| web_ui.api_version),
                 surfaces,
+                resources: manifest.resources,
             },
         })
     }
@@ -1316,6 +1340,210 @@ async fn plugin_web_descriptor(
         .get(&plugin_id)
         .map(|package| Json(package.public.clone()))
         .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn resource_mounts(headers: HeaderMap, State(state): State<Arc<AppState>>) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match state.resource_browser.mounts() {
+        Ok(mounts) => Json(mounts).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn resource_mount_root(
+    AxumPath(mount_id): AxumPath<String>,
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match state.resource_browser.mount_root(&mount_id) {
+        Ok(entry) => Json(entry).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn resource_entries(
+    AxumPath(parent_id): AxumPath<String>,
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match state.resource_browser.entries(&parent_id) {
+        Ok(entries) => Json(entries).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn bind_resource(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<BindResourceRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let registry = match PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root) {
+        Ok(registry) => registry,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let Some(package) = registry.packages.get(&request.plugin_id) else {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    };
+    let Some(requirement) = package
+        .public
+        .resources
+        .iter()
+        .find(|resource| resource.id == request.resource_id)
+    else {
+        return resource_error(ResourceError::InvalidRequest(
+            "resource is not declared by this plugin".into(),
+        ));
+    };
+    match state.resource_browser.bind(&request) {
+        Ok(grant)
+            if matches!(
+                (requirement.kind, grant.kind),
+                (
+                    rackforge_plugin_api::ResourceKind::File,
+                    ResourceEntryKind::File
+                ) | (
+                    rackforge_plugin_api::ResourceKind::Directory,
+                    ResourceEntryKind::Directory
+                )
+            ) =>
+        {
+            Json(grant).into_response()
+        }
+        Ok(_) => resource_error(ResourceError::InvalidRequest(
+            "selected entry has the wrong resource kind".into(),
+        )),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn resource_grants(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ListGrantsRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let installed = PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root)
+        .is_ok_and(|registry| registry.packages.contains_key(&request.plugin_id));
+    if !installed {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    }
+    match state.resource_browser.grants(&request.plugin_id) {
+        Ok(grants) => Json(grants).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn browse_resource_grant(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<BrowseGrantRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let installed = PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root)
+        .is_ok_and(|registry| registry.packages.contains_key(&request.plugin_id));
+    if !installed {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    }
+    match state.resource_browser.grant_entries(&request) {
+        Ok(entries) => Json(entries).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn load_granted_resource(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<LoadGrantedResourceRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let registry = match PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root) {
+        Ok(registry) => registry,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let Some(package) = registry.packages.get(&request.plugin_id) else {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    };
+    let valid_target = package.public.resources.iter().any(|resource| {
+        resource.id == request.target_resource_id
+            && resource.kind == rackforge_plugin_api::ResourceKind::File
+    });
+    if !valid_target {
+        return resource_error(ResourceError::InvalidRequest(
+            "target is not a declared file resource".into(),
+        ));
+    }
+    let path = match state.resource_browser.resolve_granted_file(
+        &request.plugin_id,
+        &request.grant_id,
+        &request.entry_id,
+    ) {
+        Ok(path) => path,
+        Err(error) => return resource_error(error),
+    };
+    let control = json!({
+        "op": "load_plugin_resource",
+        "plugin_id": request.plugin_id,
+        "instance_id": request.instance_id,
+        "resource_id": request.target_resource_id,
+        "path": path,
+    });
+    match core_request(&state.control_socket, &control).await {
+        Ok(response)
+            if response.get("status").and_then(Value::as_str) == Some("plugin_resource_loaded") =>
+        {
+            Json(json!({"status":"ok"})).into_response()
+        }
+        Ok(response) => {
+            let message = response
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("Core rejected the plugin resource")
+                .to_owned();
+            resource_error(ResourceError::Backend(message))
+        }
+        Err(error) => resource_error(ResourceError::Backend(error.to_string())),
+    }
+}
+
+fn resource_error(error: ResourceError) -> Response {
+    let status = match &error {
+        ResourceError::UnknownHandle => StatusCode::NOT_FOUND,
+        ResourceError::OutsideMount
+        | ResourceError::NotDirectory
+        | ResourceError::Unreadable
+        | ResourceError::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+        ResourceError::Backend(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (
+        status,
+        Json(json!({"status":"error", "message":error.to_string()})),
+    )
+        .into_response()
 }
 
 async fn plugin_web_asset(

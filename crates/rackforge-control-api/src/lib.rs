@@ -2,6 +2,7 @@ pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
 pub use rackforge_performance_api::{LibraryRevision, PerformanceEdit, PerformanceSnapshot};
 pub use rackforge_plugin_api::{HostPreset, HostPresetSummary, ParameterSchema};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 pub use rackforge_session_api::{
     AuditionEndReason, AuditionState, ClientId, CommandEnvelope, CommandRef, EventEnvelope,
@@ -10,7 +11,7 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 9;
+pub const CONTROL_SCHEMA_VERSION: u32 = 10;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 
@@ -54,6 +55,12 @@ pub enum ControlRequest {
         instance_id: InstanceId,
         parameter_index: u32,
         value: f64,
+    },
+    LoadPluginResource {
+        plugin_id: String,
+        instance_id: InstanceId,
+        resource_id: String,
+        path: PathBuf,
     },
     AudioSnapshot,
     ApplyAudioOutput {
@@ -124,6 +131,10 @@ pub enum ControlResponse {
         instance_id: InstanceId,
         parameter_index: u32,
         value: f64,
+    },
+    PluginResourceLoaded {
+        instance_id: InstanceId,
+        resource_id: String,
     },
     AudioSnapshot {
         snapshot: Box<AudioOutputState>,
@@ -312,6 +323,29 @@ mod tests {
                 index: 3,
                 value: 0.625,
             }],
+        };
+        assert_eq!(
+            decode_response(&encode_line(&response).unwrap()).unwrap(),
+            response
+        );
+    }
+
+    #[test]
+    fn plugin_resource_requests_round_trip_with_owner() {
+        let request = ControlRequest::LoadPluginResource {
+            plugin_id: "org.rackforge.rf-soundfonts".into(),
+            instance_id: instance_id(),
+            resource_id: "factory-soundfont".into(),
+            path: PathBuf::from("/authorized/library/piano.sf2"),
+        };
+        assert_eq!(
+            decode_request(&encode_line(&request).unwrap()).unwrap(),
+            request
+        );
+
+        let response = ControlResponse::PluginResourceLoaded {
+            instance_id: instance_id(),
+            resource_id: "factory-soundfont".into(),
         };
         assert_eq!(
             decode_response(&encode_line(&response).unwrap()).unwrap(),

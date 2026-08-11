@@ -19,6 +19,8 @@ members = [
     "crates/rackforge-plugin-sdk",
     "crates/rackforge-program-api",
     "crates/rackforge-repository",
+    "crates/rackforge-resource-api",
+    "crates/rackforge-resource-host",
     "crates/rackforge-session-api",
     "crates/rackforge-surface-api",
     "crates/rackforge-surface-runtime",

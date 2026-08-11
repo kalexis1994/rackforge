@@ -114,7 +114,7 @@ pub struct PortableLoadedPlugin {
     descriptor: RuntimeDescriptor,
     parameters: ParameterSchema,
     presets: PresetCatalog,
-    resources: BTreeMap<String, Vec<u8>>,
+    resources: BTreeMap<String, PathBuf>,
     module: PortableModule,
 }
 
@@ -173,9 +173,7 @@ impl PortableLoadedPlugin {
                     "portable resource {id:?} is a directory; wasm-v1 currently accepts files only"
                 );
             }
-            let bytes = fs::read(&path)
-                .with_context(|| format!("reading portable resource {}", path.display()))?;
-            resources.insert(id, bytes);
+            resources.insert(id, path);
         }
 
         let component_path = package
@@ -183,12 +181,18 @@ impl PortableLoadedPlugin {
             .context("portable component path is unavailable")?;
         let component_bytes = fs::read(&component_path)
             .with_context(|| format!("reading {}", component_path.display()))?;
+        let requested_memory = component
+            .memory_limit_mib
+            .unwrap_or(64)
+            .checked_mul(1024 * 1024)
+            .context("portable memory request overflow")? as usize;
+        let limits = RuntimeLimits {
+            maximum_memory_bytes: requested_memory,
+            ..RuntimeLimits::default()
+        };
         let engine = match data_root {
-            Some(root) => PortableEngine::with_cache(
-                RuntimeLimits::default(),
-                root.join(".cache/portable-code"),
-            )?,
-            None => PortableEngine::new(RuntimeLimits::default())?,
+            Some(root) => PortableEngine::with_cache(limits, root.join(".cache/portable-code"))?,
+            None => PortableEngine::new(limits)?,
         };
         let module = engine.compile(&component_bytes)?;
         Ok(Self {
@@ -203,9 +207,9 @@ impl PortableLoadedPlugin {
 
     fn create_instance(&self) -> Result<PortablePluginInstance> {
         let mut instance = self.module.instantiate()?;
-        for (id, bytes) in &self.resources {
+        for (id, path) in &self.resources {
             instance
-                .load_resource(id, bytes)
+                .load_resource_file(id, path)
                 .with_context(|| format!("delivering portable resource {id:?}"))?;
         }
         let presets = match instance.preset_catalog()? {
@@ -244,6 +248,18 @@ enum PluginInstanceBackend<'plugin> {
 }
 
 impl PluginInstance<'_> {
+    pub fn load_resource_file(&mut self, id: &str, path: impl AsRef<Path>) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Portable(instance) => instance
+                .instance
+                .load_resource_file(id, path)
+                .with_context(|| format!("loading portable resource {id:?}")),
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugin resources are fixed when the plugin is loaded")
+            }
+        }
+    }
+
     pub fn supports_program_editing(&self) -> bool {
         match &self.backend {
             PluginInstanceBackend::Native(instance) => instance.supports_program_editing(),

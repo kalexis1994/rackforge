@@ -1,6 +1,8 @@
 //! Sandboxed host for RackForge `wasm-v1` processors.
 
 use anyhow::{Context, Result, bail};
+use std::fs::File;
+use std::io::{BufReader, Read};
 use std::ops::Range;
 use std::path::Path;
 use wasmtime::{
@@ -247,6 +249,34 @@ pub struct PortableInstance {
 }
 
 impl PortableInstance {
+    pub fn load_resource_file(&mut self, id: &str, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        let file = File::open(path)
+            .with_context(|| format!("opening portable resource {}", path.display()))?;
+        let total_bytes = file
+            .metadata()
+            .with_context(|| format!("reading portable resource metadata {}", path.display()))?
+            .len();
+        self.begin_resource(id, total_bytes)?;
+        let mut reader = BufReader::new(file);
+        let mut chunk = vec![0_u8; self.capacity_transfer_bytes.min(64 * 1024)];
+        let mut offset = 0_u64;
+        loop {
+            let read = reader
+                .read(&mut chunk)
+                .with_context(|| format!("reading portable resource {}", path.display()))?;
+            if read == 0 {
+                break;
+            }
+            self.write_resource(offset, &chunk[..read])?;
+            offset += read as u64;
+        }
+        if offset != total_bytes {
+            bail!("portable resource changed while it was being delivered");
+        }
+        self.end_resource()
+    }
+
     pub fn prepare(
         &mut self,
         sample_rate: f64,
@@ -313,28 +343,45 @@ impl PortableInstance {
     /// Delivers one already-authorized package resource without exposing the
     /// filesystem to the guest. This method belongs on the control thread.
     pub fn load_resource(&mut self, id: &str, bytes: &[u8]) -> Result<()> {
+        self.begin_resource(id, bytes.len() as u64)?;
+        for (chunk_index, chunk) in bytes.chunks(self.capacity_transfer_bytes).enumerate() {
+            let offset = chunk_index
+                .checked_mul(self.capacity_transfer_bytes)
+                .context("resource offset overflow")? as u64;
+            self.write_resource(offset, chunk)?;
+        }
+        self.end_resource()
+    }
+
+    fn begin_resource(&mut self, id: &str, total_bytes: u64) -> Result<()> {
         if id.is_empty() || id.len() > self.capacity_transfer_bytes {
             bail!("resource id does not fit the portable transfer buffer");
         }
+        let total_bytes = i64::try_from(total_bytes).context("resource is too large")?;
         self.write_transfer(id.as_bytes())?;
         self.reset_control_fuel()?;
         check_status(
             self.resource_begin
-                .call(&mut self.store, (id.len() as i32, bytes.len() as i64))?,
+                .call(&mut self.store, (id.len() as i32, total_bytes))?,
             "resource_begin",
-        )?;
-        for (chunk_index, chunk) in bytes.chunks(self.capacity_transfer_bytes).enumerate() {
-            self.write_transfer(chunk)?;
-            let offset = chunk_index
-                .checked_mul(self.capacity_transfer_bytes)
-                .context("resource offset overflow")?;
-            self.reset_control_fuel()?;
-            check_status(
-                self.resource_write
-                    .call(&mut self.store, (offset as i64, chunk.len() as i32))?,
-                "resource_write",
-            )?;
+        )
+    }
+
+    fn write_resource(&mut self, offset: u64, bytes: &[u8]) -> Result<()> {
+        if bytes.len() > self.capacity_transfer_bytes {
+            bail!("resource chunk does not fit the portable transfer buffer");
         }
+        let offset = i64::try_from(offset).context("resource offset is too large")?;
+        self.write_transfer(bytes)?;
+        self.reset_control_fuel()?;
+        check_status(
+            self.resource_write
+                .call(&mut self.store, (offset, bytes.len() as i32))?,
+            "resource_write",
+        )
+    }
+
+    fn end_resource(&mut self) -> Result<()> {
         self.reset_control_fuel()?;
         check_status(self.resource_end.call(&mut self.store, ())?, "resource_end")
     }

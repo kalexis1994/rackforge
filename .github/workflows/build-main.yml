@@ -46,7 +46,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: RackForge-Windows-x86_64-${{ github.sha }}
-          path: dist/windows-x86_64/RackForge.exe
+          path: dist/windows-x86_64
           if-no-files-found: error
           retention-days: 14
 

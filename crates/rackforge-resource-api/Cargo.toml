@@ -1,0 +1,10 @@
+[package]
+name = "rackforge-resource-api"
+description = "Platform-neutral resource browser and grant contracts for RackForge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true

@@ -1,8 +1,8 @@
-use crate::PluginStateStore;
 use crate::PluginStorage;
 use crate::performance::PerformanceRepository;
 use crate::session::SharedSessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
+use crate::{LoadedPlugin, PluginInstance, PluginStateStore};
 use anyhow::{Context, Result, bail};
 use rackforge_audio_api::{AudioOutputDocument, AudioOutputProfile, AudioOutputState};
 use rackforge_control_api::{
@@ -17,8 +17,8 @@ use rackforge_performance_api::{
 };
 use rackforge_plugin_api::{
     Capability, ParameterSchema, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
-    ProgramEditRequest, ProgramEditorView, ProgramFieldEditRequest, SurfaceActivationRequest,
-    SurfaceActivationResponse,
+    ProgramEditRequest, ProgramEditorView, ProgramFieldEditRequest, ResourceKind,
+    SurfaceActivationRequest, SurfaceActivationResponse,
 };
 use rackforge_session_api::{
     AuditionEndReason, ClientId, CommandEnvelope, CommandRef, HostActionBinding,
@@ -173,7 +173,36 @@ pub enum AudioControlCommand {
         value: f64,
         reply: SyncSender<Result<f64, String>>,
     },
+    ReplaceStandaloneVoice {
+        instance_id: InstanceId,
+        instance: PreparedPluginInstance,
+        reply: SyncSender<Result<(), String>>,
+    },
 }
+
+pub struct PreparedPluginInstance(pub PluginInstance<'static>);
+
+// SAFETY: this wrapper is constructed only for a portable wasm-v1 instance.
+// Ownership moves from the control worker to the single audio loop.
+unsafe impl Send for PreparedPluginInstance {}
+
+#[derive(Clone, Copy)]
+pub struct PortableControlPlugin(&'static LoadedPlugin);
+
+impl PortableControlPlugin {
+    pub fn new(plugin: &'static LoadedPlugin) -> Option<Self> {
+        plugin
+            .manifest()
+            .portable_component()
+            .is_some()
+            .then_some(Self(plugin))
+    }
+}
+
+// SAFETY: PortableControlPlugin can contain only RackForge's immutable
+// wasm-v1 backend. Native ABI host pointers are rejected by the constructor.
+unsafe impl Send for PortableControlPlugin {}
+unsafe impl Sync for PortableControlPlugin {}
 
 struct LeaseDeadline {
     lease_id: u64,
@@ -200,6 +229,10 @@ struct ControlContext {
     performance_repository: Arc<Mutex<PerformanceRepository>>,
     state_store: Arc<Mutex<PluginStateStore>>,
     plugin_manifests: BTreeMap<String, PluginManifest>,
+    portable_plugins: BTreeMap<String, PortableControlPlugin>,
+    plugin_sample_rate: f64,
+    plugin_maximum_frames: u32,
+    plugin_output_channels: u32,
     storage: Option<PluginStorage>,
     checkpoint: Option<SessionCheckpointStore>,
     dispatch_lock: Mutex<()>,
@@ -221,6 +254,10 @@ pub fn start(
     performance_repository: Arc<Mutex<PerformanceRepository>>,
     state_store: Arc<Mutex<PluginStateStore>>,
     plugin_manifests: BTreeMap<String, PluginManifest>,
+    portable_plugins: BTreeMap<String, PortableControlPlugin>,
+    plugin_sample_rate: f64,
+    plugin_maximum_frames: u32,
+    plugin_output_channels: u32,
     storage: Option<PluginStorage>,
     checkpoint: Option<SessionCheckpointStore>,
 ) -> Result<ControlServer> {
@@ -264,6 +301,10 @@ pub fn start(
         performance_repository,
         state_store,
         plugin_manifests,
+        portable_plugins,
+        plugin_sample_rate,
+        plugin_maximum_frames,
+        plugin_output_channels,
         storage,
         checkpoint,
         dispatch_lock: Mutex::new(()),
@@ -401,6 +442,12 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             parameter_index,
             value,
         } => set_plugin_parameter(context, &instance_id, parameter_index, value),
+        ControlRequest::LoadPluginResource {
+            plugin_id,
+            instance_id,
+            resource_id,
+            path,
+        } => load_plugin_resource(context, &plugin_id, &instance_id, &resource_id, &path),
         ControlRequest::EditPerformance {
             expected_revision,
             edit,
@@ -423,6 +470,128 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
         ControlRequest::Dispatch { envelope } => dispatch_command(context, envelope),
     };
     write_response(&mut stream, &response)
+}
+
+fn load_plugin_resource(
+    context: &ControlContext,
+    plugin_id: &str,
+    instance_id: &InstanceId,
+    resource_id: &str,
+    path: &Path,
+) -> ControlResponse {
+    let snapshot = match context.store.lock() {
+        Ok(store) => store.snapshot(),
+        Err(_) => return internal_error("session store lock is poisoned", None),
+    };
+    let Some(instance_state) = snapshot.instance(instance_id) else {
+        return error_response(
+            ControlErrorCode::NotFound,
+            format!("plugin instance {instance_id} was not found"),
+            Some(snapshot.revision),
+        );
+    };
+    if instance_state.plugin_id != plugin_id {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            "plugin instance does not belong to the resource owner",
+            Some(snapshot.revision),
+        );
+    }
+    let Some(manifest) = context.plugin_manifests.get(&instance_state.plugin_id) else {
+        return internal_error(
+            "active plugin manifest is unavailable",
+            Some(snapshot.revision),
+        );
+    };
+    if !manifest
+        .resources
+        .iter()
+        .any(|resource| resource.id == resource_id && resource.kind == ResourceKind::File)
+    {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            format!("plugin does not declare file resource {resource_id:?}"),
+            Some(snapshot.revision),
+        );
+    }
+    let Some(runtime) = context
+        .portable_plugins
+        .get(&instance_state.plugin_id)
+        .copied()
+    else {
+        return error_response(
+            ControlErrorCode::Unavailable,
+            "dynamic resources currently require a portable wasm-v1 plugin",
+            Some(snapshot.revision),
+        );
+    };
+    let path = match fs::canonicalize(path) {
+        Ok(path) if path.is_file() => path,
+        Ok(_) => {
+            return error_response(
+                ControlErrorCode::InvalidRequest,
+                "selected resource is not a file",
+                Some(snapshot.revision),
+            );
+        }
+        Err(error) => {
+            return error_response(
+                ControlErrorCode::InvalidRequest,
+                format!("selected resource is unavailable: {error}"),
+                Some(snapshot.revision),
+            );
+        }
+    };
+    let mut replacement = match runtime.0.create_instance() {
+        Ok(instance) => instance,
+        Err(error) => return internal_error(error, Some(snapshot.revision)),
+    };
+    if let Err(error) = replacement.load_resource_file(resource_id, &path) {
+        return error_response(
+            ControlErrorCode::Rejected,
+            format!("plugin rejected the resource: {error:#}"),
+            Some(snapshot.revision),
+        );
+    }
+    if let Some(sound_id) = instance_state.selected_sound_id.as_deref()
+        && let Err(error) = replacement.load_preset(sound_id)
+    {
+        return error_response(
+            ControlErrorCode::Rejected,
+            format!("plugin could not restore sound {sound_id:?}: {error:#}"),
+            Some(snapshot.revision),
+        );
+    }
+    if let Err(error) = replacement.activate(
+        context.plugin_sample_rate,
+        context.plugin_maximum_frames,
+        0,
+        context.plugin_output_channels,
+    ) {
+        return error_response(
+            ControlErrorCode::Rejected,
+            format!("plugin could not activate the resource: {error:#}"),
+            Some(snapshot.revision),
+        );
+    }
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    if let Err(failure) = send_audio_command(
+        context,
+        AudioControlCommand::ReplaceStandaloneVoice {
+            instance_id: instance_id.clone(),
+            instance: PreparedPluginInstance(replacement),
+            reply: reply_sender,
+        },
+    ) {
+        return failure.into_response();
+    }
+    match receive_audio(reply_receiver, "replace plugin resource") {
+        Ok(()) => ControlResponse::PluginResourceLoaded {
+            instance_id: instance_id.clone(),
+            resource_id: resource_id.to_owned(),
+        },
+        Err(failure) => failure.into_response(),
+    }
 }
 
 fn plugin_parameters(context: &ControlContext, instance_id: &InstanceId) -> ControlResponse {
@@ -2791,6 +2960,10 @@ mod tests {
                     }))
                     .unwrap(),
                 )]),
+                portable_plugins: BTreeMap::new(),
+                plugin_sample_rate: 48_000.0,
+                plugin_maximum_frames: 128,
+                plugin_output_channels: 2,
                 checkpoint: None,
                 dispatch_lock: Mutex::new(()),
                 lease_deadline: Mutex::new(None),

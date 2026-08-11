@@ -1,39 +1,24 @@
-# Baseline de la Raspberry
+# Raspberry Pi baseline
 
-Estado comprobado el 29 de julio de 2026:
+Verified reference system on July 29, 2026:
 
-```text
-Hardware: Raspberry Pi 4B, 8 GiB
-Arquitectura: aarch64
-Sistema: Debian 13 (trixie)
-Kernel: Raspberry Pi PREEMPT
-Hostname: rackforge
-Usuario: configurable durante la instalación
-Root filesystem: ext4 en microSD de 64 GB
-Acceso: SSH mediante clave dedicada
-```
+- Raspberry Pi 4 Model B.
+- 64-bit Raspberry Pi OS Lite / Debian 13.
+- Linux AArch64.
+- Installation user selected at install time.
+- Runtime root: `$HOME/rackforge/current`.
 
-Paquetes de desarrollo instalados por `../dev/bootstrap.sh`:
+The service files are templates until the installer places and enables them.
+No repository path or username is assumed.
 
-- Git;
-- CMake y Ninja;
-- ALSA y udev development headers;
-- pkg-config;
-- Rustup y Rust estable;
-- tmux, jq, curl y certificados.
+## Verified peripherals
 
-El servicio `rackforge.service` es solamente una plantilla y aún no está instalado
-ni habilitado. El software se despliega en `$HOME/rackforge/current`.
+With the KeyLab and audio interface connected simultaneously:
 
-## Periféricos comprobados
+- Arturia KeyLab Essential 61 mk3 MIDI and DAW endpoints enumerate correctly.
+- Focusrite Scarlett Solo enumerates at USB high speed.
+- Power status reports `throttled=0x0`.
+- The Scarlett exposes stereo S32_LE playback/capture from 44.1 to 192 kHz.
 
-Con el KeyLab y la interfaz conectados simultáneamente:
-
-```text
-Arturia KeyLab Essential 61 mk3: USB 1c75:028c, MIDI ALSA
-Focusrite Scarlett Solo 3rd Gen: USB 1235:8211, audio ALSA
-Estado de alimentación: throttled=0x0
-```
-
-La Scarlett funciona a USB high speed y expone reproducción/captura estéreo
-S32_LE de 44.1 a 192 kHz. El perfil reproducible está en `../audio/`.
+The reproducible low-latency starting profile lives in `../audio/`. Device
+selection uses stable identity and never persists an ephemeral ALSA card index.

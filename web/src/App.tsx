@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useSelector } from "react-redux";
 import { Blocks, House, Play, RadioTower, Settings2 } from "lucide-react";
 import {
@@ -33,6 +41,8 @@ import type {
   ProgramEditorValue,
   PluginWebDescriptor,
   PluginWebSurfaceKind,
+  PluginResourceRequirement,
+  ResourceGrant,
   PluginRepositoryConfig,
   PluginRepositoryFile,
   SessionSnapshot,
@@ -40,6 +50,27 @@ import type {
   WebAuthStatus,
   WebPublicConfig,
 } from "./types";
+
+const ResourceExplorerDialog = lazy(() =>
+  import("./ResourceExplorerDialog").then((module) => ({
+    default: module.ResourceExplorerDialog,
+  })),
+);
+
+async function postResourceApi<T>(url: string, body: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as {
+      message?: string;
+    } | null;
+    throw new Error(payload?.message ?? `HTTP ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
 
 function findEditorField(
   pages: ProgramEditorPage[],
@@ -121,6 +152,7 @@ export function App() {
   if (auth.requires_pin) {
     return (
       <PinGatePage
+        key={`${auth.pin_state}:${auth.locked_for}`}
         status={auth}
         onUnlocked={() =>
           setAuth({ ...auth, unlocked: true, requires_pin: false })
@@ -239,9 +271,6 @@ function PinGatePage({
 
   // The wait counts itself down rather than sitting on a stale number, so a
   // player standing in front of a locked device can see it clearing.
-  useEffect(() => {
-    setLockedFor(status.locked_for);
-  }, [status.locked_for]);
   useEffect(() => {
     if (lockedFor <= 0) return;
     const timer = window.setInterval(
@@ -1041,6 +1070,28 @@ function PluginFrame({
   >("loading");
   const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const pendingResourceRequestRef = useRef<string | null>(null);
+  const [resourceRequest, setResourceRequest] = useState<{
+    requestId: string;
+    resource: PluginResourceRequirement;
+  } | null>(null);
+
+  const sendPluginResponse = useCallback(
+    (requestId: string, ok: boolean, error?: string, result?: unknown) => {
+      frameRef.current?.contentWindow?.postMessage(
+        {
+          protocol: "rackforge.plugin.web@1",
+          kind: "response",
+          request_id: requestId,
+          ok,
+          ...(error ? { error } : {}),
+          ...(result !== undefined ? { result } : {}),
+        },
+        window.location.origin,
+      );
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1178,6 +1229,83 @@ function PluginFrame({
         });
         respond(true);
       } else if (
+        event.data.method === "plugin.select_resource" &&
+        surface === "config" &&
+        typeof params.resource_id === "string"
+      ) {
+        const resource = descriptor?.resources.find(
+          (candidate) => candidate.id === params.resource_id,
+        );
+        if (!resource) {
+          respond(false, "Resource is not declared by this plugin.");
+        } else if (pendingResourceRequestRef.current) {
+          respond(false, "Another resource selection is already open.");
+        } else {
+          pendingResourceRequestRef.current = event.data.request_id;
+          setResourceRequest({
+            requestId: event.data.request_id,
+            resource,
+          });
+        }
+      } else if (
+        event.data.method === "plugin.resource_bindings" &&
+        surface === "config"
+      ) {
+        postResourceApi("/api/v1/resources/grants", {
+          plugin_id: instance.plugin_id,
+        })
+          .then((grants) => respond(true, undefined, grants))
+          .catch((error: unknown) =>
+            respond(
+              false,
+              error instanceof Error ? error.message : "Could not read resource bindings.",
+            ),
+          );
+      } else if (
+        event.data.method === "plugin.resource_entries" &&
+        surface === "config" &&
+        typeof params.grant_id === "string" &&
+        (params.parent_id === null || params.parent_id === undefined ||
+          typeof params.parent_id === "string")
+      ) {
+        postResourceApi("/api/v1/resources/browse", {
+          plugin_id: instance.plugin_id,
+          grant_id: params.grant_id,
+          parent_id: typeof params.parent_id === "string" ? params.parent_id : null,
+        })
+          .then((entries) => respond(true, undefined, entries))
+          .catch((error: unknown) =>
+            respond(
+              false,
+              error instanceof Error ? error.message : "Could not browse this resource.",
+            ),
+          );
+      } else if (
+        event.data.method === "plugin.load_resource" &&
+        surface === "config" &&
+        typeof params.target_resource_id === "string" &&
+        descriptor?.resources.some(
+          (resource) =>
+            resource.id === params.target_resource_id && resource.kind === "file",
+        ) &&
+        typeof params.grant_id === "string" &&
+        typeof params.entry_id === "string"
+      ) {
+        postResourceApi("/api/v1/resources/load", {
+          plugin_id: instance.plugin_id,
+          instance_id: instance.instance_id,
+          target_resource_id: params.target_resource_id,
+          grant_id: params.grant_id,
+          entry_id: params.entry_id,
+        })
+          .then((result) => respond(true, undefined, result))
+          .catch((error: unknown) =>
+            respond(
+              false,
+              error instanceof Error ? error.message : "Could not load this resource.",
+            ),
+          );
+      } else if (
         event.data.method === "plugin.begin_program_edit" &&
         surface === "config" &&
         (params.program_id === null ||
@@ -1282,7 +1410,7 @@ function PluginFrame({
       window.removeEventListener("message", onMessage);
       frame.removeEventListener("load", onLoad);
     };
-  }, [instance, selectedSurface, snapshot, surface]);
+  }, [descriptor, instance, selectedSurface, snapshot, surface]);
 
   const editLease =
     surface === "config" &&
@@ -1339,15 +1467,50 @@ function PluginFrame({
       />
     );
   }
+  const finishResourceSelection = (
+    ok: boolean,
+    error?: string,
+    grant?: ResourceGrant,
+  ) => {
+    const requestId = resourceRequest?.requestId;
+    if (!requestId) return;
+    sendPluginResponse(requestId, ok, error, grant);
+    pendingResourceRequestRef.current = null;
+    setResourceRequest(null);
+  };
+
   return (
-    <iframe
-      ref={frameRef}
-      className="plugin-frame"
-      title={`${instance.plugin_name} ${surface}`}
-      src={selectedSurface.entry_url}
-      sandbox="allow-scripts allow-same-origin"
-      referrerPolicy="same-origin"
-    />
+    <>
+      <iframe
+        ref={frameRef}
+        className="plugin-frame"
+        title={`${instance.plugin_name} ${surface}`}
+        src={selectedSurface.entry_url}
+        sandbox="allow-scripts allow-same-origin"
+        referrerPolicy="same-origin"
+      />
+      {resourceRequest ? (
+        <Suspense
+          fallback={
+            <div className="resource-explorer-backdrop">
+              <RfLoader label="RackForge storage" detail="Opening explorer…" />
+            </div>
+          }
+        >
+          <ResourceExplorerDialog
+            pluginId={instance.plugin_id}
+            resource={resourceRequest.resource}
+            onCancel={() =>
+              finishResourceSelection(
+                false,
+                "Resource selection was cancelled by the user.",
+              )
+            }
+            onBound={(grant) => finishResourceSelection(true, undefined, grant)}
+          />
+        </Suspense>
+      ) : null}
+    </>
   );
 }
 

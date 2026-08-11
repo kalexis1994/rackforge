@@ -50,6 +50,11 @@ pub struct ResourceRequirement {
     /// supplied. The guest receives bytes, never this filesystem path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_path: Option<String>,
+    /// Optional immutable resource distributed inside the plugin package.
+    /// This is intended for redistributable assets such as open sample banks;
+    /// user overrides still take precedence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_path: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -73,6 +78,10 @@ pub struct PortableComponent {
     pub runtime_descriptor: String,
     pub parameter_schema: String,
     pub preset_catalog: String,
+    /// Maximum linear memory requested by this component. The host applies a
+    /// conservative default when omitted and rejects requests above its cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_limit_mib: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -223,6 +232,20 @@ impl PluginManifest {
                     path: path.clone(),
                 });
             }
+            if let Some(path) = &resource.package_path
+                && !is_safe_relative_path(path)
+            {
+                return Err(ManifestError::UnsafePackagedResourcePath {
+                    id: resource.id.clone(),
+                    path: path.clone(),
+                });
+            }
+        }
+        if let Some(component) = &self.component
+            && let Some(memory_limit_mib) = component.memory_limit_mib
+            && !(64..=512).contains(&memory_limit_mib)
+        {
+            return Err(ManifestError::InvalidPortableMemoryLimit(memory_limit_mib));
         }
         for (platform, path) in &self.binaries {
             validate_identifier(platform, false)
@@ -369,6 +392,10 @@ pub enum ManifestError {
     DuplicateResource(String),
     #[error("resource {id} data path must be a safe relative path: {path:?}")]
     UnsafeResourcePath { id: String, path: String },
+    #[error("resource {id} package path must be a safe relative path: {path:?}")]
+    UnsafePackagedResourcePath { id: String, path: String },
+    #[error("portable memory limit must be between 64 and 512 MiB, found {0}")]
+    InvalidPortableMemoryLimit(u32),
     #[error("invalid or duplicate UI layout {0:?}")]
     InvalidUiLayout(String),
     #[error("invalid platform identifier {0:?}")]
@@ -450,6 +477,7 @@ mod tests {
             kind: ResourceKind::File,
             required: false,
             data_path: Some("roms/bank.bin".into()),
+            package_path: None,
         });
         assert_eq!(candidate.validate(), Ok(()));
         candidate.resources[0].data_path = Some("../outside.bin".into());
@@ -469,6 +497,7 @@ mod tests {
             runtime_descriptor: "metadata/runtime.json".into(),
             parameter_schema: "metadata/parameters.json".into(),
             preset_catalog: "metadata/presets.json".into(),
+            memory_limit_mib: None,
         });
         assert_eq!(candidate.validate(), Ok(()));
     }
@@ -482,6 +511,7 @@ mod tests {
             runtime_descriptor: "metadata/runtime.json".into(),
             parameter_schema: "metadata/parameters.json".into(),
             preset_catalog: "metadata/presets.json".into(),
+            memory_limit_mib: None,
         });
         assert_eq!(candidate.validate(), Err(ManifestError::AmbiguousRuntime));
     }

@@ -8,7 +8,7 @@ use std::mem::size_of;
 use std::ptr;
 
 pub const ABI_VERSION_MAJOR: u16 = 1;
-pub const ABI_VERSION_MINOR: u16 = 6;
+pub const ABI_VERSION_MINOR: u16 = 7;
 pub const ABI_VERSION: u32 = pack_version(ABI_VERSION_MAJOR, ABI_VERSION_MINOR);
 pub const ENTRY_SYMBOL_V1: &[u8] = b"rackforge_plugin_entry_v1\0";
 pub const PROGRAM_EXTENSION_VERSION_MAJOR: u16 = 1;
@@ -278,7 +278,8 @@ mod tests {
         assert!(is_compatible(pack_version(1, 5)));
         assert!(is_compatible(pack_version(1, 6)));
         assert!(!is_compatible(pack_version(2, 0)));
-        assert!(!is_compatible(pack_version(1, 7)));
+        assert!(is_compatible(pack_version(1, 7)));
+        assert!(!is_compatible(pack_version(1, 8)));
         assert!(is_program_extension_compatible(pack_version(1, 0)));
         assert!(is_program_extension_compatible(pack_version(1, 1)));
         assert!(is_program_extension_compatible(pack_version(1, 2)));

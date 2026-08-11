@@ -379,21 +379,34 @@ unsafe extern "C" {
 
 struct AndroidEngine {
     instance: SendablePluginInstance,
+    runtime: SendableLoadedPlugin,
     midi: Vec<MidiEventV1>,
     plugin_id: String,
     plugin_name: String,
     plugin_version: String,
     package_root: PathBuf,
     web_entry: String,
+    config_web_entry: Option<String>,
+    resource_requirements: Vec<rackforge_plugin_api::ResourceRequirement>,
+    resource_overrides: BTreeMap<String, PathBuf>,
     catalog: PresetCatalog,
     selected_sound_id: String,
 }
 
 struct SendablePluginInstance(PluginInstance<'static>);
 
+#[derive(Clone, Copy)]
+struct SendableLoadedPlugin(&'static LoadedPlugin);
+
 // SAFETY: access to the plugin instance is serialized by ENGINE's mutex. The
 // JNI bridge never exposes the instance pointer to Java or another callback.
 unsafe impl Send for SendablePluginInstance {}
+
+// SAFETY: AndroidEngine accepts only validated portable wasm-v1 packages.
+// Their LoadedPlugin backend is immutable compiled Wasm state; native plugin
+// host pointers can never inhabit this wrapper on Android.
+unsafe impl Send for SendableLoadedPlugin {}
+unsafe impl Sync for SendableLoadedPlugin {}
 
 struct NativeAudioOutput {
     stream: *mut AAudioStream,
@@ -479,6 +492,13 @@ impl AndroidEngine {
             })
             .map(|surface| surface.entry.clone())
             .context("plugin does not expose a PLAY Web surface")?;
+        let config_web_entry = manifest.web_ui.as_ref().and_then(|web| {
+            web.surfaces
+                .iter()
+                .find(|surface| surface.kind == WebSurfaceKind::Config)
+                .map(|surface| surface.entry.clone())
+        });
+        let resource_requirements = manifest.resources.clone();
         let package_root = package.root().to_path_buf();
         // SAFETY: Android installs only validated, sandboxed wasm-v1 packages.
         let plugin =
@@ -500,12 +520,16 @@ impl AndroidEngine {
         instance.activate(SAMPLE_RATE, MAX_FRAMES, 0, 2)?;
         Ok(Self {
             instance: SendablePluginInstance(instance),
+            runtime: SendableLoadedPlugin(plugin),
             midi: Vec::with_capacity(256),
             plugin_id,
             plugin_name,
             plugin_version,
             package_root,
             web_entry,
+            config_web_entry,
+            resource_requirements,
+            resource_overrides: BTreeMap::new(),
             catalog,
             selected_sound_id,
         })
@@ -550,7 +574,8 @@ impl AndroidEngine {
                 "plugin_name": self.plugin_name,
                 "plugin_version": self.plugin_version,
                 "ui_layouts": ["little@1"],
-                "config_available": false,
+                "config_available": self.config_web_entry.is_some(),
+                "config_web_entry": self.config_web_entry,
                 "sounds": sounds,
                 "selected_sound_id": self.selected_sound_id,
             },
@@ -560,7 +585,8 @@ impl AndroidEngine {
                 "active_mode": "play",
                 "master_level": 0,
                 "master_pan": 0,
-            }
+            },
+            "resources": self.resource_requirements,
         })
         .to_string()
     }
@@ -1400,6 +1426,72 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_selectPluginSound
             .as_mut()
             .context("RackForge engine is not initialized")?
             .select_sound(&sound_id)
+    })();
+    match result {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_loadPluginResource(
+    mut env: JNIEnv,
+    _class: JClass,
+    resource_id: JString,
+    file_path: JString,
+) -> jboolean {
+    let result = (|| -> Result<()> {
+        let resource_id = java_string(&mut env, resource_id)?;
+        let file_path = std::fs::canonicalize(PathBuf::from(java_string(&mut env, file_path)?))?;
+        if !file_path.is_file() {
+            bail!("selected plugin resource is not a file");
+        }
+        let (runtime, selected_sound_id, mut resources, plugin_id) = {
+            let guard = engine()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+            let current = guard
+                .as_ref()
+                .context("RackForge engine is not initialized")?;
+            if !current.resource_requirements.iter().any(|resource| {
+                resource.id == resource_id
+                    && resource.kind == rackforge_plugin_api::ResourceKind::File
+            }) {
+                bail!("plugin does not declare file resource {resource_id:?}");
+            }
+            (
+                current.runtime,
+                current.selected_sound_id.clone(),
+                current.resource_overrides.clone(),
+                current.plugin_id.clone(),
+            )
+        };
+        resources.insert(resource_id.clone(), file_path);
+        let mut replacement = runtime.0.create_instance()?;
+        for (id, path) in &resources {
+            replacement.load_resource_file(id, path)?;
+        }
+        replacement.load_preset(&selected_sound_id)?;
+        replacement.activate(SAMPLE_RATE, MAX_FRAMES, 0, 2)?;
+
+        let retired = {
+            let mut guard = engine()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+            let current = guard
+                .as_mut()
+                .context("RackForge engine stopped while loading the resource")?;
+            if current.plugin_id != plugin_id {
+                bail!("active plugin changed while loading the resource");
+            }
+            current.resource_overrides = resources;
+            std::mem::replace(&mut current.instance, SendablePluginInstance(replacement))
+        };
+        drop(retired);
+        Ok(())
     })();
     match result {
         Ok(()) => JNI_TRUE,

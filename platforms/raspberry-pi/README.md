@@ -1,108 +1,47 @@
-# Plataforma Raspberry Pi
+# Raspberry Pi platform
 
-Este directorio contiene únicamente la integración de RackForge con Raspberry
-Pi OS Lite. Core, las APIs y el runtime portable viven en `crates/`.
+This directory contains only the Raspberry Pi OS Lite integration. Core, shared
+APIs, portable runtime, and product plugins live outside the platform adapter.
 
-## Responsabilidades
+Responsibilities:
 
-- detectar el KeyLab y la salida de audio;
-- mantener la conexión y el handshake con el firmware;
-- administrar motores, plugins, bancos, presets, splits y layers;
-- mezclar audio y enviarlo directamente mediante ALSA;
-- persistir performances y restaurar la última sesión;
-- supervisar fallos y recuperarse sin intervención gráfica.
+- detect MIDI controllers and audio outputs;
+- supervise controller/runtime services and reconnect after hotplug;
+- configure low-latency ALSA output;
+- persist performances and restore the latest session;
+- expose the headless WEB surface;
+- apply optional, reversible appliance optimizations.
 
-## Máquina objetivo
+## Target
 
-```text
-Raspberry Pi 4B — 8 GiB
-Debian 13 (trixie) arm64
-Kernel Raspberry Pi PREEMPT
-Hostname: rackforge
-Usuario de servicio/desarrollo: configurable
-```
+- Raspberry Pi 4 or 5.
+- 64-bit Raspberry Pi OS Lite.
+- AArch64 userspace.
+- No desktop environment required.
 
-## Estructura remota
+The default installation root is `$HOME/rackforge/current`; the installer
+resolves the actual user and home directory and never depends on a hardcoded
+username.
 
-```text
-$HOME/rackforge/
-├── current/       software desplegado
-├── banks/         bancos de sonidos
-├── performances/  configuración musical
-├── state/         estado persistente
-└── logs/          logs acotados
-```
+## Build
 
-## Desarrollo
+From Windows or another development machine, use the repository CI or the
+platform scripts. The release pipeline publishes
+`RackForge-RaspberryPi-arm64.tar.gz`.
 
-Desde Windows:
-
-```powershell
-.\platforms\raspberry-pi\dev\health.ps1
-.\platforms\raspberry-pi\dev\sync.ps1
-.\platforms\raspberry-pi\dev\connect.ps1
-```
-
-## Artefacto ARM64
-
-`tools/build-raspberry-pi.sh` compila nativamente en ARM64 y produce
-`dist/raspberry-pi/RackForge-RaspberryPi-arm64.tar.gz`. El paquete contiene los
-hosts, la Web y la integración de Raspberry Pi, pero ningún instrumento: cada
-`.rfplugin` se publica desde su propio pipeline.
-
-La instalación no presupone un usuario concreto. Por defecto usa el usuario
-que ejecuta los scripts y despliega en `$HOME/rackforge`; ambos valores pueden
-sobrescribirse mediante `RACKFORGE_USER` y `RACKFORGE_ROOT`. Las unidades
-`systemd/` son plantillas y el instalador sustituye sus valores antes de
-copiarlas a `/etc/systemd/system`.
-
-Los paquetes `.rfcontroller` y el driver Arturia de referencia viven en
-`hardware/`. `rackforge-controller-host` los descubre y supervisa sin conocer
-marcas o modelos.
-
-`audio/` contiene el perfil ALSA inicial de la Scarlett Solo y un diagnóstico
-de hardware que no reproduce sonido ni modifica el mezclador.
-
-## Tiempo real
-
-La ruta de audio necesita dos mitades independientes, y ninguna sirve sola: la
-plataforma debe **conceder** los límites y el host debe **pedirlos**.
-
-| Mitad | Dónde vive |
-|---|---|
-| Concesión | `LimitRTPRIO` y `LimitMEMLOCK` en `systemd/rackforge-audio.service`; `etc/security/limits.d/rackforge-audio.conf` para ejecuciones manuales. |
-| Solicitud | `rackforge_core::realtime::engage`, invocado sobre el hilo que corre el bucle de audio. |
-
-`sbin/rackforge-cpu-performance.sh` fija el governor antes de que arranque el
-audio y guarda el anterior para poder restaurarlo. `optimize-appliance.sh apply`
-instala ambas mitades, desactiva swap y deja todo revertible con `rollback`.
-
-Un arranque sin privilegios de tiempo real **no es un error**: el host sigue
-sonando, pero queda expuesto a dropouts bajo carga. Como esa diferencia es
-inaudible hasta el peor momento posible, el host publica su estado en el
-arranque y la auditoría lo expone:
+## Install
 
 ```bash
-sudo platforms/raspberry-pi/scripts/optimize-appliance.sh audit
+mkdir -p "$HOME/rackforge/current"
+tar -xzf RackForge-RaspberryPi-arm64.tar.gz \
+  -C "$HOME/rackforge/current" --strip-components=1
+bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install.sh"
+bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install-appliance.sh"
 ```
 
-Las líneas `realtime_status`, `cpu_governor`, `swap_active` y
-`xruns_since_boot` describen la postura real de la máquina, no la configurada.
+The second command installs the supervised appliance services. Optional
+real-time and power optimizations are applied with `--optimize` and can be
+rolled back locally.
 
-RF-DLS y su motor DLS viven en el repositorio independiente
-`rackforge-plugin-rf-dls`. Los bancos `.dls` aportados por el usuario continúan
-en `data/plugins/rf-dls`, fuera de Git y de cualquier paquete distribuible.
-
-`crates/` contiene `rackforge-core`, la API versionada para plugins y los
-esquemas declarativos con los que cada plugin aporta sus páginas sin introducir
-pantallas específicas en el host.
-
-`engines/nuked-sc55/` integra el emulador Roland Sound Canvas, sus herramientas
-de compilación ARM64 y su launcher headless. Las ROM permanecen fuera de Git.
-
-`engines/scva-arm64/` contiene el lector Rust nativo para los bancos extraídos
-de Sound Canvas VA. Sus datos propietarios viven en `share/scva`, fuera del
-despliegue y del repositorio.
-
-La plantilla `systemd/rackforge.service` todavía no se instala: se habilitará
-cuando exista un binario de daemon con comportamiento seguro ante fallos.
+Plugins are installed separately as `.rfplugin` packages. Proprietary banks
+and ROMs are never bundled with RackForge.

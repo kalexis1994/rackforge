@@ -117,6 +117,21 @@ from plugin JavaScript.
 - `plugin.select_sound`: available to the plugin's own `PLAY` and `CONFIG`
   surfaces. The
   `sound_id` must appear in that instance's current catalog.
+- `plugin.select_resource`: available to `CONFIG`; accepts only a `resource_id`
+  declared by that plugin's manifest. RackForge opens its host-owned resource
+  explorer and returns a grant with an opaque `grant_id`, display name and
+  selected kind. The plugin cannot supply its own plugin ID, browse native
+  paths or receive a Windows path, POSIX path or Android content URI.
+- `plugin.resource_bindings`: available to `CONFIG`; returns the persistent
+  opaque grants owned by the current plugin. It takes no parameters.
+- `plugin.resource_entries`: available to `CONFIG`; lists one level inside an
+  existing grant. It accepts `grant_id` and an optional `parent_id`, both
+  opaque. Passing no `parent_id` lists the grant root.
+- `plugin.load_resource`: available to `CONFIG`; loads one granted file into a
+  file resource declared by the active plugin. It accepts
+  `target_resource_id`, `grant_id` and `entry_id`. RackForge prepares a new
+  plugin instance away from the real-time audio callback and swaps it at an
+  audio block boundary.
 - `plugin.begin_program_edit`: available to `CONFIG`; starts a new program when
   `program_id` is `null`, or edits a program from that plugin's `custom`
   collection.
@@ -135,3 +150,112 @@ from plugin JavaScript.
 These are optional capabilities, not required controls or required screens.
 The host validates and transports them; the plugin decides whether and how they
 appear.
+
+## Host-owned resource explorer
+
+Plugins declare the resources they may request:
+
+```toml
+[[resources]]
+id = "sample-library"
+name = "Sample library"
+kind = "directory"
+required = false
+```
+
+A CONFIG surface requests the declared resource:
+
+```json
+{
+  "protocol": "rackforge.plugin.web@1",
+  "kind": "request",
+  "request_id": "samples-1",
+  "method": "plugin.select_resource",
+  "params": { "resource_id": "sample-library" }
+}
+```
+
+RackForge owns the resulting dialog, platform permissions and navigation. A
+successful response contains no native location:
+
+```json
+{
+  "grant_id": "2yZPpGTf0G4iFvREl_QmDhyF",
+  "resource_id": "sample-library",
+  "display_name": "My SoundFonts",
+  "kind": "directory"
+}
+```
+
+The browser uses lazy directory loading and opaque handles. Native hosts reject
+symbolic links and revalidate every child against its authorized mount.
+Windows exposes available drives through the same contract used by Linux and
+Raspberry Pi mounts. Android implements the contract over `ContentResolver`:
+the first root authorization must use the system Storage Access Framework, but
+all navigation within an authorized tree is rendered by RackForge.
+
+After a directory has been granted, a plugin can restore and browse it without
+opening the host dialog again:
+
+```json
+{
+  "protocol": "rackforge.plugin.web@1",
+  "kind": "request",
+  "request_id": "samples-2",
+  "method": "plugin.resource_entries",
+  "params": {
+    "grant_id": "2yZPpGTf0G4iFvREl_QmDhyF",
+    "parent_id": null
+  }
+}
+```
+
+Selecting an entry never exposes its backing path or content URI. The plugin
+asks RackForge to stream the selected file into one of its declared file
+resources:
+
+```json
+{
+  "protocol": "rackforge.plugin.web@1",
+  "kind": "request",
+  "request_id": "samples-3",
+  "method": "plugin.load_resource",
+  "params": {
+    "target_resource_id": "factory-soundfont",
+    "grant_id": "2yZPpGTf0G4iFvREl_QmDhyF",
+    "entry_id": "Lu9T0t0qRnrM6FXmOsgIBfsR"
+  }
+}
+```
+
+The host derives the plugin and instance identities from the iframe. Desktop
+and Raspberry Pi resolve the handle through the confined native grant. Android
+copies the document through `ContentResolver` into private app storage before
+the same portable plugin loading path is used.
+
+Desktop exposes these native-resource routes only on the loopback listener
+used by the embedded application. Enabling its optional LAN HTTP server does
+not expose drive discovery, browsing, grants or resource loading. Raspberry Pi
+keeps them behind the Web host's normal authorization because that authenticated
+Web application is the appliance's primary configuration surface.
+
+The HTTP endpoints below are host-internal transport for the RackForge shell,
+not plugin iframe capabilities:
+
+- `GET /api/v1/resources/mounts`
+- `GET /api/v1/resources/mounts/{mount_id}/root`
+- `GET /api/v1/resources/entries/{parent_id}`
+- `POST /api/v1/resources/bind`
+- `POST /api/v1/resources/grants`
+- `POST /api/v1/resources/browse`
+- `POST /api/v1/resources/load`
+
+The backend repeats manifest ownership and resource-kind validation when a
+binding is created. A plugin must use the postMessage method; direct endpoint
+access is not part of the plugin API.
+
+RackForge renders this surface with
+[`@svar-ui/react-filemanager`](https://github.com/svar-widgets/react-filemanager)
+under its MIT license. SVAR is a replaceable view dependency only; the resource
+contracts, authorization model, persistence and platform adapters belong to
+RackForge.

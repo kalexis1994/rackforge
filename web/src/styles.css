@@ -1885,6 +1885,124 @@ body {
   }
 }
 
+.resource-explorer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(1, 7, 11, 0.82);
+  backdrop-filter: blur(12px);
+}
+
+.resource-explorer-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(1040px, 100%);
+  height: min(720px, 100%);
+  overflow: hidden;
+  color: var(--ink);
+  background: #07131c;
+  border: 1px solid rgba(85, 231, 255, 0.24);
+  border-radius: 18px;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.58);
+}
+
+.resource-explorer-header,
+.resource-explorer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 20px;
+  background: #091722;
+}
+
+.resource-explorer-header {
+  border-bottom: 1px solid rgba(85, 231, 255, 0.14);
+}
+
+.resource-explorer-header h2 {
+  margin: 3px 0 0;
+  font-size: 1.05rem;
+}
+
+.resource-explorer-body {
+  min-height: 0;
+  padding: 10px;
+  background: #050e15;
+}
+
+.resource-explorer-body > div,
+.resource-explorer-body .wx-willow-dark-theme {
+  height: 100%;
+}
+
+.resource-explorer-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--muted);
+}
+
+.resource-explorer-footer {
+  min-height: 74px;
+  border-top: 1px solid rgba(85, 231, 255, 0.14);
+}
+
+.resource-explorer-footer > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+}
+
+.resource-explorer-footer span,
+.resource-explorer-footer strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-explorer-footer strong {
+  color: #ffc6d0;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.resource-explorer-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.resource-explorer-actions button,
+.resource-explorer-header .icon-button {
+  min-height: 42px;
+}
+
+@media (max-width: 640px) {
+  .resource-explorer-backdrop {
+    padding: 0;
+  }
+
+  .resource-explorer-dialog {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .resource-explorer-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .resource-explorer-actions button {
+    flex: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

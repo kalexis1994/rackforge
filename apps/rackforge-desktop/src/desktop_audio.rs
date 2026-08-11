@@ -14,9 +14,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -120,6 +120,7 @@ pub struct VoiceSpec {
     pub instance_id: String,
     pub plugin: &'static LoadedPlugin,
     pub preset_id: Option<String>,
+    pub resources: BTreeMap<String, PathBuf>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -353,6 +354,7 @@ pub struct DesktopAudio {
     telemetry: Arc<AudioTelemetry>,
     sample_rate: u32,
     summary: String,
+    _voice_reclaimer: thread::JoinHandle<()>,
 }
 
 impl DesktopAudio {
@@ -414,29 +416,10 @@ impl DesktopAudio {
             bail!("the selected audio output reports zero channels");
         }
 
+        let voice_capacity = specs.len().saturating_add(8);
         let mut voices = Vec::with_capacity(specs.len());
         for spec in specs {
-            let mut instance = spec
-                .plugin
-                .create_instance()
-                .with_context(|| format!("creating audio instance {}", spec.instance_id))?;
-            if let Some(preset_id) = spec.preset_id.as_deref() {
-                instance.load_preset(preset_id).with_context(|| {
-                    format!("loading preset {preset_id:?} for the audio engine")
-                })?;
-            }
-            instance
-                .activate(
-                    f64::from(config.sample_rate.0),
-                    MAX_AUDIO_FRAMES as u32,
-                    0,
-                    PLUGIN_OUTPUT_CHANNELS as u32,
-                )
-                .with_context(|| format!("activating audio instance {}", spec.instance_id))?;
-            voices.push(AudioVoice {
-                instance_id: spec.instance_id,
-                instance: SendablePluginInstance(instance),
-            });
+            voices.push(prepare_audio_voice(spec, config.sample_rate.0)?);
         }
         let active_voice = active_instance_id
             .and_then(|active| voices.iter().position(|voice| voice.instance_id == active))
@@ -455,6 +438,10 @@ impl DesktopAudio {
             display_receiver,
         )?;
         let (command_sender, command_receiver) = mpsc::sync_channel(COMMAND_QUEUE_CAPACITY);
+        let (retired_voice_sender, retired_voice_receiver) = mpsc::sync_channel(voice_capacity);
+        let voice_reclaimer = thread::Builder::new()
+            .name("rackforge-audio-voice-reclaimer".into())
+            .spawn(move || while retired_voice_receiver.recv().is_ok() {})?;
         let errors = Arc::new(Mutex::new(None));
         let callback_errors = Arc::clone(&errors);
         let stream_errors = Arc::clone(&errors);
@@ -474,6 +461,8 @@ impl DesktopAudio {
             master_gain: MasterGain::new(MasterLevel::UNITY),
             master_balance: MasterBalance::new(MasterPan::CENTER),
             stopped: false,
+            retired_voice_sender,
+            deferred_retire: Vec::with_capacity(voice_capacity),
         };
         let stream = device
             .build_output_stream_raw(
@@ -531,6 +520,7 @@ impl DesktopAudio {
             telemetry,
             sample_rate: config.sample_rate.0,
             summary,
+            _voice_reclaimer: voice_reclaimer,
         })
     }
 
@@ -569,6 +559,11 @@ impl DesktopAudio {
             instance_id: instance_id.into(),
             sound_id: sound_id.into(),
         })
+    }
+
+    pub fn replace_voice(&self, spec: VoiceSpec) -> Result<()> {
+        let voice = prepare_audio_voice(spec, self.sample_rate)?;
+        self.send_command(AudioCommand::ReplaceVoice(voice))
     }
 
     pub fn set_master_level(&self, level: MasterLevel) -> Result<()> {
@@ -643,6 +638,7 @@ enum AudioCommand {
     SetMasterPan(MasterPan),
     SetRunning(bool),
     EmergencyStop,
+    ReplaceVoice(AudioVoice),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -768,6 +764,8 @@ struct AudioProcessor {
     master_gain: MasterGain,
     master_balance: MasterBalance,
     stopped: bool,
+    retired_voice_sender: SyncSender<AudioVoice>,
+    deferred_retire: Vec<AudioVoice>,
 }
 
 impl AudioProcessor {
@@ -812,6 +810,7 @@ impl AudioProcessor {
     }
 
     fn apply_commands(&mut self) -> Result<()> {
+        self.flush_retired_voices();
         while let Ok(command) = self.command_receiver.try_recv() {
             match command {
                 AudioCommand::SelectPlugin(instance_id) => {
@@ -850,10 +849,66 @@ impl AudioProcessor {
                     }
                     self.stopped = true;
                 }
+                AudioCommand::ReplaceVoice(voice) => {
+                    let index = self
+                        .voices
+                        .iter()
+                        .position(|current| current.instance_id == voice.instance_id)
+                        .with_context(|| {
+                            format!("unknown audio plugin instance {}", voice.instance_id)
+                        })?;
+                    let retired = std::mem::replace(&mut self.voices[index], voice);
+                    self.deferred_retire.push(retired);
+                }
             }
         }
         Ok(())
     }
+
+    fn flush_retired_voices(&mut self) {
+        while let Some(voice) = self.deferred_retire.pop() {
+            match self.retired_voice_sender.try_send(voice) {
+                Ok(()) => {}
+                Err(TrySendError::Full(voice)) => {
+                    self.deferred_retire.push(voice);
+                    break;
+                }
+                Err(TrySendError::Disconnected(voice)) => {
+                    self.deferred_retire.push(voice);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn prepare_audio_voice(spec: VoiceSpec, sample_rate: u32) -> Result<AudioVoice> {
+    let mut instance = spec
+        .plugin
+        .create_instance()
+        .with_context(|| format!("creating audio instance {}", spec.instance_id))?;
+    for (resource_id, path) in spec.resources {
+        instance
+            .load_resource_file(&resource_id, &path)
+            .with_context(|| format!("loading {resource_id:?} for {}", spec.instance_id))?;
+    }
+    if let Some(preset_id) = spec.preset_id.as_deref() {
+        instance
+            .load_preset(preset_id)
+            .with_context(|| format!("loading preset {preset_id:?} for the audio engine"))?;
+    }
+    instance
+        .activate(
+            f64::from(sample_rate),
+            MAX_AUDIO_FRAMES as u32,
+            0,
+            PLUGIN_OUTPUT_CHANNELS as u32,
+        )
+        .with_context(|| format!("activating audio instance {}", spec.instance_id))?;
+    Ok(AudioVoice {
+        instance_id: spec.instance_id,
+        instance: SendablePluginInstance(instance),
+    })
 }
 
 fn push_midi_event(events: &mut Vec<MidiEventV1>, packet: MidiPacket) {

@@ -10,6 +10,7 @@ mod desktop_webview;
 mod native_menu;
 mod paths;
 mod setup;
+mod startup;
 mod web;
 
 use anyhow::{Context, Result, bail};
@@ -34,6 +35,7 @@ use rackforge_surface_runtime::{
     ActiveMode, Header, Input, Menu, MenuCommand, PlayPlugin, PlaySound,
 };
 use semver::Version;
+use startup::{Options, Startup, options_from_layout, parse_startup};
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::Read;
@@ -84,36 +86,6 @@ impl LittleGeometry {
     }
 }
 
-#[derive(Clone, Debug)]
-struct Options {
-    web_preferences: web::WebServerPreferences,
-    rackforge_root: PathBuf,
-    plugins_root: PathBuf,
-    plugin_store_root: Option<PathBuf>,
-    data_root: PathBuf,
-    install_archives: Vec<PathBuf>,
-}
-
-#[derive(Debug)]
-struct CliOptions {
-    port: Option<u16>,
-    lan: bool,
-    rackforge_root: Option<PathBuf>,
-    plugins_root: Option<PathBuf>,
-    data_root: Option<PathBuf>,
-    install_archives: Vec<PathBuf>,
-}
-
-enum Startup {
-    Ready(Options),
-    FirstStart {
-        web_preferences: web::WebServerPreferences,
-        default_root: PathBuf,
-        executable_directory: PathBuf,
-        install_archives: Vec<PathBuf>,
-    },
-}
-
 enum AppMode {
     Setup {
         state: Box<setup::SetupState>,
@@ -144,6 +116,7 @@ struct DesktopPlugin {
     sounds: Vec<PlaySound>,
     selected_sound_id: Option<String>,
     instance: PluginInstance<'static>,
+    resources: BTreeMap<String, PathBuf>,
 }
 
 enum PluginInstallEvent {
@@ -1192,8 +1165,83 @@ impl DesktopApp {
 
     fn poll_web_control(&mut self) {
         while let Ok(call) = self.web_control.try_recv() {
-            let response = self.handle_web_control(call.request);
-            let _ = call.response.send(response);
+            match call {
+                web::DesktopControlCall::Session { request, response } => {
+                    let _ = response.send(self.handle_web_control(request));
+                }
+                web::DesktopControlCall::LoadResource {
+                    plugin_id,
+                    resource_id,
+                    path,
+                    response,
+                } => {
+                    let _ =
+                        response.send(self.load_plugin_resource(&plugin_id, &resource_id, &path));
+                }
+            }
+        }
+    }
+
+    fn load_plugin_resource(
+        &mut self,
+        plugin_id: &str,
+        resource_id: &str,
+        path: &Path,
+    ) -> Result<(), String> {
+        let index = self
+            .plugins
+            .iter()
+            .position(|plugin| plugin.plugin_id == plugin_id)
+            .ok_or_else(|| format!("Unknown Desktop plugin: {plugin_id}"))?;
+        let plugin = &mut self.plugins[index];
+        let previous = plugin
+            .resources
+            .insert(resource_id.to_owned(), path.to_path_buf());
+
+        let prepare = (|| -> anyhow::Result<PluginInstance<'static>> {
+            let mut instance = plugin.runtime.create_instance()?;
+            for (id, resource_path) in &plugin.resources {
+                instance.load_resource_file(id, resource_path)?;
+            }
+            if let Some(preset_id) = plugin.selected_sound_id.as_deref() {
+                instance.load_preset(preset_id)?;
+            }
+            #[cfg(windows)]
+            if let Some(audio) = &self.audio {
+                audio.replace_voice(desktop_audio::VoiceSpec {
+                    instance_id: plugin.instance_id.clone(),
+                    plugin: plugin.runtime,
+                    preset_id: plugin.selected_sound_id.clone(),
+                    resources: plugin.resources.clone(),
+                })?;
+            }
+            Ok(instance)
+        })();
+
+        match prepare {
+            Ok(instance) => {
+                plugin.instance = instance;
+                self.status = format!(
+                    "{} loaded {} from {}",
+                    plugin.name,
+                    resource_id,
+                    path.file_name()
+                        .map(|name| name.to_string_lossy())
+                        .unwrap_or_else(|| path.display().to_string().into())
+                );
+                Ok(())
+            }
+            Err(error) => {
+                match previous {
+                    Some(previous) => {
+                        plugin.resources.insert(resource_id.to_owned(), previous);
+                    }
+                    None => {
+                        plugin.resources.remove(resource_id);
+                    }
+                }
+                Err(format!("Could not load plugin resource: {error:#}"))
+            }
         }
     }
 
@@ -1888,6 +1936,7 @@ fn desktop_audio_specs(plugins: &[DesktopPlugin]) -> Vec<desktop_audio::VoiceSpe
             instance_id: plugin.instance_id.clone(),
             plugin: plugin.runtime,
             preset_id: plugin.selected_sound_id.clone(),
+            resources: plugin.resources.clone(),
         })
         .collect()
 }
@@ -2077,131 +2126,8 @@ fn load_desktop_plugin(package: &PluginPackage, data_root: &Path) -> Result<Desk
         sounds,
         selected_sound_id,
         instance,
+        resources: BTreeMap::new(),
     })
-}
-
-fn parse_startup() -> Result<Startup> {
-    resolve_options(parse_cli_options(std::env::args().skip(1))?)
-}
-
-fn parse_cli_options(arguments: impl IntoIterator<Item = String>) -> Result<CliOptions> {
-    let mut options = CliOptions {
-        port: None,
-        lan: false,
-        rackforge_root: None,
-        plugins_root: None,
-        data_root: None,
-        install_archives: Vec::new(),
-    };
-    let mut arguments = arguments.into_iter();
-    while let Some(argument) = arguments.next() {
-        match argument.as_str() {
-            "--port" => {
-                let port = arguments
-                    .next()
-                    .context("--port requires a value")?
-                    .parse()
-                    .context("invalid --port")?;
-                if port < 1024 {
-                    bail!("--port must be in 1024..=65535");
-                }
-                options.port = Some(port);
-            }
-            "--lan" => options.lan = true,
-            "--rackforge-root" => {
-                options.rackforge_root = Some(PathBuf::from(
-                    arguments
-                        .next()
-                        .context("--rackforge-root requires a directory")?,
-                ));
-            }
-            "--plugins-root" => {
-                options.plugins_root = Some(PathBuf::from(
-                    arguments
-                        .next()
-                        .context("--plugins-root requires a directory")?,
-                ));
-            }
-            "--data-root" => {
-                options.data_root = Some(PathBuf::from(
-                    arguments
-                        .next()
-                        .context("--data-root requires a directory")?,
-                ));
-            }
-            "--install-plugin" => {
-                options.install_archives.push(PathBuf::from(
-                    arguments
-                        .next()
-                        .context("--install-plugin requires an .rfplugin file")?,
-                ));
-            }
-            _ => bail!("unknown argument: {argument}"),
-        }
-    }
-    Ok(options)
-}
-
-fn resolve_options(cli: CliOptions) -> Result<Startup> {
-    let default_root = paths::default_root()?;
-    let executable_directory = paths::executable_directory()?;
-    let uses_legacy_paths =
-        cli.rackforge_root.is_none() && (cli.plugins_root.is_some() || cli.data_root.is_some());
-
-    let layout = if let Some(root) = cli.rackforge_root.as_deref() {
-        paths::DesktopPaths::initialize(root)?
-    } else if uses_legacy_paths {
-        paths::DesktopPaths::initialize(&default_root)?
-    } else if let Some(choice) = paths::load_choice(&default_root, &executable_directory)? {
-        paths::DesktopPaths::initialize(choice.root)?
-    } else {
-        let mut web_preferences = web::WebServerPreferences::default();
-        if let Some(port) = cli.port {
-            web_preferences.port = port;
-        }
-        if cli.lan {
-            web_preferences.enabled = true;
-        }
-        return Ok(Startup::FirstStart {
-            web_preferences,
-            default_root,
-            executable_directory,
-            install_archives: cli.install_archives,
-        });
-    };
-
-    let web_config_path = layout.root.join("config/web.toml");
-    let mut web_preferences =
-        web::WebServerPreferences::load(&web_config_path)?.unwrap_or_default();
-    if let Some(port) = cli.port {
-        web_preferences.port = port;
-    }
-    if cli.lan {
-        web_preferences.enabled = true;
-    }
-    Ok(Startup::Ready(Options {
-        web_preferences,
-        rackforge_root: layout.root,
-        plugins_root: cli.plugins_root.unwrap_or(layout.legacy_plugins_root),
-        plugin_store_root: (!uses_legacy_paths).then_some(layout.plugin_store_root),
-        data_root: cli.data_root.unwrap_or(layout.data_root),
-        install_archives: cli.install_archives,
-    }))
-}
-
-fn options_from_layout(
-    web_preferences: web::WebServerPreferences,
-    layout: paths::DesktopPaths,
-    install_archives: Vec<PathBuf>,
-) -> Options {
-    Options {
-        web_preferences,
-        rackforge_root: layout.root,
-        plugins_root: layout.legacy_plugins_root,
-        plugin_store_root: Some(layout.plugin_store_root),
-        data_root: layout.data_root,
-        install_archives,
-    }
 }
 
 fn create_desktop(options: Options) -> Result<DesktopApp> {
@@ -2652,45 +2578,6 @@ fn show_startup_error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_root_and_repeatable_plugin_install_arguments() {
-        let parsed = parse_cli_options([
-            "--port".to_owned(),
-            "9123".to_owned(),
-            "--lan".to_owned(),
-            "--rackforge-root".to_owned(),
-            "D:\\RackForge".to_owned(),
-            "--install-plugin".to_owned(),
-            "one.rfplugin".to_owned(),
-            "--install-plugin".to_owned(),
-            "two.rfplugin".to_owned(),
-        ])
-        .unwrap();
-
-        assert_eq!(parsed.port, Some(9123));
-        assert!(parsed.lan);
-        assert_eq!(parsed.rackforge_root, Some(PathBuf::from("D:\\RackForge")));
-        assert_eq!(
-            parsed.install_archives,
-            vec![PathBuf::from("one.rfplugin"), PathBuf::from("two.rfplugin")]
-        );
-    }
-
-    #[test]
-    fn keeps_legacy_plugin_and_data_arguments() {
-        let parsed = parse_cli_options([
-            "--plugins-root".to_owned(),
-            "legacy-plugins".to_owned(),
-            "--data-root".to_owned(),
-            "legacy-data".to_owned(),
-        ])
-        .unwrap();
-
-        assert_eq!(parsed.plugins_root, Some(PathBuf::from("legacy-plugins")));
-        assert_eq!(parsed.data_root, Some(PathBuf::from("legacy-data")));
-        assert!(parsed.rackforge_root.is_none());
-    }
 
     #[test]
     fn chooses_safe_activation_for_plugin_versions() {

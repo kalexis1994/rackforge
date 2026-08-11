@@ -1,29 +1,19 @@
-# RackForge Controller API
+# rackforge-controller-api
 
-Contratos puros y versionados para separar una fuente MIDI de una superficie de
-control.
+Pure, versioned contracts that separate musical MIDI input from a privileged
+control surface.
 
-- Un puerto MIDI desconocido puede alimentar notas y controladores al motor.
-- Solo un `ControllerDriver` registrado puede abrir una salida de display,
-  enviar SysEx o interpretar controles de superficie.
-- Los layouts nunca se infieren por resolución o cantidad de controles.
-- La negociación considera únicamente implementaciones declaradas por el
-  controlador y vistas declaradas por el plugin.
-- Un perfil puede declarar controles físicos reservados del host. Cada binding
-  identifica su mensaje MIDI exacto y un destino tipado, como
-  `master_level` o `master_pan`; el host lo consume y nunca lo expone al
-  plugin.
+- Unknown MIDI ports may feed notes, CC, pitch, and pressure to the engine.
+- Only a registered `ControllerDriver` may open display/SysEx output.
+- Layouts are explicit contracts and are never inferred from resolution or
+  control count.
+- Negotiation uses only controller implementations and plugin views declared
+  in their manifests.
+- A profile may reserve exact physical messages for typed host targets such as
+  `master_level`, `master_pan`, and `keyboard_parts`. Core consumes those
+  messages before plugin routing.
+- Trust is assigned by installation state, not claimed by a package.
 
-`little@1` garantiza 18 columnas seguras, header, dos filas de cuerpo, cuatro
-soft keys y las acciones Previous, Next, Confirm y Back.
-
-Un controlador `medium@1` no obtiene compatibilidad LITTLE automáticamente.
-Debe incluir y probar una implementación
-`SurfaceQuality::CertifiedCompatibility`; si no la declara, un plugin
-exclusivamente LITTLE resulta incompatible.
-
-La distribución dinámica vive en `rackforge-controller-package`: transforma
-estos contratos en manifests `.rfcontroller`, versiones inmutables,
-entrypoints por plataforma y niveles de confianza. `rackforge-controller-host`
-descubre y supervisa esos paquetes; este crate continúa siendo una API pura,
-sin filesystem, procesos ni conocimiento de marcas.
+`little@1` defines a header, two body lines, four soft keys, an encoder, and
+Previous/Next/Confirm/Back actions. A `medium@1` controller does not gain
+LITTLE compatibility automatically; it must ship and test an implementation.

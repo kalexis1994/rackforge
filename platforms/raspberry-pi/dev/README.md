@@ -1,36 +1,22 @@
-# Acceso y despliegue
+# Raspberry Pi development tools
 
-El repositorio local es la única fuente de verdad. `$HOME/rackforge/current`
-en la Raspberry es una copia desplegada y puede reconstruirse en cualquier
-momento.
+The local repository is the source of truth. The Pi directory
+`$HOME/rackforge/current` is a deployable copy and may be rebuilt at any time.
 
-## SSH
+Private keys remain outside the repository. Copy `ssh_config.example` into the
+user's SSH configuration after setting `HostName` and `User`; project tools
+require non-interactive key authentication.
 
-La clave privada permanece fuera del repositorio:
+Tools:
 
-```text
-~/.ssh/rackforge_ed25519
-```
+- `bootstrap.sh`: initial target-side dependencies and directories.
+- `connect.ps1`: open a remote shell.
+- `sync.ps1`: package and deploy tracked project content while excluding local
+  artifacts.
+- `health.ps1`: inspect services, devices, audio, and recent logs.
+- `install-nuked-roms.ps1`: copy user-authorized Nuked-SC55 ROMs.
+- `install-scva-banks.ps1`: copy user-authorized SCVA-derived bank data.
+- `render-scva-bank.ps1`: drive the local Windows research renderer.
 
-Después de ajustar `HostName` y `User`, copiar `ssh_config.example` a la
-configuración SSH local permite usar:
-
-```powershell
-ssh rackforge
-```
-
-La autenticación por contraseña permanece como vía de recuperación del usuario,
-pero las herramientas del proyecto exigen autenticación no interactiva por
-clave.
-
-## Herramientas
-
-- `connect.ps1`: abre una terminal remota.
-- `health.ps1`: muestra salud, temperatura, throttling, USB y ALSA.
-- `sync.ps1`: empaqueta el repositorio, excluye artefactos locales y lo despliega
-  en `current/`.
-- `install-nuked-roms.ps1`: valida y transfiere ROMs propias fuera de Git.
-- `bootstrap.sh`: reproduce hostname, paquetes, Rust y directorios base.
-
-Ninguna herramienta copia claves, contraseñas, bancos o estado runtime al
-repositorio.
+No tool copies SSH keys, passwords, proprietary banks, or runtime user state
+into Git.

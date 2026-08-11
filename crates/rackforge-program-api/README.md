@@ -1,19 +1,17 @@
-# RackForge Program API
+# rackforge-program-api
 
-Contratos serializables e independientes de plataforma para programas,
-peticiones de edición y documentos preparados por un plugin.
+Serializable, platform-independent contracts for programs, edit requests, and
+plugin-prepared documents.
 
-El plugin posee y valida el `payload`; RackForge valida el sobre común, controla
-el estado de edición y persiste el documento atómicamente dentro del namespace
-privado del plugin.
+The plugin owns and validates its payload. RackForge validates the common
+envelope, controls draft/audition lifecycle, and persists documents atomically
+inside the plugin namespace.
 
-La edición visual usa un árbol declarativo versionado (`ProgramEditorView`).
-Cada página contiene subpáginas y campos tipados (`toggle`, `number`, `choice`
-o `sound`). Los números viajan como enteros con una cantidad explícita de
-decimales para evitar diferencias de coma flotante entre plataformas.
+Visual editing uses a versioned declarative tree. Pages contain subpages and
+typed fields such as `toggle`, `number`, `choice`, and `sound`. Numeric
+values travel as integers with explicit decimal precision to avoid
+cross-platform floating-point display differences.
 
-Una superficie modifica un borrador enviando únicamente
-`ProgramFieldEditRequest { field_id, value }`. El `field_id` es opaco para el
-host: sólo el plugin conoce la ruta real dentro de su `payload`, aplica la
-mutación, valida todas las invariantes y devuelve un `PreparedProgram`
-canónico. El campo también declara si admite preview auditivo transitorio.
+A surface sends only `ProgramFieldEditRequest { field_id, value }`. The field
+ID is opaque to the host; only the plugin maps it to its payload, applies the
+change, validates invariants, and returns a prepared program.

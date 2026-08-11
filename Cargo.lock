@@ -3716,6 +3716,8 @@ dependencies = [
  "rackforge-performance-api",
  "rackforge-plugin-api",
  "rackforge-repository",
+ "rackforge-resource-api",
+ "rackforge-resource-host",
  "rackforge-session-api",
  "rackforge-surface-api",
  "rackforge-surface-runtime",
@@ -3843,6 +3845,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-resource-api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "rackforge-resource-host"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "getrandom 0.3.4",
+ "rackforge-resource-api",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rackforge-roland-scva"
 version = "0.1.0"
 dependencies = [
@@ -3919,6 +3940,8 @@ dependencies = [
  "rackforge-control-api",
  "rackforge-plugin-api",
  "rackforge-repository",
+ "rackforge-resource-api",
+ "rackforge-resource-host",
  "semver",
  "serde",
  "serde_json",

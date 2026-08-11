@@ -112,17 +112,24 @@ sudo reboot
 
 ## Current status
 
-- Raspberry Pi OS Lite / Debian 13 arm64, without a graphical environment.
-- Rust, C/C++, CMake, Ninja, ALSA, and udev toolchains installed.
-- SysEx display communication verified with the current Arturia firmware.
-- KeyLab note-on/note-off input verified directly on Raspberry Pi.
-- Nuked-SC55 builds natively for ARM64; users must provide their own ROMs.
-- Sound Canvas VA 1.1.2 ABI validated and internal banks cataloged with Rust
-  tools; these are not directly compatible Nuked-SC55 ROMs.
-- Wave ROM reader and FCE-DPCM decoder validated natively on ARM64 with output
-  matching Windows.
-- Native SCVA 1.1.2 tone, map, and sample descriptor resolver; `Piano 1/C4`
-  already produces a reproducible preview through the Scarlett.
+- Windows x86-64, Android ARM64, and Raspberry Pi OS ARM64 hosts are built from
+  the same portable contracts and published by GitHub Actions.
+- PLAY and LIVE are host-owned modes shared by the Web, desktop, Android, and
+  `little@1` controller surfaces.
+- Portable `.rfplugin` installation, version activation, duplicate prevention,
+  program selection, and embedded Web views are implemented on desktop and
+  Android. Instrument packages are released independently from RackForge.
+- Windows supports WASAPI and ASIO device discovery. Android uses its native
+  low-latency audio path and USB MIDI. Raspberry Pi uses ALSA and runs headless.
+- MIDI hotplug recovery releases held notes and reconnects without restarting
+  the application.
+- The official Arturia KeyLab Essential mk3 `.rfcontroller` package provides
+  the LITTLE display, navigation, dimmed LEDs and pads, master level and pan,
+  long-press return, and the host escape chord across the three platforms.
+- The HTTP server is disabled by default on desktop. Network exposure remains
+  an explicit user setting.
+- The `v0.1.0` packages are preview builds: Windows is not production-signed
+  and Android still uses a debug signing configuration.
 
-The immediate priority is to complete the first
-KeyLab → Nuked-SC55 → Scarlett path and integrate it into the headless daemon.
+The next milestone focuses on reliability gates, package conformance,
+measured audio/MIDI stress tests, and smaller internal implementation modules.

@@ -1,14 +1,16 @@
-# RackForge Surface Runtime
+# rackforge-surface-runtime
 
-Estado, navegación y composición de la interfaz `little@1` sin conocimiento de
-MIDI, USB, SysEx ni modelos de controlador.
+Host-owned state, navigation, and composition for the `little@1` surface,
+without MIDI, USB, SysEx, or controller-model knowledge.
 
-El runtime recibe `rackforge_ui::Input`, actualiza componentes y produce un
-`Screen` lógico con header, dos líneas y cuatro soft keys. Un driver físico
-solo traduce sus mensajes a esos inputs y codifica el `Screen` en el protocolo
-del dispositivo.
+The runtime receives `rackforge_ui::Input`, updates host/plugin view state,
+emits typed `MenuCommand` values, and renders a logical `Screen` containing
+a header, two body lines, and four footer keys. A physical driver only translates
+device messages into logical input and serializes the resulting screen.
 
-La separación evita que un nuevo `.rfcontroller` tenga que copiar menús o
-conocer RF-DLS. La siguiente evolución moverá también el cliente de sesión y
-los adaptadores de vistas de plugins desde el ejecutable Arturia hacia este
-runtime, dejando en el paquete únicamente transporte y lifecycle.
+PLAY, LIVE, plugin loading, programs, performance editing, audio, WEB, and Wi-Fi
+all project authoritative Core state. Long BACK and the emergency HOME chord
+remain host-owned.
+
+This separation lets a new `.rfcontroller` reuse the same menus without
+copying plugin-specific behavior.

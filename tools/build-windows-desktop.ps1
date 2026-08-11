@@ -75,4 +75,6 @@ if (-not (Test-Path -LiteralPath $source)) {
     $source = Join-Path $runtime "target/release/rackforge-desktop.exe"
 }
 Copy-Item -LiteralPath $source -Destination (Join-Path $output "RackForge.exe") -Force
+Copy-Item -LiteralPath (Join-Path $repository "THIRD_PARTY_NOTICES.md") `
+    -Destination (Join-Path $output "THIRD_PARTY_NOTICES.md") -Force
 Write-Host "RackForge Desktop: $(Join-Path $output 'RackForge.exe')"

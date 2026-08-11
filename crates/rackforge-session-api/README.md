@@ -1,12 +1,14 @@
-# RackForge Session API
+# rackforge-session-api
 
-Modelo puro, serializable e independiente de plataforma para describir una
-sesión RackForge.
+Pure, serializable, platform-independent RackForge session model.
 
-La sesión es la fuente de verdad compartida por LITTLE, la futura superficie
-WEB y cualquier otra interfaz. Los inputs producen `SessionCommand`; los
-cambios aceptados producen `SessionEvent` con una revisión monotónica.
-Cada comando lleva un `client_id` y un `command_id`, por lo que eventos de
-varias superficies pueden correlacionarse sin colisiones.
+The session is the shared source of truth for LITTLE, WEB, desktop, Android, and
+future surfaces. Inputs produce `SessionCommand` values; accepted changes
+produce `SessionEvent` values with monotonic revisions.
 
-Este crate no conoce ALSA, USB, KeyLab, sockets ni bibliotecas dinámicas.
+Every command carries a stable `client_id` and `command_id`, allowing
+multiple surfaces to correlate results without collisions and reconnect from a
+known revision.
+
+The crate contains no ALSA, USB, controller, socket, dynamic-library, or UI
+implementation.

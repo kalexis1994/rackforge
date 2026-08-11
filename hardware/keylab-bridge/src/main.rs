@@ -27,8 +27,8 @@ use rackforge_platform_api::{
 };
 #[cfg(target_os = "linux")]
 use rackforge_session_api::{
-    ClientId, CommandEnvelope, EventEnvelope, InstanceId, PluginInstanceState, SessionCommand,
-    SessionEvent, SessionState, SurfaceActivationRequest, SurfaceMode,
+    ClientId, CommandEnvelope, EventEnvelope, InstanceId, MasterLevel, PluginInstanceState,
+    SessionCommand, SessionEvent, SessionState, SurfaceActivationRequest, SurfaceMode,
 };
 use rackforge_session_api::{HostControlBinding, HostControlTarget, MasterPan};
 use rackforge_surface_runtime as menu;

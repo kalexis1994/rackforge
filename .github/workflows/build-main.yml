@@ -133,9 +133,12 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
-      - name: Check Raspberry Pi core
+      - name: Check Raspberry Pi Rust targets
         shell: bash
-        run: cargo check --locked -p rackforge-core --all-targets
+        run: |
+          cargo check --locked --all-targets \
+            -p rackforge-core \
+            -p rackforge-controller-arturia-keylab-essential-mk3
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

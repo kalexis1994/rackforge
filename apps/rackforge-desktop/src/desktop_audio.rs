@@ -7,7 +7,7 @@ use rackforge_core::{
     LoadedPlugin, PluginInstance,
     midi_hotplug::{PanicScope, panic_packets},
 };
-use rackforge_plugin_api::abi::MidiEventV1;
+use rackforge_plugin_api::{PreparedProgram, PresetCatalog, abi::MidiEventV1};
 use rackforge_session_api::{HostControlTarget, MasterLevel, MasterPan};
 use rackforge_surface_runtime::{Input as SurfaceInput, Screen};
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,7 @@ const MAX_OUTPUT_GAIN_DB: i8 = 12;
 const MIDI_RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
 const MIDI_SUPERVISOR_TICK: Duration = Duration::from_millis(20);
 const MASTER_SMOOTHING_FRAMES: u32 = 480;
+const CONTROL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Default)]
 struct AudioTelemetry {
@@ -561,6 +562,46 @@ impl DesktopAudio {
         })
     }
 
+    pub fn preview_program(
+        &self,
+        instance_id: &str,
+        prepared: PreparedProgram,
+        reset: bool,
+    ) -> Result<()> {
+        let (reply, receiver) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::PreviewProgram {
+            instance_id: instance_id.into(),
+            prepared,
+            reset,
+            reply,
+        })?;
+        receive_control_response(receiver, "preview program")
+    }
+
+    pub fn install_program(
+        &self,
+        instance_id: &str,
+        prepared: PreparedProgram,
+    ) -> Result<PresetCatalog> {
+        let (reply, receiver) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::InstallProgram {
+            instance_id: instance_id.into(),
+            prepared,
+            reply,
+        })?;
+        receive_control_response(receiver, "install program")
+    }
+
+    pub fn restore_program(&self, instance_id: &str, sound_id: Option<&str>) -> Result<()> {
+        let (reply, receiver) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::RestoreProgram {
+            instance_id: instance_id.into(),
+            sound_id: sound_id.map(str::to_owned),
+            reply,
+        })?;
+        receive_control_response(receiver, "restore program")
+    }
+
     pub fn replace_voice(&self, spec: VoiceSpec) -> Result<()> {
         let voice = prepare_audio_voice(spec, self.sample_rate)?;
         self.send_command(AudioCommand::ReplaceVoice(voice))
@@ -633,12 +674,41 @@ enum AudioCommand {
         instance_id: String,
         sound_id: String,
     },
+    PreviewProgram {
+        instance_id: String,
+        prepared: PreparedProgram,
+        reset: bool,
+        reply: SyncSender<Result<(), String>>,
+    },
+    InstallProgram {
+        instance_id: String,
+        prepared: PreparedProgram,
+        reply: SyncSender<Result<PresetCatalog, String>>,
+    },
+    RestoreProgram {
+        instance_id: String,
+        sound_id: Option<String>,
+        reply: SyncSender<Result<(), String>>,
+    },
     InjectMidi(MidiPacket),
     SetMasterLevel(MasterLevel),
     SetMasterPan(MasterPan),
     SetRunning(bool),
     EmergencyStop,
     ReplaceVoice(AudioVoice),
+}
+
+fn receive_control_response<T>(receiver: Receiver<Result<T, String>>, action: &str) -> Result<T> {
+    match receiver.recv_timeout(CONTROL_RESPONSE_TIMEOUT) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => bail!("audio engine could not {action}: {error}"),
+        Err(RecvTimeoutError::Timeout) => {
+            bail!("audio engine did not {action} within the control deadline")
+        }
+        Err(RecvTimeoutError::Disconnected) => {
+            bail!("audio engine disconnected while trying to {action}")
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -838,6 +908,115 @@ impl AudioProcessor {
                         self.voices[self.active_voice].instance.0.reset()?;
                         self.active_voice = index;
                     }
+                }
+                AudioCommand::PreviewProgram {
+                    instance_id,
+                    prepared,
+                    reset,
+                    reply,
+                } => {
+                    let result = (|| -> Result<(), String> {
+                        let index = self
+                            .voices
+                            .iter()
+                            .position(|voice| voice.instance_id == instance_id)
+                            .ok_or_else(|| {
+                                format!("unknown audio plugin instance {instance_id}")
+                            })?;
+                        if reset {
+                            self.voices[index]
+                                .instance
+                                .0
+                                .reset()
+                                .map_err(|error| error.to_string())?;
+                        }
+                        let previewed = self.voices[index]
+                            .instance
+                            .0
+                            .preview_program(&prepared)
+                            .map_err(|error| error.to_string())?;
+                        if !previewed {
+                            self.voices[index]
+                                .instance
+                                .0
+                                .load_preset(&prepared.preview_sound_id)
+                                .map_err(|error| error.to_string())?;
+                        }
+                        if index != self.active_voice {
+                            self.voices[self.active_voice]
+                                .instance
+                                .0
+                                .reset()
+                                .map_err(|error| error.to_string())?;
+                            self.active_voice = index;
+                        }
+                        self.stopped = false;
+                        Ok(())
+                    })();
+                    let _ = reply.try_send(result);
+                }
+                AudioCommand::InstallProgram {
+                    instance_id,
+                    prepared,
+                    reply,
+                } => {
+                    let result = (|| -> Result<PresetCatalog, String> {
+                        let voice = self
+                            .voices
+                            .iter_mut()
+                            .find(|voice| voice.instance_id == instance_id)
+                            .ok_or_else(|| {
+                                format!("unknown audio plugin instance {instance_id}")
+                            })?;
+                        voice
+                            .instance
+                            .0
+                            .install_program(&prepared)
+                            .map_err(|error| error.to_string())?;
+                        voice
+                            .instance
+                            .0
+                            .preset_catalog()
+                            .map_err(|error| error.to_string())
+                    })();
+                    let _ = reply.try_send(result);
+                }
+                AudioCommand::RestoreProgram {
+                    instance_id,
+                    sound_id,
+                    reply,
+                } => {
+                    let result = (|| -> Result<(), String> {
+                        let index = self
+                            .voices
+                            .iter()
+                            .position(|voice| voice.instance_id == instance_id)
+                            .ok_or_else(|| {
+                                format!("unknown audio plugin instance {instance_id}")
+                            })?;
+                        self.voices[index]
+                            .instance
+                            .0
+                            .reset()
+                            .map_err(|error| error.to_string())?;
+                        if let Some(sound_id) = sound_id {
+                            self.voices[index]
+                                .instance
+                                .0
+                                .load_preset(&sound_id)
+                                .map_err(|error| error.to_string())?;
+                        }
+                        if index != self.active_voice {
+                            self.voices[self.active_voice]
+                                .instance
+                                .0
+                                .reset()
+                                .map_err(|error| error.to_string())?;
+                            self.active_voice = index;
+                        }
+                        Ok(())
+                    })();
+                    let _ = reply.try_send(result);
                 }
                 AudioCommand::InjectMidi(packet) => push_midi_event(&mut self.events, packet),
                 AudioCommand::SetMasterLevel(level) => self.master_gain.set_level(level),

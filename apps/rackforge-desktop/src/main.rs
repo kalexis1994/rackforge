@@ -23,21 +23,25 @@ use eframe::egui::{
 use rackforge_control_api::{ControlErrorCode, ControlRequest, ControlResponse};
 use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
-use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage};
+use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage, PluginStorage};
 use rackforge_performance_api::{PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot};
-use rackforge_plugin_api::{PluginKind, PresetCatalog};
+use rackforge_plugin_api::{
+    PROGRAM_EDITOR_SCHEMA_VERSION, PluginKind, PreparedProgram, PresetCatalog, ProgramDocument,
+    ProgramEditRequest, ProgramEditorValue, ProgramFieldEditRequest,
+};
 use rackforge_repository::{
     InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, inspect_local_archive,
     install_local_archive,
 };
 use rackforge_session_api::{
-    BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId, MasterLevel,
-    MasterPan, PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent,
-    SessionId, SessionState, SoundSummary,
+    AuditionEndReason, BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId,
+    MasterLevel, MasterPan, PluginInstanceState, ProgramDraftState, Revision,
+    SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SessionId, SessionState, SoundSummary,
 };
 use rackforge_surface_api::SurfaceMode;
 use rackforge_surface_runtime::{
-    ActiveMode, Header, Input, Menu, MenuCommand, PlayPlugin, PlaySound,
+    ActiveMode, Header, Input, Menu, MenuCommand, PlayPlugin, PlaySound, ProgramExitDecision,
+    ProgramExitDestination,
 };
 use semver::Version;
 use startup::{Options, Startup, options_from_layout, parse_startup};
@@ -275,6 +279,8 @@ struct DesktopApp {
     options: Options,
     plugin_install: Option<PluginInstallTask>,
     performance_repository: PerformanceRepository,
+    next_program_draft_id: u64,
+    next_audition_lease_id: u64,
     #[cfg(windows)]
     audio: Option<desktop_audio::DesktopAudio>,
     #[cfg(windows)]
@@ -526,6 +532,8 @@ impl DesktopApp {
             options: options.clone(),
             plugin_install: None,
             performance_repository,
+            next_program_draft_id: 1,
+            next_audition_lease_id: 1,
             #[cfg(windows)]
             audio,
             #[cfg(windows)]
@@ -1739,6 +1747,413 @@ impl DesktopApp {
         Ok(vec![event])
     }
 
+    fn allocate_program_id(counter: &mut u64) -> u64 {
+        let id = (*counter).max(1);
+        *counter = id.checked_add(1).unwrap_or(1);
+        id
+    }
+
+    fn apply_program_events(&mut self, events: Vec<SessionEvent>) -> Result<(), String> {
+        let mut current = self.session.write().expect("session lock poisoned");
+        let mut session = current.clone();
+        for event in events {
+            let revision = session
+                .revision
+                .next()
+                .map_err(|error| format!("Could not advance session revision: {error}"))?;
+            session.apply(&EventEnvelope {
+                schema_version: SESSION_SCHEMA_VERSION,
+                revision,
+                command: None,
+                event,
+            })?;
+        }
+        *current = session;
+        Ok(())
+    }
+
+    fn preview_audio_program(
+        &self,
+        instance_id: &str,
+        prepared: PreparedProgram,
+        reset: bool,
+    ) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let audio = self.audio.as_ref().ok_or_else(|| {
+                "Audio/MIDI is unavailable; program preview cannot start".to_owned()
+            })?;
+            audio
+                .preview_program(instance_id, prepared, reset)
+                .map_err(|error| format!("Could not preview the program: {error:#}"))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (instance_id, prepared, reset);
+            Err("Desktop program preview requires the Windows audio runtime".into())
+        }
+    }
+
+    fn install_audio_program(
+        &self,
+        instance_id: &str,
+        prepared: PreparedProgram,
+    ) -> Result<PresetCatalog, String> {
+        #[cfg(windows)]
+        {
+            let audio = self.audio.as_ref().ok_or_else(|| {
+                "Audio/MIDI is unavailable; the program cannot be installed".to_owned()
+            })?;
+            audio
+                .install_program(instance_id, prepared)
+                .map_err(|error| format!("Could not install the program in audio: {error:#}"))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (instance_id, prepared);
+            Err("Desktop program installation requires the Windows audio runtime".into())
+        }
+    }
+
+    fn restore_audio_program(
+        &self,
+        instance_id: &str,
+        sound_id: Option<&str>,
+    ) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let audio = self.audio.as_ref().ok_or_else(|| {
+                "Audio/MIDI is unavailable; the previous program cannot be restored".to_owned()
+            })?;
+            audio
+                .restore_program(instance_id, sound_id)
+                .map_err(|error| format!("Could not restore the previous program: {error:#}"))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (instance_id, sound_id);
+            Err("Desktop program restoration requires the Windows audio runtime".into())
+        }
+    }
+
+    fn active_program_draft(
+        &self,
+        draft_id: u64,
+    ) -> Result<(ProgramDraftState, u64, Option<String>), String> {
+        let session = self.session.read().expect("session lock poisoned");
+        let draft = session
+            .program_draft
+            .as_ref()
+            .filter(|draft| draft.draft_id == draft_id)
+            .cloned()
+            .ok_or_else(|| "Program draft is missing or no longer valid".to_owned())?;
+        let audition = session
+            .audition
+            .as_ref()
+            .filter(|audition| audition.instance_id == draft.instance_id)
+            .ok_or_else(|| "Program draft lost its audio audition lease".to_owned())?;
+        Ok((draft, audition.lease_id, audition.previous_sound_id.clone()))
+    }
+
+    fn begin_program_edit(&mut self, program_id: Option<String>) -> Result<(), String> {
+        let (instance_id, previous_sound_id) = {
+            let session = self.session.read().expect("session lock poisoned");
+            if session.program_draft.is_some() || session.audition.is_some() {
+                return Err("Another program edit is already active".into());
+            }
+            let instance_id = session
+                .active_instance_id
+                .clone()
+                .ok_or_else(|| "No active plugin to edit".to_owned())?;
+            let previous_sound_id = session
+                .instance(&instance_id)
+                .and_then(|instance| instance.selected_sound_id.clone());
+            (instance_id, previous_sound_id)
+        };
+        let index = self
+            .plugins
+            .iter()
+            .position(|plugin| plugin.instance_id == instance_id.as_str())
+            .ok_or_else(|| format!("Unknown plugin instance: {instance_id}"))?;
+        if !self.plugins[index].instance.supports_program_editing() {
+            return Err(format!(
+                "{} does not expose the RackForge program editor",
+                self.plugins[index].name
+            ));
+        }
+        let (prepared, editor) = {
+            let plugin = &mut self.plugins[index];
+            let prepared = plugin
+                .instance
+                .begin_program_edit(&ProgramEditRequest::new(program_id.clone()))
+                .map_err(|error| format!("Could not begin program editing: {error:#}"))?;
+            let editor = plugin
+                .instance
+                .program_editor_view(&prepared.document)
+                .map_err(|error| format!("Could not build the program editor: {error:#}"))?;
+            (prepared, editor)
+        };
+        self.preview_audio_program(instance_id.as_str(), prepared.clone(), true)?;
+
+        let draft_id = Self::allocate_program_id(&mut self.next_program_draft_id);
+        let lease_id = Self::allocate_program_id(&mut self.next_audition_lease_id);
+        let draft = desktop_program_draft_state(
+            draft_id,
+            instance_id.clone(),
+            program_id,
+            &prepared,
+            editor,
+            false,
+        )?;
+        self.apply_program_events(vec![
+            SessionEvent::AuditionStarted {
+                lease_id,
+                instance_id: instance_id.clone(),
+                previous_sound_id,
+            },
+            SessionEvent::ProgramEditStarted {
+                draft: draft.clone(),
+            },
+        ])?;
+        self.menu.sync_program_edit(Some(draft), Some(lease_id));
+        Ok(())
+    }
+
+    fn edit_program_draft_field(
+        &mut self,
+        draft_id: u64,
+        field_id: String,
+        value: ProgramEditorValue,
+        preview: bool,
+    ) -> Result<(), String> {
+        let (draft, lease_id, _) = self.active_program_draft(draft_id)?;
+        let document: ProgramDocument = serde_json::from_str(&draft.document_json)
+            .map_err(|error| format!("Stored program draft is invalid: {error}"))?;
+        let index = self
+            .plugins
+            .iter()
+            .position(|plugin| plugin.instance_id == draft.instance_id.as_str())
+            .ok_or_else(|| format!("Unknown plugin instance: {}", draft.instance_id))?;
+        let (prepared, editor) = {
+            let plugin = &mut self.plugins[index];
+            let prepared = plugin
+                .instance
+                .apply_program_edit(&ProgramFieldEditRequest {
+                    schema_version: PROGRAM_EDITOR_SCHEMA_VERSION,
+                    document,
+                    field_id,
+                    value,
+                })
+                .map_err(|error| format!("Could not edit the program: {error:#}"))?;
+            let editor = plugin
+                .instance
+                .program_editor_view(&prepared.document)
+                .map_err(|error| format!("Could not refresh the program editor: {error:#}"))?;
+            (prepared, editor)
+        };
+        self.preview_audio_program(draft.instance_id.as_str(), prepared.clone(), false)?;
+        if !preview {
+            let updated = desktop_program_draft_state(
+                draft_id,
+                draft.instance_id,
+                draft.original_program_id,
+                &prepared,
+                editor,
+                true,
+            )?;
+            self.apply_program_events(vec![SessionEvent::ProgramDraftUpdated {
+                draft: updated.clone(),
+            }])?;
+            self.menu.sync_program_edit(Some(updated), Some(lease_id));
+        }
+        Ok(())
+    }
+
+    fn replace_program_draft_document(
+        &mut self,
+        draft_id: u64,
+        document: ProgramDocument,
+        dirty: bool,
+    ) -> Result<(), String> {
+        let (draft, lease_id, _) = self.active_program_draft(draft_id)?;
+        let confirmed: ProgramDocument = serde_json::from_str(&draft.document_json)
+            .map_err(|error| format!("Stored program draft is invalid: {error}"))?;
+        if document.id != confirmed.id || document.plugin_id != confirmed.plugin_id {
+            return Err("Program identity cannot change during editing".into());
+        }
+        let index = self
+            .plugins
+            .iter()
+            .position(|plugin| plugin.instance_id == draft.instance_id.as_str())
+            .ok_or_else(|| format!("Unknown plugin instance: {}", draft.instance_id))?;
+        let (prepared, editor) = {
+            let plugin = &mut self.plugins[index];
+            let prepared = plugin
+                .instance
+                .prepare_program_save(&document)
+                .map_err(|error| format!("Could not prepare the program: {error:#}"))?;
+            let editor = plugin
+                .instance
+                .program_editor_view(&prepared.document)
+                .map_err(|error| format!("Could not refresh the program editor: {error:#}"))?;
+            (prepared, editor)
+        };
+        self.preview_audio_program(draft.instance_id.as_str(), prepared.clone(), false)?;
+        let updated = desktop_program_draft_state(
+            draft_id,
+            draft.instance_id,
+            draft.original_program_id,
+            &prepared,
+            editor,
+            dirty,
+        )?;
+        self.apply_program_events(vec![SessionEvent::ProgramDraftUpdated {
+            draft: updated.clone(),
+        }])?;
+        self.menu.sync_program_edit(Some(updated), Some(lease_id));
+        Ok(())
+    }
+
+    fn restore_program_draft_preview(&mut self, draft_id: u64) -> Result<(), String> {
+        let (draft, _, _) = self.active_program_draft(draft_id)?;
+        let document: ProgramDocument = serde_json::from_str(&draft.document_json)
+            .map_err(|error| format!("Stored program draft is invalid: {error}"))?;
+        let index = self
+            .plugins
+            .iter()
+            .position(|plugin| plugin.instance_id == draft.instance_id.as_str())
+            .ok_or_else(|| format!("Unknown plugin instance: {}", draft.instance_id))?;
+        let prepared = self.plugins[index]
+            .instance
+            .prepare_program_save(&document)
+            .map_err(|error| format!("Could not restore the draft preview: {error:#}"))?;
+        self.preview_audio_program(draft.instance_id.as_str(), prepared, false)
+    }
+
+    fn set_program_draft_name(&mut self, draft_id: u64, name: String) -> Result<(), String> {
+        let (draft, _, _) = self.active_program_draft(draft_id)?;
+        let mut document: ProgramDocument = serde_json::from_str(&draft.document_json)
+            .map_err(|error| format!("Stored program draft is invalid: {error}"))?;
+        document.name = name;
+        self.replace_program_draft_document(draft_id, document, true)
+    }
+
+    fn restore_control_program(
+        &mut self,
+        plugin_index: usize,
+        sound_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.plugins[plugin_index]
+            .instance
+            .reset()
+            .map_err(|error| format!("Could not reset the program editor instance: {error:#}"))?;
+        if let Some(sound_id) = sound_id {
+            self.plugins[plugin_index]
+                .instance
+                .load_preset(sound_id)
+                .map_err(|error| format!("Could not restore {sound_id}: {error:#}"))?;
+        }
+        Ok(())
+    }
+
+    fn save_program_draft(&mut self, draft_id: u64) -> Result<(), String> {
+        let (draft, lease_id, previous_sound_id) = self.active_program_draft(draft_id)?;
+        let document: ProgramDocument = serde_json::from_str(&draft.document_json)
+            .map_err(|error| format!("Stored program draft is invalid: {error}"))?;
+        let index = self
+            .plugins
+            .iter()
+            .position(|plugin| plugin.instance_id == draft.instance_id.as_str())
+            .ok_or_else(|| format!("Unknown plugin instance: {}", draft.instance_id))?;
+        let prepared = self.plugins[index]
+            .instance
+            .prepare_program_save(&document)
+            .map_err(|error| format!("Could not prepare the program for saving: {error:#}"))?;
+        PluginStorage::new(&self.options.data_root)
+            .save_program(Path::new(&prepared.storage_path), &prepared.document)
+            .map_err(|error| format!("Could not save the program: {error:#}"))?;
+        self.plugins[index]
+            .instance
+            .install_program(&prepared)
+            .map_err(|error| format!("Could not install the saved program: {error:#}"))?;
+        let catalog = self.install_audio_program(draft.instance_id.as_str(), prepared.clone())?;
+        let preset_id = format!("custom.{}", prepared.document.id);
+        if !catalog.presets.iter().any(|preset| preset.id == preset_id) {
+            return Err("Installed program is missing from the plugin catalog".into());
+        }
+        self.restore_audio_program(draft.instance_id.as_str(), previous_sound_id.as_deref())?;
+        self.restore_control_program(index, previous_sound_id.as_deref())?;
+
+        let (banks, sound_summaries, sounds) = desktop_catalog_views(&catalog);
+        let saved_sound = sound_summaries
+            .iter()
+            .find(|sound| sound.id == preset_id)
+            .cloned()
+            .ok_or_else(|| "Installed program has no Desktop catalog entry".to_owned())?;
+        self.apply_program_events(vec![
+            SessionEvent::ProgramSaved {
+                draft_id,
+                instance_id: draft.instance_id.clone(),
+                sound: saved_sound,
+            },
+            SessionEvent::AuditionEnded {
+                lease_id,
+                instance_id: draft.instance_id.clone(),
+                restored_sound_id: previous_sound_id.clone(),
+                reason: AuditionEndReason::Released,
+            },
+        ])?;
+        self.plugins[index].banks = banks.clone();
+        self.plugins[index].sound_summaries = sound_summaries.clone();
+        self.plugins[index].sounds = sounds.clone();
+        if let Some(instance) = self
+            .session
+            .write()
+            .expect("session lock poisoned")
+            .instances
+            .iter_mut()
+            .find(|instance| instance.instance_id == draft.instance_id)
+        {
+            instance.banks = banks;
+            instance.sounds = sound_summaries;
+        }
+        self.menu.sync_active_plugin(
+            &self.plugins[index].instance_id,
+            &self.plugins[index].plugin_id,
+            &self.plugins[index].name,
+            sounds,
+            previous_sound_id.as_deref(),
+        );
+        self.menu.sync_program_edit(None, None);
+        self.persist_session_checkpoint();
+        Ok(())
+    }
+
+    fn cancel_program_edit(&mut self, draft_id: u64) -> Result<(), String> {
+        let (draft, lease_id, previous_sound_id) = self.active_program_draft(draft_id)?;
+        let index = self
+            .plugins
+            .iter()
+            .position(|plugin| plugin.instance_id == draft.instance_id.as_str())
+            .ok_or_else(|| format!("Unknown plugin instance: {}", draft.instance_id))?;
+        self.restore_audio_program(draft.instance_id.as_str(), previous_sound_id.as_deref())?;
+        self.restore_control_program(index, previous_sound_id.as_deref())?;
+        self.apply_program_events(vec![
+            SessionEvent::ProgramEditCancelled {
+                draft_id,
+                instance_id: draft.instance_id.clone(),
+            },
+            SessionEvent::AuditionEnded {
+                lease_id,
+                instance_id: draft.instance_id,
+                restored_sound_id: previous_sound_id,
+                reason: AuditionEndReason::Cancelled,
+            },
+        ])?;
+        self.menu.sync_program_edit(None, None);
+        Ok(())
+    }
+
     fn apply_command(&mut self, command: MenuCommand) {
         match command {
             MenuCommand::SetActiveMode { mode } => {
@@ -1789,14 +2204,85 @@ impl DesktopApp {
                     self.status = error;
                 }
             }
+            MenuCommand::BeginProgramEdit { program_id } => {
+                match self.begin_program_edit(program_id) {
+                    Ok(()) => {
+                        self.status = "Program editor ready · changes are auditioned live".into()
+                    }
+                    Err(error) => self.status = error,
+                }
+            }
+            MenuCommand::EditProgramDraftField {
+                draft_id,
+                field_id,
+                value,
+                preview,
+            } => match self.edit_program_draft_field(draft_id, field_id, value, preview) {
+                Ok(()) if preview => self.status = "Previewing program change".into(),
+                Ok(()) => self.status = "Program draft updated".into(),
+                Err(error) => self.status = error,
+            },
+            MenuCommand::RestoreProgramDraftPreview { draft_id } => {
+                match self.restore_program_draft_preview(draft_id) {
+                    Ok(()) => self.status = "Restored the confirmed draft preview".into(),
+                    Err(error) => self.status = error,
+                }
+            }
+            MenuCommand::SetProgramDraftName { draft_id, name } => {
+                match self.set_program_draft_name(draft_id, name) {
+                    Ok(()) => self.status = "Program name updated".into(),
+                    Err(error) => self.status = error,
+                }
+            }
+            MenuCommand::SaveProgramDraft { draft_id } => match self.save_program_draft(draft_id) {
+                Ok(()) => self.status = "Program saved".into(),
+                Err(error) => self.status = error,
+            },
+            MenuCommand::CancelProgramEdit { draft_id } => {
+                match self.cancel_program_edit(draft_id) {
+                    Ok(()) => self.status = "Program edit cancelled".into(),
+                    Err(error) => self.status = error,
+                }
+            }
+            MenuCommand::ResolveProgramExit {
+                draft_id,
+                decision,
+                destination,
+            } => {
+                let result = match decision {
+                    ProgramExitDecision::Save => self.save_program_draft(draft_id),
+                    ProgramExitDecision::Discard => self.cancel_program_edit(draft_id),
+                };
+                if let Err(error) = result {
+                    self.status = error;
+                    return;
+                }
+                match destination {
+                    ProgramExitDestination::CustomPrograms => {
+                        self.status = match decision {
+                            ProgramExitDecision::Save => "Program saved".into(),
+                            ProgramExitDecision::Discard => "Program changes discarded".into(),
+                        };
+                    }
+                    ProgramExitDestination::ActiveMode {
+                        mode,
+                        selected_sound_id,
+                    } => self.apply_command(MenuCommand::ReturnToActiveMode {
+                        mode,
+                        cancel_draft_id: None,
+                        selected_sound_id,
+                    }),
+                }
+            }
             MenuCommand::ReturnToActiveMode {
                 mode,
                 cancel_draft_id,
                 selected_sound_id,
             } => {
-                if cancel_draft_id.is_some() {
-                    self.status =
-                        "Program draft cancellation is not available on Desktop yet".into();
+                if let Some(draft_id) = cancel_draft_id
+                    && let Err(error) = self.cancel_program_edit(draft_id)
+                {
+                    self.status = error;
                     return;
                 }
                 let mut focus_sound_id = selected_sound_id;
@@ -1834,6 +2320,19 @@ impl DesktopApp {
                 };
             }
             MenuCommand::ForceHome => {
+                let active_draft_id = self
+                    .session
+                    .read()
+                    .expect("session lock poisoned")
+                    .program_draft
+                    .as_ref()
+                    .map(|draft| draft.draft_id);
+                if let Some(draft_id) = active_draft_id
+                    && let Err(error) = self.cancel_program_edit(draft_id)
+                {
+                    self.status = format!("Could not cancel the active program edit: {error}");
+                    return;
+                }
                 {
                     let mut session = self.session.write().expect("session lock poisoned");
                     session.active_mode = SurfaceMode::Idle;
@@ -2200,6 +2699,35 @@ fn desktop_catalog_views(
         })
         .collect();
     (banks, sound_summaries, sounds)
+}
+
+fn desktop_program_draft_state(
+    draft_id: u64,
+    instance_id: InstanceId,
+    original_program_id: Option<String>,
+    prepared: &PreparedProgram,
+    editor: rackforge_plugin_api::ProgramEditorView,
+    dirty: bool,
+) -> Result<ProgramDraftState, String> {
+    prepared
+        .validate()
+        .map_err(|error| format!("Plugin returned an invalid prepared program: {error}"))?;
+    editor
+        .validate()
+        .map_err(|error| format!("Plugin returned an invalid program editor: {error}"))?;
+    let document_json = serde_json::to_string(&prepared.document)
+        .map_err(|error| format!("Could not serialize the prepared program: {error}"))?;
+    Ok(ProgramDraftState {
+        draft_id,
+        instance_id,
+        original_program_id,
+        name: prepared.document.name.clone(),
+        preview_sound_id: prepared.preview_sound_id.clone(),
+        storage_path: prepared.storage_path.clone(),
+        document_json,
+        editor,
+        dirty,
+    })
 }
 
 #[cfg(windows)]
@@ -2867,7 +3395,11 @@ fn show_startup_error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rackforge_plugin_api::{BankDescriptor, PRESET_CATALOG_SCHEMA_VERSION, PresetDescriptor};
+    use rackforge_plugin_api::{
+        BankDescriptor, PRESET_CATALOG_SCHEMA_VERSION, PROGRAM_EDIT_SCHEMA_VERSION,
+        PROGRAM_SCHEMA_VERSION, PresetDescriptor, ProgramEditorField, ProgramEditorFieldKind,
+        ProgramEditorPage, ProgramEditorView,
+    };
 
     #[test]
     fn chooses_safe_activation_for_plugin_versions() {
@@ -2926,5 +3458,64 @@ mod tests {
             Some("plus1-card-combinations")
         );
         assert_eq!(menu_sounds[0].bank, "M1 Plus+1 Card Combinations");
+    }
+
+    #[test]
+    fn desktop_program_draft_preserves_plugin_owned_document_and_editor() {
+        let prepared = PreparedProgram {
+            schema_version: PROGRAM_EDIT_SCHEMA_VERSION,
+            storage_path: "org.rackforge.demo/programs/stage.rfprogram".into(),
+            preview_sound_id: "custom.stage".into(),
+            document: ProgramDocument {
+                schema_version: PROGRAM_SCHEMA_VERSION,
+                id: "stage".into(),
+                name: "Stage Piano".into(),
+                plugin_id: "org.rackforge.demo".into(),
+                plugin_version: "1.0.0".into(),
+                plugin_state_version: 1,
+                payload_version: 1,
+                category: None,
+                tags: Vec::new(),
+                payload: serde_json::json!({ "bright": true }),
+            },
+        };
+        let editor = ProgramEditorView {
+            schema_version: PROGRAM_EDITOR_SCHEMA_VERSION,
+            title: "Program Editor".into(),
+            pages: vec![ProgramEditorPage {
+                id: "tone".into(),
+                label: "Tone".into(),
+                detail: "Program tone".into(),
+                enabled: true,
+                pages: Vec::new(),
+                fields: vec![ProgramEditorField {
+                    id: "bright".into(),
+                    label: "Bright".into(),
+                    detail: "Bright tone".into(),
+                    value: ProgramEditorValue::Boolean(true),
+                    kind: ProgramEditorFieldKind::Toggle,
+                    live_preview: true,
+                }],
+            }],
+        };
+
+        let draft = desktop_program_draft_state(
+            7,
+            InstanceId::new("desktop.org.rackforge.demo").unwrap(),
+            Some("factory.stage".into()),
+            &prepared,
+            editor.clone(),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(draft.name, "Stage Piano");
+        assert_eq!(draft.preview_sound_id, "custom.stage");
+        assert_eq!(draft.editor, editor);
+        assert!(draft.dirty);
+        assert_eq!(
+            serde_json::from_str::<ProgramDocument>(&draft.document_json).unwrap(),
+            prepared.document
+        );
     }
 }

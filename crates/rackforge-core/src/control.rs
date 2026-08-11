@@ -1,5 +1,6 @@
 use crate::PluginStorage;
 use crate::performance::PerformanceRepository;
+use crate::rack_graph::compile_instrument_rack;
 use crate::session::SharedSessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
 use crate::{LoadedPlugin, PluginInstance, PluginStateStore};
@@ -12,8 +13,8 @@ use rackforge_control_api::{
 #[cfg(test)]
 use rackforge_performance_api::PerformanceLibrary;
 use rackforge_performance_api::{
-    LibraryRevision, MidiOutputRoute, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit,
-    PerformanceSnapshot, RackDefinition, RackKeyboardParts,
+    LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
+    RackDefinition, RackId, RackKeyboardParts,
 };
 use rackforge_plugin_api::{
     Capability, ParameterSchema, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
@@ -1472,9 +1473,9 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     Some(snapshot.revision),
                 );
             }
-            let rack = match context.performance_repository.lock() {
+            let (library, rack_id) = match context.performance_repository.lock() {
                 Ok(repository) => match repository.library().resolve(&location) {
-                    Ok(rack) if rack.enabled => rack.clone(),
+                    Ok(rack) if rack.enabled => (repository.library().clone(), rack.id.clone()),
                     Ok(_) => {
                         return error_response(
                             ControlErrorCode::Rejected,
@@ -1498,11 +1499,10 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 }
             };
             let (instance_id, slots) =
-                match prepare_rack_runtime(&snapshot, &rack, &context.state_store) {
+                match prepare_rack_runtime(&snapshot, &library, &rack_id, &context.state_store) {
                     Ok(runtime) => runtime,
                     Err(failure) => return failure.into_response(),
                 };
-            let rack_id = rack.id.clone();
             let (reply_sender, reply_receiver) = sync_channel(1);
             if let Err(failure) = send_audio(
                 context,
@@ -1525,8 +1525,26 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             }
         }
         SessionCommand::PreviewRack { rack } => {
+            let mut library = match context.performance_repository.lock() {
+                Ok(repository) => repository.library().clone(),
+                Err(_) => {
+                    return internal_error(
+                        "performance repository lock is poisoned",
+                        Some(snapshot.revision),
+                    );
+                }
+            };
+            if let Some(index) = library
+                .racks
+                .iter()
+                .position(|candidate| candidate.id == rack.id)
+            {
+                library.racks[index] = rack.clone();
+            } else {
+                library.racks.push(rack.clone());
+            }
             let (instance_id, slots) =
-                match prepare_rack_runtime(&snapshot, &rack, &context.state_store) {
+                match prepare_rack_runtime(&snapshot, &library, &rack.id, &context.state_store) {
                     Ok(runtime) => runtime,
                     Err(failure) => return failure.into_response(),
                 };
@@ -2389,35 +2407,23 @@ fn require_active_instance<'a>(
 
 fn prepare_rack_runtime(
     snapshot: &rackforge_session_api::SessionState,
-    rack: &RackDefinition,
+    library: &rackforge_performance_api::PerformanceLibrary,
+    rack_id: &RackId,
     state_store: &Arc<Mutex<PluginStateStore>>,
 ) -> Result<(InstanceId, Vec<RackSlotRuntimeSpec>), ControlFailure> {
-    rack.validate().map_err(|error| {
+    let compiled_slots = compile_instrument_rack(library, rack_id).map_err(|error| {
         control_failure(
-            ControlErrorCode::InvalidRequest,
-            format!("invalid Rack {}: {error}", rack.id),
+            ControlErrorCode::Rejected,
+            format!("Rack {rack_id} cannot run: {error}"),
             Some(snapshot.revision),
         )
     })?;
-    let enabled_slots = rack
-        .slots
-        .iter()
-        .filter(|slot| slot.enabled)
-        .collect::<Vec<_>>();
-    if enabled_slots.is_empty() {
-        return Err(control_failure(
-            ControlErrorCode::Rejected,
-            format!("Rack {} has no enabled Slots", rack.id),
-            Some(snapshot.revision),
-        ));
-    }
-    if enabled_slots.len() > MAX_ACTIVE_RACK_SLOTS {
+    if compiled_slots.len() > MAX_ACTIVE_RACK_SLOTS {
         return Err(control_failure(
             ControlErrorCode::Rejected,
             format!(
-                "Rack {} enables {} Slots; this engine supports at most {MAX_ACTIVE_RACK_SLOTS}",
-                rack.id,
-                enabled_slots.len()
+                "Rack {rack_id} compiles to {} Slots; this engine supports at most {MAX_ACTIVE_RACK_SLOTS}",
+                compiled_slots.len()
             ),
             Some(snapshot.revision),
         ));
@@ -2429,8 +2435,9 @@ fn prepare_rack_runtime(
             Some(snapshot.revision),
         )
     })?;
-    let mut specs = Vec::with_capacity(enabled_slots.len());
-    for slot in enabled_slots {
+    let mut specs = Vec::with_capacity(compiled_slots.len());
+    for compiled in compiled_slots {
+        let slot = &compiled.slot;
         let instance = snapshot
             .instances
             .iter()
@@ -2445,26 +2452,6 @@ fn prepare_rack_runtime(
                     Some(snapshot.revision),
                 )
             })?;
-        if !matches!(slot.midi_output, MidiOutputRoute::None) {
-            return Err(control_failure(
-                ControlErrorCode::Rejected,
-                format!(
-                    "Rack Slot {} uses a MIDI output not supported by the current engine",
-                    slot.id
-                ),
-                Some(snapshot.revision),
-            ));
-        }
-        if slot.audio_output_bus != "main" {
-            return Err(control_failure(
-                ControlErrorCode::Rejected,
-                format!(
-                    "Rack Slot {} uses unavailable audio bus {:?}",
-                    slot.id, slot.audio_output_bus
-                ),
-                Some(snapshot.revision),
-            ));
-        }
         let state = if let Some(reference) = &slot.state {
             let store = state_store.lock().map_err(|_| {
                 control_failure(
@@ -2496,14 +2483,14 @@ fn prepare_rack_runtime(
             RackSlotStateLoad::Default
         };
         specs.push(RackSlotRuntimeSpec {
-            slot_id: slot.id.as_str().to_owned(),
+            slot_id: compiled.runtime_slot_id,
             plugin_id: slot.plugin_id.clone(),
             state,
             midi_input_channel: slot.midi_input_channel,
             midi_note_low: slot.midi_note_low,
             midi_note_high: slot.midi_note_high,
             midi_transpose: slot.midi_transpose,
-            keyboard_parts: rack.keyboard_parts,
+            keyboard_parts: compiled.keyboard_parts,
             level_per_mille: slot.level_per_mille,
             pan_per_mille: slot.pan_per_mille,
         });
@@ -2921,6 +2908,7 @@ mod tests {
                             name: "Test Rack".into(),
                             enabled: true,
                             keyboard_parts: None,
+                            graph: None,
                             slots: vec![RackSlot {
                                 id: RackSlotId::new("instrument.main").unwrap(),
                                 name: "Main Instrument".into(),

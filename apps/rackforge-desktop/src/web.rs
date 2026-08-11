@@ -11,9 +11,6 @@ use futures_util::{SinkExt, StreamExt};
 use include_dir::{Dir, include_dir};
 use rackforge_control_api::{ControlRequest, ControlResponse};
 use rackforge_core::PluginPackage;
-use rackforge_performance_api::{
-    LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceLibrary, PerformanceSnapshot,
-};
 use rackforge_resource_api::{
     BindResourceRequest, BrowseGrantRequest, ListGrantsRequest, LoadGrantedResourceRequest,
     ResourceBrowser, ResourceEntryKind, ResourceError,
@@ -49,6 +46,10 @@ struct WebState {
 
 pub enum DesktopControlCall {
     Session {
+        request: ControlRequest,
+        response: Sender<ControlResponse>,
+    },
+    Performance {
         request: ControlRequest,
         response: Sender<ControlResponse>,
     },
@@ -667,11 +668,25 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         ControlRequest::Snapshot => {
             serde_json::from_str(&snapshot_json(state)).expect("snapshot JSON")
         }
-        ControlRequest::PerformanceSnapshot => {
-            serde_json::to_value(ControlResponse::PerformanceSnapshot {
-                snapshot: Box::new(empty_performance()),
-            })
-            .expect("performance response")
+        request
+        @ (ControlRequest::PerformanceSnapshot | ControlRequest::EditPerformance { .. }) => {
+            let (response_sender, response_receiver) = mpsc::channel();
+            if state
+                .control
+                .send(DesktopControlCall::Performance {
+                    request,
+                    response: response_sender,
+                })
+                .is_err()
+            {
+                return json!({"status":"error", "code":"unavailable", "message":"The Desktop runtime is shutting down."});
+            }
+            match response_receiver.recv_timeout(Duration::from_secs(2)) {
+                Ok(response) => serde_json::to_value(response).expect("control response"),
+                Err(_) => {
+                    json!({"status":"error", "code":"timeout", "message":"The Desktop runtime did not answer the performance request in time."})
+                }
+            }
         }
         ControlRequest::Events { .. } => {
             let revision = state.session.read().expect("session lock").revision;
@@ -786,15 +801,6 @@ fn snapshot_json(state: &WebState) -> String {
         snapshot: Box::new(state.session.read().expect("session lock").clone()),
     })
     .expect("serialize desktop snapshot")
-}
-
-fn empty_performance() -> PerformanceSnapshot {
-    PerformanceSnapshot {
-        schema_version: PERFORMANCE_SNAPSHOT_SCHEMA_VERSION,
-        revision: LibraryRevision::new("0".repeat(64)).expect("valid empty revision"),
-        library: PerformanceLibrary::empty(),
-        live: Default::default(),
-    }
 }
 
 async fn static_asset(uri: axum::http::Uri) -> Response {

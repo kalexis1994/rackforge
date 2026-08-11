@@ -19,7 +19,9 @@ use eframe::egui::{
     StrokeKind, Vec2,
 };
 use rackforge_control_api::{ControlErrorCode, ControlRequest, ControlResponse};
+use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage};
+use rackforge_performance_api::{PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot};
 use rackforge_plugin_api::PluginKind;
 use rackforge_repository::{
     InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, inspect_local_archive,
@@ -266,6 +268,7 @@ struct DesktopApp {
     plugins: Vec<DesktopPlugin>,
     options: Options,
     plugin_install: Option<PluginInstallTask>,
+    performance_repository: PerformanceRepository,
     #[cfg(windows)]
     audio: Option<desktop_audio::DesktopAudio>,
     #[cfg(windows)]
@@ -286,6 +289,8 @@ impl DesktopApp {
         web_control: Receiver<web::DesktopControlCall>,
     ) -> Result<Self> {
         let (plugins, mut warnings) = load_desktop_plugins(options)?;
+        let performance_repository = PerformanceRepository::load_or_empty(Some(&options.data_root))
+            .context("loading Desktop performance library")?;
         #[cfg(windows)]
         let audio_config_path = options.rackforge_root.join("config/audio.toml");
         #[cfg(windows)]
@@ -416,6 +421,7 @@ impl DesktopApp {
             plugins,
             options: options.clone(),
             plugin_install: None,
+            performance_repository,
             #[cfg(windows)]
             audio,
             #[cfg(windows)]
@@ -1169,6 +1175,9 @@ impl DesktopApp {
                 web::DesktopControlCall::Session { request, response } => {
                     let _ = response.send(self.handle_web_control(request));
                 }
+                web::DesktopControlCall::Performance { request, response } => {
+                    let _ = response.send(self.handle_performance_control(request));
+                }
                 web::DesktopControlCall::LoadResource {
                     plugin_id,
                     resource_id,
@@ -1321,6 +1330,75 @@ impl DesktopApp {
                     self.session.read().expect("session lock poisoned").revision,
                 ),
             },
+        }
+    }
+
+    fn handle_performance_control(&mut self, request: ControlRequest) -> ControlResponse {
+        match request {
+            ControlRequest::PerformanceSnapshot => ControlResponse::PerformanceSnapshot {
+                snapshot: Box::new(self.performance_snapshot()),
+            },
+            ControlRequest::EditPerformance {
+                expected_revision,
+                edit,
+            } => {
+                let current_revision = self.performance_repository.revision();
+                if expected_revision != current_revision {
+                    return ControlResponse::Error {
+                        code: ControlErrorCode::Conflict,
+                        message: format!(
+                            "performance library changed from {} to {}",
+                            expected_revision.as_str(),
+                            current_revision.as_str()
+                        ),
+                        current_revision: Some(
+                            self.session.read().expect("session lock poisoned").revision,
+                        ),
+                    };
+                }
+                let live = self
+                    .session
+                    .read()
+                    .expect("session lock poisoned")
+                    .live
+                    .clone();
+                match self
+                    .performance_repository
+                    .apply_edit(&expected_revision, edit, &live)
+                {
+                    Ok(()) => ControlResponse::PerformanceEdited {
+                        snapshot: Box::new(self.performance_snapshot()),
+                    },
+                    Err(error) => ControlResponse::Error {
+                        code: ControlErrorCode::Rejected,
+                        message: format!("Could not save performance library: {error:#}"),
+                        current_revision: Some(
+                            self.session.read().expect("session lock poisoned").revision,
+                        ),
+                    },
+                }
+            }
+            _ => ControlResponse::Error {
+                code: ControlErrorCode::InvalidRequest,
+                message: "Unsupported Desktop performance request".into(),
+                current_revision: Some(
+                    self.session.read().expect("session lock poisoned").revision,
+                ),
+            },
+        }
+    }
+
+    fn performance_snapshot(&self) -> PerformanceSnapshot {
+        PerformanceSnapshot {
+            schema_version: PERFORMANCE_SNAPSHOT_SCHEMA_VERSION,
+            revision: self.performance_repository.revision(),
+            library: self.performance_repository.library().clone(),
+            live: self
+                .session
+                .read()
+                .expect("session lock poisoned")
+                .live
+                .clone(),
         }
     }
 

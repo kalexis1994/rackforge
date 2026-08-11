@@ -114,6 +114,64 @@ export interface HostPreset {
   state: PluginStateReference;
 }
 
+export interface RackGraphPosition {
+  x: number;
+  y: number;
+}
+
+export type RackGraphNodeKind =
+  | { kind: "midi_input"; bus_id: string }
+  | { kind: "audio_input"; bus_id: string }
+  | { kind: "plugin"; slot_id: string }
+  | { kind: "rack"; rack_id: string }
+  | { kind: "midi_output"; bus_id: string }
+  | { kind: "audio_output"; bus_id: string };
+
+export interface RackGraphNode {
+  id: string;
+  kind: RackGraphNodeKind;
+  position: RackGraphPosition;
+}
+
+export type RackGraphSignal = "midi" | "audio";
+
+export interface RackGraphEndpoint {
+  node_id: string;
+  port_id: string;
+}
+
+export interface RackGraphEdge {
+  id: string;
+  signal: RackGraphSignal;
+  source: RackGraphEndpoint;
+  target: RackGraphEndpoint;
+}
+
+export type RackGraphLabelTone =
+  | "neutral"
+  | "cyan"
+  | "green"
+  | "amber"
+  | "violet"
+  | "red";
+
+export interface RackGraphLabel {
+  id: string;
+  text: string;
+  kind: "note" | "section";
+  tone: RackGraphLabelTone;
+  position: RackGraphPosition;
+  width: number;
+  height: number;
+}
+
+export interface RackGraph {
+  schema_version: number;
+  nodes: RackGraphNode[];
+  edges: RackGraphEdge[];
+  labels?: RackGraphLabel[];
+}
+
 export interface RackDefinition {
   schema_version: number;
   id: string;
@@ -121,6 +179,7 @@ export interface RackDefinition {
   enabled: boolean;
   keyboard_parts?: RackKeyboardParts;
   slots: RackSlot[];
+  graph?: RackGraph;
 }
 
 export interface SongPart {

@@ -11,6 +11,7 @@ use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -57,6 +58,23 @@ impl PerformanceRepository {
             repository.persist_bootstrap()?;
             println!("PERFORMANCE_LIBRARY_BOOTSTRAPPED");
         }
+        repository
+            .library
+            .validate()
+            .context("validating performance library")?;
+        Ok(repository)
+    }
+
+    /// Loads an existing library without inventing a playable Rack. Desktop
+    /// authoring uses this path because plugin state is chosen explicitly in
+    /// the Rack editor.
+    pub fn load_or_empty(data_root: Option<&Path>) -> Result<Self> {
+        let root = data_root.map(|root| root.join(PERFORMANCE_DIRECTORY));
+        let mut repository = Self {
+            root,
+            library: PerformanceLibrary::empty(),
+        };
+        repository.load()?;
         repository
             .library
             .validate()
@@ -213,6 +231,7 @@ fn bootstrap_library(bootstrap: PerformanceBootstrap) -> Result<PerformanceLibra
             name: bootstrap.name.clone(),
             enabled: true,
             keyboard_parts: None,
+            graph: None,
             slots: vec![RackSlot {
                 id: RackSlotId::new("instrument.main")?,
                 name: "Main Instrument".into(),
@@ -315,19 +334,19 @@ fn write_new_document<T: Serialize>(directory: &Path, id: &str, document: &T) ->
     }
     let bytes = serde_json::to_vec_pretty(document)?;
     let temporary = directory.join(format!(".{id}.json.tmp.{}", std::process::id()));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options
         .open(&temporary)
         .with_context(|| format!("creating {}", temporary.display()))?;
     file.write_all(&bytes)?;
     file.write_all(b"\n")?;
     file.sync_all()?;
     drop(file);
-    fs::rename(&temporary, &destination)
-        .with_context(|| format!("publishing {}", destination.display()))?;
-    File::open(directory)?.sync_all()?;
+    replace_file(&temporary, &destination)?;
+    sync_directory(directory)?;
     Ok(())
 }
 
@@ -340,26 +359,63 @@ fn write_document<T: Serialize>(directory: &Path, id: &str, document: &T) -> Res
         fs::remove_file(&temporary)
             .with_context(|| format!("removing stale {}", temporary.display()))?;
     }
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options
         .open(&temporary)
         .with_context(|| format!("creating {}", temporary.display()))?;
     file.write_all(&bytes)?;
     file.write_all(b"\n")?;
     file.sync_all()?;
     drop(file);
-    fs::rename(&temporary, &destination)
-        .with_context(|| format!("publishing {}", destination.display()))?;
-    File::open(directory)?.sync_all()?;
+    replace_file(&temporary, &destination)?;
+    sync_directory(directory)?;
     Ok(())
 }
 
 fn delete_document(directory: &Path, id: &str) -> Result<()> {
     let destination = directory.join(format!("{id}.json"));
     fs::remove_file(&destination).with_context(|| format!("deleting {}", destination.display()))?;
-    File::open(directory)?.sync_all()?;
+    sync_directory(directory)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn replace_file(temporary: &Path, destination: &Path) -> Result<()> {
+    fs::rename(temporary, destination)
+        .with_context(|| format!("publishing {}", destination.display()))
+}
+
+#[cfg(not(unix))]
+fn replace_file(temporary: &Path, destination: &Path) -> Result<()> {
+    if !destination.exists() {
+        return fs::rename(temporary, destination)
+            .with_context(|| format!("publishing {}", destination.display()));
+    }
+    let backup = destination.with_extension("previous-rackforge-performance");
+    if backup.exists() {
+        fs::remove_file(&backup).with_context(|| format!("removing {}", backup.display()))?;
+    }
+    fs::rename(destination, &backup)
+        .with_context(|| format!("backing up {}", destination.display()))?;
+    if let Err(error) = fs::rename(temporary, destination) {
+        let _ = fs::rename(&backup, destination);
+        return Err(error).with_context(|| format!("publishing {}", destination.display()));
+    }
+    fs::remove_file(&backup).with_context(|| format!("removing {}", backup.display()))
+}
+
+#[cfg(unix)]
+fn sync_directory(directory: &Path) -> Result<()> {
+    File::open(directory)
+        .and_then(|file| file.sync_all())
+        .with_context(|| format!("syncing directory {}", directory.display()))
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_directory: &Path) -> Result<()> {
     Ok(())
 }
 

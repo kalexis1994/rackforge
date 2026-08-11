@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import {
   dispatchCommand,
   dispatchPerformanceEdit,
@@ -6,6 +6,12 @@ import {
   requestPluginPresets,
 } from "./gateway";
 import { RfLoader } from "./components/RfLoader";
+import {
+  addSlotToRack,
+  graphFromSlots,
+  materializeRackGraph,
+  removeSlotFromRack,
+} from "./rackGraph";
 import type {
   LiveBrowseMode,
   LiveLocation,
@@ -19,6 +25,8 @@ import type {
   SetlistDefinition,
   SongDefinition,
 } from "./types";
+
+const RackGraphEditor = lazy(() => import("./components/RackGraphEditor"));
 
 type ConfigKind = "rack" | "song" | "setlist";
 
@@ -518,12 +526,14 @@ function defaultSlot(instances: PluginInstance[]): RackSlot {
 }
 
 function newRack(instances: PluginInstance[]): RackDefinition {
+  const slots = [defaultSlot(instances)];
   return {
     schema_version: 1,
     id: performanceId("rack"),
     name: "New Rack",
     enabled: true,
-    slots: [defaultSlot(instances)],
+    slots,
+    graph: graphFromSlots(slots),
   };
 }
 
@@ -665,7 +675,9 @@ function RackEditor({
   onDeleted: () => void;
 }) {
   const original = rack;
-  const [draft, setDraft] = useState(() => (rack ? clone(rack) : undefined));
+  const [draft, setDraft] = useState(() =>
+    rack ? clone(materializeRackGraph(rack)) : undefined,
+  );
   const [baseRevision, setBaseRevision] = useState(performance.revision);
   const [error, setError] = useState<string | null>(null);
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(original);
@@ -747,7 +759,9 @@ function RackEditor({
         pending={pending}
         onSave={save}
         onReset={() => {
-          setDraft(original ? clone(original) : newRack(instances));
+          setDraft(
+            original ? clone(materializeRackGraph(original)) : newRack(instances),
+          );
           setBaseRevision(performance.revision);
           setError(null);
         }}
@@ -761,11 +775,24 @@ function RackEditor({
         onEnabled={(enabled) => setDraft({ ...draft, enabled })}
       />
       <EditorSection
-        title="Slots"
-        detail="Layer plugin states, MIDI filters and mix settings inside this Rack."
+        title="Rack graph"
+        detail="Route instruments and child Racks. Positions and labels are portable; the viewport stays local to this device."
+        action={null}
+      >
+        <Suspense fallback={<div className="rack-graph-loading">Loading graph editor…</div>}>
+          <RackGraphEditor
+            rack={draft}
+            racks={performance.library.racks}
+            onChange={setDraft}
+          />
+        </Suspense>
+      </EditorSection>
+      <EditorSection
+        title="Instrument settings"
+        detail="Configure plugin state, MIDI filters and mix for each instrument node."
         action={
           <button
-            onClick={() => setDraft({ ...draft, slots: [...draft.slots, defaultSlot(instances)] })}
+            onClick={() => setDraft(addSlotToRack(draft, defaultSlot(instances)))}
             disabled={draft.slots.length >= 32 || instances.length === 0}
           >
             ＋ Add Slot
@@ -788,10 +815,7 @@ function RackEditor({
               setDraft({ ...draft, slots });
             }}
             onRemove={() =>
-              setDraft({
-                ...draft,
-                slots: draft.slots.filter((candidate) => candidate.id !== slot.id),
-              })
+              setDraft(removeSlotFromRack(draft, slot.id))
             }
           />
         ))}

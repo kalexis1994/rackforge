@@ -10,8 +10,8 @@ mod live_midi_state;
 pub mod loader;
 pub mod midi_hotplug;
 pub mod package;
-#[cfg(target_os = "linux")]
 pub mod performance;
+pub mod rack_graph;
 pub mod realtime;
 pub mod session;
 #[cfg(target_os = "linux")]

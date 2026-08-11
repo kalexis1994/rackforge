@@ -1,13 +1,19 @@
 use rackforge_plugin_api::PluginStateReference;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use thiserror::Error;
 
 pub const PERFORMANCE_SCHEMA_VERSION: u32 = 1;
 pub const PERFORMANCE_SNAPSHOT_SCHEMA_VERSION: u32 = 4;
+/// Version 1 was the implicit, flat Rack Slot layout. Version 2 is the first
+/// explicit and portable node graph.
+pub const RACK_GRAPH_SCHEMA_VERSION: u32 = 2;
 pub const MAX_RACKS: usize = 256;
 pub const MAX_RACK_SLOTS: usize = 32;
+pub const MAX_RACK_GRAPH_NODES: usize = 128;
+pub const MAX_RACK_GRAPH_EDGES: usize = 512;
+pub const MAX_RACK_GRAPH_LABELS: usize = 128;
 pub const MAX_SONGS: usize = 256;
 pub const MAX_SONG_PARTS: usize = 64;
 pub const MAX_SETLISTS: usize = 128;
@@ -41,6 +47,9 @@ macro_rules! performance_id {
 
 performance_id!(RackId);
 performance_id!(RackSlotId);
+performance_id!(RackGraphNodeId);
+performance_id!(RackGraphEdgeId);
+performance_id!(RackGraphLabelId);
 performance_id!(SongId);
 performance_id!(SongPartId);
 performance_id!(SetlistId);
@@ -226,6 +235,405 @@ impl RackKeyboardParts {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RackGraphPosition {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl RackGraphPosition {
+    fn validate(self) -> Result<(), PerformanceError> {
+        const LIMIT: i32 = 1_000_000;
+        if !(-LIMIT..=LIMIT).contains(&self.x) || !(-LIMIT..=LIMIT).contains(&self.y) {
+            return Err(PerformanceError::InvalidRackGraphPosition);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RackGraphNodeKind {
+    MidiInput { bus_id: String },
+    AudioInput { bus_id: String },
+    Plugin { slot_id: RackSlotId },
+    Rack { rack_id: RackId },
+    MidiOutput { bus_id: String },
+    AudioOutput { bus_id: String },
+}
+
+impl RackGraphNodeKind {
+    fn validate(&self) -> Result<(), PerformanceError> {
+        match self {
+            Self::MidiInput { bus_id }
+            | Self::AudioInput { bus_id }
+            | Self::MidiOutput { bus_id }
+            | Self::AudioOutput { bus_id } => validate_reference(bus_id, "Rack graph bus"),
+            Self::Plugin { .. } | Self::Rack { .. } => Ok(()),
+        }
+    }
+
+    fn supports_port(
+        &self,
+        port_id: &str,
+        signal: RackGraphSignal,
+        direction: RackGraphPortDirection,
+    ) -> bool {
+        use RackGraphNodeKind::{AudioInput, AudioOutput, MidiInput, MidiOutput, Plugin, Rack};
+        use RackGraphPortDirection::{Input, Output};
+        use RackGraphSignal::{Audio, Midi};
+
+        matches!(
+            (self, port_id, signal, direction),
+            (MidiInput { .. }, "out", Midi, Output)
+                | (AudioInput { .. }, "out", Audio, Output)
+                | (Plugin { .. } | Rack { .. }, "midi_in", Midi, Input)
+                | (Plugin { .. } | Rack { .. }, "audio_in", Audio, Input)
+                | (Plugin { .. } | Rack { .. }, "midi_out", Midi, Output)
+                | (Plugin { .. } | Rack { .. }, "audio_out", Audio, Output)
+                | (MidiOutput { .. }, "in", Midi, Input)
+                | (AudioOutput { .. }, "in", Audio, Input)
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RackGraphNode {
+    pub id: RackGraphNodeId,
+    pub kind: RackGraphNodeKind,
+    #[serde(default)]
+    pub position: RackGraphPosition,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RackGraphSignal {
+    Midi,
+    Audio,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RackGraphPortDirection {
+    Input,
+    Output,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RackGraphEndpoint {
+    pub node_id: RackGraphNodeId,
+    pub port_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RackGraphEdge {
+    pub id: RackGraphEdgeId,
+    pub signal: RackGraphSignal,
+    pub source: RackGraphEndpoint,
+    pub target: RackGraphEndpoint,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RackGraphLabelKind {
+    #[default]
+    Note,
+    Section,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RackGraphLabelTone {
+    #[default]
+    Neutral,
+    Cyan,
+    Green,
+    Amber,
+    Violet,
+    Red,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RackGraphLabel {
+    pub id: RackGraphLabelId,
+    pub text: String,
+    #[serde(default)]
+    pub kind: RackGraphLabelKind,
+    #[serde(default)]
+    pub tone: RackGraphLabelTone,
+    pub position: RackGraphPosition,
+    pub width: u16,
+    pub height: u16,
+}
+
+impl RackGraphLabel {
+    fn validate(&self) -> Result<(), PerformanceError> {
+        if self.text.trim().is_empty()
+            || self.text.chars().count() > 512
+            || self.text.contains('\0')
+        {
+            return Err(PerformanceError::InvalidRackGraphLabel);
+        }
+        self.position.validate()?;
+        if !(80..=4_000).contains(&self.width) || !(40..=4_000).contains(&self.height) {
+            return Err(PerformanceError::InvalidRackGraphLabel);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RackGraph {
+    pub schema_version: u32,
+    pub nodes: Vec<RackGraphNode>,
+    pub edges: Vec<RackGraphEdge>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<RackGraphLabel>,
+}
+
+impl RackGraph {
+    pub fn from_slots(slots: &[RackSlot]) -> Self {
+        let midi_input_id = RackGraphNodeId::new("input.midi").expect("static graph id is valid");
+        let mut nodes = vec![RackGraphNode {
+            id: midi_input_id.clone(),
+            kind: RackGraphNodeKind::MidiInput {
+                bus_id: "main".into(),
+            },
+            position: RackGraphPosition { x: 0, y: 0 },
+        }];
+        let mut edges = Vec::with_capacity(slots.len() * 2);
+        let audio_buses = slots
+            .iter()
+            .map(|slot| slot.audio_output_bus.as_str())
+            .collect::<BTreeSet<_>>();
+        let midi_buses = slots
+            .iter()
+            .filter_map(|slot| match &slot.midi_output {
+                MidiOutputRoute::None => None,
+                MidiOutputRoute::Bus { bus_id } => Some(bus_id.as_str()),
+            })
+            .collect::<BTreeSet<_>>();
+        let mut audio_outputs = BTreeMap::new();
+        for (index, bus_id) in audio_buses.into_iter().enumerate() {
+            let id = RackGraphNodeId::new(format!("output.audio.{index:02}"))
+                .expect("generated graph id is valid");
+            nodes.push(RackGraphNode {
+                id: id.clone(),
+                kind: RackGraphNodeKind::AudioOutput {
+                    bus_id: bus_id.into(),
+                },
+                position: RackGraphPosition {
+                    x: 720,
+                    y: index as i32 * 180,
+                },
+            });
+            audio_outputs.insert(bus_id, id);
+        }
+        let mut midi_outputs = BTreeMap::new();
+        for (index, bus_id) in midi_buses.into_iter().enumerate() {
+            let id = RackGraphNodeId::new(format!("output.midi.{index:02}"))
+                .expect("generated graph id is valid");
+            nodes.push(RackGraphNode {
+                id: id.clone(),
+                kind: RackGraphNodeKind::MidiOutput {
+                    bus_id: bus_id.into(),
+                },
+                position: RackGraphPosition {
+                    x: 720,
+                    y: 360 + index as i32 * 180,
+                },
+            });
+            midi_outputs.insert(bus_id, id);
+        }
+        for (index, slot) in slots.iter().enumerate() {
+            let number = index + 1;
+            let plugin_id = RackGraphNodeId::new(format!("plugin.{number:02}"))
+                .expect("generated graph id is valid");
+            nodes.push(RackGraphNode {
+                id: plugin_id.clone(),
+                kind: RackGraphNodeKind::Plugin {
+                    slot_id: slot.id.clone(),
+                },
+                position: RackGraphPosition {
+                    x: 360,
+                    y: index as i32 * 180,
+                },
+            });
+            edges.push(RackGraphEdge {
+                id: RackGraphEdgeId::new(format!("midi.{number:02}"))
+                    .expect("generated graph id is valid"),
+                signal: RackGraphSignal::Midi,
+                source: RackGraphEndpoint {
+                    node_id: midi_input_id.clone(),
+                    port_id: "out".into(),
+                },
+                target: RackGraphEndpoint {
+                    node_id: plugin_id.clone(),
+                    port_id: "midi_in".into(),
+                },
+            });
+            edges.push(RackGraphEdge {
+                id: RackGraphEdgeId::new(format!("audio.{number:02}"))
+                    .expect("generated graph id is valid"),
+                signal: RackGraphSignal::Audio,
+                source: RackGraphEndpoint {
+                    node_id: plugin_id.clone(),
+                    port_id: "audio_out".into(),
+                },
+                target: RackGraphEndpoint {
+                    node_id: audio_outputs[slot.audio_output_bus.as_str()].clone(),
+                    port_id: "in".into(),
+                },
+            });
+            if let MidiOutputRoute::Bus { bus_id } = &slot.midi_output {
+                edges.push(RackGraphEdge {
+                    id: RackGraphEdgeId::new(format!("midi-output.{number:02}"))
+                        .expect("generated graph id is valid"),
+                    signal: RackGraphSignal::Midi,
+                    source: RackGraphEndpoint {
+                        node_id: plugin_id,
+                        port_id: "midi_out".into(),
+                    },
+                    target: RackGraphEndpoint {
+                        node_id: midi_outputs[bus_id.as_str()].clone(),
+                        port_id: "in".into(),
+                    },
+                });
+            }
+        }
+        Self {
+            schema_version: RACK_GRAPH_SCHEMA_VERSION,
+            nodes,
+            edges,
+            labels: Vec::new(),
+        }
+    }
+
+    pub fn validate(&self, slots: &[RackSlot]) -> Result<(), PerformanceError> {
+        if self.schema_version != RACK_GRAPH_SCHEMA_VERSION {
+            return Err(PerformanceError::UnsupportedRackGraphSchema(
+                self.schema_version,
+            ));
+        }
+        validate_count(
+            "Rack graph nodes",
+            self.nodes.len(),
+            1,
+            MAX_RACK_GRAPH_NODES,
+        )?;
+        validate_count(
+            "Rack graph edges",
+            self.edges.len(),
+            1,
+            MAX_RACK_GRAPH_EDGES,
+        )?;
+        validate_count(
+            "Rack graph labels",
+            self.labels.len(),
+            0,
+            MAX_RACK_GRAPH_LABELS,
+        )?;
+        unique(
+            self.nodes.iter().map(|node| node.id.as_str()),
+            "Rack graph node",
+        )?;
+        unique(
+            self.edges.iter().map(|edge| edge.id.as_str()),
+            "Rack graph edge",
+        )?;
+        unique(
+            self.labels.iter().map(|label| label.id.as_str()),
+            "Rack graph label",
+        )?;
+
+        let nodes = self
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect::<BTreeMap<_, _>>();
+        for node in &self.nodes {
+            validate_id(node.id.as_str())?;
+            node.kind.validate()?;
+            node.position.validate()?;
+        }
+        for edge in &self.edges {
+            validate_id(edge.id.as_str())?;
+        }
+        for label in &self.labels {
+            validate_id(label.id.as_str())?;
+            label.validate()?;
+        }
+
+        let slot_ids = slots
+            .iter()
+            .map(|slot| slot.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let mut graph_slot_ids = BTreeSet::new();
+        for node in &self.nodes {
+            if let RackGraphNodeKind::Plugin { slot_id } = &node.kind {
+                if !slot_ids.contains(slot_id.as_str()) {
+                    return Err(PerformanceError::MissingRackSlot(slot_id.clone()));
+                }
+                if !graph_slot_ids.insert(slot_id.as_str()) {
+                    return Err(PerformanceError::DuplicateRackGraphSlot(slot_id.clone()));
+                }
+            }
+        }
+        if graph_slot_ids != slot_ids {
+            let missing = slot_ids
+                .difference(&graph_slot_ids)
+                .next()
+                .expect("different Slot sets contain a missing Slot");
+            return Err(PerformanceError::MissingRackGraphSlot(
+                RackSlotId::new((*missing).to_owned()).expect("validated Slot id remains valid"),
+            ));
+        }
+
+        let mut connections = BTreeSet::new();
+        for edge in &self.edges {
+            let source = nodes.get(edge.source.node_id.as_str()).ok_or_else(|| {
+                PerformanceError::MissingRackGraphNode(edge.source.node_id.clone())
+            })?;
+            let target = nodes.get(edge.target.node_id.as_str()).ok_or_else(|| {
+                PerformanceError::MissingRackGraphNode(edge.target.node_id.clone())
+            })?;
+            if source.id == target.id {
+                return Err(PerformanceError::RackGraphCycle);
+            }
+            if !source.kind.supports_port(
+                &edge.source.port_id,
+                edge.signal,
+                RackGraphPortDirection::Output,
+            ) {
+                return Err(PerformanceError::InvalidRackGraphPort {
+                    node_id: source.id.clone(),
+                    port_id: edge.source.port_id.clone(),
+                });
+            }
+            if !target.kind.supports_port(
+                &edge.target.port_id,
+                edge.signal,
+                RackGraphPortDirection::Input,
+            ) {
+                return Err(PerformanceError::InvalidRackGraphPort {
+                    node_id: target.id.clone(),
+                    port_id: edge.target.port_id.clone(),
+                });
+            }
+            let connection = (edge.signal, edge.source.clone(), edge.target.clone());
+            if !connections.insert(connection) {
+                return Err(PerformanceError::DuplicateRackGraphConnection);
+            }
+        }
+        validate_acyclic_graph(&self.nodes, &self.edges)
+    }
+}
+
 #[deprecated(note = "use RackSlotId")]
 pub type RackItemId = RackSlotId;
 #[deprecated(note = "use RackSlot")]
@@ -247,23 +655,54 @@ pub struct RackDefinition {
     pub keyboard_parts: Option<RackKeyboardParts>,
     #[serde(alias = "items", alias = "nodes")]
     pub slots: Vec<RackSlot>,
+    /// Explicit routing and visual layout. Missing values are legacy flat Racks
+    /// and are upgraded deterministically from `slots`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph: Option<RackGraph>,
 }
 
 impl RackDefinition {
+    pub fn resolved_graph(&self) -> RackGraph {
+        self.graph
+            .clone()
+            .unwrap_or_else(|| RackGraph::from_slots(&self.slots))
+    }
+
+    /// Materializes the v2 graph for a legacy flat Rack. Returns true when the
+    /// Rack changed and should be persisted.
+    pub fn migrate_graph(&mut self) -> bool {
+        if self.graph.is_some() {
+            return false;
+        }
+        self.graph = Some(RackGraph::from_slots(&self.slots));
+        true
+    }
+
     pub fn validate(&self) -> Result<(), PerformanceError> {
         validate_schema(self.schema_version)?;
         validate_name(&self.name)?;
         if let Some(parts) = &self.keyboard_parts {
             parts.validate()?;
         }
-        validate_count("rack slots", self.slots.len(), 1, MAX_RACK_SLOTS)?;
+        let graph = self.resolved_graph();
+        let has_nested_rack = graph
+            .nodes
+            .iter()
+            .any(|node| matches!(node.kind, RackGraphNodeKind::Rack { .. }));
+        validate_count(
+            "rack slots",
+            self.slots.len(),
+            usize::from(!has_nested_rack),
+            MAX_RACK_SLOTS,
+        )?;
         unique(self.slots.iter().map(|slot| slot.id.as_str()), "rack slot")?;
         for slot in &self.slots {
             slot.validate()?;
         }
-        if !self.slots.iter().any(|slot| slot.enabled) {
+        if !has_nested_rack && !self.slots.iter().any(|slot| slot.enabled) {
             return Err(PerformanceError::NoEnabledRackSlot);
         }
+        graph.validate(&self.slots)?;
         Ok(())
     }
 }
@@ -427,7 +866,17 @@ impl PerformanceLibrary {
         )?;
         for rack in &self.racks {
             rack.validate()?;
+            if let Some(graph) = &rack.graph {
+                for node in &graph.nodes {
+                    if let RackGraphNodeKind::Rack { rack_id } = &node.kind
+                        && !self.racks.iter().any(|candidate| candidate.id == *rack_id)
+                    {
+                        return Err(PerformanceError::MissingRack(rack_id.clone()));
+                    }
+                }
+            }
         }
+        validate_acyclic_rack_dependencies(&self.racks)?;
         for song in &self.songs {
             song.validate()?;
             for part in &song.parts {
@@ -445,6 +894,15 @@ impl PerformanceLibrary {
             }
         }
         Ok(())
+    }
+
+    /// Upgrades all legacy flat Racks in memory. The repository uses the
+    /// returned count to persist only documents that actually changed.
+    pub fn migrate_rack_graphs(&mut self) -> usize {
+        self.racks
+            .iter_mut()
+            .map(|rack| usize::from(rack.migrate_graph()))
+            .sum()
     }
 
     pub fn rack(&self, id: &RackId) -> Option<&RackDefinition> {
@@ -612,6 +1070,93 @@ impl PerformanceSnapshot {
     }
 }
 
+fn validate_acyclic_graph(
+    nodes: &[RackGraphNode],
+    edges: &[RackGraphEdge],
+) -> Result<(), PerformanceError> {
+    let mut indegree = nodes
+        .iter()
+        .map(|node| (node.id.as_str(), 0_usize))
+        .collect::<BTreeMap<_, _>>();
+    let mut outgoing = BTreeMap::<&str, Vec<&str>>::new();
+    for edge in edges {
+        *indegree
+            .get_mut(edge.target.node_id.as_str())
+            .expect("graph endpoints were validated") += 1;
+        outgoing
+            .entry(edge.source.node_id.as_str())
+            .or_default()
+            .push(edge.target.node_id.as_str());
+    }
+    let mut ready = indegree
+        .iter()
+        .filter_map(|(id, count)| (*count == 0).then_some(*id))
+        .collect::<Vec<_>>();
+    let mut visited = 0;
+    while let Some(id) = ready.pop() {
+        visited += 1;
+        for target in outgoing.get(id).into_iter().flatten() {
+            let count = indegree
+                .get_mut(target)
+                .expect("graph endpoints were validated");
+            *count -= 1;
+            if *count == 0 {
+                ready.push(target);
+            }
+        }
+    }
+    if visited != nodes.len() {
+        return Err(PerformanceError::RackGraphCycle);
+    }
+    Ok(())
+}
+
+fn validate_acyclic_rack_dependencies(racks: &[RackDefinition]) -> Result<(), PerformanceError> {
+    let mut indegree = racks
+        .iter()
+        .map(|rack| (rack.id.as_str(), 0_usize))
+        .collect::<BTreeMap<_, _>>();
+    let mut outgoing = BTreeMap::<&str, Vec<&str>>::new();
+    for rack in racks {
+        let Some(graph) = &rack.graph else {
+            continue;
+        };
+        for dependency in graph.nodes.iter().filter_map(|node| match &node.kind {
+            RackGraphNodeKind::Rack { rack_id } => Some(rack_id.as_str()),
+            _ => None,
+        }) {
+            *indegree
+                .get_mut(dependency)
+                .expect("nested Rack references were validated") += 1;
+            outgoing
+                .entry(rack.id.as_str())
+                .or_default()
+                .push(dependency);
+        }
+    }
+    let mut ready = indegree
+        .iter()
+        .filter_map(|(id, count)| (*count == 0).then_some(*id))
+        .collect::<Vec<_>>();
+    let mut visited = 0;
+    while let Some(id) = ready.pop() {
+        visited += 1;
+        for target in outgoing.get(id).into_iter().flatten() {
+            let count = indegree
+                .get_mut(target)
+                .expect("nested Rack references were validated");
+            *count -= 1;
+            if *count == 0 {
+                ready.push(target);
+            }
+        }
+    }
+    if visited != racks.len() {
+        return Err(PerformanceError::RackDependencyCycle);
+    }
+    Ok(())
+}
+
 fn default_true() -> bool {
     true
 }
@@ -709,6 +1254,8 @@ fn unique<'a>(
 pub enum PerformanceError {
     #[error("unsupported performance schema {0}")]
     UnsupportedSchema(u32),
+    #[error("unsupported Rack graph schema {0}")]
+    UnsupportedRackGraphSchema(u32),
     #[error("unsupported performance snapshot schema {0}")]
     UnsupportedSnapshotSchema(u32),
     #[error("invalid performance library revision")]
@@ -730,6 +1277,29 @@ pub enum PerformanceError {
     },
     #[error("duplicate {kind} id {id:?}")]
     DuplicateId { kind: &'static str, id: String },
+    #[error("Rack graph position is outside the supported canvas")]
+    InvalidRackGraphPosition,
+    #[error("Rack graph label is empty, too large or has invalid bounds")]
+    InvalidRackGraphLabel,
+    #[error("Rack graph node {0} does not exist")]
+    MissingRackGraphNode(RackGraphNodeId),
+    #[error("Rack Slot {0} referenced by the graph does not exist")]
+    MissingRackSlot(RackSlotId),
+    #[error("Rack Slot {0} appears in more than one graph node")]
+    DuplicateRackGraphSlot(RackSlotId),
+    #[error("Rack Slot {0} has no graph node")]
+    MissingRackGraphSlot(RackSlotId),
+    #[error("Rack graph node {node_id} does not support port {port_id:?}")]
+    InvalidRackGraphPort {
+        node_id: RackGraphNodeId,
+        port_id: String,
+    },
+    #[error("Rack graph contains the same connection more than once")]
+    DuplicateRackGraphConnection,
+    #[error("Rack graph contains a feedback cycle")]
+    RackGraphCycle,
+    #[error("nested Racks contain a dependency cycle")]
+    RackDependencyCycle,
     #[error("rack must contain at least one enabled Slot")]
     NoEnabledRackSlot,
     #[error("MIDI channel must be between 1 and 16")]
@@ -779,6 +1349,7 @@ mod tests {
                 name: "Stage Piano".into(),
                 enabled: true,
                 keyboard_parts: None,
+                graph: None,
                 slots: vec![RackSlot {
                     id: RackSlotId::new("instrument.main").unwrap(),
                     name: "Main Instrument".into(),
@@ -987,5 +1558,174 @@ mod tests {
             Some("dls.piano")
         );
         assert!(serde_json::to_value(rack).unwrap().get("slots").is_some());
+    }
+
+    #[test]
+    fn flat_rack_migrates_to_a_deterministic_v2_graph() {
+        let mut library = library();
+        assert_eq!(library.migrate_rack_graphs(), 1);
+        assert_eq!(library.migrate_rack_graphs(), 0);
+        library.validate().unwrap();
+
+        let rack = &library.racks[0];
+        let graph = rack.graph.as_ref().unwrap();
+        assert_eq!(graph.schema_version, RACK_GRAPH_SCHEMA_VERSION);
+        assert!(graph.nodes.iter().any(|node| matches!(
+            &node.kind,
+            RackGraphNodeKind::Plugin { slot_id } if slot_id == &rack.slots[0].id
+        )));
+        assert!(graph.edges.iter().any(|edge| {
+            edge.signal == RackGraphSignal::Midi
+                && edge.source.port_id == "out"
+                && edge.target.port_id == "midi_in"
+        }));
+        assert!(graph.edges.iter().any(|edge| {
+            edge.signal == RackGraphSignal::Audio
+                && edge.source.port_id == "audio_out"
+                && edge.target.port_id == "in"
+        }));
+
+        let serialized_once = serde_json::to_vec(rack).unwrap();
+        let serialized_twice = serde_json::to_vec(rack).unwrap();
+        assert_eq!(serialized_once, serialized_twice);
+    }
+
+    #[test]
+    fn graph_labels_round_trip_without_affecting_slots() {
+        let mut library = library();
+        library.migrate_rack_graphs();
+        let original_slots = library.racks[0].slots.clone();
+        library.racks[0]
+            .graph
+            .as_mut()
+            .unwrap()
+            .labels
+            .push(RackGraphLabel {
+                id: RackGraphLabelId::new("label.keys").unwrap(),
+                text: "Main keyboards".into(),
+                kind: RackGraphLabelKind::Section,
+                tone: RackGraphLabelTone::Cyan,
+                position: RackGraphPosition { x: 280, y: -40 },
+                width: 360,
+                height: 220,
+            });
+        library.validate().unwrap();
+
+        let bytes = serde_json::to_vec(&library.racks[0]).unwrap();
+        let decoded: RackDefinition = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.slots, original_slots);
+        assert_eq!(decoded, library.racks[0]);
+    }
+
+    #[test]
+    fn graph_rejects_invalid_ports_and_feedback_cycles() {
+        let mut invalid_port = library();
+        invalid_port.migrate_rack_graphs();
+        invalid_port.racks[0].graph.as_mut().unwrap().edges[0]
+            .source
+            .port_id = "midi_out".into();
+        assert!(matches!(
+            invalid_port.validate(),
+            Err(PerformanceError::InvalidRackGraphPort { .. })
+        ));
+
+        let mut library = library();
+        let mut second = library.racks[0].slots[0].clone();
+        second.id = RackSlotId::new("instrument.layer").unwrap();
+        second.name = "Layer".into();
+        library.racks[0].slots.push(second);
+        library.migrate_rack_graphs();
+        let graph = library.racks[0].graph.as_mut().unwrap();
+        graph.edges.extend([
+            RackGraphEdge {
+                id: RackGraphEdgeId::new("cycle.forward").unwrap(),
+                signal: RackGraphSignal::Audio,
+                source: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("plugin.01").unwrap(),
+                    port_id: "audio_out".into(),
+                },
+                target: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("plugin.02").unwrap(),
+                    port_id: "audio_in".into(),
+                },
+            },
+            RackGraphEdge {
+                id: RackGraphEdgeId::new("cycle.back").unwrap(),
+                signal: RackGraphSignal::Audio,
+                source: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("plugin.02").unwrap(),
+                    port_id: "audio_out".into(),
+                },
+                target: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("plugin.01").unwrap(),
+                    port_id: "audio_in".into(),
+                },
+            },
+        ]);
+        assert_eq!(library.validate(), Err(PerformanceError::RackGraphCycle));
+    }
+
+    #[test]
+    fn nested_rack_dependencies_must_exist_and_remain_acyclic() {
+        fn add_nested_rack(rack: &mut RackDefinition, rack_id: RackId) {
+            let graph = rack.graph.as_mut().unwrap();
+            graph.nodes.push(RackGraphNode {
+                id: RackGraphNodeId::new("rack.child").unwrap(),
+                kind: RackGraphNodeKind::Rack { rack_id },
+                position: RackGraphPosition { x: 540, y: 240 },
+            });
+            graph.edges.extend([
+                RackGraphEdge {
+                    id: RackGraphEdgeId::new("child.midi").unwrap(),
+                    signal: RackGraphSignal::Midi,
+                    source: RackGraphEndpoint {
+                        node_id: RackGraphNodeId::new("input.midi").unwrap(),
+                        port_id: "out".into(),
+                    },
+                    target: RackGraphEndpoint {
+                        node_id: RackGraphNodeId::new("rack.child").unwrap(),
+                        port_id: "midi_in".into(),
+                    },
+                },
+                RackGraphEdge {
+                    id: RackGraphEdgeId::new("child.audio").unwrap(),
+                    signal: RackGraphSignal::Audio,
+                    source: RackGraphEndpoint {
+                        node_id: RackGraphNodeId::new("rack.child").unwrap(),
+                        port_id: "audio_out".into(),
+                    },
+                    target: RackGraphEndpoint {
+                        node_id: RackGraphNodeId::new("output.audio.00").unwrap(),
+                        port_id: "in".into(),
+                    },
+                },
+            ]);
+        }
+
+        let mut missing_dependency = library();
+        missing_dependency.migrate_rack_graphs();
+        add_nested_rack(
+            &mut missing_dependency.racks[0],
+            RackId::new("rack.missing").unwrap(),
+        );
+        assert_eq!(
+            missing_dependency.validate(),
+            Err(PerformanceError::MissingRack(
+                RackId::new("rack.missing").unwrap()
+            ))
+        );
+
+        let mut library = library();
+        library.migrate_rack_graphs();
+        let mut second = library.racks[0].clone();
+        second.id = RackId::new("rack.layer").unwrap();
+        second.name = "Layer".into();
+        add_nested_rack(&mut library.racks[0], second.id.clone());
+        add_nested_rack(&mut second, library.racks[0].id.clone());
+        library.racks.push(second);
+        assert_eq!(
+            library.validate(),
+            Err(PerformanceError::RackDependencyCycle)
+        );
     }
 }

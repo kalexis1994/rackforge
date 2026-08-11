@@ -8,6 +8,7 @@ use crate::midi_hotplug::{
     self, SupervisedSource, is_performance_midi_input, stable_alsa_source_id,
 };
 use crate::performance::{PerformanceBootstrap, PerformanceRepository};
+use crate::rack_graph::compile_instrument_rack;
 use crate::realtime::{self, XrunMonitor};
 use crate::session::SessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
@@ -581,12 +582,17 @@ pub fn run(config: LiveConfig) -> Result<()> {
         .as_ref()
         .and_then(|location| performance_repository.library().resolve(location).ok())
     {
-        for slot in rack
-            .slots
-            .iter()
-            .filter(|slot| slot.enabled)
-            .take(control::MAX_ACTIVE_RACK_SLOTS)
-        {
+        let compiled_slots = compile_instrument_rack(&performance_library, &rack.id)?;
+        if compiled_slots.len() > control::MAX_ACTIVE_RACK_SLOTS {
+            bail!(
+                "initial Rack {} compiles to {} Slots; this engine supports at most {}",
+                rack.id,
+                compiled_slots.len(),
+                control::MAX_ACTIVE_RACK_SLOTS
+            );
+        }
+        for compiled in compiled_slots {
+            let slot = &compiled.slot;
             let state = if let Some(reference) = &slot.state {
                 RackSlotStateLoad::Opaque(state_store.read(reference)?)
             } else if let Some(program_id) = &slot.legacy_program_id {
@@ -595,14 +601,14 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 RackSlotStateLoad::Default
             };
             initial_rack_specs.push(RackSlotRuntimeSpec {
-                slot_id: slot.id.as_str().to_owned(),
+                slot_id: compiled.runtime_slot_id,
                 plugin_id: slot.plugin_id.clone(),
                 state,
                 midi_input_channel: slot.midi_input_channel,
                 midi_note_low: slot.midi_note_low,
                 midi_note_high: slot.midi_note_high,
                 midi_transpose: slot.midi_transpose,
-                keyboard_parts: rack.keyboard_parts,
+                keyboard_parts: compiled.keyboard_parts,
                 level_per_mille: slot.level_per_mille,
                 pan_per_mille: slot.pan_per_mille,
             });

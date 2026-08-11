@@ -1932,6 +1932,7 @@ impl Menu {
                     enabled: true,
                     keyboard_parts: None,
                     slots: Vec::new(),
+                    graph: None,
                 }))
             }
             Page::ConfigRacks => self
@@ -6712,6 +6713,7 @@ mod tests {
             name: "Stage Piano".into(),
             enabled: true,
             keyboard_parts: None,
+            graph: None,
             slots: vec![RackSlot {
                 id: RackSlotId::new("instrument.main").unwrap(),
                 name: "Main Instrument".into(),

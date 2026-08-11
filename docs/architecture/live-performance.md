@@ -5,7 +5,7 @@ it. `Rack` is the only directly playable object. `Song` and `Setlist` provide
 ordered navigation without copying Rack state.
 
 ```text
-Setlist -> Song -> Part -> Rack -> Slots -> plugins
+Setlist -> Song -> Part -> Rack -> node graph -> plugins / child Racks
 ```
 
 LIVE exposes three peer entry modes:
@@ -42,6 +42,27 @@ channels 1–16 are explicit user-selectable filters.
 The portable contracts live in `rackforge-performance-api` and contain no ALSA,
 USB, Raspberry Pi or controller-model details. Documents use stable typed IDs,
 explicit schema versions and bounded collections.
+
+## Rack graph contract
+
+Rack graph schema v2 makes routing explicit while keeping plugin state in its
+Slot. Typed nodes represent MIDI/audio inputs, plugin Slots, child Racks and
+MIDI/audio outputs. Typed edges connect stable input/output port IDs. Node
+positions and canvas labels are presentation metadata and never participate in
+audio compilation.
+
+Labels can be notes or section bounds. Their position, size and color tone are
+portable so an arrangement authored on Desktop remains understandable on other
+platforms. The current zoom and pan viewport is intentionally device-local:
+restoring a Desktop viewport on a phone would be actively unhelpful.
+
+Flat Rack documents are graph schema v1 implicitly. Resolving one generates a
+deterministic v2 graph in memory with one MIDI input, one node per Slot and
+output nodes for the Slot routes. The new graph editor materializes that graph
+when the user saves it; merely starting RackForge never rewrites existing
+documents. Validation rejects
+missing Slots or nodes, invalid ports, duplicate connections, feedback cycles,
+dangling child Rack references and recursive Rack dependencies before runtime.
 
 ## Persistence
 

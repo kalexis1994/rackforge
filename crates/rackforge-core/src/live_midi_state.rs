@@ -162,6 +162,18 @@ impl MidiControllerStates {
         }
         omitted
     }
+
+    #[cfg(test)]
+    pub(super) fn replay_source_into(
+        &self,
+        source: MidiSourceKey,
+        events: &mut Vec<MidiEventV1>,
+        maximum_events: usize,
+    ) -> Option<usize> {
+        self.sources
+            .get(source.get() as usize)
+            .map(|state| state.replay_into(events, maximum_events))
+    }
 }
 
 impl Default for MidiControllerState {

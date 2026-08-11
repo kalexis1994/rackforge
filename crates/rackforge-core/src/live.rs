@@ -2067,15 +2067,15 @@ mod tests {
 
         let mut first = Vec::new();
         assert_eq!(
-            states.sources[0].replay_into(&mut first, MAX_EVENTS_PER_BLOCK),
-            0
+            states.replay_source_into(MidiSourceKey::new(0), &mut first, MAX_EVENTS_PER_BLOCK,),
+            Some(0)
         );
         assert_eq!(first[0].data, [0xb0, 1, 20]);
 
         let mut second = Vec::new();
         assert_eq!(
-            states.sources[1].replay_into(&mut second, MAX_EVENTS_PER_BLOCK),
-            0
+            states.replay_source_into(MidiSourceKey::new(1), &mut second, MAX_EVENTS_PER_BLOCK,),
+            Some(0)
         );
         assert_eq!(second[0].data, [0xb0, 1, 100]);
     }

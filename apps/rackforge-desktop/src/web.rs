@@ -33,6 +33,7 @@ use std::time::Duration;
 use crate::Options;
 
 static WEB_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../web/dist");
+const DESKTOP_CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 struct WebState {
@@ -681,7 +682,7 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
             {
                 return json!({"status":"error", "code":"unavailable", "message":"The Desktop runtime is shutting down."});
             }
-            match response_receiver.recv_timeout(Duration::from_secs(2)) {
+            match response_receiver.recv_timeout(DESKTOP_CONTROL_TIMEOUT) {
                 Ok(response) => serde_json::to_value(response).expect("control response"),
                 Err(_) => {
                     json!({"status":"error", "code":"timeout", "message":"The Desktop runtime did not answer the performance request in time."})
@@ -708,7 +709,7 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
             {
                 return json!({"status":"error", "code":"unavailable", "message":"The Desktop runtime is shutting down."});
             }
-            match response_receiver.recv_timeout(Duration::from_secs(2)) {
+            match response_receiver.recv_timeout(DESKTOP_CONTROL_TIMEOUT) {
                 Ok(response) => serde_json::to_value(response).expect("control response"),
                 Err(_) => {
                     json!({"status":"error", "code":"timeout", "message":"The Desktop runtime did not answer the command in time."})
@@ -870,7 +871,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatches_program_changes_to_the_desktop_runtime() {
+    fn dispatches_session_changes_to_the_desktop_runtime() {
         let (control, receiver) = control_channel();
         let state = WebState {
             session: Arc::new(RwLock::new(SessionState::new(
@@ -917,6 +918,61 @@ mod tests {
                 .unwrap();
         });
         let response = response_for(request, &state);
+        responder.join().unwrap();
+        assert_eq!(
+            response.get("status").and_then(Value::as_str),
+            Some("command_applied")
+        );
+    }
+
+    #[test]
+    fn dispatches_program_edit_commands_to_the_desktop_runtime() {
+        let (control, receiver) = control_channel();
+        let state = WebState {
+            session: Arc::new(RwLock::new(SessionState::new(
+                SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
+            ))),
+            legacy_plugins_root: PathBuf::new(),
+            plugin_store_root: None,
+            public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
+            control,
+            resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
+        };
+        let request = ControlRequest::Dispatch {
+            envelope: CommandEnvelope::new(
+                ClientId::new("test.desktop-program-web").unwrap(),
+                11,
+                SessionCommand::ReplaceProgramDraft {
+                    draft_id: 3,
+                    document_json: r#"{"schema_version":1}"#.into(),
+                },
+            ),
+        };
+        let responder = std::thread::spawn(move || {
+            let DesktopControlCall::Session { request, response } = receiver.recv().unwrap() else {
+                panic!("unexpected Desktop control call");
+            };
+            assert!(matches!(
+                request,
+                ControlRequest::Dispatch {
+                    envelope: CommandEnvelope {
+                        command: SessionCommand::ReplaceProgramDraft { draft_id: 3, .. },
+                        ..
+                    }
+                }
+            ));
+            response
+                .send(ControlResponse::CommandApplied {
+                    client_id: ClientId::new("test.desktop-program-web").unwrap(),
+                    command_id: 11,
+                    revision: Revision::new(4),
+                    events: Vec::new(),
+                })
+                .unwrap();
+        });
+
+        let response = response_for(request, &state);
+
         responder.join().unwrap();
         assert_eq!(
             response.get("status").and_then(Value::as_str),

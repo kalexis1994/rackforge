@@ -1450,6 +1450,83 @@ impl DesktopApp {
                 instance_id,
                 sound_id,
             } => self.select_sound(&instance_id, &sound_id, Some(command_ref)),
+            SessionCommand::BeginProgramEdit {
+                instance_id,
+                program_id,
+            } => {
+                let active_instance_id = self
+                    .session
+                    .read()
+                    .expect("session lock poisoned")
+                    .active_instance_id
+                    .clone();
+                if active_instance_id.as_ref() != Some(&instance_id) {
+                    Err(format!(
+                        "Plugin instance {instance_id} is not the active Desktop plugin"
+                    ))
+                } else {
+                    self.begin_program_edit(program_id, Some(command_ref))
+                }
+            }
+            SessionCommand::ReplaceProgramDraft {
+                draft_id,
+                document_json,
+            } => serde_json::from_str::<ProgramDocument>(&document_json)
+                .map_err(|error| format!("Program document is invalid: {error}"))
+                .and_then(|document| {
+                    self.replace_program_draft_document(
+                        draft_id,
+                        document,
+                        true,
+                        true,
+                        Some(command_ref),
+                    )
+                }),
+            SessionCommand::PreviewProgramDraft {
+                draft_id,
+                document_json,
+            } => serde_json::from_str::<ProgramDocument>(&document_json)
+                .map_err(|error| format!("Program preview document is invalid: {error}"))
+                .and_then(|document| {
+                    self.replace_program_draft_document(
+                        draft_id,
+                        document,
+                        false,
+                        false,
+                        Some(command_ref),
+                    )
+                }),
+            SessionCommand::EditProgramDraftField {
+                draft_id,
+                field_id,
+                value,
+                preview,
+            } => {
+                self.edit_program_draft_field(draft_id, field_id, value, preview, Some(command_ref))
+            }
+            SessionCommand::RestoreProgramDraftPreview { draft_id } => {
+                self.restore_program_draft_preview(draft_id)
+            }
+            SessionCommand::SaveProgramDraft { draft_id } => {
+                self.save_program_draft(draft_id, Some(command_ref))
+            }
+            SessionCommand::CancelProgramEdit { draft_id } => {
+                self.cancel_program_edit(draft_id, Some(command_ref))
+            }
+            SessionCommand::KeepAuditionAlive { lease_id } => {
+                let lease_matches = self
+                    .session
+                    .read()
+                    .expect("session lock poisoned")
+                    .audition
+                    .as_ref()
+                    .is_some_and(|audition| audition.lease_id == lease_id);
+                if lease_matches {
+                    Ok(Vec::new())
+                } else {
+                    Err("Program audition lease is missing or no longer valid".into())
+                }
+            }
             other => Err(format!(
                 "Desktop does not support this command yet: {other:?}"
             )),
@@ -1753,23 +1830,30 @@ impl DesktopApp {
         id
     }
 
-    fn apply_program_events(&mut self, events: Vec<SessionEvent>) -> Result<(), String> {
+    fn apply_program_events(
+        &mut self,
+        events: Vec<SessionEvent>,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
         let mut current = self.session.write().expect("session lock poisoned");
         let mut session = current.clone();
+        let mut envelopes = Vec::with_capacity(events.len());
         for event in events {
             let revision = session
                 .revision
                 .next()
                 .map_err(|error| format!("Could not advance session revision: {error}"))?;
-            session.apply(&EventEnvelope {
+            let envelope = EventEnvelope {
                 schema_version: SESSION_SCHEMA_VERSION,
                 revision,
-                command: None,
+                command: command.clone(),
                 event,
-            })?;
+            };
+            session.apply(&envelope)?;
+            envelopes.push(envelope);
         }
         *current = session;
-        Ok(())
+        Ok(envelopes)
     }
 
     fn preview_audio_program(
@@ -1855,7 +1939,11 @@ impl DesktopApp {
         Ok((draft, audition.lease_id, audition.previous_sound_id.clone()))
     }
 
-    fn begin_program_edit(&mut self, program_id: Option<String>) -> Result<(), String> {
+    fn begin_program_edit(
+        &mut self,
+        program_id: Option<String>,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
         let (instance_id, previous_sound_id) = {
             let session = self.session.read().expect("session lock poisoned");
             if session.program_draft.is_some() || session.audition.is_some() {
@@ -1905,18 +1993,21 @@ impl DesktopApp {
             editor,
             false,
         )?;
-        self.apply_program_events(vec![
-            SessionEvent::AuditionStarted {
-                lease_id,
-                instance_id: instance_id.clone(),
-                previous_sound_id,
-            },
-            SessionEvent::ProgramEditStarted {
-                draft: draft.clone(),
-            },
-        ])?;
+        let events = self.apply_program_events(
+            vec![
+                SessionEvent::AuditionStarted {
+                    lease_id,
+                    instance_id: instance_id.clone(),
+                    previous_sound_id,
+                },
+                SessionEvent::ProgramEditStarted {
+                    draft: draft.clone(),
+                },
+            ],
+            command,
+        )?;
         self.menu.sync_program_edit(Some(draft), Some(lease_id));
-        Ok(())
+        Ok(events)
     }
 
     fn edit_program_draft_field(
@@ -1925,7 +2016,8 @@ impl DesktopApp {
         field_id: String,
         value: ProgramEditorValue,
         preview: bool,
-    ) -> Result<(), String> {
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
         let (draft, lease_id, _) = self.active_program_draft(draft_id)?;
         let document: ProgramDocument = serde_json::from_str(&draft.document_json)
             .map_err(|error| format!("Stored program draft is invalid: {error}"))?;
@@ -1961,12 +2053,16 @@ impl DesktopApp {
                 editor,
                 true,
             )?;
-            self.apply_program_events(vec![SessionEvent::ProgramDraftUpdated {
-                draft: updated.clone(),
-            }])?;
+            let events = self.apply_program_events(
+                vec![SessionEvent::ProgramDraftUpdated {
+                    draft: updated.clone(),
+                }],
+                command,
+            )?;
             self.menu.sync_program_edit(Some(updated), Some(lease_id));
+            return Ok(events);
         }
-        Ok(())
+        Ok(Vec::new())
     }
 
     fn replace_program_draft_document(
@@ -1974,7 +2070,9 @@ impl DesktopApp {
         draft_id: u64,
         document: ProgramDocument,
         dirty: bool,
-    ) -> Result<(), String> {
+        persist: bool,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
         let (draft, lease_id, _) = self.active_program_draft(draft_id)?;
         let confirmed: ProgramDocument = serde_json::from_str(&draft.document_json)
             .map_err(|error| format!("Stored program draft is invalid: {error}"))?;
@@ -1999,6 +2097,9 @@ impl DesktopApp {
             (prepared, editor)
         };
         self.preview_audio_program(draft.instance_id.as_str(), prepared.clone(), false)?;
+        if !persist {
+            return Ok(Vec::new());
+        }
         let updated = desktop_program_draft_state(
             draft_id,
             draft.instance_id,
@@ -2007,14 +2108,20 @@ impl DesktopApp {
             editor,
             dirty,
         )?;
-        self.apply_program_events(vec![SessionEvent::ProgramDraftUpdated {
-            draft: updated.clone(),
-        }])?;
+        let events = self.apply_program_events(
+            vec![SessionEvent::ProgramDraftUpdated {
+                draft: updated.clone(),
+            }],
+            command,
+        )?;
         self.menu.sync_program_edit(Some(updated), Some(lease_id));
-        Ok(())
+        Ok(events)
     }
 
-    fn restore_program_draft_preview(&mut self, draft_id: u64) -> Result<(), String> {
+    fn restore_program_draft_preview(
+        &mut self,
+        draft_id: u64,
+    ) -> Result<Vec<EventEnvelope>, String> {
         let (draft, _, _) = self.active_program_draft(draft_id)?;
         let document: ProgramDocument = serde_json::from_str(&draft.document_json)
             .map_err(|error| format!("Stored program draft is invalid: {error}"))?;
@@ -2027,15 +2134,20 @@ impl DesktopApp {
             .instance
             .prepare_program_save(&document)
             .map_err(|error| format!("Could not restore the draft preview: {error:#}"))?;
-        self.preview_audio_program(draft.instance_id.as_str(), prepared, false)
+        self.preview_audio_program(draft.instance_id.as_str(), prepared, false)?;
+        Ok(Vec::new())
     }
 
-    fn set_program_draft_name(&mut self, draft_id: u64, name: String) -> Result<(), String> {
+    fn set_program_draft_name(
+        &mut self,
+        draft_id: u64,
+        name: String,
+    ) -> Result<Vec<EventEnvelope>, String> {
         let (draft, _, _) = self.active_program_draft(draft_id)?;
         let mut document: ProgramDocument = serde_json::from_str(&draft.document_json)
             .map_err(|error| format!("Stored program draft is invalid: {error}"))?;
         document.name = name;
-        self.replace_program_draft_document(draft_id, document, true)
+        self.replace_program_draft_document(draft_id, document, true, true, None)
     }
 
     fn restore_control_program(
@@ -2056,7 +2168,11 @@ impl DesktopApp {
         Ok(())
     }
 
-    fn save_program_draft(&mut self, draft_id: u64) -> Result<(), String> {
+    fn save_program_draft(
+        &mut self,
+        draft_id: u64,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
         let (draft, lease_id, previous_sound_id) = self.active_program_draft(draft_id)?;
         let document: ProgramDocument = serde_json::from_str(&draft.document_json)
             .map_err(|error| format!("Stored program draft is invalid: {error}"))?;
@@ -2090,19 +2206,22 @@ impl DesktopApp {
             .find(|sound| sound.id == preset_id)
             .cloned()
             .ok_or_else(|| "Installed program has no Desktop catalog entry".to_owned())?;
-        self.apply_program_events(vec![
-            SessionEvent::ProgramSaved {
-                draft_id,
-                instance_id: draft.instance_id.clone(),
-                sound: saved_sound,
-            },
-            SessionEvent::AuditionEnded {
-                lease_id,
-                instance_id: draft.instance_id.clone(),
-                restored_sound_id: previous_sound_id.clone(),
-                reason: AuditionEndReason::Released,
-            },
-        ])?;
+        let events = self.apply_program_events(
+            vec![
+                SessionEvent::ProgramSaved {
+                    draft_id,
+                    instance_id: draft.instance_id.clone(),
+                    sound: saved_sound,
+                },
+                SessionEvent::AuditionEnded {
+                    lease_id,
+                    instance_id: draft.instance_id.clone(),
+                    restored_sound_id: previous_sound_id.clone(),
+                    reason: AuditionEndReason::Released,
+                },
+            ],
+            command,
+        )?;
         self.plugins[index].banks = banks.clone();
         self.plugins[index].sound_summaries = sound_summaries.clone();
         self.plugins[index].sounds = sounds.clone();
@@ -2126,10 +2245,14 @@ impl DesktopApp {
         );
         self.menu.sync_program_edit(None, None);
         self.persist_session_checkpoint();
-        Ok(())
+        Ok(events)
     }
 
-    fn cancel_program_edit(&mut self, draft_id: u64) -> Result<(), String> {
+    fn cancel_program_edit(
+        &mut self,
+        draft_id: u64,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
         let (draft, lease_id, previous_sound_id) = self.active_program_draft(draft_id)?;
         let index = self
             .plugins
@@ -2138,20 +2261,23 @@ impl DesktopApp {
             .ok_or_else(|| format!("Unknown plugin instance: {}", draft.instance_id))?;
         self.restore_audio_program(draft.instance_id.as_str(), previous_sound_id.as_deref())?;
         self.restore_control_program(index, previous_sound_id.as_deref())?;
-        self.apply_program_events(vec![
-            SessionEvent::ProgramEditCancelled {
-                draft_id,
-                instance_id: draft.instance_id.clone(),
-            },
-            SessionEvent::AuditionEnded {
-                lease_id,
-                instance_id: draft.instance_id,
-                restored_sound_id: previous_sound_id,
-                reason: AuditionEndReason::Cancelled,
-            },
-        ])?;
+        let events = self.apply_program_events(
+            vec![
+                SessionEvent::ProgramEditCancelled {
+                    draft_id,
+                    instance_id: draft.instance_id.clone(),
+                },
+                SessionEvent::AuditionEnded {
+                    lease_id,
+                    instance_id: draft.instance_id,
+                    restored_sound_id: previous_sound_id,
+                    reason: AuditionEndReason::Cancelled,
+                },
+            ],
+            command,
+        )?;
         self.menu.sync_program_edit(None, None);
-        Ok(())
+        Ok(events)
     }
 
     fn apply_command(&mut self, command: MenuCommand) {
@@ -2205,8 +2331,8 @@ impl DesktopApp {
                 }
             }
             MenuCommand::BeginProgramEdit { program_id } => {
-                match self.begin_program_edit(program_id) {
-                    Ok(()) => {
+                match self.begin_program_edit(program_id, None) {
+                    Ok(_) => {
                         self.status = "Program editor ready · changes are auditioned live".into()
                     }
                     Err(error) => self.status = error,
@@ -2217,30 +2343,32 @@ impl DesktopApp {
                 field_id,
                 value,
                 preview,
-            } => match self.edit_program_draft_field(draft_id, field_id, value, preview) {
-                Ok(()) if preview => self.status = "Previewing program change".into(),
-                Ok(()) => self.status = "Program draft updated".into(),
+            } => match self.edit_program_draft_field(draft_id, field_id, value, preview, None) {
+                Ok(_) if preview => self.status = "Previewing program change".into(),
+                Ok(_) => self.status = "Program draft updated".into(),
                 Err(error) => self.status = error,
             },
             MenuCommand::RestoreProgramDraftPreview { draft_id } => {
                 match self.restore_program_draft_preview(draft_id) {
-                    Ok(()) => self.status = "Restored the confirmed draft preview".into(),
+                    Ok(_) => self.status = "Restored the confirmed draft preview".into(),
                     Err(error) => self.status = error,
                 }
             }
             MenuCommand::SetProgramDraftName { draft_id, name } => {
                 match self.set_program_draft_name(draft_id, name) {
-                    Ok(()) => self.status = "Program name updated".into(),
+                    Ok(_) => self.status = "Program name updated".into(),
                     Err(error) => self.status = error,
                 }
             }
-            MenuCommand::SaveProgramDraft { draft_id } => match self.save_program_draft(draft_id) {
-                Ok(()) => self.status = "Program saved".into(),
-                Err(error) => self.status = error,
-            },
+            MenuCommand::SaveProgramDraft { draft_id } => {
+                match self.save_program_draft(draft_id, None) {
+                    Ok(_) => self.status = "Program saved".into(),
+                    Err(error) => self.status = error,
+                }
+            }
             MenuCommand::CancelProgramEdit { draft_id } => {
-                match self.cancel_program_edit(draft_id) {
-                    Ok(()) => self.status = "Program edit cancelled".into(),
+                match self.cancel_program_edit(draft_id, None) {
+                    Ok(_) => self.status = "Program edit cancelled".into(),
                     Err(error) => self.status = error,
                 }
             }
@@ -2250,8 +2378,8 @@ impl DesktopApp {
                 destination,
             } => {
                 let result = match decision {
-                    ProgramExitDecision::Save => self.save_program_draft(draft_id),
-                    ProgramExitDecision::Discard => self.cancel_program_edit(draft_id),
+                    ProgramExitDecision::Save => self.save_program_draft(draft_id, None),
+                    ProgramExitDecision::Discard => self.cancel_program_edit(draft_id, None),
                 };
                 if let Err(error) = result {
                     self.status = error;
@@ -2280,7 +2408,7 @@ impl DesktopApp {
                 selected_sound_id,
             } => {
                 if let Some(draft_id) = cancel_draft_id
-                    && let Err(error) = self.cancel_program_edit(draft_id)
+                    && let Err(error) = self.cancel_program_edit(draft_id, None)
                 {
                     self.status = error;
                     return;
@@ -2328,7 +2456,7 @@ impl DesktopApp {
                     .as_ref()
                     .map(|draft| draft.draft_id);
                 if let Some(draft_id) = active_draft_id
-                    && let Err(error) = self.cancel_program_edit(draft_id)
+                    && let Err(error) = self.cancel_program_edit(draft_id, None)
                 {
                     self.status = format!("Could not cancel the active program edit: {error}");
                     return;

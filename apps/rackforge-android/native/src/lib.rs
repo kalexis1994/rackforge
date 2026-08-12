@@ -1442,8 +1442,8 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_loadPluginResourc
     _class: JClass,
     resource_id: JString,
     file_path: JString,
-) -> jboolean {
-    let result = (|| -> Result<()> {
+) -> jint {
+    let result = (|| -> Result<jint> {
         let resource_id = java_string(&mut env, resource_id)?;
         let file_path = std::fs::canonicalize(PathBuf::from(java_string(&mut env, file_path)?))?;
         if !file_path.is_file() {
@@ -1469,15 +1469,30 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_loadPluginResourc
                 current.plugin_id.clone(),
             )
         };
+        runtime.0.validate_resource_file(&resource_id, &file_path)?;
         resources.insert(resource_id.clone(), file_path);
-        let mut replacement = runtime.0.create_instance()?;
-        for (id, path) in &resources {
-            replacement.load_resource_file(id, path)?;
-        }
-        replacement.load_preset(&selected_sound_id)?;
-        replacement.activate(SAMPLE_RATE, MAX_FRAMES, 0, 2)?;
+        let replacement = (|| -> Result<_> {
+            // Resource delivery must happen before the plugin publishes its dynamic catalog.
+            // create_instance() finalizes that phase immediately; trying to load overrides on
+            // the returned instance makes plugins correctly reject them as late resources.
+            let mut replacement = runtime
+                .0
+                .create_instance_with_resource_overrides(&resources)?;
+            let catalog = replacement.preset_catalog()?;
+            let next_sound_id = catalog
+                .presets
+                .iter()
+                .find(|preset| preset.id == selected_sound_id)
+                .or_else(|| catalog.presets.first())
+                .context("plugin exposes no playable preset after loading resources")?
+                .id
+                .clone();
+            replacement.load_preset(&next_sound_id)?;
+            replacement.activate(SAMPLE_RATE, MAX_FRAMES, 0, 2)?;
+            Ok((replacement, catalog, next_sound_id))
+        })();
 
-        let retired = {
+        let (retired, load_status) = {
             let mut guard = engine()
                 .lock()
                 .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
@@ -1488,16 +1503,32 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_loadPluginResourc
                 bail!("active plugin changed while loading the resource");
             }
             current.resource_overrides = resources;
-            std::mem::replace(&mut current.instance, SendablePluginInstance(replacement))
+            match replacement {
+                Ok((replacement, catalog, next_sound_id)) => {
+                    current.catalog = catalog;
+                    current.selected_sound_id = next_sound_id;
+                    (
+                        Some(std::mem::replace(
+                            &mut current.instance,
+                            SendablePluginInstance(replacement),
+                        )),
+                        1,
+                    )
+                }
+                // A single individually installed resource may be valid but incomplete. Keep its
+                // override so later resources can complete the set, and tell the Web UI that the
+                // active instance was not rebuilt yet.
+                Err(_) => (None, 2),
+            }
         };
         drop(retired);
-        Ok(())
+        Ok(load_status)
     })();
     match result {
-        Ok(()) => JNI_TRUE,
+        Ok(status) => status,
         Err(error) => {
             report(&mut env, error);
-            JNI_FALSE
+            0
         }
     }
 }

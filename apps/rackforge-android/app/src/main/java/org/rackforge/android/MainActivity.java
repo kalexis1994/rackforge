@@ -128,7 +128,7 @@ public final class MainActivity extends Activity {
     private static native String pluginWebEntry();
     private static native String pluginWebContext();
     private static native boolean selectPluginSound(String soundId);
-    private static native boolean loadPluginResource(String resourceId, String filePath);
+    private static native int loadPluginResource(String resourceId, String filePath);
     private static native void sendMidiMessage(int status, int data1, int data2, int length);
     private static native void releaseMidiNotes();
     private static native String keyLabAcquirePlan();
@@ -204,10 +204,7 @@ public final class MainActivity extends Activity {
         super.onResume();
         refreshAudioOutputs();
         scheduleMidiReconnect();
-        if ("diagnostics".equals(currentPage)) renderDiagnostics();
-        else if ("live".equals(currentPage)) showLive();
-        else if ("idle".equals(currentPage)) showIdle();
-        else showPlay();
+        restoreVisiblePage();
     }
 
     @Override
@@ -315,6 +312,14 @@ public final class MainActivity extends Activity {
                     respondToPlugin(requestId, true, null, pluginResourceBindings());
                     return;
                 }
+                if ("plugin.resource_status".equals(method)) {
+                    if (!"config".equals(pluginWebSurface)) {
+                        respondToPlugin(requestId, false, "Resource status requires CONFIG.");
+                        return;
+                    }
+                    respondToPlugin(requestId, true, null, pluginResourceStatus());
+                    return;
+                }
                 if ("plugin.resource_entries".equals(method)) {
                     if (!"config".equals(pluginWebSurface)) {
                         respondToPlugin(requestId, false, "Resource browsing requires CONFIG.");
@@ -335,7 +340,8 @@ public final class MainActivity extends Activity {
                     }, "rackforge-resource-browser").start();
                     return;
                 }
-                if ("plugin.load_resource".equals(method)) {
+                if ("plugin.load_resource".equals(method)
+                        || "plugin.install_resource".equals(method)) {
                     if (!"config".equals(pluginWebSurface)) {
                         respondToPlugin(requestId, false, "Resource loading requires CONFIG.");
                         return;
@@ -343,7 +349,8 @@ public final class MainActivity extends Activity {
                     JSONObject params = request.getJSONObject("params");
                     String targetResourceId = params.getString("target_resource_id");
                     String grantId = params.getString("grant_id");
-                    String entryId = params.getString("entry_id");
+                    String entryId = params.isNull("entry_id")
+                            ? null : params.optString("entry_id", null);
                     if (!"file".equals(pluginResourceKind(targetResourceId))) {
                         respondToPlugin(requestId, false, "Target is not a declared file resource.");
                         return;
@@ -365,7 +372,9 @@ public final class MainActivity extends Activity {
                             }
                             File resource = copyGrantedResourceToPrivateData(
                                     grantId, entryId, targetResourceId);
-                            if (!loadPluginResource(targetResourceId, resource.getAbsolutePath())) {
+                            int loadStatus = loadPluginResource(
+                                    targetResourceId, resource.getAbsolutePath());
+                            if (loadStatus == 0) {
                                 throw new IllegalStateException("Portable runtime rejected the resource");
                             }
                             if (backup != null && backup.isFile() && !backup.delete()) {
@@ -375,10 +384,12 @@ public final class MainActivity extends Activity {
                                     .putString("resource.active_grant." + pluginId + "." + targetResourceId,
                                             grantId)
                                     .putString("resource.active_entry." + pluginId + "." + targetResourceId,
-                                            entryId)
+                                            entryId == null ? "__grant_root__" : entryId)
                                     .apply();
-                            runOnUiThread(() -> respondToPlugin(requestId, true, null,
-                                    new JSONObject()));
+                            JSONObject result = new JSONObject();
+                            result.put("stored", true);
+                            result.put("activated", loadStatus == 1);
+                            runOnUiThread(() -> respondToPlugin(requestId, true, null, result));
                         } catch (Throwable error) {
                             Log.e("RackForge", "Could not load plugin resource", error);
                             if (backup != null) {
@@ -503,6 +514,27 @@ public final class MainActivity extends Activity {
         return bindings;
     }
 
+    private JSONArray pluginResourceStatus() throws Exception {
+        JSONObject context = new JSONObject(pluginWebContext());
+        String pluginId = context.getJSONObject("instance").getString("plugin_id");
+        JSONArray declared = context.optJSONArray("resources");
+        JSONArray statuses = new JSONArray();
+        if (declared == null) return statuses;
+        for (int index = 0; index < declared.length(); index++) {
+            JSONObject resource = declared.getJSONObject(index);
+            if (!"file".equals(resource.optString("kind"))) continue;
+            String resourceId = resource.getString("id");
+            boolean installed = preferences.getString(
+                    "resource.active_entry." + pluginId + "." + resourceId, null) != null
+                    && privatePluginResourceFile(pluginId, resourceId).isFile();
+            JSONObject status = new JSONObject();
+            status.put("resource_id", resourceId);
+            status.put("installed", installed);
+            statuses.put(status);
+        }
+        return statuses;
+    }
+
     private LinearLayout buildTopBar() {
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(android.view.Gravity.CENTER_VERTICAL);
@@ -523,9 +555,15 @@ public final class MainActivity extends Activity {
         mark.setPadding(dp(2), dp(2), dp(2), dp(2));
         bar.addView(mark, new LinearLayout.LayoutParams(dp(32), dp(32)));
         TextView title = new TextView(this);
-        title.setText("RACKFORGE");
+        // The zero-width space is the only intentional wrap opportunity in the
+        // wordmark, keeping a narrow header readable as RACK / FORGE.
+        title.setText("RACK\u200BFORGE");
         title.setTextColor(0xFF5CE2F5);
-        title.setTextSize(18);
+        int screenWidthDp = getResources().getConfiguration().screenWidthDp;
+        title.setTextSize(screenWidthDp <= 380 ? 14 : screenWidthDp <= 440 ? 16 : 18);
+        title.setMaxLines(2);
+        title.setBreakStrategy(android.text.Layout.BREAK_STRATEGY_SIMPLE);
+        title.setHyphenationFrequency(android.text.Layout.HYPHENATION_FREQUENCY_NONE);
         applyDisplayTypeface(title);
         title.setPadding(dp(8), 0, dp(12), 0);
         bar.addView(title, new LinearLayout.LayoutParams(
@@ -534,6 +572,9 @@ public final class MainActivity extends Activity {
         activePluginLabel.setText(activePluginDisplayName());
         activePluginLabel.setTextColor(0xFFB8CDD3);
         activePluginLabel.setPadding(dp(8), 0, dp(8), 0);
+        activePluginLabel.setSingleLine(true);
+        activePluginLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        activePluginLabel.setMaxWidth(dp(screenWidthDp <= 380 ? 82 : 116));
         bar.addView(activePluginLabel);
         bar.addView(toolbarButton("⚙", view -> showSettingsDialog()));
         return bar;
@@ -718,7 +759,6 @@ public final class MainActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(20), dp(14), dp(20), dp(24));
-        panel.setBackground(surface(0xFF0D202A, 24, 0xFF2A4B57, 1));
 
         View handle = new View(this);
         handle.setBackground(surface(0xFF55727C, 3, 0, 0));
@@ -769,7 +809,16 @@ public final class MainActivity extends Activity {
             menu.dismiss(); showAbout();
         }));
 
-        menu.setContentView(panel);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackground(surface(0xFF0D202A, 24, 0xFF2A4B57, 1));
+        scroll.setFillViewport(false);
+        scroll.setClipToPadding(false);
+        scroll.setVerticalScrollBarEnabled(true);
+        scroll.setScrollbarFadingEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        scroll.addView(panel, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        menu.setContentView(scroll);
         Window window = menu.getWindow();
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
@@ -780,7 +829,15 @@ public final class MainActivity extends Activity {
         }
         menu.setOnShowListener(unused -> {
             Window shown = menu.getWindow();
-            if (shown != null) shown.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            if (shown == null) return;
+            scroll.post(() -> {
+                int maximumHeight = Math.round(
+                        getResources().getDisplayMetrics().heightPixels * 0.92f);
+                int contentHeight = panel.getMeasuredHeight();
+                shown.setLayout(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        Math.min(contentHeight, maximumHeight));
+            });
         });
         menu.show();
     }
@@ -877,7 +934,11 @@ public final class MainActivity extends Activity {
         } else {
             intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("application/octet-stream");
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
+                    "application/zip", "application/octet-stream", "application/json",
+                    "audio/midi", "audio/x-midi"
+            });
         }
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
@@ -1127,8 +1188,16 @@ public final class MainActivity extends Activity {
             }
         }
         if (!owned) throw new IllegalArgumentException("Resource grant belongs to another plugin");
-        String uriText = preferences.getString(
-                "resource.entry." + grantId + "." + entryId, null);
+        String uriText;
+        if (entryId == null) {
+            if (!"file".equals(preferences.getString("resource.kind." + grantId, null))) {
+                throw new IllegalArgumentException("A directory grant requires a file entry");
+            }
+            uriText = preferences.getString("resource.uri." + grantId, null);
+        } else {
+            uriText = preferences.getString(
+                    "resource.entry." + grantId + "." + entryId, null);
+        }
         if (uriText == null) throw new IllegalArgumentException("Unknown resource entry");
         JSONObject context = new JSONObject(pluginWebContext());
         String pluginId = context.getJSONObject("instance").getString("plugin_id");
@@ -1364,9 +1433,7 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     engineStarting = false;
                     if (activePluginLabel != null) activePluginLabel.setText(activePluginDisplayName());
-                    if ("diagnostics".equals(currentPage)) renderDiagnostics();
-                    else if ("live".equals(currentPage)) showLive();
-                    else showPlay();
+                    restoreVisiblePage();
                     Toast.makeText(this, activePluginDisplayName() + " active",
                             Toast.LENGTH_LONG).show();
                 });
@@ -1419,6 +1486,7 @@ public final class MainActivity extends Activity {
         menu.getMenu().add("Reload UI").setOnMenuItemClickListener(item -> {
             if ("diagnostics".equals(currentPage)) renderDiagnostics();
             else if ("live".equals(currentPage)) showLive();
+            else if ("plugin-config".equals(currentPage)) showPluginConfig();
             else showPlay();
             return true;
         });
@@ -1438,6 +1506,27 @@ public final class MainActivity extends Activity {
                         + "\nPortable .rfplugin runtime\nRust + Wasmtime + AAudio")
                 .setPositiveButton("Close", null)
                 .show();
+    }
+
+    /**
+     * Refresh native pages after an Activity resume or an asynchronous engine event without
+     * reloading the plugin CONFIG WebView. A document picker pauses the Activity; reloading that
+     * WebView here would destroy the pending select_resource promise before onActivityResult can
+     * deliver the selected grant.
+     */
+    private void restoreVisiblePage() {
+        if ("diagnostics".equals(currentPage)) {
+            renderDiagnostics();
+        } else if ("live".equals(currentPage)) {
+            showLive();
+        } else if ("idle".equals(currentPage)) {
+            showIdle();
+        } else if ("plugin-config".equals(currentPage)) {
+            pluginWebSurface = "config";
+            updateModeButtons();
+        } else {
+            showPlay();
+        }
     }
 
     private void showPlay() {
@@ -1641,9 +1730,7 @@ public final class MainActivity extends Activity {
                     if (audioRunning) switchAudioOutput();
                     closeMidi();
                     if (audioRunning) openMidiInputs();
-                    if ("diagnostics".equals(currentPage)) renderDiagnostics();
-                    else if ("live".equals(currentPage)) showLive();
-                    else showPlay();
+                    restoreVisiblePage();
                 })
                 .create();
         refreshDevices.setOnClickListener(view -> {
@@ -1836,7 +1923,7 @@ public final class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     engineStarting = false;
                     if (activePluginLabel != null) activePluginLabel.setText(activePluginDisplayName());
-                    if ("live".equals(currentPage)) showLive(); else showPlay();
+                    restoreVisiblePage();
                     Toast.makeText(this, activePluginName + " ready · 48 kHz", Toast.LENGTH_SHORT).show();
                 });
             } catch (Throwable error) {
@@ -1865,7 +1952,7 @@ public final class MainActivity extends Activity {
                     "resource.active_entry." + pluginId + "." + resourceId, null) == null) continue;
             File copy = privatePluginResourceFile(pluginId, resourceId);
             if (!copy.isFile()) continue;
-            if (!loadPluginResource(resourceId, copy.getAbsolutePath())) {
+            if (loadPluginResource(resourceId, copy.getAbsolutePath()) == 0) {
                 throw new IllegalStateException("Could not restore plugin resource " + resourceId);
             }
         }

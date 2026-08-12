@@ -286,6 +286,11 @@ export interface ProgramDraftState {
   name: string;
   preview_sound_id: string;
   storage_path: string;
+  artifacts?: Array<{
+    storage_path: string;
+    media_type: string;
+    bytes: number[];
+  }>;
   document_json: string;
   editor: {
     schema_version: number;

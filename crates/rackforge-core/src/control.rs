@@ -2181,6 +2181,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 storage_path: draft.storage_path.clone(),
                 preview_sound_id: draft.preview_sound_id.clone(),
                 document,
+                artifacts: draft.artifacts.clone(),
             };
             if let Err(error) = prepared.validate() {
                 return internal_error(
@@ -2195,9 +2196,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     Some(snapshot.revision),
                 );
             };
-            if let Err(error) =
-                storage.save_program(Path::new(&prepared.storage_path), &prepared.document)
-            {
+            if let Err(error) = storage.save_prepared_program(&prepared) {
                 return error_response(
                     ControlErrorCode::Rejected,
                     format!("saving program: {error:#}"),
@@ -2573,6 +2572,7 @@ fn program_draft_state(
         name: prepared.document.name.clone(),
         preview_sound_id: prepared.preview_sound_id.clone(),
         storage_path: prepared.storage_path.clone(),
+        artifacts: prepared.artifacts.clone(),
         document_json,
         editor,
         dirty,

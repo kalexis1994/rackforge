@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use rackforge_plugin_api::{ProgramDocument, validate_plugin_identifier};
+use rackforge_plugin_api::{PreparedProgram, ProgramDocument, validate_plugin_identifier};
 use std::ffi::OsStr;
 #[cfg(unix)]
 use std::fs::File;
@@ -93,6 +93,23 @@ impl PluginStorage {
         let mut bytes = serde_json::to_vec_pretty(program).context("serializing program")?;
         bytes.push(b'\n');
         self.write_atomic(&program.plugin_id, relative, &bytes)
+    }
+
+    /// Persists a plugin-prepared Program and every small derived artifact it
+    /// owns. Artifacts are written first and the canonical Program document is
+    /// committed last, so readers never observe a new document before its
+    /// derived files are available.
+    pub fn save_prepared_program(&self, prepared: &PreparedProgram) -> Result<PathBuf> {
+        prepared.validate().context("validating prepared program")?;
+        for artifact in &prepared.artifacts {
+            self.write_atomic(
+                &prepared.document.plugin_id,
+                Path::new(&artifact.storage_path),
+                &artifact.bytes,
+            )
+            .with_context(|| format!("saving program artifact {}", artifact.storage_path))?;
+        }
+        self.save_program(Path::new(&prepared.storage_path), &prepared.document)
     }
 
     pub fn load_program(&self, plugin_id: &str, relative: &Path) -> Result<ProgramDocument> {
@@ -493,6 +510,45 @@ mod tests {
         let temporary = fs::canonicalize(std::env::temp_dir()).unwrap();
         assert!(absolute.starts_with(temporary));
         fs::remove_dir_all(absolute).unwrap();
+    }
+
+    #[test]
+    fn saves_prepared_program_artifacts_in_the_plugin_namespace() {
+        let root = temporary_root();
+        let storage = PluginStorage::new(&root);
+        let prepared = PreparedProgram {
+            schema_version: rackforge_plugin_api::PROGRAM_EDIT_SCHEMA_VERSION,
+            storage_path: "programs/user.test.rackforge-program.json".into(),
+            preview_sound_id: "custom.user.test".into(),
+            document: program("Artifact test"),
+            artifacts: vec![rackforge_plugin_api::ProgramArtifact {
+                storage_path: "exports/user.test.syx".into(),
+                media_type: "audio/midi".into(),
+                bytes: vec![0xf0, 0x42, 0xf7],
+            }],
+        };
+
+        storage.save_prepared_program(&prepared).unwrap();
+        assert_eq!(
+            storage
+                .read(
+                    "org.rackforge.roland-scva",
+                    Path::new("exports/user.test.syx")
+                )
+                .unwrap(),
+            vec![0xf0, 0x42, 0xf7]
+        );
+        assert_eq!(
+            storage
+                .load_program(
+                    "org.rackforge.roland-scva",
+                    Path::new("programs/user.test.rackforge-program.json")
+                )
+                .unwrap()
+                .name,
+            "Artifact test"
+        );
+        fs::remove_dir_all(fs::canonicalize(root).unwrap()).unwrap();
     }
 
     #[test]

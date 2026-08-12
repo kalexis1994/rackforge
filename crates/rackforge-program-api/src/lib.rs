@@ -7,6 +7,8 @@ use thiserror::Error;
 pub const PROGRAM_SCHEMA_VERSION: u32 = 1;
 pub const PROGRAM_EDIT_SCHEMA_VERSION: u32 = 1;
 pub const PROGRAM_EDITOR_SCHEMA_VERSION: u32 = 1;
+pub const MAX_PROGRAM_ARTIFACTS: usize = 16;
+pub const MAX_PROGRAM_ARTIFACT_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -59,6 +61,21 @@ pub struct PreparedProgram {
     pub storage_path: String,
     pub preview_sound_id: String,
     pub document: ProgramDocument,
+    /// Small plugin-owned files derived from the document at save time.
+    ///
+    /// Examples include hardware SysEx exports and compact lookup indexes.
+    /// RackForge stores them in the same plugin namespace as the Program and
+    /// never interprets their contents.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<ProgramArtifact>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProgramArtifact {
+    pub storage_path: String,
+    pub media_type: String,
+    pub bytes: Vec<u8>,
 }
 
 /// A resolved, platform-neutral editor tree published by a plugin for one
@@ -303,8 +320,60 @@ impl PreparedProgram {
         {
             return Err(ProgramError::InvalidEditMetadata);
         }
-        self.document.validate()
+        self.document.validate()?;
+        if self.artifacts.len() > MAX_PROGRAM_ARTIFACTS {
+            return Err(ProgramError::TooManyArtifacts(self.artifacts.len()));
+        }
+        let mut paths = BTreeSet::new();
+        let mut total_bytes = 0usize;
+        for artifact in &self.artifacts {
+            artifact.validate()?;
+            if artifact.storage_path == self.storage_path
+                || !paths.insert(artifact.storage_path.clone())
+            {
+                return Err(ProgramError::DuplicateArtifactPath(
+                    artifact.storage_path.clone(),
+                ));
+            }
+            total_bytes = total_bytes
+                .checked_add(artifact.bytes.len())
+                .ok_or(ProgramError::ArtifactsTooLarge(usize::MAX))?;
+        }
+        if total_bytes > MAX_PROGRAM_ARTIFACT_BYTES {
+            return Err(ProgramError::ArtifactsTooLarge(total_bytes));
+        }
+        Ok(())
     }
+}
+
+impl ProgramArtifact {
+    pub fn validate(&self) -> Result<(), ProgramError> {
+        if !valid_artifact_path(&self.storage_path) {
+            return Err(ProgramError::InvalidArtifactPath(self.storage_path.clone()));
+        }
+        if self.media_type.trim().is_empty()
+            || self.media_type.len() > 128
+            || !self.media_type.is_ascii()
+            || self.media_type.contains('\0')
+        {
+            return Err(ProgramError::InvalidArtifactMediaType);
+        }
+        if self.bytes.is_empty() {
+            return Err(ProgramError::EmptyArtifact(self.storage_path.clone()));
+        }
+        Ok(())
+    }
+}
+
+fn valid_artifact_path(value: &str) -> bool {
+    !value.is_empty()
+        && !value.contains('\0')
+        && !value.contains('\\')
+        && !value.starts_with('/')
+        && !value.contains(':')
+        && value
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
 }
 
 impl ProgramDocument {
@@ -403,6 +472,18 @@ pub enum ProgramError {
     UnsupportedEditSchema(u32),
     #[error("program edit metadata is empty or contains NUL")]
     InvalidEditMetadata,
+    #[error("prepared program has {0} artifacts, exceeding the host limit")]
+    TooManyArtifacts(usize),
+    #[error("prepared program artifacts total {0} bytes, exceeding the host limit")]
+    ArtifactsTooLarge(usize),
+    #[error("invalid program artifact path {0:?}")]
+    InvalidArtifactPath(String),
+    #[error("program artifact media type is empty, non-ASCII, too long, or contains NUL")]
+    InvalidArtifactMediaType,
+    #[error("program artifact {0:?} is empty")]
+    EmptyArtifact(String),
+    #[error("duplicate or colliding program artifact path {0:?}")]
+    DuplicateArtifactPath(String),
     #[error("unsupported program editor schema {0}")]
     UnsupportedEditorSchema(u32),
     #[error("program editor is empty")]
@@ -470,8 +551,39 @@ mod tests {
             storage_path: "custom/user.piano-strings.rackforge-program.json".into(),
             preview_sound_id: "dls.b00000000.p00000000".into(),
             document: valid_program(),
+            artifacts: vec![ProgramArtifact {
+                storage_path: "exports/user.piano-strings.syx".into(),
+                media_type: "audio/midi".into(),
+                bytes: vec![0xf0, 0xf7],
+            }],
         };
         assert_eq!(prepared.validate(), Ok(()));
+    }
+
+    #[test]
+    fn rejects_unsafe_or_oversized_program_artifacts() {
+        let mut prepared = PreparedProgram {
+            schema_version: PROGRAM_EDIT_SCHEMA_VERSION,
+            storage_path: "programs/test.rackforge-program.json".into(),
+            preview_sound_id: "custom.test".into(),
+            document: valid_program(),
+            artifacts: vec![ProgramArtifact {
+                storage_path: "../escape.syx".into(),
+                media_type: "audio/midi".into(),
+                bytes: vec![0xf0, 0xf7],
+            }],
+        };
+        assert!(matches!(
+            prepared.validate(),
+            Err(ProgramError::InvalidArtifactPath(_))
+        ));
+
+        prepared.artifacts[0].storage_path = "exports/test.syx".into();
+        prepared.artifacts[0].bytes = vec![0; MAX_PROGRAM_ARTIFACT_BYTES + 1];
+        assert!(matches!(
+            prepared.validate(),
+            Err(ProgramError::ArtifactsTooLarge(_))
+        ));
     }
 
     #[test]

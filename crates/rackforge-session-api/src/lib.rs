@@ -1,7 +1,7 @@
 pub use rackforge_performance_api::{
     LiveBrowseMode, LiveLocation, LivePerformanceState, RackDefinition, RackId,
 };
-use rackforge_program_api::{ProgramEditorValue, ProgramEditorView};
+use rackforge_program_api::{ProgramArtifact, ProgramEditorValue, ProgramEditorView};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
@@ -271,6 +271,8 @@ pub struct ProgramDraftState {
     pub name: String,
     pub preview_sound_id: String,
     pub storage_path: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<ProgramArtifact>,
     pub document_json: String,
     pub editor: ProgramEditorView,
     pub dirty: bool,
@@ -833,6 +835,7 @@ mod tests {
             name: "CUSTOM 001".into(),
             preview_sound_id: "dls.piano-1".into(),
             storage_path: "custom/user.custom-001.rackforge-program.json".into(),
+            artifacts: Vec::new(),
             document_json: r#"{"id":"user.custom-001","payload":{}}"#.into(),
             editor: rackforge_program_api::ProgramEditorView {
                 schema_version: rackforge_program_api::PROGRAM_EDITOR_SCHEMA_VERSION,

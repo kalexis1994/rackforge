@@ -21,8 +21,9 @@ pub use parameter::{
 };
 pub use preset::{BankDescriptor, PresetCatalog, PresetDescriptor};
 pub use program::{
-    PROGRAM_EDIT_SCHEMA_VERSION, PROGRAM_EDITOR_SCHEMA_VERSION, PROGRAM_SCHEMA_VERSION,
-    PreparedProgram, ProgramDocument, ProgramEditRequest, ProgramEditorChoice, ProgramEditorField,
+    MAX_PROGRAM_ARTIFACT_BYTES, MAX_PROGRAM_ARTIFACTS, PROGRAM_EDIT_SCHEMA_VERSION,
+    PROGRAM_EDITOR_SCHEMA_VERSION, PROGRAM_SCHEMA_VERSION, PreparedProgram, ProgramArtifact,
+    ProgramDocument, ProgramEditRequest, ProgramEditorChoice, ProgramEditorField,
     ProgramEditorFieldKind, ProgramEditorPage, ProgramEditorValue, ProgramEditorView, ProgramError,
     ProgramFieldEditRequest, validate_plugin_identifier, validate_program_identifier,
 };

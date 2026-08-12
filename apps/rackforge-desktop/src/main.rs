@@ -2186,7 +2186,7 @@ impl DesktopApp {
             .prepare_program_save(&document)
             .map_err(|error| format!("Could not prepare the program for saving: {error:#}"))?;
         PluginStorage::new(&self.options.data_root)
-            .save_program(Path::new(&prepared.storage_path), &prepared.document)
+            .save_prepared_program(&prepared)
             .map_err(|error| format!("Could not save the program: {error:#}"))?;
         self.plugins[index]
             .instance
@@ -2852,6 +2852,7 @@ fn desktop_program_draft_state(
         name: prepared.document.name.clone(),
         preview_sound_id: prepared.preview_sound_id.clone(),
         storage_path: prepared.storage_path.clone(),
+        artifacts: prepared.artifacts.clone(),
         document_json,
         editor,
         dirty,
@@ -3606,6 +3607,7 @@ mod tests {
                 tags: Vec::new(),
                 payload: serde_json::json!({ "bright": true }),
             },
+            artifacts: Vec::new(),
         };
         let editor = ProgramEditorView {
             schema_version: PROGRAM_EDITOR_SCHEMA_VERSION,

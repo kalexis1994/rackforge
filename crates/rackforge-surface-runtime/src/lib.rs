@@ -7292,6 +7292,7 @@ mod tests {
             name: "CUSTOM 001".into(),
             preview_sound_id: preview_sound_id.into(),
             storage_path: "custom/user.custom-001.rackforge-program.json".into(),
+            artifacts: Vec::new(),
             document_json: r#"{
                 "payload": {
                     "layers": [{

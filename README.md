@@ -1,182 +1,235 @@
 # RackForge
 
 <p align="center">
-  <img src="assets/brand/rackforge-logo.svg" width="320" alt="RackForge logo" />
+  <img src="assets/brand/rackforge-logo.svg" width="360" alt="RackForge logo" />
 </p>
 
-RackForge turns MIDI controllers and general-purpose or embedded computers
-into self-contained musical instruments, without requiring a desktop, monitor,
-or DAW. The KeyLab Essential 61 mk3 paired with a Raspberry Pi 4B is the first
-reference implementation, not an architectural limitation.
+<p align="center">
+  <strong>Turn a computer, phone, or Raspberry Pi into a portable musical instrument.</strong>
+</p>
 
-The cross-platform direction, portable plugin runtime, SDK, and future control
-surfaces are described in the [technical roadmap](ROADMAP.md).
+RackForge is a cross-platform instrument host for Windows, Android, and
+Raspberry Pi. Connect a MIDI controller and an audio interface, install a
+portable `.rfplugin`, and play without a DAW. The same instruments and
+portable plugin packages can run across all three platforms.
 
-The repository separates the portable product from its platform adapters:
+> RackForge `v0.1.x` is a public preview. Packages are functional but not yet
+> production-signed, and instrument plugins are distributed separately.
 
-| Area         | Responsibility                                                            |
-| ------------ | ------------------------------------------------------------------------- |
-| `crates/`    | Core, APIs, SDK, and portable plugin runtime.                             |
-| `apps/`      | Windows Desktop, Android, and headless/Web hosts.                          |
-| `platforms/` | Platform-specific integrations, starting with Raspberry Pi.               |
-| `hardware/`  | Drivers and packages for supported MIDI controllers.                      |
-| `plugins/`   | Minimal conformance fixtures; instruments live in their own repositories. |
-| `web/`       | RackForge's adaptive SPA.                                                 |
+## What you can do
 
-## Signal flow
+- Use **PLAY** to choose an instrument and its programs.
+- Use **LIVE** to build Racks, Songs, and Setlists for a performance.
+- Route MIDI and audio through a visual node graph with drag, pan, zoom, and
+  labels.
+- Install the same portable `.rfplugin` package on Windows, Android, and
+  Raspberry Pi.
+- Use USB MIDI controllers and built-in or external audio interfaces.
+- Reconnect MIDI hardware without restarting RackForge or leaving stuck notes.
+- Control RackForge from supported hardware displays, buttons, encoders, LEDs,
+  and pads through portable `.rfcontroller` packages.
+- Restore the active mode, instrument, program, master volume, and pan after a
+  restart.
+
+## Choose a platform
+
+| Platform | Best for | Audio and MIDI |
+| --- | --- | --- |
+| Windows x86-64 | Creating and editing performances | WASAPI, ASIO, and Windows MIDI |
+| Android ARM64 | A compact touchscreen instrument | Low-latency native audio and USB MIDI |
+| Raspberry Pi OS ARM64 | A dedicated headless instrument | ALSA, USB MIDI, Web control, and boot services |
+
+Download the current packages from the
+[latest RackForge release](https://github.com/kalexis1994/rackforge/releases/latest).
+
+## Quick start
+
+### Windows
+
+1. Download
+   [`RackForge-Windows-x86_64.exe`](https://github.com/kalexis1994/rackforge/releases/latest/download/RackForge-Windows-x86_64.exe).
+2. Run the executable and choose where RackForge should store plugins,
+   performances, and settings.
+3. Install an instrument `.rfplugin` from the Plugins section.
+4. Open Settings, select the MIDI input and audio output, then choose the
+   instrument in PLAY.
+
+Windows builds are currently unsigned, so Windows may ask you to confirm that
+you trust the application. See the
+[Desktop guide](apps/rackforge-desktop/README.md) for ASIO setup, portable mode,
+and troubleshooting.
+
+### Android
+
+1. Download
+   [`RackForge-Android-arm64.apk`](https://github.com/kalexis1994/rackforge/releases/latest/download/RackForge-Android-arm64.apk).
+2. Allow installation from your browser or file manager, then install the APK.
+3. Connect the MIDI controller and, optionally, a class-compliant USB audio
+   interface through a powered USB hub.
+4. Install an instrument `.rfplugin`, select the devices, and choose the
+   instrument in PLAY.
+
+The preview APK is ARM64 and debug-signed. The phone speaker can be used for
+initial testing. See the [Android guide](apps/rackforge-android/README.md) for
+USB audio, background operation, and latency details.
+
+### Raspberry Pi in one command
+
+Use a Raspberry Pi 4 or 5 with the 64-bit edition of Raspberry Pi OS Lite.
+Run this command as the regular user that will run RackForge, **not** with
+`sudo`:
+
+```bash
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/kalexis1994/rackforge/main/platforms/raspberry-pi/install-release.sh | bash'
+```
+
+The installer:
+
+- verifies that the system uses a 64-bit ARM userspace;
+- downloads the latest Raspberry Pi release over HTTPS;
+- verifies the archive against the release's `SHA256SUMS.txt`;
+- preserves the previous release and restores it if installation fails;
+- installs the runtime, Web interface, controller host, and systemd services;
+- enables RackForge automatically at boot and starts its control services.
+
+When it finishes, open `http://RASPBERRY_PI_ADDRESS:8787` from another device
+on the same network. Install an instrument `.rfplugin`, then select the MIDI
+and audio devices.
+
+To review the script before running it:
+
+```bash
+curl -fL https://raw.githubusercontent.com/kalexis1994/rackforge/main/platforms/raspberry-pi/install-release.sh -o install-rackforge.sh
+less install-rackforge.sh
+bash install-rackforge.sh
+```
+
+To install a specific release or enable the optional reversible appliance
+optimizations:
+
+```bash
+RACKFORGE_VERSION=v0.1.1 bash install-rackforge.sh
+RACKFORGE_OPTIMIZE=1 bash install-rackforge.sh
+```
+
+The installer detects the current user's home directory and never assumes a
+fixed username. Advanced installations may set `RACKFORGE_ROOT`. See the
+[Raspberry Pi guide](platforms/raspberry-pi/README.md) for manual installation,
+service management, audio configuration, and diagnostics.
+
+## From first sound to a live set
+
+The normal workflow is the same on every platform:
+
+1. Connect the MIDI controller and audio output.
+2. Install an instrument `.rfplugin`.
+3. Select the MIDI and audio devices in Settings.
+4. Open PLAY, select the instrument, and choose a program.
+5. Open LIVE to place instruments inside Racks and organize them into Songs
+   and Setlists.
+
+RackForge keeps host configuration separate from instrument content. Plugins
+own their programs and resources; LIVE owns layering, routing, splits, songs,
+and the order of a performance.
+
+## Supported control surfaces
+
+The Arturia KeyLab Essential mk3 is the first reference controller. Its
+official `.rfcontroller` package provides:
+
+- the LITTLE display and menu navigation;
+- dimmed button and pad lighting;
+- master volume and pan;
+- long-press return to the active instrument;
+- a hardware escape chord that stops sound and returns to the main menu.
+
+The controller package is portable across Windows, Android, and Raspberry Pi.
+RackForge's core owns the musical state, while each platform adapter handles
+the native MIDI and audio APIs.
+
+## Preview status
+
+RackForge already provides cross-platform PLAY/LIVE state, portable plugin
+installation, embedded PLAY and CONFIG interfaces, plugin-private storage, a
+host-owned resource explorer, program editing, MIDI hotplug recovery, session
+restoration, and protection against concurrent audio engines on Windows and
+Raspberry Pi.
+
+Current preview limitations:
+
+- Windows packages are not code-signed.
+- Android packages are ARM64 and debug-signed.
+- Raspberry Pi packages require a 64-bit Raspberry Pi OS userspace.
+- Instruments are separate downloads; RackForge does not bundle production
+  `.rfplugin` packages yet.
+- Desktop's optional HTTP server is disabled by default.
+- The reliability milestone still includes package conformance gates and
+  measured audio/MIDI stress tests.
+
+## For plugin authors
+
+RackForge plugins use portable host contracts instead of platform-specific
+audio or filesystem APIs. Start with:
+
+- [Plugin development](docs/PLUGIN_DEVELOPMENT.md)
+- [Portable plugin runtime](docs/architecture/portable-plugin-runtime.md)
+- [Plugin Web API](docs/WEB_PLUGIN_API.md)
+
+Production instruments maintain their own repositories, versions, assets, and
+release pipelines. This repository contains only minimal conformance fixtures.
+
+## For contributors
+
+Every push to `main` runs the cross-platform GitHub Actions workflow. It builds
+the Windows executable, Android APK, and Raspberry Pi ARM64 archive. Release
+packages and `SHA256SUMS.txt` are published from those artifacts.
+
+<details>
+<summary><strong>Architecture and repository layout</strong></summary>
 
 ```text
 MIDI controller
   • keys, pads, encoders, buttons
-           │ USB MIDI
+           │ native MIDI
            ▼
 Platform MIDI + .rfcontroller package
   • discovers and reconnects hardware
   • maps controls to host intents
-  • renders LITTLE, LEDs and pads
+  • renders LITTLE, LEDs, and pads
            │
            ▼
 RackForge Core
   • authoritative musical state
   • portable plugins and programs
-  • Racks, Songs and Setlists
-  • routing, mixing and audio
+  • Racks, Songs, and Setlists
+  • routing, mixing, and audio
            │
            ▼
 Platform audio
-  • ALSA / WASAPI / ASIO / AAudio
+  • ALSA / WASAPI / ASIO / native Android audio
            │
            ▼
 Built-in audio / USB interface
 ```
 
-The host owns the authoritative engine, bank, and performance state. The
-controller sends physical events, and its driver renders the state it receives.
-If either side restarts, a handshake rebuilds the control surface without
-depending on implicit state.
+| Area | Responsibility |
+| --- | --- |
+| `crates/` | Core, APIs, SDK, and portable plugin runtime |
+| `apps/` | Windows Desktop, Android, and headless/Web hosts |
+| `platforms/` | Platform adapters, installation, and deployment |
+| `hardware/` | Drivers and packages for supported MIDI controllers |
+| `plugins/` | Minimal conformance fixtures |
+| `web/` | RackForge's adaptive Web application |
 
-## Raspberry Pi development
+The host owns authoritative engine, bank, and performance state. Controllers
+send physical events and render the state they receive. A handshake rebuilds
+the control surface after either side restarts.
 
-Development helpers for connection, synchronization and diagnostics live in
-`platforms/raspberry-pi/dev/`. Copy the provided SSH configuration example and
-choose any local alias; `rackforge` is used in the examples:
+</details>
 
-```powershell
-ssh rackforge
-```
-
-No usernames, private keys or passwords are stored in the repository.
-
-## Automated builds
-
-Every push to `main` runs `.github/workflows/build-main.yml` and publishes
-three plugin-independent artifacts:
-
-- `RackForge.exe` for Windows x86-64;
-- `RackForge-debug.apk` for Android ARM64;
-- `RackForge-RaspberryPi-arm64.tar.gz` for Raspberry Pi OS ARM64.
-
-Plugins maintain their own repositories, versions, and pipelines. RackForge
-only ships hosts capable of installing and running them.
-
-### Windows preview
-
-Download the Windows artifact or release, extract the complete directory and
-run `RackForge.exe`. On first start, RackForge asks where to store plugins,
-performances and settings. The recommended location uses the current user's
-local application-data directory; portable mode keeps `RackForgeData` beside
-the executable. See [RackForge Desktop](apps/rackforge-desktop/README.md) for
-audio, ASIO and build details.
-
-### Android preview
-
-Download `RackForge-debug.apk`, allow installation from the selected source and
-install the APK. The preview build is ARM64 and debug-signed. USB MIDI devices
-and class-compliant USB audio interfaces can be attached through a powered hub;
-the phone speaker remains available for initial testing. See
-[RackForge Android](apps/rackforge-android/README.md) for audio and background
-runtime details.
-
-## Install on Raspberry Pi
-
-The Raspberry Pi distribution requires a Raspberry Pi 4 or 5 running the
-64-bit edition of Raspberry Pi OS Lite. Instrument plugins are not bundled;
-`.rfplugin` packages are installed separately from RackForge.
-
-Download `RackForge-RaspberryPi-arm64.tar.gz` from the
-[GitHub Releases page](https://github.com/kalexis1994/rackforge/releases).
-On the Raspberry Pi, run the following commands as the user who will run
-RackForge:
-
-```bash
-mkdir -p "$HOME/rackforge/current"
-tar -xzf RackForge-RaspberryPi-arm64.tar.gz \
-  -C "$HOME/rackforge/current" --strip-components=1
-bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install.sh"
-bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install-appliance.sh"
-```
-
-The installer detects the user and home directory, installs the runtime, Web
-interface, platform and controller hosts, and configures the boot services. It
-does not depend on a specific username. Set `RACKFORGE_USER` and
-`RACKFORGE_ROOT` to use a custom identity or installation directory.
-
-After installation, the Web interface is available on port `8787` of the
-Raspberry Pi. Find its address with:
-
-```bash
-hostname -I
-```
-
-From another device on the same network, open
-`http://RASPBERRY_PI_ADDRESS:8787`, install an instrument `.rfplugin`, and
-select the MIDI and audio devices. Enable the reversible appliance
-optimizations with:
-
-```bash
-bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install-appliance.sh" --optimize
-sudo reboot
-```
-
-## Current status
-
-- Windows x86-64, Android ARM64, and Raspberry Pi OS ARM64 hosts are built from
-  the same portable contracts and published by GitHub Actions.
-- PLAY and LIVE are host-owned modes shared by the Web, desktop, Android, and
-  `little@1` controller surfaces.
-- LIVE provides persistent Racks, Songs and Setlists. Its graph editor supports
-  typed MIDI/audio nodes, child Racks, connections, drag positioning, wheel
-  zoom, panning and portable labels; the viewport itself stays device-local.
-- Portable `.rfplugin` installation, version activation, duplicate prevention,
-  program selection, host presets and embedded PLAY/CONFIG Web surfaces are
-  implemented. Local archives are supported by Desktop and Android, while the
-  Web Store installs packages from configured signed repositories.
-- Plugins can use a host-owned cross-platform resource explorer and install
-  selected files into private plugin storage. Portable plugins can also expose
-  native program editors with preview, save, replace and cancel operations.
-- Windows supports WASAPI and ASIO device discovery. Android uses its native
-  low-latency audio path and USB MIDI. Raspberry Pi uses ALSA and runs headless.
-- MIDI hotplug recovery releases held notes and reconnects without restarting
-  the application.
-- The official Arturia KeyLab Essential mk3 `.rfcontroller` package provides
-  the LITTLE display, navigation, dimmed LEDs and pads, master level and pan,
-  long-press return, and the host escape chord across the three platforms.
-- Stable PLAY/LIVE context, active plugin/program, master level and pan are
-  checkpointed and restored. Windows and Raspberry Pi also prevent concurrent
-  RackForge audio engines.
-- The HTTP server is disabled by default on desktop. Network exposure remains
-  an explicit user setting.
-- The `v0.1.x` packages are preview builds: Windows is not production-signed
-  and Android still uses a debug signing configuration.
-
-The next milestone focuses on reliability gates, package conformance,
-measured audio/MIDI stress tests, and smaller internal implementation modules.
-
-## Documentation
+Development helpers contain no usernames, passwords, or private keys. Start
+with the platform guides and the documents below:
 
 - [Runtime layout and process model](docs/RUNTIME.md)
-- [Plugin development](docs/PLUGIN_DEVELOPMENT.md)
-- [Portable plugin runtime](docs/architecture/portable-plugin-runtime.md)
-- [Plugin Web API](docs/WEB_PLUGIN_API.md)
 - [LIVE performance and rack graphs](docs/architecture/live-performance.md)
 - [Technical roadmap](ROADMAP.md)

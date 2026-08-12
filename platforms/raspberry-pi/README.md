@@ -19,9 +19,9 @@ Responsibilities:
 - AArch64 userspace.
 - No desktop environment required.
 
-The default installation root is `$HOME/rackforge/current`; the installer
-resolves the actual user and home directory and never depends on a hardcoded
-username.
+The default deployment root is `$HOME/rackforge`, and the active release lives
+in its `current` directory. The installer resolves the actual user and home
+directory and never depends on a hardcoded username.
 
 ## Build
 
@@ -31,6 +31,20 @@ platform scripts. The release pipeline publishes
 
 ## Install
 
+The public release can be installed or updated in one command. Run it as the
+regular user that will run RackForge, not with `sudo`:
+
+```bash
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/kalexis1994/rackforge/main/platforms/raspberry-pi/install-release.sh | bash'
+```
+
+The release installer checks the ARM64 architecture, verifies the archive
+against the published SHA-256 digest, and restores the previous runtime if an
+update fails. It then installs and enables the systemd services.
+
+For a manual installation, download and verify
+`RackForge-RaspberryPi-arm64.tar.gz` from the GitHub release, then run:
+
 ```bash
 mkdir -p "$HOME/rackforge/current"
 tar -xzf RackForge-RaspberryPi-arm64.tar.gz \
@@ -39,7 +53,7 @@ bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install.sh"
 bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install-appliance.sh"
 ```
 
-The second command installs the supervised appliance services. Optional
+`install-appliance.sh` installs the supervised appliance services. Optional
 real-time and power optimizations are applied with `--optimize` and can be
 rolled back locally.
 

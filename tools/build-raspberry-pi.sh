@@ -17,6 +17,7 @@ esac
 command -v cargo >/dev/null
 command -v pnpm >/dev/null
 command -v tar >/dev/null
+bash -n "$repository/platforms/raspberry-pi/install-release.sh"
 
 cd "$repository"
 pnpm --dir web install --frozen-lockfile
@@ -62,7 +63,7 @@ RACKFORGE_SOURCE="$repository" bash \
 cp -a "$repository/web/dist" "$release/web/dist"
 cp -a "$repository/config/." "$release/config/"
 install -d "$release/platforms/raspberry-pi" "$release/hardware"
-for entry in appliance audio config etc provision sbin scripts systemd README.md
+for entry in appliance audio config etc provision sbin scripts systemd README.md install-release.sh
 do
   cp -a "$repository/platforms/raspberry-pi/$entry" \
     "$release/platforms/raspberry-pi/$entry"

@@ -48,6 +48,19 @@ install -m 0644 \
   "$repository/target/aarch64-linux-android/release/librackforge_android_native.so" \
   "$native_output/librackforge_android.so"
 
+bundled_output="$android_project/app/build/generated/bundled-plugins"
+rm -rf -- "$bundled_output"
+if [[ -n "${RACKFORGE_BUNDLED_PLUGIN:-}" ]]; then
+  [[ -f "$RACKFORGE_BUNDLED_PLUGIN" ]] || {
+    printf 'RACKFORGE_BUNDLED_PLUGIN is not a file: %s\n' \
+      "$RACKFORGE_BUNDLED_PLUGIN" >&2
+    exit 2
+  }
+  install -d "$bundled_output/bundled"
+  install -m 0644 "$RACKFORGE_BUNDLED_PLUGIN" \
+    "$bundled_output/bundled/RF-Soundfonts.rfplugin"
+fi
+
 cd "$android_project"
 bash ./gradlew assembleDebug --no-daemon
 

@@ -55,6 +55,20 @@ New-Item -ItemType Directory -Force -Path $nativeOutput | Out-Null
 Copy-Item -LiteralPath (Join-Path $repository "target/aarch64-linux-android/release/librackforge_android_native.so") `
     -Destination (Join-Path $nativeOutput "librackforge_android.so") -Force
 
+$bundledOutput = Join-Path $androidProject "app/build/generated/bundled-plugins"
+if (Test-Path -LiteralPath $bundledOutput) {
+    Remove-Item -LiteralPath $bundledOutput -Recurse -Force
+}
+if ($env:RACKFORGE_BUNDLED_PLUGIN) {
+    if (-not (Test-Path -LiteralPath $env:RACKFORGE_BUNDLED_PLUGIN -PathType Leaf)) {
+        throw "RACKFORGE_BUNDLED_PLUGIN is not a file: $env:RACKFORGE_BUNDLED_PLUGIN"
+    }
+    $bundledDirectory = Join-Path $bundledOutput "bundled"
+    New-Item -ItemType Directory -Path $bundledDirectory -Force | Out-Null
+    Copy-Item -LiteralPath $env:RACKFORGE_BUNDLED_PLUGIN `
+        -Destination (Join-Path $bundledDirectory "RF-Soundfonts.rfplugin") -Force
+}
+
 Push-Location $androidProject
 try {
     & $gradle assembleDebug --no-daemon

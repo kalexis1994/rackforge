@@ -196,4 +196,5 @@ fi
 [[ ! -e "$backup" ]] || rm -rf -- "$backup"
 address="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 printf '\nRackForge is installed at %s\n' "$root"
-printf 'Open http://%s:8787 and install an instrument .rfplugin.\n' "${address:-RASPBERRY_PI_ADDRESS}"
+printf 'Open http://%s:8787 to select MIDI and audio devices.\n' \
+  "${address:-RASPBERRY_PI_ADDRESS}"

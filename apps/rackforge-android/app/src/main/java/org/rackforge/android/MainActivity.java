@@ -1784,6 +1784,7 @@ public final class MainActivity extends Activity {
                 if (!legacyAddons.mkdirs() && !legacyAddons.isDirectory()) {
                     throw new IllegalStateException("Cannot create legacy plugin migration directory");
                 }
+                installBundledDefaultPluginIfEmpty(store);
                 List<String> candidates = startupPluginRoots(store);
                 Throwable activationError = null;
                 boolean activated = false;
@@ -1883,6 +1884,45 @@ public final class MainActivity extends Activity {
             if (!root.isBlank() && !roots.contains(root)) roots.add(root);
         }
         return roots;
+    }
+
+    private void installBundledDefaultPluginIfEmpty(File store) throws Exception {
+        JSONObject catalog = new JSONObject(installedPlugins(store.getAbsolutePath()));
+        if (catalog.getJSONArray("plugins").length() != 0) return;
+
+        String assetName = "RF-Soundfonts.rfplugin";
+        boolean available = false;
+        String[] bundled = getAssets().list("bundled");
+        if (bundled != null) {
+            for (String name : bundled) {
+                if (assetName.equals(name)) {
+                    available = true;
+                    break;
+                }
+            }
+        }
+        if (!available) return;
+
+        File archive = new File(getCacheDir(), "rackforge-default-plugin.rfplugin");
+        try (InputStream input = getAssets().open("bundled/" + assetName);
+             FileOutputStream output = new FileOutputStream(archive)) {
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+            output.getFD().sync();
+        }
+        try {
+            String descriptor = installPluginFile(
+                    archive.getAbsolutePath(), store.getAbsolutePath());
+            if (descriptor == null || descriptor.isBlank()) {
+                throw new IllegalStateException("The bundled default instrument was rejected");
+            }
+            JSONObject installed = new JSONObject(descriptor);
+            Log.i("RackForge", "Bundled default plugin ready: "
+                    + installed.optString("plugin_name", "RF-Soundfonts"));
+        } finally {
+            if (!archive.delete() && archive.exists()) archive.deleteOnExit();
+        }
     }
 
     private void startAudio() {

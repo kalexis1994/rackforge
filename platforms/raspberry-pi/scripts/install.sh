@@ -37,6 +37,18 @@ do
   mv "$root/bin/$binary.new" "$root/bin/$binary"
 done
 
+bundled_plugin="$source_root/bundled-plugins/RF-Soundfonts.rfplugin"
+shopt -s nullglob
+installed_plugins=("$root/plugin-store/packages"/*)
+shopt -u nullglob
+bundled_plugins=none
+if [[ -f "$bundled_plugin" && ${#installed_plugins[@]} -eq 0 ]]; then
+  "$root/bin/rackforge-store" install-local \
+    "$bundled_plugin" \
+    "$root/plugin-store"
+  bundled_plugins=org.rackforge.rf-soundfonts
+fi
+
 controller_package="$source_root/controller-packages/org.rackforge.arturia-keylab-essential-mk3.rfcontroller"
 if [[ -d "$controller_package" ]]; then
   install -d "$root/controllers"
@@ -71,5 +83,5 @@ mv "$web_stage" "$root/web"
 rm -rf "$web_previous"
 trap - EXIT
 
-printf 'RUNTIME_INSTALLED root=%s bundled_plugins=none web=%s\n' \
-  "$root" "$root/web"
+printf 'RUNTIME_INSTALLED root=%s bundled_plugins=%s web=%s\n' \
+  "$root" "$bundled_plugins" "$root/web"

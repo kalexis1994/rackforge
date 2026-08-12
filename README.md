@@ -13,8 +13,13 @@ Raspberry Pi. Connect a MIDI controller and an audio interface, install a
 portable `.rfplugin`, and play without a DAW. The same instruments and
 portable plugin packages can run across all three platforms.
 
+New installations include the open-source
+[RF-Soundfonts](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts)
+instrument and its YDP Grand Piano as the initial playable program.
+
 > RackForge `v0.1.x` is a public preview. Packages are functional but not yet
-> production-signed, and instrument plugins are distributed separately.
+> production-signed, and additional instrument plugins are distributed
+> separately.
 
 ## What you can do
 
@@ -50,9 +55,9 @@ Download the current packages from the
    [`RackForge-Windows-x86_64.exe`](https://github.com/kalexis1994/rackforge/releases/latest/download/RackForge-Windows-x86_64.exe).
 2. Run the executable and choose where RackForge should store plugins,
    performances, and settings.
-3. Install an instrument `.rfplugin` from the Plugins section.
-4. Open Settings, select the MIDI input and audio output, then choose the
-   instrument in PLAY.
+3. Open Settings and select the MIDI input and audio output. RF-Soundfonts and
+   its YDP Grand Piano are ready on the first run.
+4. Install other `.rfplugin` instruments from the Plugins section as needed.
 
 Windows builds are currently unsigned, so Windows may ask you to confirm that
 you trust the application. See the
@@ -66,8 +71,8 @@ and troubleshooting.
 2. Allow installation from your browser or file manager, then install the APK.
 3. Connect the MIDI controller and, optionally, a class-compliant USB audio
    interface through a powered USB hub.
-4. Install an instrument `.rfplugin`, select the devices, and choose the
-   instrument in PLAY.
+4. Select the devices and play the included YDP Grand Piano, or install another
+   `.rfplugin` instrument.
 
 The preview APK is ARM64 and debug-signed. The phone speaker can be used for
 initial testing. See the [Android guide](apps/rackforge-android/README.md) for
@@ -90,11 +95,12 @@ The installer:
 - verifies the archive against the release's `SHA256SUMS.txt`;
 - preserves the previous release and restores it if installation fails;
 - installs the runtime, Web interface, controller host, and systemd services;
+- installs RF-Soundfonts with the YDP Grand Piano on a new plugin store;
 - enables RackForge automatically at boot and starts its control services.
 
 When it finishes, open `http://RASPBERRY_PI_ADDRESS:8787` from another device
-on the same network. Install an instrument `.rfplugin`, then select the MIDI
-and audio devices.
+on the same network, then select the MIDI and audio devices. The bundled piano
+does not replace or alter plugins already installed by the user.
 
 To review the script before running it:
 
@@ -122,8 +128,8 @@ service management, audio configuration, and diagnostics.
 The normal workflow is the same on every platform:
 
 1. Connect the MIDI controller and audio output.
-2. Install an instrument `.rfplugin`.
-3. Select the MIDI and audio devices in Settings.
+2. Select the MIDI and audio devices in Settings.
+3. Play the included YDP Grand Piano or install another `.rfplugin`.
 4. Open PLAY, select the instrument, and choose a program.
 5. Open LIVE to place instruments inside Racks and organize them into Songs
    and Setlists.
@@ -160,8 +166,8 @@ Current preview limitations:
 - Windows packages are not code-signed.
 - Android packages are ARM64 and debug-signed.
 - Raspberry Pi packages require a 64-bit Raspberry Pi OS userspace.
-- Instruments are separate downloads; RackForge does not bundle production
-  `.rfplugin` packages yet.
+- RF-Soundfonts is the only bundled instrument; additional `.rfplugin`
+  instruments remain separate downloads.
 - Desktop's optional HTTP server is disabled by default.
 - The reliability milestone still includes package conformance gates and
   measured audio/MIDI stress tests.
@@ -180,8 +186,9 @@ release pipelines. This repository contains only minimal conformance fixtures.
 
 ## For contributors
 
-Every push to `main` runs the cross-platform GitHub Actions workflow. It builds
-the Windows executable, Android APK, and Raspberry Pi ARM64 archive. Release
+Every push to `main` runs the cross-platform GitHub Actions workflow. It
+resolves and verifies the latest stable RF-Soundfonts release, then builds the
+Windows executable, Android APK, and Raspberry Pi ARM64 archive. Release
 packages and `SHA256SUMS.txt` are published from those artifacts.
 
 <details>

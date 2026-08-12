@@ -2,8 +2,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signer, SigningKey};
 use rackforge_plugin_api::PluginManifest;
 use rackforge_repository::{
-    RepositoryConfig, RepositoryFile, fetch_repository, install_archive, repository_platform_key,
-    verify_catalog,
+    RepositoryConfig, RepositoryFile, fetch_repository, install_archive, install_local_archive,
+    repository_platform_key, verify_catalog,
 };
 use sha2::{Digest, Sha256};
 use std::env;
@@ -52,12 +52,28 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
         ] if command == "install" => {
             install(config, repository_id, plugin_id, store_root, Some(version))
         }
+        [command, package, store_root] if command == "install-local" => {
+            install_local(package, store_root)
+        }
         [command, package, output] if command == "pack" => pack(package, output),
         [command, package, component, output] if command == "pack-wasm" => {
             pack_wasm(package, component, output)
         }
         _ => Err(usage().into()),
     }
+}
+
+fn install_local(package_path: &str, store_root: &str) -> Result<(), String> {
+    let bytes = fs::read(package_path).map_err(|error| error.to_string())?;
+    let installed = install_local_archive(store_root, &bytes).map_err(|error| error.to_string())?;
+    println!(
+        "PLUGIN_INSTALLED id={} version={} path={} existing={} source=local",
+        installed.record.plugin_id,
+        installed.record.version,
+        installed.path.display(),
+        installed.already_installed
+    );
+    Ok(())
 }
 
 fn keygen(secret_path: &str, public_path: &str) -> Result<(), String> {
@@ -331,5 +347,5 @@ fn hex_digest(bytes: &[u8]) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  rackforge-store keygen SECRET_KEY PUBLIC_KEY\n  rackforge-store sign INDEX_JSON SECRET_KEY INDEX_SIG\n  rackforge-store verify INDEX_JSON INDEX_SIG REPOSITORIES_TOML REPOSITORY_ID\n  rackforge-store list REPOSITORIES_TOML\n  rackforge-store install REPOSITORIES_TOML REPOSITORY_ID PLUGIN_ID STORE_ROOT [VERSION]\n  rackforge-store pack PACKAGE_DIRECTORY OUTPUT.rfplugin\n  rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin"
+    "usage:\n  rackforge-store keygen SECRET_KEY PUBLIC_KEY\n  rackforge-store sign INDEX_JSON SECRET_KEY INDEX_SIG\n  rackforge-store verify INDEX_JSON INDEX_SIG REPOSITORIES_TOML REPOSITORY_ID\n  rackforge-store list REPOSITORIES_TOML\n  rackforge-store install REPOSITORIES_TOML REPOSITORY_ID PLUGIN_ID STORE_ROOT [VERSION]\n  rackforge-store install-local PACKAGE.rfplugin STORE_ROOT\n  rackforge-store pack PACKAGE_DIRECTORY OUTPUT.rfplugin\n  rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin"
 }

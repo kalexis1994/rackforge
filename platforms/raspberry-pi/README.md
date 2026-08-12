@@ -40,7 +40,8 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/kalexis1994/ra
 
 The release installer checks the ARM64 architecture, verifies the archive
 against the published SHA-256 digest, and restores the previous runtime if an
-update fails. It then installs and enables the systemd services.
+update fails. It installs RF-Soundfonts with the YDP Grand Piano when the
+plugin store is empty, then installs and enables the systemd services.
 
 For a manual installation, download and verify
 `RackForge-RaspberryPi-arm64.tar.gz` from the GitHub release, then run:
@@ -63,5 +64,6 @@ prints a clear error and exits before opening MIDI, plugins, or ALSA. The
 kernel releases this lock automatically when the owning process exits or
 crashes; the persistent lock file is not a stale PID-file gate.
 
-Plugins are installed separately as `.rfplugin` packages. Proprietary banks
-and ROMs are never bundled with RackForge.
+RF-Soundfonts and its openly licensed YDP Grand Piano are included as the
+default instrument. Other plugins are installed separately as `.rfplugin`
+packages. Proprietary banks and ROMs are never bundled with RackForge.

@@ -38,6 +38,13 @@ jobs:
           pnpm --dir web install --frozen-lockfile
           pnpm --dir web build
 
+      - name: Fetch verified default instrument
+        shell: pwsh
+        run: |
+          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Soundfonts.rfplugin'
+          ./tools/fetch-default-plugin.ps1 -Output $plugin
+          "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
+
       - name: Build RackForge Desktop
         shell: pwsh
         run: ./tools/build-windows-desktop.ps1
@@ -98,7 +105,14 @@ jobs:
             "ndk;27.0.12077973"
           test -x "$sdk_root/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
 
-      - name: Build plugin-independent APK
+      - name: Fetch verified default instrument
+        shell: pwsh
+        run: |
+          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Soundfonts.rfplugin'
+          ./tools/fetch-default-plugin.ps1 -Output $plugin
+          "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
+
+      - name: Build Android APK
         shell: bash
         run: bash tools/build-android.sh
 
@@ -150,6 +164,13 @@ jobs:
         run: |
           corepack enable
           corepack prepare pnpm@11.9.0 --activate
+
+      - name: Fetch verified default instrument
+        shell: pwsh
+        run: |
+          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Soundfonts.rfplugin'
+          ./tools/fetch-default-plugin.ps1 -Output $plugin
+          "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
 
       - name: Build Raspberry Pi release bundle
         shell: bash

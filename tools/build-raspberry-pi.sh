@@ -62,6 +62,16 @@ RACKFORGE_SOURCE="$repository" bash \
 
 cp -a "$repository/web/dist" "$release/web/dist"
 cp -a "$repository/config/." "$release/config/"
+if [[ -n "${RACKFORGE_BUNDLED_PLUGIN:-}" ]]; then
+  [[ -f "$RACKFORGE_BUNDLED_PLUGIN" ]] || {
+    printf 'RACKFORGE_BUNDLED_PLUGIN is not a file: %s\n' \
+      "$RACKFORGE_BUNDLED_PLUGIN" >&2
+    exit 2
+  }
+  install -d "$release/bundled-plugins"
+  install -m 0644 "$RACKFORGE_BUNDLED_PLUGIN" \
+    "$release/bundled-plugins/RF-Soundfonts.rfplugin"
+fi
 install -d "$release/platforms/raspberry-pi" "$release/hardware"
 for entry in appliance audio config etc provision sbin scripts systemd README.md install-release.sh
 do
@@ -72,14 +82,19 @@ cp -a "$repository/hardware/controllers" "$release/hardware/controllers"
 cp "$repository/THIRD_PARTY_NOTICES.md" "$release/THIRD_PARTY_NOTICES.md"
 
 revision="${GITHUB_SHA:-$(git rev-parse HEAD)}"
-printf 'revision=%s\narchitecture=linux-aarch64\nplugins=built-separately\n' \
-  "$revision" >"$release/build-info.txt"
+default_plugin=none
+if [[ -f "$release/bundled-plugins/RF-Soundfonts.rfplugin" ]]; then
+  default_plugin=org.rackforge.rf-soundfonts
+fi
+printf 'revision=%s\narchitecture=linux-aarch64\ndefault_plugin=%s\n' \
+  "$revision" "$default_plugin" >"$release/build-info.txt"
 
 cat >"$release/INSTALL.md" <<'EOF'
 # RackForge for Raspberry Pi ARM64
 
-This artifact contains RackForge hosts and Raspberry Pi integration only.
-Instrument plugins are versioned and distributed by their own pipelines.
+This artifact contains the RackForge hosts, Raspberry Pi integration, and the
+verified RF-Soundfonts default instrument. Other instruments are versioned and
+distributed by their own pipelines.
 
 Extract it for the user who will run RackForge. The installer derives the
 deployment root from that user's home directory; it can also be overridden
@@ -93,8 +108,8 @@ bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install.sh"
 bash "$HOME/rackforge/current/platforms/raspberry-pi/scripts/install-appliance.sh"
 ```
 
-Install and configure an instrument `.rfplugin` before creating `audio.toml`
-or starting the audio service for unattended boot.
+Select the MIDI and audio devices before creating `audio.toml` or starting the
+audio service for unattended boot.
 EOF
 
 mkdir -p "$output_directory"

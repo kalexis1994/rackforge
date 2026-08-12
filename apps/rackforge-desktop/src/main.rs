@@ -54,6 +54,8 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+include!(concat!(env!("OUT_DIR"), "/bundled_plugin.rs"));
+
 const LONG_PRESS: Duration = Duration::from_millis(700);
 const HOME_CHORD_SIMULTANEITY: Duration = Duration::from_millis(250);
 const LITTLE_WIDTH: f32 = 760.0;
@@ -3132,6 +3134,8 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
         }
     }
 
+    install_bundled_default_plugin(&options)?;
+
     let session = Arc::new(RwLock::new(SessionState::new(
         SessionId::new(DEFAULT_LIVE_SESSION_ID).expect("valid live session id"),
     )));
@@ -3144,6 +3148,32 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
     )?;
     let app = DesktopApp::new(Arc::clone(&session), &options, web_servers, web_control)?;
     Ok(app)
+}
+
+fn install_bundled_default_plugin(options: &Options) -> Result<()> {
+    let Some(bytes) = BUNDLED_DEFAULT_PLUGIN else {
+        return Ok(());
+    };
+    let Some(store_root) = options.plugin_store_root.as_deref() else {
+        return Ok(());
+    };
+    let packages_root = store_root.join("packages");
+    if fs::read_dir(&packages_root)
+        .ok()
+        .is_some_and(|mut entries| entries.next().is_some())
+    {
+        return Ok(());
+    }
+    let installed = install_local_archive(store_root, bytes)
+        .context("installing the bundled default instrument")?;
+    eprintln!(
+        "DESKTOP_DEFAULT_PLUGIN id={} version={} path={} existing={}",
+        installed.record.plugin_id,
+        installed.record.version,
+        installed.path.display(),
+        installed.already_installed
+    );
+    Ok(())
 }
 
 impl RackForgeApp {

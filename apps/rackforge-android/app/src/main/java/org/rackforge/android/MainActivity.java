@@ -129,6 +129,7 @@ public final class MainActivity extends Activity {
     private static native String pluginWebEntry();
     private static native String pluginWebContext();
     private static native boolean selectPluginSound(String soundId);
+    private static native String pluginProgramCommand(String method, String paramsJson);
     private static native int loadPluginResource(String resourceId, String filePath);
     private static native String importPluginResourceArchive(
             String importerId, String archivePath, String resourceRoot);
@@ -453,6 +454,33 @@ public final class MainActivity extends Activity {
                     }, "rackforge-resource-loader").start();
                     return;
                 }
+                if (isPluginProgramMethod(method)) {
+                    JSONObject params = request.optJSONObject("params");
+                    String paramsJson = params == null ? "{}" : params.toString();
+                    new Thread(() -> {
+                        try {
+                            String updatedContext = pluginProgramCommand(method, paramsJson);
+                            if (updatedContext == null || updatedContext.isBlank()) {
+                                throw new IllegalStateException(
+                                        "Portable runtime did not return the updated program context");
+                            }
+                            runOnUiThread(() -> {
+                                respondToPlugin(requestId, true, null);
+                                sendPluginMessage(updatedContext);
+                                if ("plugin.save_program".equals(method)
+                                        || "plugin.cancel_program".equals(method)) {
+                                    keyLabSyncActivePlugin();
+                                    refreshKeyLabDisplay();
+                                }
+                            });
+                        } catch (Throwable error) {
+                            Log.e("RackForge", "Plugin program command failed", error);
+                            runOnUiThread(() -> respondToPlugin(requestId, false,
+                                    error.getMessage() == null ? error.toString() : error.getMessage()));
+                        }
+                    }, "rackforge-program-editor").start();
+                    return;
+                }
                 if (!"plugin.select_sound".equals(method)) {
                     respondToPlugin(requestId, false, "Method is not available on Android.");
                     return;
@@ -483,11 +511,24 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private static boolean isPluginProgramMethod(String method) {
+        return "plugin.begin_program_edit".equals(method)
+                || "plugin.edit_program_field".equals(method)
+                || "plugin.set_program_name".equals(method)
+                || "plugin.restore_program_preview".equals(method)
+                || "plugin.save_program".equals(method)
+                || "plugin.cancel_program".equals(method);
+    }
+
     private void respondToPlugin(String requestId, boolean ok, String error) {
         respondToPlugin(requestId, ok, error, null);
     }
 
     private void respondToPlugin(String requestId, boolean ok, String error, Object result) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(() -> respondToPlugin(requestId, ok, error, result));
+            return;
+        }
         try {
             JSONObject response = new JSONObject();
             response.put("protocol", "rackforge.plugin.web@1");

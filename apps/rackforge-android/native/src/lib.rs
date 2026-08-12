@@ -4,12 +4,18 @@ use jni::objects::{JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
 use keylab_essential_mk3::protocol as keylab_protocol;
 use rackforge_core::{
-    LoadedPlugin, PluginInstance, PluginPackage,
+    LoadedPlugin, PluginInstance, PluginPackage, PluginStorage,
     midi_hotplug::{PanicScope, panic_packets},
 };
-use rackforge_plugin_api::{PluginKind, PresetCatalog, WebSurfaceKind, abi::MidiEventV1};
+use rackforge_plugin_api::{
+    PROGRAM_EDITOR_SCHEMA_VERSION, PluginKind, PreparedProgram, PresetCatalog, ProgramDocument,
+    ProgramEditRequest, ProgramEditorValue, ProgramEditorView, ProgramFieldEditRequest,
+    WebSurfaceKind, abi::MidiEventV1,
+};
 use rackforge_repository::install_local_archive;
-use rackforge_session_api::{HostControlTarget, MasterLevel, MasterPan};
+use rackforge_session_api::{
+    HostControlTarget, InstanceId, MasterLevel, MasterPan, ProgramDraftState,
+};
 use rackforge_surface_runtime::{
     ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayPlugin, PlaySound,
 };
@@ -398,8 +404,12 @@ struct AndroidEngine {
     config_web_entry: Option<String>,
     resource_requirements: Vec<rackforge_plugin_api::ResourceRequirement>,
     resource_overrides: BTreeMap<String, PathBuf>,
+    data_root: PathBuf,
     catalog: PresetCatalog,
     selected_sound_id: String,
+    program_draft: Option<ProgramDraftState>,
+    program_previous_sound_id: Option<String>,
+    next_program_draft_id: u64,
 }
 
 struct SendablePluginInstance(PluginInstance<'static>);
@@ -557,12 +567,19 @@ impl AndroidEngine {
             config_web_entry,
             resource_requirements,
             resource_overrides: BTreeMap::new(),
+            data_root,
             catalog,
             selected_sound_id,
+            program_draft: None,
+            program_previous_sound_id: None,
+            next_program_draft_id: 1,
         })
     }
 
     fn select_sound(&mut self, sound_id: &str) -> Result<()> {
+        if self.program_draft.is_some() {
+            bail!("finish or cancel the active program edit before selecting another sound");
+        }
         if !self
             .catalog
             .presets
@@ -574,6 +591,294 @@ impl AndroidEngine {
         self.instance.0.load_preset(sound_id)?;
         self.selected_sound_id = sound_id.to_owned();
         Ok(())
+    }
+
+    fn draft_state(
+        &self,
+        draft_id: u64,
+        original_program_id: Option<String>,
+        prepared: &PreparedProgram,
+        editor: ProgramEditorView,
+        dirty: bool,
+    ) -> Result<ProgramDraftState> {
+        prepared
+            .validate()
+            .context("validating Android prepared program")?;
+        editor
+            .validate()
+            .context("validating Android program editor")?;
+        Ok(ProgramDraftState {
+            draft_id,
+            instance_id: InstanceId::new("android-main").map_err(anyhow::Error::msg)?,
+            original_program_id,
+            name: prepared.document.name.clone(),
+            preview_sound_id: prepared.preview_sound_id.clone(),
+            storage_path: prepared.storage_path.clone(),
+            artifacts: prepared.artifacts.clone(),
+            document_json: serde_json::to_string(&prepared.document)
+                .context("serializing Android program draft")?,
+            editor,
+            dirty,
+        })
+    }
+
+    fn active_draft(&self, draft_id: u64) -> Result<ProgramDraftState> {
+        self.program_draft
+            .as_ref()
+            .filter(|draft| draft.draft_id == draft_id)
+            .cloned()
+            .context("program draft is missing or no longer valid")
+    }
+
+    fn begin_program_edit(&mut self, program_id: Option<String>) -> Result<()> {
+        if self.program_draft.is_some() {
+            bail!("another program edit is already active");
+        }
+        if !self.instance.0.supports_program_editing() {
+            bail!(
+                "{} does not expose the RackForge program editor",
+                self.plugin_name
+            );
+        }
+        let prepared = self
+            .instance
+            .0
+            .begin_program_edit(&ProgramEditRequest::new(program_id.clone()))
+            .context("beginning program editing")?;
+        let editor = self
+            .instance
+            .0
+            .program_editor_view(&prepared.document)
+            .context("building the program editor")?;
+        if !self
+            .instance
+            .0
+            .preview_program(&prepared)
+            .context("previewing the program draft")?
+        {
+            bail!("plugin rejected the program preview");
+        }
+        let draft_id = self.next_program_draft_id;
+        self.next_program_draft_id = self.next_program_draft_id.saturating_add(1);
+        let draft = self.draft_state(draft_id, program_id, &prepared, editor, false)?;
+        self.program_previous_sound_id = Some(self.selected_sound_id.clone());
+        self.program_draft = Some(draft);
+        Ok(())
+    }
+
+    fn edit_program_field(
+        &mut self,
+        draft_id: u64,
+        field_id: String,
+        value: ProgramEditorValue,
+        preview: bool,
+    ) -> Result<()> {
+        let draft = self.active_draft(draft_id)?;
+        let document: ProgramDocument = serde_json::from_str(&draft.document_json)
+            .context("parsing the stored Android program draft")?;
+        let prepared = self
+            .instance
+            .0
+            .apply_program_edit(&ProgramFieldEditRequest {
+                schema_version: PROGRAM_EDITOR_SCHEMA_VERSION,
+                document,
+                field_id,
+                value,
+            })
+            .context("applying the program field edit")?;
+        let editor = self
+            .instance
+            .0
+            .program_editor_view(&prepared.document)
+            .context("refreshing the program editor")?;
+        if !self
+            .instance
+            .0
+            .preview_program(&prepared)
+            .context("previewing the edited program")?
+        {
+            bail!("plugin rejected the edited program preview");
+        }
+        if !preview {
+            self.program_draft = Some(self.draft_state(
+                draft_id,
+                draft.original_program_id,
+                &prepared,
+                editor,
+                true,
+            )?);
+        }
+        Ok(())
+    }
+
+    fn replace_program_document(
+        &mut self,
+        draft: ProgramDraftState,
+        document: ProgramDocument,
+    ) -> Result<()> {
+        let confirmed: ProgramDocument = serde_json::from_str(&draft.document_json)
+            .context("parsing the confirmed Android program draft")?;
+        if document.id != confirmed.id || document.plugin_id != confirmed.plugin_id {
+            bail!("program identity cannot change during editing");
+        }
+        let prepared = self
+            .instance
+            .0
+            .prepare_program_save(&document)
+            .context("preparing the edited program")?;
+        let editor = self
+            .instance
+            .0
+            .program_editor_view(&prepared.document)
+            .context("refreshing the program editor")?;
+        if !self
+            .instance
+            .0
+            .preview_program(&prepared)
+            .context("previewing the edited program")?
+        {
+            bail!("plugin rejected the edited program preview");
+        }
+        self.program_draft = Some(self.draft_state(
+            draft.draft_id,
+            draft.original_program_id,
+            &prepared,
+            editor,
+            true,
+        )?);
+        Ok(())
+    }
+
+    fn set_program_name(&mut self, draft_id: u64, name: String) -> Result<()> {
+        let draft = self.active_draft(draft_id)?;
+        let mut document: ProgramDocument = serde_json::from_str(&draft.document_json)
+            .context("parsing the stored Android program draft")?;
+        document.name = name;
+        self.replace_program_document(draft, document)
+    }
+
+    fn restore_program_preview(&mut self, draft_id: u64) -> Result<()> {
+        let draft = self.active_draft(draft_id)?;
+        let document: ProgramDocument = serde_json::from_str(&draft.document_json)
+            .context("parsing the stored Android program draft")?;
+        let prepared = self
+            .instance
+            .0
+            .prepare_program_save(&document)
+            .context("restoring the confirmed program draft")?;
+        if !self
+            .instance
+            .0
+            .preview_program(&prepared)
+            .context("restoring the program preview")?
+        {
+            bail!("plugin rejected the restored program preview");
+        }
+        Ok(())
+    }
+
+    fn restore_previous_program(&mut self) -> Result<()> {
+        let previous = self
+            .program_previous_sound_id
+            .clone()
+            .context("program audition has no previous sound")?;
+        self.instance
+            .0
+            .reset()
+            .context("resetting the program audition")?;
+        self.instance
+            .0
+            .load_preset(&previous)
+            .with_context(|| format!("restoring preset {previous:?}"))?;
+        self.selected_sound_id = previous;
+        Ok(())
+    }
+
+    fn save_program(&mut self, draft_id: u64) -> Result<()> {
+        let draft = self.active_draft(draft_id)?;
+        let document: ProgramDocument = serde_json::from_str(&draft.document_json)
+            .context("parsing the stored Android program draft")?;
+        let prepared = self
+            .instance
+            .0
+            .prepare_program_save(&document)
+            .context("preparing the Android program for saving")?;
+        PluginStorage::new(&self.data_root)
+            .save_prepared_program(&prepared)
+            .context("saving the Android program")?;
+        self.instance
+            .0
+            .install_program(&prepared)
+            .context("installing the saved Android program")?;
+        self.catalog = self
+            .instance
+            .0
+            .preset_catalog()
+            .context("refreshing the Android program catalog")?;
+        self.restore_previous_program()?;
+        self.program_draft = None;
+        self.program_previous_sound_id = None;
+        Ok(())
+    }
+
+    fn cancel_program_edit(&mut self, draft_id: u64) -> Result<()> {
+        self.active_draft(draft_id)?;
+        self.restore_previous_program()?;
+        self.program_draft = None;
+        self.program_previous_sound_id = None;
+        Ok(())
+    }
+
+    fn apply_program_web_command(
+        &mut self,
+        method: &str,
+        params: &serde_json::Value,
+    ) -> Result<()> {
+        let draft_id = || {
+            params
+                .get("draft_id")
+                .and_then(serde_json::Value::as_u64)
+                .context("program command is missing draft_id")
+        };
+        match method {
+            "plugin.begin_program_edit" => self.begin_program_edit(
+                params
+                    .get("program_id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
+            ),
+            "plugin.edit_program_field" => self.edit_program_field(
+                draft_id()?,
+                params
+                    .get("field_id")
+                    .and_then(serde_json::Value::as_str)
+                    .context("program field edit is missing field_id")?
+                    .to_owned(),
+                serde_json::from_value(
+                    params
+                        .get("value")
+                        .cloned()
+                        .context("program field edit is missing value")?,
+                )
+                .context("parsing program editor value")?,
+                params
+                    .get("preview")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+            ),
+            "plugin.set_program_name" => self.set_program_name(
+                draft_id()?,
+                params
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .context("program name command is missing name")?
+                    .to_owned(),
+            ),
+            "plugin.restore_program_preview" => self.restore_program_preview(draft_id()?),
+            "plugin.save_program" => self.save_program(draft_id()?),
+            "plugin.cancel_program" => self.cancel_program_edit(draft_id()?),
+            _ => bail!("method {method:?} is not a program editing command"),
+        }
     }
 
     fn web_context_json(&self) -> String {
@@ -606,8 +911,12 @@ impl AndroidEngine {
                 "sounds": sounds,
                 "selected_sound_id": self.selected_sound_id,
             },
-            "program_draft": null,
-            "audition": null,
+            "program_draft": &self.program_draft,
+            "audition": self.program_draft.as_ref().map(|draft| serde_json::json!({
+                "lease_id": draft.draft_id,
+                "instance_id": "android-main",
+                "previous_sound_id": self.program_previous_sound_id,
+            })),
             "host": {
                 "active_mode": "play",
                 "master_level": 0,
@@ -1529,6 +1838,29 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_selectPluginSound
             JNI_FALSE
         }
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginProgramCommand(
+    mut env: JNIEnv,
+    _class: JClass,
+    method: JString,
+    params_json: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let method = java_string(&mut env, method)?;
+        let params: serde_json::Value = serde_json::from_str(&java_string(&mut env, params_json)?)
+            .context("parsing plugin program command parameters")?;
+        let mut guard = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+        let engine = guard
+            .as_mut()
+            .context("RackForge engine is not initialized")?;
+        engine.apply_program_web_command(&method, &params)?;
+        Ok(engine.web_context_json())
+    })();
+    result_string(&mut env, result)
 }
 
 #[unsafe(no_mangle)]

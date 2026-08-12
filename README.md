@@ -128,7 +128,7 @@ sudo reboot
   long-press return, and the host escape chord across the three platforms.
 - The HTTP server is disabled by default on desktop. Network exposure remains
   an explicit user setting.
-- The `v0.1.0` packages are preview builds: Windows is not production-signed
+- The `v0.1.x` packages are preview builds: Windows is not production-signed
   and Android still uses a debug signing configuration.
 
 The next milestone focuses on reliability gates, package conformance,

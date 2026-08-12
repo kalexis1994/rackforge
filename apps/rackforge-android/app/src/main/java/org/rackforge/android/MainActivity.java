@@ -1426,7 +1426,8 @@ public final class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("About RackForge")
-                .setMessage("RackForge Android 0.1.0 prototype\nPortable .rfplugin runtime\nRust + Wasmtime + AAudio")
+                .setMessage("RackForge Android " + BuildConfig.VERSION_NAME
+                        + "\nPortable .rfplugin runtime\nRust + Wasmtime + AAudio")
                 .setPositiveButton("Close", null)
                 .show();
     }

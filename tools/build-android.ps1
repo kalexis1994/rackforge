@@ -42,7 +42,11 @@ $env:AR_aarch64_linux_android = $androidAr
 
 Push-Location $repository
 try {
-    & cargo build --locked --release -p rackforge-android-native --target aarch64-linux-android
+    # Use the MSVC host toolchain explicitly. The user's default Rust host may be
+    # GNU, which makes native build dependencies look for dlltool.exe even though
+    # the final target is linked by the Android NDK clang toolchain configured above.
+    & rustup run stable-x86_64-pc-windows-msvc cargo build --locked --release `
+        -p rackforge-android-native --target aarch64-linux-android
     if ($LASTEXITCODE -ne 0) {
         throw "RackForge Android native runtime build failed."
     }

@@ -44,6 +44,13 @@ static AUDIO_CALLBACK_COUNT: AtomicU64 = AtomicU64::new(0);
 static AUDIO_CALLBACK_FRAMES: AtomicU64 = AtomicU64::new(0);
 static AUDIO_CALLBACK_TOTAL_NANOS: AtomicU64 = AtomicU64::new(0);
 static AUDIO_CALLBACK_MAX_NANOS: AtomicU64 = AtomicU64::new(0);
+static AUDIO_ENGINE_LOCK_MISSES: AtomicU64 = AtomicU64::new(0);
+static AUDIO_RENDER_ERRORS: AtomicU64 = AtomicU64::new(0);
+static AUDIO_NONFINITE_SAMPLES: AtomicU64 = AtomicU64::new(0);
+static AUDIO_CLIPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
+static AUDIO_RECOVERY_RAMP_PENDING: AtomicU32 = AtomicU32::new(0);
+static AUDIO_LAST_LEFT_BITS: AtomicU32 = AtomicU32::new(0.0_f32.to_bits());
+static AUDIO_LAST_RIGHT_BITS: AtomicU32 = AtomicU32::new(0.0_f32.to_bits());
 
 const AAUDIO_OK: i32 = 0;
 const AAUDIO_DIRECTION_OUTPUT: i32 = 0;
@@ -56,6 +63,7 @@ const AAUDIO_CALLBACK_RESULT_CONTINUE: i32 = 0;
 const CONTROLLER_LONG_PRESS_MS: u128 = 700;
 const CONTROLLER_HOME_CHORD_MS: u128 = 250;
 const MASTER_SMOOTHING_FACTOR: f32 = 0.02;
+const DROPOUT_FADE_FRAMES: usize = 64;
 const HOST_CONTROL_HEADER_MS: u64 = 1_500;
 
 struct AndroidControllerMenu {
@@ -452,6 +460,24 @@ impl NativeAudioOutput {
             _ => bail!("invalid Android latency mode {latency_mode}"),
         }
     }
+
+    fn grow_buffer(&self) -> bool {
+        if self.stream.is_null() {
+            return false;
+        }
+        // SAFETY: self owns a live stream and AAudio permits changing the
+        // application buffer size while the stream is running.
+        unsafe {
+            let burst = AAudioStream_getFramesPerBurst(self.stream);
+            let current = AAudioStream_getBufferSizeInFrames(self.stream);
+            let capacity = AAudioStream_getBufferCapacityInFrames(self.stream);
+            if burst <= 0 || current < 0 || capacity <= current {
+                return false;
+            }
+            let requested = current.saturating_add(burst).min(capacity);
+            AAudioStream_setBufferSizeInFrames(self.stream, requested) > current
+        }
+    }
 }
 
 impl Drop for NativeAudioOutput {
@@ -820,6 +846,10 @@ fn audio_status_json() -> String {
             "pending_error": AUDIO_ERROR.load(Ordering::Acquire),
             "midi_dropped_events": MIDI_DROPPED_EVENTS.load(Ordering::Relaxed),
             "midi_panic_count": MIDI_PANIC_COUNT.load(Ordering::Relaxed),
+            "engine_lock_misses": AUDIO_ENGINE_LOCK_MISSES.load(Ordering::Relaxed),
+            "render_errors": AUDIO_RENDER_ERRORS.load(Ordering::Relaxed),
+            "nonfinite_samples": AUDIO_NONFINITE_SAMPLES.load(Ordering::Relaxed),
+            "clipped_samples": AUDIO_CLIPPED_SAMPLES.load(Ordering::Relaxed),
             "callback_count": callback_count,
             "average_callback_us": average_callback_micros,
             "maximum_callback_us": AUDIO_CALLBACK_MAX_NANOS.load(Ordering::Relaxed) as f64 / 1_000.0,
@@ -848,11 +878,24 @@ unsafe extern "C" fn render_callback(
     if num_frames as u32 > MAX_FRAMES {
         return AAUDIO_CALLBACK_RESULT_CONTINUE;
     }
-    if let Ok(mut guard) = engine().try_lock()
-        && let Some(engine) = guard.as_mut()
-        && engine.render(num_frames as u32, output).is_err()
-    {
-        output.fill(0.0);
+    let rendered = match engine().try_lock() {
+        Ok(mut guard) => match guard.as_mut() {
+            Some(engine) => match engine.render(num_frames as u32, output) {
+                Ok(()) => true,
+                Err(_) => {
+                    AUDIO_RENDER_ERRORS.fetch_add(1, Ordering::Relaxed);
+                    false
+                }
+            },
+            None => false,
+        },
+        Err(_) => {
+            AUDIO_ENGINE_LOCK_MISSES.fetch_add(1, Ordering::Relaxed);
+            false
+        }
+    };
+    if !rendered {
+        conceal_audio_dropout(output);
     }
     let output_gain = f32::from_bits(OUTPUT_GAIN_BITS.load(Ordering::Relaxed));
     let level_target = f32::from_bits(MASTER_LEVEL_TARGET_BITS.load(Ordering::Relaxed));
@@ -861,22 +904,73 @@ unsafe extern "C" fn render_callback(
     let mut level = f32::from_bits(MASTER_LEVEL_CURRENT_BITS.load(Ordering::Relaxed));
     let mut pan_left = f32::from_bits(MASTER_PAN_LEFT_CURRENT_BITS.load(Ordering::Relaxed));
     let mut pan_right = f32::from_bits(MASTER_PAN_RIGHT_CURRENT_BITS.load(Ordering::Relaxed));
-    for frame in output.chunks_exact_mut(2) {
+    let recover = rendered && AUDIO_RECOVERY_RAMP_PENDING.swap(0, Ordering::AcqRel) != 0;
+    let recovery_frames = output.len().div_ceil(2).min(DROPOUT_FADE_FRAMES).max(1);
+    let mut nonfinite = 0_u64;
+    let mut clipped = 0_u64;
+    for (index, frame) in output.chunks_exact_mut(2).enumerate() {
         smooth_master_sample(&mut level, level_target);
         smooth_master_sample(&mut pan_left, pan_left_target);
         smooth_master_sample(&mut pan_right, pan_right_target);
-        frame[0] = (frame[0] * output_gain * level * pan_left).clamp(-1.0, 1.0);
-        frame[1] = (frame[1] * output_gain * level * pan_right).clamp(-1.0, 1.0);
+        let recovery_gain = if recover && index < recovery_frames {
+            (index + 1) as f32 / recovery_frames as f32
+        } else {
+            1.0
+        };
+        let gain = output_gain * level * recovery_gain;
+        let left = if rendered {
+            frame[0] * gain * pan_left
+        } else {
+            frame[0]
+        };
+        let right = if rendered {
+            frame[1] * gain * pan_right
+        } else {
+            frame[1]
+        };
+        for (sample, value) in frame.iter_mut().zip([left, right]) {
+            if !value.is_finite() {
+                *sample = 0.0;
+                nonfinite += 1;
+            } else {
+                if value.abs() > 1.0 {
+                    clipped += 1;
+                }
+                *sample = value.clamp(-1.0, 1.0);
+            }
+        }
     }
+    AUDIO_NONFINITE_SAMPLES.fetch_add(nonfinite, Ordering::Relaxed);
+    AUDIO_CLIPPED_SAMPLES.fetch_add(clipped, Ordering::Relaxed);
     MASTER_LEVEL_CURRENT_BITS.store(level.to_bits(), Ordering::Relaxed);
     MASTER_PAN_LEFT_CURRENT_BITS.store(pan_left.to_bits(), Ordering::Relaxed);
     MASTER_PAN_RIGHT_CURRENT_BITS.store(pan_right.to_bits(), Ordering::Relaxed);
+    if let Some(last) = output.chunks_exact(2).last() {
+        AUDIO_LAST_LEFT_BITS.store(last[0].to_bits(), Ordering::Relaxed);
+        AUDIO_LAST_RIGHT_BITS.store(last[1].to_bits(), Ordering::Relaxed);
+    }
     let elapsed = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
     AUDIO_CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
     AUDIO_CALLBACK_FRAMES.fetch_add(num_frames as u64, Ordering::Relaxed);
     AUDIO_CALLBACK_TOTAL_NANOS.fetch_add(elapsed, Ordering::Relaxed);
     AUDIO_CALLBACK_MAX_NANOS.fetch_max(elapsed, Ordering::Relaxed);
     AAUDIO_CALLBACK_RESULT_CONTINUE
+}
+
+fn conceal_audio_dropout(output: &mut [f32]) {
+    let left = f32::from_bits(AUDIO_LAST_LEFT_BITS.load(Ordering::Relaxed));
+    let right = f32::from_bits(AUDIO_LAST_RIGHT_BITS.load(Ordering::Relaxed));
+    let fade_frames = output.len().div_ceil(2).min(DROPOUT_FADE_FRAMES).max(1);
+    for (index, frame) in output.chunks_exact_mut(2).enumerate() {
+        let gain = if index < fade_frames {
+            1.0 - (index + 1) as f32 / fade_frames as f32
+        } else {
+            0.0
+        };
+        frame[0] = left * gain;
+        frame[1] = right * gain;
+    }
+    AUDIO_RECOVERY_RAMP_PENDING.store(1, Ordering::Release);
 }
 
 fn java_string(env: &mut JNIEnv<'_>, value: JString<'_>) -> Result<String> {
@@ -1554,6 +1648,13 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_startNativeAudio(
         AUDIO_CALLBACK_FRAMES.store(0, Ordering::Relaxed);
         AUDIO_CALLBACK_TOTAL_NANOS.store(0, Ordering::Relaxed);
         AUDIO_CALLBACK_MAX_NANOS.store(0, Ordering::Relaxed);
+        AUDIO_ENGINE_LOCK_MISSES.store(0, Ordering::Relaxed);
+        AUDIO_RENDER_ERRORS.store(0, Ordering::Relaxed);
+        AUDIO_NONFINITE_SAMPLES.store(0, Ordering::Relaxed);
+        AUDIO_CLIPPED_SAMPLES.store(0, Ordering::Relaxed);
+        AUDIO_RECOVERY_RAMP_PENDING.store(0, Ordering::Relaxed);
+        AUDIO_LAST_LEFT_BITS.store(0.0_f32.to_bits(), Ordering::Relaxed);
+        AUDIO_LAST_RIGHT_BITS.store(0.0_f32.to_bits(), Ordering::Relaxed);
         *audio()
             .lock()
             .map_err(|_| anyhow::anyhow!("audio lock poisoned"))? = Some(candidate);
@@ -1574,6 +1675,19 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_nativeAudioStatus
     _class: JClass,
 ) -> jstring {
     result_string(&mut env, Ok(audio_status_json()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_growNativeAudioBuffer(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jboolean {
+    audio()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(NativeAudioOutput::grow_buffer))
+        .unwrap_or(false)
+        .into()
 }
 
 #[unsafe(no_mangle)]

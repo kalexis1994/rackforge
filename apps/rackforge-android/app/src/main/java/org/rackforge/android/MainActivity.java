@@ -88,6 +88,7 @@ public final class MainActivity extends Activity {
     private String selectedAudioDeviceKey = "default";
     private int latencyMode;
     private int outputGainDb;
+    private long lastObservedAudioXruns = -1;
     private boolean refreshingAudioOutputs;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final List<AudioOutputChoice> audioOutputChoices = new ArrayList<>();
@@ -142,13 +143,18 @@ public final class MainActivity extends Activity {
     private static native void setNativeOutputGain(int gainDb);
     static native void stopNativeAudio();
     private static native String nativeAudioStatus();
+    private static native boolean growNativeAudioBuffer();
     private static native int pollNativeAudioError();
 
     private final Runnable audioHealthPoll = new Runnable() {
         @Override public void run() {
             if (audioRunning) {
                 int error = pollNativeAudioError();
-                if (error != 0) recoverAudioStream(error);
+                if (error != 0) {
+                    recoverAudioStream(error);
+                } else {
+                    stabilizeAudioBufferAfterXrun();
+                }
             }
             mainHandler.postDelayed(this, 1_000);
         }
@@ -167,7 +173,9 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         preferences = getSharedPreferences("rackforge-settings", MODE_PRIVATE);
         selectedAudioDeviceKey = preferences.getString("audio.output", "default");
-        latencyMode = preferences.getInt("audio.latency", 0);
+        // Balanced leaves one extra AAudio burst for portable WASM instruments.
+        // Users can still opt into the most aggressive low-latency profile.
+        latencyMode = preferences.getInt("audio.latency", 1);
         outputGainDb = preferences.getInt("audio.gain_db", 0);
         setNativeOutputGain(outputGainDb);
         webView = new WebView(this);
@@ -1657,10 +1665,18 @@ public final class MainActivity extends Activity {
             double maximumUs = status.optDouble("maximum_callback_us", 0.0);
             double load = status.optDouble("callback_load_percent", 0.0);
             long droppedMidi = status.optLong("midi_dropped_events", 0);
+            long lockMisses = status.optLong("engine_lock_misses", 0);
+            long renderErrors = status.optLong("render_errors", 0);
+            long nonfiniteSamples = status.optLong("nonfinite_samples", 0);
+            long clippedSamples = status.optLong("clipped_samples", 0);
             audioCard.addView(settingsValue("Stream", actualRate + " Hz · " + burst + " frames/burst"));
             audioCard.addView(settingsValue("Buffer", buffer + " frames · " + xruns + " xruns"));
             audioCard.addView(settingsValue("Callback CPU", String.format(Locale.ROOT,
                     "%.1f%% · avg %.0f µs · max %.0f µs", load, averageUs, maximumUs)));
+            audioCard.addView(settingsValue("Audio continuity", lockMisses + " lock misses · "
+                    + renderErrors + " render errors"));
+            audioCard.addView(settingsValue("Signal integrity", nonfiniteSamples + " invalid · "
+                    + clippedSamples + " clipped samples"));
             audioCard.addView(settingsValue("MIDI queue", droppedMidi == 0
                     ? "No dropped events" : droppedMidi + " dropped events"));
         } catch (Exception ignored) {
@@ -2013,11 +2029,27 @@ public final class MainActivity extends Activity {
     }
 
     private void startAudio() {
+        lastObservedAudioXruns = -1;
         if (!startNativeAudio(selectedAudioDeviceId, latencyMode)) {
             throw new IllegalStateException("Native low-latency audio rejected the selected output");
         }
         audioRunning = true;
         startAudioService();
+    }
+
+    private void stabilizeAudioBufferAfterXrun() {
+        try {
+            JSONObject status = new JSONObject(nativeAudioStatus());
+            long xruns = status.optLong("xruns", -1);
+            if (xruns >= 0 && lastObservedAudioXruns >= 0 && xruns > lastObservedAudioXruns) {
+                if (growNativeAudioBuffer()) {
+                    Log.w("RackForge", "AAudio xrun detected; increased the stream buffer by one burst");
+                }
+            }
+            lastObservedAudioXruns = xruns;
+        } catch (Throwable error) {
+            Log.w("RackForge", "Could not inspect AAudio continuity", error);
+        }
     }
 
     private void startAudioService() {

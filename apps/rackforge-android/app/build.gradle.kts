@@ -18,8 +18,8 @@ android {
         applicationId = "org.rackforge.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.3-preview"
+        versionCode = 5
+        versionName = "0.1.4-preview"
     }
 
     sourceSets {

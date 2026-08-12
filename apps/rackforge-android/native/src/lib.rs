@@ -15,6 +15,7 @@ use rackforge_surface_runtime::{
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{CStr, c_char, c_void};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::slice;
@@ -1623,6 +1624,121 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_loadPluginResourc
         Err(error) => {
             report(&mut env, error);
             0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_importPluginResourceArchive(
+    mut env: JNIEnv,
+    _class: JClass,
+    importer_id: JString,
+    archive_path: JString,
+    resource_root: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let importer_id = java_string(&mut env, importer_id)?;
+        let archive_path = fs::canonicalize(PathBuf::from(java_string(&mut env, archive_path)?))?;
+        let resource_root = PathBuf::from(java_string(&mut env, resource_root)?);
+        if !archive_path.is_file() {
+            bail!("selected resource archive is not a file");
+        }
+        let (runtime, selected_sound_id, mut resources, plugin_id) =
+            {
+                let guard = engine()
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+                let current = guard
+                    .as_ref()
+                    .context("RackForge engine is not initialized")?;
+                if !current.resource_requirements.iter().any(|resource| {
+                    resource.id == importer_id && !resource.import_targets.is_empty()
+                }) {
+                    bail!("plugin does not declare resource importer {importer_id:?}");
+                }
+                (
+                    current.runtime,
+                    current.selected_sound_id.clone(),
+                    current.resource_overrides.clone(),
+                    current.plugin_id.clone(),
+                )
+            };
+
+        let imported = runtime
+            .0
+            .import_resource_archive(&importer_id, &archive_path)?;
+        let plugin_root = resource_root.join(&plugin_id);
+        fs::create_dir_all(&plugin_root)
+            .with_context(|| format!("creating {}", plugin_root.display()))?;
+        let mut installed_ids = Vec::with_capacity(imported.len());
+        for (target_id, bytes) in &imported {
+            let destination = plugin_root.join(format!("{target_id}.resource"));
+            let temporary = plugin_root.join(format!(".{target_id}.resource-import"));
+            fs::write(&temporary, bytes)
+                .with_context(|| format!("writing {}", temporary.display()))?;
+            fs::rename(&temporary, &destination)
+                .with_context(|| format!("installing {}", destination.display()))?;
+            resources.insert(target_id.clone(), destination);
+            installed_ids.push(target_id.clone());
+        }
+
+        let replacement = (|| -> Result<_> {
+            let mut replacement = runtime
+                .0
+                .create_instance_with_resource_overrides(&resources)?;
+            let catalog = replacement.preset_catalog()?;
+            let next_sound_id = catalog
+                .presets
+                .iter()
+                .find(|preset| preset.id == selected_sound_id)
+                .or_else(|| catalog.presets.first())
+                .context("plugin exposes no playable preset after importing resources")?
+                .id
+                .clone();
+            replacement.load_preset(&next_sound_id)?;
+            replacement.activate(SAMPLE_RATE, MAX_FRAMES, 0, 2)?;
+            Ok((replacement, catalog, next_sound_id))
+        })();
+
+        let (retired, activated) = {
+            let mut guard = engine()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+            let current = guard
+                .as_mut()
+                .context("RackForge engine stopped while importing resources")?;
+            if current.plugin_id != plugin_id {
+                bail!("active plugin changed while importing resources");
+            }
+            current.resource_overrides = resources;
+            match replacement {
+                Ok((replacement, catalog, next_sound_id)) => {
+                    current.catalog = catalog;
+                    current.selected_sound_id = next_sound_id;
+                    (
+                        Some(std::mem::replace(
+                            &mut current.instance,
+                            SendablePluginInstance(replacement),
+                        )),
+                        true,
+                    )
+                }
+                Err(_) => (None, false),
+            }
+        };
+        drop(retired);
+        Ok(serde_json::json!({
+            "stored": true,
+            "activated": activated,
+            "installed_resource_ids": installed_ids,
+        })
+        .to_string())
+    })();
+    match result.and_then(|value| Ok(env.new_string(value)?.into_raw())) {
+        Ok(value) => value,
+        Err(error) => {
+            report(&mut env, error);
+            ptr::null_mut()
         }
     }
 }

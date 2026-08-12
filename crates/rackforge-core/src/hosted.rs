@@ -12,10 +12,15 @@ use rackforge_plugin_runtime::{
 };
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
+use zip::ZipArchive;
 
 const MAX_REALTIME_EVENTS: usize = 4096;
 const MAX_STATIC_METADATA_BYTES: u64 = 1024 * 1024;
+const MAX_IMPORT_ARCHIVE_ENTRIES: usize = 512;
+const MAX_IMPORT_ARCHIVE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_IMPORT_ARCHIVE_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 
 /// One validated RackForge plugin, independent of its execution backend.
 pub struct LoadedPlugin {
@@ -136,6 +141,93 @@ impl LoadedPlugin {
         instance
             .load_resource_file(id, path)
             .with_context(|| format!("validating portable resource {id:?}"))
+    }
+
+    /// Expands one manifest-declared ZIP importer into the actual resources it
+    /// contains. Entry names are deliberately ignored: the portable plugin
+    /// authenticates every candidate against each declared import target.
+    pub fn import_resource_archive(
+        &self,
+        importer_id: &str,
+        path: impl AsRef<Path>,
+    ) -> Result<BTreeMap<String, Vec<u8>>> {
+        let LoadedBackend::Portable(plugin) = &self.backend else {
+            bail!("resource archive import requires a portable wasm-v1 plugin");
+        };
+        let importer = plugin
+            .manifest
+            .resources
+            .iter()
+            .find(|resource| resource.id == importer_id && !resource.import_targets.is_empty())
+            .with_context(|| format!("resource {importer_id:?} is not a declared importer"))?;
+        let metadata = fs::metadata(path.as_ref())
+            .with_context(|| format!("inspecting resource archive {}", path.as_ref().display()))?;
+        if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_IMPORT_ARCHIVE_BYTES {
+            bail!("resource import ZIP size is outside supported limits");
+        }
+        let archive_bytes = fs::read(path.as_ref())
+            .with_context(|| format!("reading resource archive {}", path.as_ref().display()))?;
+        let mut archive =
+            ZipArchive::new(Cursor::new(archive_bytes)).context("opening resource import ZIP")?;
+        if archive.is_empty() || archive.len() > MAX_IMPORT_ARCHIVE_ENTRIES {
+            bail!("resource import ZIP entry count is outside supported limits");
+        }
+        let mut expanded = 0_u64;
+        let mut candidates = Vec::new();
+        for index in 0..archive.len() {
+            let mut entry = archive
+                .by_index(index)
+                .context("reading resource import ZIP")?;
+            if entry.is_dir() {
+                continue;
+            }
+            if entry
+                .unix_mode()
+                .is_some_and(|mode| mode & 0o170000 == 0o120000)
+            {
+                bail!("symbolic links are forbidden in resource import ZIPs");
+            }
+            expanded = expanded
+                .checked_add(entry.size())
+                .context("resource import ZIP expanded size overflow")?;
+            if expanded > MAX_IMPORT_ARCHIVE_EXPANDED_BYTES {
+                bail!("resource import ZIP exceeds the expanded size limit");
+            }
+            let length = usize::try_from(entry.size()).context("resource entry is too large")?;
+            let mut bytes = Vec::with_capacity(length);
+            entry
+                .read_to_end(&mut bytes)
+                .context("extracting resource import ZIP entry")?;
+            if bytes.len() != length {
+                bail!("resource import ZIP entry changed while it was read");
+            }
+            candidates.push(bytes);
+        }
+
+        let mut imported = BTreeMap::new();
+        for target_id in &importer.import_targets {
+            let mut matched = None;
+            for candidate in &candidates {
+                let mut instance = plugin.module.instantiate()?;
+                if instance.load_resource(target_id, candidate).is_ok() {
+                    if let Some(previous) = matched.as_ref()
+                        && previous != candidate
+                    {
+                        bail!(
+                            "resource import ZIP contains conflicting candidates for {target_id:?}"
+                        );
+                    }
+                    matched = Some(candidate.clone());
+                }
+            }
+            if let Some(bytes) = matched {
+                imported.insert(target_id.clone(), bytes);
+            }
+        }
+        if imported.is_empty() {
+            bail!("resource import ZIP contains no resources recognized by this plugin");
+        }
+        Ok(imported)
     }
 }
 

@@ -55,6 +55,13 @@ pub struct ResourceRequirement {
     /// user overrides still take precedence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub package_path: Option<String>,
+    /// Optional list of manifest resources that may be discovered inside this
+    /// file. Hosts treat such a resource as an import container: every entry is
+    /// authenticated by the plugin against these target ids and persisted in
+    /// the target's own private `data_path`. The container itself is never a
+    /// substitute for the resources it happens to contain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub import_targets: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -241,6 +248,43 @@ impl PluginManifest {
                 });
             }
         }
+        for resource in &self.resources {
+            if resource.import_targets.is_empty() {
+                continue;
+            }
+            if resource.kind != ResourceKind::File
+                || resource.required
+                || resource.data_path.is_some()
+                || resource.package_path.is_some()
+            {
+                return Err(ManifestError::InvalidResourceImporter(resource.id.clone()));
+            }
+            let mut targets = BTreeSet::new();
+            for target_id in &resource.import_targets {
+                if target_id == &resource.id || !targets.insert(target_id.as_str()) {
+                    return Err(ManifestError::InvalidResourceImportTarget {
+                        importer: resource.id.clone(),
+                        target: target_id.clone(),
+                    });
+                }
+                let Some(target) = self
+                    .resources
+                    .iter()
+                    .find(|candidate| candidate.id == *target_id)
+                else {
+                    return Err(ManifestError::InvalidResourceImportTarget {
+                        importer: resource.id.clone(),
+                        target: target_id.clone(),
+                    });
+                };
+                if target.kind != ResourceKind::File || target.data_path.is_none() {
+                    return Err(ManifestError::InvalidResourceImportTarget {
+                        importer: resource.id.clone(),
+                        target: target_id.clone(),
+                    });
+                }
+            }
+        }
         if let Some(component) = &self.component
             && let Some(memory_limit_mib) = component.memory_limit_mib
             && !(64..=512).contains(&memory_limit_mib)
@@ -394,6 +438,10 @@ pub enum ManifestError {
     UnsafeResourcePath { id: String, path: String },
     #[error("resource {id} package path must be a safe relative path: {path:?}")]
     UnsafePackagedResourcePath { id: String, path: String },
+    #[error("resource {0} is not a valid import container")]
+    InvalidResourceImporter(String),
+    #[error("resource {importer} has invalid import target {target:?}")]
+    InvalidResourceImportTarget { importer: String, target: String },
     #[error("portable memory limit must be between 64 and 512 MiB, found {0}")]
     InvalidPortableMemoryLimit(u32),
     #[error("invalid or duplicate UI layout {0:?}")]
@@ -478,12 +526,43 @@ mod tests {
             required: false,
             data_path: Some("roms/bank.bin".into()),
             package_path: None,
+            import_targets: Vec::new(),
         });
         assert_eq!(candidate.validate(), Ok(()));
         candidate.resources[0].data_path = Some("../outside.bin".into());
         assert!(matches!(
             candidate.validate(),
             Err(ManifestError::UnsafeResourcePath { .. })
+        ));
+    }
+
+    #[test]
+    fn validates_resource_importers_and_their_persistent_targets() {
+        let mut candidate = manifest();
+        candidate.resources.push(ResourceRequirement {
+            id: "sample-bank".into(),
+            name: "Sample bank".into(),
+            kind: ResourceKind::File,
+            required: false,
+            data_path: Some("roms/bank.bin".into()),
+            package_path: None,
+            import_targets: Vec::new(),
+        });
+        candidate.resources.push(ResourceRequirement {
+            id: "sample-archive".into(),
+            name: "Sample archive".into(),
+            kind: ResourceKind::File,
+            required: false,
+            data_path: None,
+            package_path: None,
+            import_targets: vec!["sample-bank".into()],
+        });
+        assert_eq!(candidate.validate(), Ok(()));
+
+        candidate.resources[1].import_targets = vec!["missing-bank".into()];
+        assert!(matches!(
+            candidate.validate(),
+            Err(ManifestError::InvalidResourceImportTarget { .. })
         ));
     }
 

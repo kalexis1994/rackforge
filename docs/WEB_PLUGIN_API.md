@@ -146,7 +146,11 @@ from plugin JavaScript.
   directory grants provide the selected child `entry_id`. RackForge activates
   a replacement instance when the installed set is already complete; partial
   sets remain safely installed for the next import. Future instances resolve
-  installed resources automatically.
+  installed resources automatically. When the selected manifest resource has
+  `import_targets`, the granted ZIP is only an import container: RackForge
+  authenticates its entries with the plugin, persists each recognized target
+  separately, and returns `installed_resource_ids`. Repeated ZIP imports are
+  cumulative; the ZIP itself is not reported as installed.
 - `plugin.begin_program_edit`: available to `PLAY` and `CONFIG`; starts a new
   program when `program_id` is `null`, or edits a program from that plugin's
   `custom` collection.

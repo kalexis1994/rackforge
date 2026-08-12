@@ -80,6 +80,24 @@ and the host rejects any path that escapes the private plugin directory. A
 portable component receives only the resource bytes through the SDK lifecycle;
 it never opens that path itself.
 
+Plugins may also declare a ZIP import container whose entries populate several
+ordinary file resources:
+
+```toml
+[[resources]]
+id = "bank-import"
+name = "Bank ZIP"
+kind = "file"
+required = false
+import_targets = ["program-rom", "wave-rom"]
+```
+
+An importer has no `data_path`: RackForge does not retain the container as a
+stand-in for its contents. It ignores entry names, asks a fresh portable plugin
+instance to authenticate each candidate against the declared targets, and
+persists every recognized file in that target's own `data_path`. Imports are
+cumulative, and a later ZIP may complete or replace individual resources.
+
 Plugins whose program list depends on those bytes implement
 `Processor::write_preset_catalog`. RackForge calls it on the control thread
 after resource delivery, validates the returned `PresetCatalog`, and falls back

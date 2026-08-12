@@ -1353,33 +1353,73 @@ impl DesktopApp {
             .position(|plugin| plugin.plugin_id == plugin_id)
             .ok_or_else(|| format!("Unknown Desktop plugin: {plugin_id}"))?;
         let plugin = &mut self.plugins[index];
-        let data_path = persist
-            .then(|| {
-                plugin
-                    .resource_data_paths
-                    .get(resource_id)
-                    .cloned()
-                    .ok_or_else(|| {
-                        format!(
-                            "Resource {resource_id:?} cannot be installed because it has no private data_path"
-                        )
-                    })
-            })
-            .transpose()?;
-        let selected_path = if let Some(data_path) = data_path.as_deref() {
-            plugin
-                .runtime
-                .validate_resource_file(resource_id, path)
-                .map_err(|error| format!("Selected file was rejected: {error:#}"))?;
-            PluginStorage::new(&self.options.data_root)
-                .copy_file_atomic(plugin_id, data_path, path)
-                .map_err(|error| format!("Could not install plugin resource: {error:#}"))?
-        } else {
-            path.to_path_buf()
-        };
-        let previous = plugin
+        let import_targets = plugin
+            .runtime
+            .manifest()
             .resources
-            .insert(resource_id.to_owned(), selected_path);
+            .iter()
+            .find(|resource| resource.id == resource_id)
+            .map(|resource| resource.import_targets.clone())
+            .ok_or_else(|| format!("Plugin does not declare resource {resource_id:?}"))?;
+        let mut previous = Vec::new();
+        let installed_count;
+        if !import_targets.is_empty() {
+            if !persist {
+                return Err(
+                    "Resource archives must be installed into private plugin storage".into(),
+                );
+            }
+            let imported = plugin
+                .runtime
+                .import_resource_archive(resource_id, path)
+                .map_err(|error| format!("Selected archive was rejected: {error:#}"))?;
+            let storage = PluginStorage::new(&self.options.data_root);
+            installed_count = imported.len();
+            for (target_id, bytes) in imported {
+                let data_path = plugin.resource_data_paths.get(&target_id).ok_or_else(|| {
+                    format!("Imported resource {target_id:?} has no private data_path")
+                })?;
+                let selected_path = storage
+                    .write_atomic(plugin_id, data_path, &bytes)
+                    .map_err(|error| format!("Could not install {target_id:?}: {error:#}"))?;
+                previous.push((
+                    target_id.clone(),
+                    plugin.resources.insert(target_id, selected_path),
+                ));
+            }
+        } else {
+            let data_path = persist
+                .then(|| {
+                    plugin
+                        .resource_data_paths
+                        .get(resource_id)
+                        .cloned()
+                        .ok_or_else(|| {
+                            format!(
+                                "Resource {resource_id:?} cannot be installed because it has no private data_path"
+                            )
+                        })
+                })
+                .transpose()?;
+            let selected_path = if let Some(data_path) = data_path.as_deref() {
+                plugin
+                    .runtime
+                    .validate_resource_file(resource_id, path)
+                    .map_err(|error| format!("Selected file was rejected: {error:#}"))?;
+                PluginStorage::new(&self.options.data_root)
+                    .copy_file_atomic(plugin_id, data_path, path)
+                    .map_err(|error| format!("Could not install plugin resource: {error:#}"))?
+            } else {
+                path.to_path_buf()
+            };
+            installed_count = 1;
+            previous.push((
+                resource_id.to_owned(),
+                plugin
+                    .resources
+                    .insert(resource_id.to_owned(), selected_path),
+            ));
+        }
 
         let prepare =
             (|| -> anyhow::Result<(PluginInstance<'static>, PresetCatalog, Option<String>)> {
@@ -1432,9 +1472,10 @@ impl DesktopApp {
                     session.revision = Revision::new(session.revision.get().saturating_add(1));
                 }
                 self.status = format!(
-                    "{} installed and activated {} from {}",
+                    "{} installed and activated {} recognized resource{} from {}",
                     plugin.name,
-                    resource_id,
+                    installed_count,
+                    if installed_count == 1 { "" } else { "s" },
                     path.file_name()
                         .map(|name| name.to_string_lossy())
                         .unwrap_or_else(|| path.display().to_string().into())
@@ -1449,12 +1490,14 @@ impl DesktopApp {
                     );
                     return Ok(());
                 }
-                match previous {
-                    Some(previous) => {
-                        plugin.resources.insert(resource_id.to_owned(), previous);
-                    }
-                    None => {
-                        plugin.resources.remove(resource_id);
+                for (id, prior) in previous {
+                    match prior {
+                        Some(prior) => {
+                            plugin.resources.insert(id, prior);
+                        }
+                        None => {
+                            plugin.resources.remove(&id);
+                        }
                     }
                 }
                 Err(format!("Could not load plugin resource: {error:#}"))

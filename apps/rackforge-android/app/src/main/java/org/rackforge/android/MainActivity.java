@@ -130,6 +130,8 @@ public final class MainActivity extends Activity {
     private static native String pluginWebContext();
     private static native boolean selectPluginSound(String soundId);
     private static native int loadPluginResource(String resourceId, String filePath);
+    private static native String importPluginResourceArchive(
+            String importerId, String archivePath, String resourceRoot);
     private static native void sendMidiMessage(int status, int data1, int data2, int length);
     private static native void releaseMidiNotes();
     private static native String keyLabAcquirePlan();
@@ -369,6 +371,35 @@ public final class MainActivity extends Activity {
                         try {
                             String pluginId = new JSONObject(pluginWebContext())
                                     .getJSONObject("instance").getString("plugin_id");
+                            JSONArray importTargets = pluginResourceImportTargets(targetResourceId);
+                            if (importTargets.length() > 0) {
+                                File archive = copyGrantedResourceToPrivateData(
+                                        grantId, entryId, targetResourceId);
+                                JSONObject result;
+                                try {
+                                    String imported = importPluginResourceArchive(
+                                            targetResourceId,
+                                            archive.getAbsolutePath(),
+                                            new File(pluginDataRoot(), "resources").getAbsolutePath());
+                                    if (imported == null || imported.isBlank()) {
+                                        throw new IllegalStateException(
+                                                "Portable runtime could not import the resource archive");
+                                    }
+                                    result = new JSONObject(imported);
+                                } finally {
+                                    if (archive.isFile() && !archive.delete()) {
+                                        Log.w("RackForge", "Could not remove temporary resource archive " + archive);
+                                    }
+                                }
+                                JSONArray installedIds = result.optJSONArray("installed_resource_ids");
+                                if (installedIds == null || installedIds.length() == 0) {
+                                    throw new IllegalStateException(
+                                            "The archive did not contain any recognized plugin resources");
+                                }
+                                rememberImportedResources(pluginId, grantId, installedIds);
+                                runOnUiThread(() -> respondToPlugin(requestId, true, null, result));
+                                return;
+                            }
                             destination = privatePluginResourceFile(pluginId, targetResourceId);
                             if (destination.isFile()) {
                                 backup = new File(destination.getParentFile(),
@@ -541,6 +572,35 @@ public final class MainActivity extends Activity {
             statuses.put(status);
         }
         return statuses;
+    }
+
+    private JSONArray pluginResourceImportTargets(String resourceId) throws Exception {
+        JSONObject context = new JSONObject(pluginWebContext());
+        JSONArray declared = context.optJSONArray("resources");
+        if (declared == null) return new JSONArray();
+        for (int index = 0; index < declared.length(); index++) {
+            JSONObject resource = declared.getJSONObject(index);
+            if (resourceId.equals(resource.optString("id"))) {
+                JSONArray targets = resource.optJSONArray("import_targets");
+                return targets == null ? new JSONArray() : targets;
+            }
+        }
+        return new JSONArray();
+    }
+
+    private void rememberImportedResources(
+            String pluginId, String grantId, JSONArray installedIds) throws Exception {
+        SharedPreferences.Editor editor = preferences.edit();
+        for (int index = 0; index < installedIds.length(); index++) {
+            String installedId = installedIds.getString(index);
+            editor.putString(
+                    "resource.active_grant." + pluginId + "." + installedId,
+                    grantId);
+            editor.putString(
+                    "resource.active_entry." + pluginId + "." + installedId,
+                    "__archive_import__");
+        }
+        editor.apply();
     }
 
     private LinearLayout buildTopBar() {
@@ -1964,10 +2024,38 @@ public final class MainActivity extends Activity {
             JSONObject resource = resources.getJSONObject(index);
             if (!"file".equals(resource.optString("kind"))) continue;
             String resourceId = resource.getString("id");
-            if (preferences.getString(
-                    "resource.active_entry." + pluginId + "." + resourceId, null) == null) continue;
+            String activeEntry = preferences.getString(
+                    "resource.active_entry." + pluginId + "." + resourceId, null);
+            if (activeEntry == null) continue;
             File copy = privatePluginResourceFile(pluginId, resourceId);
             if (!copy.isFile()) continue;
+            JSONArray importTargets = resource.optJSONArray("import_targets");
+            if (importTargets != null && importTargets.length() > 0) {
+                String imported = importPluginResourceArchive(
+                        resourceId,
+                        copy.getAbsolutePath(),
+                        new File(pluginDataRoot(), "resources").getAbsolutePath());
+                if (imported == null || imported.isBlank()) {
+                    throw new IllegalStateException(
+                            "Could not migrate installed resource archive " + resourceId);
+                }
+                JSONArray installedIds = new JSONObject(imported)
+                        .getJSONArray("installed_resource_ids");
+                rememberImportedResources(
+                        pluginId,
+                        preferences.getString(
+                                "resource.active_grant." + pluginId + "." + resourceId,
+                                "__legacy_archive__"),
+                        installedIds);
+                preferences.edit()
+                        .remove("resource.active_grant." + pluginId + "." + resourceId)
+                        .remove("resource.active_entry." + pluginId + "." + resourceId)
+                        .apply();
+                if (!copy.delete()) {
+                    Log.w("RackForge", "Could not remove migrated resource archive " + copy);
+                }
+                continue;
+            }
             if (loadPluginResource(resourceId, copy.getAbsolutePath()) == 0) {
                 throw new IllegalStateException("Could not restore plugin resource " + resourceId);
             }

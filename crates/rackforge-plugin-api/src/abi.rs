@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn packs_and_checks_api_versions() {
         assert_eq!(version_major(ABI_VERSION), 1);
-        assert_eq!(version_minor(ABI_VERSION), 6);
+        assert_eq!(version_minor(ABI_VERSION), 7);
         assert!(is_compatible(pack_version(1, 0)));
         assert!(is_compatible(pack_version(1, 1)));
         assert!(is_compatible(pack_version(1, 2)));

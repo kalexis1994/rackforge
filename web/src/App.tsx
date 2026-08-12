@@ -1299,8 +1299,7 @@ function PluginFrame({
         (params.program_id === null ||
           (typeof params.program_id === "string" &&
             instance.sounds.some(
-              (sound) =>
-                sound.id === params.program_id && sound.bank === "custom",
+              (sound) => sound.id === params.program_id && sound.editable,
             )))
       ) {
         dispatchCommand({

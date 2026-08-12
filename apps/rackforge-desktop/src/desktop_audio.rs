@@ -1064,13 +1064,8 @@ impl AudioProcessor {
 fn prepare_audio_voice(spec: VoiceSpec, sample_rate: u32) -> Result<AudioVoice> {
     let mut instance = spec
         .plugin
-        .create_instance()
+        .create_instance_with_resource_overrides(&spec.resources)
         .with_context(|| format!("creating audio instance {}", spec.instance_id))?;
-    for (resource_id, path) in spec.resources {
-        instance
-            .load_resource_file(&resource_id, &path)
-            .with_context(|| format!("loading {resource_id:?} for {}", spec.instance_id))?;
-    }
     if let Some(preset_id) = spec.preset_id.as_deref() {
         instance
             .load_preset(preset_id)

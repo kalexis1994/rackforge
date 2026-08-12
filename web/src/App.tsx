@@ -1250,6 +1250,20 @@ function PluginFrame({
             ),
           );
       } else if (
+        event.data.method === "plugin.resource_status" &&
+        surface === "config"
+      ) {
+        postResourceApi("/api/v1/resources/status", {
+          plugin_id: instance.plugin_id,
+        })
+          .then((status) => respond(true, undefined, status))
+          .catch((error: unknown) =>
+            respond(
+              false,
+              error instanceof Error ? error.message : "Could not read installed resources.",
+            ),
+          );
+      } else if (
         event.data.method === "plugin.resource_entries" &&
         surface === "config" &&
         typeof params.grant_id === "string" &&
@@ -1269,7 +1283,8 @@ function PluginFrame({
             ),
           );
       } else if (
-        event.data.method === "plugin.load_resource" &&
+        (event.data.method === "plugin.load_resource" ||
+          event.data.method === "plugin.install_resource") &&
         surface === "config" &&
         typeof params.target_resource_id === "string" &&
         descriptor?.resources.some(
@@ -1277,14 +1292,16 @@ function PluginFrame({
             resource.id === params.target_resource_id && resource.kind === "file",
         ) &&
         typeof params.grant_id === "string" &&
-        typeof params.entry_id === "string"
+        (params.entry_id === null || params.entry_id === undefined ||
+          typeof params.entry_id === "string")
       ) {
         postResourceApi("/api/v1/resources/load", {
           plugin_id: instance.plugin_id,
           instance_id: instance.instance_id,
           target_resource_id: params.target_resource_id,
           grant_id: params.grant_id,
-          entry_id: params.entry_id,
+          entry_id: typeof params.entry_id === "string" ? params.entry_id : null,
+          persist: event.data.method === "plugin.install_resource",
         })
           .then((result) => respond(true, undefined, result))
           .catch((error: unknown) =>

@@ -82,6 +82,60 @@ impl PluginStorage {
         Ok(destination)
     }
 
+    /// Copies an already-authorized regular file into a plugin namespace and
+    /// commits it atomically. The source name and path never become part of
+    /// the private resource layout.
+    pub fn copy_file_atomic(
+        &self,
+        plugin_id: &str,
+        relative: &Path,
+        source: &Path,
+    ) -> Result<PathBuf> {
+        let metadata = fs::symlink_metadata(source)
+            .with_context(|| format!("inspecting resource source {}", source.display()))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            bail!("resource source must be a regular file");
+        }
+        let plugin = self.ensure_plugin(plugin_id)?;
+        let destination = prepare_file_path(&plugin.root, relative)?;
+        reject_symlink(&destination)?;
+        let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
+        let file_name = destination
+            .file_name()
+            .context("plugin storage path has no file name")?
+            .to_string_lossy();
+        let temporary =
+            destination.with_file_name(format!(".{file_name}.tmp-{}-{serial}", std::process::id()));
+        let copy_result = (|| -> Result<()> {
+            let copied = fs::copy(source, &temporary).with_context(|| {
+                format!(
+                    "copying resource {} into {}",
+                    source.display(),
+                    temporary.display()
+                )
+            })?;
+            if copied != metadata.len() {
+                bail!("resource source changed while it was being copied");
+            }
+            OpenOptions::new()
+                .write(true)
+                .open(&temporary)?
+                .sync_all()?;
+            replace_file(&temporary, &destination)?;
+            sync_directory(
+                destination
+                    .parent()
+                    .context("plugin storage file has no parent")?,
+            )?;
+            Ok(())
+        })();
+        if copy_result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        copy_result?;
+        Ok(destination)
+    }
+
     pub fn read(&self, plugin_id: &str, relative: &Path) -> Result<Vec<u8>> {
         let plugin = self.ensure_plugin(plugin_id)?;
         let path = resolve_existing_file(&plugin.root, relative)?;
@@ -510,6 +564,25 @@ mod tests {
         let temporary = fs::canonicalize(std::env::temp_dir()).unwrap();
         assert!(absolute.starts_with(temporary));
         fs::remove_dir_all(absolute).unwrap();
+    }
+
+    #[test]
+    fn copies_authorized_resources_atomically_into_private_storage() {
+        let root = temporary_root();
+        let source = root.with_extension("source.bin");
+        fs::write(&source, b"recognized-rom").unwrap();
+        let storage = PluginStorage::new(&root);
+        let destination = storage
+            .copy_file_atomic(
+                "org.rackforge.roland-scva",
+                Path::new("roms/wave.bin"),
+                &source,
+            )
+            .unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"recognized-rom");
+        assert!(destination.ends_with(Path::new("roms/wave.bin")));
+        fs::remove_file(source).unwrap();
+        fs::remove_dir_all(fs::canonicalize(root).unwrap()).unwrap();
     }
 
     #[test]

@@ -107,6 +107,36 @@ impl LoadedPlugin {
         };
         Ok(PluginInstance { backend })
     }
+
+    /// Creates a portable instance after replacing any startup resource paths
+    /// with the supplied private/runtime overrides. Each resource is delivered
+    /// exactly once, before the plugin builds its dynamic catalog.
+    pub fn create_instance_with_resource_overrides(
+        &self,
+        overrides: &BTreeMap<String, PathBuf>,
+    ) -> Result<PluginInstance<'_>> {
+        let LoadedBackend::Portable(plugin) = &self.backend else {
+            bail!("runtime resource replacement requires a portable wasm-v1 plugin");
+        };
+        Ok(PluginInstance {
+            backend: PluginInstanceBackend::Portable(
+                plugin.create_instance_with_resource_overrides(overrides)?,
+            ),
+        })
+    }
+
+    /// Lets a portable plugin authenticate one candidate resource in an empty
+    /// instance, without loading its existing resource set or initializing its
+    /// preset catalog.
+    pub fn validate_resource_file(&self, id: &str, path: impl AsRef<Path>) -> Result<()> {
+        let LoadedBackend::Portable(plugin) = &self.backend else {
+            bail!("runtime resource validation requires a portable wasm-v1 plugin");
+        };
+        let mut instance = plugin.module.instantiate()?;
+        instance
+            .load_resource_file(id, path)
+            .with_context(|| format!("validating portable resource {id:?}"))
+    }
 }
 
 pub struct PortableLoadedPlugin {
@@ -208,8 +238,24 @@ impl PortableLoadedPlugin {
     }
 
     fn create_instance(&self) -> Result<PortablePluginInstance> {
+        self.create_instance_from_resources(&self.resources)
+    }
+
+    fn create_instance_with_resource_overrides(
+        &self,
+        overrides: &BTreeMap<String, PathBuf>,
+    ) -> Result<PortablePluginInstance> {
+        let mut resources = self.resources.clone();
+        resources.extend(overrides.clone());
+        self.create_instance_from_resources(&resources)
+    }
+
+    fn create_instance_from_resources(
+        &self,
+        resources: &BTreeMap<String, PathBuf>,
+    ) -> Result<PortablePluginInstance> {
         let mut instance = self.module.instantiate()?;
-        for (id, path) in &self.resources {
+        for (id, path) in resources {
             instance
                 .load_resource_file(id, path)
                 .with_context(|| format!("delivering portable resource {id:?}"))?;

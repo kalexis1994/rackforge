@@ -118,6 +118,7 @@ struct AppState {
     repositories: Arc<RwLock<RepositoryFile>>,
     plugins_root: PathBuf,
     plugin_store_root: PathBuf,
+    data_root: PathBuf,
     resource_browser: Arc<NativeResourceBrowser>,
 }
 
@@ -536,6 +537,7 @@ async fn main() -> Result<()> {
         repositories: Arc::new(RwLock::new(repositories)),
         plugins_root: root.join("plugins"),
         plugin_store_root: root.join("plugin-store"),
+        data_root: root.join("data"),
         resource_browser: Arc::new(NativeResourceBrowser::platform_defaults_persistent(
             root.join("state/resource-grants.json"),
         )?),
@@ -560,6 +562,7 @@ async fn main() -> Result<()> {
         )
         .route("/api/v1/resources/bind", post(bind_resource))
         .route("/api/v1/resources/grants", post(resource_grants))
+        .route("/api/v1/resources/status", post(resource_status))
         .route("/api/v1/resources/browse", post(browse_resource_grant))
         .route("/api/v1/resources/load", post(load_granted_resource))
         .route(
@@ -1450,6 +1453,49 @@ async fn resource_grants(
     }
 }
 
+async fn resource_status(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ListGrantsRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let registry = match PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root) {
+        Ok(registry) => registry,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let Some(package) = registry.packages.get(&request.plugin_id) else {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    };
+    Json(resource_install_statuses(&package.public, &state.data_root)).into_response()
+}
+
+fn resource_install_statuses(package: &PublicPluginWeb, data_root: &Path) -> Vec<Value> {
+    let plugin_root = fs::canonicalize(data_root.join("plugins").join(&package.plugin_id)).ok();
+    package
+        .resources
+        .iter()
+        .filter_map(|resource| {
+            let relative = resource.data_path.as_deref()?;
+            let installed = plugin_root.as_ref().is_some_and(|root| {
+                let candidate = root.join(relative);
+                fs::symlink_metadata(&candidate).is_ok_and(|metadata| {
+                    !metadata.file_type().is_symlink()
+                        && metadata.is_file()
+                        && fs::canonicalize(&candidate).is_ok_and(|path| path.starts_with(root))
+                })
+            });
+            Some(json!({
+                "resource_id": resource.id,
+                "installed": installed,
+            }))
+        })
+        .collect()
+}
+
 async fn browse_resource_grant(
     headers: HeaderMap,
     State(state): State<Arc<AppState>>,
@@ -1500,7 +1546,7 @@ async fn load_granted_resource(
     let path = match state.resource_browser.resolve_granted_file(
         &request.plugin_id,
         &request.grant_id,
-        &request.entry_id,
+        request.entry_id.as_deref(),
     ) {
         Ok(path) => path,
         Err(error) => return resource_error(error),
@@ -1511,6 +1557,7 @@ async fn load_granted_resource(
         "instance_id": request.instance_id,
         "resource_id": request.target_resource_id,
         "path": path,
+        "persist": request.persist,
     });
     match core_request(&state.control_socket, &control).await {
         Ok(response)

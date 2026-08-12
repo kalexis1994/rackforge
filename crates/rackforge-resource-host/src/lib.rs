@@ -163,7 +163,7 @@ impl NativeResourceBrowser {
         &self,
         plugin_id: &str,
         grant_id: &str,
-        entry_id: &str,
+        entry_id: Option<&str>,
     ) -> Result<PathBuf, ResourceError> {
         let state = self.state.lock().map_err(|_| poisoned())?;
         let grant = state
@@ -171,12 +171,27 @@ impl NativeResourceBrowser {
             .iter()
             .find(|grant| grant.grant_id == grant_id && grant.plugin_id == plugin_id)
             .ok_or(ResourceError::UnknownHandle)?;
-        let entry = state
-            .entries
-            .get(entry_id)
-            .ok_or(ResourceError::UnknownHandle)?;
         let grant_root = fs::canonicalize(&grant.path).map_err(backend)?;
-        let path = fs::canonicalize(&entry.path).map_err(backend)?;
+        let path = match (grant.kind, entry_id) {
+            (ResourceEntryKind::File, None) => grant_root.clone(),
+            (ResourceEntryKind::File, Some(_)) => {
+                return Err(ResourceError::InvalidRequest(
+                    "file grants must not include an entry id".into(),
+                ));
+            }
+            (ResourceEntryKind::Directory, Some(entry_id)) => {
+                let entry = state
+                    .entries
+                    .get(entry_id)
+                    .ok_or(ResourceError::UnknownHandle)?;
+                fs::canonicalize(&entry.path).map_err(backend)?
+            }
+            (ResourceEntryKind::Directory, None) => {
+                return Err(ResourceError::InvalidRequest(
+                    "directory grants require a selected file entry".into(),
+                ));
+            }
+        };
         if !path.starts_with(&grant_root) {
             return Err(ResourceError::OutsideMount);
         }
@@ -538,6 +553,48 @@ mod tests {
         let entry = browser.mount_root(&mount.id).unwrap();
         assert!(!mount.id.contains(&root.display().to_string()));
         assert!(!entry.id.contains(&root.display().to_string()));
+    }
+
+    #[test]
+    fn file_grants_resolve_the_selected_file_without_a_child_entry() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-resource-file-grant-test-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("IC36.bin");
+        fs::write(&source, [1, 2, 3, 4]).unwrap();
+        let browser = NativeResourceBrowser::new([NativeMount {
+            name: "Test".into(),
+            root: root.clone(),
+            read_only: true,
+        }])
+        .unwrap();
+        let mount = browser.mounts().unwrap().remove(0);
+        let mount_root = browser.mount_root(&mount.id).unwrap();
+        let file = browser
+            .entries(&mount_root.id)
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "IC36.bin")
+            .unwrap();
+        let grant = browser
+            .bind(&BindResourceRequest {
+                plugin_id: "org.rackforge.test".into(),
+                resource_id: "pcm".into(),
+                entry_id: file.id,
+            })
+            .unwrap();
+        assert_eq!(
+            browser
+                .resolve_granted_file("org.rackforge.test", &grant.grant_id, None)
+                .unwrap(),
+            fs::canonicalize(&source).unwrap()
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

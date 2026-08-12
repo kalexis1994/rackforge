@@ -61,6 +61,8 @@ pub enum ControlRequest {
         instance_id: InstanceId,
         resource_id: String,
         path: PathBuf,
+        #[serde(default)]
+        persist: bool,
     },
     AudioSnapshot,
     ApplyAudioOutput {
@@ -337,6 +339,7 @@ mod tests {
             instance_id: instance_id(),
             resource_id: "factory-soundfont".into(),
             path: PathBuf::from("/authorized/library/piano.sf2"),
+            persist: true,
         };
         assert_eq!(
             decode_request(&encode_line(&request).unwrap()).unwrap(),

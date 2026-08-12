@@ -129,6 +129,9 @@ from plugin JavaScript.
   paths or receive a Windows path, POSIX path or Android content URI.
 - `plugin.resource_bindings`: available to `CONFIG`; returns the persistent
   opaque grants owned by the current plugin. It takes no parameters.
+- `plugin.resource_status`: available to `CONFIG`; reports whether each
+  declared private `data_path` currently contains an installed regular file.
+  It returns resource identifiers and booleans without exposing native paths.
 - `plugin.resource_entries`: available to `CONFIG`; lists one level inside an
   existing grant. It accepts `grant_id` and an optional `parent_id`, both
   opaque. Passing no `parent_id` lists the grant root.
@@ -137,6 +140,13 @@ from plugin JavaScript.
   `target_resource_id`, `grant_id` and `entry_id`. RackForge prepares a new
   plugin instance away from the real-time audio callback and swaps it at an
   audio block boundary.
+- `plugin.install_resource`: available to `CONFIG`; asks a fresh plugin
+  instance to accept a granted file and then copies it atomically to the
+  resource's declared private `data_path`. File grants omit `entry_id`;
+  directory grants provide the selected child `entry_id`. RackForge activates
+  a replacement instance when the installed set is already complete; partial
+  sets remain safely installed for the next import. Future instances resolve
+  installed resources automatically.
 - `plugin.begin_program_edit`: available to `PLAY` and `CONFIG`; starts a new
   program when `program_id` is `null`, or edits a program from that plugin's
   `custom` collection.

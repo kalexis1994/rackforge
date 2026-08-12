@@ -74,7 +74,14 @@ pub struct LoadGrantedResourceRequest {
     pub instance_id: String,
     pub target_resource_id: String,
     pub grant_id: String,
-    pub entry_id: String,
+    /// Required when loading a child of a directory grant. File grants load
+    /// their selected file directly when this is omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_id: Option<String>,
+    /// Installs the validated resource at its manifest `data_path` so future
+    /// plugin instances can resolve it without retaining the source grant.
+    #[serde(default)]
+    pub persist: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -231,6 +231,7 @@ struct ControlContext {
     state_store: Arc<Mutex<PluginStateStore>>,
     plugin_manifests: BTreeMap<String, PluginManifest>,
     portable_plugins: BTreeMap<String, PortableControlPlugin>,
+    dynamic_resources: Mutex<BTreeMap<InstanceId, BTreeMap<String, PathBuf>>>,
     plugin_sample_rate: f64,
     plugin_maximum_frames: u32,
     plugin_output_channels: u32,
@@ -303,6 +304,7 @@ pub fn start(
         state_store,
         plugin_manifests,
         portable_plugins,
+        dynamic_resources: Mutex::new(BTreeMap::new()),
         plugin_sample_rate,
         plugin_maximum_frames,
         plugin_output_channels,
@@ -448,7 +450,15 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             instance_id,
             resource_id,
             path,
-        } => load_plugin_resource(context, &plugin_id, &instance_id, &resource_id, &path),
+            persist,
+        } => load_plugin_resource(
+            context,
+            &plugin_id,
+            &instance_id,
+            &resource_id,
+            &path,
+            persist,
+        ),
         ControlRequest::EditPerformance {
             expected_revision,
             edit,
@@ -479,6 +489,7 @@ fn load_plugin_resource(
     instance_id: &InstanceId,
     resource_id: &str,
     path: &Path,
+    persist: bool,
 ) -> ControlResponse {
     let snapshot = match context.store.lock() {
         Ok(store) => store.snapshot(),
@@ -504,17 +515,29 @@ fn load_plugin_resource(
             Some(snapshot.revision),
         );
     };
-    if !manifest
+    let Some(requirement) = manifest
         .resources
         .iter()
-        .any(|resource| resource.id == resource_id && resource.kind == ResourceKind::File)
-    {
+        .find(|resource| resource.id == resource_id && resource.kind == ResourceKind::File)
+    else {
         return error_response(
             ControlErrorCode::InvalidRequest,
             format!("plugin does not declare file resource {resource_id:?}"),
             Some(snapshot.revision),
         );
-    }
+    };
+    let install_path = if persist {
+        let Some(relative) = requirement.data_path.as_deref() else {
+            return error_response(
+                ControlErrorCode::InvalidRequest,
+                format!("resource {resource_id:?} has no private data_path"),
+                Some(snapshot.revision),
+            );
+        };
+        Some(PathBuf::from(relative))
+    } else {
+        None
+    };
     let Some(runtime) = context
         .portable_plugins
         .get(&instance_state.plugin_id)
@@ -543,20 +566,82 @@ fn load_plugin_resource(
             );
         }
     };
-    let mut replacement = match runtime.0.create_instance() {
-        Ok(instance) => instance,
-        Err(error) => return internal_error(error.to_string(), Some(snapshot.revision)),
-    };
-    if let Err(error) = replacement.load_resource_file(resource_id, &path) {
+    if let Err(error) = runtime.0.validate_resource_file(resource_id, &path) {
         return error_response(
             ControlErrorCode::Rejected,
-            format!("plugin rejected the resource: {error:#}"),
+            format!("plugin rejected resource {resource_id:?}: {error:#}"),
             Some(snapshot.revision),
         );
     }
+    let mut resources = match context.dynamic_resources.lock() {
+        Ok(resources) => resources.get(instance_id).cloned().unwrap_or_default(),
+        Err(_) => {
+            return internal_error(
+                "dynamic resource registry is poisoned",
+                Some(snapshot.revision),
+            );
+        }
+    };
+    resources.insert(resource_id.to_owned(), path.to_path_buf());
+    if let Some(relative) = install_path.as_deref() {
+        let Some(storage) = context.storage.as_ref() else {
+            return error_response(
+                ControlErrorCode::Unavailable,
+                "private plugin storage is unavailable",
+                Some(snapshot.revision),
+            );
+        };
+        match storage.copy_file_atomic(plugin_id, relative, path) {
+            Ok(installed) => {
+                resources.insert(resource_id.to_owned(), installed);
+            }
+            Err(error) => {
+                return internal_error(
+                    format!("could not install plugin resource: {error:#}"),
+                    Some(snapshot.revision),
+                );
+            }
+        }
+    }
+    if let Ok(mut registry) = context.dynamic_resources.lock() {
+        registry.insert(instance_id.clone(), resources);
+    } else {
+        return internal_error(
+            "dynamic resource registry is poisoned",
+            Some(snapshot.revision),
+        );
+    }
+    let resources = match context.dynamic_resources.lock() {
+        Ok(registry) => registry.get(instance_id).cloned().unwrap_or_default(),
+        Err(_) => {
+            return internal_error(
+                "dynamic resource registry is poisoned",
+                Some(snapshot.revision),
+            );
+        }
+    };
+    let mut replacement = match runtime
+        .0
+        .create_instance_with_resource_overrides(&resources)
+    {
+        Ok(instance) => instance,
+        Err(error) if persist => {
+            return ControlResponse::PluginResourceLoaded {
+                instance_id: instance_id.clone(),
+                resource_id: resource_id.to_owned(),
+            };
+        }
+        Err(error) => return internal_error(error.to_string(), Some(snapshot.revision)),
+    };
     if let Some(sound_id) = instance_state.selected_sound_id.as_deref()
         && let Err(error) = replacement.load_preset(sound_id)
     {
+        if persist {
+            return ControlResponse::PluginResourceLoaded {
+                instance_id: instance_id.clone(),
+                resource_id: resource_id.to_owned(),
+            };
+        }
         return error_response(
             ControlErrorCode::Rejected,
             format!("plugin could not restore sound {sound_id:?}: {error:#}"),
@@ -569,6 +654,12 @@ fn load_plugin_resource(
         0,
         context.plugin_output_channels,
     ) {
+        if persist {
+            return ControlResponse::PluginResourceLoaded {
+                instance_id: instance_id.clone(),
+                resource_id: resource_id.to_owned(),
+            };
+        }
         return error_response(
             ControlErrorCode::Rejected,
             format!("plugin could not activate the resource: {error:#}"),
@@ -2949,6 +3040,7 @@ mod tests {
                     .unwrap(),
                 )]),
                 portable_plugins: BTreeMap::new(),
+                dynamic_resources: Mutex::new(BTreeMap::new()),
                 plugin_sample_rate: 48_000.0,
                 plugin_maximum_frames: 128,
                 plugin_output_channels: 2,

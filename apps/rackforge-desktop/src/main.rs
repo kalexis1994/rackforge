@@ -128,6 +128,7 @@ struct DesktopPlugin {
     selected_sound_id: Option<String>,
     instance: PluginInstance<'static>,
     resources: BTreeMap<String, PathBuf>,
+    resource_data_paths: BTreeMap<String, PathBuf>,
 }
 
 enum PluginInstallEvent {
@@ -1323,10 +1324,15 @@ impl DesktopApp {
                     plugin_id,
                     resource_id,
                     path,
+                    persist,
                     response,
                 } => {
-                    let _ =
-                        response.send(self.load_plugin_resource(&plugin_id, &resource_id, &path));
+                    let _ = response.send(self.load_plugin_resource(
+                        &plugin_id,
+                        &resource_id,
+                        &path,
+                        persist,
+                    ));
                 }
             }
         }
@@ -1337,6 +1343,7 @@ impl DesktopApp {
         plugin_id: &str,
         resource_id: &str,
         path: &Path,
+        persist: bool,
     ) -> Result<(), String> {
         let index = self
             .plugins
@@ -1344,35 +1351,86 @@ impl DesktopApp {
             .position(|plugin| plugin.plugin_id == plugin_id)
             .ok_or_else(|| format!("Unknown Desktop plugin: {plugin_id}"))?;
         let plugin = &mut self.plugins[index];
+        let data_path = persist
+            .then(|| {
+                plugin
+                    .resource_data_paths
+                    .get(resource_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        format!(
+                            "Resource {resource_id:?} cannot be installed because it has no private data_path"
+                        )
+                    })
+            })
+            .transpose()?;
+        let selected_path = if let Some(data_path) = data_path.as_deref() {
+            plugin
+                .runtime
+                .validate_resource_file(resource_id, path)
+                .map_err(|error| format!("Selected file was rejected: {error:#}"))?;
+            PluginStorage::new(&self.options.data_root)
+                .copy_file_atomic(plugin_id, data_path, path)
+                .map_err(|error| format!("Could not install plugin resource: {error:#}"))?
+        } else {
+            path.to_path_buf()
+        };
         let previous = plugin
             .resources
-            .insert(resource_id.to_owned(), path.to_path_buf());
+            .insert(resource_id.to_owned(), selected_path);
 
-        let prepare = (|| -> anyhow::Result<PluginInstance<'static>> {
-            let mut instance = plugin.runtime.create_instance()?;
-            for (id, resource_path) in &plugin.resources {
-                instance.load_resource_file(id, resource_path)?;
-            }
-            if let Some(preset_id) = plugin.selected_sound_id.as_deref() {
-                instance.load_preset(preset_id)?;
-            }
-            #[cfg(windows)]
-            if let Some(audio) = &self.audio {
-                audio.replace_voice(desktop_audio::VoiceSpec {
-                    instance_id: plugin.instance_id.clone(),
-                    plugin: plugin.runtime,
-                    preset_id: plugin.selected_sound_id.clone(),
-                    resources: plugin.resources.clone(),
-                })?;
-            }
-            Ok(instance)
-        })();
+        let prepare =
+            (|| -> anyhow::Result<(PluginInstance<'static>, PresetCatalog, Option<String>)> {
+                let mut instance = plugin
+                    .runtime
+                    .create_instance_with_resource_overrides(&plugin.resources)?;
+                let catalog = instance.preset_catalog()?;
+                let selected_sound_id = plugin
+                    .selected_sound_id
+                    .as_ref()
+                    .filter(|id| {
+                        catalog
+                            .presets
+                            .iter()
+                            .any(|preset| preset.id == id.as_str())
+                    })
+                    .cloned()
+                    .or_else(|| catalog.presets.first().map(|preset| preset.id.clone()));
+                if let Some(preset_id) = selected_sound_id.as_deref() {
+                    instance.load_preset(preset_id)?;
+                }
+                #[cfg(windows)]
+                if let Some(audio) = &self.audio {
+                    audio.replace_voice(desktop_audio::VoiceSpec {
+                        instance_id: plugin.instance_id.clone(),
+                        plugin: plugin.runtime,
+                        preset_id: selected_sound_id.clone(),
+                        resources: plugin.resources.clone(),
+                    })?;
+                }
+                Ok((instance, catalog, selected_sound_id))
+            })();
 
         match prepare {
-            Ok(instance) => {
+            Ok((instance, catalog, selected_sound_id)) => {
+                let (banks, sound_summaries, sounds) = desktop_catalog_views(&catalog);
                 plugin.instance = instance;
+                plugin.banks = banks;
+                plugin.sound_summaries = sound_summaries;
+                plugin.sounds = sounds;
+                plugin.selected_sound_id = selected_sound_id;
+                let next_session_state = plugin_session_state(plugin);
+                let mut session = self.session.write().expect("session lock poisoned");
+                if let Some(state) = session
+                    .instances
+                    .iter_mut()
+                    .find(|state| state.instance_id.as_str() == plugin.instance_id)
+                {
+                    *state = next_session_state;
+                    session.revision = Revision::new(session.revision.get().saturating_add(1));
+                }
                 self.status = format!(
-                    "{} loaded {} from {}",
+                    "{} installed and activated {} from {}",
                     plugin.name,
                     resource_id,
                     path.file_name()
@@ -1382,6 +1440,13 @@ impl DesktopApp {
                 Ok(())
             }
             Err(error) => {
+                if persist {
+                    self.status = format!(
+                        "{} installed {}; waiting for the remaining compatible resources",
+                        plugin.name, resource_id
+                    );
+                    return Ok(());
+                }
                 match previous {
                     Some(previous) => {
                         plugin.resources.insert(resource_id.to_owned(), previous);
@@ -3040,6 +3105,17 @@ fn load_desktop_plugin(package: &PluginPackage, data_root: &Path) -> Result<Desk
         selected_sound_id,
         instance,
         resources: BTreeMap::new(),
+        resource_data_paths: package
+            .manifest()
+            .resources
+            .iter()
+            .filter_map(|resource| {
+                resource
+                    .data_path
+                    .as_deref()
+                    .map(|path| (resource.id.clone(), PathBuf::from(path)))
+            })
+            .collect(),
     })
 }
 

@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
@@ -40,6 +40,7 @@ struct WebState {
     session: Arc<RwLock<SessionState>>,
     legacy_plugins_root: PathBuf,
     plugin_store_root: Option<PathBuf>,
+    data_root: PathBuf,
     public_server: Arc<RwLock<WebServerPreferences>>,
     control: Sender<DesktopControlCall>,
     resource_browser: Arc<NativeResourceBrowser>,
@@ -58,6 +59,7 @@ pub enum DesktopControlCall {
         plugin_id: String,
         resource_id: String,
         path: PathBuf,
+        persist: bool,
         response: Sender<Result<(), String>>,
     },
 }
@@ -227,6 +229,7 @@ pub fn start(
         session,
         legacy_plugins_root: options.plugins_root.clone(),
         plugin_store_root: options.plugin_store_root.clone(),
+        data_root: options.data_root.clone(),
         public_server: Arc::clone(&shared_preferences),
         control,
         resource_browser: Arc::new(NativeResourceBrowser::platform_defaults_persistent(
@@ -318,6 +321,7 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
             )
             .route("/api/v1/resources/bind", post(bind_resource))
             .route("/api/v1/resources/grants", post(resource_grants))
+            .route("/api/v1/resources/status", post(resource_status))
             .route("/api/v1/resources/browse", post(browse_resource_grant))
             .route("/api/v1/resources/load", post(load_granted_resource))
     } else {
@@ -470,6 +474,45 @@ async fn resource_grants(
     }
 }
 
+async fn resource_status(
+    State(state): State<WebState>,
+    Json(request): Json<ListGrantsRequest>,
+) -> Response {
+    let packages = match discover_web_packages(&state) {
+        Ok(packages) => packages,
+        Err(error) => return internal_error(error),
+    };
+    let Some(package) = packages.get(&request.plugin_id) else {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    };
+    Json(resource_install_statuses(&package.public, &state.data_root)).into_response()
+}
+
+fn resource_install_statuses(package: &PublicPluginWeb, data_root: &Path) -> Vec<Value> {
+    let plugin_root = fs::canonicalize(data_root.join("plugins").join(&package.plugin_id)).ok();
+    package
+        .resources
+        .iter()
+        .filter_map(|resource| {
+            let relative = resource.data_path.as_deref()?;
+            let installed = plugin_root.as_ref().is_some_and(|root| {
+                let candidate = root.join(relative);
+                fs::symlink_metadata(&candidate).is_ok_and(|metadata| {
+                    !metadata.file_type().is_symlink()
+                        && metadata.is_file()
+                        && fs::canonicalize(&candidate).is_ok_and(|path| path.starts_with(root))
+                })
+            });
+            Some(json!({
+                "resource_id": resource.id,
+                "installed": installed,
+            }))
+        })
+        .collect()
+}
+
 async fn browse_resource_grant(
     State(state): State<WebState>,
     Json(request): Json<BrowseGrantRequest>,
@@ -521,7 +564,7 @@ async fn load_granted_resource(
     let path = match state.resource_browser.resolve_granted_file(
         &request.plugin_id,
         &request.grant_id,
-        &request.entry_id,
+        request.entry_id.as_deref(),
     ) {
         Ok(path) => path,
         Err(error) => return resource_error(error),
@@ -533,6 +576,7 @@ async fn load_granted_resource(
             plugin_id: request.plugin_id,
             resource_id: request.target_resource_id,
             path,
+            persist: request.persist,
             response: response_sender,
         })
         .is_err()
@@ -879,6 +923,7 @@ mod tests {
             ))),
             legacy_plugins_root: PathBuf::new(),
             plugin_store_root: None,
+            data_root: PathBuf::new(),
             public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
             control,
             resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
@@ -934,6 +979,7 @@ mod tests {
             ))),
             legacy_plugins_root: PathBuf::new(),
             plugin_store_root: None,
+            data_root: PathBuf::new(),
             public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
             control,
             resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),

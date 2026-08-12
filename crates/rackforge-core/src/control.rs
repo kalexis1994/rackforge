@@ -591,7 +591,7 @@ fn load_plugin_resource(
                 Some(snapshot.revision),
             );
         };
-        match storage.copy_file_atomic(plugin_id, relative, path) {
+        match storage.copy_file_atomic(plugin_id, relative, &path) {
             Ok(installed) => {
                 resources.insert(resource_id.to_owned(), installed);
             }

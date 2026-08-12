@@ -1,0 +1,41 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 1000 1000"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">RackForge</title>
+  <desc id="description">
+    RackForge geometric signal-path monogram and wordmark.
+  </desc>
+
+  <rect width="1000" height="1000" fill="#050b11" />
+
+  <!--
+    The mark is reconstructed as a constant-width signal path. The two paths
+    share the same grid and meet at the spine and lower junction.
+  -->
+  <g
+    fill="none"
+    stroke="#55e7ff"
+    stroke-width="30"
+    stroke-linecap="square"
+    stroke-linejoin="bevel"
+  >
+    <path d="M230 650H285L400 535V295L460 235H610V320L580 350H475V540Q475 560 495 560H620L735 675H780" />
+    <path d="M475 430H620L660 470V520L620 560" />
+  </g>
+
+  <!-- Chakra Petch SemiBold wordmark converted to vector outlines. -->
+  <g fill="#55e7ff" transform="translate(220 795) scale(0.07752 -0.07752)">
+    <path transform="translate(0 0)" d="M602 226V0H486V198L414 277H186V0H70V700H496L598 597V382L525 309ZM186 373H444L484 413V562L444 602H186Z" />
+    <path transform="translate(847 0)" d="M264 700H374L627 0H509L449 166H188L128 0H10ZM422 263 319 559H317L216 263Z" />
+    <path transform="translate(1664 0)" d="M60 113V587L173 700H501L612 589V497H496V548L443 600H233L176 544V156L233 100H443L496 152V203H612V111L501 0H173Z" />
+    <path transform="translate(2491 0)" d="M70 700H186V399H311L484 700H613L410 351L630 0H498L311 299H186V0H70Z" />
+    <path transform="translate(3311 0)" d="M70 700H548V601H186V387H500V288H186V0H70Z" />
+    <path transform="translate(4059 0)" d="M60 113V587L173 700H519L632 587V113L519 0H173ZM459 100 516 156V544L459 600H233L176 544V156L233 100Z" />
+    <path transform="translate(4931 0)" d="M602 226V0H486V198L414 277H186V0H70V700H496L598 597V382L525 309ZM186 373H444L484 413V562L444 602H186Z" />
+    <path transform="translate(5778 0)" d="M60 113V587L173 700H507L618 589V497H502V548L449 600H233L176 544V156L233 100H449L505 155V282H352V382H618V113L505 0H173Z" />
+    <path transform="translate(6626 0)" d="M70 700H558V601H186V401H529V303H186V99H558V0H70Z" />
+  </g>
+</svg>

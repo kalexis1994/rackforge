@@ -3528,11 +3528,16 @@ fn run() -> Result<()> {
         }
     };
     let startup = parse_startup()?;
+    let app_icon = eframe::icon_data::from_png_bytes(include_bytes!(
+        "../../../assets/brand/rackforge-mark-256.png"
+    ))
+    .context("loading the embedded RackForge app icon")?;
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("RackForge Desktop")
             .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([900.0, 600.0]),
+            .with_min_inner_size([900.0, 600.0])
+            .with_icon(Arc::new(app_icon)),
         ..Default::default()
     };
     eframe::run_native(

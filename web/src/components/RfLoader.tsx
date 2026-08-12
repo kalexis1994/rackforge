@@ -29,12 +29,16 @@ export function RfLoader({
       aria-busy="true"
     >
       <span className="rf-async-loader__mark" aria-hidden="true">
-        <span className="rf-async-loader__letter rf-async-loader__letter--base">
-          RF
-        </span>
-        <span className="rf-async-loader__letter rf-async-loader__letter--fill">
-          RF
-        </span>
+        <img
+          className="rf-async-loader__logo rf-async-loader__logo--base"
+          src="/brand/rackforge-mark-foreground.svg"
+          alt=""
+        />
+        <img
+          className="rf-async-loader__logo rf-async-loader__logo--fill"
+          src="/brand/rackforge-mark-foreground.svg"
+          alt=""
+        />
         <span className="rf-async-loader__scanner" />
       </span>
       <span className="rf-async-loader__copy">

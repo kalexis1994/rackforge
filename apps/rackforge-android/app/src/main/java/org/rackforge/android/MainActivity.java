@@ -45,6 +45,7 @@ import android.webkit.WebViewClient;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.ScrollView;
@@ -118,6 +119,7 @@ public final class MainActivity extends Activity {
     private TextView playContextLabel;
     private AlertDialog pluginPickerDialog;
     private AlertDialog installedPluginsDialog;
+    private android.graphics.Typeface displayTypeface;
 
     private static native String installPluginFile(String archivePath, String storeRoot);
     private static native String installedPlugins(String storeRoot);
@@ -514,11 +516,17 @@ public final class MainActivity extends Activity {
             return insets;
         });
         bar.addView(toolbarButton("☰", this::showMainMenu));
+        ImageView mark = new ImageView(this);
+        mark.setImageResource(R.drawable.rackforge_mark);
+        mark.setContentDescription(null);
+        mark.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        mark.setPadding(dp(2), dp(2), dp(2), dp(2));
+        bar.addView(mark, new LinearLayout.LayoutParams(dp(32), dp(32)));
         TextView title = new TextView(this);
         title.setText("RACKFORGE");
         title.setTextColor(0xFF5CE2F5);
         title.setTextSize(18);
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        applyDisplayTypeface(title);
         title.setPadding(dp(8), 0, dp(12), 0);
         bar.addView(title, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
@@ -570,7 +578,7 @@ public final class MainActivity extends Activity {
         title.setText("Select plugin");
         title.setTextColor(0xFFF2FAFC);
         title.setTextSize(27);
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        applyDisplayTypeface(title);
         content.addView(title);
         TextView subtitle = new TextView(this);
         subtitle.setText("Choose the instrument you want to play");
@@ -649,7 +657,7 @@ public final class MainActivity extends Activity {
         title.setText(name);
         title.setTextColor(compatible ? 0xFFF2FAFC : 0xFF718991);
         title.setTextSize(18);
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        applyDisplayTypeface(title);
         title.setSingleLine(true);
         title.setEllipsize(android.text.TextUtils.TruncateAt.END);
         card.addView(title, new LinearLayout.LayoutParams(
@@ -723,7 +731,7 @@ public final class MainActivity extends Activity {
         title.setText("RackForge");
         title.setTextColor(0xFFF2FAFC);
         title.setTextSize(25);
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        applyDisplayTypeface(title);
         panel.addView(title);
         TextView subtitle = new TextView(this);
         subtitle.setText("Instrument workspace");
@@ -812,7 +820,7 @@ public final class MainActivity extends Activity {
         heading.setText(title);
         heading.setTextColor(action == null ? 0xFF718991 : 0xFFF2FAFC);
         heading.setTextSize(16);
-        heading.setTypeface(null, android.graphics.Typeface.BOLD);
+        applyDisplayTypeface(heading);
         copy.addView(heading);
         TextView description = new TextView(this);
         description.setText(detail);
@@ -1184,7 +1192,7 @@ public final class MainActivity extends Activity {
             title.setText("Installed plugins");
             title.setTextColor(0xFFF2FAFC);
             title.setTextSize(27);
-            title.setTypeface(null, android.graphics.Typeface.BOLD);
+            applyDisplayTypeface(title);
             content.addView(title);
             TextView subtitle = new TextView(this);
             subtitle.setText("Portable packages are immutable by plugin ID and version");
@@ -1512,7 +1520,7 @@ public final class MainActivity extends Activity {
         title.setText("Audio & MIDI");
         title.setTextColor(0xFFF2FAFC);
         title.setTextSize(27);
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        applyDisplayTypeface(title);
         content.addView(title);
         TextView subtitle = new TextView(this);
         subtitle.setText("Configure the real-time engine and connected hardware");
@@ -1677,9 +1685,17 @@ public final class MainActivity extends Activity {
         view.setText(text);
         view.setTextColor(0xFF5CE2F5);
         view.setTextSize(19);
-        view.setTypeface(null, android.graphics.Typeface.BOLD);
+        applyDisplayTypeface(view);
         view.setPadding(0, dp(16), 0, dp(8));
         return view;
+    }
+
+    private void applyDisplayTypeface(TextView view) {
+        if (displayTypeface == null) {
+            displayTypeface = android.graphics.Typeface.createFromAsset(
+                    getAssets(), "fonts/ChakraPetch-SemiBold.ttf");
+        }
+        view.setTypeface(displayTypeface, android.graphics.Typeface.NORMAL);
     }
 
     private LinearLayout settingsValue(String label, String value) {

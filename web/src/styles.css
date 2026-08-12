@@ -1,3 +1,27 @@
+@font-face {
+  font-family: "Chakra Petch";
+  src: url("/fonts/ChakraPetch-Medium.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Chakra Petch";
+  src: url("/fonts/ChakraPetch-SemiBold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Chakra Petch";
+  src: url("/fonts/ChakraPetch-Bold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700 900;
+  font-display: swap;
+}
+
 :root {
   color: #171714;
   background: #e9e7e1;
@@ -11,6 +35,7 @@
   --acid: #c9f254;
   --orange: #ff7557;
   --blue: #6d91f7;
+  --display-font: "Chakra Petch", "Segoe UI", Arial, sans-serif;
 }
 
 .play-launcher {
@@ -692,15 +717,19 @@ body {
 .brand-mark {
   width: 38px;
   height: 38px;
-  display: grid;
-  place-items: center;
-  color: #11110f;
-  background: var(--acid);
-  font-family: "Cascadia Mono", "Consolas", monospace;
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: -1px;
-  transform: rotate(-2deg);
+  flex: 0 0 38px;
+  display: block;
+  overflow: hidden;
+  background: #050b11;
+  border: 1px solid rgba(85, 231, 255, 0.28);
+  border-radius: 8px;
+  box-shadow: 0 0 20px rgba(85, 231, 255, 0.12);
+}
+
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .brand-name {
@@ -3055,7 +3084,6 @@ body {
 .rf-async-loader {
   --rf-loader-width: 150px;
   --rf-loader-height: 108px;
-  --rf-loader-font-size: 102px;
   --rf-loader-gap: 18px;
   --rf-loader-duration: 2.8s;
   --rf-loader-ring: 16px;
@@ -3070,7 +3098,6 @@ body {
 .rf-async-loader--compact {
   --rf-loader-width: 70px;
   --rf-loader-height: 50px;
-  --rf-loader-font-size: 46px;
   --rf-loader-gap: 9px;
   --rf-loader-ring: 8px;
   --rf-loader-glow: 24px;
@@ -3079,7 +3106,6 @@ body {
 .rf-async-loader--large {
   --rf-loader-width: 214px;
   --rf-loader-height: 150px;
-  --rf-loader-font-size: 142px;
   --rf-loader-gap: 26px;
   --rf-loader-ring: 24px;
   --rf-loader-glow: 70px;
@@ -3107,30 +3133,22 @@ body {
   animation: rf-loader-breathe var(--rf-loader-duration) ease-in-out infinite;
 }
 
-.rf-async-loader__letter {
+.rf-async-loader__logo {
   position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font: 900 var(--rf-loader-font-size) / 1 "Segoe UI", Arial, sans-serif;
-  letter-spacing: -0.13em;
-  text-indent: -0.13em;
+  width: var(--rf-loader-height);
+  height: var(--rf-loader-height);
+  object-fit: contain;
   user-select: none;
+  pointer-events: none;
 }
 
-.rf-async-loader__letter--base {
-  color: rgba(85, 231, 255, 0.055);
-  -webkit-text-stroke: 1px rgba(138, 237, 255, 0.22);
-  text-shadow: 0 0 24px rgba(85, 231, 255, 0.06);
+.rf-async-loader__logo--base {
+  opacity: 0.13;
+  filter: saturate(0.6) drop-shadow(0 0 20px rgba(85, 231, 255, 0.08));
 }
 
-.rf-async-loader__letter--fill {
-  color: transparent;
-  background:
-    linear-gradient(180deg, #d7fbff 0%, var(--acid) 42%, #1dbbd8 100%)
-    bottom / 100% 0% no-repeat;
-  background-clip: text;
-  -webkit-background-clip: text;
+.rf-async-loader__logo--fill {
+  clip-path: inset(100% 0 0);
   filter: drop-shadow(0 0 12px rgba(85, 231, 255, 0.3));
   animation: rf-loader-fill var(--rf-loader-duration) cubic-bezier(0.65, 0, 0.2, 1)
     infinite;
@@ -3188,16 +3206,16 @@ body {
 @keyframes rf-loader-fill {
   0%,
   20% {
-    background-size: 100% 0%;
+    clip-path: inset(100% 0 0);
     opacity: 0.35;
   }
   60%,
   86% {
-    background-size: 100% 100%;
+    clip-path: inset(0 0 0);
     opacity: 1;
   }
   100% {
-    background-size: 100% 100%;
+    clip-path: inset(0 0 0);
     opacity: 0;
   }
 }
@@ -3241,13 +3259,13 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .rf-async-loader__mark::before,
-  .rf-async-loader__letter--fill,
+  .rf-async-loader__logo--fill,
   .rf-async-loader__scanner {
     animation: none;
   }
 
-  .rf-async-loader__letter--fill {
-    background-size: 100% 72%;
+  .rf-async-loader__logo--fill {
+    clip-path: inset(28% 0 0);
     opacity: 1;
   }
 
@@ -3301,7 +3319,6 @@ body {
     16px 0 44px rgba(0, 4, 8, 0.28);
 }
 
-.brand-mark,
 .plugin-surface-state-mark,
 .empty-state > span {
   color: #021016;
@@ -3539,4 +3556,12 @@ body {
   .pin-form input {
     width: 100%;
   }
+}
+
+/* Display typography stays distinct from controls and technical data. */
+:where(h1, h2, h3),
+.play-plugin-copy strong,
+.preset-load-target strong,
+.session-stats dd {
+  font-family: var(--display-font);
 }

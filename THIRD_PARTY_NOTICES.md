@@ -1,5 +1,17 @@
 # Third-Party Notices
 
+RackForge includes the Chakra Petch typeface for display typography.
+
+## Chakra Petch
+
+- Project: <https://github.com/m4rc1e/Chakra-Petch>
+- License: SIL Open Font License 1.1
+
+Copyright 2018 The Chakra Petch Project Authors.
+
+The complete license is distributed with the Web and Android assets at
+`fonts/OFL.txt`.
+
 RackForge's Web resource explorer includes the SVAR React File Manager and its
 SVAR UI support packages.
 

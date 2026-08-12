@@ -57,6 +57,14 @@ const ResourceExplorerDialog = lazy(() =>
   })),
 );
 
+function BrandMark() {
+  return (
+    <span className="brand-mark" aria-hidden="true">
+      <img src="/brand/rackforge-mark.svg" alt="" />
+    </span>
+  );
+}
+
 async function postResourceApi<T>(url: string, body: unknown): Promise<T> {
   const response = await fetch(url, {
     method: "POST",
@@ -181,7 +189,7 @@ function RackForgeApp() {
     <div className={`app-shell${isPluginSurface ? " plugin-surface-active" : ""}`}>
       <aside className="rail">
         <div className="brand-lockup" aria-label="RackForge">
-          <span className="brand-mark">RF</span>
+          <BrandMark />
           <span className="brand-name">RACKFORGE</span>
         </div>
         <nav className="primary-nav">
@@ -319,7 +327,7 @@ function PinGatePage({
     <main className="pairing-shell">
       <section className="pairing-panel">
         <div className="pairing-brand">
-          <span className="brand-mark">RF</span>
+          <BrandMark />
           <span>RACKFORGE</span>
         </div>
         <span className="eyebrow accent">Device access</span>

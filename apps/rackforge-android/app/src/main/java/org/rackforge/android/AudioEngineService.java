@@ -32,7 +32,8 @@ public final class AudioEngineService extends Service {
         PendingIntent pending = PendingIntent.getActivity(this, 0, open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new Notification.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setColor(0xFF55E7FF)
                 .setContentTitle("RackForge is ready to play")
                 .setContentText("Low-latency audio and MIDI remain active")
                 .setContentIntent(pending)

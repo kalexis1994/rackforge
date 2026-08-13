@@ -38,6 +38,7 @@ use crate::Options;
 
 static WEB_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../web/dist");
 const DESKTOP_CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
+const DESKTOP_SETTINGS_TIMEOUT: Duration = Duration::from_secs(20);
 static CLIENT_UPLOAD_SERIAL: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
@@ -79,6 +80,24 @@ pub enum DesktopControlCall {
         path: PathBuf,
         persist: bool,
         response: Sender<Result<(), String>>,
+    },
+    ActivatePlugin {
+        plugin_id: String,
+        response: Sender<Result<(), String>>,
+    },
+    AudioSettings {
+        response: Sender<Result<Value, String>>,
+    },
+    ApplyAudioSettings {
+        preferences: Value,
+        response: Sender<Result<Value, String>>,
+    },
+    TestAudio {
+        response: Sender<Result<(), String>>,
+    },
+    ApplyWebSettings {
+        preferences: WebServerPreferences,
+        response: Sender<Result<Value, String>>,
     },
 }
 
@@ -330,15 +349,24 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
     let router = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/auth/status", get(auth_status))
-        .route("/api/v1/config", get(config))
+        .route(
+            "/api/v1/host/audio",
+            get(audio_settings).put(apply_audio_settings),
+        )
+        .route("/api/v1/host/audio/test", post(test_audio))
         .route("/api/v1/plugins", get(plugin_catalog))
         .route("/api/v1/plugins/{plugin_id}", get(plugin_descriptor))
+        .route(
+            "/api/v1/plugins/{plugin_id}/activate",
+            post(activate_plugin),
+        )
         .route("/api/v1/repositories", get(empty_repositories))
         .route("/api/v1/store/catalog", get(empty_store))
         .route("/ws/v1/session", get(session_socket))
         .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_asset));
     let router = if allow_native_resources {
         router
+            .route("/api/v1/config", get(local_config).put(apply_web_settings))
             .route("/api/v1/resources/mounts", get(resource_mounts))
             .route(
                 "/api/v1/resources/mounts/{mount_id}/root",
@@ -361,7 +389,7 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
             .route("/api/v1/resources/selections", post(select_host_resource))
             .route("/api/v1/plugins/install", post(install_selected_plugin))
     } else {
-        router
+        router.route("/api/v1/config", get(config))
     };
     router.fallback(get(static_asset)).with_state(state)
 }
@@ -385,6 +413,14 @@ async fn auth_status() -> Json<Value> {
 }
 
 async fn config(State(state): State<WebState>) -> Json<Value> {
+    config_response(&state, false)
+}
+
+async fn local_config(State(state): State<WebState>) -> Json<Value> {
+    config_response(&state, true)
+}
+
+fn config_response(state: &WebState, configurable: bool) -> Json<Value> {
     let preferences = state
         .public_server
         .read()
@@ -393,8 +429,80 @@ async fn config(State(state): State<WebState>) -> Json<Value> {
     Json(json!({
         "enabled": preferences.enabled,
         "access": if preferences.enabled { "lan" } else { "local" },
-        "port": preferences.port
+        "port": preferences.port,
+        "configurable": configurable
     }))
+}
+
+async fn apply_web_settings(
+    State(state): State<WebState>,
+    Json(preferences): Json<WebServerPreferences>,
+) -> Response {
+    desktop_settings_response(&state, |response| DesktopControlCall::ApplyWebSettings {
+        preferences,
+        response,
+    })
+}
+
+async fn audio_settings(State(state): State<WebState>) -> Response {
+    desktop_settings_response(&state, |response| DesktopControlCall::AudioSettings {
+        response,
+    })
+}
+
+async fn apply_audio_settings(
+    State(state): State<WebState>,
+    Json(preferences): Json<Value>,
+) -> Response {
+    desktop_settings_response(&state, |response| DesktopControlCall::ApplyAudioSettings {
+        preferences,
+        response,
+    })
+}
+
+async fn test_audio(State(state): State<WebState>) -> Response {
+    let (response_sender, response_receiver) = mpsc::channel();
+    if state
+        .control
+        .send(DesktopControlCall::TestAudio {
+            response: response_sender,
+        })
+        .is_err()
+    {
+        return desktop_settings_error("Desktop runtime is shutting down".into());
+    }
+    match response_receiver.recv_timeout(DESKTOP_SETTINGS_TIMEOUT) {
+        Ok(Ok(())) => Json(json!({"status":"ok"})).into_response(),
+        Ok(Err(message)) => desktop_settings_error(message),
+        Err(_) => desktop_settings_error(
+            "Desktop runtime did not answer the audio test request in time.".into(),
+        ),
+    }
+}
+
+fn desktop_settings_response(
+    state: &WebState,
+    call: impl FnOnce(Sender<Result<Value, String>>) -> DesktopControlCall,
+) -> Response {
+    let (response_sender, response_receiver) = mpsc::channel();
+    if state.control.send(call(response_sender)).is_err() {
+        return desktop_settings_error("Desktop runtime is shutting down".into());
+    }
+    match response_receiver.recv_timeout(DESKTOP_SETTINGS_TIMEOUT) {
+        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Err(message)) => desktop_settings_error(message),
+        Err(_) => desktop_settings_error(
+            "Desktop runtime did not answer the audio settings request in time.".into(),
+        ),
+    }
+}
+
+fn desktop_settings_error(message: String) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"status":"error", "message":message})),
+    )
+        .into_response()
 }
 
 async fn plugin_catalog(State(state): State<WebState>) -> Response {
@@ -420,6 +528,47 @@ async fn plugin_descriptor(
             |package| Json(package.public).into_response(),
         ),
         Err(error) => internal_error(error),
+    }
+}
+
+async fn activate_plugin(
+    AxumPath(plugin_id): AxumPath<String>,
+    State(state): State<WebState>,
+) -> Response {
+    if !plugin_is_installed(&state, &plugin_id) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"status":"error", "message":"Plugin is not installed."})),
+        )
+            .into_response();
+    }
+    let (response_sender, response_receiver) = mpsc::channel();
+    if state
+        .control
+        .send(DesktopControlCall::ActivatePlugin {
+            plugin_id: plugin_id.clone(),
+            response: response_sender,
+        })
+        .is_err()
+    {
+        return resource_error(ResourceError::Backend(
+            "Desktop runtime is shutting down".into(),
+        ));
+    }
+    match tokio::task::spawn_blocking(move || {
+        response_receiver.recv_timeout(Duration::from_secs(45))
+    })
+    .await
+    {
+        Ok(Ok(Ok(()))) => Json(json!({"status":"active", "plugin_id":plugin_id})).into_response(),
+        Ok(Ok(Err(message))) => (
+            StatusCode::CONFLICT,
+            Json(json!({"status":"error", "message":message})),
+        )
+            .into_response(),
+        _ => resource_error(ResourceError::Backend(
+            "Desktop runtime did not finish activating the plugin".into(),
+        )),
     }
 }
 
@@ -896,8 +1045,11 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         ControlRequest::Snapshot => {
             serde_json::from_str(&snapshot_json(state)).expect("snapshot JSON")
         }
-        request
-        @ (ControlRequest::PerformanceSnapshot | ControlRequest::EditPerformance { .. }) => {
+        request @ (ControlRequest::PerformanceSnapshot
+        | ControlRequest::EditPerformance { .. }
+        | ControlRequest::PluginPresets { .. }
+        | ControlRequest::PluginPreset { .. }
+        | ControlRequest::MaterializePluginState { .. }) => {
             let (response_sender, response_receiver) = mpsc::channel();
             if state
                 .control

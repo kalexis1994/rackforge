@@ -4,7 +4,7 @@ use jni::objects::{JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
 use keylab_essential_mk3::protocol as keylab_protocol;
 use rackforge_core::{
-    LoadedPlugin, PluginInstance, PluginPackage, PluginStorage,
+    LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore, PluginStorage,
     midi_hotplug::{PanicScope, panic_packets},
 };
 use rackforge_plugin_api::{
@@ -810,6 +810,58 @@ impl AndroidEngine {
         self.instance.0.load_preset(sound_id)?;
         self.selected_sound_id = sound_id.to_owned();
         Ok(())
+    }
+
+    fn plugin_state_command(
+        &self,
+        method: &str,
+        params: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let mut store = PluginStateStore::new(Some(&self.data_root))?;
+        match method {
+            "list_presets" => Ok(serde_json::to_value(store.list_presets(&self.plugin_id)?)?),
+            "preset" => {
+                let preset_id = params
+                    .get("preset_id")
+                    .and_then(serde_json::Value::as_str)
+                    .context("preset command is missing preset_id")?;
+                Ok(serde_json::to_value(
+                    store.preset(&self.plugin_id, preset_id)?,
+                )?)
+            }
+            "materialize" => {
+                let sound_id = params
+                    .get("sound_id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned);
+                if let Some(sound_id) = sound_id.as_deref()
+                    && !self
+                        .catalog
+                        .presets
+                        .iter()
+                        .any(|preset| preset.id == sound_id)
+                {
+                    bail!("plugin does not expose sound {sound_id:?}");
+                }
+                let mut isolated = self
+                    .runtime
+                    .0
+                    .create_instance_with_resource_overrides(&self.resource_overrides)?;
+                if let Some(sound_id) = sound_id.as_deref() {
+                    isolated.load_preset(sound_id)?;
+                }
+                let bytes = isolated.save_state()?;
+                let state = store.put(
+                    &self.plugin_id,
+                    &self.plugin_version,
+                    self.runtime.0.manifest().state_version,
+                    sound_id,
+                    &bytes,
+                )?;
+                Ok(serde_json::to_value(state)?)
+            }
+            _ => bail!("unknown plugin state command {method:?}"),
+        }
     }
 
     fn draft_state(
@@ -2180,6 +2232,28 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginProgramComm
             .context("RackForge engine is not initialized")?;
         engine.apply_program_web_command(&method, &params)?;
         Ok(engine.web_context_json())
+    })();
+    result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginStateCommand(
+    mut env: JNIEnv,
+    _class: JClass,
+    method: JString,
+    params_json: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let method = java_string(&mut env, method)?;
+        let params: serde_json::Value = serde_json::from_str(&java_string(&mut env, params_json)?)
+            .context("parsing plugin state command parameters")?;
+        let guard = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+        let engine = guard
+            .as_ref()
+            .context("RackForge engine is not initialized")?;
+        Ok(engine.plugin_state_command(&method, &params)?.to_string())
     })();
     result_string(&mut env, result)
 }

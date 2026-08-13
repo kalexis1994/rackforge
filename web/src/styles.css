@@ -64,6 +64,17 @@ body,
   width: 100%;
   max-width: 100%;
   overflow-x: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
 }
 
 .app-shell,
@@ -281,10 +292,29 @@ textarea {
   text-align: center;
 }
 
-.play-plugin-identity > div {
+.performance-info-slot {
+  min-width: 0;
+}
+
+.performance-info-copy {
   min-width: 0;
   display: grid;
   gap: 2px;
+}
+
+.performance-info-left,
+.performance-info-center {
+  display: none;
+}
+
+.performance-info-right {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.live-performance-bar {
+  display: none;
 }
 
 .play-plugin-icon {
@@ -826,6 +856,37 @@ body {
   overscroll-behavior: none;
 }
 
+.app-shell.controller-dock-active {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.controller-dock-active .workspace {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.controller-dock-active .page {
+  height: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.global-controller-dock {
+  min-width: 0;
+  min-height: 0;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 20;
+}
+
 .plugin-surface-active .workspace {
   height: 100%;
   min-height: 0;
@@ -889,7 +950,35 @@ body {
   gap: 5px;
 }
 
+.rail-context-actions {
+  margin-top: 18px;
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-top: 1px solid #2a2a26;
+}
+
+.rail-context-label {
+  padding: 0 13px 5px;
+  color: #706f68;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.rail-context-actions .nav-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
 .nav-item {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
   padding: 12px 13px;
   display: flex;
   align-items: center;
@@ -949,6 +1038,43 @@ body {
     0 7px 20px rgba(50, 211, 237, 0.2);
 }
 
+.rail .nav-item.controller-toggle {
+  position: relative;
+  opacity: 1;
+  background: transparent;
+}
+
+.rail .nav-item.controller-toggle .nav-mark,
+.rail .nav-item.controller-toggle.dock-open .nav-mark {
+  color: #706f68;
+  background: transparent;
+  box-shadow: none;
+}
+
+.rail .nav-item.controller-toggle.dock-open {
+  color: #999990;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.rail .nav-item.controller-toggle.dock-open::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  width: 2px;
+  height: 18px;
+  background: var(--acid);
+  border-radius: 999px;
+  box-shadow: 0 0 8px rgba(85, 231, 255, 0.44);
+}
+
+.rail .nav-item.controller-toggle:hover .nav-mark,
+.rail .nav-item.controller-toggle.dock-open:hover .nav-mark {
+  color: var(--acid);
+  background: rgba(85, 231, 255, 0.08);
+}
+
 .connection-badge {
   margin-top: auto;
   padding: 14px 12px;
@@ -986,6 +1112,10 @@ body {
 
 .mobile-menu-button,
 .mobile-menu-backdrop {
+  display: none;
+}
+
+.performance-menu-button {
   display: none;
 }
 
@@ -1800,6 +1930,40 @@ body {
   border-radius: 50%;
 }
 
+.web-server-settings-form {
+  margin-top: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.web-server-settings-form > label:not(.repository-check) {
+  display: grid;
+  gap: 6px;
+}
+
+.web-server-settings-form > label > span {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.web-server-settings-form input[type="number"] {
+  min-width: 0;
+  padding: 10px 11px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  font: 11px/1.3 "Cascadia Mono", "Consolas", monospace;
+}
+
+.web-server-settings-form p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .pairing-card {
   color: #f4f2ec;
   background: #171714;
@@ -1812,9 +1976,82 @@ body {
 }
 
 .repository-settings-card,
-.store-catalog-card {
+.store-catalog-card,
+.host-audio-settings-card {
   grid-column: 1 / -1;
   min-height: 0;
+}
+
+.host-audio-form {
+  margin-top: 24px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.host-audio-form > label,
+.host-audio-form fieldset {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.host-audio-form > label > span,
+.host-audio-form legend {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.host-audio-form select {
+  min-width: 0;
+  width: 100%;
+  padding: 11px 12px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  font: 11px/1.3 "Cascadia Mono", "Consolas", monospace;
+}
+
+.host-audio-form fieldset {
+  grid-column: 1 / -1;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.host-audio-check {
+  display: flex !important;
+  align-items: center;
+  gap: 9px !important;
+  font-size: 11px;
+}
+
+.host-audio-form pre {
+  grid-column: 1 / -1;
+  max-height: 180px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--line);
+  font: 9px/1.55 "Cascadia Mono", "Consolas", monospace;
+  white-space: pre-wrap;
+}
+
+.host-audio-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.host-audio-form .repository-message {
+  grid-column: 1 / -1;
 }
 
 .repository-editor {
@@ -1982,7 +2219,8 @@ body {
 
   .brand-name,
   .nav-item > span:last-child,
-  .connection-badge > span:last-child {
+  .connection-badge > span:last-child,
+  .rail-context-label {
     display: none;
   }
 
@@ -2071,6 +2309,21 @@ body {
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior: contain;
+  }
+
+  /* The fixed inset rectangle is the only viewport authority on a native
+     edge-to-edge host. Explicit viewport heights would extend the shell below
+     the navigation inset (or behind its side edge in landscape). */
+  .app-shell.plugin-surface-active,
+  .app-shell.performance-surface-active,
+  .app-shell.live-surface-active,
+  .app-shell.rack-workspace-active {
+    width: auto;
+    height: auto;
+    min-width: 0;
+    min-height: 0;
+    max-width: none;
+    max-height: none;
   }
 
   .app-shell.plugin-surface-active {
@@ -2421,6 +2674,12 @@ body {
   }
 }
 
+@media (max-width: 620px) {
+  .host-audio-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 .diagnostics-actions {
   margin: -12px 0 22px;
   display: flex;
@@ -2603,20 +2862,6 @@ body {
 }
 
 @media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
-  .rack-graph-toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .rack-graph-child-tools {
-    flex-wrap: wrap;
-  }
-
-  .rack-graph-toolbar select {
-    max-width: none;
-    flex: 1;
-  }
-
   .rack-graph-label-tools {
     align-items: stretch;
     flex-direction: column;
@@ -2769,6 +3014,31 @@ body {
   font-size: 0.8rem;
 }
 
+.install-plugin-complete {
+  display: grid;
+  gap: 14px;
+}
+
+.install-plugin-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.install-plugin-actions button {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 11px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.install-plugin-actions .secondary-button {
+  color: #d8e4e9;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
 .install-plugin-status {
   color: #a9bdc9;
   background: rgba(109, 145, 247, 0.12);
@@ -2804,6 +3074,14 @@ body {
   .install-plugin-success {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .install-plugin-actions {
+    flex-direction: column;
+  }
+
+  .install-plugin-actions button {
+    width: 100%;
   }
 }
 
@@ -3242,6 +3520,81 @@ body {
   -webkit-user-select: none;
 }
 
+.touch-pad-grid.fitted {
+  width: min(var(--pad-grid-width), 100%);
+  height: min(var(--pad-grid-height), 100%);
+  min-height: 0;
+  margin: auto;
+  padding: 0;
+  grid-template-rows: repeat(var(--pad-rows, 4), minmax(0, 1fr));
+  gap: var(--pad-gap, 8px);
+  align-self: center;
+  justify-self: center;
+}
+
+.touch-pad-grid.fitted .touch-pad {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.touch-pad-grid.fitted .touch-pad > span,
+.touch-pad-grid.fitted .touch-pad > strong,
+.touch-pad-grid.fitted .touch-pad > small {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.touch-pad-grid.fitted.condensed .touch-pad {
+  padding: 7px 8px;
+  border-radius: 11px;
+}
+
+.touch-pad-grid.fitted.condensed .touch-pad > span,
+.touch-pad-grid.fitted.condensed .touch-pad > small {
+  font-size: 7px;
+  letter-spacing: 0.035em;
+}
+
+.touch-pad-grid.fitted.condensed .touch-pad > strong {
+  font-size: clamp(16px, 2.3vmin, 24px);
+}
+
+.touch-pad-grid.fitted.compact .touch-pad,
+.touch-pad-grid.fitted.micro .touch-pad {
+  padding: 4px 5px;
+  border-radius: 8px;
+}
+
+.touch-pad-grid.fitted.compact .touch-pad > span,
+.touch-pad-grid.fitted.compact .touch-pad > small,
+.touch-pad-grid.fitted.micro .touch-pad > span,
+.touch-pad-grid.fitted.micro .touch-pad > small {
+  display: none;
+}
+
+.touch-pad-grid.fitted.compact .touch-pad > strong,
+.touch-pad-grid.fitted.micro .touch-pad > strong {
+  align-self: center;
+  justify-self: center;
+  text-align: center;
+  font-size: clamp(11px, 2vmin, 18px);
+}
+
+.touch-pad-grid.fitted.micro .touch-pad {
+  padding: 2px;
+  border-radius: 5px;
+}
+
+.touch-pad-grid.fitted.micro .touch-pad > strong {
+  font-size: clamp(8px, 1.6vmin, 13px);
+}
+
 .touch-pad {
   min-width: 0;
   min-height: 96px;
@@ -3484,6 +3837,16 @@ body {
 .touch-controller-menu-button svg {
   width: 58%;
   height: 58%;
+}
+
+.touch-controller-stage,
+.touch-controller-dockbar,
+.touch-controller-dock-resizer {
+  display: none;
+}
+
+.touch-controller-dock {
+  display: contents;
 }
 
 .touch-controller-menu-backdrop {
@@ -3735,9 +4098,8 @@ body {
   border-radius: 0 0 5px 5px;
 }
 
-.controller-surface-active .touch-pad-grid {
-  padding: clamp(7px, 1.3vmin, 13px);
-  gap: clamp(6px, 1.1vmin, 12px);
+  .controller-surface-active .touch-pad-grid {
+  gap: var(--pad-gap, clamp(6px, 1.1vmin, 12px));
 }
 
 .controller-surface-active .touch-pad {
@@ -3752,6 +4114,274 @@ body {
 @media (min-width: 761px) {
   .touch-main-navigation {
     display: none;
+  }
+}
+
+/* Roomy controller workspace. This is intentionally capability-responsive,
+   not platform-specific: CSS pixels already include OS DPI/display scaling,
+   and the rail is kept whenever the usable viewport can support it. */
+@media (min-width: 1100px) and (min-height: 620px) {
+  .app-shell.controller-surface-active {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .controller-surface-active .rail {
+    display: flex;
+  }
+
+  .controller-surface-active .workspace {
+    grid-column: 2;
+    min-width: 0;
+  }
+
+  .controller-surface-active .touch-controller {
+    display: grid;
+    grid-template-rows: minmax(80px, 1fr) var(--controller-dock-height, 360px);
+    background:
+      radial-gradient(circle at 50% 80%, rgba(85, 231, 255, 0.07), transparent 42%),
+      #030b11;
+  }
+
+  .touch-controller.docked {
+    position: relative;
+    width: 100%;
+    height: var(--controller-dock-height, 250px);
+    min-height: 0;
+    gap: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+    background: #030b11;
+  }
+
+  .controller-surface-active .touch-controller-menu-button {
+    display: none;
+  }
+
+  .touch-controller-stage {
+    min-width: 0;
+    padding: clamp(28px, 5vw, 72px);
+    display: grid;
+    align-content: end;
+    justify-items: start;
+    gap: 5px;
+    overflow: hidden;
+  }
+
+  .touch-controller-stage > span {
+    color: var(--acid);
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.14em;
+  }
+
+  .touch-controller-stage > strong,
+  .touch-controller-stage > small {
+    max-width: min(680px, 90%);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .touch-controller-stage > strong {
+    font-family: var(--display-font);
+    font-size: clamp(24px, 3vw, 42px);
+  }
+
+  .touch-controller-stage > small {
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .touch-controller-dockbar {
+    min-height: 48px;
+    padding: 5px 8px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(5, 16, 24, 0.97);
+    border-top: 1px solid var(--line);
+  }
+
+  .touch-controller-dock {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    height: var(--controller-dock-height, 360px);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .touch-controller.docked .touch-controller-dock {
+    height: 100%;
+  }
+
+  .touch-controller-dock.resizing {
+    user-select: none;
+  }
+
+  .controller-surface-active .touch-controller-dock > .touch-controller-menu-backdrop {
+    position: fixed;
+    inset:
+      var(--rackforge-safe-top)
+      var(--rackforge-safe-right)
+      var(--rackforge-safe-bottom)
+      calc(220px + var(--rackforge-safe-left));
+  }
+
+  .touch-controller.docked .touch-controller-menu-backdrop {
+    position: fixed;
+    inset:
+      var(--rackforge-safe-top)
+      var(--rackforge-safe-right)
+      var(--rackforge-safe-bottom)
+      calc(220px + var(--rackforge-safe-left));
+  }
+
+  .touch-controller-dock-resizer {
+    position: absolute;
+    z-index: 26;
+    top: -17px;
+    left: 50%;
+    width: 96px;
+    height: 34px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    transform: translateX(-50%);
+    cursor: ns-resize;
+    touch-action: none;
+  }
+
+  .touch-controller-dock-resizer > span {
+    width: 52px;
+    height: 7px;
+    display: block;
+    background: rgba(104, 169, 184, 0.65);
+    border: 1px solid rgba(158, 225, 238, 0.42);
+    border-radius: 999px;
+    box-shadow: 0 2px 12px rgba(0, 4, 8, 0.54);
+    transition: width 140ms ease, height 140ms ease, background 140ms ease;
+  }
+
+  .touch-controller-dock-resizer:hover > span,
+  .touch-controller-dock-resizer:focus-visible > span,
+  .touch-controller-dock.resizing .touch-controller-dock-resizer > span {
+    width: 64px;
+    height: 9px;
+    background: var(--acid);
+  }
+
+  .touch-controller-dockbar .touch-mode-switch {
+    flex: 0 0 auto;
+  }
+
+  .touch-controller-dockbar .touch-mode-switch button,
+  .touch-controller-dockbar > button {
+    min-height: 36px;
+    padding: 7px 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .touch-controller-dockbar .touch-mode-switch button.active,
+  .touch-controller-dockbar > button.active {
+    color: #031017;
+    background: var(--acid);
+    border-color: var(--acid);
+  }
+
+  .touch-controller-dockbar svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .touch-controller-range-summary {
+    min-width: 0;
+    margin-right: auto;
+    overflow: hidden;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.08em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .controller-surface-active .touch-instrument {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    align-self: end;
+    border-top: 1px solid rgba(85, 231, 255, 0.22);
+  }
+
+  .touch-controller.docked .touch-instrument {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    align-self: end;
+    overflow: hidden;
+    background: #030b11;
+    border: 0;
+    border-top: 1px solid rgba(85, 231, 255, 0.22);
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .controller-surface-active .piano-keyboard,
+  .touch-controller.docked .piano-keyboard {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .controller-surface-active .mode-pads .touch-controller-stage {
+    padding-block: 16px;
+  }
+
+  .controller-surface-active .mode-pads .touch-instrument {
+    height: 100%;
+    min-height: 0;
+    padding: clamp(12px, 2vmin, 22px);
+  }
+
+  .touch-controller.docked.mode-pads .touch-instrument {
+    height: 100%;
+    min-height: 0;
+    padding: clamp(8px, 1.2vmin, 14px);
+  }
+
+  .controller-surface-active .mode-pads .touch-pad-grid {
+    width: min(var(--pad-grid-width), 920px, 100%);
+    height: min(var(--pad-grid-height), 100%);
+    max-height: 640px;
+    margin: auto;
+    grid-template-rows: repeat(var(--pad-rows, 4), minmax(0, 1fr));
+  }
+
+  .touch-controller.docked.mode-pads .touch-pad-grid {
+    width: min(var(--pad-grid-width), 920px, 100%);
+    height: min(var(--pad-grid-height), 100%);
+    min-height: 0;
+    max-height: none;
+    margin: auto;
+    grid-template-rows: repeat(var(--pad-rows, 4), minmax(0, 1fr));
   }
 }
 
@@ -4422,13 +5052,13 @@ body {
 }
 
 .rack-graph-editor {
+  position: relative;
   overflow: hidden;
   border: 1px solid rgba(98, 223, 241, 0.16);
   background: #071119;
   box-shadow: var(--inner-light);
 }
 
-.rack-graph-toolbar,
 .rack-graph-label-tools {
   min-height: 48px;
   padding: 8px 10px;
@@ -4440,15 +5070,6 @@ body {
   background: rgba(12, 26, 35, 0.92);
 }
 
-.rack-graph-toolbar > div,
-.rack-graph-child-tools {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.rack-graph-toolbar button,
-.rack-graph-toolbar select,
 .rack-graph-label-tools input,
 .rack-graph-label-tools select {
   min-height: 30px;
@@ -4460,29 +5081,596 @@ body {
   font-size: 10px;
 }
 
-.rack-graph-toolbar button {
-  padding: 0 11px;
+.rack-node-menu {
+  position: absolute;
+  z-index: 40;
+  width: 182px;
+  padding: 6px;
+  display: grid;
+  gap: 3px;
+  color: var(--ink);
+  background: rgba(5, 16, 24, 0.98);
+  border: 1px solid rgba(98, 223, 241, 0.3);
+  border-radius: 9px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.54);
+}
+
+.rack-graph-menu-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.rack-graph-menu-layer .rack-node-menu {
+  pointer-events: auto;
+}
+
+.rack-slot-popover-link {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.rack-slot-popover-link line {
+  stroke: rgba(98, 223, 241, 0.62);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 5;
+}
+
+.rack-slot-popover-link circle {
+  fill: var(--acid);
+}
+
+.rack-slot-popover {
+  position: absolute;
+  z-index: 44;
+  width: min(720px, calc(100% - 24px));
+  height: min(620px, calc(100% - 24px));
+  min-width: 420px;
+  min-height: 300px;
+  max-width: min(1280px, calc(100% - 24px));
+  max-height: min(920px, calc(100% - 24px));
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: visible;
+  color: var(--ink);
+  background: #061018;
+  border: 1px solid rgba(98, 223, 241, 0.42);
+  border-radius: 16px;
+  box-shadow: 0 28px 84px rgba(0, 0, 0, 0.72), var(--inner-light);
+  pointer-events: auto;
+}
+
+.rack-slot-popover-tail {
+  position: absolute;
+  top: 28px;
+  left: -12px;
+  width: 22px;
+  height: 22px;
+  border-left: 1px solid rgba(98, 223, 241, 0.42);
+  border-bottom: 1px solid rgba(98, 223, 241, 0.42);
+  background: #0a1922;
+  transform: rotate(45deg);
+}
+
+.rack-slot-popover.floating .rack-slot-popover-tail {
+  display: none;
+}
+
+.rack-slot-popover-header {
+  grid-row: 1;
+  position: relative;
+  z-index: 1;
+  min-height: 54px;
+  padding: 7px 8px 7px 13px;
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(180px, 1.25fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid rgba(98, 223, 241, 0.15);
+  border-radius: 15px 15px 0 0;
+  background: linear-gradient(180deg, #10232d, #091720);
+  cursor: grab;
+  touch-action: none;
+}
+
+.rack-slot-popover-header:active {
+  cursor: grabbing;
+}
+
+.rack-slot-popover-header > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.rack-slot-popover-header > div:first-child span,
+.rack-slot-popover footer span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 7px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.rack-slot-popover-header > div:first-child strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rack-slot-popover-preset {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px;
+}
+
+.rack-slot-popover select,
+.rack-slot-popover button {
+  min-height: 31px;
+  border: 1px solid rgba(98, 223, 241, 0.2);
+  border-radius: 6px;
+  color: var(--ink);
+  background: rgba(5, 15, 22, 0.86);
+  font: inherit;
+  font-size: 9px;
+}
+
+.rack-slot-popover button {
+  padding: 0 10px;
   cursor: pointer;
 }
 
-.rack-graph-toolbar button:hover:not(:disabled) {
-  border-color: rgba(98, 223, 241, 0.65);
+.rack-slot-popover button:hover:not(:disabled),
+.rack-slot-popover button:focus-visible {
   color: var(--acid);
+  border-color: rgba(98, 223, 241, 0.48);
 }
 
-.rack-graph-toolbar button:disabled {
-  cursor: default;
+.rack-slot-popover button:disabled {
   opacity: 0.4;
+  cursor: default;
 }
 
-.rack-graph-toolbar button.danger:hover:not(:disabled) {
-  border-color: rgba(255, 105, 135, 0.7);
-  color: #ff7995;
+.rack-slot-close-button {
+  width: 32px;
+  padding: 0 !important;
+  font-size: 17px !important;
 }
 
-.rack-graph-toolbar select {
-  max-width: 180px;
-  padding: 0 8px;
+.rack-slot-popover-error {
+  grid-row: 2;
+  padding: 6px 10px;
+  color: #ffc4d0;
+  background: rgba(112, 18, 43, 0.38);
+  border-bottom: 1px solid rgba(255, 121, 149, 0.24);
+  font-size: 9px;
+}
+
+.rack-slot-popover-surface {
+  grid-row: 3;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  border-radius: 0;
+  background: #02080c;
+}
+
+.rack-slot-popover-surface .plugin-frame-stage {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.rack-slot-popover-surface .plugin-frame {
+  width: 100%;
+  height: 100%;
+}
+
+.rack-slot-popover footer {
+  grid-row: 4;
+  min-height: 24px;
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid rgba(98, 223, 241, 0.12);
+  background: #08151d;
+}
+
+.rack-slot-resize-handle {
+  position: absolute;
+  z-index: 4;
+  right: -1px;
+  bottom: -1px;
+  width: 28px !important;
+  height: 28px;
+  min-height: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  border: 0 !important;
+  border-radius: 0 0 15px 0 !important;
+  background: transparent !important;
+  cursor: nwse-resize !important;
+  touch-action: none;
+}
+
+.rack-slot-resize-handle::before,
+.rack-slot-resize-handle::after {
+  content: "";
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  border-right: 1px solid rgba(98, 223, 241, 0.74);
+  border-bottom: 1px solid rgba(98, 223, 241, 0.74);
+}
+
+.rack-slot-resize-handle::before {
+  width: 11px;
+  height: 11px;
+}
+
+.rack-slot-resize-handle::after {
+  width: 6px;
+  height: 6px;
+}
+
+.rack-slot-resize-handle:hover::before,
+.rack-slot-resize-handle:hover::after,
+.rack-slot-resize-handle:focus-visible::before,
+.rack-slot-resize-handle:focus-visible::after {
+  border-color: var(--acid);
+}
+
+@media (max-width: 700px), (max-height: 600px) {
+  .rack-slot-popover-link,
+  .rack-slot-popover-tail,
+  .rack-slot-attach-button,
+  .rack-slot-resize-handle {
+    display: none !important;
+  }
+
+  .rack-slot-popover,
+  .rack-slot-popover.attached,
+  .rack-slot-popover.floating {
+    inset: 0 !important;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .rack-slot-popover-header {
+    min-height: 46px;
+    padding: 5px 7px 5px 58px;
+    grid-template-columns: minmax(80px, 0.75fr) minmax(150px, 1.25fr) auto;
+    border-radius: 0;
+    cursor: default;
+    touch-action: auto;
+  }
+
+  .rack-slot-popover footer {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .rack-slot-popover-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .rack-slot-popover-preset {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+.rack-node-menu header {
+  min-width: 0;
+  padding: 7px 8px 8px;
+  display: grid;
+  gap: 2px;
+  border-bottom: 1px solid rgba(98, 223, 241, 0.13);
+}
+
+.rack-node-menu header span {
+  color: var(--muted);
+  font-size: 7px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.rack-node-menu header strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rack-node-menu button {
+  min-height: 31px;
+  padding: 0 9px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  text-align: left;
+}
+
+.rack-node-menu button:hover:not(:disabled),
+.rack-node-menu button:focus-visible {
+  color: var(--acid);
+  background: rgba(98, 223, 241, 0.1);
+}
+
+.rack-node-menu button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.rack-pane-menu {
+  width: 218px;
+}
+
+.rack-pane-child-picker {
+  padding: 6px 8px;
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid rgba(98, 223, 241, 0.1);
+}
+
+.rack-pane-child-picker span {
+  color: var(--muted);
+  font-size: 7px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.rack-pane-child-picker select {
+  min-width: 0;
+  width: 100%;
+  min-height: 29px;
+  padding: 0 7px;
+  border: 1px solid rgba(98, 223, 241, 0.2);
+  border-radius: 3px;
+  color: var(--ink);
+  background: #0a1821;
+  font: inherit;
+  font-size: 9px;
+}
+
+/* The Rack graph is a first-class performance workspace. On a roomy viewport
+   the regular navigation rail remains available; only compact viewports move
+   navigation behind the floating menu. CSS pixels already account for the
+   operating-system DPI/display scale. */
+.app-shell.rack-workspace-active {
+  width: auto;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rack-workspace-active .topbar,
+.rack-workspace-active .live-toolbar,
+.rack-workspace-active .config-library {
+  display: none;
+}
+
+.rack-workspace-active .workspace {
+  grid-column: 2;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rack-workspace-active .page.live-host-page {
+  width: 100%;
+  max-width: none;
+  height: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
+.rack-workspace-active .live-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rack-workspace-active .live-performance-bar {
+  width: 100%;
+  min-height: 22px;
+  height: 22px;
+  padding: 0 6px;
+  display: grid;
+  grid-template-columns: minmax(70px, 0.75fr) minmax(120px, 1.5fr) minmax(120px, 1fr);
+  align-items: center;
+  flex: 0 0 22px;
+  color: var(--ink);
+  background: rgba(5, 16, 24, 0.96);
+  border-bottom: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.04);
+  z-index: 4;
+}
+
+.rack-workspace-active .performance-info-slot {
+  min-width: 0;
+  padding: 0 6px;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.rack-workspace-active .performance-info-slot + .performance-info-slot {
+  border-left: 1px solid rgba(123, 207, 225, 0.16);
+}
+
+.rack-workspace-active .performance-info-left { justify-content: flex-start; }
+.rack-workspace-active .performance-info-right { justify-content: flex-end; }
+.rack-workspace-active .performance-info-bar span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 6px;
+  letter-spacing: 0.11em;
+}
+.rack-workspace-active .performance-info-bar strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 8px;
+  letter-spacing: 0.035em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .app-shell.rack-workspace-active {
+    height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .rack-workspace-active .rail {
+    display: none;
+  }
+
+  .rack-workspace-active .workspace {
+    grid-column: 1;
+  }
+
+  .rack-workspace-active .live-performance-bar {
+    padding-left: 58px;
+  }
+
+  .rack-workspace-active .performance-menu-button {
+    position: absolute;
+    z-index: 36;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    color: var(--acid);
+    background: rgba(4, 17, 26, 0.84);
+    border: 1px solid rgba(85, 231, 255, 0.34);
+    border-radius: 13px;
+    box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
+    backdrop-filter: blur(14px) saturate(120%);
+    touch-action: none;
+    user-select: none;
+    cursor: grab;
+  }
+}
+
+.rack-workspace-active .performance-config.rack-graph-workspace,
+.rack-workspace-active .config-editor,
+.rack-workspace-active .rack-editor-form.immersive,
+.rack-workspace-active .rack-editor-form.immersive > .editor-section,
+.rack-workspace-active .rack-editor-form.immersive > .editor-section > .editor-section-content,
+.rack-workspace-active .rack-graph-editor {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.rack-workspace-active .performance-config.rack-graph-workspace {
+  width: auto;
+  height: 0;
+  display: block;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
+.rack-workspace-active .config-editor {
+  position: relative;
+}
+
+.rack-workspace-active .rack-editor-form.immersive {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rack-workspace-active .rack-editor-form.immersive > .editor-header,
+.rack-workspace-active .rack-editor-form.immersive > .basic-fields,
+.rack-workspace-active .rack-editor-form.immersive > .editor-section:last-child {
+  display: none;
+}
+
+.rack-workspace-active .rack-editor-form.immersive > .editor-section {
+  border: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
+.rack-workspace-active .rack-editor-form.immersive > .editor-section > header {
+  display: none;
+}
+
+.rack-workspace-active .rack-editor-form.immersive > .editor-section > .editor-section-content {
+  padding: 0;
+  display: block;
+}
+
+.rack-workspace-active .rack-graph-editor {
+  display: flex;
+  flex-direction: column;
+  border: 0;
+}
+
+.rack-workspace-active .rack-graph-canvas {
+  width: 100%;
+  max-width: 100%;
+  height: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
+.rack-workspace-active .rack-graph-canvas > .react-flow {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+}
+
+.rack-workspace-active .rack-graph-canvas .react-flow__minimap {
+  width: 116px;
+  height: 76px;
+}
+
+.rack-workspace-active .rack-graph-hint {
+  margin: 0;
+  padding: 5px 10px;
+  flex: 0 0 auto;
 }
 
 .rack-graph-label-tools {
@@ -4508,6 +5696,7 @@ body {
 }
 
 .rack-graph-canvas {
+  position: relative;
   height: clamp(390px, 54vh, 620px);
   min-height: 390px;
   background:
@@ -4521,6 +5710,23 @@ body {
 
 .rack-graph-canvas .react-flow__pane:active {
   cursor: grabbing;
+}
+
+/* Android WebView can temporarily cull React Flow's transformed SVG/node
+   subtree while a pointer continuously changes a node transform. Keep the
+   renderer layers composited for the complete gesture instead of promoting
+   and discarding them on each movement frame. */
+.rack-graph-canvas .react-flow__viewport,
+.rack-graph-canvas .react-flow__nodes,
+.rack-graph-canvas .react-flow__edges {
+  backface-visibility: hidden;
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+.rack-graph-canvas .react-flow__node {
+  backface-visibility: hidden;
+  will-change: transform;
 }
 
 .rack-flow-node {
@@ -4666,6 +5872,16 @@ body {
 }
 
 .rack-graph-canvas .react-flow__minimap-mask { fill: rgba(2, 8, 12, 0.72); }
+
+@media (max-width: 700px), (max-height: 600px) {
+  .rack-graph-canvas .react-flow__minimap {
+    display: none;
+  }
+
+  .rack-workspace-active .rack-graph-hint {
+    display: none;
+  }
+}
 
 .rack-graph-hint {
   padding: 9px 12px;
@@ -5589,5 +6805,310 @@ body {
   .plugin-grid.expanded,
   .live-content {
     grid-template-columns: 1fr;
+  }
+}
+
+/* PLAY and LIVE are stage surfaces on a short landscape viewport. Their
+   controls float over the surface instead of permanently consuming two rows
+   of the available height. */
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .app-shell.performance-surface-active {
+    overflow: hidden;
+  }
+
+  .performance-surface-active .workspace {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .performance-surface-active .topbar {
+    display: none;
+  }
+
+  .performance-menu-button {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 36;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    color: var(--acid);
+    background: rgba(4, 17, 26, 0.84);
+    border: 1px solid rgba(85, 231, 255, 0.34);
+    border-radius: 13px;
+    box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
+    backdrop-filter: blur(14px) saturate(120%);
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: grab;
+    will-change: left, top, transform;
+    transform-origin: 50% 50%;
+    transition:
+      transform 180ms cubic-bezier(0.2, 0.82, 0.2, 1),
+      color 150ms ease,
+      background-color 150ms ease,
+      border-color 150ms ease,
+      box-shadow 180ms ease;
+  }
+
+  .performance-menu-button svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .performance-menu-button.dragging,
+  .performance-menu-button.dragging:active {
+    cursor: grabbing;
+  }
+
+  .performance-surface-active .page.plugin-host-page,
+  .performance-surface-active .page.live-host-page {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    flex: 1 1 0;
+    overflow: hidden;
+  }
+
+  .performance-surface-active .play-plugin-toolbar {
+    position: relative;
+    top: auto;
+    right: auto;
+    left: auto;
+    width: 100%;
+    min-height: 22px;
+    height: 22px;
+    padding: 0 6px 0 58px;
+    flex: 0 0 22px;
+    color: var(--ink);
+    background: rgba(5, 16, 24, 0.96);
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.04);
+    display: flex;
+    align-items: center;
+    z-index: 4;
+  }
+
+  .performance-surface-active .play-plugin-toolbar .play-header-button {
+    display: none;
+  }
+
+  .performance-surface-active .play-header-button {
+    min-height: 44px;
+    padding: 7px 9px;
+    background: rgba(4, 17, 26, 0.84);
+    backdrop-filter: blur(14px) saturate(120%);
+  }
+
+  .performance-surface-active .play-plugin-identity {
+    width: 100%;
+    max-width: none;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(70px, 0.75fr) minmax(120px, 1.5fr) minmax(120px, 1fr);
+    align-items: center;
+    gap: 0;
+    padding: 0;
+    color: var(--ink);
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .performance-surface-active .performance-info-right > .play-plugin-icon,
+  .performance-surface-active .performance-info-right > .play-plugin-icon.plugin-icon-fallback {
+    display: none;
+  }
+
+  .performance-surface-active .performance-info-slot {
+    min-width: 0;
+    padding: 0 6px;
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 4px;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .performance-surface-active .performance-info-slot + .performance-info-slot {
+    border-left: 1px solid rgba(123, 207, 225, 0.16);
+  }
+
+  .performance-surface-active .performance-info-left {
+    justify-content: flex-start;
+  }
+
+  .performance-surface-active .performance-info-right {
+    justify-content: flex-end;
+  }
+
+  .performance-surface-active .performance-info-copy {
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    overflow: hidden;
+  }
+
+  .performance-surface-active .performance-info-bar span {
+    display: inline;
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 6px;
+    letter-spacing: 0.11em;
+  }
+
+  .performance-surface-active .performance-info-bar strong {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 8px;
+    letter-spacing: 0.035em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .performance-surface-active .preset-modal-backdrop {
+    inset: 0;
+    z-index: 48;
+  }
+
+  .live-surface-active .live-shell {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .live-surface-active .live-performance-bar {
+    width: 100%;
+    min-height: 22px;
+    height: 22px;
+    padding: 0 6px 0 58px;
+    display: grid;
+    grid-template-columns: minmax(70px, 0.75fr) minmax(120px, 1.5fr) minmax(120px, 1fr);
+    align-items: center;
+    flex: 0 0 22px;
+    color: var(--ink);
+    background: rgba(5, 16, 24, 0.96);
+    border-bottom: 1px solid var(--line);
+    box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.04);
+    z-index: 4;
+  }
+
+  .live-surface-active .live-toolbar > div:first-child {
+    display: none;
+  }
+
+  .live-surface-active .live-toolbar {
+    display: none;
+  }
+
+  .live-surface-active .live-perform-surface .live-toolbar {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 24;
+    margin: 0;
+    padding: 0;
+  }
+
+  .live-surface-active .live-toolbar .live-surface-tabs {
+    padding: 3px;
+    background: rgba(4, 17, 26, 0.84);
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    box-shadow: 0 8px 26px rgba(0, 3, 7, 0.3);
+    backdrop-filter: blur(14px) saturate(120%);
+  }
+
+  .live-surface-active .live-surface-tabs button,
+  .live-surface-active .live-mode-tabs button {
+    min-height: 36px;
+  }
+
+  .live-surface-active .live-perform-surface .live-content {
+    min-height: 0;
+    height: auto;
+    display: block;
+    padding: 8px;
+    flex: 1 1 0;
+    overflow: hidden;
+  }
+
+  .live-surface-active .live-perform-surface .active-performance-card {
+    display: none;
+  }
+
+  .live-surface-active .live-perform-surface .live-browser {
+    min-height: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .live-surface-active .live-perform-surface .live-mode-tabs {
+    min-height: 38px;
+    padding: 4px;
+    flex: 0 0 auto;
+  }
+
+  .live-surface-active .live-perform-surface .live-mode-tabs button {
+    min-height: 28px;
+  }
+
+  .live-surface-active .live-perform-surface .live-target-list {
+    min-height: 0;
+    max-height: none;
+    padding: 8px;
+    flex: 1 1 0;
+  }
+
+  .live-surface-active .live-configure-surface {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .live-surface-active .live-configure-surface .live-toolbar {
+    min-height: 44px;
+    margin: 0 0 8px;
+    padding-left: 52px;
+    display: none;
+    align-items: center;
+    justify-content: flex-end;
+    flex: 0 0 auto;
+  }
+
+  .live-surface-active .live-configure-surface .performance-config {
+    min-height: 0;
+    padding: 8px;
+    overflow: auto;
+    flex: 1 1 0;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 640px) {
+  .live-surface-active .live-perform-surface .live-content {
+    grid-template-columns: minmax(145px, 0.52fr) minmax(0, 1.48fr);
+  }
+
+  .live-surface-active .live-perform-surface .active-performance-card {
+    padding-inline: 12px;
   }
 }

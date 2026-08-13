@@ -1,13 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(windows)]
-mod audio_settings;
-#[cfg(windows)]
 mod desktop_audio;
 #[cfg(windows)]
 mod desktop_webview;
-#[cfg(windows)]
-mod native_menu;
 mod paths;
 mod setup;
 #[cfg(windows)]
@@ -25,7 +21,9 @@ use rackforge_control_api::{
 };
 use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
-use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage, PluginStorage};
+use rackforge_core::{
+    LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore, PluginStorage,
+};
 use rackforge_performance_api::{PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot};
 use rackforge_plugin_api::{
     PROGRAM_EDITOR_SCHEMA_VERSION, PluginKind, PreparedProgram, PresetCatalog, ProgramDocument,
@@ -112,11 +110,7 @@ enum AppMode {
 struct RackForgeApp {
     mode: AppMode,
     #[cfg(windows)]
-    audio_settings: Option<audio_settings::AudioSettingsState>,
-    #[cfg(windows)]
     webview: desktop_webview::DesktopWebView,
-    #[cfg(windows)]
-    native_menu: native_menu::NativeMenu,
 }
 
 struct DesktopPlugin {
@@ -290,6 +284,7 @@ struct DesktopApp {
     options: Options,
     plugin_install: Option<PluginInstallTask>,
     performance_repository: PerformanceRepository,
+    state_store: PluginStateStore,
     virtual_midi: BTreeMap<ClientId, VirtualMidiClientState>,
     next_program_draft_id: u64,
     next_audition_lease_id: u64,
@@ -398,6 +393,8 @@ impl DesktopApp {
                 });
         let performance_repository = PerformanceRepository::load_or_empty(Some(&options.data_root))
             .context("loading Desktop performance library")?;
+        let state_store = PluginStateStore::new(Some(&options.data_root))
+            .context("loading Desktop plugin-state store")?;
         #[cfg(windows)]
         let audio_config_path = options.rackforge_root.join("config/audio.toml");
         #[cfg(windows)]
@@ -544,6 +541,7 @@ impl DesktopApp {
             options: options.clone(),
             plugin_install: None,
             performance_repository,
+            state_store,
             virtual_midi: BTreeMap::new(),
             next_program_draft_id: 1,
             next_audition_lease_id: 1,
@@ -662,15 +660,6 @@ impl DesktopApp {
     }
 
     #[cfg(windows)]
-    fn show_audio_error(message: &str) {
-        rfd::MessageDialog::new()
-            .set_title("RackForge audio is unavailable")
-            .set_description(message)
-            .set_level(rfd::MessageLevel::Error)
-            .show();
-    }
-
-    #[cfg(windows)]
     fn poll_audio_error(&mut self) {
         let stream_error = self.audio.as_ref().and_then(|audio| audio.take_error());
         if let Some(error) = stream_error {
@@ -738,19 +727,19 @@ impl DesktopApp {
     }
 
     #[cfg(windows)]
-    fn audio_settings_state(&self) -> Result<audio_settings::AudioSettingsState> {
+    fn audio_settings_json(&self) -> Result<serde_json::Value> {
         let inventory = desktop_audio::AudioInventory::scan()?;
         let preferences = self
             .audio_preferences
             .clone()
             .map_or_else(|| inventory.default_preferences(), Ok)?;
-        let mut state = audio_settings::AudioSettingsState::new(
-            inventory,
-            preferences,
-            self.web_preferences.clone(),
-        );
-        state.set_runtime_status(self.audio_summary());
-        Ok(state)
+        Ok(serde_json::json!({
+            "status": "ok",
+            "host": "desktop",
+            "inventory": inventory,
+            "preferences": preferences,
+            "runtime_status": self.audio_summary(),
+        }))
     }
 
     #[cfg(windows)]
@@ -1044,13 +1033,10 @@ impl DesktopApp {
                 Self::show_install_info("Plugin installed", &self.status);
                 false
             }
-            PluginInstallActivation::Reload => match self.reload_plugins() {
-                Ok(warnings) => {
-                    self.status = if warnings.is_empty() {
-                        format!("{label} installed and ready")
-                    } else {
-                        format!("{label} installed · {}", warnings.join(" · "))
-                    };
+            PluginInstallActivation::Reload => match self.activate_plugin_id(&inspection.plugin_id)
+            {
+                Ok(()) => {
+                    self.status = format!("{label} installed and active");
                     Self::show_install_info("Plugin installed", &self.status);
                     true
                 }
@@ -1346,8 +1332,103 @@ impl DesktopApp {
                         persist,
                     ));
                 }
+                web::DesktopControlCall::ActivatePlugin {
+                    plugin_id,
+                    response,
+                } => {
+                    let _ = response.send(self.activate_plugin_id(&plugin_id));
+                }
+                web::DesktopControlCall::AudioSettings { response } => {
+                    #[cfg(windows)]
+                    let _ = response.send(
+                        self.audio_settings_json()
+                            .map_err(|error| format!("{error:#}")),
+                    );
+                    #[cfg(not(windows))]
+                    let _ = response.send(Err(
+                        "This host does not publish Desktop audio settings.".into(),
+                    ));
+                }
+                web::DesktopControlCall::ApplyAudioSettings {
+                    preferences,
+                    response,
+                } => {
+                    #[cfg(windows)]
+                    let result =
+                        serde_json::from_value::<desktop_audio::AudioPreferences>(preferences)
+                            .map_err(|error| format!("Invalid Desktop audio settings: {error}"))
+                            .and_then(|preferences| {
+                                self.apply_audio_preferences(preferences)
+                                    .map_err(|error| format!("{error:#}"))?;
+                                self.audio_settings_json()
+                                    .map_err(|error| format!("{error:#}"))
+                            });
+                    #[cfg(windows)]
+                    let _ = response.send(result);
+                    #[cfg(not(windows))]
+                    let _ = {
+                        let _ = preferences;
+                        response.send(Err(
+                            "This host does not publish Desktop audio settings.".into()
+                        ))
+                    };
+                }
+                web::DesktopControlCall::TestAudio { response } => {
+                    #[cfg(windows)]
+                    let _ =
+                        response.send(self.test_audio_note().map_err(|error| format!("{error:#}")));
+                    #[cfg(not(windows))]
+                    let _ = response.send(Err(
+                        "This host does not publish an audio test control.".into()
+                    ));
+                }
+                web::DesktopControlCall::ApplyWebSettings {
+                    preferences,
+                    response,
+                } => {
+                    let result = self
+                        .apply_web_preferences(preferences)
+                        .map(|message| {
+                            serde_json::json!({
+                                "status": "ok",
+                                "enabled": self.web_preferences.enabled,
+                                "access": if self.web_preferences.enabled { "lan" } else { "local" },
+                                "port": self.web_preferences.port,
+                                "configurable": true,
+                                "message": message,
+                            })
+                        })
+                        .map_err(|error| format!("{error:#}"));
+                    let _ = response.send(result);
+                }
             }
         }
+    }
+
+    fn activate_plugin_id(&mut self, plugin_id: &str) -> Result<(), String> {
+        if !self
+            .plugins
+            .iter()
+            .any(|plugin| plugin.plugin_id == plugin_id)
+        {
+            self.reload_plugins()
+                .map_err(|error| format!("Could not load the installed plugin: {error:#}"))?;
+        }
+        let instance_id = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == plugin_id)
+            .map(|plugin| plugin.instance_id.clone())
+            .ok_or_else(|| {
+                format!("Installed plugin {plugin_id:?} is not compatible with Desktop")
+            })?;
+        let instance_id = InstanceId::new(instance_id)
+            .map_err(|error| format!("Installed plugin has an invalid instance id: {error}"))?;
+        self.select_plugin(&instance_id, None)?;
+        self.apply_command(MenuCommand::SetActiveMode {
+            mode: ActiveMode::Play,
+        });
+        Ok(())
     }
 
     fn load_plugin_resource(
@@ -1818,9 +1899,102 @@ impl DesktopApp {
                     },
                 }
             }
+            ControlRequest::PluginPresets { plugin_id } => {
+                match self.state_store.list_presets(&plugin_id) {
+                    Ok(presets) => ControlResponse::PluginPresets { plugin_id, presets },
+                    Err(error) => ControlResponse::Error {
+                        code: ControlErrorCode::InvalidRequest,
+                        message: format!("Could not list RackForge presets: {error:#}"),
+                        current_revision: Some(
+                            self.session.read().expect("session lock poisoned").revision,
+                        ),
+                    },
+                }
+            }
+            ControlRequest::PluginPreset {
+                plugin_id,
+                preset_id,
+            } => match self.state_store.preset(&plugin_id, &preset_id) {
+                Ok(preset) => ControlResponse::PluginPreset {
+                    preset: Box::new(preset),
+                },
+                Err(error) => ControlResponse::Error {
+                    code: ControlErrorCode::NotFound,
+                    message: format!("Could not read RackForge preset: {error:#}"),
+                    current_revision: Some(
+                        self.session.read().expect("session lock poisoned").revision,
+                    ),
+                },
+            },
+            ControlRequest::MaterializePluginState {
+                plugin_id,
+                sound_id,
+            } => self.materialize_plugin_state(&plugin_id, sound_id),
             _ => ControlResponse::Error {
                 code: ControlErrorCode::InvalidRequest,
                 message: "Unsupported Desktop performance request".into(),
+                current_revision: Some(
+                    self.session.read().expect("session lock poisoned").revision,
+                ),
+            },
+        }
+    }
+
+    fn materialize_plugin_state(
+        &mut self,
+        plugin_id: &str,
+        sound_id: Option<String>,
+    ) -> ControlResponse {
+        let Some(plugin) = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == plugin_id)
+        else {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message: format!("Plugin {plugin_id} is not active on Desktop"),
+                current_revision: Some(
+                    self.session.read().expect("session lock poisoned").revision,
+                ),
+            };
+        };
+        if let Some(sound_id) = sound_id.as_deref()
+            && !plugin
+                .sound_summaries
+                .iter()
+                .any(|sound| sound.id == sound_id)
+        {
+            return ControlResponse::Error {
+                code: ControlErrorCode::NotFound,
+                message: format!("Plugin {plugin_id} does not provide sound {sound_id:?}"),
+                current_revision: Some(
+                    self.session.read().expect("session lock poisoned").revision,
+                ),
+            };
+        }
+        let state = (|| -> Result<_> {
+            let mut isolated = plugin
+                .runtime
+                .create_instance_with_resource_overrides(&plugin.resources)?;
+            if let Some(sound_id) = sound_id.as_deref() {
+                isolated.load_preset(sound_id)?;
+            }
+            let bytes = isolated.save_state()?;
+            self.state_store.put(
+                plugin_id,
+                &plugin.version.to_string(),
+                plugin.runtime.manifest().state_version,
+                sound_id,
+                &bytes,
+            )
+        })();
+        match state {
+            Ok(state) => ControlResponse::PluginStateMaterialized {
+                state: Box::new(state),
+            },
+            Err(error) => ControlResponse::Error {
+                code: ControlErrorCode::Rejected,
+                message: format!("Could not materialize Rack Slot state: {error:#}"),
                 current_revision: Some(
                     self.session.read().expect("session lock poisoned").revision,
                 ),
@@ -3353,9 +3527,7 @@ impl RackForgeApp {
     fn new(startup: Startup, creation: &eframe::CreationContext<'_>) -> Result<Self> {
         Ok(Self {
             mode: Self::initial_mode(startup)?,
-            audio_settings: None,
             webview: desktop_webview::DesktopWebView::new(creation)?,
-            native_menu: native_menu::NativeMenu::new(creation)?,
         })
     }
 
@@ -3397,262 +3569,19 @@ impl eframe::App for RackForgeApp {
                 app.poll_controller();
                 app.poll_web_control();
                 context.request_repaint_after(Duration::from_millis(16));
-                let mut install_plugin = false;
-                let mut reload_web = false;
-                let mut open_browser = false;
-                let mut open_root = false;
-                let mut open_settings = false;
-                #[cfg(windows)]
-                let mut web_route: Option<(&'static str, ActiveMode)> = None;
-                #[cfg(windows)]
-                {
-                    let mut popup_request = None;
-                    egui::TopBottomPanel::top("rackforge-desktop-menu-bar")
-                        .exact_height(42.0)
-                        .frame(
-                            egui::Frame::new()
-                                .fill(Color32::from_rgb(9, 24, 34))
-                                .inner_margin(egui::Margin::symmetric(8, 4))
-                                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(49, 91, 106))),
-                        )
-                        .show(context, |ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            ui.horizontal(|ui| {
-                                for (section, label, width) in [
-                                    (native_menu::NativeMenuSection::File, "File", 70.0),
-                                    (native_menu::NativeMenuSection::Settings, "Settings", 100.0),
-                                    (native_menu::NativeMenuSection::View, "View", 70.0),
-                                    (native_menu::NativeMenuSection::Help, "Help", 70.0),
-                                ] {
-                                    let (rect, response) = ui.allocate_exact_size(
-                                        Vec2::new(width, 34.0),
-                                        Sense::click(),
-                                    );
-                                    response.widget_info(|| {
-                                        egui::WidgetInfo::labeled(
-                                            egui::WidgetType::Button,
-                                            true,
-                                            label,
-                                        )
-                                    });
-                                    let selected = response.hovered() || response.has_focus();
-                                    ui.painter().rect(
-                                        rect,
-                                        0.0,
-                                        if selected {
-                                            Color32::from_rgb(92, 226, 245)
-                                        } else {
-                                            Color32::from_rgb(12, 34, 46)
-                                        },
-                                        Stroke::new(1.0_f32, Color32::from_rgb(53, 91, 105)),
-                                        StrokeKind::Inside,
-                                    );
-                                    ui.painter().text(
-                                        rect.center(),
-                                        Align2::CENTER_CENTER,
-                                        label,
-                                        FontId::proportional(13.0),
-                                        if selected {
-                                            Color32::from_rgb(2, 16, 22)
-                                        } else {
-                                            Color32::from_rgb(226, 242, 245)
-                                        },
-                                    );
-                                    let keyboard_open = response.has_focus()
-                                        && ui.input(|input| {
-                                            input.key_pressed(Key::Enter)
-                                                || input.key_pressed(Key::Space)
-                                        });
-                                    if response.clicked() || keyboard_open {
-                                        popup_request = Some((section, rect.left_bottom()));
-                                    }
-                                }
-                            });
-                        });
-                    if let Some((section, anchor)) = popup_request
-                        && let Err(error) =
-                            self.native_menu
-                                .popup(section, anchor, context.pixels_per_point())
-                    {
-                        app.status = format!("Could not show application menu: {error:#}");
-                    }
-                    for command in self.native_menu.drain() {
-                        match command {
-                            native_menu::NativeMenuCommand::InstallPlugin => install_plugin = true,
-                            native_menu::NativeMenuCommand::OpenRoot => open_root = true,
-                            native_menu::NativeMenuCommand::Settings => open_settings = true,
-                            native_menu::NativeMenuCommand::Exit => {
-                                context.send_viewport_cmd(egui::ViewportCommand::Close)
-                            }
-                            native_menu::NativeMenuCommand::Reload => reload_web = true,
-                            native_menu::NativeMenuCommand::OpenBrowser => open_browser = true,
-                            native_menu::NativeMenuCommand::DeveloperTools => {
-                                self.webview.open_devtools()
-                            }
-                            native_menu::NativeMenuCommand::AudioMidiStatus => {
-                                rfd::MessageDialog::new()
-                                    .set_title("RackForge Audio & MIDI")
-                                    .set_description(app.audio_summary())
-                                    .set_level(rfd::MessageLevel::Info)
-                                    .show();
-                            }
-                            native_menu::NativeMenuCommand::Play => {
-                                web_route = Some(("play", ActiveMode::Play));
-                            }
-                            native_menu::NativeMenuCommand::Live => {
-                                web_route = Some(("live", ActiveMode::Live));
-                            }
-                            native_menu::NativeMenuCommand::About => {
-                                rfd::MessageDialog::new()
-                                    .set_title("About RackForge")
-                                    .set_description(format!(
-                                        "RackForge Desktop\nRust host · Embedded Web workspace\n\n{}",
-                                        app.audio_summary()
-                                    ))
-                                    .set_level(rfd::MessageLevel::Info)
-                                    .show();
-                            }
-                        }
-                    }
-                }
-
-                #[cfg(windows)]
-                if let Some((route, mode)) = web_route {
-                    app.apply_command(MenuCommand::SetActiveMode { mode });
-                    let url = format!("{}/{route}", app.web_url.trim_end_matches('/'));
-                    if let Err(error) = self.webview.navigate(&url) {
-                        app.status = format!("Could not open {route}: {error:#}");
-                    }
-                }
-
-                if install_plugin {
-                    app.begin_plugin_install();
-                }
-                reload_web |= app.poll_plugin_install(context);
+                let reload_web = app.poll_plugin_install(context);
                 context.send_viewport_cmd(egui::ViewportCommand::Title(app.window_title().into()));
                 #[cfg(windows)]
-                self.native_menu
-                    .set_install_enabled(!app.install_in_progress());
-                if open_browser {
-                    match webbrowser::open(&app.web_url) {
-                        Ok(()) => app.status = format!("Opened {}", app.web_url),
-                        Err(error) => app.status = format!("Could not open browser: {error}"),
-                    }
-                }
-                if open_root {
-                    match std::process::Command::new("explorer.exe")
-                        .arg(&app.options.rackforge_root)
-                        .spawn()
-                    {
-                        Ok(_) => {
-                            app.status = format!(
-                                "Opened RackForge Root {}",
-                                app.options.rackforge_root.display()
-                            )
-                        }
-                        Err(error) => {
-                            app.status = format!("Could not open RackForge Root: {error}")
-                        }
-                    }
-                }
-
-                #[cfg(windows)]
-                if open_settings {
-                    match app.audio_settings_state() {
-                        Ok(state) => self.audio_settings = Some(state),
-                        Err(error) => {
-                            app.status = format!("Could not open Audio & MIDI settings: {error:#}");
-                            DesktopApp::show_audio_error(&app.status);
-                        }
-                    }
-                }
-
-                #[cfg(windows)]
-                if let Some(settings) = self.audio_settings.as_mut() {
-                    settings.set_runtime_status(app.audio_summary());
-                }
-                #[cfg(windows)]
-                let settings_action = self
-                    .audio_settings
-                    .as_mut()
-                    .map(|settings| settings.show(context));
-                #[cfg(windows)]
-                if let Some(action) = settings_action {
-                    match action {
-                        audio_settings::AudioSettingsAction::None => {}
-                        audio_settings::AudioSettingsAction::Close => {
-                            self.audio_settings = None;
-                            context.request_repaint();
-                        }
-                        audio_settings::AudioSettingsAction::Rescan => {
-                            match desktop_audio::AudioInventory::scan() {
-                                Ok(inventory) => {
-                                    if let Some(settings) = self.audio_settings.as_mut() {
-                                        settings.replace_inventory(inventory);
-                                    }
-                                }
-                                Err(error) => {
-                                    if let Some(settings) = self.audio_settings.as_mut() {
-                                        settings.error(format!("Device rescan failed: {error:#}"));
-                                    }
-                                }
-                            }
-                        }
-                        audio_settings::AudioSettingsAction::TestNote => {
-                            if let Err(error) = app.test_audio_note()
-                                && let Some(settings) = self.audio_settings.as_mut()
-                            {
-                                settings.error(format!("Could not play test note: {error:#}"));
-                            }
-                        }
-                        audio_settings::AudioSettingsAction::Apply(preferences) => {
-                            match app.apply_audio_preferences(preferences.clone()) {
-                                Ok(message) => {
-                                    if let Some(settings) = self.audio_settings.as_mut() {
-                                        settings.applied(preferences, message);
-                                    }
-                                }
-                                Err(error) => {
-                                    if let Some(settings) = self.audio_settings.as_mut() {
-                                        settings.error(format!("{error:#}"));
-                                    }
-                                }
-                            }
-                        }
-                        audio_settings::AudioSettingsAction::ApplyWeb(preferences) => {
-                            match app.apply_web_preferences(preferences.clone()) {
-                                Ok(message) => {
-                                    if let Some(settings) = self.audio_settings.as_mut() {
-                                        settings.web_applied(preferences, message);
-                                    }
-                                }
-                                Err(error) => {
-                                    if let Some(settings) = self.audio_settings.as_mut() {
-                                        settings.error(format!("{error:#}"));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                #[cfg(windows)]
                 {
-                    if self.audio_settings.is_some() {
-                        if let Err(error) = self.webview.hide() {
-                            app.status = format!("Could not hide embedded Web UI: {error:#}");
-                        }
-                    } else {
-                        let web_rect = egui::CentralPanel::default()
-                            .frame(egui::Frame::NONE)
-                            .show(context, |ui| ui.available_rect_before_wrap())
-                            .inner;
-                        if reload_web && let Err(error) = self.webview.reload() {
-                            app.status = format!("Could not reload Web UI: {error:#}");
-                        }
-                        if let Err(error) = self.webview.show(&app.web_url, web_rect) {
-                            app.status = format!("Could not show embedded Web UI: {error:#}");
-                        }
+                    let web_rect = egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(context, |ui| ui.available_rect_before_wrap())
+                        .inner;
+                    if reload_web && let Err(error) = self.webview.reload() {
+                        app.status = format!("Could not reload Web UI: {error:#}");
+                    }
+                    if let Err(error) = self.webview.show(&app.web_url, web_rect) {
+                        app.status = format!("Could not show embedded Web UI: {error:#}");
                     }
                 }
                 #[cfg(not(windows))]

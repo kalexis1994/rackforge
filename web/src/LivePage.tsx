@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   dispatchCommand,
   dispatchPerformanceEdit,
@@ -6,6 +6,7 @@ import {
   requestPluginPresets,
 } from "./gateway";
 import { RfLoader } from "./components/RfLoader";
+import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
 import {
   addSlotToRack,
   graphFromSlots,
@@ -20,6 +21,7 @@ import type {
   PerformanceSnapshot,
   PluginInstance,
   RackDefinition,
+  RackGraphPosition,
   RackSlot,
   SessionSnapshot,
   SetlistDefinition,
@@ -34,6 +36,13 @@ interface LivePageProps {
   session: SessionSnapshot | null;
   performance: PerformanceSnapshot | null;
   pending: boolean;
+  surface: "perform" | "configure";
+  onSurfaceChange: (surface: "perform" | "configure") => void;
+  onWorkspaceChange: (workspace: { kind: "rack"; name: string } | null) => void;
+  renderPluginSurface: (options: {
+    instance: PluginInstance;
+    onSelectSound: (soundId: string) => Promise<unknown>;
+  }) => ReactNode;
 }
 
 const kindLabels: Record<ConfigKind, string> = {
@@ -86,11 +95,49 @@ function describeLocation(
   };
 }
 
-export function LivePage({ session, performance, pending }: LivePageProps) {
-  const [surface, setSurface] = useState<"perform" | "configure">("perform");
-
+export function LivePage({
+  session,
+  performance,
+  pending,
+  surface,
+  onSurfaceChange,
+  onWorkspaceChange,
+  renderPluginSurface,
+}: LivePageProps) {
+  const [workspace, setWorkspace] = useState<{ kind: "rack"; name: string } | null>(null);
+  const handleWorkspaceChange = useCallback(
+    (next: { kind: "rack"; name: string } | null) => {
+      setWorkspace(next);
+      onWorkspaceChange(next);
+    },
+    [onWorkspaceChange],
+  );
+  const active = performance
+    ? describeLocation(performance, performance.live.active)
+    : { title: "Synchronizing", detail: "RackForge Core" };
+  const liveContext = performance
+    ? kindLabels[performance.live.mode]
+    : "Performance";
   return (
-    <section className="live-shell">
+    <section className={`live-shell live-${surface}-surface`}>
+      <PerformanceInfoBar
+        className="live-performance-bar"
+        left={{ label: "Mode", value: "LIVE" }}
+        center={
+          workspace
+            ? { label: "Rack", value: workspace.name }
+            : surface === "perform"
+            ? { label: "Active", value: active.title }
+            : { label: "Workspace", value: "Configure" }
+        }
+        right={
+          workspace
+            ? { label: "Editor", value: "Node graph" }
+            : surface === "perform"
+            ? { label: "Context", value: active.detail }
+            : { label: "Library", value: liveContext }
+        }
+      />
       <div className="live-toolbar">
         <div>
           <span className="eyebrow accent">Performance workspace</span>
@@ -99,13 +146,13 @@ export function LivePage({ session, performance, pending }: LivePageProps) {
         <div className="live-surface-tabs" role="tablist" aria-label="LIVE views">
           <button
             className={surface === "perform" ? "active" : ""}
-            onClick={() => setSurface("perform")}
+            onClick={() => onSurfaceChange("perform")}
           >
             Perform
           </button>
           <button
             className={surface === "configure" ? "active" : ""}
-            onClick={() => setSurface("configure")}
+            onClick={() => onSurfaceChange("configure")}
           >
             Configure
           </button>
@@ -120,6 +167,8 @@ export function LivePage({ session, performance, pending }: LivePageProps) {
           session={session}
           performance={performance}
           pending={pending}
+          onWorkspaceChange={handleWorkspaceChange}
+          renderPluginSurface={renderPluginSurface}
         />
       )}
     </section>
@@ -361,16 +410,21 @@ function PerformanceConfig({
   session,
   performance,
   pending,
+  onWorkspaceChange,
+  renderPluginSurface,
 }: {
   session: SessionSnapshot | null;
   performance: PerformanceSnapshot;
   pending: boolean;
+  onWorkspaceChange: (workspace: { kind: "rack"; name: string } | null) => void;
+  renderPluginSurface: LivePageProps["renderPluginSurface"];
 }) {
   const [kind, setKind] = useState<ConfigKind>("rack");
   const [selectedId, setSelectedId] = useState<string | null>(
     performance.library.racks[0]?.id ?? null,
   );
   const [editorDirty, setEditorDirty] = useState(false);
+  const [rackWorkspaceId, setRackWorkspaceId] = useState<string | null>(null);
   const items =
     kind === "rack"
       ? performance.library.racks
@@ -385,6 +439,26 @@ function PerformanceConfig({
     return () => window.removeEventListener("beforeunload", warn);
   }, [editorDirty]);
 
+  useEffect(() => {
+    const closeWorkspace = () => setRackWorkspaceId(null);
+    window.addEventListener("rackforge:close-rack-workspace", closeWorkspace);
+    return () => window.removeEventListener("rackforge:close-rack-workspace", closeWorkspace);
+  }, []);
+
+  const workspaceRackName = rackWorkspaceId === "new"
+    ? "New Rack"
+    : performance.library.racks.find((rack) => rack.id === rackWorkspaceId)?.name;
+  useEffect(() => {
+    const workspace = workspaceRackName
+      ? { kind: "rack" as const, name: workspaceRackName }
+      : null;
+    onWorkspaceChange(workspace);
+  }, [onWorkspaceChange, workspaceRackName]);
+  useEffect(
+    () => () => onWorkspaceChange(null),
+    [onWorkspaceChange],
+  );
+
   const proceed = (action: () => void) => {
     if (
       editorDirty &&
@@ -394,12 +468,16 @@ function PerformanceConfig({
     action();
   };
   const selectItem = (id: string) => {
-    if (selectedId === id) return;
-    proceed(() => setSelectedId(id));
+    if (selectedId === id && kind !== "rack") return;
+    proceed(() => {
+      setSelectedId(id);
+      if (kind === "rack") setRackWorkspaceId(id);
+    });
   };
   const changeKind = (next: ConfigKind) => {
     if (next === kind) return;
     proceed(() => {
+    setRackWorkspaceId(null);
     setKind(next);
     const collection =
       next === "rack"
@@ -412,7 +490,7 @@ function PerformanceConfig({
   };
 
   return (
-    <div className="performance-config">
+    <div className={`performance-config${rackWorkspaceId ? " rack-graph-workspace" : ""}`}>
       <aside className="config-library">
         <div className="config-kind-tabs">
           {(["rack", "song", "setlist"] as ConfigKind[]).map((item) => (
@@ -460,6 +538,8 @@ function PerformanceConfig({
             instances={session?.instances ?? []}
             performance={performance}
             pending={pending}
+            immersive={rackWorkspaceId !== null}
+            renderPluginSurface={renderPluginSurface}
             onDirtyChange={setEditorDirty}
             onSaved={(id) => setSelectedId(id)}
             onDeleted={() =>
@@ -662,6 +742,8 @@ function RackEditor({
   instances,
   performance,
   pending,
+  immersive,
+  renderPluginSurface,
   onDirtyChange,
   onSaved,
   onDeleted,
@@ -670,6 +752,8 @@ function RackEditor({
   instances: PluginInstance[];
   performance: PerformanceSnapshot;
   pending: boolean;
+  immersive: boolean;
+  renderPluginSurface: LivePageProps["renderPluginSurface"];
   onDirtyChange: (dirty: boolean) => void;
   onSaved: (id: string) => void;
   onDeleted: () => void;
@@ -686,15 +770,8 @@ function RackEditor({
     onDirtyChange(dirty || isNew);
     return () => onDirtyChange(false);
   }, [dirty, isNew, onDirtyChange]);
-  if (!draft)
-    return <EditorEmpty>Select a Rack or create a new one.</EditorEmpty>;
-
-  const updateSlot = (index: number, next: RackSlot) => {
-    const slots = [...draft.slots];
-    slots[index] = next;
-    setDraft({ ...draft, slots });
-  };
-  const validate = () => {
+  const validate = useCallback(() => {
+    if (!draft) return "Select a Rack or create a new one.";
     const nameError = validationName(draft.name);
     if (nameError) return nameError;
     if (draft.slots.length === 0) return "A Rack needs at least one Slot.";
@@ -706,8 +783,9 @@ function RackEditor({
         return `${slot.name} needs an available plugin.`;
     }
     return null;
-  };
-  const save = async () => {
+  }, [draft, instances]);
+  const save = useCallback(async () => {
+    if (!draft) return;
     const nextError = validate();
     setError(nextError);
     if (nextError) return;
@@ -723,6 +801,21 @@ function RackEditor({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save Rack.");
     }
+  }, [baseRevision, draft, onSaved, validate]);
+  useEffect(() => {
+    if (!immersive) return;
+    const saveWorkspace = () => void save();
+    window.addEventListener("rackforge:save-rack-workspace", saveWorkspace);
+    return () => window.removeEventListener("rackforge:save-rack-workspace", saveWorkspace);
+  }, [immersive, save]);
+
+  if (!draft)
+    return <EditorEmpty>Select a Rack or create a new one.</EditorEmpty>;
+
+  const updateSlot = (index: number, next: RackSlot) => {
+    const slots = [...draft.slots];
+    slots[index] = next;
+    setDraft({ ...draft, slots });
   };
   const usedBy = [
     ...performance.library.songs
@@ -751,7 +844,10 @@ function RackEditor({
   };
 
   return (
-    <form className="performance-form" onSubmit={(event) => event.preventDefault()}>
+    <form
+      className={`performance-form rack-editor-form${immersive ? " immersive" : ""}`}
+      onSubmit={(event) => event.preventDefault()}
+    >
       <EditorHeader
         eyebrow={isNew ? "New Rack" : "Rack configuration"}
         title={draft.name}
@@ -784,6 +880,12 @@ function RackEditor({
             rack={draft}
             racks={performance.library.racks}
             onChange={setDraft}
+            canAddInstrument={draft.slots.length < 32 && instances.length > 0}
+            onAddInstrument={(position: RackGraphPosition) =>
+              setDraft(addSlotToRack(draft, defaultSlot(instances), position))
+            }
+            instances={instances}
+            renderPluginSurface={renderPluginSurface}
           />
         </Suspense>
       </EditorSection>
@@ -888,7 +990,7 @@ function SlotEditor({
       .finally(() => setPresetBusy(false));
   };
   return (
-    <article className={`slot-editor${slot.enabled ? "" : " disabled"}`}>
+    <article id={`rack-slot-${slot.id}`} className={`slot-editor${slot.enabled ? "" : " disabled"}`}>
       <header>
         <span className="slot-number">{String(index + 1).padStart(2, "0")}</span>
         <strong>{slot.name || "Unnamed Slot"}</strong>

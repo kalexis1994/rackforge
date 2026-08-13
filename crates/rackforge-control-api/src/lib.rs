@@ -1,6 +1,8 @@
 pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
 pub use rackforge_performance_api::{LibraryRevision, PerformanceEdit, PerformanceSnapshot};
-pub use rackforge_plugin_api::{HostPreset, HostPresetSummary, ParameterSchema};
+pub use rackforge_plugin_api::{
+    HostPreset, HostPresetSummary, ParameterSchema, PluginStateReference,
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -11,7 +13,7 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 11;
+pub const CONTROL_SCHEMA_VERSION: u32 = 12;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 
@@ -47,6 +49,15 @@ pub enum ControlRequest {
     PluginPreset {
         plugin_id: String,
         preset_id: String,
+    },
+    /// Creates an immutable state snapshot in an isolated plugin instance.
+    ///
+    /// This is the safe path used by Rack Slot editors: selecting a sound for
+    /// a draft must never mutate the standalone PLAY instance.
+    MaterializePluginState {
+        plugin_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sound_id: Option<String>,
     },
     PluginParameters {
         instance_id: InstanceId,
@@ -135,6 +146,9 @@ pub enum ControlResponse {
     },
     PluginPreset {
         preset: Box<HostPreset>,
+    },
+    PluginStateMaterialized {
+        state: Box<PluginStateReference>,
     },
     PluginParameters {
         instance_id: InstanceId,
@@ -453,6 +467,34 @@ mod tests {
                 index: 3,
                 value: 0.625,
             }],
+        };
+        assert_eq!(
+            decode_response(&encode_line(&response).unwrap()).unwrap(),
+            response
+        );
+    }
+
+    #[test]
+    fn isolated_plugin_state_requests_round_trip() {
+        let request = ControlRequest::MaterializePluginState {
+            plugin_id: "org.rackforge.rf-m1".into(),
+            sound_id: Some("m1.piano.01".into()),
+        };
+        assert_eq!(
+            decode_request(&encode_line(&request).unwrap()).unwrap(),
+            request
+        );
+
+        let response = ControlResponse::PluginStateMaterialized {
+            state: Box::new(PluginStateReference {
+                schema_version: 1,
+                plugin_id: "org.rackforge.rf-m1".into(),
+                plugin_version: "0.1.3".into(),
+                state_version: 2,
+                blob_sha256: "a".repeat(64),
+                byte_length: 42,
+                selected_sound_id: Some("m1.piano.01".into()),
+            }),
         };
         assert_eq!(
             decode_response(&encode_line(&response).unwrap()).unwrap(),

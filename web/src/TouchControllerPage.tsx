@@ -5,7 +5,9 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from "react";
 import { Grid3X3, LogOut, Menu, Minus, Piano, Plus, ShieldAlert, X } from "lucide-react";
 import { releaseVirtualMidi, sendVirtualMidi } from "./gateway";
@@ -33,9 +35,15 @@ const EMPTY_SESSION: SessionSnapshot = {
 };
 const KEYBOARD_WIDTH_STORAGE_KEY = "rackforge.touch-controller.keyboard-width";
 const PAD_MATRIX_STORAGE_KEY = "rackforge.touch-controller.pad-matrix";
+const DOCK_HEIGHT_STORAGE_KEY = "rackforge.touch-controller.dock-heights.v1";
 const MIN_VISIBLE_WHITE_KEYS = 1;
 const MAX_VISIBLE_WHITE_KEYS = 29;
 const MAX_PAD_MATRIX_SIDE = 8;
+const FULL_KEYBOARD_START_NOTE = 21;
+const FULL_KEYBOARD_WHITE_KEYS = 52;
+const FULL_KEYBOARD_MIN_WHITE_KEY_PX = 22;
+const WINDOWED_KEY_MIN_PX = 42;
+const PAD_ASPECT_RATIO = 1;
 
 function storedKeyboardWidth(): KeyboardWidth {
   try {
@@ -73,20 +81,47 @@ function storedPadMatrix(): PadMatrix {
   return { columns: 4, rows: 4 };
 }
 
+interface DockHeights {
+  keyboard?: number;
+  pads?: number;
+}
+
+function storedDockHeights(): DockHeights {
+  try {
+    const stored = JSON.parse(
+      window.localStorage.getItem(DOCK_HEIGHT_STORAGE_KEY) ?? "null",
+    ) as DockHeights | null;
+    return {
+      keyboard: typeof stored?.keyboard === "number" ? stored.keyboard : undefined,
+      pads: typeof stored?.pads === "number" ? stored.pads : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
 function noteName(note: number) {
   return `${NOTE_NAMES[note % 12]}${Math.floor(note / 12) - 1}`;
 }
 
-function useCompactKeyboard() {
-  const query = "(max-width: 700px) and (orientation: portrait)";
-  const [compact, setCompact] = useState(() => window.matchMedia(query).matches);
+function useControllerSize(ref: RefObject<HTMLElement | null>) {
+  const [size, setSize] = useState(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
   useEffect(() => {
-    const media = window.matchMedia(query);
-    const update = () => setCompact(media.matches);
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-  return compact;
+    const element = ref.current;
+    if (!element) return;
+    const update = () => {
+      const bounds = element.getBoundingClientRect();
+      setSize({ width: bounds.width, height: bounds.height });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+  return size;
 }
 
 interface KeyboardKey {
@@ -127,11 +162,13 @@ export function TouchControllerPage({
   connection,
   onOpenNavigation,
   onExit,
+  docked = false,
 }: {
   snapshot: SessionSnapshot | null;
   connection: string;
   onOpenNavigation: () => void;
   onExit: () => void;
+  docked?: boolean;
 }) {
   const session = snapshot ?? EMPTY_SESSION;
   const [mode, setMode] = useState<ControllerMode>("keyboard");
@@ -141,18 +178,77 @@ export function TouchControllerPage({
   const [menuOpen, setMenuOpen] = useState(false);
   const [keyboardWidth, setKeyboardWidth] = useState<KeyboardWidth>(storedKeyboardWidth);
   const [padMatrix, setPadMatrix] = useState<PadMatrix>(storedPadMatrix);
+  const [dockHeights, setDockHeights] = useState<DockHeights>(storedDockHeights);
+  const [resizingDock, setResizingDock] = useState(false);
   const [activeNotes, setActiveNotes] = useState<Set<number>>(() => new Set());
+  const controllerRef = useRef<HTMLElement | null>(null);
   const pointerNotes = useRef(new Map<number, number>());
   const notePointers = useRef(new Map<number, Set<number>>());
-  const compactKeyboard = useCompactKeyboard();
-  const visibleWhiteKeys = keyboardWidth === "auto"
-    ? compactKeyboard ? 8 : 15
-    : keyboardWidth;
+  const dockResizeRef = useRef<{
+    pointerId: number;
+    startY: number;
+    height: number;
+  } | null>(null);
+  const controllerSize = useControllerSize(controllerRef);
+  const controllerWidth = controllerSize.width;
+  const fullKeyboard = keyboardWidth === "auto"
+    && controllerWidth >= FULL_KEYBOARD_WHITE_KEYS * FULL_KEYBOARD_MIN_WHITE_KEY_PX;
+  const automaticWindowKeys = Math.max(
+    8,
+    Math.min(MAX_VISIBLE_WHITE_KEYS, Math.floor(controllerWidth / WINDOWED_KEY_MIN_PX)),
+  );
+  const visibleWhiteKeys = fullKeyboard
+    ? FULL_KEYBOARD_WHITE_KEYS
+    : keyboardWidth === "auto"
+      ? automaticWindowKeys
+      : keyboardWidth;
   const keyboardSpan = keyboardKeys(0, visibleWhiteKeys).at(-1)?.note ?? 0;
   const padSpan = padMatrix.rows * padMatrix.columns - 1;
-  const maximumOctave = maximumOctaveForSpan(mode === "keyboard" ? keyboardSpan : padSpan);
-  const baseNote = (octave + 1) * 12;
+  const maximumOctave = mode === "keyboard" && fullKeyboard
+    ? 7
+    : maximumOctaveForSpan(mode === "keyboard" ? keyboardSpan : padSpan);
+  const windowBaseNote = (octave + 1) * 12;
+  const baseNote = mode === "keyboard" && fullKeyboard
+    ? FULL_KEYBOARD_START_NOTE
+    : windowBaseNote;
   const playable = connection === "online" && session.active_mode !== "idle";
+  const sizingHeight = docked ? window.innerHeight : controllerSize.height;
+  const minimumDockHeight = mode === "keyboard" ? 190 : 250;
+  const maximumDockHeight = mode === "keyboard"
+    ? Math.max(minimumDockHeight, Math.min(440, sizingHeight * 0.48))
+    : Math.max(minimumDockHeight, sizingHeight - 80);
+  const automaticDockHeight = mode === "keyboard"
+    ? Math.min(300, Math.max(minimumDockHeight, sizingHeight * 0.3))
+    : Math.min(560, Math.max(minimumDockHeight, sizingHeight * 0.52));
+  const dockHeight = Math.min(
+    maximumDockHeight,
+    Math.max(minimumDockHeight, dockHeights[mode] ?? automaticDockHeight),
+  );
+  const roomyLayout = window.innerWidth >= 1100 && window.innerHeight >= 620;
+  const padGap = roomyLayout ? 9 : 7;
+  const padAreaWidth = Math.max(
+    1,
+    Math.min(920, controllerSize.width - (roomyLayout ? 28 : 14)),
+  );
+  const padAreaHeight = Math.max(
+    1,
+    (roomyLayout ? dockHeight - 48 : controllerSize.height) - (roomyLayout ? 28 : 14),
+  );
+  const padCellHeight = Math.max(1, Math.min(
+    (padAreaHeight - padGap * (padMatrix.rows - 1)) / padMatrix.rows,
+    (padAreaWidth - padGap * (padMatrix.columns - 1)) /
+      padMatrix.columns / PAD_ASPECT_RATIO,
+  ));
+  const padCellWidth = padCellHeight * PAD_ASPECT_RATIO;
+  const padGridWidth = padCellWidth * padMatrix.columns + padGap * (padMatrix.columns - 1);
+  const padGridHeight = padCellHeight * padMatrix.rows + padGap * (padMatrix.rows - 1);
+  const padDensityClass = padCellHeight < 54
+    ? " micro"
+    : padCellHeight < 92
+      ? " compact"
+      : padCellHeight < 132
+        ? " condensed"
+        : "";
 
   const activeInstance = session.instances.find(
     (instance) => instance.instance_id === session.active_instance_id,
@@ -223,6 +319,14 @@ export function TouchControllerPage({
   }, [padMatrix]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(DOCK_HEIGHT_STORAGE_KEY, JSON.stringify(dockHeights));
+    } catch {
+      // Persistent sizing is optional in hardened or ephemeral WebViews.
+    }
+  }, [dockHeights]);
+
+  useEffect(() => {
     if (octave > maximumOctave) {
       window.queueMicrotask(() => {
         panic();
@@ -282,8 +386,10 @@ export function TouchControllerPage({
   const changeMode = (next: ControllerMode) => {
     if (next === mode) return;
     panic();
-    const nextSpan = next === "keyboard" ? keyboardSpan : padSpan;
-    setOctave((current) => Math.min(current, maximumOctaveForSpan(nextSpan)));
+    if (next === "pads" || !fullKeyboard) {
+      const nextSpan = next === "keyboard" ? keyboardSpan : padSpan;
+      setOctave((current) => Math.min(current, maximumOctaveForSpan(nextSpan)));
+    }
     setMode(next);
   };
 
@@ -300,6 +406,58 @@ export function TouchControllerPage({
     hostHaptic("confirm");
   };
 
+  const setCurrentDockHeight = useCallback((height: number | undefined) => {
+    setDockHeights((current) => ({ ...current, [mode]: height }));
+  }, [mode]);
+
+  const beginDockResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dockResizeRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      height: dockHeight,
+    };
+    setResizingDock(true);
+    hostHaptic("confirm");
+  };
+
+  const resizeDock = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const gesture = dockResizeRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setCurrentDockHeight(Math.min(
+      maximumDockHeight,
+      Math.max(minimumDockHeight, gesture.height + gesture.startY - event.clientY),
+    ));
+  };
+
+  const finishDockResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (dockResizeRef.current?.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dockResizeRef.current = null;
+    setResizingDock(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const resizeDockWithKeyboard = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const direction = event.key === "ArrowUp" ? 1 : event.key === "ArrowDown" ? -1 : 0;
+    if (!direction) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const step = event.shiftKey ? 40 : 10;
+    setCurrentDockHeight(Math.min(
+      maximumDockHeight,
+      Math.max(minimumDockHeight, dockHeight + direction * step),
+    ));
+  };
+
   const keys = useMemo(
     () => keyboardKeys(baseNote, visibleWhiteKeys),
     [baseNote, visibleWhiteKeys],
@@ -308,20 +466,77 @@ export function TouchControllerPage({
 
   return (
     <section
-      className="touch-controller"
+      ref={controllerRef}
+      className={`touch-controller mode-${mode}${fullKeyboard ? " full-keyboard" : ""}${
+        docked ? " docked" : ""
+      }`}
+      style={{ "--controller-dock-height": `${dockHeight}px` } as CSSProperties}
       onPointerMove={pointerMove}
       onPointerUp={(event) => releasePointer(event.pointerId)}
       onPointerCancel={(event) => releasePointer(event.pointerId)}
       onContextMenu={(event) => event.preventDefault()}
     >
-      <button
+      {!docked ? <button
         className="touch-controller-menu-button"
         onClick={() => setMenuOpen(true)}
         aria-label="Open controller menu"
         aria-expanded={menuOpen}
       >
         <Menu aria-hidden="true" />
+      </button> : null}
+
+      {!docked ? <div className="touch-controller-stage">
+        <span>TOUCH CONTROLLER</span>
+        <strong>{targetName}</strong>
+        <small>{playable ? targetDetail : "The audio host is not ready"}</small>
+      </div> : null}
+
+      <div className={`touch-controller-dock${resizingDock ? " resizing" : ""}`}>
+      <button
+        type="button"
+        className="touch-controller-dock-resizer"
+        role="separator"
+        aria-label={`Resize ${mode} dock`}
+        aria-orientation="horizontal"
+        aria-valuemin={Math.round(minimumDockHeight)}
+        aria-valuemax={Math.round(maximumDockHeight)}
+        aria-valuenow={Math.round(dockHeight)}
+        title="Drag to resize · Double-click to restore automatic height"
+        onPointerDown={beginDockResize}
+        onPointerMove={resizeDock}
+        onPointerUp={finishDockResize}
+        onPointerCancel={finishDockResize}
+        onLostPointerCapture={() => {
+          dockResizeRef.current = null;
+          setResizingDock(false);
+        }}
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setCurrentDockHeight(undefined);
+        }}
+        onKeyDown={resizeDockWithKeyboard}
+      >
+        <span />
       </button>
+      <div className="touch-controller-dockbar">
+        <div className="touch-mode-switch" aria-label="Touch controller layout">
+          <button className={mode === "keyboard" ? "active" : ""} onClick={() => changeMode("keyboard")}>
+            <Piano aria-hidden="true" /> Keyboard
+          </button>
+          <button className={mode === "pads" ? "active" : ""} onClick={() => changeMode("pads")}>
+            <Grid3X3 aria-hidden="true" /> Pads
+          </button>
+        </div>
+        <span className="touch-controller-range-summary">
+          {mode === "keyboard"
+            ? fullKeyboard ? "88 KEYS · A0—C8" : `${visibleWhiteKeys} WHITE KEYS · FROM C${octave}`
+            : `${padMatrix.columns} × ${padMatrix.rows} PADS · FROM C${octave}`}
+        </span>
+        <button className={sustain ? "active" : ""} onClick={toggleSustain} disabled={!playable}>Sustain</button>
+        <button onClick={panic}>Panic</button>
+        <button onClick={() => setMenuOpen(true)}><Menu aria-hidden="true" /> Settings</button>
+      </div>
 
       {menuOpen ? (
         <div
@@ -360,7 +575,7 @@ export function TouchControllerPage({
               </button>
             </div>
 
-            <div className="touch-octave-control">
+            {(mode === "pads" || !fullKeyboard) ? <div className="touch-octave-control">
               <span>BASE OCTAVE</span>
               <div>
                 <button onClick={() => changeOctave(-1)} disabled={octave <= 1} aria-label="Previous octave">
@@ -371,7 +586,7 @@ export function TouchControllerPage({
                   <Plus aria-hidden="true" />
                 </button>
               </div>
-            </div>
+            </div> : null}
 
             <label className="touch-velocity-control">
               <span>VELOCITY <output>{velocity}</output></span>
@@ -384,7 +599,7 @@ export function TouchControllerPage({
               />
             </label>
 
-            {mode === "keyboard" ? <div className="touch-key-width-control">
+            {mode === "keyboard" && !fullKeyboard ? <div className="touch-key-width-control">
               <div>
                 <span>VISIBLE WHITE KEYS</span>
                 <output>{keyboardWidth === "auto" ? `AUTO · ${visibleWhiteKeys}` : visibleWhiteKeys}</output>
@@ -494,7 +709,7 @@ export function TouchControllerPage({
               }}
             >
               <LogOut aria-hidden="true" />
-              Exit Touch Controller
+              {docked ? "Close Touch Controller" : "Exit Touch Controller"}
             </button>
           </aside>
         </div>
@@ -537,8 +752,14 @@ export function TouchControllerPage({
           </div>
         ) : (
           <div
-            className="touch-pad-grid"
-            style={{ "--pad-columns": padMatrix.columns } as CSSProperties}
+            className={`touch-pad-grid fitted${padDensityClass}`}
+            style={{
+              "--pad-columns": padMatrix.columns,
+              "--pad-rows": padMatrix.rows,
+              "--pad-gap": `${padGap}px`,
+              "--pad-grid-width": `${padGridWidth}px`,
+              "--pad-grid-height": `${padGridHeight}px`,
+            } as CSSProperties}
             aria-label="On-screen MIDI pads"
           >
             {pads.map((note, index) => (
@@ -564,6 +785,7 @@ export function TouchControllerPage({
             <span>Connect to the RackForge audio host and select a Play or Live target.</span>
           </div>
         ) : null}
+      </div>
       </div>
     </section>
   );

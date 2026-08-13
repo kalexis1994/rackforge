@@ -38,6 +38,7 @@ import android.webkit.WebResourceResponse;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.HapticFeedbackConstants;
+import android.view.MotionEvent;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowManager;
@@ -179,6 +180,7 @@ public final class MainActivity extends Activity {
     private static native String pluginWebContext();
     private static native boolean selectPluginSound(String soundId);
     private static native String pluginProgramCommand(String method, String paramsJson);
+    private static native String pluginStateCommand(String method, String paramsJson);
     private static native int loadPluginResource(String resourceId, String filePath);
     private static native String importPluginResourceArchive(
             String importerId, String archivePath, String resourceRoot);
@@ -245,9 +247,22 @@ public final class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setDomStorageEnabled(false);
         webView.setBackgroundColor(0xFF050F16);
+        // Chromium emits its own long-press vibration for selection/context
+        // gestures. RackForge owns those gestures, so keep native automatic
+        // haptics disabled and trigger only deliberate UI feedback below.
+        webView.setHapticFeedbackEnabled(false);
         webView.addJavascriptInterface(new PluginWebBridge(), "RackForgeAndroid");
         webView.addJavascriptInterface(new NativeHostBridge(), "RackForgeNativeHost");
         webView.setWebViewClient(pluginWebViewClient());
+        webView.setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_UP
+                    || action == MotionEvent.ACTION_CANCEL
+                    || action == MotionEvent.ACTION_OUTSIDE) {
+                notifySharedUiTouchEnded();
+            }
+            return false;
+        });
         webView.setOnApplyWindowInsetsListener((view, insets) -> {
             updateSharedUiSystemInsets(insets);
             return insets;
@@ -263,6 +278,26 @@ public final class MainActivity extends Activity {
         mainHandler.post(audioHealthPoll);
         webView.loadUrl(SHARED_UI_URL);
         startEngine();
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        boolean handled = super.dispatchTouchEvent(event);
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_UP
+                || action == MotionEvent.ACTION_CANCEL
+                || action == MotionEvent.ACTION_OUTSIDE) {
+            notifySharedUiTouchEnded();
+        }
+        return handled;
+    }
+
+    private void notifySharedUiTouchEnded() {
+        WebView activeWebView = webView;
+        if (activeWebView == null) return;
+        activeWebView.post(() -> activeWebView.evaluateJavascript(
+                "window.dispatchEvent(new Event('rackforge:native-touch-end'))",
+                null));
     }
 
     private void configureSystemBarBackdrop() {
@@ -733,7 +768,9 @@ public final class MainActivity extends Activity {
                         int feedback = "confirm".equals(style) && Build.VERSION.SDK_INT >= 30
                                 ? HapticFeedbackConstants.CONFIRM
                                 : HapticFeedbackConstants.VIRTUAL_KEY;
-                        boolean performed = webView.performHapticFeedback(feedback);
+                        boolean performed = webView.performHapticFeedback(
+                                feedback,
+                                HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING);
                         respondNativeHost(requestId, true, 200, null, performed);
                     });
                     case "ui.route" -> runOnUiThread(() -> {
@@ -915,7 +952,7 @@ public final class MainActivity extends Activity {
         return null;
     }
 
-    private static JSONObject sharedPluginDescriptor(JSONObject plugin) throws Exception {
+    private JSONObject sharedPluginDescriptor(JSONObject plugin) throws Exception {
         String pluginId = plugin.getString("plugin_id");
         JSONArray surfaces = new JSONArray();
         String playEntry = plugin.optString("web_entry", "");
@@ -953,7 +990,7 @@ public final class MainActivity extends Activity {
                 .put("plugin_id", pluginId)
                 .put("plugin_name", plugin.getString("plugin_name"))
                 .put("version", plugin.getString("version"))
-                .put("active", plugin.optBoolean("active"))
+                .put("active", plugin.optBoolean("active") && !engineStarting)
                 .put("api_version", plugin.optInt("web_api_version", 0))
                 .put("branding", branding == null ? JSONObject.NULL : branding)
                 .put("surfaces", surfaces)
@@ -1131,6 +1168,35 @@ public final class MainActivity extends Activity {
                 emitNativeSessionEvent("message", new JSONObject()
                         .put("status", "performance_snapshot")
                         .put("snapshot", snapshot)
+                        .toString());
+                return;
+            }
+            if ("plugin_presets".equals(operation)) {
+                JSONArray presets = new JSONArray(pluginStateCommand("list_presets", "{}"));
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "plugin_presets")
+                        .put("plugin_id", request.getString("plugin_id"))
+                        .put("presets", presets)
+                        .toString());
+                return;
+            }
+            if ("plugin_preset".equals(operation)) {
+                JSONObject preset = new JSONObject(pluginStateCommand("preset", new JSONObject()
+                        .put("preset_id", request.getString("preset_id"))
+                        .toString()));
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "plugin_preset")
+                        .put("preset", preset)
+                        .toString());
+                return;
+            }
+            if ("materialize_plugin_state".equals(operation)) {
+                JSONObject params = new JSONObject();
+                if (request.has("sound_id")) params.put("sound_id", request.getString("sound_id"));
+                JSONObject state = new JSONObject(pluginStateCommand("materialize", params.toString()));
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "plugin_state_materialized")
+                        .put("state", state)
                         .toString());
                 return;
             }
@@ -1372,7 +1438,7 @@ public final class MainActivity extends Activity {
                         "The archive did not contain any recognized plugin resources");
             }
             rememberImportedResources(pluginId, grantId, installedIds);
-            return result;
+            return publishPluginResourceUpdate(result);
         }
 
         File destination = privatePluginResourceFile(pluginId, targetResourceId);
@@ -1401,9 +1467,9 @@ public final class MainActivity extends Activity {
                     .putString("resource.active_entry." + pluginId + "." + targetResourceId,
                             entryId == null ? "__grant_root__" : entryId)
                     .apply();
-            return new JSONObject()
+            return publishPluginResourceUpdate(new JSONObject()
                     .put("stored", true)
-                    .put("activated", loadStatus == 1);
+                    .put("activated", loadStatus == 1));
         } catch (Throwable error) {
             if (backup != null && backup.isFile()) {
                 if (destination.isFile() && !destination.delete()) {
@@ -1418,6 +1484,23 @@ public final class MainActivity extends Activity {
             if (error instanceof Exception) throw (Exception) error;
             throw new RuntimeException(error);
         }
+    }
+
+    private JSONObject publishPluginResourceUpdate(JSONObject result) {
+        if (!result.optBoolean("activated")) return result;
+        rememberActivePluginSound();
+        try {
+            if (!keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath())) {
+                Log.w("RackForge", "LITTLE could not refresh the plugin catalog after resource loading");
+            }
+        } catch (Throwable error) {
+            Log.w("RackForge", "Could not refresh LITTLE after resource loading", error);
+        }
+        mainHandler.post(() -> {
+            refreshKeyLabDisplay();
+            emitSessionSnapshot();
+        });
+        return result;
     }
 
     private void rememberImportedResources(

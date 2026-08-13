@@ -137,14 +137,14 @@ pub struct AudioPreferences {
     pub midi_inputs: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AudioDriverInfo {
     pub name: String,
     pub available: bool,
     pub detail: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AudioOutputInfo {
     pub driver: String,
     pub name: String,
@@ -155,7 +155,7 @@ pub struct AudioOutputInfo {
     pub buffer_frames: Vec<u32>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AudioInventory {
     pub drivers: Vec<AudioDriverInfo>,
     pub outputs: Vec<AudioOutputInfo>,

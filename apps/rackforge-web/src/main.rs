@@ -64,6 +64,7 @@ const FREE_ATTEMPTS: u32 = 5;
 const LOCKOUT_STEP_SECONDS: u64 = 5;
 const LOCKOUT_CAP_SECONDS: u64 = 15 * 60;
 static CLIENT_UPLOAD_SERIAL: AtomicU64 = AtomicU64::new(1);
+static PLUGIN_ACTIVATION_SERIAL: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -579,6 +580,10 @@ async fn main() -> Result<()> {
         .route("/api/v1/config", get(public_config))
         .route("/api/v1/plugins", get(plugin_web_catalog))
         .route("/api/v1/plugins/{plugin_id}", get(plugin_web_descriptor))
+        .route(
+            "/api/v1/plugins/{plugin_id}/activate",
+            post(activate_plugin),
+        )
         .route("/api/v1/resources/mounts", get(resource_mounts))
         .route(
             "/api/v1/resources/mounts/{mount_id}/root",
@@ -1393,6 +1398,71 @@ async fn plugin_web_descriptor(
         .get(&plugin_id)
         .map(|package| Json(package.public.clone()))
         .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn activate_plugin(
+    AxumPath(plugin_id): AxumPath<String>,
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let snapshot = match core_request(&state.control_socket, &json!({"op":"snapshot"})).await {
+        Ok(snapshot) => snapshot,
+        Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+    };
+    let Some(instance_id) = snapshot
+        .pointer("/snapshot/instances")
+        .and_then(Value::as_array)
+        .and_then(|instances| {
+            instances.iter().find_map(|instance| {
+                (instance.get("plugin_id").and_then(Value::as_str) == Some(plugin_id.as_str()))
+                    .then(|| instance.get("instance_id").and_then(Value::as_str))
+                    .flatten()
+            })
+        })
+    else {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "status":"error",
+                "message":"The plugin is installed, but the Raspberry Pi audio runtime must be restarted before this new package can be activated."
+            })),
+        )
+            .into_response();
+    };
+    for command in [
+        json!({"type":"set_active_mode", "mode":"play"}),
+        json!({"type":"select_plugin", "instance_id":instance_id}),
+    ] {
+        let request = json!({
+            "op":"dispatch",
+            "envelope":{
+                "schema_version":rackforge_control_api::SESSION_SCHEMA_VERSION,
+                "client_id":"web.plugin-install",
+                "command_id":PLUGIN_ACTIVATION_SERIAL.fetch_add(1, Ordering::Relaxed),
+                "command":command,
+            }
+        });
+        match core_request(&state.control_socket, &request).await {
+            Ok(response)
+                if response.get("status").and_then(Value::as_str) == Some("command_applied") => {}
+            Ok(response) => {
+                let message = response
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Core rejected plugin activation");
+                return (
+                    StatusCode::CONFLICT,
+                    Json(json!({"status":"error", "message":message})),
+                )
+                    .into_response();
+            }
+            Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+        }
+    }
+    Json(json!({"status":"active", "plugin_id":plugin_id})).into_response()
 }
 
 /// Streams a file selected on the browser's device into host-owned storage and

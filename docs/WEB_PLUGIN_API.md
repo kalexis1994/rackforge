@@ -122,6 +122,12 @@ from plugin JavaScript.
 - `plugin.select_sound`: available to the plugin's own `PLAY` and `CONFIG`
   surfaces. The
   `sound_id` must appear in that instance's current catalog.
+- `plugin.set_surface_info`: available to `PLAY`; publishes optional ephemeral
+  text in the center slot of RackForge's compact performance bar. `label` is
+  limited to 24 characters and `value` to 96. Sending an empty or null `value`
+  clears the slot. The host owns presentation, escapes all text and clears the
+  value when the surface or active instance changes. When no value is
+  published, RackForge shows the instance's currently selected program.
 - `plugin.select_resource`: available to `CONFIG`; accepts only a `resource_id`
   declared by that plugin's manifest. RackForge opens its host-owned resource
   explorer and returns a grant with an opaque `grant_id`, display name and

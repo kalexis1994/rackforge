@@ -16,6 +16,7 @@ import type {
   PerformanceSnapshot,
   PerformanceSnapshotMessage,
   PluginParameterSnapshot,
+  PluginStateReference,
   SessionCommand,
 } from "./types";
 
@@ -208,6 +209,21 @@ export function requestPluginPreset(
     { op: "plugin_preset", plugin_id: pluginId, preset_id: presetId },
     "plugin_preset",
     (message) => message.preset as HostPreset,
+  );
+}
+
+export function materializePluginState(
+  pluginId: string,
+  soundId?: string,
+): Promise<PluginStateReference> {
+  return requestPresetOperation(
+    {
+      op: "materialize_plugin_state",
+      plugin_id: pluginId,
+      ...(soundId ? { sound_id: soundId } : {}),
+    },
+    "plugin_state_materialized",
+    (message) => message.state as PluginStateReference,
   );
 }
 

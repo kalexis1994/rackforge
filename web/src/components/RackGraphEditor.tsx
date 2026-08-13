@@ -14,20 +14,33 @@ import {
   type NodeChange,
   type NodeProps,
   type NodeTypes,
+  type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { memo, useCallback, useMemo, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import {
   materializeRackGraph,
   rackGraphId,
   removeSlotFromRack,
 } from "../rackGraph";
+import { RackSlotPopover } from "./RackSlotPopover";
 import type {
+  PluginInstance,
   RackDefinition,
   RackGraphEdge,
   RackGraphLabel,
   RackGraphLabelTone,
   RackGraphNode,
+  RackGraphPosition,
   RackGraphSignal,
 } from "../types";
 
@@ -40,6 +53,18 @@ type CanvasNodeData = {
 };
 
 type CanvasNode = Node<CanvasNodeData>;
+
+type GraphMenuAnchor = {
+  position: RackGraphPosition;
+  offset: RackGraphPosition;
+};
+
+type CanvasBounds = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
 
 const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<CanvasNode>) {
   const acceptsMidi = data.kind === "plugin" || data.kind === "rack";
@@ -143,7 +168,10 @@ function nodeTitle(node: RackGraphNode, rack: RackDefinition, racks: RackDefinit
   }
 }
 
-function toCanvasNodes(rack: RackDefinition, racks: RackDefinition[]): CanvasNode[] {
+function toCanvasNodes(
+  rack: RackDefinition,
+  racks: RackDefinition[],
+): CanvasNode[] {
   const graph = materializeRackGraph(rack).graph!;
   const nodes = graph.nodes.map((node): CanvasNode => {
     const [title, subtitle] = nodeTitle(node, rack, racks);
@@ -224,19 +252,180 @@ interface RackGraphEditorProps {
   rack: RackDefinition;
   racks: RackDefinition[];
   onChange: (rack: RackDefinition) => void;
+  canAddInstrument: boolean;
+  onAddInstrument: (position: RackGraphPosition) => void;
+  instances: PluginInstance[];
+  renderPluginSurface: (options: {
+    instance: PluginInstance;
+    onSelectSound: (soundId: string) => Promise<unknown>;
+  }) => ReactNode;
 }
 
-export default function RackGraphEditor({ rack, racks, onChange }: RackGraphEditorProps) {
+export default function RackGraphEditor({
+  rack,
+  racks,
+  onChange,
+  canAddInstrument,
+  onAddInstrument,
+  instances,
+  renderPluginSurface,
+}: RackGraphEditorProps) {
   const materialized = useMemo(() => materializeRackGraph(rack), [rack]);
+  const [selectedId, setSelectedId] = useState<string>();
+  const [editorSlotId, setEditorSlotId] = useState<string>();
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const suppressPaneClickRef = useRef(false);
+  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
+  const [canvasBounds, setCanvasBounds] = useState<CanvasBounds>({
+    left: 0,
+    top: 0,
+    width: 0,
+    height: 0,
+  });
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const measure = () => {
+      const bounds = canvas.getBoundingClientRect();
+      setCanvasBounds({
+        left: bounds.left,
+        top: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+      });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(canvas);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+  const paneGestureRef = useRef<{
+    pointerId: number;
+    x: number;
+    y: number;
+    timer: number;
+    nodeId?: string;
+  } | null>(null);
+  const [nodeMenu, setNodeMenu] = useState<{
+    nodeId: string;
+    anchor: GraphMenuAnchor;
+  } | null>(null);
+  const [paneMenu, setPaneMenu] = useState<GraphMenuAnchor | null>(null);
+  const createMenuAnchor = useCallback(
+    (clientX: number, clientY: number, width: number, height: number) => {
+      if (!canvasBounds.width || !canvasBounds.height) return null;
+      const gap = 8;
+      const localX = clientX - canvasBounds.left;
+      const localY = clientY - canvasBounds.top;
+      const position = {
+        x: (localX - viewport.x) / viewport.zoom,
+        y: (localY - viewport.y) / viewport.zoom,
+      };
+      const x = Math.max(gap, Math.min(canvasBounds.width - width - gap, localX + gap));
+      const y = Math.max(gap, Math.min(canvasBounds.height - height - gap, localY + gap));
+      return {
+        position,
+        offset: { x: x - localX, y: y - localY },
+      };
+    },
+    [canvasBounds, viewport],
+  );
+  const menuStyle = useCallback(
+    (anchor: GraphMenuAnchor) => {
+      return {
+        left: viewport.x + anchor.position.x * viewport.zoom + anchor.offset.x,
+        top: viewport.y + anchor.position.y * viewport.zoom + anchor.offset.y,
+      };
+    },
+    [viewport],
+  );
+  const openNodeMenu = useCallback((
+    nodeId: string,
+    clientX: number,
+    clientY: number,
+  ) => {
+    const anchor = createMenuAnchor(clientX, clientY, 182, 170);
+    if (!anchor) return;
+    setSelectedId(nodeId);
+    setPaneMenu(null);
+    setNodeMenu({ nodeId, anchor });
+  }, [createMenuAnchor]);
+  const openPaneMenu = useCallback((clientX: number, clientY: number) => {
+    const anchor = createMenuAnchor(clientX, clientY, 218, 286);
+    if (!anchor) return;
+    setSelectedId(undefined);
+    setNodeMenu(null);
+    setPaneMenu(anchor);
+  }, [createMenuAnchor]);
+  const finishPaneGesture = useCallback(() => {
+    const gesture = paneGestureRef.current;
+    if (!gesture) return;
+    window.clearTimeout(gesture.timer);
+    paneGestureRef.current = null;
+  }, []);
+  const beginPaneGesture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const origin = event.target instanceof Element ? event.target : null;
+      const nodeElement = origin?.closest<HTMLElement>(".react-flow__node");
+      const isPane = origin?.classList.contains("react-flow__pane");
+      if (
+        !event.isPrimary ||
+        event.button !== 0 ||
+        (!isPane && !nodeElement)
+      ) {
+        return;
+      }
+      finishPaneGesture();
+      const { clientX: x, clientY: y, pointerId } = event;
+      paneGestureRef.current = {
+        pointerId,
+        x,
+        y,
+        nodeId: nodeElement?.dataset.id,
+        timer: window.setTimeout(() => {
+          if (paneGestureRef.current?.pointerId !== pointerId) return;
+          const gesture = paneGestureRef.current;
+          paneGestureRef.current = null;
+          suppressPaneClickRef.current = true;
+          if (gesture.nodeId) {
+            openNodeMenu(gesture.nodeId, x, y);
+          } else {
+            openPaneMenu(x, y);
+          }
+        }, 520),
+      };
+    },
+    [finishPaneGesture, openNodeMenu, openPaneMenu],
+  );
+  const movePaneGesture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const gesture = paneGestureRef.current;
+      if (
+        gesture?.pointerId === event.pointerId &&
+        Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 20
+      ) {
+        finishPaneGesture();
+      }
+    },
+    [finishPaneGesture],
+  );
   const mappedNodes = useMemo(
     () => toCanvasNodes(materialized, racks),
     [materialized, racks],
   );
-  const [selectedId, setSelectedId] = useState<string>();
-  const nodes = useMemo(
-    () => mappedNodes.map((node) => ({ ...node, selected: node.id === selectedId })),
-    [mappedNodes, selectedId],
-  );
+  const [interactiveState, setInteractiveState] = useState(() => ({
+    source: mappedNodes,
+    nodes: mappedNodes,
+  }));
+  let interactiveNodes = interactiveState.nodes;
+  if (interactiveState.source !== mappedNodes) {
+    interactiveNodes = mappedNodes;
+    setInteractiveState({ source: mappedNodes, nodes: mappedNodes });
+  }
   const edges = useMemo(
     () => toCanvasEdges(materialized.graph!.edges),
     [materialized.graph],
@@ -261,26 +450,41 @@ export default function RackGraphEditor({ rack, racks, onChange }: RackGraphEdit
     (next: RackDefinition["graph"]) => onChange({ ...materialized, graph: next }),
     [materialized, onChange],
   );
+  const updateSlot = useCallback((nextSlot: RackDefinition["slots"][number]) => {
+    onChange({
+      ...materialized,
+      slots: materialized.slots.map((slot) =>
+        slot.id === nextSlot.id ? nextSlot : slot,
+      ),
+    });
+  }, [materialized, onChange]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<CanvasNode>[]) => {
-      if (!changes.some((change) => change.type === "position" && change.position)) return;
-      const nextNodes = applyNodeChanges(changes, nodes);
-      const positions = new Map(nextNodes.map((node) => [node.id, node.position]));
+      setInteractiveState((current) => ({
+        ...current,
+        nodes: applyNodeChanges(changes, current.nodes),
+      }));
+    },
+    [],
+  );
+
+  const persistNodePosition = useCallback(
+    (nodeId: string, position: RackGraphPosition) => {
       const graph = materialized.graph!;
       updateGraph({
         ...graph,
         nodes: graph.nodes.map((node) =>
-          positions.has(node.id) ? { ...node, position: positions.get(node.id)! } : node,
+          node.id === nodeId ? { ...node, position } : node,
         ),
         labels: (graph.labels ?? []).map((label) =>
-          positions.has(`label:${label.id}`)
-            ? { ...label, position: positions.get(`label:${label.id}`)! }
+          `label:${label.id}` === nodeId
+            ? { ...label, position }
             : label,
         ),
       });
     },
-    [materialized.graph, nodes, updateGraph],
+    [materialized.graph, updateGraph],
   );
 
   const connect = useCallback(
@@ -328,14 +532,14 @@ export default function RackGraphEditor({ rack, racks, onChange }: RackGraphEdit
   );
 
   const addLabel = useCallback(
-    (kind: RackGraphLabel["kind"]) => {
+    (kind: RackGraphLabel["kind"], position: RackGraphPosition) => {
       const graph = materialized.graph!;
       const label: RackGraphLabel = {
         id: rackGraphId("label"),
         text: kind === "section" ? "New section" : "New note",
         kind,
         tone: kind === "section" ? "cyan" : "neutral",
-        position: { x: 120, y: kind === "section" ? -80 : 280 },
+        position,
         width: kind === "section" ? 640 : 240,
         height: kind === "section" ? 320 : 100,
       };
@@ -345,7 +549,7 @@ export default function RackGraphEditor({ rack, racks, onChange }: RackGraphEdit
     [materialized.graph, updateGraph],
   );
 
-  const addChildRack = useCallback(() => {
+  const addChildRack = useCallback((position: RackGraphPosition) => {
     if (!activeChildRackId) return;
     const graph = materialized.graph!;
     const midiInput = graph.nodes.find((node) => node.kind.kind === "midi_input");
@@ -361,7 +565,7 @@ export default function RackGraphEditor({ rack, racks, onChange }: RackGraphEdit
         {
           id: nodeId,
           kind: { kind: "rack", rack_id: activeChildRackId },
-          position: { x: 360, y: graph.nodes.length * 90 },
+          position,
         },
       ],
       edges: [
@@ -410,12 +614,30 @@ export default function RackGraphEditor({ rack, racks, onChange }: RackGraphEdit
       });
     }
     setSelectedId(undefined);
-  }, [materialized, onChange, selectedId, updateGraph]);
+  }, [materialized, onChange, selectedId, setSelectedId, updateGraph]);
 
   const selectedLabel = selectedId?.startsWith("label:")
     ? materialized.graph!.labels?.find(
         (label) => label.id === selectedId.slice("label:".length),
       )
+    : undefined;
+  const menuNode = nodeMenu
+    ? materialized.graph!.nodes.find((node) => node.id === nodeMenu.nodeId)
+    : undefined;
+  const menuSlotId = menuNode?.kind.kind === "plugin" ? menuNode.kind.slot_id : undefined;
+  const menuSlot = menuSlotId
+    ? materialized.slots.find((slot) => slot.id === menuSlotId)
+    : undefined;
+  const editorSlot = editorSlotId
+    ? materialized.slots.find((slot) => slot.id === editorSlotId)
+    : undefined;
+  const editorNode = editorSlotId
+    ? materialized.graph!.nodes.find(
+        (node) => node.kind.kind === "plugin" && node.kind.slot_id === editorSlotId,
+      )
+    : undefined;
+  const editorInstance = editorSlot
+    ? instances.find((instance) => instance.plugin_id === editorSlot.plugin_id)
     : undefined;
 
   const updateSelectedLabel = useCallback(
@@ -434,37 +656,6 @@ export default function RackGraphEditor({ rack, racks, onChange }: RackGraphEdit
 
   return (
     <div className="rack-graph-editor">
-      <div className="rack-graph-toolbar">
-        <div>
-          <button type="button" onClick={() => addLabel("note")}>
-            ＋ Note
-          </button>
-          <button type="button" onClick={() => addLabel("section")}>
-            ＋ Section
-          </button>
-        </div>
-        <div className="rack-graph-child-tools">
-          <select
-            aria-label="Child Rack"
-            value={activeChildRackId}
-            onChange={(event) => setChildRackId(event.target.value)}
-            disabled={childOptions.length === 0}
-          >
-            {childOptions.length === 0 ? <option>No child Racks available</option> : null}
-            {childOptions.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" onClick={addChildRack} disabled={!activeChildRackId}>
-            ＋ Child Rack
-          </button>
-          <button type="button" className="danger" onClick={removeSelected} disabled={!selectedId}>
-            Remove selected
-          </button>
-        </div>
-      </div>
       {selectedLabel ? (
         <div className="rack-graph-label-tools">
           <label>
@@ -492,16 +683,54 @@ export default function RackGraphEditor({ rack, racks, onChange }: RackGraphEdit
           </label>
         </div>
       ) : null}
-      <div className="rack-graph-canvas">
-        <ReactFlow
-          nodes={nodes}
+      <div
+        ref={canvasRef}
+        className="rack-graph-canvas"
+        onPointerDown={beginPaneGesture}
+        onPointerMove={movePaneGesture}
+        onPointerUp={finishPaneGesture}
+        onPointerCancel={finishPaneGesture}
+      >
+        <ReactFlow<CanvasNode, Edge>
+          nodes={interactiveNodes}
           edges={edges}
           nodeTypes={nodeTypes}
           onNodesChange={handleNodesChange}
+          onNodeDragStop={(_event, node) => persistNodePosition(node.id, node.position)}
           onConnect={connect}
           onEdgesDelete={removeEdges}
+          onViewportChange={setViewport}
           onNodeClick={(_event, node) => setSelectedId(node.id)}
-          onPaneClick={() => setSelectedId(undefined)}
+          onNodeDoubleClick={(event, node) => {
+            const graphNode = materialized.graph!.nodes.find(
+              (candidate) => candidate.id === node.id,
+            );
+            if (graphNode?.kind.kind === "plugin") {
+              setSelectedId(node.id);
+              setNodeMenu(null);
+              setPaneMenu(null);
+              setEditorSlotId(graphNode.kind.slot_id);
+            } else {
+              openNodeMenu(node.id, event.clientX, event.clientY);
+            }
+          }}
+          onNodeContextMenu={(event, node) => {
+            event.preventDefault();
+            openNodeMenu(node.id, event.clientX, event.clientY);
+          }}
+          onPaneClick={() => {
+            if (suppressPaneClickRef.current) {
+              suppressPaneClickRef.current = false;
+              return;
+            }
+            setSelectedId(undefined);
+            setNodeMenu(null);
+            setPaneMenu(null);
+          }}
+          onPaneContextMenu={(event) => {
+            event.preventDefault();
+            openPaneMenu(event.clientX, event.clientY);
+          }}
           deleteKeyCode={["Backspace", "Delete"]}
           minZoom={0.2}
           maxZoom={2.5}
@@ -520,6 +749,90 @@ export default function RackGraphEditor({ rack, racks, onChange }: RackGraphEdit
             showInteractive={false}
           />
         </ReactFlow>
+        <div className="rack-graph-menu-layer">
+          {paneMenu ? (
+            <div
+              className="rack-node-menu rack-pane-menu"
+              style={menuStyle(paneMenu)}
+              role="menu"
+              aria-label="Add to Rack"
+            >
+              <header>
+                <span>Add to Rack</span>
+                <strong>{materialized.name}</strong>
+              </header>
+              <button type="button" role="menuitem" disabled={!canAddInstrument} onClick={() => {
+                onAddInstrument(paneMenu.position);
+                setPaneMenu(null);
+              }}>Instrument</button>
+              <button type="button" role="menuitem" onClick={() => {
+                addLabel("note", paneMenu.position);
+                setPaneMenu(null);
+              }}>Note</button>
+              <button type="button" role="menuitem" onClick={() => {
+                addLabel("section", paneMenu.position);
+                setPaneMenu(null);
+              }}>Section</button>
+              <label className="rack-pane-child-picker">
+                <span>Child Rack</span>
+                <select
+                  aria-label="Child Rack"
+                  value={activeChildRackId}
+                  onChange={(event) => setChildRackId(event.target.value)}
+                  disabled={childOptions.length === 0}
+                >
+                  {childOptions.length === 0 ? <option>No Racks available</option> : null}
+                  {childOptions.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" role="menuitem" disabled={!activeChildRackId} onClick={() => {
+                addChildRack(paneMenu.position);
+                setPaneMenu(null);
+              }}>Add Child Rack</button>
+              <button type="button" role="menuitem" onClick={() => setPaneMenu(null)}>Close</button>
+            </div>
+          ) : null}
+          {nodeMenu && menuNode ? (
+            <div
+              className="rack-node-menu"
+              style={menuStyle(nodeMenu.anchor)}
+              role="menu"
+              aria-label="Node actions"
+            >
+              <header>
+                <span>{menuNode.kind.kind === "plugin" ? "Instrument" : "Node"}</span>
+                <strong>{menuSlot?.name ?? nodeTitle(menuNode, materialized, racks)[0]}</strong>
+              </header>
+              {menuSlot ? (
+                <>
+                  <button type="button" role="menuitem" onClick={() => {
+                    setNodeMenu(null);
+                    setEditorSlotId(menuSlot.id);
+                  }}>Edit instrument</button>
+                </>
+              ) : null}
+              <button type="button" role="menuitem" onClick={() => {
+                setNodeMenu(null);
+                removeSelected();
+              }} disabled={menuNode.kind.kind === "midi_input" || menuNode.kind.kind.endsWith("output")}>Remove node</button>
+              <button type="button" role="menuitem" onClick={() => setNodeMenu(null)}>Close</button>
+            </div>
+          ) : null}
+          {editorSlot && editorNode && editorInstance ? (
+            <RackSlotPopover
+              key={`${editorSlot.id}:${editorSlot.plugin_id}`}
+              slot={editorSlot}
+              instance={editorInstance}
+              nodePosition={editorNode.position}
+              viewport={viewport}
+              onChange={updateSlot}
+              onClose={() => setEditorSlotId(undefined)}
+              renderSurface={renderPluginSurface}
+            />
+          ) : null}
+        </div>
       </div>
       <p className="rack-graph-hint">
         Mouse wheel zooms · drag empty space to pan · drag ports to connect · Delete removes a

@@ -3,6 +3,7 @@ import type {
   RackGraph,
   RackGraphEdge,
   RackGraphNode,
+  RackGraphPosition,
   RackSlot,
 } from "./types";
 
@@ -104,25 +105,38 @@ export function materializeRackGraph(rack: RackDefinition): RackDefinition {
       };
 }
 
-export function addSlotToRack(rack: RackDefinition, slot: RackSlot): RackDefinition {
+export function addSlotToRack(
+  rack: RackDefinition,
+  slot: RackSlot,
+  position?: RackGraphPosition,
+): RackDefinition {
   const current = materializeRackGraph(rack);
   const graph = current.graph!;
+  const nodePosition = position ?? { x: 360, y: current.slots.length * 180 };
   const midiInput = graph.nodes.find((node) => node.kind.kind === "midi_input");
   const audioOutput = graph.nodes.find(
     (node) => node.kind.kind === "audio_output" && node.kind.bus_id === slot.audio_output_bus,
   );
   if (!midiInput || !audioOutput) {
+    const nextGraph = graphFromSlots([...current.slots, slot]);
     return {
       ...current,
       slots: [...current.slots, slot],
-      graph: graphFromSlots([...current.slots, slot]),
+      graph: {
+        ...nextGraph,
+        nodes: nextGraph.nodes.map((node) =>
+          node.kind.kind === "plugin" && node.kind.slot_id === slot.id
+            ? { ...node, position: nodePosition }
+            : node,
+        ),
+      },
     };
   }
   const nodeId = rackGraphId("plugin");
   const node: RackGraphNode = {
     id: nodeId,
     kind: { kind: "plugin", slot_id: slot.id },
-    position: { x: 360, y: current.slots.length * 180 },
+    position: nodePosition,
   };
   return {
     ...current,

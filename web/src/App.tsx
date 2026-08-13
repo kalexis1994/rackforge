@@ -46,6 +46,7 @@ import {
   stopGateway,
 } from "./gateway";
 import { RfLoader } from "./components/RfLoader";
+import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
 import {
   bindNativePluginResource,
   hostHaptic,
@@ -62,6 +63,8 @@ import type { RootState } from "./store";
 import type {
   PluginInstance,
   HostPresetSummary,
+  HostAudioPreferences,
+  HostAudioSettings,
   ProgramEditorField,
   ProgramEditorPage,
   ProgramEditorValue,
@@ -228,6 +231,22 @@ const aboutItem = {
   icon: Info,
 };
 
+const ROOMY_CONTROLLER_QUERY = "(min-width: 1100px) and (min-height: 620px)";
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [query]);
+
+  return matches;
+}
+
 export function App() {
   const [auth, setAuth] = useState<WebAuthStatus | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -281,11 +300,38 @@ function RackForgeApp() {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [installPluginOpen, setInstallPluginOpen] = useState(false);
+  const [playOverlay, setPlayOverlay] = useState<"plugins" | "presets" | null>(null);
+  const [liveSurface, setLiveSurface] = useState<"perform" | "configure">("perform");
+  const [liveWorkspace, setLiveWorkspace] = useState<{ kind: "rack"; name: string } | null>(null);
+  const [settingsBootstrap, setSettingsBootstrap] = useState<HostSettingsBootstrap | null>(null);
+  const [controllerDockOpen, setControllerDockOpen] = useState(false);
+  const roomyController = useMediaQuery(ROOMY_CONTROLLER_QUERY);
+  const lastContentRoute = useRef(location.pathname === "/controller" ? "/play" : location.pathname);
   useTactileFeedback();
-  const isControllerSurface = location.pathname === "/controller";
+  const isControllerSurface = location.pathname === "/controller" && !roomyController;
   const isPluginSurface =
     location.pathname === "/play" ||
     location.pathname.startsWith("/plugins/");
+  const isPerformanceSurface =
+    location.pathname === "/play" || location.pathname === "/live";
+  const isLiveSurface = location.pathname === "/live";
+  const renderRackSlotPluginSurface = useCallback(
+    ({
+      instance,
+      onSelectSound,
+    }: {
+      instance: PluginInstance;
+      onSelectSound: (soundId: string) => Promise<unknown>;
+    }) => (
+      <PluginFrame
+        instance={instance}
+        surface="play"
+        isolated
+        onSelectSound={onSelectSound}
+      />
+    ),
+    [],
+  );
 
   useEffect(() => {
     connectGateway();
@@ -293,19 +339,79 @@ function RackForgeApp() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    requestHostSettingsBootstrap().then((bootstrap) => {
+      if (active) setSettingsBootstrap(bootstrap);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     syncNativeRoute(location.pathname);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (location.pathname !== "/controller") {
+      lastContentRoute.current = location.pathname;
+      return;
+    }
+    if (roomyController) {
+      let active = true;
+      window.queueMicrotask(() => {
+        if (!active) return;
+        setControllerDockOpen(true);
+        navigate(lastContentRoute.current, { replace: true });
+      });
+      return () => {
+        active = false;
+      };
+    }
+  }, [location.pathname, navigate, roomyController]);
+
+  const showControllerDock = roomyController && controllerDockOpen;
 
   return (
     <div className={`app-shell${isPluginSurface ? " plugin-surface-active" : ""}${
       isControllerSurface ? " controller-surface-active" : ""
+    }${isPerformanceSurface ? " performance-surface-active" : ""}${
+      isLiveSurface ? " live-surface-active" : ""
+    }${liveWorkspace ? " rack-workspace-active" : ""
+    }${showControllerDock ? " controller-dock-active" : ""
     }`}>
       <aside className="rail">
         <div className="brand-lockup" aria-label="RackForge">
           <BrandMark />
           <span className="brand-name">RACKFORGE</span>
         </div>
-        <NavigationLinks />
+        <NavigationLinks
+          controllerDockOpen={showControllerDock}
+          onControllerToggle={roomyController
+            ? () => setControllerDockOpen((open) => !open)
+            : undefined}
+        />
+        {liveWorkspace ? (
+          <nav className="rail-context-actions" aria-label="Rack editor actions">
+            <span className="rail-context-label">Rack editor</span>
+            <button
+              type="button"
+              className="nav-item"
+              onClick={() => window.dispatchEvent(new Event("rackforge:save-rack-workspace"))}
+            >
+              <span className="nav-mark"><Activity aria-hidden="true" strokeWidth={1.9} /></span>
+              <span className="nav-copy"><span>Save Rack</span></span>
+            </button>
+            <button
+              type="button"
+              className="nav-item"
+              onClick={() => window.dispatchEvent(new Event("rackforge:close-rack-workspace"))}
+            >
+              <span className="nav-mark"><Blocks aria-hidden="true" strokeWidth={1.9} /></span>
+              <span className="nav-copy"><span>Back to LIVE</span></span>
+            </button>
+          </nav>
+        ) : null}
         <ConnectionBadge status={connection} />
       </aside>
 
@@ -317,12 +423,20 @@ function RackForgeApp() {
             onMenu={() => setMobileMenuOpen((open) => !open)}
           />
         ) : null}
+        {isPerformanceSurface ? (
+          <FloatingPerformanceMenuButton
+            menuOpen={mobileMenuOpen}
+            onOpen={() => setMobileMenuOpen(true)}
+          />
+        ) : null}
         {error && <div className="error-banner">{error}</div>}
         <div
           className={`page${isPluginSurface ? " plugin-host-page" : ""}${
             isControllerSurface ? " controller-host-page" : ""
           }${
             location.pathname === "/" ? " home-page" : ""
+          }${
+            isLiveSurface ? " live-host-page" : ""
           }`}
         >
           <Routes>
@@ -334,10 +448,23 @@ function RackForgeApp() {
                   session={snapshot}
                   performance={performance}
                   pending={performancePending}
+                  surface={liveSurface}
+                  onSurfaceChange={setLiveSurface}
+                  onWorkspaceChange={setLiveWorkspace}
+                  renderPluginSurface={renderRackSlotPluginSurface}
                 />
               }
             />
-            <Route path="/play" element={<PlayPage snapshot={snapshot} />} />
+            <Route
+              path="/play"
+              element={
+                <PlayPage
+                  snapshot={snapshot}
+                  overlay={playOverlay}
+                  onOverlayChange={setPlayOverlay}
+                />
+              }
+            />
             <Route
               path="/controller"
               element={
@@ -357,12 +484,41 @@ function RackForgeApp() {
               path="/plugins/:instanceId"
               element={<PluginPage snapshot={snapshot} />}
             />
-            <Route path="/settings" element={<SettingsPage />} />
+            <Route
+              path="/settings"
+              element={settingsBootstrap ? (
+                <SettingsPage
+                  initial={settingsBootstrap}
+                  onConfigChange={(config) => setSettingsBootstrap((current) =>
+                    current ? { ...current, config } : current
+                  )}
+                  onRepositoriesChange={(repositoryFile) => setSettingsBootstrap((current) =>
+                    current ? { ...current, repositoryFile } : current
+                  )}
+                  onAudioChange={(audioSettings) => setSettingsBootstrap((current) =>
+                    current ? { ...current, audioSettings } : current
+                  )}
+                />
+              ) : (
+                <RfLoader label="Settings" detail="Reading host capabilities…" size="medium" />
+              )}
+            />
             <Route path="/diagnostics" element={<DiagnosticsPage />} />
             <Route path="/about" element={<AboutPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
+        {showControllerDock ? (
+          <div className="global-controller-dock">
+            <TouchControllerPage
+              snapshot={snapshot}
+              connection={connection}
+              onOpenNavigation={() => setMobileMenuOpen(true)}
+              onExit={() => setControllerDockOpen(false)}
+              docked
+            />
+          </div>
+        ) : null}
       </main>
       {mobileMenuOpen ? (
         <MobileNavigation
@@ -372,12 +528,251 @@ function RackForgeApp() {
             setMobileMenuOpen(false);
             setInstallPluginOpen(true);
           }}
+          performanceSurface={
+            location.pathname === "/play"
+              ? "play"
+              : location.pathname === "/live"
+                ? "live"
+                : undefined
+          }
+          liveWorkspaceActive={liveWorkspace !== null}
+          onPerformanceAction={(action) => {
+            setMobileMenuOpen(false);
+            if (action === "select-plugin") setPlayOverlay("plugins");
+            if (action === "presets") setPlayOverlay("presets");
+            if (action === "live-perform") setLiveSurface("perform");
+            if (action === "live-configure") setLiveSurface("configure");
+            if (action === "live-save-editor") {
+              window.dispatchEvent(new Event("rackforge:save-rack-workspace"));
+            }
+            if (action === "live-close-editor") {
+              window.dispatchEvent(new Event("rackforge:close-rack-workspace"));
+            }
+          }}
         />
       ) : null}
       {installPluginOpen ? (
         <InstallPluginDialog onClose={() => setInstallPluginOpen(false)} />
       ) : null}
     </div>
+  );
+}
+
+const PERFORMANCE_MENU_POSITION_KEY = "rackforge.performance-menu-position.v1";
+
+function readPerformanceMenuPosition() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PERFORMANCE_MENU_POSITION_KEY) ?? "null") as {
+      x?: number;
+      y?: number;
+    } | null;
+    return {
+      x: Math.min(1, Math.max(0, saved?.x ?? 0)),
+      y: Math.min(1, Math.max(0, saved?.y ?? 0)),
+    };
+  } catch {
+    return { x: 0, y: 0 };
+  }
+}
+
+function FloatingPerformanceMenuButton({
+  menuOpen,
+  onOpen,
+}: {
+  menuOpen: boolean;
+  onOpen: () => void;
+}) {
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const [position, setPosition] = useState(readPerformanceMenuPosition);
+  const positionRef = useRef(position);
+  const [dragging, setDragging] = useState(false);
+  const gestureRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    grabX: number;
+    grabY: number;
+    armed: boolean;
+    moved: boolean;
+    timer: number;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+  const finishGestureRef = useRef<() => void>(() => undefined);
+  const dragCueAnimationRef = useRef<Animation | null>(null);
+
+  const stopDragCue = useCallback(() => {
+    dragCueAnimationRef.current?.cancel();
+    dragCueAnimationRef.current = null;
+  }, []);
+
+  const startDragCue = useCallback(() => {
+    stopDragCue();
+    const button = buttonRef.current;
+    if (!button) return;
+    dragCueAnimationRef.current = button.animate(
+      [
+        {
+          color: "var(--acid)",
+          backgroundColor: "rgba(4, 17, 26, 0.84)",
+          borderColor: "rgba(85, 231, 255, 0.34)",
+          boxShadow: "0 8px 26px rgba(0, 3, 7, 0.38)",
+          transform: "scale(1)",
+        },
+        {
+          color: "#021016",
+          backgroundColor: "var(--acid)",
+          borderColor: "#baf7ff",
+          boxShadow:
+            "0 0 0 7px rgba(85, 231, 255, 0.17), 0 16px 42px rgba(28, 211, 239, 0.42)",
+          transform: "scale(1.2)",
+        },
+      ],
+      {
+        duration: 180,
+        easing: "cubic-bezier(0.2, 0.82, 0.2, 1)",
+        fill: "forwards",
+      },
+    );
+  }, [stopDragCue]);
+
+  const moveGesture = useCallback((pointerId: number, clientX: number, clientY: number) => {
+    const gesture = gestureRef.current;
+    const button = buttonRef.current;
+    if (!gesture || gesture.pointerId !== pointerId || !button) return;
+    const distance = Math.hypot(clientX - gesture.startX, clientY - gesture.startY);
+    if (!gesture.armed) {
+      if (distance > 10) {
+        gesture.moved = true;
+        window.clearTimeout(gesture.timer);
+      }
+      return;
+    }
+    gesture.moved = true;
+    const shell = button.closest(".app-shell")?.getBoundingClientRect();
+    if (!shell) return;
+    const availableX = Math.max(1, shell.width - button.offsetWidth - 16);
+    const availableY = Math.max(1, shell.height - button.offsetHeight - 16);
+    const nextPosition = {
+      x: Math.min(1, Math.max(0, (clientX - shell.left - gesture.grabX - 8) / availableX)),
+      y: Math.min(1, Math.max(0, (clientY - shell.top - gesture.grabY - 8) / availableY)),
+    };
+    positionRef.current = nextPosition;
+    setPosition(nextPosition);
+  }, []);
+
+  const finishGesture = useCallback((pointerId?: number) => {
+    const gesture = gestureRef.current;
+    if (!gesture || (pointerId !== undefined && gesture.pointerId !== pointerId)) return;
+    window.clearTimeout(gesture.timer);
+    stopDragCue();
+    suppressClickRef.current = gesture.armed || gesture.moved;
+    if (gesture.armed) {
+      localStorage.setItem(PERFORMANCE_MENU_POSITION_KEY, JSON.stringify(positionRef.current));
+    }
+    gestureRef.current = null;
+    setDragging(false);
+    const button = buttonRef.current;
+    if (button?.hasPointerCapture(gesture.pointerId)) {
+      button.releasePointerCapture(gesture.pointerId);
+    }
+  }, [stopDragCue]);
+
+  useEffect(() => {
+    finishGestureRef.current = () => finishGesture();
+    return () => {
+      finishGestureRef.current = () => undefined;
+    };
+  }, [finishGesture]);
+
+  useEffect(() => {
+    const finishPointer = (event: PointerEvent) => finishGesture(event.pointerId);
+    const finishAnyGesture = () => finishGesture();
+    const finishWhenHidden = () => {
+      if (document.visibilityState !== "visible") finishGesture();
+    };
+    window.addEventListener("pointerup", finishPointer, true);
+    window.addEventListener("pointercancel", finishPointer, true);
+    window.addEventListener("touchend", finishAnyGesture, true);
+    window.addEventListener("touchcancel", finishAnyGesture, true);
+    window.addEventListener("mouseup", finishAnyGesture, true);
+    window.addEventListener("rackforge:native-touch-end", finishAnyGesture);
+    window.addEventListener("blur", finishAnyGesture);
+    document.addEventListener("visibilitychange", finishWhenHidden);
+    return () => {
+      window.removeEventListener("pointerup", finishPointer, true);
+      window.removeEventListener("pointercancel", finishPointer, true);
+      window.removeEventListener("touchend", finishAnyGesture, true);
+      window.removeEventListener("touchcancel", finishAnyGesture, true);
+      window.removeEventListener("mouseup", finishAnyGesture, true);
+      window.removeEventListener("rackforge:native-touch-end", finishAnyGesture);
+      window.removeEventListener("blur", finishAnyGesture);
+      document.removeEventListener("visibilitychange", finishWhenHidden);
+      const gesture = gestureRef.current;
+      if (gesture) window.clearTimeout(gesture.timer);
+      stopDragCue();
+      gestureRef.current = null;
+    };
+  }, [finishGesture, stopDragCue]);
+
+  return (
+    <button
+      ref={buttonRef}
+      className={`performance-menu-button${dragging ? " dragging" : ""}`}
+      style={{
+        left: `calc(8px + ${position.x * 100}% - ${position.x * 60}px)`,
+        top: `calc(8px + ${position.y * 100}% - ${position.y * 60}px)`,
+      }}
+      onPointerDown={(event) => {
+        if (!event.isPrimary || event.button !== 0) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const gesture = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          grabX: event.clientX - rect.left,
+          grabY: event.clientY - rect.top,
+          armed: false,
+          moved: false,
+          timer: 0,
+        };
+        gesture.timer = window.setTimeout(() => {
+          if (gestureRef.current !== gesture) return;
+          gesture.armed = true;
+          setDragging(true);
+          startDragCue();
+          hostHaptic("tap");
+        }, 360);
+        gestureRef.current = gesture;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        moveGesture(event.pointerId, event.clientX, event.clientY);
+      }}
+      onPointerUp={(event) => finishGesture(event.pointerId)}
+      onPointerCancel={(event) => finishGesture(event.pointerId)}
+      onTouchEnd={() => finishGesture()}
+      onTouchCancel={() => finishGesture()}
+      onMouseUp={() => finishGesture()}
+      onLostPointerCapture={(event) => finishGesture(event.pointerId)}
+      onContextMenu={(event) => event.preventDefault()}
+      onClick={() => {
+        if (
+          suppressClickRef.current ||
+          gestureRef.current?.armed ||
+          gestureRef.current?.moved
+        ) {
+          suppressClickRef.current = false;
+          finishGesture();
+          return;
+        }
+        onOpen();
+      }}
+      aria-label="Open RackForge menu. Hold and drag to move this button."
+      aria-expanded={menuOpen}
+      title="Tap to open · Hold and drag to move"
+    >
+      <Menu aria-hidden="true" />
+    </button>
   );
 }
 
@@ -419,7 +814,7 @@ function useTactileFeedback() {
       // Piano keys and pads provide their own immediate pressed state. A
       // delayed expanding ripple obscures adjacent notes and feels sluggish
       // when playing quickly or gliding across the keyboard.
-      if (candidate.closest(".touch-instrument")) return;
+      if (candidate.closest(".touch-instrument, .performance-menu-button")) return;
       clearPressed();
       gesture = {
         candidate,
@@ -448,20 +843,27 @@ function useTactileFeedback() {
     };
     const pointerUp = (event: PointerEvent) => {
       if (!gesture || gesture.pointerId !== event.pointerId) return;
-      const { candidate, startX, startY, cancelled } = gesture;
+      const { candidate, cancelled } = gesture;
       clearPressTimer();
       candidate.classList.remove("rf-pressed");
       gesture = null;
       const releaseTarget = document.elementFromPoint(event.clientX, event.clientY);
       if (cancelled || !releaseTarget || !candidate.contains(releaseTarget)) return;
       const bounds = candidate.getBoundingClientRect();
-      const diameter = Math.max(bounds.width, bounds.height) * 2.1;
+      const localX = Math.min(bounds.width, Math.max(0, event.clientX - bounds.left));
+      const localY = Math.min(bounds.height, Math.max(0, event.clientY - bounds.top));
+      const diameter = Math.max(
+        Math.hypot(localX, localY),
+        Math.hypot(bounds.width - localX, localY),
+        Math.hypot(localX, bounds.height - localY),
+        Math.hypot(bounds.width - localX, bounds.height - localY),
+      ) * 2;
       const ripple = document.createElement("span");
       ripple.className = "rf-touch-ripple";
       ripple.style.width = `${diameter}px`;
       ripple.style.height = `${diameter}px`;
-      ripple.style.left = `${startX - bounds.left - diameter / 2}px`;
-      ripple.style.top = `${startY - bounds.top - diameter / 2}px`;
+      ripple.style.left = `${localX - diameter / 2}px`;
+      ripple.style.top = `${localY - diameter / 2}px`;
       candidate.appendChild(ripple);
       ripple.addEventListener("animationend", () => ripple.remove(), { once: true });
       hostHaptic("tap");
@@ -488,15 +890,41 @@ function NavigationLinks({
   items = navItems,
   detailed = false,
   onNavigate,
+  controllerDockOpen = false,
+  onControllerToggle,
 }: {
   items?: typeof navItems;
   detailed?: boolean;
   onNavigate?: () => void;
+  controllerDockOpen?: boolean;
+  onControllerToggle?: () => void;
 }) {
   return (
     <nav className="primary-nav" aria-label="RackForge sections">
       {items.map((item) => {
         const Icon = item.icon;
+        if (item.path === "/controller" && onControllerToggle) {
+          return (
+            <button
+              key={item.path}
+              type="button"
+              onClick={() => {
+                onControllerToggle();
+                onNavigate?.();
+              }}
+              className={`nav-item controller-toggle${controllerDockOpen ? " dock-open" : ""}`}
+              aria-pressed={controllerDockOpen}
+            >
+              <span className="nav-mark">
+                <Icon aria-hidden="true" strokeWidth={1.9} />
+              </span>
+              <span className="nav-copy">
+                <span>{item.label}</span>
+                {detailed ? <small>{item.detail}</small> : null}
+              </span>
+            </button>
+          );
+        }
         return (
           <NavLink
             key={item.path}
@@ -525,10 +953,18 @@ function MobileNavigation({
   connection,
   onClose,
   onInstall,
+  performanceSurface,
+  liveWorkspaceActive,
+  onPerformanceAction,
 }: {
   connection: string;
   onClose: () => void;
   onInstall: () => void;
+  performanceSurface?: "play" | "live";
+  liveWorkspaceActive: boolean;
+  onPerformanceAction: (
+    action: "select-plugin" | "presets" | "live-perform" | "live-configure" | "live-save-editor" | "live-close-editor",
+  ) => void;
 }) {
   const panelRef = useRef<HTMLElement | null>(null);
   const [closing, setClosing] = useState(false);
@@ -578,6 +1014,89 @@ function MobileNavigation({
           </button>
         </header>
         <div className="mobile-menu-scroll">
+          {performanceSurface ? (
+            <>
+              <span className="mobile-menu-section">
+                {performanceSurface === "play" ? "Play controls" : "Live workspace"}
+              </span>
+              <nav
+                className="primary-nav mobile-menu-actions performance-menu-actions"
+                aria-label={performanceSurface === "play" ? "Play controls" : "Live workspace"}
+              >
+                {performanceSurface === "play" ? (
+                  <>
+                    <button
+                      className="nav-item"
+                      onClick={() => onPerformanceAction("select-plugin")}
+                    >
+                      <span className="nav-mark"><Blocks aria-hidden="true" strokeWidth={1.9} /></span>
+                      <span className="nav-copy">
+                        <span>Select plugin</span>
+                        <small>Choose the active instrument</small>
+                      </span>
+                    </button>
+                    <button
+                      className="nav-item"
+                      onClick={() => onPerformanceAction("presets")}
+                    >
+                      <span className="nav-mark"><Activity aria-hidden="true" strokeWidth={1.9} /></span>
+                      <span className="nav-copy">
+                        <span>Presets</span>
+                        <small>Load or manage plugin presets</small>
+                      </span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {liveWorkspaceActive ? (
+                      <>
+                        <button
+                          className="nav-item"
+                          onClick={() => onPerformanceAction("live-save-editor")}
+                        >
+                          <span className="nav-mark"><Activity aria-hidden="true" strokeWidth={1.9} /></span>
+                          <span className="nav-copy">
+                            <span>Save Rack</span>
+                            <small>Store this portable node graph</small>
+                          </span>
+                        </button>
+                        <button
+                          className="nav-item"
+                          onClick={() => onPerformanceAction("live-close-editor")}
+                        >
+                          <span className="nav-mark"><Blocks aria-hidden="true" strokeWidth={1.9} /></span>
+                          <span className="nav-copy">
+                            <span>Back to LIVE library</span>
+                            <small>Close the full-screen node workspace</small>
+                          </span>
+                        </button>
+                      </>
+                    ) : null}
+                    <button
+                      className="nav-item"
+                      onClick={() => onPerformanceAction("live-perform")}
+                    >
+                      <span className="nav-mark"><Play aria-hidden="true" strokeWidth={1.9} /></span>
+                      <span className="nav-copy">
+                        <span>Perform</span>
+                        <small>Open the stage-ready LIVE view</small>
+                      </span>
+                    </button>
+                    <button
+                      className="nav-item"
+                      onClick={() => onPerformanceAction("live-configure")}
+                    >
+                      <span className="nav-mark"><Settings2 aria-hidden="true" strokeWidth={1.9} /></span>
+                      <span className="nav-copy">
+                        <span>Configure</span>
+                        <small>Edit racks, songs, and setlists</small>
+                      </span>
+                    </button>
+                  </>
+                )}
+              </nav>
+            </>
+          ) : null}
           <span className="mobile-menu-section">Workspace</span>
           <NavigationLinks
             items={[navItems[2], navItems[1], navItems[3], diagnosticsItem]}
@@ -620,6 +1139,38 @@ interface InstalledPluginResult {
   activation_required: boolean;
 }
 
+const PLUGIN_ACTIVATION_TIMEOUT_MS = 45_000;
+
+async function activateInstalledPlugin(
+  result: InstalledPluginResult,
+): Promise<PluginWebDescriptor> {
+  const activation = await hostJson<{ status?: string }>(
+    `/api/v1/plugins/${encodeURIComponent(result.plugin_id)}/activate`,
+    { method: "POST" },
+  );
+  if (activation.status === "active") {
+    return hostJson<PluginWebDescriptor>(
+      `/api/v1/plugins/${encodeURIComponent(result.plugin_id)}`,
+    );
+  }
+  const startedAt = performance.now();
+  let lastError: unknown;
+  while (performance.now() - startedAt < PLUGIN_ACTIVATION_TIMEOUT_MS) {
+    try {
+      const descriptor = await hostJson<PluginWebDescriptor>(
+        `/api/v1/plugins/${encodeURIComponent(result.plugin_id)}`,
+      );
+      if (descriptor.active) return descriptor;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("RackForge installed the plugin but activation did not finish in time.");
+}
+
 const MAX_CLIENT_RESOURCE_BYTES = 512 * 1024 * 1024;
 
 function InstallPluginDialog({ onClose }: { onClose: () => void }) {
@@ -629,7 +1180,11 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activationError, setActivationError] = useState<string | null>(null);
   const [installed, setInstalled] = useState<InstalledPluginResult | null>(null);
+  const [activated, setActivated] = useState<PluginWebDescriptor | null>(null);
+  const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -651,10 +1206,23 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
     });
   };
 
-  const finishInstall = (result: InstalledPluginResult) => {
+  const finishInstall = async (result: InstalledPluginResult) => {
     setInstalled(result);
-    setStatus(null);
-    hostHaptic("confirm");
+    setActivationError(null);
+    setStatus(`Activating ${result.plugin_id}…`);
+    try {
+      const descriptor = await activateInstalledPlugin(result);
+      setActivated(descriptor);
+      hostHaptic("confirm");
+    } catch (reason) {
+      setActivationError(
+        reason instanceof Error
+          ? reason.message
+          : "The plugin was installed but could not be activated.",
+      );
+    } finally {
+      setStatus(null);
+    }
   };
 
   const openNativePicker = async () => {
@@ -666,7 +1234,7 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
         kind: "file",
         extensions: [".rfplugin"],
       });
-      finishInstall(await installSelection(selection));
+      await finishInstall(await installSelection(selection));
     } catch (reason) {
       setStatus(null);
       setError(
@@ -695,7 +1263,7 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
           body: file,
         },
       );
-      finishInstall(await installSelection(selection));
+      await finishInstall(await installSelection(selection));
     } catch (reason) {
       setStatus(null);
       setError(
@@ -718,7 +1286,7 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
         "/api/v1/resources/selections",
         { entry_id: entry.id },
       );
-      finishInstall(await installSelection(selection));
+      await finishInstall(await installSelection(selection));
     } catch (reason) {
       setStatus(null);
       setError(
@@ -751,12 +1319,12 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
             Close
           </button>
         </header>
-        <p className="install-plugin-intro">
+        {!installed ? <p className="install-plugin-intro">
           {native
             ? "Select a portable .rfplugin package. RackForge validates it before installing anything."
             : "Choose where the .rfplugin package is located. RackForge validates it on the host before installing anything."}
-        </p>
-        <div className="install-plugin-sources">
+        </p> : null}
+        {!installed ? <div className="install-plugin-sources">
           <button
             type="button"
             className="install-source-card"
@@ -787,7 +1355,7 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
               </span>
             </button>
           ) : null}
-        </div>
+        </div> : null}
         <input
           ref={fileInputRef}
           className="visually-hidden"
@@ -800,12 +1368,48 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
         />
         {status ? <p className="install-plugin-status">{status}</p> : null}
         {error ? <p className="install-plugin-error">{error}</p> : null}
+        {activationError ? (
+          <p className="install-plugin-error">
+            The package is installed, but activation failed: {activationError}
+          </p>
+        ) : null}
         {installed ? (
-          <div className="install-plugin-success" role="status">
-            <strong>
-              {installed.already_installed ? "Already installed" : "Plugin installed"}
-            </strong>
-            <span>{installed.plugin_id} v{installed.version}</span>
+          <div className="install-plugin-complete">
+            <div className="install-plugin-success" role="status">
+              <strong>
+                {activated
+                  ? "Plugin installed and active"
+                  : installed.already_installed
+                    ? "Plugin already installed"
+                    : "Plugin installed"}
+              </strong>
+              <span>{installed.plugin_id} v{installed.version}</span>
+            </div>
+            {!busy && !status ? (
+              <div className="install-plugin-actions">
+                {activated?.surfaces.some((surface) => surface.kind === "config") ? (
+                  <button
+                    className="primary-button"
+                    onClick={() => {
+                      const instance = snapshot?.instances.find(
+                        (candidate) => candidate.plugin_id === installed.plugin_id,
+                      );
+                      navigate(
+                        instance
+                          ? `/plugins/${encodeURIComponent(instance.instance_id)}`
+                          : "/plugins",
+                      );
+                      onClose();
+                    }}
+                  >
+                    Open configuration
+                  </button>
+                ) : null}
+                <button className="secondary-button" onClick={onClose}>
+                  Close
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -1165,14 +1769,27 @@ function HomePage({ snapshot }: { snapshot: SessionSnapshot | null }) {
   );
 }
 
-function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
+function PlayPage({
+  snapshot,
+  overlay,
+  onOverlayChange,
+}: {
+  snapshot: SessionSnapshot | null;
+  overlay: "plugins" | "presets" | null;
+  onOverlayChange: (overlay: "plugins" | "presets" | null) => void;
+}) {
   const instances = snapshot?.instances ?? [];
   const active =
     instances.find(
       (instance) => instance.instance_id === snapshot?.active_instance_id,
     ) ?? instances[0];
-  const [pluginPickerOpen, setPluginPickerOpen] = useState(false);
-  const [presetsOpen, setPresetsOpen] = useState(false);
+  const pluginPickerOpen = overlay === "plugins";
+  const presetsOpen = overlay === "presets";
+  const [surfaceInfo, setSurfaceInfo] = useState<{
+    instanceId: string;
+    label: string;
+    value: string;
+  } | null>(null);
   const [installedPlugins, setInstalledPlugins] = useState<PluginWebDescriptor[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -1194,43 +1811,64 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
   const activeDescriptor = installedPlugins.find(
     (plugin) => plugin.plugin_id === active?.plugin_id,
   );
+  const activeProgram = active?.sounds.find(
+    (sound) => sound.id === active.selected_sound_id,
+  );
+  const activeSurfaceInfo =
+    surfaceInfo?.instanceId === active?.instance_id ? surfaceInfo : null;
+  const activeInstanceId = active?.instance_id;
+  const handleSurfaceInfo = useCallback(
+    (info: { label: string; value: string } | null) => {
+      if (!activeInstanceId) return;
+      setSurfaceInfo(
+        info
+          ? { instanceId: activeInstanceId, ...info }
+          : null,
+      );
+    },
+    [activeInstanceId],
+  );
   return (
     <section className="plugin-surface-shell direct-surface">
       <div className="play-plugin-toolbar">
         <button
           className={`play-header-button back${pluginPickerOpen ? " active" : ""}`}
           onClick={() => {
-            setPresetsOpen(false);
-            setPluginPickerOpen((open) => !open);
+            onOverlayChange(pluginPickerOpen ? null : "plugins");
           }}
           aria-expanded={pluginPickerOpen}
         >
           <span aria-hidden="true">▦</span>
           <strong>Select plugin</strong>
         </button>
-        <div className="play-plugin-identity">
-          {active && (
-            <PluginIcon
-              plugin={activeDescriptor}
-              name={active.plugin_name}
-              className="play-plugin-icon"
-            />
-          )}
-          <div>
-          <span>PLAY</span>
-          <strong>
-            {active
+        <PerformanceInfoBar
+          className="play-plugin-identity"
+          left={{ label: "Mode", value: "PLAY" }}
+          center={{
+            label: activeSurfaceInfo?.label || "Program",
+            value: activeSurfaceInfo?.value || activeProgram?.name || "No program",
+          }}
+          right={{
+            label: "Plugin",
+            value: active
               ? `${active.plugin_name}${formatPluginVersion(activeVersion)}`
-              : "Select an instrument"}
-          </strong>
-          </div>
-        </div>
+              : "Select an instrument",
+          }}
+          rightAccessory={
+            active ? (
+              <PluginIcon
+                plugin={activeDescriptor}
+                name={active.plugin_name}
+                className="play-plugin-icon"
+              />
+            ) : null
+          }
+        />
         <button
           className={`play-header-button presets${presetsOpen ? " active" : ""}`}
           disabled={!active}
           onClick={() => {
-            setPluginPickerOpen(false);
-            setPresetsOpen((open) => !open);
+            onOverlayChange(presetsOpen ? null : "presets");
           }}
           aria-expanded={presetsOpen}
         >
@@ -1239,7 +1877,12 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
         </button>
       </div>
       {active ? (
-        <PluginFrame key={active.instance_id} instance={active} surface="play" />
+        <PluginFrame
+          key={active.instance_id}
+          instance={active}
+          surface="play"
+          onSurfaceInfoChange={handleSurfaceInfo}
+        />
       ) : (
         <PluginSurfaceState
           title="No instrument active"
@@ -1251,11 +1894,11 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
           active={active}
           instances={instances}
           plugins={installedPlugins}
-          onClose={() => setPluginPickerOpen(false)}
+          onClose={() => onOverlayChange(null)}
         />
       )}
       {presetsOpen && active && (
-        <PresetModal instance={active} onClose={() => setPresetsOpen(false)} />
+        <PresetModal instance={active} onClose={() => onOverlayChange(null)} />
       )}
     </section>
   );
@@ -1721,12 +2364,18 @@ function PluginConfigSurface({ instance }: { instance: PluginInstance }) {
   );
 }
 
-function PluginFrame({
+export function PluginFrame({
   instance,
   surface,
+  onSurfaceInfoChange,
+  isolated = false,
+  onSelectSound,
 }: {
   instance: PluginInstance;
   surface: PluginWebSurfaceKind;
+  onSurfaceInfoChange?: (info: { label: string; value: string } | null) => void;
+  isolated?: boolean;
+  onSelectSound?: (soundId: string) => Promise<unknown>;
 }) {
   const [descriptor, setDescriptor] = useState<PluginWebDescriptor | null>(null);
   const [descriptorStatus, setDescriptorStatus] = useState<
@@ -1740,6 +2389,13 @@ function PluginFrame({
     requestId: string;
     resource: PluginResourceRequirement;
   } | null>(null);
+
+  useEffect(
+    () => () => {
+      onSurfaceInfoChange?.(null);
+    },
+    [onSurfaceInfoChange],
+  );
 
   const sendPluginResponse = useCallback(
     (requestId: string, ok: boolean, error?: string, result?: unknown) => {
@@ -1853,7 +2509,9 @@ function PluginFrame({
         event.data.method === "plugin.parameters" &&
         (surface === "play" || surface === "config")
       ) {
-        requestPluginParameters(instance.instance_id)
+        if (isolated) {
+          respond(false, "Rack Slot parameter editing needs an isolated audio edit session.");
+        } else requestPluginParameters(instance.instance_id)
           .then((result) => respond(true, undefined, result))
           .catch((error: unknown) =>
             respond(
@@ -1868,7 +2526,9 @@ function PluginFrame({
         typeof params.value === "number" &&
         Number.isFinite(params.value)
       ) {
-        setPluginParameter(
+        if (isolated) {
+          respond(false, "Rack Slot parameter editing needs an isolated audio edit session.");
+        } else setPluginParameter(
           instance.instance_id,
           Number(params.parameter_index),
           params.value,
@@ -1888,7 +2548,16 @@ function PluginFrame({
           (sound) => sound.id === params.sound_id,
         )
       ) {
-        if (isNativeHost()) {
+        if (onSelectSound) {
+          onSelectSound(params.sound_id)
+            .then((result) => respond(true, undefined, result))
+            .catch((error: unknown) =>
+              respond(
+                false,
+                error instanceof Error ? error.message : "Could not select this sound.",
+              ),
+            );
+        } else if (isNativeHost()) {
           selectNativePluginSound({
             instance_id: instance.instance_id,
             sound_id: params.sound_id,
@@ -2023,6 +2692,19 @@ function PluginFrame({
             ),
           );
       } else if (
+        event.data.method === "plugin.set_surface_info" &&
+        surface === "play" &&
+        (params.label === undefined ||
+          (typeof params.label === "string" && params.label.length <= 24)) &&
+        (params.value === null ||
+          params.value === undefined ||
+          (typeof params.value === "string" && params.value.length <= 96))
+      ) {
+        const label = typeof params.label === "string" ? params.label.trim() : "";
+        const value = typeof params.value === "string" ? params.value.trim() : "";
+        onSurfaceInfoChange?.(value ? { label, value } : null);
+        respond(true, undefined, { published: value.length > 0 });
+      } else if (
         event.data.method === "plugin.begin_program_edit" &&
         (surface === "play" || surface === "config") &&
         (params.program_id === null ||
@@ -2031,16 +2713,19 @@ function PluginFrame({
               (sound) => sound.id === params.program_id && sound.editable,
             )))
       ) {
-        dispatchCommand({
+        if (isolated) {
+          respond(false, "Program document editing is unavailable in a Rack Slot session.");
+        } else dispatchCommand({
           type: "begin_program_edit",
           instance_id: instance.instance_id,
           ...(typeof params.program_id === "string"
             ? { program_id: params.program_id }
             : {}),
         });
-        respond(true);
+        if (!isolated) respond(true);
       } else if (
         event.data.method === "plugin.edit_program_field" &&
+        !isolated &&
         (surface === "play" || surface === "config") &&
         draft &&
         params.draft_id === draft.draft_id &&
@@ -2058,6 +2743,7 @@ function PluginFrame({
         respond(true);
       } else if (
         event.data.method === "plugin.set_program_name" &&
+        !isolated &&
         (surface === "play" || surface === "config") &&
         draft &&
         params.draft_id === draft.draft_id &&
@@ -2083,6 +2769,7 @@ function PluginFrame({
         }
       } else if (
         event.data.method === "plugin.save_program" &&
+        !isolated &&
         (surface === "play" || surface === "config") &&
         draft &&
         params.draft_id === draft.draft_id
@@ -2094,6 +2781,7 @@ function PluginFrame({
         respond(true);
       } else if (
         event.data.method === "plugin.cancel_program" &&
+        !isolated &&
         (surface === "play" || surface === "config") &&
         draft &&
         params.draft_id === draft.draft_id
@@ -2105,6 +2793,7 @@ function PluginFrame({
         respond(true);
       } else if (
         event.data.method === "plugin.restore_program_preview" &&
+        !isolated &&
         (surface === "play" || surface === "config") &&
         draft &&
         params.draft_id === draft.draft_id
@@ -2126,7 +2815,7 @@ function PluginFrame({
       window.removeEventListener("message", onMessage);
       frame.removeEventListener("load", onLoad);
     };
-  }, [descriptor, instance, selectedSurface, snapshot, surface]);
+  }, [descriptor, instance, isolated, onSelectSound, onSurfaceInfoChange, selectedSurface, snapshot, surface]);
 
   const editLease =
     (surface === "play" || surface === "config") &&
@@ -2363,21 +3052,131 @@ function ChangePinCard() {
   );
 }
 
-function SettingsPage() {
-  const [config, setConfig] = useState<WebPublicConfig | null>(null);
+interface HostSettingsBootstrap {
+  config: WebPublicConfig | null;
+  repositoryFile: PluginRepositoryFile | null;
+  audioSettings: HostAudioSettings | null;
+}
+
+let hostSettingsBootstrapPromise: Promise<HostSettingsBootstrap> | null = null;
+
+function requestHostSettingsBootstrap() {
+  hostSettingsBootstrapPromise ??= Promise.all([
+    hostJson<WebPublicConfig>("/api/v1/config").catch(() => null),
+    hostJson<PluginRepositoryFile>("/api/v1/repositories").catch(() => null),
+    hostJson<HostAudioSettings>("/api/v1/host/audio").catch(() => null),
+  ]).then(([config, repositoryFile, audioSettings]) => ({
+    config,
+    repositoryFile,
+    audioSettings,
+  }));
+  return hostSettingsBootstrapPromise;
+}
+
+function SettingsPage({
+  initial,
+  onConfigChange,
+  onRepositoriesChange,
+  onAudioChange,
+}: {
+  initial: HostSettingsBootstrap;
+  onConfigChange: (config: WebPublicConfig) => void;
+  onRepositoriesChange: (repositoryFile: PluginRepositoryFile) => void;
+  onAudioChange: (audioSettings: HostAudioSettings) => void;
+}) {
+  const [config, setConfig] = useState<WebPublicConfig | null>(initial.config);
+  const [webDraft, setWebDraft] = useState<{ enabled: boolean; port: number } | null>(
+    initial.config ? { enabled: initial.config.enabled, port: initial.config.port } : null,
+  );
+  const [webBusy, setWebBusy] = useState(false);
+  const [webMessage, setWebMessage] = useState<string | null>(null);
   const [repositoryFile, setRepositoryFile] =
-    useState<PluginRepositoryFile | null>(null);
+    useState<PluginRepositoryFile | null>(initial.repositoryFile);
   const [catalog, setCatalog] = useState<StoreCatalogResponse | null>(null);
   const [storeBusy, setStoreBusy] = useState(false);
   const [storeMessage, setStoreMessage] = useState<string | null>(null);
-  useEffect(() => {
-    hostJson<WebPublicConfig>("/api/v1/config")
-      .then(setConfig)
-      .catch(() => setConfig(null));
-    hostJson<PluginRepositoryFile>("/api/v1/repositories")
-      .then(setRepositoryFile)
-      .catch(() => setRepositoryFile(null));
-  }, []);
+  const [audioSettings, setAudioSettings] = useState<HostAudioSettings | null>(initial.audioSettings);
+  const [audioDraft, setAudioDraft] = useState<HostAudioPreferences | null>(initial.audioSettings?.preferences ?? null);
+  const [audioBusy, setAudioBusy] = useState(false);
+  const [audioMessage, setAudioMessage] = useState<string | null>(null);
+  const loadAudioSettings = useCallback(async () => {
+    setAudioBusy(true);
+    setAudioMessage(null);
+    try {
+      const settings = await hostJson<HostAudioSettings>("/api/v1/host/audio");
+      setAudioSettings(settings);
+      setAudioDraft(settings.preferences);
+      onAudioChange(settings);
+    } catch (error) {
+      setAudioMessage(error instanceof Error ? error.message : "Device refresh failed.");
+    } finally {
+      setAudioBusy(false);
+    }
+  }, [onAudioChange]);
+
+  const selectAudioDriver = (driver: string) => {
+    if (!audioSettings || !audioDraft) return;
+    const output = audioSettings.inventory.outputs.find(
+      (candidate) => candidate.driver === driver && candidate.is_default,
+    ) ?? audioSettings.inventory.outputs.find((candidate) => candidate.driver === driver);
+    if (!output) return;
+    setAudioDraft({
+      ...audioDraft,
+      driver,
+      output_device: output.name,
+      sample_rate_hz: output.default_sample_rate,
+      buffer_frames: undefined,
+    });
+  };
+  const selectAudioOutput = (name: string) => {
+    if (!audioSettings || !audioDraft) return;
+    const output = audioSettings.inventory.outputs.find(
+      (candidate) => candidate.driver === audioDraft.driver && candidate.name === name,
+    );
+    if (!output) return;
+    setAudioDraft({
+      ...audioDraft,
+      output_device: name,
+      sample_rate_hz: output.sample_rates.includes(audioDraft.sample_rate_hz)
+        ? audioDraft.sample_rate_hz
+        : output.default_sample_rate,
+      buffer_frames: output.buffer_frames.includes(audioDraft.buffer_frames ?? -1)
+        ? audioDraft.buffer_frames
+        : undefined,
+    });
+  };
+  const saveAudioSettings = async () => {
+    if (!audioDraft) return;
+    setAudioBusy(true);
+    setAudioMessage(null);
+    try {
+      const settings = await hostJson<HostAudioSettings>("/api/v1/host/audio", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(audioDraft),
+      });
+      setAudioSettings(settings);
+      setAudioDraft(settings.preferences);
+      onAudioChange(settings);
+      setAudioMessage("Audio and MIDI settings applied.");
+    } catch (error) {
+      setAudioMessage(error instanceof Error ? error.message : "Audio settings failed.");
+    } finally {
+      setAudioBusy(false);
+    }
+  };
+  const testAudio = async () => {
+    setAudioBusy(true);
+    setAudioMessage(null);
+    try {
+      await hostJson("/api/v1/host/audio/test", { method: "POST" });
+      setAudioMessage("Playing test note.");
+    } catch (error) {
+      setAudioMessage(error instanceof Error ? error.message : "Audio test failed.");
+    } finally {
+      setAudioBusy(false);
+    }
+  };
 
   const updateRepository = (
     index: number,
@@ -2389,6 +3188,27 @@ function SettingsPage() {
       repositories[index] = { ...repositories[index], ...patch };
       return { ...current, repositories };
     });
+  };
+
+  const saveWebSettings = async () => {
+    if (!webDraft) return;
+    setWebBusy(true);
+    setWebMessage(null);
+    try {
+      const next = await hostJson<WebPublicConfig & { message?: string }>("/api/v1/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schema_version: 1, ...webDraft }),
+      });
+      setConfig(next);
+      setWebDraft({ enabled: next.enabled, port: next.port });
+      onConfigChange(next);
+      setWebMessage(next.message ?? "HTTP server settings applied.");
+    } catch (error) {
+      setWebMessage(error instanceof Error ? error.message : "HTTP settings failed.");
+    } finally {
+      setWebBusy(false);
+    }
   };
 
   const saveRepositories = async () => {
@@ -2405,6 +3225,7 @@ function SettingsPage() {
         body: JSON.stringify(repositoryFile),
       });
       setRepositoryFile(body.config);
+      onRepositoriesChange(body.config);
       setStoreMessage("Repository configuration saved.");
     } catch (error) {
       setStoreMessage(error instanceof Error ? error.message : "Save failed.");
@@ -2434,13 +3255,22 @@ function SettingsPage() {
       const body = await hostJson<{
         plugin_id: string;
         version: string;
+        already_installed?: boolean;
+        activation_required?: boolean;
       }>("/api/v1/store/install", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repository_id: repositoryId, plugin_id: pluginId }),
       });
+      setStoreMessage(`Activating ${body.plugin_id}…`);
+      await activateInstalledPlugin({
+        plugin_id: body.plugin_id,
+        version: body.version,
+        already_installed: body.already_installed ?? false,
+        activation_required: body.activation_required ?? true,
+      });
       setStoreMessage(
-        `${body.plugin_id} ${body.version} installed. Activation is available after a safe plugin reload.`,
+        `${body.plugin_id} ${body.version} installed and active.`,
       );
     } catch (error) {
       setStoreMessage(error instanceof Error ? error.message : "Installation failed.");
@@ -2457,6 +3287,93 @@ function SettingsPage() {
         detail="Host-wide configuration. Plugin-specific controls live inside each plugin."
       />
       <section className="settings-grid">
+        {audioSettings && audioDraft ? (
+          <article className="settings-card host-audio-settings-card">
+            <div className="settings-icon">♫</div>
+            <div className="settings-copy">
+              <span className="card-kicker">{audioSettings.host} host</span>
+              <h2>Audio & MIDI</h2>
+              <p>Available controls are provided by this device and applied by its native audio runtime.</p>
+            </div>
+            <div className="host-audio-form">
+              <label>
+                <span>Driver</span>
+                <select value={audioDraft.driver} onChange={(event) => selectAudioDriver(event.target.value)}>
+                  {audioSettings.inventory.drivers.map((driver) => (
+                    <option key={driver.name} value={driver.name} disabled={!driver.available}>
+                      {driver.name}{driver.available ? "" : " (unavailable)"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Output device</span>
+                <select value={audioDraft.output_device} onChange={(event) => selectAudioOutput(event.target.value)}>
+                  {audioSettings.inventory.outputs
+                    .filter((output) => output.driver === audioDraft.driver)
+                    .map((output) => (
+                      <option key={output.name} value={output.name}>
+                        {output.name}{output.is_default ? " (default)" : ""}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {(() => {
+                const output = audioSettings.inventory.outputs.find(
+                  (candidate) => candidate.driver === audioDraft.driver && candidate.name === audioDraft.output_device,
+                );
+                return output ? (
+                  <>
+                    <label>
+                      <span>Sample rate</span>
+                      <select value={audioDraft.sample_rate_hz} onChange={(event) => setAudioDraft({ ...audioDraft, sample_rate_hz: Number(event.target.value) })}>
+                        {output.sample_rates.map((rate) => <option key={rate} value={rate}>{rate} Hz</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      <span>Buffer</span>
+                      <select value={audioDraft.buffer_frames ?? ""} onChange={(event) => setAudioDraft({ ...audioDraft, buffer_frames: event.target.value ? Number(event.target.value) : undefined })}>
+                        <option value="">System default</option>
+                        {output.buffer_frames.map((frames) => <option key={frames} value={frames}>{frames} frames · {(frames * 1000 / audioDraft.sample_rate_hz).toFixed(1)} ms</option>)}
+                      </select>
+                    </label>
+                  </>
+                ) : null;
+              })()}
+              <label>
+                <span>Output gain</span>
+                <select value={audioDraft.output_gain_db} onChange={(event) => setAudioDraft({ ...audioDraft, output_gain_db: Number(event.target.value) })}>
+                  {[0, 3, 6, 9, 12].map((gain) => <option key={gain} value={gain}>+{gain} dB</option>)}
+                </select>
+              </label>
+              <fieldset>
+                <legend>MIDI inputs</legend>
+                {audioSettings.inventory.midi_inputs.length ? audioSettings.inventory.midi_inputs.map((input) => (
+                  <label className="host-audio-check" key={input}>
+                    <input
+                      type="checkbox"
+                      checked={audioDraft.midi_inputs.includes(input)}
+                      onChange={(event) => setAudioDraft({
+                        ...audioDraft,
+                        midi_inputs: event.target.checked
+                          ? [...audioDraft.midi_inputs, input].sort()
+                          : audioDraft.midi_inputs.filter((candidate) => candidate !== input),
+                      })}
+                    />
+                    <span>{input}</span>
+                  </label>
+                )) : <p>No MIDI inputs detected.</p>}
+              </fieldset>
+              <pre>{audioSettings.runtime_status}</pre>
+              <div className="host-audio-actions">
+                <button className="secondary-button" disabled={audioBusy} onClick={() => void loadAudioSettings()}>Refresh devices</button>
+                <button className="secondary-button" disabled={audioBusy} onClick={() => void testAudio()}>Test note</button>
+                <button className="primary-button" disabled={audioBusy} onClick={() => void saveAudioSettings()}>{audioBusy ? "Working…" : "Apply"}</button>
+              </div>
+              {audioMessage ? <p className="repository-message">{audioMessage}</p> : null}
+            </div>
+          </article>
+        ) : null}
         <article className="settings-card">
           <div className="settings-icon">⌁</div>
           <div className="settings-copy">
@@ -2484,6 +3401,20 @@ function SettingsPage() {
               <dd>{config?.port ?? "8787"}</dd>
             </div>
           </dl>
+          {config?.configurable && webDraft ? (
+            <div className="web-server-settings-form">
+              <label className="repository-check">
+                <input type="checkbox" checked={webDraft.enabled} onChange={(event) => setWebDraft({ ...webDraft, enabled: event.target.checked })} />
+                <span>Enable HTTP server</span>
+              </label>
+              <label>
+                <span>Port</span>
+                <input type="number" min="1024" max="65535" disabled={!webDraft.enabled} value={webDraft.port} onChange={(event) => setWebDraft({ ...webDraft, port: Number(event.target.value) })} />
+              </label>
+              <button className="secondary-button" disabled={webBusy || webDraft.port < 1024 || webDraft.port > 65535} onClick={() => void saveWebSettings()}>{webBusy ? "Applying…" : "Apply server settings"}</button>
+              {webMessage ? <p>{webMessage}</p> : null}
+            </div>
+          ) : null}
         </article>
         <ChangePinCard />
         <article className="settings-card repository-settings-card">

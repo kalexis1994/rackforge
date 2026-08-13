@@ -449,6 +449,10 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             plugin_id,
             preset_id,
         } => get_plugin_preset(context, &plugin_id, &preset_id),
+        ControlRequest::MaterializePluginState {
+            plugin_id,
+            sound_id,
+        } => materialize_plugin_state(context, &plugin_id, sound_id),
         ControlRequest::PluginParameters { instance_id } => {
             plugin_parameters(context, &instance_id)
         }
@@ -1151,6 +1155,91 @@ fn get_plugin_preset(
         Err(_) => internal_error(
             "plugin state store lock is poisoned",
             current_revision(context),
+        ),
+    }
+}
+
+fn materialize_plugin_state(
+    context: &ControlContext,
+    plugin_id: &str,
+    sound_id: Option<String>,
+) -> ControlResponse {
+    let snapshot = match context.store.lock() {
+        Ok(store) => store.snapshot(),
+        Err(_) => return internal_error("session store lock is poisoned", None),
+    };
+    let Some(instance) = snapshot
+        .instances
+        .iter()
+        .find(|instance| instance.plugin_id == plugin_id)
+    else {
+        return error_response(
+            ControlErrorCode::Unavailable,
+            format!("plugin {plugin_id} has no runtime instance"),
+            Some(snapshot.revision),
+        );
+    };
+    if let Some(sound_id) = sound_id.as_deref()
+        && !instance.sounds.iter().any(|sound| sound.id == sound_id)
+    {
+        return error_response(
+            ControlErrorCode::NotFound,
+            format!("unknown sound {sound_id:?} for plugin {plugin_id}"),
+            Some(snapshot.revision),
+        );
+    }
+    let Some(manifest) = context.plugin_manifests.get(plugin_id) else {
+        return error_response(
+            ControlErrorCode::Unavailable,
+            format!("plugin {plugin_id} is not hosted by this runtime"),
+            Some(snapshot.revision),
+        );
+    };
+    if !manifest.capabilities.contains(&Capability::State) {
+        return error_response(
+            ControlErrorCode::Unavailable,
+            format!("plugin {plugin_id} does not support complete state snapshots"),
+            Some(snapshot.revision),
+        );
+    }
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    if let Err(failure) = send_audio(
+        context,
+        AudioControlCommand::MaterializeState {
+            instance_id: instance.instance_id.clone(),
+            program_id: sound_id.clone(),
+            reply: reply_sender,
+        },
+    ) {
+        return failure.into_response();
+    }
+    let bytes = match receive_audio(reply_receiver, "materialize isolated plugin state") {
+        Ok(bytes) => bytes,
+        Err(failure) => return failure.into_response(),
+    };
+    let mut store = match context.state_store.lock() {
+        Ok(store) => store,
+        Err(_) => {
+            return internal_error(
+                "plugin state store lock is poisoned",
+                Some(snapshot.revision),
+            );
+        }
+    };
+    match store.put(
+        plugin_id,
+        &manifest.version,
+        manifest.state_version,
+        sound_id,
+        &bytes,
+    ) {
+        Ok(state) => ControlResponse::PluginStateMaterialized {
+            state: Box::new(state),
+        },
+        Err(error) => error_response(
+            ControlErrorCode::Rejected,
+            format!("storing isolated plugin state: {error:#}"),
+            Some(snapshot.revision),
         ),
     }
 }

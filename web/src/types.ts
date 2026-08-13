@@ -1,5 +1,43 @@
 export type ConnectionStatus = "connecting" | "online" | "offline";
 
+export interface HostAudioDriver {
+  name: string;
+  available: boolean;
+  detail: string;
+}
+
+export interface HostAudioOutput {
+  driver: string;
+  name: string;
+  is_default: boolean;
+  channels: number;
+  default_sample_rate: number;
+  sample_rates: number[];
+  buffer_frames: number[];
+}
+
+export interface HostAudioPreferences {
+  schema_version: number;
+  driver: string;
+  output_device: string;
+  sample_rate_hz: number;
+  buffer_frames?: number;
+  output_gain_db: number;
+  midi_inputs: string[];
+}
+
+export interface HostAudioSettings {
+  status: "ok";
+  host: string;
+  inventory: {
+    drivers: HostAudioDriver[];
+    outputs: HostAudioOutput[];
+    midi_inputs: string[];
+  };
+  preferences: HostAudioPreferences;
+  runtime_status: string;
+}
+
 export interface SoundSummary {
   id: string;
   name: string;
@@ -320,6 +358,7 @@ export interface WebPublicConfig {
   enabled: boolean;
   access: "local" | "lan";
   port: number;
+  configurable?: boolean;
 }
 
 export interface PluginRepositoryConfig {

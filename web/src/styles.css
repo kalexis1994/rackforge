@@ -2792,6 +2792,838 @@ body {
   }
 }
 
+/* Shared low-latency touch controller */
+.touch-controller {
+  display: grid;
+  gap: 22px;
+}
+
+.touch-controller-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.touch-controller-header h1 {
+  margin: 7px 0 5px;
+  font-family: var(--display-font);
+  font-size: clamp(32px, 5vw, 58px);
+  letter-spacing: -0.045em;
+  line-height: 0.96;
+}
+
+.touch-controller-header p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.touch-target {
+  min-width: min(360px, 100%);
+  padding: 14px 17px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 13px;
+  background: rgba(8, 24, 34, 0.84);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--inner-light);
+}
+
+.touch-target > span {
+  grid-row: 1 / 3;
+  align-self: center;
+  padding: 6px 8px;
+  color: #031017;
+  background: var(--acid);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.touch-target strong,
+.touch-target small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.touch-target small {
+  color: var(--muted);
+}
+
+.touch-target.unavailable > span {
+  color: var(--ink);
+  background: rgba(255, 120, 144, 0.18);
+}
+
+.touch-controller-toolbar {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: auto auto minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  background: rgba(7, 19, 28, 0.82);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--inner-light);
+}
+
+.touch-mode-switch,
+.touch-performance-actions,
+.touch-octave-control > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.touch-mode-switch {
+  padding: 4px;
+  background: rgba(0, 5, 9, 0.5);
+  border-radius: 13px;
+}
+
+.touch-mode-switch button,
+.touch-performance-actions button,
+.touch-octave-control button {
+  min-height: 42px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.touch-mode-switch button svg,
+.touch-performance-actions button svg,
+.touch-octave-control button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.touch-mode-switch button.active,
+.touch-performance-actions .sustain.active {
+  color: #031017;
+  background: var(--acid);
+  border-color: var(--acid);
+}
+
+.touch-octave-control,
+.touch-velocity-control {
+  display: grid;
+  gap: 5px;
+}
+
+.touch-octave-control > span,
+.touch-velocity-control > span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.09em;
+}
+
+.touch-octave-control output {
+  min-width: 38px;
+  color: var(--ink);
+  font-family: var(--display-font);
+  font-size: 18px;
+  text-align: center;
+}
+
+.touch-octave-control button {
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.035);
+  border-color: var(--line);
+}
+
+.touch-velocity-control output {
+  float: right;
+  color: var(--ink);
+}
+
+.touch-velocity-control input {
+  width: 100%;
+  accent-color: var(--acid);
+}
+
+.touch-performance-actions button {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.035);
+  border-color: var(--line);
+}
+
+.touch-performance-actions .touch-panic {
+  color: #ffacb8;
+  border-color: rgba(255, 120, 144, 0.28);
+}
+
+.touch-instrument {
+  position: relative;
+  min-height: 340px;
+  padding: clamp(13px, 2vw, 22px);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 120%, rgba(85, 231, 255, 0.13), transparent 46%),
+    rgba(3, 11, 17, 0.94);
+  border: 1px solid rgba(85, 231, 255, 0.22);
+  border-radius: 24px;
+  box-shadow: var(--glass-shadow);
+}
+
+.piano-keyboard {
+  position: relative;
+  width: 100%;
+  height: clamp(300px, 48vh, 510px);
+  overflow: hidden;
+  border: 1px solid rgba(160, 229, 240, 0.26);
+  border-radius: 16px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.piano-white-keys {
+  height: 100%;
+  display: grid;
+  grid-template-columns: repeat(var(--white-key-count), minmax(0, 1fr));
+}
+
+.piano-key {
+  min-width: 0;
+  padding: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.piano-key.white {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 17px;
+  color: #45616c;
+  background: linear-gradient(180deg, #e9f8fa, #c7e2e7);
+  border: 0;
+  border-right: 1px solid #77929b;
+  border-radius: 0 0 7px 7px;
+  box-shadow: inset 0 -10px 18px rgba(42, 77, 88, 0.12);
+}
+
+.piano-key.white:last-child {
+  border-right: 0;
+}
+
+.piano-key.black {
+  position: absolute;
+  top: 0;
+  left: var(--key-left);
+  z-index: 2;
+  width: calc(100% / var(--white-key-count) * 0.64);
+  height: 62%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 2px 13px;
+  color: #88a9b4;
+  background: linear-gradient(180deg, #101d25, #02070a);
+  border: 1px solid #203944;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 10px 12px rgba(0, 0, 0, 0.42);
+  transform: translateX(-50%);
+}
+
+.piano-key span {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: clamp(8px, 1.15vw, 11px);
+  text-overflow: clip;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.piano-key.white.active {
+  color: #021016;
+  background: linear-gradient(180deg, #b8f7ff, #58e5fa);
+  box-shadow: inset 0 -18px 30px rgba(0, 137, 165, 0.22);
+}
+
+.piano-key.black.active {
+  color: #021016;
+  background: linear-gradient(180deg, #79efff, #25c7e3);
+  box-shadow: 0 0 30px rgba(85, 231, 255, 0.48);
+}
+
+.touch-pad-grid {
+  min-height: clamp(430px, 58vh, 680px);
+  display: grid;
+  grid-template-columns: repeat(var(--pad-columns, 4), minmax(0, 1fr));
+  gap: clamp(8px, 1.6vw, 16px);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.touch-pad {
+  min-width: 0;
+  min-height: 96px;
+  padding: clamp(12px, 2vw, 22px);
+  display: grid;
+  align-content: space-between;
+  justify-items: start;
+  color: var(--ink);
+  background:
+    linear-gradient(145deg, rgba(26, 66, 80, 0.88), rgba(8, 27, 38, 0.96));
+  border: 1px solid rgba(92, 226, 245, 0.24);
+  border-radius: 18px;
+  box-shadow:
+    inset 0 1px 0 rgba(220, 250, 255, 0.09),
+    0 12px 28px rgba(0, 3, 7, 0.28);
+  touch-action: none;
+}
+
+.touch-pad > span,
+.touch-pad > small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+
+.touch-pad > strong {
+  font-family: var(--display-font);
+  font-size: clamp(22px, 4vw, 38px);
+  pointer-events: none;
+}
+
+.touch-pad.active {
+  color: #021016;
+  background: linear-gradient(145deg, #9bf4ff, #3dd7ef);
+  border-color: #c6f9ff;
+  box-shadow: 0 0 36px rgba(85, 231, 255, 0.35);
+  transform: scale(0.985);
+}
+
+.touch-pad.active > span,
+.touch-pad.active > small {
+  color: rgba(2, 16, 22, 0.62);
+}
+
+.touch-instrument.disabled > :not(.touch-instrument-message) {
+  opacity: 0.34;
+  filter: saturate(0.35);
+}
+
+.touch-instrument-message {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  padding: 24px;
+  color: var(--ink);
+  text-align: center;
+  pointer-events: none;
+}
+
+.touch-instrument-message svg {
+  width: 32px;
+  height: 32px;
+  color: #ff93a4;
+}
+
+.touch-instrument-message span {
+  max-width: 430px;
+  color: var(--muted);
+}
+
+@media (max-width: 980px) {
+  .touch-controller-toolbar {
+    grid-template-columns: auto auto minmax(150px, 1fr);
+  }
+
+  .touch-performance-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 700px) {
+  .touch-controller {
+    gap: 14px;
+  }
+
+  .touch-controller-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .touch-controller-header h1 {
+    font-size: clamp(34px, 11vw, 48px);
+  }
+
+  .touch-target {
+    min-width: 0;
+  }
+
+  .touch-controller-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+
+  .touch-mode-switch {
+    min-width: 0;
+  }
+
+  .touch-mode-switch button {
+    min-width: 0;
+    flex: 1;
+    padding-inline: 9px;
+  }
+
+  .touch-velocity-control,
+  .touch-performance-actions {
+    grid-column: 1 / -1;
+  }
+
+  .touch-performance-actions {
+    justify-content: stretch;
+  }
+
+  .touch-performance-actions button {
+    flex: 1;
+  }
+
+  .touch-instrument {
+    min-height: 300px;
+    padding: 9px;
+    border-radius: 18px;
+  }
+
+  .piano-keyboard {
+    height: min(43vh, 390px);
+    min-height: 285px;
+    border-radius: 12px;
+  }
+
+  .touch-pad-grid {
+    min-height: min(60vh, 570px);
+    gap: 8px;
+  }
+
+  .touch-pad {
+    min-height: 84px;
+    padding: 10px;
+    border-radius: 13px;
+  }
+
+  .touch-pad > strong {
+    font-size: clamp(18px, 6vw, 28px);
+  }
+}
+
+/* Immersive controller surface: the instrument owns the viewport while all
+   less-frequent controls remain available behind one floating menu. */
+.app-shell.controller-surface-active {
+  position: fixed;
+  inset:
+    var(--rackforge-safe-top)
+    var(--rackforge-safe-right)
+    var(--rackforge-safe-bottom)
+    var(--rackforge-safe-left);
+  width: auto;
+  height: auto;
+  min-height: 0;
+  display: block;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.controller-surface-active .rail,
+.controller-surface-active .topbar {
+  display: none;
+}
+
+.controller-surface-active .workspace,
+.controller-surface-active .page.controller-host-page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.controller-surface-active .workspace {
+  display: block;
+}
+
+.controller-surface-active .page.controller-host-page {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.controller-surface-active .error-banner {
+  position: fixed;
+  top: var(--rackforge-safe-top);
+  right: var(--rackforge-safe-right);
+  left: var(--rackforge-safe-left);
+  z-index: 80;
+}
+
+.controller-surface-active .touch-controller {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: block;
+  overflow: hidden;
+  background: #030b11;
+}
+
+.touch-controller-menu-button {
+  position: absolute;
+  top: clamp(10px, 2vmin, 18px);
+  left: clamp(10px, 2vmin, 18px);
+  z-index: 24;
+  width: clamp(46px, 8vmin, 58px);
+  height: clamp(46px, 8vmin, 58px);
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--acid);
+  background: rgba(4, 17, 26, 0.82);
+  border: 1px solid rgba(85, 231, 255, 0.32);
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0, 3, 7, 0.34);
+  backdrop-filter: blur(14px);
+  cursor: pointer;
+}
+
+.touch-controller-menu-button svg {
+  width: 58%;
+  height: 58%;
+}
+
+.touch-controller-menu-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  padding: clamp(10px, 2vmin, 20px);
+  display: flex;
+  align-items: flex-start;
+  background: rgba(0, 5, 9, 0.56);
+  backdrop-filter: blur(8px);
+}
+
+.touch-controller-menu {
+  width: min(390px, 100%);
+  max-height: 100%;
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  color: var(--ink);
+  background: rgba(5, 18, 27, 0.97);
+  border: 1px solid rgba(85, 231, 255, 0.26);
+  border-radius: 18px;
+  box-shadow: 0 22px 70px rgba(0, 2, 6, 0.58);
+}
+
+.touch-controller-menu > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.touch-controller-menu > header > div {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 4px;
+}
+
+.touch-controller-menu > header strong,
+.touch-controller-menu > header small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.touch-controller-menu > header strong {
+  font-family: var(--display-font);
+  font-size: 21px;
+}
+
+.touch-controller-menu > header small {
+  color: var(--muted);
+}
+
+.touch-controller-menu > header > button {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.touch-controller-menu .touch-mode-switch,
+.touch-controller-menu .touch-performance-actions {
+  width: 100%;
+}
+
+.touch-controller-menu .touch-mode-switch button,
+.touch-controller-menu .touch-performance-actions button {
+  flex: 1;
+}
+
+.touch-controller-menu .touch-octave-control {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.touch-controller-menu .touch-velocity-control {
+  gap: 9px;
+}
+
+.touch-key-width-control {
+  display: grid;
+  gap: 9px;
+}
+
+.touch-key-width-control > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.touch-key-width-control span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.09em;
+}
+
+.touch-key-width-control output {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.touch-key-width-control button {
+  min-height: 32px;
+  padding: 5px 10px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.touch-key-width-control button.active {
+  color: #031017;
+  background: var(--acid);
+  border-color: var(--acid);
+}
+
+.touch-key-width-control input {
+  width: 100%;
+  accent-color: var(--acid);
+}
+
+.touch-key-width-control.disabled {
+  opacity: 0.42;
+}
+
+.touch-pad-matrix-control {
+  display: grid;
+  gap: 9px;
+}
+
+.touch-pad-matrix-control.disabled {
+  opacity: 0.42;
+}
+
+.touch-pad-matrix-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.touch-pad-matrix-heading span,
+.touch-pad-matrix-heading output {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.09em;
+}
+
+.touch-pad-matrix-heading span {
+  color: var(--muted);
+}
+
+.touch-pad-matrix-heading output {
+  color: var(--ink);
+  letter-spacing: 0;
+}
+
+.touch-pad-matrix-picker {
+  width: min(230px, 100%);
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.touch-pad-matrix-picker button {
+  aspect-ratio: 1;
+  min-height: 0;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(135, 205, 219, 0.2);
+  border-radius: 4px;
+}
+
+.touch-pad-matrix-picker button.selected {
+  background: rgba(85, 231, 255, 0.58);
+  border-color: var(--acid);
+}
+
+.touch-pad-matrix-picker button[aria-selected="true"] {
+  background: var(--acid);
+  box-shadow: 0 0 0 2px rgba(85, 231, 255, 0.18);
+}
+
+.touch-main-navigation,
+.touch-controller-exit {
+  min-height: 46px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--ink);
+  background: rgba(85, 231, 255, 0.07);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  font-weight: 700;
+}
+
+.touch-main-navigation svg,
+.touch-controller-exit svg {
+  width: 18px;
+  height: 18px;
+}
+
+.touch-controller-exit {
+  color: #ffb5c0;
+  background: rgba(255, 105, 130, 0.06);
+  border-color: rgba(255, 120, 144, 0.24);
+}
+
+.controller-surface-active .touch-instrument {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  background: #030b11;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.controller-surface-active .piano-keyboard,
+.controller-surface-active .touch-pad-grid {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.controller-surface-active .piano-keyboard {
+  border: 0;
+  border-radius: 0;
+}
+
+.controller-surface-active .piano-key.white {
+  border-radius: 0 0 5px 5px;
+}
+
+.controller-surface-active .touch-pad-grid {
+  padding: clamp(7px, 1.3vmin, 13px);
+  gap: clamp(6px, 1.1vmin, 12px);
+}
+
+.controller-surface-active .touch-pad {
+  min-height: 0;
+}
+
+.controller-surface-active .piano-key.black.active,
+.controller-surface-active .touch-pad.active {
+  box-shadow: none;
+}
+
+@media (min-width: 761px) {
+  .touch-main-navigation {
+    display: none;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 760px) {
+  .touch-controller-menu-button {
+    top: 10px;
+    left: 10px;
+    width: 46px;
+    height: 46px;
+    border-radius: 12px;
+  }
+
+  .touch-controller-menu-backdrop {
+    padding: 8px;
+  }
+
+  .touch-controller-menu {
+    width: min(680px, 82vw);
+    padding: 12px;
+    grid-template-columns: minmax(190px, 1fr) minmax(220px, 1.2fr);
+    gap: 10px 14px;
+  }
+
+  .touch-controller-menu > header,
+  .touch-main-navigation,
+  .touch-controller-exit {
+    grid-column: 1 / -1;
+  }
+
+  .touch-controller-menu .touch-performance-actions {
+    align-self: end;
+  }
+
+  .controller-surface-active .piano-key span {
+    font-size: 8px;
+  }
+}
+
 /* LIVE performance workspace */
 .live-shell {
   min-height: calc(100dvh - 78px);

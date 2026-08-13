@@ -657,6 +657,18 @@ impl DesktopAudio {
         Ok(())
     }
 
+    pub fn inject_midi_messages(&self, messages: Vec<[u8; 3]>) -> Result<()> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+        self.send_command(AudioCommand::InjectMidiBatch(
+            messages
+                .into_iter()
+                .map(|data| MidiPacket { length: 3, data })
+                .collect(),
+        ))
+    }
+
     pub fn take_error(&self) -> Option<String> {
         self.errors.lock().ok()?.take()
     }
@@ -691,6 +703,7 @@ enum AudioCommand {
         reply: SyncSender<Result<(), String>>,
     },
     InjectMidi(MidiPacket),
+    InjectMidiBatch(Vec<MidiPacket>),
     SetMasterLevel(MasterLevel),
     SetMasterPan(MasterPan),
     SetRunning(bool),
@@ -1019,6 +1032,11 @@ impl AudioProcessor {
                     let _ = reply.try_send(result);
                 }
                 AudioCommand::InjectMidi(packet) => push_midi_event(&mut self.events, packet),
+                AudioCommand::InjectMidiBatch(packets) => {
+                    for packet in packets {
+                        push_midi_event(&mut self.events, packet);
+                    }
+                }
                 AudioCommand::SetMasterLevel(level) => self.master_gain.set_level(level),
                 AudioCommand::SetMasterPan(pan) => self.master_balance.set_pan(pan),
                 AudioCommand::SetRunning(running) => self.stopped = !running,

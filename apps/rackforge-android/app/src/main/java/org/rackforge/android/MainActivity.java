@@ -63,6 +63,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -150,6 +151,8 @@ public final class MainActivity extends Activity {
     private int sharedUiBottomInsetPixels;
     private volatile boolean nativeSessionConnected;
     private long nativeSessionRevision;
+    private final Map<String, VirtualMidiClientState> virtualMidiClients =
+            new ConcurrentHashMap<>();
 
     private static final class ClientResourceSelection {
         final File file;
@@ -161,6 +164,11 @@ public final class MainActivity extends Activity {
             this.displayName = displayName;
             this.createdAtMs = System.currentTimeMillis();
         }
+    }
+
+    private static final class VirtualMidiClientState {
+        final Set<Integer> notes = new HashSet<>();
+        final Set<Integer> channels = new HashSet<>();
     }
 
     private static native String installPluginFile(String archivePath, String storeRoot);
@@ -298,6 +306,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        releaseAllVirtualMidi();
         audioRunning = false;
         stopNativeAudio();
         stopService(new Intent(this, AudioEngineService.class));
@@ -716,6 +725,7 @@ public final class MainActivity extends Activity {
                     }
                     case "session.close" -> runOnUiThread(() -> {
                         nativeSessionConnected = false;
+                        releaseAllVirtualMidi();
                         respondNativeHost(requestId, true, 200, null, new JSONObject());
                     });
                     case "ui.haptic" -> runOnUiThread(() -> {
@@ -1081,6 +1091,14 @@ public final class MainActivity extends Activity {
         try {
             JSONObject request = new JSONObject(payload);
             String operation = request.optString("op");
+            if ("virtual_midi".equals(operation)) {
+                acceptVirtualMidi(request);
+                return;
+            }
+            if ("release_virtual_midi".equals(operation)) {
+                releaseVirtualMidi(request.getString("client_id"));
+                return;
+            }
             if ("performance_snapshot".equals(operation)) {
                 JSONObject live = new JSONObject().put("mode", "rack");
                 JSONObject library = new JSONObject()
@@ -1123,6 +1141,63 @@ public final class MainActivity extends Activity {
             } catch (Exception ignored) {
                 // Logging above is the final fallback when even JSON encoding fails.
             }
+        }
+    }
+
+    private void acceptVirtualMidi(JSONObject request) throws Exception {
+        String clientId = request.getString("client_id");
+        if (!clientId.matches("[a-z0-9][a-z0-9._-]*")) {
+            throw new IllegalArgumentException("Invalid virtual MIDI client identifier");
+        }
+        JSONObject message = request.getJSONObject("message");
+        int status = message.getInt("status");
+        int data1 = message.getInt("data1");
+        int data2 = message.getInt("data2");
+        if (data1 < 0 || data1 > 127 || data2 < 0 || data2 > 127) {
+            throw new IllegalArgumentException("MIDI data bytes must be in 0..=127");
+        }
+        int kind = status & 0xF0;
+        if (status < 0x80 || status > 0xBF
+                || (kind != 0x80 && kind != 0x90 && (kind != 0xB0 || data1 != 64))) {
+            throw new IllegalArgumentException(
+                    "Touch controller accepts note and sustain messages only");
+        }
+        sendMidiMessage(status, data1, data2, 3);
+        VirtualMidiClientState state = virtualMidiClients.computeIfAbsent(
+                clientId, ignored -> new VirtualMidiClientState());
+        synchronized (state) {
+            int channel = status & 0x0F;
+            state.channels.add(channel);
+            int noteKey = channel << 8 | data1;
+            if (kind == 0x90 && data2 != 0) state.notes.add(noteKey);
+            else if (kind == 0x80 || (kind == 0x90 && data2 == 0)) {
+                state.notes.remove(noteKey);
+            }
+        }
+    }
+
+    private void releaseVirtualMidi(String clientId) {
+        VirtualMidiClientState state = virtualMidiClients.remove(clientId);
+        if (state == null) return;
+        synchronized (state) {
+            for (int noteKey : state.notes) {
+                int channel = noteKey >>> 8;
+                int note = noteKey & 0x7F;
+                sendMidiMessage(0x80 | channel, note, 0, 3);
+            }
+            Set<Integer> channels = state.channels.isEmpty()
+                    ? Set.of(0) : new HashSet<>(state.channels);
+            for (int channel : channels) {
+                sendMidiMessage(0xB0 | channel, 64, 0, 3);
+                sendMidiMessage(0xB0 | channel, 123, 0, 3);
+                sendMidiMessage(0xB0 | channel, 120, 0, 3);
+            }
+        }
+    }
+
+    private void releaseAllVirtualMidi() {
+        for (String clientId : new ArrayList<>(virtualMidiClients.keySet())) {
+            releaseVirtualMidi(clientId);
         }
     }
 
@@ -2532,7 +2607,7 @@ public final class MainActivity extends Activity {
 
     private void rememberSharedUiRoute(String route) {
         if (route == null || !route.matches(
-                "^/(?:|play|live|plugins(?:/[^/?#]+)?|settings|diagnostics|about)$")) {
+                "^/(?:|play|live|controller|plugins(?:/[^/?#]+)?|settings|diagnostics|about)$")) {
             Log.w("RackForge", "Ignoring unsupported shared UI route " + route);
             return;
         }
@@ -2545,6 +2620,8 @@ public final class MainActivity extends Activity {
             pluginWebSurface = "play";
         } else if ("/live".equals(route)) {
             currentPage = "live";
+            pluginWebSurface = "play";
+        } else if ("/controller".equals(route)) {
             pluginWebSurface = "play";
         } else if ("/diagnostics".equals(route)) {
             currentPage = "diagnostics";

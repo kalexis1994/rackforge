@@ -8,8 +8,9 @@ use anyhow::{Context, Result, bail};
 use rackforge_audio_api::{AudioOutputDocument, AudioOutputProfile, AudioOutputState};
 use rackforge_control_api::{
     ControlErrorCode, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES,
-    PluginParameterValue, decode_request, encode_line,
+    PluginParameterValue, VirtualMidiMessage, decode_request, encode_line,
 };
+use rackforge_midi_api::MidiPacket;
 #[cfg(test)]
 use rackforge_performance_api::PerformanceLibrary;
 use rackforge_performance_api::{
@@ -26,7 +27,7 @@ use rackforge_session_api::{
     HostControlBinding, InstanceId, MasterLevel, MasterPan, ProgramDraftState, Revision,
     SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SoundSummary,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
@@ -66,6 +67,9 @@ pub struct RackSlotRuntimeSpec {
 }
 
 pub enum AudioControlCommand {
+    InjectVirtualMidi {
+        packets: Vec<MidiPacket>,
+    },
     ApplyAudioOutput {
         profile: AudioOutputProfile,
         reply: SyncSender<Result<AudioOutputState, String>>,
@@ -210,6 +214,12 @@ struct LeaseDeadline {
     deadline: Instant,
 }
 
+#[derive(Clone, Default)]
+struct VirtualMidiClientState {
+    notes: BTreeSet<(u8, u8)>,
+    channels: BTreeSet<u8>,
+}
+
 struct ControlFailure {
     code: ControlErrorCode,
     message: String,
@@ -232,6 +242,7 @@ struct ControlContext {
     plugin_manifests: BTreeMap<String, PluginManifest>,
     portable_plugins: BTreeMap<String, PortableControlPlugin>,
     dynamic_resources: Mutex<BTreeMap<InstanceId, BTreeMap<String, PathBuf>>>,
+    virtual_midi: Mutex<BTreeMap<ClientId, VirtualMidiClientState>>,
     plugin_sample_rate: f64,
     plugin_maximum_frames: u32,
     plugin_output_channels: u32,
@@ -305,6 +316,7 @@ pub fn start(
         plugin_manifests,
         portable_plugins,
         dynamic_resources: Mutex::new(BTreeMap::new()),
+        virtual_midi: Mutex::new(BTreeMap::new()),
         plugin_sample_rate,
         plugin_maximum_frames,
         plugin_output_channels,
@@ -464,6 +476,12 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             edit,
         } => edit_performance(context, expected_revision, edit),
         ControlRequest::ApplyAudioOutput { profile } => apply_audio_output(context, profile),
+        ControlRequest::VirtualMidi { client_id, message } => {
+            accept_virtual_midi(context, client_id, message)
+        }
+        ControlRequest::ReleaseVirtualMidi { client_id } => {
+            release_virtual_midi(context, client_id)
+        }
         ControlRequest::Events { after_revision } => match context.store.lock() {
             Ok(store) => match store.events_after(after_revision) {
                 Ok(events) => ControlResponse::Events {
@@ -481,6 +499,91 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
         ControlRequest::Dispatch { envelope } => dispatch_command(context, envelope),
     };
     write_response(&mut stream, &response)
+}
+
+fn accept_virtual_midi(
+    context: &ControlContext,
+    client_id: ClientId,
+    message: VirtualMidiMessage,
+) -> ControlResponse {
+    if let Err(message) = message.validate() {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            message,
+            current_revision(context),
+        );
+    }
+    let packet = match MidiPacket::new(0, &message.bytes()) {
+        Ok(packet) => packet,
+        Err(error) => {
+            return error_response(
+                ControlErrorCode::InvalidRequest,
+                error.to_string(),
+                current_revision(context),
+            );
+        }
+    };
+    if let Err(failure) = send_audio(
+        context,
+        AudioControlCommand::InjectVirtualMidi {
+            packets: vec![packet],
+        },
+    ) {
+        return failure.into_response();
+    }
+    let active_notes = match context.virtual_midi.lock() {
+        Ok(mut clients) => {
+            let state = clients.entry(client_id.clone()).or_default();
+            let channel = message.channel();
+            state.channels.insert(channel);
+            if let Some(note) = message.note_on() {
+                state.notes.insert((channel, note));
+            } else if let Some(note) = message.note_off() {
+                state.notes.remove(&(channel, note));
+            }
+            u16::try_from(state.notes.len()).unwrap_or(u16::MAX)
+        }
+        Err(_) => return internal_error("virtual MIDI state lock is poisoned", None),
+    };
+    ControlResponse::VirtualMidiAccepted {
+        client_id,
+        active_notes,
+    }
+}
+
+fn release_virtual_midi(context: &ControlContext, client_id: ClientId) -> ControlResponse {
+    let state = match context.virtual_midi.lock() {
+        Ok(mut clients) => clients.remove(&client_id).unwrap_or_default(),
+        Err(_) => return internal_error("virtual MIDI state lock is poisoned", None),
+    };
+    let mut packets = Vec::with_capacity(state.notes.len() + state.channels.len() * 3);
+    for (channel, note) in &state.notes {
+        if let Ok(packet) = MidiPacket::new(0, &[0x80 | channel, *note, 0]) {
+            packets.push(packet);
+        }
+    }
+    let channels = if state.channels.is_empty() {
+        vec![0]
+    } else {
+        state.channels.iter().copied().collect()
+    };
+    for channel in channels {
+        for controller in [64, 123, 120] {
+            if let Ok(packet) = MidiPacket::new(0, &[0xb0 | channel, controller, 0]) {
+                packets.push(packet);
+            }
+        }
+    }
+    if !packets.is_empty()
+        && let Err(failure) =
+            send_audio(context, AudioControlCommand::InjectVirtualMidi { packets })
+    {
+        if let Ok(mut clients) = context.virtual_midi.lock() {
+            clients.insert(client_id.clone(), state);
+        }
+        return failure.into_response();
+    }
+    ControlResponse::VirtualMidiReleased { client_id }
 }
 
 fn load_plugin_resource(
@@ -3041,6 +3144,7 @@ mod tests {
                 )]),
                 portable_plugins: BTreeMap::new(),
                 dynamic_resources: Mutex::new(BTreeMap::new()),
+                virtual_midi: Mutex::new(BTreeMap::new()),
                 plugin_sample_rate: 48_000.0,
                 plugin_maximum_frames: 128,
                 plugin_output_channels: 2,
@@ -3078,6 +3182,50 @@ mod tests {
             }
         ));
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn virtual_midi_release_is_scoped_to_its_client() {
+        let (context, receiver) = context();
+        let first = ClientId::new("web.touch.first").unwrap();
+        let second = ClientId::new("web.touch.second").unwrap();
+        for (client_id, note) in [(first.clone(), 60), (second.clone(), 64)] {
+            let response = accept_virtual_midi(
+                &context,
+                client_id,
+                VirtualMidiMessage {
+                    status: 0x90,
+                    data1: note,
+                    data2: 100,
+                },
+            );
+            assert!(matches!(
+                response,
+                ControlResponse::VirtualMidiAccepted {
+                    active_notes: 1,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                receiver.recv().unwrap(),
+                AudioControlCommand::InjectVirtualMidi { .. }
+            ));
+        }
+
+        let response = release_virtual_midi(&context, first.clone());
+        assert_eq!(
+            response,
+            ControlResponse::VirtualMidiReleased {
+                client_id: first.clone()
+            }
+        );
+        let AudioControlCommand::InjectVirtualMidi { packets } = receiver.recv().unwrap() else {
+            panic!("expected virtual MIDI release");
+        };
+        assert!(packets.iter().any(|packet| packet.data == [0x80, 60, 0]));
+        assert!(!packets.iter().any(|packet| packet.data == [0x80, 64, 0]));
+        assert!(context.virtual_midi.lock().unwrap().contains_key(&second));
+        assert!(!context.virtual_midi.lock().unwrap().contains_key(&first));
     }
 
     #[test]

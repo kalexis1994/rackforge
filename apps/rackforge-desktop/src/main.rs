@@ -20,7 +20,9 @@ use eframe::egui::{
     self, Align, Align2, Color32, FontId, Key, Layout, Pos2, Rect, RichText, Sense, Stroke,
     StrokeKind, Vec2,
 };
-use rackforge_control_api::{ControlErrorCode, ControlRequest, ControlResponse};
+use rackforge_control_api::{
+    ClientId, ControlErrorCode, ControlRequest, ControlResponse, VirtualMidiMessage,
+};
 use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage, PluginStorage};
@@ -45,7 +47,7 @@ use rackforge_surface_runtime::{
 };
 use semver::Version;
 use startup::{Options, Startup, options_from_layout, parse_startup};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -131,6 +133,12 @@ struct DesktopPlugin {
     instance: PluginInstance<'static>,
     resources: BTreeMap<String, PathBuf>,
     resource_data_paths: BTreeMap<String, PathBuf>,
+}
+
+#[derive(Clone, Default)]
+struct VirtualMidiClientState {
+    notes: BTreeSet<(u8, u8)>,
+    channels: BTreeSet<u8>,
 }
 
 enum PluginInstallEvent {
@@ -282,6 +290,7 @@ struct DesktopApp {
     options: Options,
     plugin_install: Option<PluginInstallTask>,
     performance_repository: PerformanceRepository,
+    virtual_midi: BTreeMap<ClientId, VirtualMidiClientState>,
     next_program_draft_id: u64,
     next_audition_lease_id: u64,
     #[cfg(windows)]
@@ -535,6 +544,7 @@ impl DesktopApp {
             options: options.clone(),
             plugin_install: None,
             performance_repository,
+            virtual_midi: BTreeMap::new(),
             next_program_draft_id: 1,
             next_audition_lease_id: 1,
             #[cfg(windows)]
@@ -1506,12 +1516,21 @@ impl DesktopApp {
     }
 
     fn handle_web_control(&mut self, request: ControlRequest) -> ControlResponse {
-        let ControlRequest::Dispatch { envelope } = request else {
-            return ControlResponse::Error {
-                code: ControlErrorCode::Unavailable,
-                message: "This Desktop operation is not connected yet.".into(),
-                current_revision: None,
-            };
+        let envelope = match request {
+            ControlRequest::VirtualMidi { client_id, message } => {
+                return self.accept_virtual_midi(client_id, message);
+            }
+            ControlRequest::ReleaseVirtualMidi { client_id } => {
+                return self.release_virtual_midi(client_id);
+            }
+            ControlRequest::Dispatch { envelope } => envelope,
+            _ => {
+                return ControlResponse::Error {
+                    code: ControlErrorCode::Unavailable,
+                    message: "This Desktop operation is not connected yet.".into(),
+                    current_revision: None,
+                };
+            }
         };
         let current_revision = self.session.read().expect("session lock poisoned").revision;
         if envelope.schema_version != SESSION_SCHEMA_VERSION {
@@ -1659,6 +1678,99 @@ impl DesktopApp {
                 ),
             },
         }
+    }
+
+    fn accept_virtual_midi(
+        &mut self,
+        client_id: ClientId,
+        message: VirtualMidiMessage,
+    ) -> ControlResponse {
+        if let Err(message) = message.validate() {
+            return ControlResponse::Error {
+                code: ControlErrorCode::InvalidRequest,
+                message: message.into(),
+                current_revision: Some(
+                    self.session.read().expect("session lock poisoned").revision,
+                ),
+            };
+        }
+        #[cfg(windows)]
+        let result = self
+            .audio
+            .as_ref()
+            .ok_or_else(|| "Desktop audio is unavailable".to_owned())
+            .and_then(|audio| {
+                audio
+                    .inject_midi_messages(vec![message.bytes()])
+                    .map_err(|error| error.to_string())
+            });
+        #[cfg(not(windows))]
+        let result: Result<(), String> = Err("Desktop audio is unavailable".into());
+        if let Err(message) = result {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message,
+                current_revision: Some(
+                    self.session.read().expect("session lock poisoned").revision,
+                ),
+            };
+        }
+        let state = self.virtual_midi.entry(client_id.clone()).or_default();
+        let channel = message.channel();
+        state.channels.insert(channel);
+        if let Some(note) = message.note_on() {
+            state.notes.insert((channel, note));
+        } else if let Some(note) = message.note_off() {
+            state.notes.remove(&(channel, note));
+        }
+        ControlResponse::VirtualMidiAccepted {
+            client_id,
+            active_notes: u16::try_from(state.notes.len()).unwrap_or(u16::MAX),
+        }
+    }
+
+    fn release_virtual_midi(&mut self, client_id: ClientId) -> ControlResponse {
+        let state = self.virtual_midi.remove(&client_id).unwrap_or_default();
+        let mut messages = Vec::with_capacity(state.notes.len() + state.channels.len() * 3);
+        for (channel, note) in &state.notes {
+            messages.push([0x80 | *channel, *note, 0]);
+        }
+        let channels = if state.channels.is_empty() {
+            vec![0]
+        } else {
+            state.channels.iter().copied().collect()
+        };
+        for channel in channels {
+            for controller in [64, 123, 120] {
+                messages.push([0xb0 | channel, controller, 0]);
+            }
+        }
+        #[cfg(windows)]
+        let result = self
+            .audio
+            .as_ref()
+            .ok_or_else(|| "Desktop audio is unavailable".to_owned())
+            .and_then(|audio| {
+                audio
+                    .inject_midi_messages(messages)
+                    .map_err(|error| error.to_string())
+            });
+        #[cfg(not(windows))]
+        let result: Result<(), String> = {
+            let _ = messages;
+            Err("Desktop audio is unavailable".into())
+        };
+        if let Err(message) = result {
+            self.virtual_midi.insert(client_id.clone(), state);
+            return ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message,
+                current_revision: Some(
+                    self.session.read().expect("session lock poisoned").revision,
+                ),
+            };
+        }
+        ControlResponse::VirtualMidiReleased { client_id }
     }
 
     fn handle_performance_control(&mut self, request: ControlRequest) -> ControlResponse {

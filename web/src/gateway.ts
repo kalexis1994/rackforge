@@ -19,7 +19,13 @@ import type {
   SessionCommand,
 } from "./types";
 
-const CLIENT_ID = "web.main";
+function createClientId() {
+  const random = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `web.touch.${random.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}`;
+}
+
+const CLIENT_ID = createClientId();
 const SESSION_SCHEMA_VERSION = 14;
 const RECONNECT_DELAY_MS = 1200;
 const PERFORMANCE_REFRESH_MS = 2000;
@@ -277,10 +283,42 @@ export function stopGateway() {
   if (performanceTimer !== null) window.clearInterval(performanceTimer);
   reconnectTimer = null;
   performanceTimer = null;
+  releaseVirtualMidi();
   socket?.close();
   socket = null;
   sessionConnected = false;
   sessionConnecting = false;
+}
+
+export function sendVirtualMidi(status: number, data1: number, data2: number) {
+  if (!socket || !sessionConnected) return false;
+  if (
+    !Number.isInteger(status)
+    || !Number.isInteger(data1)
+    || !Number.isInteger(data2)
+    || status < 0x80
+    || status > 0xbf
+    || data1 < 0
+    || data1 > 127
+    || data2 < 0
+    || data2 > 127
+  ) {
+    return false;
+  }
+  socket.send(JSON.stringify({
+    op: "virtual_midi",
+    client_id: CLIENT_ID,
+    message: { status, data1, data2 },
+  }));
+  return true;
+}
+
+export function releaseVirtualMidi() {
+  if (!socket || !sessionConnected) return;
+  socket.send(JSON.stringify({
+    op: "release_virtual_midi",
+    client_id: CLIENT_ID,
+  }));
 }
 
 export function dispatchPerformanceEdit(

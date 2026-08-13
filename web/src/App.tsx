@@ -17,6 +17,7 @@ import {
   House,
   Info,
   Menu,
+  Piano,
   Play,
   RadioTower,
   Settings2,
@@ -55,6 +56,7 @@ import {
   syncNativeRoute,
 } from "./host";
 import { LivePage } from "./LivePage";
+import { TouchControllerPage } from "./TouchControllerPage";
 import type { RootState } from "./store";
 import type {
   PluginInstance,
@@ -155,6 +157,13 @@ const navItems = [
     icon: Play,
   },
   {
+    path: "/controller",
+    label: "Touch Controller",
+    detail: "On-screen keyboard and pads",
+    section: "workspace",
+    icon: Piano,
+  },
+  {
     path: "/plugins",
     label: "Plugins",
     detail: "Install, manage and configure instruments",
@@ -187,7 +196,7 @@ const audioMidiItem = {
 };
 
 const installedPluginsItem = {
-  ...navItems[3],
+  ...navItems[4],
   label: "Installed plugins",
   detail: "Manage versions and active instruments",
 };
@@ -250,9 +259,11 @@ function RackForgeApp() {
     (state: RootState) => state.rackforge,
   );
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [installPluginOpen, setInstallPluginOpen] = useState(false);
   useTactileFeedback();
+  const isControllerSurface = location.pathname === "/controller";
   const isPluginSurface =
     location.pathname === "/play" ||
     location.pathname.startsWith("/plugins/");
@@ -267,7 +278,9 @@ function RackForgeApp() {
   }, [location.pathname]);
 
   return (
-    <div className={`app-shell${isPluginSurface ? " plugin-surface-active" : ""}`}>
+    <div className={`app-shell${isPluginSurface ? " plugin-surface-active" : ""}${
+      isControllerSurface ? " controller-surface-active" : ""
+    }`}>
       <aside className="rail">
         <div className="brand-lockup" aria-label="RackForge">
           <BrandMark />
@@ -278,14 +291,18 @@ function RackForgeApp() {
       </aside>
 
       <main className="workspace">
-        <TopBar
-          snapshot={snapshot}
-          menuOpen={mobileMenuOpen}
-          onMenu={() => setMobileMenuOpen((open) => !open)}
-        />
+        {!isControllerSurface ? (
+          <TopBar
+            snapshot={snapshot}
+            menuOpen={mobileMenuOpen}
+            onMenu={() => setMobileMenuOpen((open) => !open)}
+          />
+        ) : null}
         {error && <div className="error-banner">{error}</div>}
         <div
           className={`page${isPluginSurface ? " plugin-host-page" : ""}${
+            isControllerSurface ? " controller-host-page" : ""
+          }${
             location.pathname === "/" ? " home-page" : ""
           }`}
         >
@@ -302,6 +319,17 @@ function RackForgeApp() {
               }
             />
             <Route path="/play" element={<PlayPage snapshot={snapshot} />} />
+            <Route
+              path="/controller"
+              element={
+                <TouchControllerPage
+                  snapshot={snapshot}
+                  connection={connection}
+                  onOpenNavigation={() => setMobileMenuOpen(true)}
+                  onExit={() => navigate("/play")}
+                />
+              }
+            />
             <Route
               path="/plugins"
               element={<PluginsPage snapshot={snapshot} />}
@@ -348,6 +376,10 @@ function useTactileFeedback() {
         "button:not(:disabled), a[href], [role='button']:not([aria-disabled='true'])",
       );
       if (!candidate || !candidate.closest("#root")) return;
+      // Piano keys and pads provide their own immediate pressed state. A
+      // delayed expanding ripple obscures adjacent notes and feels sluggish
+      // when playing quickly or gliding across the keyboard.
+      if (candidate.closest(".touch-instrument")) return;
       clearPressed();
       pressed = candidate;
       candidate.classList.add("rf-tactile", "rf-pressed");
@@ -473,7 +505,7 @@ function MobileNavigation({
         <div className="mobile-menu-scroll">
           <span className="mobile-menu-section">Workspace</span>
           <NavigationLinks
-            items={[navItems[2], navItems[1], diagnosticsItem]}
+            items={[navItems[2], navItems[1], navItems[3], diagnosticsItem]}
             detailed
             onNavigate={requestClose}
           />

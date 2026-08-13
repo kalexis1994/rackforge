@@ -11,7 +11,7 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 10;
+pub const CONTROL_SCHEMA_VERSION: u32 = 11;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 
@@ -67,6 +67,18 @@ pub enum ControlRequest {
     AudioSnapshot,
     ApplyAudioOutput {
         profile: AudioOutputProfile,
+    },
+    /// Sends a transient channel-voice message from an authenticated UI.
+    ///
+    /// These messages never mutate the persisted session or advance its
+    /// revision. The client identity exists so the host can release only the
+    /// notes owned by a connection that disappears.
+    VirtualMidi {
+        client_id: ClientId,
+        message: VirtualMidiMessage,
+    },
+    ReleaseVirtualMidi {
+        client_id: ClientId,
     },
     Events {
         after_revision: Revision,
@@ -144,6 +156,13 @@ pub enum ControlResponse {
     AudioApplied {
         snapshot: Box<AudioOutputState>,
     },
+    VirtualMidiAccepted {
+        client_id: ClientId,
+        active_notes: u16,
+    },
+    VirtualMidiReleased {
+        client_id: ClientId,
+    },
     Events {
         current_revision: Revision,
         events: Vec<EventEnvelope>,
@@ -167,6 +186,56 @@ pub enum ControlResponse {
 pub struct PluginParameterValue {
     pub index: u32,
     pub value: f64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VirtualMidiMessage {
+    pub status: u8,
+    pub data1: u8,
+    pub data2: u8,
+}
+
+impl VirtualMidiMessage {
+    pub fn validate(self) -> Result<(), &'static str> {
+        if self.data1 > 0x7f || self.data2 > 0x7f {
+            return Err("MIDI data bytes must be in 0..=127");
+        }
+        match self.status & 0xf0 {
+            0x80 | 0x90 => Ok(()),
+            0xb0 if self.data1 == 64 => Ok(()),
+            0xb0 => Err("the touch controller only accepts sustain control changes"),
+            _ => Err("the touch controller only accepts note and sustain messages"),
+        }
+    }
+
+    pub const fn channel(self) -> u8 {
+        self.status & 0x0f
+    }
+
+    pub const fn note_on(self) -> Option<u8> {
+        if self.status & 0xf0 == 0x90 && self.data2 != 0 {
+            Some(self.data1)
+        } else {
+            None
+        }
+    }
+
+    pub const fn note_off(self) -> Option<u8> {
+        if self.status & 0xf0 == 0x80 || (self.status & 0xf0 == 0x90 && self.data2 == 0) {
+            Some(self.data1)
+        } else {
+            None
+        }
+    }
+
+    pub const fn is_sustain(self) -> bool {
+        self.status & 0xf0 == 0xb0 && self.data1 == 64
+    }
+
+    pub const fn bytes(self) -> [u8; 3] {
+        [self.status, self.data1, self.data2]
+    }
 }
 
 pub fn encode_line<T: Serialize>(value: &T) -> Result<Vec<u8>, serde_json::Error> {
@@ -244,6 +313,65 @@ mod tests {
         assert_eq!(
             decode_response(&encode_line(&response).unwrap()).unwrap(),
             response
+        );
+    }
+
+    #[test]
+    fn virtual_midi_requests_are_strict_and_round_trip() {
+        let client_id = ClientId::new("web.touch.test-1").unwrap();
+        let request = ControlRequest::VirtualMidi {
+            client_id: client_id.clone(),
+            message: VirtualMidiMessage {
+                status: 0x90,
+                data1: 60,
+                data2: 100,
+            },
+        };
+        assert_eq!(
+            decode_request(&encode_line(&request).unwrap()).unwrap(),
+            request
+        );
+        assert!(
+            VirtualMidiMessage {
+                status: 0x90,
+                data1: 60,
+                data2: 100
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            VirtualMidiMessage {
+                status: 0xb0,
+                data1: 64,
+                data2: 127
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            VirtualMidiMessage {
+                status: 0xb0,
+                data1: 1,
+                data2: 127
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            VirtualMidiMessage {
+                status: 0x90,
+                data1: 128,
+                data2: 100
+            }
+            .validate()
+            .is_err()
+        );
+
+        let release = ControlRequest::ReleaseVirtualMidi { client_id };
+        assert_eq!(
+            decode_request(&encode_line(&release).unwrap()).unwrap(),
+            release
         );
     }
 

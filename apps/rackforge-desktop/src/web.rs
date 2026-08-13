@@ -9,7 +9,7 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use include_dir::{Dir, include_dir};
-use rackforge_control_api::{ControlRequest, ControlResponse};
+use rackforge_control_api::{ClientId, ControlRequest, ControlResponse};
 use rackforge_core::PluginPackage;
 use rackforge_repository::{MAX_PACKAGE_BYTES, install_local_archive};
 use rackforge_resource_api::{
@@ -819,6 +819,7 @@ async fn session_socket(ws: WebSocketUpgrade, State(state): State<WebState>) -> 
 
 async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
     let (mut sender, mut receiver) = socket.split();
+    let mut virtual_midi_clients = std::collections::BTreeSet::<ClientId>::new();
     if sender
         .send(Message::Text(snapshot_json(&state).into()))
         .await
@@ -830,6 +831,17 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
         match message {
             Message::Text(text) => {
                 let request = serde_json::from_str::<ControlRequest>(&text);
+                if let Ok(request) = &request {
+                    match request {
+                        ControlRequest::VirtualMidi { client_id, .. } => {
+                            virtual_midi_clients.insert(client_id.clone());
+                        }
+                        ControlRequest::ReleaseVirtualMidi { client_id } => {
+                            virtual_midi_clients.remove(client_id);
+                        }
+                        _ => {}
+                    }
+                }
                 let sends_snapshot = request
                     .as_ref()
                     .is_ok_and(|request| matches!(request, ControlRequest::Dispatch { .. }));
@@ -863,6 +875,9 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
             Message::Close(_) => break,
             _ => {}
         }
+    }
+    for client_id in virtual_midi_clients {
+        let _ = response_for(ControlRequest::ReleaseVirtualMidi { client_id }, &state);
     }
 }
 
@@ -899,7 +914,9 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
             })
             .expect("events response")
         }
-        request @ ControlRequest::Dispatch { .. } => {
+        request @ (ControlRequest::Dispatch { .. }
+        | ControlRequest::VirtualMidi { .. }
+        | ControlRequest::ReleaseVirtualMidi { .. }) => {
             let (response_sender, response_receiver) = mpsc::channel();
             if state
                 .control

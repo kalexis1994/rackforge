@@ -23,8 +23,8 @@ use rackforge_control_api::{CONTROL_SOCKET_NAME, PluginParameterValue};
 use rackforge_midi_api::{
     CompiledMidiRoute, DEFAULT_INPUT_BUS_ID, IngressMidiEvent, MIDI_ROUTING_SCHEMA_VERSION,
     MidiInputBusId, MidiPacket, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget,
-    MidiRouteTransform, MidiSourceDescriptor, MidiSourceKey, MidiSourceRegistry, MidiTargetId,
-    PluginChannelModel,
+    MidiRouteTransform, MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry,
+    MidiSourceSelector, MidiTargetId, PluginChannelModel,
 };
 use rackforge_performance_api::RackKeyboardParts;
 use rackforge_plugin_api::abi::MidiEventV1;
@@ -46,6 +46,7 @@ const MAX_EVENTS_PER_BLOCK: usize = 256;
 const MIDI_QUEUE_CAPACITY: usize = 2_048;
 const AUDIO_CONTROL_QUEUE_CAPACITY: usize = 64;
 const MASTER_LEVEL_SMOOTHING_FRAMES: u32 = 480;
+const VIRTUAL_MIDI_SOURCE_ID: &str = "rackforge.virtual.touch";
 
 struct MasterGain {
     current: f32,
@@ -623,10 +624,30 @@ pub fn run(config: LiveConfig) -> Result<()> {
     )?;
 
     let (sender, receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
-    let (midi_port_names, midi_sources) = connect_midi_sources(sender)?;
+    let (midi_port_names, mut midi_sources) = connect_midi_sources(sender)?;
+    let virtual_midi_source = MidiSourceKey::new(midi_port_names.len() as u32);
+    let virtual_midi_source_id = MidiSourceId::new(VIRTUAL_MIDI_SOURCE_ID)?;
+    midi_sources.register(
+        virtual_midi_source,
+        MidiSourceDescriptor {
+            id: virtual_midi_source_id.clone(),
+            name: "RackForge Touch Controller".into(),
+            primary: false,
+        },
+    )?;
     println!("MIDI_READY ports={midi_port_names:?}");
     let play_route = compile_default_play_route(
         &midi_sources,
+        primary_plugin
+            .manifest()
+            .midi
+            .as_ref()
+            .map(|midi| midi.channel_model)
+            .unwrap_or(PluginChannelModel::SinglePart),
+    )?;
+    let virtual_play_route = compile_virtual_play_route(
+        &midi_sources,
+        &virtual_midi_source_id,
         primary_plugin
             .manifest()
             .midi
@@ -737,7 +758,9 @@ pub fn run(config: LiveConfig) -> Result<()> {
         active_instance_id,
         rack_voices,
         &play_route,
-        midi_port_names.len(),
+        &virtual_play_route,
+        virtual_midi_source,
+        midi_port_names.len() + 1,
         initial_master_level,
         initial_master_pan,
         initial_surface_mode.into(),
@@ -838,6 +861,30 @@ fn compile_default_play_route(
     route.compile(sources, channel_model).map_err(Into::into)
 }
 
+fn compile_virtual_play_route(
+    sources: &MidiSourceRegistry,
+    source_id: &MidiSourceId,
+    channel_model: PluginChannelModel,
+) -> Result<CompiledMidiRoute> {
+    let mut matches = MidiRouteMatch::default();
+    matches.source = MidiSourceSelector::Source {
+        source_id: source_id.clone(),
+    };
+    MidiRoute {
+        schema_version: MIDI_ROUTING_SCHEMA_VERSION,
+        id: MidiRouteId::new("play.touch")?,
+        enabled: true,
+        matches,
+        transform: MidiRouteTransform::default(),
+        target: MidiRouteTarget {
+            instance_id: MidiTargetId::new(DEFAULT_LIVE_INSTANCE_ID)?,
+            input_bus_id: MidiInputBusId::new(DEFAULT_INPUT_BUS_ID)?,
+        },
+    }
+    .compile(sources, channel_model)
+    .map_err(Into::into)
+}
+
 fn ensure_supported_engine_profile(profile: &AudioOutputProfile) -> Result<()> {
     profile.validate()?;
     if profile.sample_format != AudioSampleFormat::S32Le {
@@ -874,6 +921,8 @@ fn audio_loop(
     mut active_instance_id: InstanceId,
     mut rack_voices: Vec<RackSlotVoice<'static>>,
     play_route: &CompiledMidiRoute,
+    virtual_play_route: &CompiledMidiRoute,
+    virtual_midi_source: MidiSourceKey,
     midi_source_count: usize,
     initial_master_level: MasterLevel,
     initial_master_pan: MasterPan,
@@ -901,6 +950,7 @@ fn audio_loop(
     let mut master_gain = MasterGain::new(initial_master_level);
     let mut master_balance = MasterBalance::new(initial_master_pan);
     let mut reserved_midi_controls = ReservedMidiControls::with_sources(midi_source_count);
+    let mut pending_virtual_midi = Vec::with_capacity(32);
     let (retired_sender, retired_receiver) = mpsc::sync_channel(16);
     let _retired_reclaimer = thread::Builder::new()
         .name("rackforge-live-voice-reclaimer".into())
@@ -929,6 +979,13 @@ fn audio_loop(
         }
         while let Ok(command) = control_receiver.try_recv() {
             match command {
+                AudioControlCommand::InjectVirtualMidi { packets } => {
+                    let available = MAX_EVENTS_PER_BLOCK.saturating_sub(pending_virtual_midi.len());
+                    let accepted = packets.len().min(available);
+                    let omitted = packets.len().saturating_sub(accepted);
+                    pending_virtual_midi.extend(packets.into_iter().take(accepted));
+                    dropped_events += omitted;
+                }
                 AudioControlCommand::ApplyAudioOutput { profile, reply } => {
                     let result = reconfigure_audio_output(
                         &mut output,
@@ -1477,6 +1534,44 @@ fn audio_loop(
                 eprintln!("MIDI_CONTROLLER_REPLAY_TRUNCATED omitted={omitted}");
             }
             replay_controller_state = false;
+        }
+        for packet in pending_virtual_midi.drain(..) {
+            let event = IngressMidiEvent {
+                source: virtual_midi_source,
+                packet,
+            };
+            controller_states.observe(virtual_midi_source, plugin_midi_event(packet));
+            match render_mode {
+                AudioRenderMode::Silent => {}
+                AudioRenderMode::Plugin => {
+                    if let Some(routed) = virtual_play_route.route(event) {
+                        if events.len() < MAX_EVENTS_PER_BLOCK {
+                            events.push(plugin_midi_event(routed.packet));
+                        } else {
+                            dropped_events += 1;
+                        }
+                    }
+                }
+                AudioRenderMode::Rack => {
+                    for voice in &mut rack_voices {
+                        if let Some(routed) = route_rack_event(
+                            event,
+                            voice.midi_input_channel,
+                            voice.midi_note_low,
+                            voice.midi_note_high,
+                            voice.midi_transpose,
+                            voice.keyboard_parts,
+                            virtual_play_route,
+                        ) {
+                            if voice.events.len() < MAX_EVENTS_PER_BLOCK {
+                                voice.events.push(routed);
+                            } else {
+                                dropped_events += 1;
+                            }
+                        }
+                    }
+                }
+            }
         }
         while let Ok(event) = receiver.try_recv() {
             let plugin_event = plugin_midi_event(event.packet);

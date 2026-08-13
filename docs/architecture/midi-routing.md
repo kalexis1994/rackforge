@@ -154,6 +154,27 @@ Host-reserved controls are intercepted before plugin routes. A future binding
 may be source-specific; channel plus CC alone is insufficient when multiple
 controllers are connected.
 
+## Touch controller source
+
+The shared Web UI exposes one platform-neutral `Touch Controller` with keyboard
+and pad layouts. It is a transient virtual MIDI source rather than a persisted
+route editor:
+
+- PLAY sends it through a dedicated source route to the active instrument;
+- LIVE sends it through the active Rack graph, including Part splits, Slot
+  ranges and transposition;
+- every browser or native UI receives a distinct validated `ClientId`;
+- the host tracks held notes and used channels independently for each client;
+- leaving the page, losing focus, closing the WebSocket or destroying a native
+  Activity releases that client's notes, sustain and channel sound state;
+- disconnect cleanup never silences notes owned by another client or a physical
+  controller.
+
+Only note-on, note-off and sustain are accepted from the touch surface. The
+restricted transient protocol prevents a remote UI from smuggling program
+changes or arbitrary host-reserved controls through the MIDI path. These
+messages never advance the session revision or enter its persistent event log.
+
 Continuous `host_controls` (for example master level and pan) and momentary
 `host_actions` (for example a hardware keyboard-parts shortcut) are declared
 separately by controller packages. An action binding includes explicit press

@@ -1883,6 +1883,7 @@ async fn handle_session_socket(socket: axum::extract::ws::WebSocket, state: Arc<
     let mut ticker = tokio::time::interval(Duration::from_millis(250));
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut last_revision = None;
+    let mut virtual_midi_clients = std::collections::BTreeSet::<String>::new();
 
     if let Ok(snapshot) = core_request(&state.control_socket, &json!({"op":"snapshot"})).await {
         last_revision = snapshot
@@ -1926,6 +1927,19 @@ async fn handle_session_socket(socket: axum::extract::ws::WebSocket, state: Arc<
                                 continue;
                             }
                         };
+                        match request.get("op").and_then(Value::as_str) {
+                            Some("virtual_midi") => {
+                                if let Some(client_id) = request.get("client_id").and_then(Value::as_str) {
+                                    virtual_midi_clients.insert(client_id.to_owned());
+                                }
+                            }
+                            Some("release_virtual_midi") => {
+                                if let Some(client_id) = request.get("client_id").and_then(Value::as_str) {
+                                    virtual_midi_clients.remove(client_id);
+                                }
+                            }
+                            _ => {}
+                        }
                         match core_request(&state.control_socket, &request).await {
                             Ok(response) => {
                                 if sender.send(Message::Text(response.to_string().into())).await.is_err() { break; }
@@ -1953,6 +1967,13 @@ async fn handle_session_socket(socket: axum::extract::ws::WebSocket, state: Arc<
                 }
             }
         }
+    }
+    for client_id in virtual_midi_clients {
+        let _ = core_request(
+            &state.control_socket,
+            &json!({"op":"release_virtual_midi", "client_id":client_id}),
+        )
+        .await;
     }
 }
 

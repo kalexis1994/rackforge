@@ -4647,7 +4647,18 @@ body {
   background: rgba(7, 17, 25, 0.92);
 }
 
+.rack-graph-canvas .react-flow__controls {
+  top: 10px;
+  right: 10px;
+  bottom: auto;
+  left: auto;
+  margin: 0;
+}
+
 .rack-graph-canvas .react-flow__controls-button {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
   border-bottom-color: rgba(98, 223, 241, 0.12);
   color: var(--ink);
   background: transparent;

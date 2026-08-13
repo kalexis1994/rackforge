@@ -514,7 +514,11 @@ export default function RackGraphEditor({ rack, racks, onChange }: RackGraphEdit
         >
           <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} />
           <MiniMap pannable zoomable nodeStrokeWidth={3} />
-          <Controls showInteractive={false} />
+          <Controls
+            position="top-right"
+            orientation="horizontal"
+            showInteractive={false}
+          />
         </ReactFlow>
       </div>
       <p className="rack-graph-hint">

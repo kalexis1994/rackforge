@@ -6,9 +6,19 @@ param(
 $ErrorActionPreference = "Stop"
 $repository = Split-Path -Parent $PSScriptRoot
 $toolRoot = Join-Path $repository "local/android-toolchain"
-$sdkRoot = Join-Path $toolRoot "sdk"
-$jdkRoot = Get-ChildItem (Join-Path $toolRoot "jdk") -Directory |
-    Select-Object -First 1 -ExpandProperty FullName
+$sdkRoot = if ($env:ANDROID_SDK_ROOT) {
+    $env:ANDROID_SDK_ROOT
+} elseif ($env:ANDROID_HOME) {
+    $env:ANDROID_HOME
+} else {
+    Join-Path $toolRoot "sdk"
+}
+$jdkRoot = if ($env:JAVA_HOME) {
+    $env:JAVA_HOME
+} else {
+    Get-ChildItem (Join-Path $toolRoot "jdk") -Directory -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+}
 $androidProject = Join-Path $repository "apps/rackforge-android"
 $gradle = Join-Path $androidProject "gradlew.bat"
 $ndkRoot = Join-Path $sdkRoot "ndk/27.0.12077973"
@@ -42,6 +52,17 @@ $env:AR_aarch64_linux_android = $androidAr
 
 Push-Location $repository
 try {
+    if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+        throw "pnpm is required to build the shared RackForge UI."
+    }
+    & pnpm --dir web install --frozen-lockfile
+    if ($LASTEXITCODE -ne 0) {
+        throw "RackForge shared UI dependency installation failed."
+    }
+    & pnpm --dir web build
+    if ($LASTEXITCODE -ne 0) {
+        throw "RackForge shared UI build failed."
+    }
     # Use the MSVC host toolchain explicitly. The user's default Rust host may be
     # GNU, which makes native build dependencies look for dlltool.exe even though
     # the final target is linked by the Android NDK clang toolchain configured above.
@@ -58,6 +79,13 @@ $nativeOutput = Join-Path $androidProject "app/build/generated/rust-jni/arm64-v8
 New-Item -ItemType Directory -Force -Path $nativeOutput | Out-Null
 Copy-Item -LiteralPath (Join-Path $repository "target/aarch64-linux-android/release/librackforge_android_native.so") `
     -Destination (Join-Path $nativeOutput "librackforge_android.so") -Force
+
+$webOutput = Join-Path $androidProject "app/build/generated/web-ui/rackforge"
+if (Test-Path -LiteralPath $webOutput) {
+    Remove-Item -LiteralPath $webOutput -Recurse -Force
+}
+New-Item -ItemType Directory -Path $webOutput -Force | Out-Null
+Copy-Item -Path (Join-Path $repository "web/dist/*") -Destination $webOutput -Recurse -Force
 
 $bundledOutput = Join-Path $androidProject "app/build/generated/bundled-plugins"
 if (Test-Path -LiteralPath $bundledOutput) {

@@ -8,7 +8,20 @@ import {
   type FormEvent,
 } from "react";
 import { useSelector } from "react-redux";
-import { Blocks, House, Play, RadioTower, Settings2 } from "lucide-react";
+import {
+  Activity,
+  Blocks,
+  Download,
+  FileUp,
+  FolderOpen,
+  House,
+  Info,
+  Menu,
+  Play,
+  RadioTower,
+  Settings2,
+  X,
+} from "lucide-react";
 import {
   NavLink,
   Navigate,
@@ -31,6 +44,16 @@ import {
   stopGateway,
 } from "./gateway";
 import { RfLoader } from "./components/RfLoader";
+import {
+  bindNativePluginResource,
+  hostHaptic,
+  hostJson,
+  HostRequestError,
+  isNativeHost,
+  selectNativePluginSound,
+  selectNativeResource,
+  syncNativeRoute,
+} from "./host";
 import { LivePage } from "./LivePage";
 import type { RootState } from "./store";
 import type {
@@ -42,7 +65,9 @@ import type {
   PluginWebDescriptor,
   PluginWebSurfaceKind,
   PluginResourceRequirement,
+  ResourceEntry,
   ResourceGrant,
+  ResourceSelection,
   PluginRepositoryConfig,
   PluginRepositoryFile,
   SessionSnapshot,
@@ -66,18 +91,11 @@ function BrandMark() {
 }
 
 async function postResourceApi<T>(url: string, body: unknown): Promise<T> {
-  const response = await fetch(url, {
+  return hostJson<T>(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as {
-      message?: string;
-    } | null;
-    throw new Error(payload?.message ?? `HTTP ${response.status}`);
-  }
-  return (await response.json()) as T;
 }
 
 function findEditorField(
@@ -115,12 +133,72 @@ function isProgramEditorValue(value: unknown): value is ProgramEditorValue {
 }
 
 const navItems = [
-  { path: "/", label: "Home", icon: House },
-  { path: "/live", label: "Live", icon: RadioTower },
-  { path: "/play", label: "Play", icon: Play },
-  { path: "/plugins", label: "Plugins", icon: Blocks },
-  { path: "/settings", label: "Settings", icon: Settings2 },
+  {
+    path: "/",
+    label: "Home",
+    detail: "Current instrument and system overview",
+    section: "workspace",
+    icon: House,
+  },
+  {
+    path: "/live",
+    label: "Live",
+    detail: "Performance racks, songs and setlists",
+    section: "workspace",
+    icon: RadioTower,
+  },
+  {
+    path: "/play",
+    label: "Play",
+    detail: "Play and edit the active instrument",
+    section: "workspace",
+    icon: Play,
+  },
+  {
+    path: "/plugins",
+    label: "Plugins",
+    detail: "Install, manage and configure instruments",
+    section: "system",
+    icon: Blocks,
+  },
+  {
+    path: "/settings",
+    label: "Settings",
+    detail: "Audio, MIDI and host configuration",
+    section: "system",
+    icon: Settings2,
+  },
 ];
+
+const diagnosticsItem = {
+  path: "/diagnostics",
+  label: "Diagnostics",
+  detail: "Connected audio, MIDI and USB devices",
+  section: "workspace",
+  icon: Activity,
+};
+
+const audioMidiItem = {
+  path: "/settings",
+  label: "Audio & MIDI",
+  detail: "Output, latency, gain and controllers",
+  section: "system",
+  icon: Settings2,
+};
+
+const installedPluginsItem = {
+  ...navItems[3],
+  label: "Installed plugins",
+  detail: "Manage versions and active instruments",
+};
+
+const aboutItem = {
+  path: "/about",
+  label: "About RackForge",
+  detail: "Version and runtime information",
+  section: "system",
+  icon: Info,
+};
 
 export function App() {
   const [auth, setAuth] = useState<WebAuthStatus | null>(null);
@@ -129,11 +207,7 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     const refresh = () =>
-      fetch("/api/v1/auth/status")
-        .then(async (response) => {
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return (await response.json()) as WebAuthStatus;
-        })
+      hostJson<WebAuthStatus>("/api/v1/auth/status")
         .then((status) => {
           if (!cancelled) {
             setAuth(status);
@@ -176,6 +250,9 @@ function RackForgeApp() {
     (state: RootState) => state.rackforge,
   );
   const location = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [installPluginOpen, setInstallPluginOpen] = useState(false);
+  useTactileFeedback();
   const isPluginSurface =
     location.pathname === "/play" ||
     location.pathname.startsWith("/plugins/");
@@ -185,6 +262,10 @@ function RackForgeApp() {
     return stopGateway;
   }, []);
 
+  useEffect(() => {
+    syncNativeRoute(location.pathname);
+  }, [location.pathname]);
+
   return (
     <div className={`app-shell${isPluginSurface ? " plugin-surface-active" : ""}`}>
       <aside className="rail">
@@ -192,31 +273,16 @@ function RackForgeApp() {
           <BrandMark />
           <span className="brand-name">RACKFORGE</span>
         </div>
-        <nav className="primary-nav">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                end={item.path === "/"}
-                className={({ isActive }) =>
-                  `nav-item${isActive ? " active" : ""}`
-                }
-              >
-                <span className="nav-mark">
-                  <Icon aria-hidden="true" strokeWidth={1.9} />
-                </span>
-                <span>{item.label}</span>
-              </NavLink>
-            );
-          })}
-        </nav>
+        <NavigationLinks />
         <ConnectionBadge status={connection} />
       </aside>
 
       <main className="workspace">
-        <TopBar snapshot={snapshot} />
+        <TopBar
+          snapshot={snapshot}
+          menuOpen={mobileMenuOpen}
+          onMenu={() => setMobileMenuOpen((open) => !open)}
+        />
         {error && <div className="error-banner">{error}</div>}
         <div
           className={`page${isPluginSurface ? " plugin-host-page" : ""}${
@@ -245,10 +311,413 @@ function RackForgeApp() {
               element={<PluginPage snapshot={snapshot} />}
             />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/diagnostics" element={<DiagnosticsPage />} />
+            <Route path="/about" element={<AboutPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
       </main>
+      {mobileMenuOpen ? (
+        <MobileNavigation
+          connection={connection}
+          onClose={() => setMobileMenuOpen(false)}
+          onInstall={() => {
+            setMobileMenuOpen(false);
+            setInstallPluginOpen(true);
+          }}
+        />
+      ) : null}
+      {installPluginOpen ? (
+        <InstallPluginDialog onClose={() => setInstallPluginOpen(false)} />
+      ) : null}
+    </div>
+  );
+}
+
+function useTactileFeedback() {
+  useEffect(() => {
+    let pressed: HTMLElement | null = null;
+    const clearPressed = () => {
+      pressed?.classList.remove("rf-pressed");
+      pressed = null;
+    };
+    const pointerDown = (event: PointerEvent) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      const origin = event.target instanceof Element ? event.target : null;
+      const candidate = origin?.closest<HTMLElement>(
+        "button:not(:disabled), a[href], [role='button']:not([aria-disabled='true'])",
+      );
+      if (!candidate || !candidate.closest("#root")) return;
+      clearPressed();
+      pressed = candidate;
+      candidate.classList.add("rf-tactile", "rf-pressed");
+      const bounds = candidate.getBoundingClientRect();
+      const diameter = Math.max(bounds.width, bounds.height) * 2.1;
+      const ripple = document.createElement("span");
+      ripple.className = "rf-touch-ripple";
+      ripple.style.width = `${diameter}px`;
+      ripple.style.height = `${diameter}px`;
+      ripple.style.left = `${event.clientX - bounds.left - diameter / 2}px`;
+      ripple.style.top = `${event.clientY - bounds.top - diameter / 2}px`;
+      candidate.appendChild(ripple);
+      ripple.addEventListener("animationend", () => ripple.remove(), { once: true });
+      hostHaptic("tap");
+    };
+    document.addEventListener("pointerdown", pointerDown, { capture: true, passive: true });
+    document.addEventListener("pointerup", clearPressed, { capture: true, passive: true });
+    document.addEventListener("pointercancel", clearPressed, { capture: true, passive: true });
+    window.addEventListener("blur", clearPressed);
+    return () => {
+      clearPressed();
+      document.removeEventListener("pointerdown", pointerDown, true);
+      document.removeEventListener("pointerup", clearPressed, true);
+      document.removeEventListener("pointercancel", clearPressed, true);
+      window.removeEventListener("blur", clearPressed);
+    };
+  }, []);
+}
+
+function NavigationLinks({
+  items = navItems,
+  detailed = false,
+  onNavigate,
+}: {
+  items?: typeof navItems;
+  detailed?: boolean;
+  onNavigate?: () => void;
+}) {
+  return (
+    <nav className="primary-nav" aria-label="RackForge sections">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <NavLink
+            key={item.path}
+            to={item.path}
+            end={item.path === "/"}
+            onClick={onNavigate}
+            className={({ isActive }) =>
+              `nav-item${isActive ? " active" : ""}`
+            }
+          >
+            <span className="nav-mark">
+              <Icon aria-hidden="true" strokeWidth={1.9} />
+            </span>
+            <span className="nav-copy">
+              <span>{item.label}</span>
+              {detailed ? <small>{item.detail}</small> : null}
+            </span>
+          </NavLink>
+        );
+      })}
+    </nav>
+  );
+}
+
+function MobileNavigation({
+  connection,
+  onClose,
+  onInstall,
+}: {
+  connection: string;
+  onClose: () => void;
+  onInstall: () => void;
+}) {
+  const panelRef = useRef<HTMLElement | null>(null);
+  const [closing, setClosing] = useState(false);
+  const requestClose = useCallback(() => setClosing(true), []);
+  useEffect(() => {
+    if (!closing) return;
+    const timeout = window.setTimeout(onClose, 190);
+    return () => window.clearTimeout(timeout);
+  }, [closing, onClose]);
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    panelRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") requestClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [requestClose]);
+
+  return (
+    <div
+      className={`mobile-menu-backdrop${closing ? " closing" : ""}`}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) requestClose();
+      }}
+    >
+      <section
+        ref={panelRef}
+        className={`mobile-menu-panel${closing ? " closing" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mobile-menu-title"
+        tabIndex={-1}
+      >
+        <span className="mobile-menu-handle" aria-hidden="true" />
+        <header>
+          <div className="mobile-menu-heading">
+            <h2 id="mobile-menu-title">RackForge</h2>
+            <p>Instrument workspace</p>
+          </div>
+          <button onClick={requestClose} aria-label="Close RackForge menu">
+            <X aria-hidden="true" />
+          </button>
+        </header>
+        <div className="mobile-menu-scroll">
+          <span className="mobile-menu-section">Workspace</span>
+          <NavigationLinks
+            items={[navItems[2], navItems[1], diagnosticsItem]}
+            detailed
+            onNavigate={requestClose}
+          />
+          <span className="mobile-menu-section">System</span>
+          <NavigationLinks
+            items={[audioMidiItem]}
+            detailed
+            onNavigate={requestClose}
+          />
+          <nav className="primary-nav mobile-menu-actions" aria-label="RackForge system actions">
+            <button className="nav-item" onClick={onInstall}>
+              <span className="nav-mark">
+                <Download aria-hidden="true" strokeWidth={1.9} />
+              </span>
+              <span className="nav-copy">
+                <span>Install plugin</span>
+                <small>Choose a portable .rfplugin package</small>
+              </span>
+            </button>
+          </nav>
+          <NavigationLinks
+            items={[installedPluginsItem, aboutItem]}
+            detailed
+            onNavigate={requestClose}
+          />
+        </div>
+        <ConnectionBadge status={connection} />
+      </section>
+    </div>
+  );
+}
+
+interface InstalledPluginResult {
+  plugin_id: string;
+  version: string;
+  already_installed: boolean;
+  activation_required: boolean;
+}
+
+const MAX_CLIENT_RESOURCE_BYTES = 512 * 1024 * 1024;
+
+function InstallPluginDialog({ onClose }: { onClose: () => void }) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const native = isNativeHost();
+  const [browseHost, setBrowseHost] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [installed, setInstalled] = useState<InstalledPluginResult | null>(null);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [busy, onClose]);
+
+  const installSelection = async (selection: ResourceSelection) => {
+    setStatus(`Validating ${selection.display_name}…`);
+    return postResourceApi<InstalledPluginResult>("/api/v1/plugins/install", {
+      selection_id: selection.selection_id,
+    });
+  };
+
+  const finishInstall = (result: InstalledPluginResult) => {
+    setInstalled(result);
+    setStatus(null);
+    hostHaptic("confirm");
+  };
+
+  const openNativePicker = async () => {
+    setBusy(true);
+    setError(null);
+    setStatus("Opening file picker…");
+    try {
+      const selection = await selectNativeResource({
+        kind: "file",
+        extensions: [".rfplugin"],
+      });
+      finishInstall(await installSelection(selection));
+    } catch (reason) {
+      setStatus(null);
+      setError(
+        reason instanceof Error ? reason.message : "Could not open the file picker.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const uploadClientFile = async (file: File) => {
+    if (file.size === 0 || file.size > MAX_CLIENT_RESOURCE_BYTES) {
+      setError("The package is empty or exceeds RackForge's 512 MB limit.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setInstalled(null);
+    setStatus(`Uploading ${file.name} to RackForge…`);
+    try {
+      const selection = await hostJson<ResourceSelection>(
+        `/api/v1/resources/uploads?name=${encodeURIComponent(file.name)}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: file,
+        },
+      );
+      finishInstall(await installSelection(selection));
+    } catch (reason) {
+      setStatus(null);
+      setError(
+        reason instanceof Error ? reason.message : "Could not install this plugin.",
+      );
+    } finally {
+      setBusy(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const installHostEntry = async (entry: ResourceEntry) => {
+    setBrowseHost(false);
+    setBusy(true);
+    setError(null);
+    setInstalled(null);
+    setStatus(`Selecting ${entry.name} on the RackForge host…`);
+    try {
+      const selection = await postResourceApi<ResourceSelection>(
+        "/api/v1/resources/selections",
+        { entry_id: entry.id },
+      );
+      finishInstall(await installSelection(selection));
+    } catch (reason) {
+      setStatus(null);
+      setError(
+        reason instanceof Error ? reason.message : "Could not install this plugin.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="install-plugin-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) onClose();
+      }}
+    >
+      <section
+        className="install-plugin-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="install-plugin-title"
+      >
+        <header>
+          <div>
+            <span className="eyebrow">PORTABLE PACKAGE</span>
+            <h2 id="install-plugin-title">Install plugin</h2>
+          </div>
+          <button className="icon-button" onClick={onClose} disabled={busy}>
+            Close
+          </button>
+        </header>
+        <p className="install-plugin-intro">
+          {native
+            ? "Select a portable .rfplugin package. RackForge validates it before installing anything."
+            : "Choose where the .rfplugin package is located. RackForge validates it on the host before installing anything."}
+        </p>
+        <div className="install-plugin-sources">
+          <button
+            type="button"
+            className="install-source-card"
+            disabled={busy}
+            onClick={() =>
+              native ? void openNativePicker() : fileInputRef.current?.click()
+            }
+          >
+            <span className="install-source-icon"><FileUp aria-hidden="true" /></span>
+            <span>
+              <strong>{native ? "Choose plugin package" : "Upload from this device"}</strong>
+              {!native ? (
+                <small>Use the browser picker, then securely upload to the host</small>
+              ) : null}
+            </span>
+          </button>
+          {!native ? (
+            <button
+              type="button"
+              className="install-source-card"
+              disabled={busy}
+              onClick={() => setBrowseHost(true)}
+            >
+              <span className="install-source-icon"><FolderOpen aria-hidden="true" /></span>
+              <span>
+                <strong>Browse the RackForge host</strong>
+                <small>Select a package already stored on the host device</small>
+              </span>
+            </button>
+          ) : null}
+        </div>
+        <input
+          ref={fileInputRef}
+          className="visually-hidden"
+          type="file"
+          accept=".rfplugin,application/octet-stream"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void uploadClientFile(file);
+          }}
+        />
+        {status ? <p className="install-plugin-status">{status}</p> : null}
+        {error ? <p className="install-plugin-error">{error}</p> : null}
+        {installed ? (
+          <div className="install-plugin-success" role="status">
+            <strong>
+              {installed.already_installed ? "Already installed" : "Plugin installed"}
+            </strong>
+            <span>{installed.plugin_id} v{installed.version}</span>
+          </div>
+        ) : null}
+      </section>
+      {browseHost ? (
+        <Suspense
+          fallback={
+            <div className="resource-explorer-backdrop">
+              <RfLoader label="RackForge storage" detail="Opening explorer…" />
+            </div>
+          }
+        >
+          <ResourceExplorerDialog
+            mode="select"
+            selection={{ name: "plugin package", kind: "file" }}
+            onCancel={() => setBrowseHost(false)}
+            onSelected={(entry) => void installHostEntry(entry)}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }
@@ -298,21 +767,19 @@ function PinGatePage({
     setSubmitting(true);
     setError(null);
     const endpoint = enrolling ? "/api/v1/auth/pin" : "/api/v1/auth/unlock";
-    fetch(endpoint, {
+    hostJson<unknown>(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pin }),
     })
-      .then(async (response) => {
-        const body = await response.json().catch(() => null);
-        if (!response.ok) {
-          if (body?.locked_for) setLockedFor(body.locked_for);
-          throw new Error(body?.message ?? "That PIN was not accepted.");
-        }
-        return body;
-      })
       .then(() => onUnlocked())
       .catch((reason: Error) => {
+        if (reason instanceof HostRequestError) {
+          const payload = reason.payload as { locked_for?: unknown } | undefined;
+          if (typeof payload?.locked_for === "number") {
+            setLockedFor(payload.locked_for);
+          }
+        }
         setError(reason.message);
         setPin("");
         setConfirmation("");
@@ -398,7 +865,15 @@ function ConnectionBadge({ status }: { status: string }) {
   );
 }
 
-function TopBar({ snapshot }: { snapshot: SessionSnapshot | null }) {
+function TopBar({
+  snapshot,
+  menuOpen,
+  onMenu,
+}: {
+  snapshot: SessionSnapshot | null;
+  menuOpen: boolean;
+  onMenu: () => void;
+}) {
   const active = snapshot?.instances.find(
     (instance) => instance.instance_id === snapshot.active_instance_id,
   );
@@ -407,6 +882,14 @@ function TopBar({ snapshot }: { snapshot: SessionSnapshot | null }) {
   );
   return (
     <header className="topbar">
+      <button
+        className="mobile-menu-button"
+        onClick={onMenu}
+        aria-label="Open RackForge menu"
+        aria-expanded={menuOpen}
+      >
+        <Menu aria-hidden="true" />
+      </button>
       <div className="now-playing">
         <span className="eyebrow">Now playing</span>
         <strong>{selected?.name ?? "Waiting for Core"}</strong>
@@ -583,37 +1066,24 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
     ) ?? instances[0];
   const [pluginPickerOpen, setPluginPickerOpen] = useState(false);
   const [presetsOpen, setPresetsOpen] = useState(false);
-  const [pluginVersions, setPluginVersions] = useState<Record<string, string>>({});
+  const [installedPlugins, setInstalledPlugins] = useState<PluginWebDescriptor[]>([]);
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/v1/plugins")
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return (await response.json()) as PluginWebDescriptor[];
-      })
+    hostJson<PluginWebDescriptor[]>("/api/v1/plugins")
       .then((plugins) => {
         if (cancelled) return;
-        setPluginVersions(Object.fromEntries(
-          plugins.map((plugin) => [plugin.plugin_id, plugin.version]),
-        ));
+        setInstalledPlugins(plugins);
       })
       .catch(() => {
-        if (!cancelled) setPluginVersions({});
+        if (!cancelled) setInstalledPlugins([]);
       });
     return () => {
       cancelled = true;
     };
   }, []);
-  if (!active) {
-    return (
-      <section className="plugin-surface-shell direct-surface">
-        <PluginSurfaceState
-          title="No instrument available"
-          detail="RackForge Core has not registered an active instrument."
-        />
-      </section>
-    );
-  }
+  const activeVersion = installedPlugins.find(
+    (plugin) => plugin.plugin_id === active?.plugin_id,
+  )?.version;
   return (
     <section className="plugin-surface-shell direct-surface">
       <div className="play-plugin-toolbar">
@@ -630,10 +1100,15 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
         </button>
         <div className="play-plugin-identity">
           <span>PLAY</span>
-          <strong>{active.plugin_name}{formatPluginVersion(pluginVersions[active.plugin_id])}</strong>
+          <strong>
+            {active
+              ? `${active.plugin_name}${formatPluginVersion(activeVersion)}`
+              : "Select an instrument"}
+          </strong>
         </div>
         <button
           className={`play-header-button presets${presetsOpen ? " active" : ""}`}
+          disabled={!active}
           onClick={() => {
             setPluginPickerOpen(false);
             setPresetsOpen((open) => !open);
@@ -644,16 +1119,23 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
           <strong>Presets</strong>
         </button>
       </div>
-      <PluginFrame key={active.instance_id} instance={active} surface="play" />
+      {active ? (
+        <PluginFrame key={active.instance_id} instance={active} surface="play" />
+      ) : (
+        <PluginSurfaceState
+          title="No instrument active"
+          detail="Select one of the installed RackForge plugins to start playing."
+        />
+      )}
       {pluginPickerOpen && (
         <PluginPickerModal
           active={active}
           instances={instances}
-          versions={pluginVersions}
+          plugins={installedPlugins}
           onClose={() => setPluginPickerOpen(false)}
         />
       )}
-      {presetsOpen && (
+      {presetsOpen && active && (
         <PresetModal instance={active} onClose={() => setPresetsOpen(false)} />
       )}
     </section>
@@ -663,14 +1145,16 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
 function PluginPickerModal({
   active,
   instances,
-  versions,
+  plugins,
   onClose,
 }: {
-  active: PluginInstance;
+  active: PluginInstance | undefined;
   instances: PluginInstance[];
-  versions: Record<string, string>;
+  plugins: PluginWebDescriptor[];
   onClose: () => void;
 }) {
+  const [activatingId, setActivatingId] = useState<string | null>(null);
+  const [activationError, setActivationError] = useState<string | null>(null);
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -678,10 +1162,41 @@ function PluginPickerModal({
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [onClose]);
-  const orderedInstances = [
-    active,
-    ...instances.filter((instance) => instance.instance_id !== active.instance_id),
+  const activePluginId = active?.plugin_id;
+  const orderedPlugins = [
+    ...plugins.filter((plugin) => plugin.plugin_id === activePluginId),
+    ...plugins.filter((plugin) => plugin.plugin_id !== activePluginId),
   ];
+  const activate = async (plugin: PluginWebDescriptor) => {
+    const instance = instances.find(
+      (candidate) => candidate.plugin_id === plugin.plugin_id,
+    );
+    setActivationError(null);
+    dispatchCommand({ type: "set_active_mode", mode: "play" });
+    if (instance) {
+      if (instance.instance_id !== active?.instance_id) {
+        dispatchCommand({
+          type: "select_plugin",
+          instance_id: instance.instance_id,
+        });
+      }
+      onClose();
+      return;
+    }
+    setActivatingId(plugin.plugin_id);
+    try {
+      await hostJson(`/api/v1/plugins/${encodeURIComponent(plugin.plugin_id)}/activate`, {
+        method: "POST",
+      });
+      onClose();
+    } catch (error) {
+      setActivationError(
+        error instanceof Error ? error.message : "Could not activate the plugin.",
+      );
+    } finally {
+      setActivatingId(null);
+    }
+  };
   return (
     <div className="preset-modal-backdrop" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
@@ -697,35 +1212,43 @@ function PluginPickerModal({
         <div className="preset-modal-toolbar">
           <p>Choose the instrument you want to play. The active plugin stays first.</p>
         </div>
+        {activationError && <p className="form-error">{activationError}</p>}
         <div className="play-plugin-selector modal-list" role="list" aria-label="Instrument plugins">
-          {orderedInstances.map((instance, index) => {
-            const selected = instance.instance_id === active.instance_id;
+          {orderedPlugins.map((plugin, index) => {
+            const instance = instances.find(
+              (candidate) => candidate.plugin_id === plugin.plugin_id,
+            );
+            const selected = plugin.plugin_id === activePluginId;
+            const activating = activatingId === plugin.plugin_id;
             return (
               <button
                 className={selected ? "active" : ""}
-                key={instance.instance_id}
-                onClick={() => {
-                  dispatchCommand({ type: "set_active_mode", mode: "play" });
-                  if (!selected) {
-                    dispatchCommand({
-                      type: "select_plugin",
-                      instance_id: instance.instance_id,
-                    });
-                  }
-                  onClose();
-                }}
+                disabled={activatingId !== null}
+                key={plugin.plugin_id}
+                onClick={() => void activate(plugin)}
               >
                 <span className="play-plugin-number">{String(index + 1).padStart(2, "0")}</span>
                 <span className="play-plugin-copy">
-                  <strong>{instance.plugin_name}{formatPluginVersion(versions[instance.plugin_id])}</strong>
-                  <small>{instance.sounds.length} programs · Web instrument</small>
+                  <strong>{plugin.plugin_name}{formatPluginVersion(plugin.version)}</strong>
+                  <small>
+                    {instance
+                      ? `${instance.sounds.length} programs · Ready`
+                      : "Installed · Activates on selection"}
+                  </small>
                 </span>
                 <span className="play-plugin-status">
-                  {selected ? "PLAYING" : "SELECT"}<i aria-hidden="true">→</i>
+                  {selected ? "PLAYING" : activating ? "LOADING" : "SELECT"}
+                  <i aria-hidden="true">→</i>
                 </span>
               </button>
             );
           })}
+          {orderedPlugins.length === 0 && (
+            <PluginSurfaceState
+              title="No plugins installed"
+              detail="Install an .rfplugin package from the Plugins section."
+            />
+          )}
         </div>
       </section>
     </div>
@@ -891,11 +1414,7 @@ function PluginsPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/v1/plugins")
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return (await response.json()) as PluginWebDescriptor[];
-      })
+    hostJson<PluginWebDescriptor[]>("/api/v1/plugins")
       .then((plugins) => {
         if (!cancelled) setInstalled(plugins);
       })
@@ -1091,22 +1610,23 @@ function PluginFrame({
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/v1/plugins/${encodeURIComponent(instance.plugin_id)}`)
-      .then(async (response) => {
-        if (response.status === 404) return null;
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return (await response.json()) as PluginWebDescriptor;
-      })
+    hostJson<PluginWebDescriptor>(
+      `/api/v1/plugins/${encodeURIComponent(instance.plugin_id)}`,
+    )
       .then((value) => {
         if (!cancelled) {
           setDescriptor(value);
           setDescriptorStatus(value ? "ready" : "unavailable");
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
           setDescriptor(null);
-          setDescriptorStatus("error");
+          setDescriptorStatus(
+            error instanceof HostRequestError && error.status === 404
+              ? "unavailable"
+              : "error",
+          );
         }
       });
     return () => {
@@ -1218,12 +1738,28 @@ function PluginFrame({
           (sound) => sound.id === params.sound_id,
         )
       ) {
-        dispatchCommand({
-          type: "select_sound",
-          instance_id: instance.instance_id,
-          sound_id: params.sound_id,
-        });
-        respond(true);
+        if (isNativeHost()) {
+          selectNativePluginSound({
+            instance_id: instance.instance_id,
+            sound_id: params.sound_id,
+          })
+            .then((result) => respond(true, undefined, result))
+            .catch((error: unknown) =>
+              respond(
+                false,
+                error instanceof Error
+                  ? error.message
+                  : "Could not select this program.",
+              ),
+            );
+        } else {
+          dispatchCommand({
+            type: "select_sound",
+            instance_id: instance.instance_id,
+            sound_id: params.sound_id,
+          });
+          respond(true);
+        }
       } else if (
         event.data.method === "plugin.select_resource" &&
         surface === "config" &&
@@ -1236,6 +1772,24 @@ function PluginFrame({
           respond(false, "Resource is not declared by this plugin.");
         } else if (pendingResourceRequestRef.current) {
           respond(false, "Another resource selection is already open.");
+        } else if (isNativeHost()) {
+          pendingResourceRequestRef.current = event.data.request_id;
+          bindNativePluginResource({
+            plugin_id: instance.plugin_id,
+            resource_id: resource.id,
+          })
+            .then((grant) => respond(true, undefined, grant))
+            .catch((error: unknown) =>
+              respond(
+                false,
+                error instanceof Error
+                  ? error.message
+                  : "Could not select this resource.",
+              ),
+            )
+            .finally(() => {
+              pendingResourceRequestRef.current = null;
+            });
         } else {
           pendingResourceRequestRef.current = event.data.request_id;
           setResourceRequest({
@@ -1541,8 +2095,7 @@ function ChangePinCard() {
   const [managed, setManaged] = useState<boolean | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/v1/auth/status")
-      .then((response) => response.json())
+    hostJson<WebAuthStatus>("/api/v1/auth/status")
       .then((status: WebAuthStatus) => {
         if (!cancelled) setManaged(status.pin_managed === true);
       })
@@ -1570,15 +2123,11 @@ function ChangePinCard() {
     if (!ready || busy) return;
     setBusy(true);
     setNote(null);
-    fetch("/api/v1/auth/pin", {
+    hostJson<unknown>("/api/v1/auth/pin", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pin: next, current_pin: current }),
     })
-      .then(async (response) => {
-        const body = await response.json().catch(() => null);
-        if (!response.ok) throw new Error(body?.message ?? "The PIN was not changed.");
-      })
       .then(() => {
         setNote({
           ok: true,
@@ -1654,13 +2203,11 @@ function SettingsPage() {
   const [storeBusy, setStoreBusy] = useState(false);
   const [storeMessage, setStoreMessage] = useState<string | null>(null);
   useEffect(() => {
-    fetch("/api/v1/config")
-      .then((response) => response.json())
-      .then((value: WebPublicConfig) => setConfig(value))
+    hostJson<WebPublicConfig>("/api/v1/config")
+      .then(setConfig)
       .catch(() => setConfig(null));
-    fetch("/api/v1/repositories")
-      .then((response) => response.json())
-      .then((value: PluginRepositoryFile) => setRepositoryFile(value))
+    hostJson<PluginRepositoryFile>("/api/v1/repositories")
+      .then(setRepositoryFile)
       .catch(() => setRepositoryFile(null));
   }, []);
 
@@ -1681,13 +2228,14 @@ function SettingsPage() {
     setStoreBusy(true);
     setStoreMessage(null);
     try {
-      const response = await fetch("/api/v1/repositories", {
+      const body = await hostJson<{
+        status: "ok";
+        config: PluginRepositoryFile;
+      }>("/api/v1/repositories", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(repositoryFile),
       });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.message ?? "Could not save repositories.");
       setRepositoryFile(body.config);
       setStoreMessage("Repository configuration saved.");
     } catch (error) {
@@ -1701,9 +2249,7 @@ function SettingsPage() {
     setStoreBusy(true);
     setStoreMessage(null);
     try {
-      const response = await fetch("/api/v1/store/catalog");
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.message ?? "Could not refresh stores.");
+      const body = await hostJson<StoreCatalogResponse>("/api/v1/store/catalog");
       setCatalog(body);
       setStoreMessage("Signed catalogs refreshed.");
     } catch (error) {
@@ -1717,13 +2263,14 @@ function SettingsPage() {
     setStoreBusy(true);
     setStoreMessage(`Installing ${pluginId}…`);
     try {
-      const response = await fetch("/api/v1/store/install", {
+      const body = await hostJson<{
+        plugin_id: string;
+        version: string;
+      }>("/api/v1/store/install", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repository_id: repositoryId, plugin_id: pluginId }),
       });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.message ?? "Installation failed.");
       setStoreMessage(
         `${body.plugin_id} ${body.version} installed. Activation is available after a safe plugin reload.`,
       );
@@ -1952,6 +2499,140 @@ function SettingsPage() {
             </div>
           </article>
         ))}
+      </section>
+    </>
+  );
+}
+
+interface HostDiagnostics {
+  platform: string;
+  version: string;
+  audio_running: boolean;
+  selected_audio_output: string;
+  audio_status: Record<string, number>;
+  audio_outputs: Array<{ id: number; name: string; detail: string }>;
+  midi_devices: Array<{ name: string; detail: string }>;
+  usb_devices: Array<{ name: string; detail: string }>;
+}
+
+function DiagnosticsPage() {
+  const [diagnostics, setDiagnostics] = useState<HostDiagnostics | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      setDiagnostics(await hostJson<HostDiagnostics>("/api/v1/diagnostics"));
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Diagnostics are unavailable.");
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    hostJson<HostDiagnostics>("/api/v1/diagnostics")
+      .then((result) => {
+        if (!cancelled) {
+          setDiagnostics(result);
+          setError(null);
+        }
+      })
+      .catch((reason) => {
+        if (!cancelled) {
+          setError(reason instanceof Error ? reason.message : "Diagnostics are unavailable.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRefreshing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const status = diagnostics?.audio_status ?? {};
+  return (
+    <>
+      <PageHeading
+        eyebrow="Runtime status"
+        title="Diagnostics"
+        detail="Live information from the native audio, MIDI and USB host."
+      />
+      <div className="diagnostics-actions">
+        <button className="primary-button" disabled={refreshing} onClick={() => void refresh()}>
+          {refreshing ? "Refreshing…" : "Refresh devices"}
+        </button>
+      </div>
+      {error ? <p className="form-error">{error}</p> : null}
+      {diagnostics ? (
+        <section className="settings-grid diagnostics-grid">
+          <article className="settings-card">
+            <div className="settings-icon">◉</div>
+            <div className="settings-copy">
+              <span className="card-kicker">Native runtime</span>
+              <h2>{diagnostics.platform}</h2>
+              <p>RackForge {diagnostics.version} · {diagnostics.audio_running ? "Audio running" : "Audio stopped"}</p>
+            </div>
+            <dl className="settings-values">
+              <div><dt>Output</dt><dd>{diagnostics.selected_audio_output}</dd></div>
+              <div><dt>Sample rate</dt><dd>{status.sample_rate ?? 0} Hz</dd></div>
+              <div><dt>Buffer</dt><dd>{status.buffer_size_frames ?? 0} frames</dd></div>
+              <div><dt>Xruns</dt><dd>{status.xruns ?? 0}</dd></div>
+            </dl>
+          </article>
+          <DiagnosticDeviceCard title="Audio outputs" items={diagnostics.audio_outputs} />
+          <DiagnosticDeviceCard title="MIDI devices" items={diagnostics.midi_devices} />
+          <DiagnosticDeviceCard title="USB devices" items={diagnostics.usb_devices} />
+        </section>
+      ) : null}
+    </>
+  );
+}
+
+function DiagnosticDeviceCard({
+  title,
+  items,
+}: {
+  title: string;
+  items: Array<{ name: string; detail: string }>;
+}) {
+  return (
+    <article className="settings-card diagnostic-device-card">
+      <div className="settings-copy">
+        <span className="card-kicker">Connected · {items.length}</span>
+        <h2>{title}</h2>
+      </div>
+      <div className="diagnostic-device-list">
+        {items.map((item, index) => (
+          <div key={`${item.name}-${index}`}>
+            <strong>{item.name}</strong>
+            <small>{item.detail}</small>
+          </div>
+        ))}
+        {items.length === 0 ? <p>No devices detected.</p> : null}
+      </div>
+    </article>
+  );
+}
+
+function AboutPage() {
+  return (
+    <>
+      <PageHeading
+        eyebrow="RackForge"
+        title="About"
+        detail="A portable instrument host built around one shared interface and native real-time runtimes."
+      />
+      <section className="settings-grid">
+        <article className="settings-card about-card">
+          <BrandMark />
+          <div className="settings-copy">
+            <span className="card-kicker">Runtime protocol</span>
+            <h2>rackforge.host@1</h2>
+            <p>Portable .rfplugin runtime · Rust core · native audio and MIDI.</p>
+          </div>
+        </article>
       </section>
     </>
   );

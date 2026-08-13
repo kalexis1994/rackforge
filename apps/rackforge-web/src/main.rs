@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Path as AxumPath, State, WebSocketUpgrade, ws::Message},
+    extract::{DefaultBodyLimit, Path as AxumPath, Query, State, WebSocketUpgrade, ws::Message},
     http::{
         HeaderMap, HeaderValue, StatusCode,
         header::{
@@ -16,12 +16,14 @@ use futures_util::{SinkExt, StreamExt};
 use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_plugin_api::{PluginManifest, WebSurfaceKind};
 use rackforge_repository::{
-    InstallationRecord, InstalledPackage, RepositoryFile, RepositoryIndex, RepositoryPlugin,
-    fetch_repository, install_archive, repository_platform_key,
+    InstallationRecord, InstalledPackage, MAX_PACKAGE_BYTES, RepositoryFile, RepositoryIndex,
+    RepositoryPlugin, fetch_repository, install_archive, install_local_archive,
+    repository_platform_key,
 };
 use rackforge_resource_api::{
     BindResourceRequest, BrowseGrantRequest, ListGrantsRequest, LoadGrantedResourceRequest,
-    ResourceBrowser, ResourceEntryKind, ResourceError,
+    MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser, ResourceEntryKind, ResourceError,
+    SelectHostEntryRequest,
 };
 use rackforge_resource_host::NativeResourceBrowser;
 use semver::Version;
@@ -33,9 +35,11 @@ use std::{
     env, fs,
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     path::{Component, Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     sync::{Arc, Mutex, RwLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tokio::io::AsyncWriteExt;
 use tokio::time::MissedTickBehavior;
 use tower_http::{
     services::{ServeDir, ServeFile},
@@ -59,6 +63,7 @@ const ENROLMENT_WINDOW_SECONDS: u64 = 15 * 60;
 const FREE_ATTEMPTS: u32 = 5;
 const LOCKOUT_STEP_SECONDS: u64 = 5;
 const LOCKOUT_CAP_SECONDS: u64 = 15 * 60;
+static CLIENT_UPLOAD_SERIAL: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -120,6 +125,7 @@ struct AppState {
     plugin_store_root: PathBuf,
     data_root: PathBuf,
     resource_browser: Arc<NativeResourceBrowser>,
+    resource_upload_root: PathBuf,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -175,11 +181,22 @@ struct InstallPluginRequest {
     version: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallSelectedPluginRequest {
+    selection_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UploadResourceQuery {
+    name: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 struct InstallPluginResponse {
     plugin_id: String,
     version: String,
-    path: String,
     already_installed: bool,
     activation_required: bool,
 }
@@ -541,6 +558,7 @@ async fn main() -> Result<()> {
         resource_browser: Arc::new(NativeResourceBrowser::platform_defaults_persistent(
             root.join("state/resource-grants.json"),
         )?),
+        resource_upload_root: root.join("state/resource-uploads"),
     });
     let static_files = ServeDir::new(&web_root).fallback(ServeFile::new(index));
     let app = Router::new()
@@ -566,11 +584,18 @@ async fn main() -> Result<()> {
         .route("/api/v1/resources/browse", post(browse_resource_grant))
         .route("/api/v1/resources/load", post(load_granted_resource))
         .route(
+            "/api/v1/resources/uploads",
+            post(upload_client_resource)
+                .layer(DefaultBodyLimit::max(MAX_CLIENT_UPLOAD_BYTES as usize)),
+        )
+        .route("/api/v1/resources/selections", post(select_host_resource))
+        .route(
             "/api/v1/repositories",
             get(repository_config).put(replace_repository_config),
         )
         .route("/api/v1/store/catalog", get(repository_catalog))
         .route("/api/v1/store/install", post(install_store_plugin))
+        .route("/api/v1/plugins/install", post(install_selected_plugin))
         .route("/ws/v1/session", get(session_socket))
         .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_web_asset))
         .fallback_service(static_files)
@@ -1309,7 +1334,6 @@ fn install_response(installed: InstalledPackage) -> InstallPluginResponse {
     InstallPluginResponse {
         plugin_id: installed.record.plugin_id,
         version: installed.record.version,
-        path: installed.path.display().to_string(),
         already_installed: installed.already_installed,
         activation_required: true,
     }
@@ -1343,6 +1367,154 @@ async fn plugin_web_descriptor(
         .get(&plugin_id)
         .map(|package| Json(package.public.clone()))
         .ok_or(StatusCode::NOT_FOUND)
+}
+
+/// Streams a file selected on the browser's device into host-owned storage and
+/// returns a short-lived opaque handle. Consumers never see the staging path.
+async fn upload_client_resource(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<UploadResourceQuery>,
+    body: Body,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let display_name = query.name.trim();
+    if display_name.is_empty() {
+        return resource_error(ResourceError::InvalidRequest(
+            "upload name is required".into(),
+        ));
+    }
+    if let Err(error) = tokio::fs::create_dir_all(&state.resource_upload_root).await {
+        return resource_error(ResourceError::Backend(error.to_string()));
+    }
+    let serial = CLIENT_UPLOAD_SERIAL.fetch_add(1, Ordering::Relaxed);
+    let stage = state
+        .resource_upload_root
+        .join(format!(".client-upload-{}-{serial}", std::process::id()));
+    let mut file = match tokio::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&stage)
+        .await
+    {
+        Ok(file) => file,
+        Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+    };
+
+    let mut stream = body.into_data_stream();
+    let mut size = 0_u64;
+    let streamed = async {
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| error.to_string())?;
+            size = size
+                .checked_add(chunk.len() as u64)
+                .ok_or_else(|| "upload size overflow".to_owned())?;
+            if size > MAX_CLIENT_UPLOAD_BYTES {
+                return Err(format!(
+                    "uploaded file exceeds the {} byte limit",
+                    MAX_CLIENT_UPLOAD_BYTES
+                ));
+            }
+            file.write_all(&chunk)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        if size == 0 {
+            return Err("uploaded file is empty".to_owned());
+        }
+        file.flush().await.map_err(|error| error.to_string())?;
+        file.sync_all().await.map_err(|error| error.to_string())
+    }
+    .await;
+    drop(file);
+
+    if let Err(message) = streamed {
+        let _ = tokio::fs::remove_file(&stage).await;
+        return resource_error(ResourceError::InvalidRequest(message));
+    }
+
+    match state.resource_browser.register_client_upload_file(
+        display_name,
+        &stage,
+        &state.resource_upload_root,
+    ) {
+        Ok(selection) => Json(selection).into_response(),
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&stage).await;
+            resource_error(error)
+        }
+    }
+}
+
+/// Turns an entry chosen in RackForge's host browser into the same generic
+/// handle produced by a client upload.
+async fn select_host_resource(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<SelectHostEntryRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match state.resource_browser.select_host_entry(&request.entry_id) {
+        Ok(selection) => Json(selection).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+/// Plugin installation is one consumer of the generic resource-selection API.
+/// The selection is released after this attempt whether validation succeeds or
+/// fails; a client must explicitly select the file again to retry.
+async fn install_selected_plugin(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<InstallSelectedPluginRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let selection_id = request.selection_id.trim().to_owned();
+    if selection_id.is_empty() {
+        return resource_error(ResourceError::InvalidRequest(
+            "selection_id is required".into(),
+        ));
+    }
+    let selection = match state.resource_browser.consume_selection_file(&selection_id) {
+        Ok(selection) => selection,
+        Err(error) => return resource_error(error),
+    };
+    if fs::metadata(selection.path()).map_or(true, |metadata| metadata.len() > MAX_PACKAGE_BYTES) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "status":"error",
+                "message":"plugin package exceeds RackForge's 512 MB limit"
+            })),
+        )
+            .into_response();
+    }
+    let store_root = state.plugin_store_root.clone();
+    match tokio::task::spawn_blocking(move || {
+        fs::read(selection.path())
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| install_local_archive(store_root, &bytes).map_err(Into::into))
+    })
+    .await
+    {
+        Ok(Ok(installed)) => Json(install_response(installed)).into_response(),
+        Ok(Err(error)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"status": "error", "message": error.to_string()})),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": "error", "message": error.to_string()})),
+        )
+            .into_response(),
+    }
 }
 
 async fn resource_mounts(headers: HeaderMap, State(state): State<Arc<AppState>>) -> Response {

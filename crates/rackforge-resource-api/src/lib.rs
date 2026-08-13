@@ -7,6 +7,10 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Host-wide ceiling for a single client-provided resource. Individual
+/// consumers can impose smaller limits (for example portable plugin packages).
+pub const MAX_CLIENT_UPLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceEntryKind {
@@ -34,6 +38,37 @@ pub struct ResourceEntry {
     pub modified_unix_ms: Option<u64>,
     pub lazy: bool,
     pub can_read: bool,
+}
+
+/// Where an opaque selection entered RackForge. Consumers never receive the
+/// underlying native path, regardless of its source.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceSelectionSource {
+    ClientUpload,
+    HostEntry,
+}
+
+/// A short-lived host-owned handle produced by the shared file explorer.
+///
+/// The same handle can be consumed by plugin installation, resource imports,
+/// preset restore and future workflows without coupling the explorer to any
+/// one feature.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceSelection {
+    pub selection_id: String,
+    pub display_name: String,
+    pub kind: ResourceEntryKind,
+    pub size: Option<u64>,
+    pub source: ResourceSelectionSource,
+    pub expires_in_seconds: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelectHostEntryRequest {
+    pub entry_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

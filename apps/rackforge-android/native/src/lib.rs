@@ -1532,6 +1532,12 @@ fn package_descriptor(
             .find(|surface| surface.kind == WebSurfaceKind::Play)
             .map(|surface| surface.entry.as_str())
     });
+    let config_entry = manifest.web_ui.as_ref().and_then(|web| {
+        web.surfaces
+            .iter()
+            .find(|surface| surface.kind == WebSurfaceKind::Config)
+            .map(|surface| surface.entry.as_str())
+    });
     let portable = manifest.portable_component().is_some();
     let compatible = manifest.kind == PluginKind::Instrument && portable && play_entry.is_some();
     let incompatibility = if manifest.kind != PluginKind::Instrument {
@@ -1554,6 +1560,9 @@ fn package_descriptor(
         "incompatibility": incompatibility,
         "package_root": root.to_string_lossy(),
         "web_entry": play_entry,
+        "config_web_entry": config_entry,
+        "web_api_version": manifest.web_ui.as_ref().map_or(0, |web| web.api_version),
+        "resources": manifest.resources,
         "active": active_plugin.is_some_and(|(id, version)| {
             id == &manifest.id && version == &manifest.version
         }),

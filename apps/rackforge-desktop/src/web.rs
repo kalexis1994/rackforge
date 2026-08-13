@@ -2,7 +2,7 @@ use anyhow::Context;
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Path as AxumPath, State, WebSocketUpgrade, ws::Message},
+    extract::{DefaultBodyLimit, Path as AxumPath, Query, State, WebSocketUpgrade, ws::Message},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -11,9 +11,11 @@ use futures_util::{SinkExt, StreamExt};
 use include_dir::{Dir, include_dir};
 use rackforge_control_api::{ControlRequest, ControlResponse};
 use rackforge_core::PluginPackage;
+use rackforge_repository::{MAX_PACKAGE_BYTES, install_local_archive};
 use rackforge_resource_api::{
     BindResourceRequest, BrowseGrantRequest, ListGrantsRequest, LoadGrantedResourceRequest,
-    ResourceBrowser, ResourceEntryKind, ResourceError,
+    MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser, ResourceEntryKind, ResourceError,
+    SelectHostEntryRequest,
 };
 use rackforge_resource_host::NativeResourceBrowser;
 use rackforge_session_api::SessionState;
@@ -25,15 +27,18 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 
 use crate::Options;
 
 static WEB_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../web/dist");
 const DESKTOP_CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
+static CLIENT_UPLOAD_SERIAL: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 struct WebState {
@@ -44,6 +49,19 @@ struct WebState {
     public_server: Arc<RwLock<WebServerPreferences>>,
     control: Sender<DesktopControlCall>,
     resource_browser: Arc<NativeResourceBrowser>,
+    resource_upload_root: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UploadResourceQuery {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallSelectedPluginRequest {
+    selection_id: String,
 }
 
 pub enum DesktopControlCall {
@@ -235,6 +253,7 @@ pub fn start(
         resource_browser: Arc::new(NativeResourceBrowser::platform_defaults_persistent(
             options.rackforge_root.join("state/resource-grants.json"),
         )?),
+        resource_upload_root: options.rackforge_root.join("state/resource-uploads"),
     };
     let local_listener =
         std::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))?;
@@ -324,6 +343,13 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
             .route("/api/v1/resources/status", post(resource_status))
             .route("/api/v1/resources/browse", post(browse_resource_grant))
             .route("/api/v1/resources/load", post(load_granted_resource))
+            .route(
+                "/api/v1/resources/uploads",
+                post(upload_client_resource)
+                    .layer(DefaultBodyLimit::max(MAX_CLIENT_UPLOAD_BYTES as usize)),
+            )
+            .route("/api/v1/resources/selections", post(select_host_resource))
+            .route("/api/v1/plugins/install", post(install_selected_plugin))
     } else {
         router
     };
@@ -411,6 +437,138 @@ async fn resource_entries(
     match state.resource_browser.entries(&parent_id) {
         Ok(entries) => Json(entries).into_response(),
         Err(error) => resource_error(error),
+    }
+}
+
+async fn upload_client_resource(
+    State(state): State<WebState>,
+    Query(query): Query<UploadResourceQuery>,
+    body: Body,
+) -> Response {
+    let display_name = query.name.trim();
+    if display_name.is_empty() {
+        return resource_error(ResourceError::InvalidRequest(
+            "upload name is required".into(),
+        ));
+    }
+    if let Err(error) = tokio::fs::create_dir_all(&state.resource_upload_root).await {
+        return resource_error(ResourceError::Backend(error.to_string()));
+    }
+    let serial = CLIENT_UPLOAD_SERIAL.fetch_add(1, Ordering::Relaxed);
+    let stage = state
+        .resource_upload_root
+        .join(format!(".client-upload-{}-{serial}", std::process::id()));
+    let mut file = match tokio::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&stage)
+        .await
+    {
+        Ok(file) => file,
+        Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+    };
+    let mut stream = body.into_data_stream();
+    let mut size = 0_u64;
+    let streamed = async {
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| error.to_string())?;
+            size = size
+                .checked_add(chunk.len() as u64)
+                .ok_or_else(|| "upload size overflow".to_owned())?;
+            if size > MAX_CLIENT_UPLOAD_BYTES {
+                return Err(format!(
+                    "uploaded file exceeds the {} byte limit",
+                    MAX_CLIENT_UPLOAD_BYTES
+                ));
+            }
+            file.write_all(&chunk)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        if size == 0 {
+            return Err("uploaded file is empty".to_owned());
+        }
+        file.flush().await.map_err(|error| error.to_string())?;
+        file.sync_all().await.map_err(|error| error.to_string())
+    }
+    .await;
+    drop(file);
+    if let Err(message) = streamed {
+        let _ = tokio::fs::remove_file(&stage).await;
+        return resource_error(ResourceError::InvalidRequest(message));
+    }
+    match state.resource_browser.register_client_upload_file(
+        display_name,
+        &stage,
+        &state.resource_upload_root,
+    ) {
+        Ok(selection) => Json(selection).into_response(),
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&stage).await;
+            resource_error(error)
+        }
+    }
+}
+
+async fn select_host_resource(
+    State(state): State<WebState>,
+    Json(request): Json<SelectHostEntryRequest>,
+) -> Response {
+    match state.resource_browser.select_host_entry(&request.entry_id) {
+        Ok(selection) => Json(selection).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn install_selected_plugin(
+    State(state): State<WebState>,
+    Json(request): Json<InstallSelectedPluginRequest>,
+) -> Response {
+    let selection_id = request.selection_id.trim().to_owned();
+    if selection_id.is_empty() {
+        return resource_error(ResourceError::InvalidRequest(
+            "selection_id is required".into(),
+        ));
+    }
+    let Some(store_root) = state.plugin_store_root.clone() else {
+        return resource_error(ResourceError::Backend(
+            "Desktop plugin storage is unavailable".into(),
+        ));
+    };
+    let selection = match state.resource_browser.consume_selection_file(&selection_id) {
+        Ok(selection) => selection,
+        Err(error) => return resource_error(error),
+    };
+    if fs::metadata(selection.path()).map_or(true, |metadata| metadata.len() > MAX_PACKAGE_BYTES) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "status":"error",
+                "message":"plugin package exceeds RackForge's 512 MB limit"
+            })),
+        )
+            .into_response();
+    }
+    match tokio::task::spawn_blocking(move || {
+        fs::read(selection.path())
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| install_local_archive(store_root, &bytes).map_err(Into::into))
+    })
+    .await
+    {
+        Ok(Ok(installed)) => Json(json!({
+            "plugin_id": installed.record.plugin_id,
+            "version": installed.record.version,
+            "already_installed": installed.already_installed,
+            "activation_required": true,
+        }))
+        .into_response(),
+        Ok(Err(error)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"status":"error", "message":error.to_string()})),
+        )
+            .into_response(),
+        Err(error) => internal_error(error),
     }
 }
 
@@ -927,6 +1085,7 @@ mod tests {
             public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
             control,
             resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
+            resource_upload_root: PathBuf::new(),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
         let request = ControlRequest::Dispatch {
@@ -983,6 +1142,7 @@ mod tests {
             public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
             control,
             resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
+            resource_upload_root: PathBuf::new(),
         };
         let request = ControlRequest::Dispatch {
             envelope: CommandEnvelope::new(

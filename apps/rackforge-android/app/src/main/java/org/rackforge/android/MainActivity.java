@@ -37,8 +37,10 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.HapticFeedbackConstants;
 import android.view.Window;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -67,6 +69,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.UUID;
 
 import org.json.JSONObject;
@@ -80,7 +83,16 @@ public final class MainActivity extends Activity {
     private static final int SAMPLE_RATE = 48_000;
     private static final int REQUEST_INSTALL_PLUGIN = 4101;
     private static final int REQUEST_SELECT_PLUGIN_RESOURCE = 4102;
+    private static final int REQUEST_SELECT_CLIENT_RESOURCE = 4103;
     private static final long MAX_PLUGIN_BYTES = 512L * 1024L * 1024L;
+    private static final long MAX_CLIENT_RESOURCE_BYTES = 2L * 1024L * 1024L * 1024L;
+    private static final long CLIENT_RESOURCE_TTL_MS = 30L * 60L * 1000L;
+    private static final String SHARED_UI_URL =
+            "https://rackforge.local/rackforge/index.html";
+    private static final String HOST_PROTOCOL = "rackforge.host@1";
+    private static final String APP_HOST = "rackforge.local";
+    private static final String PLUGIN_HOST = "plugins.rackforge.local";
+    private final String nativeHostToken = UUID.randomUUID().toString();
     private WebView webView;
     private Spinner audioOutputSpinner;
     private volatile boolean audioRunning;
@@ -110,6 +122,7 @@ public final class MainActivity extends Activity {
     private int thermalStatus = PowerManager.THERMAL_STATUS_NONE;
     private SharedPreferences preferences;
     private String currentPage = "play";
+    private String currentSharedRoute = "/play";
     private volatile boolean engineStarting;
     private File pluginPackageRoot;
     private String pluginWebEntry;
@@ -118,6 +131,10 @@ public final class MainActivity extends Activity {
     private String pendingResourceRequestId;
     private String pendingResourceId;
     private String pendingResourceKind;
+    private boolean pendingResourceNativeHost;
+    private String pendingClientResourceRequestId;
+    private final Map<String, ClientResourceSelection> clientResourceSelections =
+            new ConcurrentHashMap<>();
     private String activePluginName = "No plugin";
     private String activePluginVersion = "";
     private TextView activePluginLabel;
@@ -126,6 +143,25 @@ public final class MainActivity extends Activity {
     private AlertDialog pluginPickerDialog;
     private AlertDialog installedPluginsDialog;
     private android.graphics.Typeface displayTypeface;
+    private volatile boolean sharedUiReady;
+    private int sharedUiTopInsetPixels;
+    private int sharedUiLeftInsetPixels;
+    private int sharedUiRightInsetPixels;
+    private int sharedUiBottomInsetPixels;
+    private volatile boolean nativeSessionConnected;
+    private long nativeSessionRevision;
+
+    private static final class ClientResourceSelection {
+        final File file;
+        final String displayName;
+        final long createdAtMs;
+
+        ClientResourceSelection(File file, String displayName) {
+            this.file = file;
+            this.displayName = displayName;
+            this.createdAtMs = System.currentTimeMillis();
+        }
+    }
 
     private static native String installPluginFile(String archivePath, String storeRoot);
     private static native String installedPlugins(String storeRoot);
@@ -183,9 +219,11 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        configureSystemBarBackdrop();
         preferences = getSharedPreferences("rackforge-settings", MODE_PRIVATE);
         currentPage = "live".equals(preferences.getString("session.active_mode", "play"))
                 ? "live" : "play";
+        currentSharedRoute = "live".equals(currentPage) ? "/live" : "/play";
         selectedAudioDeviceKey = preferences.getString("audio.output", "default");
         // Balanced keeps a render-ahead queue for measured portable WASM CPU
         // spikes. Users can still opt into the more aggressive Low profile.
@@ -200,26 +238,49 @@ public final class MainActivity extends Activity {
         settings.setDomStorageEnabled(false);
         webView.setBackgroundColor(0xFF050F16);
         webView.addJavascriptInterface(new PluginWebBridge(), "RackForgeAndroid");
+        webView.addJavascriptInterface(new NativeHostBridge(), "RackForgeNativeHost");
         webView.setWebViewClient(pluginWebViewClient());
+        webView.setOnApplyWindowInsetsListener((view, insets) -> {
+            updateSharedUiSystemInsets(insets);
+            return insets;
+        });
 
         audioOutputSpinner = new Spinner(this);
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(0xFF050F16);
-        root.addView(buildTopBar(), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        root.addView(buildPlayToolbar(), new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
-        root.addView(webView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
-        setContentView(root);
+        setContentView(webView);
         refreshAudioOutputs();
         registerAudioDeviceUpdates();
         registerMidiDeviceUpdates();
         registerThermalMonitoring();
         mainHandler.post(audioHealthPoll);
-        if ("live".equals(currentPage)) showLive();
-        else showPlay();
+        webView.loadUrl(SHARED_UI_URL);
         startEngine();
+    }
+
+    private void configureSystemBarBackdrop() {
+        Window window = getWindow();
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false);
+        } else {
+            window.getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        }
+        window.setStatusBarColor(Color.TRANSPARENT);
+        window.setNavigationBarColor(Color.TRANSPARENT);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.setNavigationBarDividerColor(Color.TRANSPARENT);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.setStatusBarContrastEnforced(false);
+            window.setNavigationBarContrastEnforced(false);
+        }
+        GradientDrawable backdrop = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[] {0xFF04090F, 0xFF07121B, 0xFF050C13});
+        window.getDecorView().setBackground(backdrop);
     }
 
     @Override
@@ -227,7 +288,12 @@ public final class MainActivity extends Activity {
         super.onResume();
         refreshAudioOutputs();
         scheduleMidiReconnect();
-        restoreVisiblePage();
+        // A system document picker temporarily pauses the Activity. Navigating while its
+        // native request is pending would unmount CONFIG and discard the plugin promise
+        // which must consume the selected document.
+        if (pendingResourceRequestId == null && pendingClientResourceRequestId == null) {
+            restoreVisiblePage();
+        }
     }
 
     @Override
@@ -252,31 +318,72 @@ public final class MainActivity extends Activity {
         return new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return !"rackforge.local".equals(request.getUrl().getHost());
+                String host = request.getUrl().getHost();
+                return !APP_HOST.equals(host) && !PLUGIN_HOST.equals(host);
             }
 
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String path = request.getUrl().getPath();
-                if (pluginPackageRoot == null || path == null || !path.startsWith("/plugin/")) {
+                String host = request.getUrl().getHost();
+                if (path == null) {
                     return null;
                 }
-                try {
-                    String relative = path.substring("/plugin/".length());
-                    File root = pluginPackageRoot.getCanonicalFile();
-                    File asset = new File(root, relative).getCanonicalFile();
-                    if (!asset.getPath().startsWith(root.getPath() + File.separator) || !asset.isFile()) {
-                        return new WebResourceResponse("text/plain", "UTF-8", 404, "Not Found",
-                                java.util.Collections.emptyMap(),
-                                new java.io.ByteArrayInputStream(new byte[0]));
+                if (APP_HOST.equals(host)) {
+                    if (path.equals("/") || path.equals("/rackforge")
+                            || path.equals("/rackforge/index.html")) {
+                        return applicationShellAsset();
                     }
-                    String extension = MimeTypeMap.getFileExtensionFromUrl(asset.getName());
-                    String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
-                    if (mime == null) mime = "application/octet-stream";
-                    return new WebResourceResponse(mime, "UTF-8", new FileInputStream(asset));
+                    if (path.startsWith("/rackforge/")) {
+                        return applicationAsset(path.substring(1));
+                    }
+                    if (path.startsWith("/assets/") || path.startsWith("/brand/")) {
+                        return applicationAsset("rackforge" + path);
+                    }
+                    if (path.equals("/favicon.svg") || path.equals("/favicon.ico")
+                            || path.equals("/site.webmanifest")) {
+                        return applicationAsset("rackforge" + path);
+                    }
+                    if (path.startsWith("/plugin-assets/")) {
+                        String remainder = path.substring("/plugin-assets/".length());
+                        int separator = remainder.indexOf('/');
+                        if (separator < 1 || separator == remainder.length() - 1) {
+                            return emptyWebResponse(404, "Not Found");
+                        }
+                        String pluginId = remainder.substring(0, separator);
+                        String relative = remainder.substring(separator + 1);
+                        try {
+                            File root = installedPluginRoot(pluginId);
+                            return root == null
+                                    ? emptyWebResponse(404, "Not Found")
+                                    : pluginAsset(root, relative);
+                        } catch (Exception error) {
+                            Log.e("RackForge", "Could not serve plugin Web asset", error);
+                            return emptyWebResponse(500, "Internal Server Error");
+                        }
+                    }
+                    if (!path.startsWith("/plugin/") || pluginPackageRoot == null) {
+                        return null;
+                    }
+                    return pluginAsset(pluginPackageRoot,
+                            path.substring("/plugin/".length()));
+                }
+                if (!PLUGIN_HOST.equals(host)) return null;
+                String remainder = path.startsWith("/") ? path.substring(1) : path;
+                int separator = remainder.indexOf('/');
+                if (separator < 1 || separator == remainder.length() - 1) {
+                    return emptyWebResponse(404, "Not Found");
+                }
+                String pluginId = remainder.substring(0, separator);
+                String relative = remainder.substring(separator + 1);
+                try {
+                    File root = installedPluginRoot(pluginId);
+                    return root == null
+                            ? emptyWebResponse(404, "Not Found")
+                            : pluginAsset(root, relative);
                 } catch (Exception error) {
                     Log.e("RackForge", "Could not serve plugin Web asset", error);
-                    return null;
+                    return emptyWebResponse(500, "Internal Server Error");
                 }
             }
 
@@ -285,9 +392,141 @@ public final class MainActivity extends Activity {
                 if (url.startsWith("https://rackforge.local/plugin/")) {
                     view.scrollTo(0, 0);
                     injectPluginBridge();
+                } else if (url.startsWith("https://rackforge.local/rackforge/")) {
+                    sharedUiReady = true;
+                    applySharedUiSystemInsetsToPage();
+                    emitSessionSnapshot();
                 }
             }
         };
+    }
+
+    private void updateSharedUiSystemInsets(WindowInsets insets) {
+        int topPixels;
+        int rightPixels;
+        int bottomPixels;
+        int leftPixels;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.graphics.Insets systemBars = insets.getInsets(
+                    WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            topPixels = systemBars.top;
+            rightPixels = systemBars.right;
+            bottomPixels = systemBars.bottom;
+            leftPixels = systemBars.left;
+        } else {
+            topPixels = insets.getSystemWindowInsetTop();
+            rightPixels = insets.getSystemWindowInsetRight();
+            bottomPixels = insets.getSystemWindowInsetBottom();
+            leftPixels = insets.getSystemWindowInsetLeft();
+        }
+        if (topPixels == sharedUiTopInsetPixels
+                && rightPixels == sharedUiRightInsetPixels
+                && bottomPixels == sharedUiBottomInsetPixels
+                && leftPixels == sharedUiLeftInsetPixels) {
+            applySharedUiSystemInsetsToPage();
+            return;
+        }
+        sharedUiTopInsetPixels = topPixels;
+        sharedUiRightInsetPixels = rightPixels;
+        sharedUiBottomInsetPixels = bottomPixels;
+        sharedUiLeftInsetPixels = leftPixels;
+        applySharedUiSystemInsetsToPage();
+    }
+
+    private void applySharedUiSystemInsetsToPage() {
+        float density = getResources().getDisplayMetrics().density;
+        int topCssPixels = cssPixels(sharedUiTopInsetPixels, density);
+        int rightCssPixels = cssPixels(sharedUiRightInsetPixels, density);
+        int bottomCssPixels = cssPixels(sharedUiBottomInsetPixels, density);
+        int leftCssPixels = cssPixels(sharedUiLeftInsetPixels, density);
+        Log.d("RackForge", "Safe viewport CSS px: top=" + topCssPixels
+                + " right=" + rightCssPixels + " bottom=" + bottomCssPixels
+                + " left=" + leftCssPixels);
+        String script = "document.documentElement.style.setProperty('--rackforge-system-top-inset','"
+                + topCssPixels + "px');"
+                + "document.documentElement.style.setProperty('--rackforge-system-right-inset','"
+                + rightCssPixels + "px');"
+                + "document.documentElement.style.setProperty('--rackforge-system-bottom-inset','"
+                + bottomCssPixels + "px');"
+                + "document.documentElement.style.setProperty('--rackforge-system-left-inset','"
+                + leftCssPixels + "px');";
+        webView.evaluateJavascript(script, null);
+    }
+
+    private static int cssPixels(int physicalPixels, float density) {
+        return Math.max(0, density > 0
+                ? (int) Math.ceil(physicalPixels / density) : physicalPixels);
+    }
+
+    private WebResourceResponse applicationAsset(String assetPath) {
+        try {
+            return new WebResourceResponse(mimeType(assetPath), "UTF-8",
+                    getAssets().open(assetPath));
+        } catch (Exception error) {
+            Log.e("RackForge", "Could not serve application asset " + assetPath, error);
+            return emptyWebResponse(404, "Not Found");
+        }
+    }
+
+    private WebResourceResponse applicationShellAsset() {
+        try (InputStream input = getAssets().open("rackforge/index.html")) {
+            String html = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            String bootstrap = "<script>window.__RACKFORGE_NATIVE_HOST_TOKEN__="
+                    + JSONObject.quote(nativeHostToken) + ";</script>";
+            html = html.replace("<head>", "<head>" + bootstrap);
+            return new WebResourceResponse("text/html", "UTF-8",
+                    new java.io.ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception error) {
+            Log.e("RackForge", "Could not serve RackForge application shell", error);
+            return emptyWebResponse(500, "Internal Server Error");
+        }
+    }
+
+    private File installedPluginRoot(String pluginId) throws Exception {
+        JSONArray installed = new JSONObject(
+                installedPlugins(pluginStoreRoot().getAbsolutePath()))
+                .getJSONArray("plugins");
+        for (int index = 0; index < installed.length(); index++) {
+            JSONObject plugin = installed.getJSONObject(index);
+            if (pluginId.equals(plugin.optString("plugin_id"))
+                    && plugin.optBoolean("compatible")) {
+                String packageRoot = plugin.optString("package_root", "");
+                return packageRoot.isBlank() ? null : new File(packageRoot);
+            }
+        }
+        return null;
+    }
+
+    private static WebResourceResponse pluginAsset(File packageRoot, String relative) {
+        try {
+            File root = packageRoot.getCanonicalFile();
+            File asset = new File(root, relative).getCanonicalFile();
+            if (!asset.getPath().startsWith(root.getPath() + File.separator)
+                    || !asset.isFile()) {
+                return emptyWebResponse(404, "Not Found");
+            }
+            return new WebResourceResponse(mimeType(asset.getName()), null,
+                    new FileInputStream(asset));
+        } catch (Exception error) {
+            Log.e("RackForge", "Could not serve plugin Web asset", error);
+            return emptyWebResponse(500, "Internal Server Error");
+        }
+    }
+
+    private static WebResourceResponse emptyWebResponse(int status, String reason) {
+        return new WebResourceResponse("text/plain", "UTF-8", status, reason,
+                java.util.Collections.emptyMap(),
+                new java.io.ByteArrayInputStream(new byte[0]));
+    }
+
+    private static String mimeType(String name) {
+        String extension = MimeTypeMap.getFileExtensionFromUrl(name);
+        String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
+        if (mime != null) return mime;
+        if (name.endsWith(".js")) return "text/javascript";
+        if (name.endsWith(".json")) return "application/json";
+        if (name.endsWith(".svg")) return "image/svg+xml";
+        return "application/octet-stream";
     }
 
     private void injectPluginBridge() {
@@ -324,7 +563,7 @@ public final class MainActivity extends Activity {
                         respondToPlugin(requestId, false, "Resource is not available to this surface.");
                         return;
                     }
-                    runOnUiThread(() -> choosePluginResource(requestId, resourceId));
+                    runOnUiThread(() -> choosePluginResource(requestId, resourceId, false));
                     return;
                 }
                 if ("plugin.resource_bindings".equals(method)) {
@@ -371,95 +610,16 @@ public final class MainActivity extends Activity {
                     }
                     JSONObject params = request.getJSONObject("params");
                     String targetResourceId = params.getString("target_resource_id");
-                    String grantId = params.getString("grant_id");
-                    String entryId = params.isNull("entry_id")
-                            ? null : params.optString("entry_id", null);
                     if (!"file".equals(pluginResourceKind(targetResourceId))) {
                         respondToPlugin(requestId, false, "Target is not a declared file resource.");
                         return;
                     }
                     new Thread(() -> {
-                        File destination = null;
-                        File backup = null;
                         try {
-                            String pluginId = new JSONObject(pluginWebContext())
-                                    .getJSONObject("instance").getString("plugin_id");
-                            JSONArray importTargets = pluginResourceImportTargets(targetResourceId);
-                            if (importTargets.length() > 0) {
-                                File archive = copyGrantedResourceToPrivateData(
-                                        grantId, entryId, targetResourceId);
-                                JSONObject result;
-                                try {
-                                    String imported = importPluginResourceArchive(
-                                            targetResourceId,
-                                            archive.getAbsolutePath(),
-                                            new File(pluginDataRoot(), "resources").getAbsolutePath());
-                                    if (imported == null || imported.isBlank()) {
-                                        throw new IllegalStateException(
-                                                "Portable runtime could not import the resource archive");
-                                    }
-                                    result = new JSONObject(imported);
-                                } finally {
-                                    if (archive.isFile() && !archive.delete()) {
-                                        Log.w("RackForge", "Could not remove temporary resource archive " + archive);
-                                    }
-                                }
-                                JSONArray installedIds = result.optJSONArray("installed_resource_ids");
-                                if (installedIds == null || installedIds.length() == 0) {
-                                    throw new IllegalStateException(
-                                            "The archive did not contain any recognized plugin resources");
-                                }
-                                rememberImportedResources(pluginId, grantId, installedIds);
-                                runOnUiThread(() -> respondToPlugin(requestId, true, null, result));
-                                return;
-                            }
-                            destination = privatePluginResourceFile(pluginId, targetResourceId);
-                            if (destination.isFile()) {
-                                backup = new File(destination.getParentFile(),
-                                        destination.getName() + ".backup-" + UUID.randomUUID());
-                                if (!destination.renameTo(backup)) {
-                                    throw new IllegalStateException(
-                                            "Could not preserve the previous plugin resource");
-                                }
-                            }
-                            File resource = copyGrantedResourceToPrivateData(
-                                    grantId, entryId, targetResourceId);
-                            int loadStatus = loadPluginResource(
-                                    targetResourceId, resource.getAbsolutePath());
-                            if (loadStatus == 0) {
-                                throw new IllegalStateException("Portable runtime rejected the resource");
-                            }
-                            if (backup != null && backup.isFile() && !backup.delete()) {
-                                Log.w("RackForge", "Could not remove old plugin resource " + backup);
-                            }
-                            preferences.edit()
-                                    .putString("resource.active_grant." + pluginId + "." + targetResourceId,
-                                            grantId)
-                                    .putString("resource.active_entry." + pluginId + "." + targetResourceId,
-                                            entryId == null ? "__grant_root__" : entryId)
-                                    .apply();
-                            JSONObject result = new JSONObject();
-                            result.put("stored", true);
-                            result.put("activated", loadStatus == 1);
+                            JSONObject result = loadGrantedPluginResource(params);
                             runOnUiThread(() -> respondToPlugin(requestId, true, null, result));
                         } catch (Throwable error) {
                             Log.e("RackForge", "Could not load plugin resource", error);
-                            if (backup != null) {
-                                if (backup.isFile()) {
-                                    if (destination != null && destination.isFile()
-                                            && !destination.delete()) {
-                                        Log.e("RackForge", "Could not discard rejected plugin resource "
-                                                + destination);
-                                    } else if (destination != null && !backup.renameTo(destination)) {
-                                        Log.e("RackForge", "Could not restore previous plugin resource "
-                                                + backup);
-                                    }
-                                }
-                            } else if (destination != null && destination.isFile()
-                                    && !destination.delete()) {
-                                Log.e("RackForge", "Could not discard rejected plugin resource "
-                                        + destination);
-                            }
                             runOnUiThread(() -> respondToPlugin(requestId, false,
                                     error.getMessage() == null ? error.toString() : error.getMessage()));
                         }
@@ -521,6 +681,447 @@ public final class MainActivity extends Activity {
                 }, "rackforge-plugin-web-command").start();
             } catch (Throwable error) {
                 Log.e("RackForge", "Invalid plugin Web message", error);
+            }
+        }
+    }
+
+    private final class NativeHostBridge {
+        @JavascriptInterface
+        public void postMessage(String payload) {
+            try {
+                JSONObject request = new JSONObject(payload);
+                if (!HOST_PROTOCOL.equals(request.optString("protocol"))
+                        || !"request".equals(request.optString("kind"))) return;
+                String requestId = request.getString("request_id");
+                if (!nativeHostToken.equals(request.optString("token"))) {
+                    respondNativeHost(requestId, false, 403,
+                            "RackForge native host authentication failed.", null);
+                    return;
+                }
+                String method = request.getString("method");
+                JSONObject decodedParams = request.optJSONObject("params");
+                final JSONObject params = decodedParams == null ? new JSONObject() : decodedParams;
+                switch (method) {
+                    case "http.request" -> handleNativeHttpRequest(requestId, params);
+                    case "session.connect" -> runOnUiThread(() -> {
+                        nativeSessionConnected = true;
+                        respondNativeHost(requestId, true, 200, null, new JSONObject());
+                        emitNativeSessionEvent("open", null);
+                        emitSessionSnapshot();
+                    });
+                    case "session.send" -> {
+                        String sessionPayload = params.getString("payload");
+                        respondNativeHost(requestId, true, 200, null, new JSONObject());
+                        handleSharedSessionPayload(sessionPayload);
+                    }
+                    case "session.close" -> runOnUiThread(() -> {
+                        nativeSessionConnected = false;
+                        respondNativeHost(requestId, true, 200, null, new JSONObject());
+                    });
+                    case "ui.haptic" -> runOnUiThread(() -> {
+                        String style = params.optString("style", "tap");
+                        int feedback = "confirm".equals(style) && Build.VERSION.SDK_INT >= 30
+                                ? HapticFeedbackConstants.CONFIRM
+                                : HapticFeedbackConstants.VIRTUAL_KEY;
+                        boolean performed = webView.performHapticFeedback(feedback);
+                        respondNativeHost(requestId, true, 200, null, performed);
+                    });
+                    case "ui.route" -> runOnUiThread(() -> {
+                        rememberSharedUiRoute(params.optString("path", ""));
+                        respondNativeHost(requestId, true, 200, null, new JSONObject());
+                    });
+                    case "resource.pick" -> runOnUiThread(
+                            () -> chooseClientResource(requestId, params));
+                    case "resource.bind" -> runOnUiThread(
+                            () -> chooseNativePluginResource(requestId, params));
+                    case "plugin.select_sound" -> selectNativePluginSound(requestId, params);
+                    default -> respondNativeHost(requestId, false, 404,
+                            "RackForge Android does not expose " + method + ".", null);
+                }
+            } catch (Throwable error) {
+                Log.e("RackForge", "Invalid native host request", error);
+            }
+        }
+    }
+
+    private void handleNativeHttpRequest(String requestId, JSONObject params) {
+        new Thread(() -> {
+            try {
+                String path = params.getString("path");
+                String method = params.optString("method", "GET").toUpperCase(Locale.ROOT);
+                Object result;
+                if ("GET".equals(method) && "/api/v1/auth/status".equals(path)) {
+                    result = new JSONObject()
+                            .put("status", "ok")
+                            .put("pin_managed", false)
+                            .put("requires_pin", false)
+                            .put("unlocked", true)
+                            .put("pin_state", "set")
+                            .put("pin_digits", 4)
+                            .put("locked_for", 0);
+                } else if ("GET".equals(method) && "/api/v1/config".equals(path)) {
+                    result = new JSONObject()
+                            .put("enabled", false)
+                            .put("access", "local")
+                            .put("port", 8787);
+                } else if ("GET".equals(method) && "/api/v1/plugins".equals(path)) {
+                    result = sharedPluginDescriptors();
+                } else if ("POST".equals(method)
+                        && "/api/v1/plugins/install".equals(path)) {
+                    JSONObject body = new JSONObject(params.optString("body", "{}"));
+                    result = installSelectedClientResource(body.getString("selection_id"));
+                } else if ("POST".equals(method)
+                        && "/api/v1/plugins/install-local".equals(path)) {
+                    respondNativeHost(requestId, true, 202, null,
+                            new JSONObject().put("status", "picker_opening"));
+                    runOnUiThread(this::choosePluginFile);
+                    return;
+                } else if ("GET".equals(method) && "/api/v1/diagnostics".equals(path)) {
+                    result = sharedDiagnostics();
+                } else if ("POST".equals(method)
+                        && "/api/v1/resources/grants".equals(path)) {
+                    JSONObject body = requestBody(params);
+                    requireCurrentPlugin(body.getString("plugin_id"));
+                    result = pluginResourceBindings();
+                } else if ("POST".equals(method)
+                        && "/api/v1/resources/status".equals(path)) {
+                    JSONObject body = requestBody(params);
+                    requireCurrentPlugin(body.getString("plugin_id"));
+                    result = pluginResourceStatus();
+                } else if ("POST".equals(method)
+                        && "/api/v1/resources/browse".equals(path)) {
+                    JSONObject body = requestBody(params);
+                    requireCurrentPlugin(body.getString("plugin_id"));
+                    String parentId = body.isNull("parent_id")
+                            ? null : body.optString("parent_id", null);
+                    result = pluginResourceEntries(body.getString("grant_id"), parentId);
+                } else if ("POST".equals(method)
+                        && "/api/v1/resources/load".equals(path)) {
+                    JSONObject body = requestBody(params);
+                    requireCurrentPlugin(body.getString("plugin_id"));
+                    String instanceId = body.optString("instance_id", "android-main");
+                    if (!"android-main".equals(instanceId)) {
+                        throw new IllegalArgumentException(
+                                "Resource target belongs to another plugin instance");
+                    }
+                    result = loadGrantedPluginResource(body);
+                } else if ("POST".equals(method)
+                        && path.startsWith("/api/v1/plugins/")
+                        && path.endsWith("/activate")) {
+                    String pluginId = path.substring("/api/v1/plugins/".length(),
+                            path.length() - "/activate".length());
+                    JSONObject plugin = installedPluginRecord(pluginId);
+                    if (plugin == null || !plugin.optBoolean("compatible")) {
+                        respondNativeHost(requestId, false, 404,
+                                "Plugin is not installed or compatible.", null);
+                        return;
+                    }
+                    if (engineStarting) {
+                        respondNativeHost(requestId, false, 409,
+                                "RackForge is already changing plugins.", null);
+                        return;
+                    }
+                    respondNativeHost(requestId, true, 202, null,
+                            new JSONObject().put("status", "activating")
+                                    .put("plugin_id", pluginId));
+                    runOnUiThread(() -> activatePlugin(
+                            plugin.optString("package_root"),
+                            plugin.optString("plugin_name", pluginId),
+                            plugin.optString("version")));
+                    return;
+                } else if ("GET".equals(method) && path.startsWith("/api/v1/plugins/")) {
+                    String pluginId = path.substring("/api/v1/plugins/".length());
+                    JSONObject descriptor = sharedPluginDescriptor(pluginId);
+                    if (descriptor == null) {
+                        respondNativeHost(requestId, false, 404,
+                                "Plugin is not installed.", null);
+                        return;
+                    }
+                    result = descriptor;
+                } else if ("GET".equals(method) && "/api/v1/repositories".equals(path)) {
+                    result = new JSONObject()
+                            .put("schema_version", 1)
+                            .put("repositories", new JSONArray());
+                } else if ("GET".equals(method) && "/api/v1/store/catalog".equals(path)) {
+                    result = new JSONObject().put("repositories", new JSONArray());
+                } else {
+                    respondNativeHost(requestId, false, 404,
+                            "Android host route is not available: " + path, null);
+                    return;
+                }
+                respondNativeHost(requestId, true, 200, null, result);
+            } catch (Throwable error) {
+                Log.e("RackForge", "Android host request failed", error);
+                respondNativeHost(requestId, false, 500,
+                        error.getMessage() == null ? error.toString() : error.getMessage(), null);
+            }
+        }, "rackforge-native-host-http").start();
+    }
+
+    private static JSONObject requestBody(JSONObject params) throws Exception {
+        String body = params.optString("body", "{}");
+        return body == null || body.isBlank() ? new JSONObject() : new JSONObject(body);
+    }
+
+    private void requireCurrentPlugin(String pluginId) throws Exception {
+        String currentPluginId = new JSONObject(pluginWebContext())
+                .getJSONObject("instance").getString("plugin_id");
+        if (!currentPluginId.equals(pluginId)) {
+            throw new IllegalArgumentException(
+                    "Resource request belongs to another plugin instance");
+        }
+    }
+
+    private JSONArray sharedPluginDescriptors() throws Exception {
+        JSONArray installed = new JSONObject(
+                installedPlugins(pluginStoreRoot().getAbsolutePath()))
+                .getJSONArray("plugins");
+        JSONArray descriptors = new JSONArray();
+        for (int index = 0; index < installed.length(); index++) {
+            JSONObject plugin = installed.getJSONObject(index);
+            if (!plugin.optBoolean("compatible")) continue;
+            descriptors.put(sharedPluginDescriptor(plugin));
+        }
+        return descriptors;
+    }
+
+    private JSONObject sharedPluginDescriptor(String pluginId) throws Exception {
+        JSONObject plugin = installedPluginRecord(pluginId);
+        return plugin != null && plugin.optBoolean("compatible")
+                ? sharedPluginDescriptor(plugin) : null;
+    }
+
+    private JSONObject installedPluginRecord(String pluginId) throws Exception {
+        JSONArray installed = new JSONObject(
+                installedPlugins(pluginStoreRoot().getAbsolutePath()))
+                .getJSONArray("plugins");
+        for (int index = 0; index < installed.length(); index++) {
+            JSONObject plugin = installed.getJSONObject(index);
+            if (pluginId.equals(plugin.optString("plugin_id"))
+                    && plugin.optBoolean("compatible")) {
+                return plugin;
+            }
+        }
+        return null;
+    }
+
+    private static JSONObject sharedPluginDescriptor(JSONObject plugin) throws Exception {
+        String pluginId = plugin.getString("plugin_id");
+        JSONArray surfaces = new JSONArray();
+        String playEntry = plugin.optString("web_entry", "");
+        if (!playEntry.isBlank()) {
+            surfaces.put(new JSONObject()
+                    .put("kind", "play")
+                    .put("entry_url", "https://" + APP_HOST + "/plugin-assets/"
+                            + Uri.encode(pluginId) + "/" + playEntry));
+        }
+        String configEntry = plugin.optString("config_web_entry", "");
+        if (!configEntry.isBlank()) {
+            surfaces.put(new JSONObject()
+                    .put("kind", "config")
+                    .put("entry_url", "https://" + APP_HOST + "/plugin-assets/"
+                            + Uri.encode(pluginId) + "/" + configEntry));
+        }
+        JSONArray resources = plugin.optJSONArray("resources");
+        return new JSONObject()
+                .put("plugin_id", pluginId)
+                .put("plugin_name", plugin.getString("plugin_name"))
+                .put("version", plugin.getString("version"))
+                .put("active", plugin.optBoolean("active"))
+                .put("api_version", plugin.optInt("web_api_version", 0))
+                .put("surfaces", surfaces)
+                .put("resources", resources == null ? new JSONArray() : resources);
+    }
+
+    private JSONObject sharedDiagnostics() throws Exception {
+        JSONObject audioStatus;
+        try {
+            audioStatus = new JSONObject(nativeAudioStatus());
+        } catch (Throwable error) {
+            audioStatus = new JSONObject();
+        }
+        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        JSONArray audioOutputs = new JSONArray();
+        for (AudioDeviceInfo output : audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            if (!output.isSink()) continue;
+            String name = output.getProductName() == null
+                    ? "Audio device" : output.getProductName().toString();
+            audioOutputs.put(new JSONObject()
+                    .put("id", output.getId())
+                    .put("name", name)
+                    .put("detail", typeLabel(output.getType()) + " · "
+                            + channelSummary(output.getChannelCounts())));
+        }
+        JSONArray midiDevices = new JSONArray();
+        MidiManager midiManager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
+        if (midiManager != null) {
+            for (MidiDeviceInfo device : midiManager.getDevices()) {
+                midiDevices.put(new JSONObject()
+                        .put("name", midiDeviceName(device))
+                        .put("detail", device.getPorts().length + " ports · type "
+                                + device.getType()));
+            }
+        }
+        JSONArray usbDevices = new JSONArray();
+        UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
+        for (UsbDevice device : usbManager.getDeviceList().values()) {
+            String name = device.getProductName();
+            if (name == null || name.isBlank()) name = device.getDeviceName();
+            usbDevices.put(new JSONObject()
+                    .put("name", name)
+                    .put("detail", String.format(Locale.ROOT,
+                            "VID %04X · PID %04X · %d interfaces",
+                            device.getVendorId(), device.getProductId(),
+                            device.getInterfaceCount())));
+        }
+        return new JSONObject()
+                .put("platform", "Android native")
+                .put("version", BuildConfig.VERSION_NAME)
+                .put("audio_running", audioRunning)
+                .put("selected_audio_output", selectedAudioOutputLabel())
+                .put("audio_status", audioStatus)
+                .put("audio_outputs", audioOutputs)
+                .put("midi_devices", midiDevices)
+                .put("usb_devices", usbDevices);
+    }
+
+    private void respondNativeHost(String requestId, boolean ok, int status,
+            String error, Object result) {
+        try {
+            JSONObject response = new JSONObject()
+                    .put("protocol", HOST_PROTOCOL)
+                    .put("kind", "response")
+                    .put("request_id", requestId)
+                    .put("ok", ok)
+                    .put("status", status);
+            if (error != null) response.put("error", error);
+            if (result != null) response.put("result", result);
+            postNativeHostMessage(response);
+        } catch (Exception responseError) {
+            Log.e("RackForge", "Could not encode native host response", responseError);
+        }
+    }
+
+    private void emitNativeSessionEvent(String event, String payload) {
+        try {
+            JSONObject message = new JSONObject()
+                    .put("protocol", HOST_PROTOCOL)
+                    .put("kind", "event")
+                    .put("channel", "session")
+                    .put("event", event);
+            if (payload != null) message.put("payload", payload);
+            postNativeHostMessage(message);
+        } catch (Exception error) {
+            Log.e("RackForge", "Could not encode native session event", error);
+        }
+    }
+
+    private void postNativeHostMessage(JSONObject message) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(() -> postNativeHostMessage(message));
+            return;
+        }
+        if (!sharedUiReady) return;
+        webView.evaluateJavascript(
+                "window.postMessage(" + message + ",window.location.origin);", null);
+    }
+
+    private void emitSessionSnapshot() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(this::emitSessionSnapshot);
+            return;
+        }
+        if (!nativeSessionConnected || !sharedUiReady) return;
+        try {
+            JSONObject snapshot = sharedSessionSnapshot();
+            emitNativeSessionEvent("message", new JSONObject()
+                    .put("status", "snapshot")
+                    .put("snapshot", snapshot)
+                    .toString());
+        } catch (Throwable error) {
+            Log.e("RackForge", "Could not publish Android session snapshot", error);
+        }
+    }
+
+    private JSONObject sharedSessionSnapshot() throws Exception {
+        nativeSessionRevision++;
+        JSONArray instances = new JSONArray();
+        JSONObject context = null;
+        try {
+            String contextJson = pluginWebContext();
+            if (contextJson != null && !contextJson.isBlank()) {
+                context = new JSONObject(contextJson);
+                instances.put(context.getJSONObject("instance"));
+            }
+        } catch (Throwable ignored) {
+            // Engine start and plugin replacement intentionally publish an empty session.
+        }
+        String mode = "idle".equals(currentPage) ? "idle"
+                : "live".equals(currentPage) ? "live" : "play";
+        JSONObject snapshot = new JSONObject()
+                .put("schema_version", 14)
+                .put("session_id", "android.main")
+                .put("revision", nativeSessionRevision)
+                .put("active_mode", mode)
+                .put("master_level", 1000)
+                .put("master_pan", 0)
+                .put("live", new JSONObject().put("mode", "rack"))
+                .put("instances", instances);
+        if (instances.length() > 0) snapshot.put("active_instance_id", "android-main");
+        if (context != null && !context.isNull("program_draft")) {
+            snapshot.put("program_draft", context.get("program_draft"));
+        }
+        if (context != null && !context.isNull("audition")) {
+            snapshot.put("audition", context.get("audition"));
+        }
+        return snapshot;
+    }
+
+    private void handleSharedSessionPayload(String payload) {
+        try {
+            JSONObject request = new JSONObject(payload);
+            String operation = request.optString("op");
+            if ("performance_snapshot".equals(operation)) {
+                JSONObject live = new JSONObject().put("mode", "rack");
+                JSONObject library = new JSONObject()
+                        .put("schema_version", 1)
+                        .put("racks", new JSONArray())
+                        .put("songs", new JSONArray())
+                        .put("setlists", new JSONArray());
+                JSONObject snapshot = new JSONObject()
+                        .put("schema_version", 1)
+                        .put("revision", "android-0")
+                        .put("library", library)
+                        .put("live", live);
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "performance_snapshot")
+                        .put("snapshot", snapshot)
+                        .toString());
+                return;
+            }
+            if (!"dispatch".equals(operation)) return;
+            JSONObject command = request.getJSONObject("envelope").getJSONObject("command");
+            String type = command.optString("type");
+            switch (type) {
+                case "set_active_mode" -> runOnUiThread(() -> {
+                    String mode = command.optString("mode");
+                    if ("live".equals(mode)) showLive();
+                    else if ("idle".equals(mode)) showIdle();
+                    else showPlay();
+                });
+                case "select_sound" -> selectControllerSound(command.optString("sound_id"));
+                default -> Log.d("RackForge", "Shared UI command pending on Android: " + type);
+            }
+        } catch (Throwable error) {
+            Log.e("RackForge", "Could not handle shared UI session request", error);
+            try {
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "gateway_error")
+                        .put("message", error.getMessage() == null
+                                ? error.toString() : error.getMessage())
+                        .toString());
+            } catch (Exception ignored) {
+                // Logging above is the final fallback when even JSON encoding fails.
             }
         }
     }
@@ -641,6 +1242,90 @@ public final class MainActivity extends Activity {
             }
         }
         return new JSONArray();
+    }
+
+    private JSONObject loadGrantedPluginResource(JSONObject params) throws Exception {
+        String targetResourceId = params.getString("target_resource_id");
+        String grantId = params.getString("grant_id");
+        String entryId = params.isNull("entry_id")
+                ? null : params.optString("entry_id", null);
+        if (!"file".equals(pluginResourceKind(targetResourceId))) {
+            throw new IllegalArgumentException("Target is not a declared file resource.");
+        }
+        String pluginId = new JSONObject(pluginWebContext())
+                .getJSONObject("instance").getString("plugin_id");
+        JSONArray importTargets = pluginResourceImportTargets(targetResourceId);
+        if (importTargets.length() > 0) {
+            File archive = copyGrantedResourceToPrivateData(
+                    grantId, entryId, targetResourceId);
+            JSONObject result;
+            try {
+                String imported = importPluginResourceArchive(
+                        targetResourceId,
+                        archive.getAbsolutePath(),
+                        new File(pluginDataRoot(), "resources").getAbsolutePath());
+                if (imported == null || imported.isBlank()) {
+                    throw new IllegalStateException(
+                            "Portable runtime could not import the resource archive");
+                }
+                result = new JSONObject(imported);
+            } finally {
+                if (archive.isFile() && !archive.delete()) {
+                    Log.w("RackForge", "Could not remove temporary resource archive " + archive);
+                }
+            }
+            JSONArray installedIds = result.optJSONArray("installed_resource_ids");
+            if (installedIds == null || installedIds.length() == 0) {
+                throw new IllegalStateException(
+                        "The archive did not contain any recognized plugin resources");
+            }
+            rememberImportedResources(pluginId, grantId, installedIds);
+            return result;
+        }
+
+        File destination = privatePluginResourceFile(pluginId, targetResourceId);
+        File backup = null;
+        try {
+            if (destination.isFile()) {
+                backup = new File(destination.getParentFile(),
+                        destination.getName() + ".backup-" + UUID.randomUUID());
+                if (!destination.renameTo(backup)) {
+                    throw new IllegalStateException(
+                            "Could not preserve the previous plugin resource");
+                }
+            }
+            File resource = copyGrantedResourceToPrivateData(
+                    grantId, entryId, targetResourceId);
+            int loadStatus = loadPluginResource(targetResourceId, resource.getAbsolutePath());
+            if (loadStatus == 0) {
+                throw new IllegalStateException("Portable runtime rejected the resource");
+            }
+            if (backup != null && backup.isFile() && !backup.delete()) {
+                Log.w("RackForge", "Could not remove old plugin resource " + backup);
+            }
+            preferences.edit()
+                    .putString("resource.active_grant." + pluginId + "." + targetResourceId,
+                            grantId)
+                    .putString("resource.active_entry." + pluginId + "." + targetResourceId,
+                            entryId == null ? "__grant_root__" : entryId)
+                    .apply();
+            return new JSONObject()
+                    .put("stored", true)
+                    .put("activated", loadStatus == 1);
+        } catch (Throwable error) {
+            if (backup != null && backup.isFile()) {
+                if (destination.isFile() && !destination.delete()) {
+                    Log.e("RackForge", "Could not discard rejected plugin resource "
+                            + destination);
+                } else if (!backup.renameTo(destination)) {
+                    Log.e("RackForge", "Could not restore previous plugin resource " + backup);
+                }
+            } else if (destination.isFile() && !destination.delete()) {
+                Log.e("RackForge", "Could not discard rejected plugin resource " + destination);
+            }
+            if (error instanceof Exception) throw (Exception) error;
+            throw new RuntimeException(error);
+        }
     }
 
     private void rememberImportedResources(
@@ -1037,19 +1722,52 @@ public final class MainActivity extends Activity {
         startActivityForResult(intent, REQUEST_INSTALL_PLUGIN);
     }
 
-    private void choosePluginResource(String requestId, String resourceId) {
+    private void chooseClientResource(String requestId, JSONObject params) {
+        if (pendingClientResourceRequestId != null) {
+            respondNativeHost(requestId, false, 409,
+                    "Another resource selection is already open.", null);
+            return;
+        }
+        if (!"file".equals(params.optString("kind", "file"))) {
+            respondNativeHost(requestId, false, 400,
+                    "This Android picker currently selects files.", null);
+            return;
+        }
+        pendingClientResourceRequestId = requestId;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(intent, REQUEST_SELECT_CLIENT_RESOURCE);
+    }
+
+    private void chooseNativePluginResource(String requestId, JSONObject params) {
+        try {
+            requireCurrentPlugin(params.getString("plugin_id"));
+            choosePluginResource(requestId, params.getString("resource_id"), true);
+        } catch (Throwable error) {
+            respondNativeHost(requestId, false, 400,
+                    error.getMessage() == null ? error.toString() : error.getMessage(), null);
+        }
+    }
+
+    private void choosePluginResource(
+            String requestId, String resourceId, boolean nativeHost) {
         if (pendingResourceRequestId != null) {
-            respondToPlugin(requestId, false, "Another resource selection is already open.");
+            respondPluginResourceSelection(requestId, nativeHost, false,
+                    "Another resource selection is already open.", null);
             return;
         }
         String kind = pluginResourceKind(resourceId);
         if (!"directory".equals(kind) && !"file".equals(kind)) {
-            respondToPlugin(requestId, false, "Plugin resource has an unsupported kind.");
+            respondPluginResourceSelection(requestId, nativeHost, false,
+                    "Plugin resource has an unsupported kind.", null);
             return;
         }
         pendingResourceRequestId = requestId;
         pendingResourceId = resourceId;
         pendingResourceKind = kind;
+        pendingResourceNativeHost = nativeHost;
         Intent intent;
         if ("directory".equals(kind)) {
             intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
@@ -1071,6 +1789,10 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_SELECT_CLIENT_RESOURCE) {
+            finishClientResourceSelection(resultCode, data);
+            return;
+        }
         if (requestCode == REQUEST_SELECT_PLUGIN_RESOURCE) {
             finishPluginResourceSelection(resultCode, data);
             return;
@@ -1091,16 +1813,58 @@ public final class MainActivity extends Activity {
         importPlugin(uri);
     }
 
+    private void finishClientResourceSelection(int resultCode, Intent data) {
+        String requestId = pendingClientResourceRequestId;
+        pendingClientResourceRequestId = null;
+        if (requestId == null) return;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            respondNativeHost(requestId, false, 400,
+                    "Resource selection was cancelled by the user.", null);
+            return;
+        }
+        Uri uri = data.getData();
+        String selectedName = selectedFileName(uri);
+        String displayName = selectedName == null || selectedName.isBlank()
+                ? "Selected file" : selectedName;
+        new Thread(() -> {
+            File temporary = null;
+            try {
+                cleanupExpiredClientResources();
+                temporary = copyClientResourceToPrivateCache(uri);
+                String selectionId = UUID.randomUUID().toString();
+                clientResourceSelections.put(selectionId,
+                        new ClientResourceSelection(temporary, displayName));
+                JSONObject selection = new JSONObject()
+                        .put("selection_id", selectionId)
+                        .put("display_name", displayName)
+                        .put("kind", "file")
+                        .put("size", temporary.length())
+                        .put("source", "client_upload")
+                        .put("expires_in_seconds", CLIENT_RESOURCE_TTL_MS / 1000L);
+                respondNativeHost(requestId, true, 200, null, selection);
+            } catch (Throwable error) {
+                if (temporary != null && temporary.isFile() && !temporary.delete()) {
+                    Log.w("RackForge", "Could not remove failed resource import " + temporary);
+                }
+                respondNativeHost(requestId, false, 400,
+                        error.getMessage() == null ? error.toString() : error.getMessage(), null);
+            }
+        }, "rackforge-client-resource-picker").start();
+    }
+
     private void finishPluginResourceSelection(int resultCode, Intent data) {
         String requestId = pendingResourceRequestId;
         String resourceId = pendingResourceId;
         String kind = pendingResourceKind;
+        boolean nativeHost = pendingResourceNativeHost;
         pendingResourceRequestId = null;
         pendingResourceId = null;
         pendingResourceKind = null;
+        pendingResourceNativeHost = false;
         if (requestId == null) return;
         if (resultCode != RESULT_OK || data == null || data.getData() == null) {
-            respondToPlugin(requestId, false, "Resource selection was cancelled by the user.");
+            respondPluginResourceSelection(requestId, nativeHost, false,
+                    "Resource selection was cancelled by the user.", null);
             return;
         }
         Uri uri = data.getData();
@@ -1130,11 +1894,20 @@ public final class MainActivity extends Activity {
             grant.put("resource_id", resourceId);
             grant.put("display_name", displayName);
             grant.put("kind", kind);
-            respondToPlugin(requestId, true, null, grant);
+            respondPluginResourceSelection(requestId, nativeHost, true, null, grant);
         } catch (Throwable error) {
             Log.e("RackForge", "Could not authorize plugin resource", error);
-            respondToPlugin(requestId, false,
-                    error.getMessage() == null ? error.toString() : error.getMessage());
+            respondPluginResourceSelection(requestId, nativeHost, false,
+                    error.getMessage() == null ? error.toString() : error.getMessage(), null);
+        }
+    }
+
+    private void respondPluginResourceSelection(String requestId, boolean nativeHost,
+            boolean ok, String error, JSONObject grant) {
+        if (nativeHost) {
+            respondNativeHost(requestId, ok, ok ? 200 : 400, error, grant);
+        } else {
+            respondToPlugin(requestId, ok, error, grant);
         }
     }
 
@@ -1265,6 +2038,47 @@ public final class MainActivity extends Activity {
         }, "rackforge-plugin-install").start();
     }
 
+    private JSONObject installSelectedClientResource(String selectionId) throws Exception {
+        cleanupExpiredClientResources();
+        ClientResourceSelection selection = clientResourceSelections.remove(selectionId);
+        if (selection == null || !selection.file.isFile()) {
+            throw new IllegalArgumentException("The resource selection is missing or expired.");
+        }
+        try {
+            if (selection.file.length() > MAX_PLUGIN_BYTES) {
+                throw new IllegalArgumentException(
+                        "The plugin exceeds the 512 MB package limit.");
+            }
+            String descriptorText = installPluginFile(
+                    selection.file.getAbsolutePath(), pluginStoreRoot().getAbsolutePath());
+            JSONObject descriptor = new JSONObject(descriptorText);
+            keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
+            refreshKeyLabDisplay();
+            return new JSONObject()
+                    .put("plugin_id", descriptor.getString("plugin_id"))
+                    .put("version", descriptor.getString("version"))
+                    .put("already_installed", descriptor.optBoolean("already_installed"))
+                    .put("activation_required", true);
+        } finally {
+            if (selection.file.isFile() && !selection.file.delete()) {
+                Log.w("RackForge", "Could not remove consumed resource " + selection.file);
+            }
+        }
+    }
+
+    private void cleanupExpiredClientResources() {
+        long cutoff = System.currentTimeMillis() - CLIENT_RESOURCE_TTL_MS;
+        for (Map.Entry<String, ClientResourceSelection> entry
+                : clientResourceSelections.entrySet()) {
+            ClientResourceSelection selection = entry.getValue();
+            if (selection.createdAtMs >= cutoff
+                    || !clientResourceSelections.remove(entry.getKey(), selection)) continue;
+            if (selection.file.isFile() && !selection.file.delete()) {
+                Log.w("RackForge", "Could not remove expired resource " + selection.file);
+            }
+        }
+    }
+
     private String selectedFileName(Uri uri) {
         try (Cursor cursor = getContentResolver().query(
                 uri, new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
@@ -1291,6 +2105,31 @@ public final class MainActivity extends Activity {
                 output.write(buffer, 0, read);
             }
             if (total == 0) throw new IllegalStateException("The selected plugin is empty");
+            output.flush();
+            output.getFD().sync();
+        } catch (Throwable error) {
+            if (temporary.isFile() && !temporary.delete()) temporary.deleteOnExit();
+            throw error;
+        }
+        return temporary;
+    }
+
+    private File copyClientResourceToPrivateCache(Uri uri) throws Exception {
+        File temporary = File.createTempFile("rackforge-resource-", ".upload", getCacheDir());
+        long total = 0;
+        try (InputStream input = getContentResolver().openInputStream(uri);
+             FileOutputStream output = new FileOutputStream(temporary)) {
+            if (input == null) throw new IllegalStateException("The selected file cannot be opened");
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                total += read;
+                if (total > MAX_CLIENT_RESOURCE_BYTES) {
+                    throw new IllegalStateException("The resource exceeds the 2 GB host limit");
+                }
+                output.write(buffer, 0, read);
+            }
+            if (total == 0) throw new IllegalStateException("The selected file is empty");
             output.flush();
             output.getFD().sync();
         } catch (Throwable error) {
@@ -1687,18 +2526,50 @@ public final class MainActivity extends Activity {
      * deliver the selected grant.
      */
     private void restoreVisiblePage() {
-        if ("diagnostics".equals(currentPage)) {
-            renderDiagnostics();
-        } else if ("live".equals(currentPage)) {
-            showLive();
-        } else if ("idle".equals(currentPage)) {
-            showIdle();
-        } else if ("plugin-config".equals(currentPage)) {
-            pluginWebSurface = "config";
-            updateModeButtons();
-        } else {
-            showPlay();
+        navigateSharedUi(currentSharedRoute);
+        emitSessionSnapshot();
+    }
+
+    private void rememberSharedUiRoute(String route) {
+        if (route == null || !route.matches(
+                "^/(?:|play|live|plugins(?:/[^/?#]+)?|settings|diagnostics|about)$")) {
+            Log.w("RackForge", "Ignoring unsupported shared UI route " + route);
+            return;
         }
+        currentSharedRoute = route;
+        if (route.startsWith("/plugins/")) {
+            currentPage = "plugin-config";
+            pluginWebSurface = "config";
+        } else if ("/play".equals(route)) {
+            currentPage = "play";
+            pluginWebSurface = "play";
+        } else if ("/live".equals(route)) {
+            currentPage = "live";
+            pluginWebSurface = "play";
+        } else if ("/diagnostics".equals(route)) {
+            currentPage = "diagnostics";
+            pluginWebSurface = "play";
+        } else if ("plugin-config".equals(currentPage)) {
+            currentPage = "live".equals(
+                    preferences.getString("session.active_mode", "play")) ? "live" : "play";
+            pluginWebSurface = "play";
+        }
+    }
+
+    private void navigateSharedUi(String route) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(() -> navigateSharedUi(route));
+            return;
+        }
+        currentSharedRoute = route;
+        if (!sharedUiReady) {
+            if (!SHARED_UI_URL.equals(webView.getUrl())) webView.loadUrl(SHARED_UI_URL);
+            return;
+        }
+        String encoded = JSONObject.quote(route);
+        webView.evaluateJavascript(
+                "history.pushState({},''," + encoded + ");"
+                        + "window.dispatchEvent(new PopStateEvent('popstate'));", null);
     }
 
     private void syncControllerActiveMode(String mode, boolean persist) {
@@ -1720,16 +2591,8 @@ public final class MainActivity extends Activity {
         pluginWebSurface = "play";
         syncControllerActiveMode("play", true);
         updateModeButtons();
-        if (audioRunning && pluginWebEntry != null) {
-            webView.loadUrl("https://rackforge.local/plugin/" + pluginWebEntry);
-            return;
-        }
-        if (engineStarting) {
-            showEngineState("Loading plugin", "Validating the portable package and starting AAudio…");
-        } else {
-            showEngineState("No plugin selected",
-                    "Install a portable .rfplugin package, then choose it from Select plugin.");
-        }
+        navigateSharedUi("/play");
+        emitSessionSnapshot();
     }
 
     private void showPluginConfig() {
@@ -1738,47 +2601,30 @@ public final class MainActivity extends Activity {
         pluginWebSurface = "config";
         syncControllerActiveMode("play", true);
         updateModeButtons();
-        webView.loadUrl("https://rackforge.local/plugin/" + pluginConfigWebEntry);
+        navigateSharedUi("/plugins/android-main");
+        emitSessionSnapshot();
     }
 
     private void showIdle() {
         currentPage = "idle";
         syncControllerActiveMode("idle", false);
         updateModeButtons();
-        showEngineState("RackForge idle",
-                "No plugin is active. Choose PLAY and select a plugin to start audio again.");
+        navigateSharedUi("/");
+        emitSessionSnapshot();
     }
 
     private void showLive() {
         currentPage = "live";
         syncControllerActiveMode("live", true);
         updateModeButtons();
-        int midiPorts;
-        synchronized (openMidiPorts) { midiPorts = openMidiPorts.size(); }
-        String body = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-                + "<style>" + css() + "</style></head><body><main>"
-                + "<div class='eyebrow'>LIVE MODE</div><h1>Performance rack</h1>"
-                + "<p class='lead'>A stable performance view that stays separate from the plugin editor in Play.</p>"
-                + card("Rack 1", row("Instrument", activePluginDisplayName())
-                        + row("Audio", audioRunning ? selectedAudioOutputLabel() : "Inactive")
-                        + row("MIDI inputs", Integer.toString(midiPorts)))
-                + card("System health", row("Thermal", thermalLabel(thermalStatus))
-                        + row("Background audio", audioRunning ? "Protected by foreground service" : "Inactive")
-                        + "<div class='ok'>Use PLAY to edit sounds; LIVE keeps the performance overview stable.</div>")
-                + "</main></body></html>";
-        webView.loadDataWithBaseURL("https://rackforge.local/live/", body, "text/html", "UTF-8", null);
+        navigateSharedUi("/live");
+        emitSessionSnapshot();
     }
 
     private void showEngineState(String title, String detail) {
-        String body = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-                + "<style>" + css() + "</style></head><body><main>"
-                + "<div class='eyebrow'>RACKFORGE ANDROID</div><h1>" + escape(title) + "</h1>"
-                + "<p class='lead'>" + escape(detail) + "</p>"
-                + card("Engine", "<div class='ok'>Automatic startup</div>"
-                        + row("Audio output", selectedAudioOutputLabel())
-                        + row("Latency mode", latencyLabel(latencyMode)))
-                + "</main></body></html>";
-        webView.loadDataWithBaseURL("https://rackforge.local/status/", body, "text/html", "UTF-8", null);
+        Log.i("RackForge", title + ": " + detail);
+        navigateSharedUi("/");
+        emitSessionSnapshot();
     }
 
     private void showDiagnostics() {
@@ -2701,18 +3547,57 @@ public final class MainActivity extends Activity {
     private void selectControllerSound(String soundId) {
         if (soundId == null || soundId.isBlank()) return;
         new Thread(() -> {
-            if (!selectPluginSound(soundId)) {
-                Log.w("RackForge", "KeyLab could not select sound " + soundId);
-                return;
+            try {
+                applyPluginSound(soundId);
+                runOnUiThread(this::publishSelectedPluginSound);
+            } catch (Throwable error) {
+                Log.w("RackForge", "Could not select sound " + soundId, error);
             }
-            rememberActivePluginSound();
-            if (!keyLabSyncActivePlugin()) {
-                Log.w("RackForge", "KeyLab could not confirm sound " + soundId);
-                return;
-            }
-            refreshKeyLabDisplay();
-            runOnUiThread(() -> sendPluginMessage(pluginWebContext()));
         }, "rackforge-keylab-sound").start();
+    }
+
+    private void selectNativePluginSound(String requestId, JSONObject params) {
+        String instanceId = params.optString("instance_id", "");
+        String soundId = params.optString("sound_id", "");
+        if (!"android-main".equals(instanceId) || soundId.isBlank()) {
+            respondNativeHost(requestId, false, 400,
+                    "The program target is not available in this Android session.", null);
+            return;
+        }
+        new Thread(() -> {
+            try {
+                applyPluginSound(soundId);
+                JSONObject result = new JSONObject().put("sound_id", soundId);
+                runOnUiThread(() -> {
+                    publishSelectedPluginSound();
+                    respondNativeHost(requestId, true, 200, null, result);
+                });
+            } catch (Throwable error) {
+                Log.e("RackForge", "Shared UI could not select sound " + soundId, error);
+                respondNativeHost(requestId, false, 409,
+                        error.getMessage() == null ? error.toString() : error.getMessage(), null);
+            }
+        }, "rackforge-shared-ui-sound").start();
+    }
+
+    private void applyPluginSound(String soundId) {
+        if (!selectPluginSound(soundId)) {
+            throw new IllegalStateException("The plugin rejected program " + soundId);
+        }
+        rememberActivePluginSound();
+        if (keyLabSyncActivePlugin()) {
+            refreshKeyLabDisplay();
+        } else {
+            // The Core selection is authoritative. A disconnected controller must not
+            // prevent the shared UI from observing a successful program change.
+            Log.w("RackForge", "KeyLab could not confirm sound " + soundId);
+        }
+    }
+
+    private void publishSelectedPluginSound() {
+        // Retain the legacy direct surface and also update the shared Web shell.
+        sendPluginMessage(pluginWebContext());
+        emitSessionSnapshot();
     }
 
     private void playTestNote() {

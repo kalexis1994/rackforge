@@ -6,6 +6,7 @@ import {
   snapshotReceived,
   store,
 } from "./store";
+import { openSessionChannel, type SessionChannel } from "./host";
 import type {
   CoreErrorMessage,
   CoreSnapshotMessage,
@@ -23,7 +24,9 @@ const SESSION_SCHEMA_VERSION = 14;
 const RECONNECT_DELAY_MS = 1200;
 const PERFORMANCE_REFRESH_MS = 2000;
 
-let socket: WebSocket | null = null;
+let socket: SessionChannel | null = null;
+let sessionConnected = false;
+let sessionConnecting = false;
 let commandId = 0;
 let reconnectTimer: number | null = null;
 let performanceTimer: number | null = null;
@@ -49,16 +52,11 @@ const presetRequestQueue: Array<{
 }> = [];
 
 function pumpPresetRequests() {
-  if (pendingPresetRequest || socket?.readyState !== WebSocket.OPEN) return;
+  if (pendingPresetRequest || !socket || !sessionConnected) return;
   const next = presetRequestQueue.shift();
   if (!next) return;
   pendingPresetRequest = next;
   socket.send(JSON.stringify(next.request));
-}
-
-function socketUrl() {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/ws/v1/session`;
 }
 
 function scheduleReconnect() {
@@ -71,7 +69,8 @@ function scheduleReconnect() {
 
 function sendPerformanceSnapshotRequest() {
   if (
-    socket?.readyState === WebSocket.OPEN &&
+    socket &&
+    sessionConnected &&
     !store.getState().rackforge.performancePending
   ) {
     socket.send(JSON.stringify({ op: "performance_snapshot" }));
@@ -79,96 +78,92 @@ function sendPerformanceSnapshotRequest() {
 }
 
 export function connectGateway() {
-  if (
-    socket?.readyState === WebSocket.OPEN ||
-    socket?.readyState === WebSocket.CONNECTING
-  ) {
-    return;
-  }
+  if (sessionConnected || sessionConnecting) return;
 
   intentionallyStopped = false;
+  sessionConnecting = true;
   store.dispatch(connectionChanged("connecting"));
-  socket = new WebSocket(socketUrl());
-
-  socket.addEventListener("open", () => {
-    store.dispatch(connectionChanged("online"));
-    sendPerformanceSnapshotRequest();
-    if (performanceTimer !== null) window.clearInterval(performanceTimer);
-    performanceTimer = window.setInterval(
-      sendPerformanceSnapshotRequest,
-      PERFORMANCE_REFRESH_MS,
-    );
-  });
-  socket.addEventListener("message", (event) => {
-    try {
-      const message = JSON.parse(event.data) as Record<string, unknown>;
-      if (
-        message.status === "snapshot" &&
-        "snapshot" in message
-      ) {
-        const snapshotMessage = message as unknown as CoreSnapshotMessage;
-        store.dispatch(snapshotReceived(snapshotMessage.snapshot));
-      } else if (
-        typeof message.status === "string" &&
-        pendingPresetRequest?.expected === message.status
-      ) {
-        pendingPresetRequest.resolve(message);
-        pendingPresetRequest = null;
-        pumpPresetRequests();
-      } else if (
-        (message.status === "performance_snapshot" ||
-          message.status === "performance_edited") &&
-        "snapshot" in message
-      ) {
-        const performanceMessage =
-          message as unknown as PerformanceSnapshotMessage;
-        store.dispatch(
-          performanceReceived({
-            snapshot: performanceMessage.snapshot,
-            edited: message.status === "performance_edited",
-          }),
-        );
-        if (message.status === "performance_edited") {
-          pendingPerformanceEdit?.resolve(performanceMessage.snapshot);
+  socket = openSessionChannel({
+    onOpen: () => {
+      sessionConnecting = false;
+      sessionConnected = true;
+      store.dispatch(connectionChanged("online"));
+      sendPerformanceSnapshotRequest();
+      if (performanceTimer !== null) window.clearInterval(performanceTimer);
+      performanceTimer = window.setInterval(
+        sendPerformanceSnapshotRequest,
+        PERFORMANCE_REFRESH_MS,
+      );
+    },
+    onMessage: (payload) => {
+      try {
+        const message = JSON.parse(payload) as Record<string, unknown>;
+        if (message.status === "snapshot" && "snapshot" in message) {
+          const snapshotMessage = message as unknown as CoreSnapshotMessage;
+          store.dispatch(snapshotReceived(snapshotMessage.snapshot));
+        } else if (
+          typeof message.status === "string" &&
+          pendingPresetRequest?.expected === message.status
+        ) {
+          pendingPresetRequest.resolve(message);
+          pendingPresetRequest = null;
+          pumpPresetRequests();
+        } else if (
+          (message.status === "performance_snapshot" ||
+            message.status === "performance_edited") &&
+          "snapshot" in message
+        ) {
+          const performanceMessage =
+            message as unknown as PerformanceSnapshotMessage;
+          store.dispatch(
+            performanceReceived({
+              snapshot: performanceMessage.snapshot,
+              edited: message.status === "performance_edited",
+            }),
+          );
+          if (message.status === "performance_edited") {
+            pendingPerformanceEdit?.resolve(performanceMessage.snapshot);
+            pendingPerformanceEdit = null;
+          }
+        } else if (
+          (message.status === "error" || message.status === "gateway_error") &&
+          "message" in message
+        ) {
+          const errorMessage = message as unknown as CoreErrorMessage;
+          store.dispatch(errorReceived(errorMessage.message));
+          pendingPerformanceEdit?.reject(new Error(errorMessage.message));
           pendingPerformanceEdit = null;
+          pendingPresetRequest?.reject(new Error(errorMessage.message));
+          pendingPresetRequest = null;
+          pumpPresetRequests();
         }
-      } else if (
-        (message.status === "error" ||
-          message.status === "gateway_error") &&
-        "message" in message
-      ) {
-        const errorMessage = message as unknown as CoreErrorMessage;
-        store.dispatch(errorReceived(errorMessage.message));
-        pendingPerformanceEdit?.reject(new Error(errorMessage.message));
-        pendingPerformanceEdit = null;
-        pendingPresetRequest?.reject(new Error(errorMessage.message));
-        pendingPresetRequest = null;
-        pumpPresetRequests();
+      } catch {
+        store.dispatch(errorReceived("RackForge returned an unreadable response."));
       }
-    } catch {
-      store.dispatch(errorReceived("RackForge returned an unreadable response."));
-    }
-  });
-  socket.addEventListener("close", () => {
-    socket = null;
-    if (performanceTimer !== null) window.clearInterval(performanceTimer);
-    performanceTimer = null;
-    pendingPerformanceEdit?.reject(
-      new Error("The RackForge Core connection was interrupted."),
-    );
-    pendingPerformanceEdit = null;
-    pendingPresetRequest?.reject(
-      new Error("The RackForge Core connection was interrupted."),
-    );
-    pendingPresetRequest = null;
-    for (const queued of presetRequestQueue.splice(0)) {
-      queued.reject(new Error("The RackForge Core connection was interrupted."));
-    }
-    store.dispatch(connectionChanged("offline"));
-    scheduleReconnect();
-  });
-  socket.addEventListener("error", () => {
-    store.dispatch(errorReceived("The RackForge Core connection was interrupted."));
+    },
+    onClose: () => {
+      socket = null;
+      sessionConnected = false;
+      sessionConnecting = false;
+      if (performanceTimer !== null) window.clearInterval(performanceTimer);
+      performanceTimer = null;
+      pendingPerformanceEdit?.reject(
+        new Error("The RackForge Core connection was interrupted."),
+      );
+      pendingPerformanceEdit = null;
+      pendingPresetRequest?.reject(
+        new Error("The RackForge Core connection was interrupted."),
+      );
+      pendingPresetRequest = null;
+      for (const queued of presetRequestQueue.splice(0)) {
+        queued.reject(new Error("The RackForge Core connection was interrupted."));
+      }
+      store.dispatch(connectionChanged("offline"));
+      scheduleReconnect();
+    },
+    onError: () => {
+      store.dispatch(errorReceived("The RackForge Core connection was interrupted."));
+    },
   });
 }
 
@@ -177,7 +172,7 @@ function requestPresetOperation<T>(
   expected: string,
   decode: (message: Record<string, unknown>) => T,
 ): Promise<T> {
-  if (socket?.readyState !== WebSocket.OPEN) {
+  if (!socket || !sessionConnected) {
     return Promise.reject(new Error("RackForge Core is not connected."));
   }
   return new Promise((resolve, reject) => {
@@ -284,13 +279,15 @@ export function stopGateway() {
   performanceTimer = null;
   socket?.close();
   socket = null;
+  sessionConnected = false;
+  sessionConnecting = false;
 }
 
 export function dispatchPerformanceEdit(
   expectedRevision: string,
   edit: PerformanceEdit,
 ): Promise<PerformanceSnapshot> {
-  if (socket?.readyState !== WebSocket.OPEN) {
+  if (!socket || !sessionConnected) {
     const message = "RackForge Core is not connected.";
     store.dispatch(errorReceived(message));
     return Promise.reject(new Error(message));
@@ -312,7 +309,7 @@ export function dispatchPerformanceEdit(
 }
 
 export function dispatchCommand(command: SessionCommand) {
-  if (socket?.readyState !== WebSocket.OPEN) {
+  if (!socket || !sessionConnected) {
     store.dispatch(errorReceived("RackForge Core is not connected."));
     return;
   }

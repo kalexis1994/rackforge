@@ -7,6 +7,7 @@ import {
 } from "@svar-ui/react-filemanager";
 import "@svar-ui/react-filemanager/all.css";
 
+import { hostJson } from "./host";
 import type {
   PluginResourceRequirement,
   ResourceEntry,
@@ -14,12 +15,24 @@ import type {
   ResourceMount,
 } from "./types";
 
-interface ResourceExplorerDialogProps {
-  pluginId: string;
-  resource: PluginResourceRequirement;
-  onCancel: () => void;
-  onBound: (grant: ResourceGrant) => void;
-}
+type ResourceExplorerDialogProps =
+  | {
+      mode?: "bind";
+      pluginId: string;
+      resource: PluginResourceRequirement;
+      onCancel: () => void;
+      onBound: (grant: ResourceGrant) => void;
+      onSelected?: never;
+    }
+  | {
+      mode: "select";
+      selection: { name: string; kind: "file" | "directory" };
+      onCancel: () => void;
+      onSelected: (entry: ResourceEntry) => void;
+      resource?: never;
+      pluginId?: never;
+      onBound?: never;
+    };
 
 function toFileManagerEntry(entry: ResourceEntry, parentId: string): IEntity {
   const id = `${parentId === "/" ? "" : parentId}/${entry.name}`;
@@ -37,23 +50,9 @@ function toFileManagerEntry(entry: ResourceEntry, parentId: string): IEntity {
   };
 }
 
-async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      message?: string;
-    } | null;
-    throw new Error(body?.message ?? `HTTP ${response.status}`);
-  }
-  return (await response.json()) as T;
-}
-
-export function ResourceExplorerDialog({
-  pluginId,
-  resource,
-  onCancel,
-  onBound,
-}: ResourceExplorerDialogProps) {
+export function ResourceExplorerDialog(props: ResourceExplorerDialogProps) {
+  const target = props.mode === "select" ? props.selection : props.resource;
+  const { onCancel } = props;
   const apiRef = useRef<IApi | null>(null);
   const entriesRef = useRef(new Map<string, ResourceEntry>());
   const [data, setData] = useState<IEntity[] | null>(null);
@@ -64,12 +63,12 @@ export function ResourceExplorerDialog({
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      readJson<ResourceMount[]>("/api/v1/resources/mounts"),
+      hostJson<ResourceMount[]>("/api/v1/resources/mounts"),
     ])
       .then(async ([mounts]) => {
         const roots = await Promise.all(
           mounts.map((mount) =>
-            readJson<ResourceEntry>(
+            hostJson<ResourceEntry>(
               `/api/v1/resources/mounts/${encodeURIComponent(mount.id)}/root`,
             ),
           ),
@@ -96,12 +95,12 @@ export function ResourceExplorerDialog({
   }, []);
 
   const selectionValid =
-    selected?.can_read === true && selected.kind === resource.kind;
+    selected?.can_read === true && selected.kind === target.kind;
   const hint = useMemo(() => {
-    if (!selected) return `Choose a ${resource.kind}.`;
+    if (!selected) return `Choose a ${target.kind}.`;
     if (selectionValid) return selected.name;
-    return `This plugin requires a ${resource.kind}.`;
-  }, [resource.kind, selected, selectionValid]);
+    return `This selection requires a ${target.kind}.`;
+  }, [target.kind, selected, selectionValid]);
 
   const requestData = ({ id }: { id: string }) => {
     const parent = entriesRef.current.get(id);
@@ -109,7 +108,7 @@ export function ResourceExplorerDialog({
       setError("RackForge could not resolve this folder.");
       return;
     }
-    readJson<ResourceEntry[]>(
+    hostJson<ResourceEntry[]>(
       `/api/v1/resources/entries/${encodeURIComponent(parent.id)}`,
     )
       .then((entries) => {
@@ -130,20 +129,24 @@ export function ResourceExplorerDialog({
       );
   };
 
-  const bind = () => {
+  const select = () => {
     if (!selected || !selectionValid || binding) return;
+    if (props.mode === "select") {
+      props.onSelected(selected);
+      return;
+    }
     setBinding(true);
     setError(null);
-    readJson<ResourceGrant>("/api/v1/resources/bind", {
+    hostJson<ResourceGrant>("/api/v1/resources/bind", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        plugin_id: pluginId,
-        resource_id: resource.id,
+        plugin_id: props.pluginId,
+        resource_id: props.resource.id,
         entry_id: selected.id,
       }),
     })
-      .then(onBound)
+      .then(props.onBound)
       .catch((reason: unknown) => {
         setBinding(false);
         setError(
@@ -163,7 +166,7 @@ export function ResourceExplorerDialog({
         <header className="resource-explorer-header">
           <div>
             <span className="eyebrow">RACKFORGE STORAGE</span>
-            <h2 id="resource-explorer-title">Select {resource.name}</h2>
+            <h2 id="resource-explorer-title">Select {target.name}</h2>
           </div>
           <button type="button" className="icon-button" onClick={onCancel}>
             Close
@@ -201,8 +204,8 @@ export function ResourceExplorerDialog({
             <button type="button" className="secondary" onClick={onCancel}>
               Cancel
             </button>
-            <button type="button" disabled={!selectionValid || binding} onClick={bind}>
-              {binding ? "Selecting…" : `Select ${resource.kind}`}
+            <button type="button" disabled={!selectionValid || binding} onClick={select}>
+              {binding ? "Selecting…" : `Select ${target.kind}`}
             </button>
           </div>
         </footer>

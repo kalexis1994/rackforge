@@ -1,7 +1,8 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rackforge_resource_api::{
     BindResourceRequest, BrowseGrantRequest, GrantedResourceEntry, ResourceBrowser, ResourceEntry,
-    ResourceEntryKind, ResourceError, ResourceGrant, ResourceMount,
+    ResourceEntryKind, ResourceError, ResourceGrant, ResourceMount, ResourceSelection,
+    ResourceSelectionSource,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -9,8 +10,10 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
-    time::UNIX_EPOCH,
+    time::{SystemTime, UNIX_EPOCH},
 };
+
+const SELECTION_TTL_SECONDS: u64 = 30 * 60;
 
 #[derive(Clone, Debug)]
 pub struct NativeMount {
@@ -38,6 +41,41 @@ struct BrowserState {
     mounts: Vec<MountState>,
     entries: HashMap<String, EntryState>,
     grants: Vec<GrantRecord>,
+    selections: HashMap<String, SelectionRecord>,
+}
+
+#[derive(Clone, Debug)]
+struct SelectionRecord {
+    path: PathBuf,
+    scope_root: PathBuf,
+    display_name: String,
+    kind: ResourceEntryKind,
+    size: Option<u64>,
+    source: ResourceSelectionSource,
+    created_unix_seconds: u64,
+    owned: bool,
+}
+
+/// A resource selection consumed exactly once. Uploaded files are removed when
+/// this guard is dropped, including validation failures and early returns.
+#[derive(Debug)]
+pub struct ConsumedResourceFile {
+    path: PathBuf,
+    owned: bool,
+}
+
+impl ConsumedResourceFile {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for ConsumedResourceFile {
+    fn drop(&mut self) {
+        if self.owned && self.path.is_file() {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 
 pub struct NativeResourceBrowser {
@@ -202,6 +240,232 @@ impl NativeResourceBrowser {
         }
         Ok(path)
     }
+
+    pub fn select_host_entry(&self, entry_id: &str) -> Result<ResourceSelection, ResourceError> {
+        let mut state = self.state.lock().map_err(|_| poisoned())?;
+        prune_expired_selections(&mut state);
+        let entry = state
+            .entries
+            .get(entry_id)
+            .cloned()
+            .ok_or(ResourceError::UnknownHandle)?;
+        let mount = state
+            .mounts
+            .iter()
+            .find(|mount| mount.public.id == entry.mount_id)
+            .ok_or(ResourceError::UnknownHandle)?;
+        let mount_root = mount.root.clone();
+        let path = fs::canonicalize(&entry.path).map_err(backend)?;
+        if !path.starts_with(&mount_root) {
+            return Err(ResourceError::OutsideMount);
+        }
+        let metadata = fs::metadata(&path).map_err(backend)?;
+        if !metadata.is_file() {
+            return Err(ResourceError::InvalidRequest(
+                "selected host entry is not a file".into(),
+            ));
+        }
+        let display_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .ok_or(ResourceError::Unreadable)?;
+        register_selection(
+            &mut state,
+            SelectionRecord {
+                path,
+                scope_root: mount_root,
+                display_name,
+                kind: ResourceEntryKind::File,
+                size: Some(metadata.len()),
+                source: ResourceSelectionSource::HostEntry,
+                created_unix_seconds: unix_seconds(),
+                owned: false,
+            },
+        )
+    }
+
+    pub fn register_client_upload(
+        &self,
+        display_name: &str,
+        bytes: &[u8],
+        upload_root: &Path,
+    ) -> Result<ResourceSelection, ResourceError> {
+        if bytes.is_empty() {
+            return Err(ResourceError::InvalidRequest(
+                "uploaded file is empty".into(),
+            ));
+        }
+        let display_name = Path::new(display_name)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| ResourceError::InvalidRequest("upload name is invalid".into()))?;
+        fs::create_dir_all(upload_root).map_err(backend)?;
+        let upload_root = fs::canonicalize(upload_root).map_err(backend)?;
+        let selection_id = random_handle()?;
+        let path = upload_root.join(format!("{selection_id}.upload"));
+        if path.exists() {
+            return Err(ResourceError::Backend("upload handle collision".into()));
+        }
+        fs::write(&path, bytes).map_err(backend)?;
+        let path = fs::canonicalize(&path).map_err(backend)?;
+        if !path.starts_with(&upload_root) {
+            let _ = fs::remove_file(&path);
+            return Err(ResourceError::OutsideMount);
+        }
+        self.register_client_upload_file_with_id(display_name, &path, &upload_root, selection_id)
+    }
+
+    /// Registers a file already streamed into host-owned upload storage.
+    /// The host takes ownership and removes it when the selection is consumed
+    /// or expires.
+    pub fn register_client_upload_file(
+        &self,
+        display_name: &str,
+        path: &Path,
+        upload_root: &Path,
+    ) -> Result<ResourceSelection, ResourceError> {
+        self.register_client_upload_file_with_id(
+            display_name.to_owned(),
+            path,
+            upload_root,
+            random_handle()?,
+        )
+    }
+
+    fn register_client_upload_file_with_id(
+        &self,
+        display_name: String,
+        path: &Path,
+        upload_root: &Path,
+        selection_id: String,
+    ) -> Result<ResourceSelection, ResourceError> {
+        let display_name = Path::new(&display_name)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| ResourceError::InvalidRequest("upload name is invalid".into()))?;
+        let upload_root = fs::canonicalize(upload_root).map_err(backend)?;
+        let path = fs::canonicalize(path).map_err(backend)?;
+        if !path.starts_with(&upload_root) || !path.is_file() {
+            return Err(ResourceError::OutsideMount);
+        }
+        let size = fs::metadata(&path).map_err(backend)?.len();
+        let mut state = self.state.lock().map_err(|_| poisoned())?;
+        prune_expired_selections(&mut state);
+        let record = SelectionRecord {
+            path,
+            scope_root: upload_root,
+            display_name: display_name.clone(),
+            kind: ResourceEntryKind::File,
+            size: Some(size),
+            source: ResourceSelectionSource::ClientUpload,
+            created_unix_seconds: unix_seconds(),
+            owned: true,
+        };
+        state.selections.insert(selection_id.clone(), record);
+        Ok(ResourceSelection {
+            selection_id,
+            display_name,
+            kind: ResourceEntryKind::File,
+            size: Some(size),
+            source: ResourceSelectionSource::ClientUpload,
+            expires_in_seconds: SELECTION_TTL_SECONDS,
+        })
+    }
+
+    pub fn resolve_selection_file(&self, selection_id: &str) -> Result<PathBuf, ResourceError> {
+        let mut state = self.state.lock().map_err(|_| poisoned())?;
+        prune_expired_selections(&mut state);
+        let selection = state
+            .selections
+            .get(selection_id)
+            .ok_or(ResourceError::UnknownHandle)?;
+        let path = fs::canonicalize(&selection.path).map_err(backend)?;
+        if !path.starts_with(&selection.scope_root) || !path.is_file() {
+            return Err(ResourceError::OutsideMount);
+        }
+        Ok(path)
+    }
+
+    /// Removes a selection from the registry before exposing its confined file
+    /// to a consumer. A second consumer therefore receives `UnknownHandle`.
+    pub fn consume_selection_file(
+        &self,
+        selection_id: &str,
+    ) -> Result<ConsumedResourceFile, ResourceError> {
+        let mut state = self.state.lock().map_err(|_| poisoned())?;
+        prune_expired_selections(&mut state);
+        let selection = state
+            .selections
+            .remove(selection_id)
+            .ok_or(ResourceError::UnknownHandle)?;
+        let path = match fs::canonicalize(&selection.path) {
+            Ok(path) => path,
+            Err(error) => {
+                if selection.owned && selection.path.is_file() {
+                    let _ = fs::remove_file(selection.path);
+                }
+                return Err(backend(error));
+            }
+        };
+        if !path.starts_with(&selection.scope_root) || !path.is_file() {
+            if selection.owned && selection.path.is_file() {
+                let _ = fs::remove_file(selection.path);
+            }
+            return Err(ResourceError::OutsideMount);
+        }
+        Ok(ConsumedResourceFile {
+            path,
+            owned: selection.owned,
+        })
+    }
+
+    pub fn release_selection(&self, selection_id: &str) -> Result<(), ResourceError> {
+        let mut state = self.state.lock().map_err(|_| poisoned())?;
+        let selection = state
+            .selections
+            .remove(selection_id)
+            .ok_or(ResourceError::UnknownHandle)?;
+        if selection.owned && selection.path.is_file() {
+            fs::remove_file(selection.path).map_err(backend)?;
+        }
+        Ok(())
+    }
+}
+
+fn register_selection(
+    state: &mut BrowserState,
+    record: SelectionRecord,
+) -> Result<ResourceSelection, ResourceError> {
+    let selection_id = random_handle()?;
+    let selection = ResourceSelection {
+        selection_id: selection_id.clone(),
+        display_name: record.display_name.clone(),
+        kind: record.kind,
+        size: record.size,
+        source: record.source,
+        expires_in_seconds: SELECTION_TTL_SECONDS,
+    };
+    state.selections.insert(selection_id, record);
+    Ok(selection)
+}
+
+fn prune_expired_selections(state: &mut BrowserState) {
+    let cutoff = unix_seconds().saturating_sub(SELECTION_TTL_SECONDS);
+    state.selections.retain(|_, selection| {
+        let retain = selection.created_unix_seconds >= cutoff;
+        if !retain && selection.owned && selection.path.is_file() {
+            let _ = fs::remove_file(&selection.path);
+        }
+        retain
+    });
+}
+
+fn unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
 }
 
 impl ResourceBrowser for NativeResourceBrowser {
@@ -671,6 +935,77 @@ mod tests {
             })
             .unwrap();
         assert_eq!(first_grant.grant_id, second_grant.grant_id);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn opaque_selections_preserve_host_files_and_delete_client_uploads() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-resource-selection-test-{}-{}",
+            std::process::id(),
+            unix_seconds()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        let library = root.join("library");
+        let uploads = root.join("uploads");
+        fs::create_dir_all(&library).unwrap();
+        let host_file = library.join("host.rfplugin");
+        fs::write(&host_file, [1, 2, 3, 4]).unwrap();
+
+        let browser = NativeResourceBrowser::new([NativeMount {
+            name: "Test".into(),
+            root: library.clone(),
+            read_only: true,
+        }])
+        .unwrap();
+        let mount = browser.mounts().unwrap().remove(0);
+        let mount_root = browser.mount_root(&mount.id).unwrap();
+        let host_entry = browser
+            .entries(&mount_root.id)
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "host.rfplugin")
+            .unwrap();
+        let host_selection = browser.select_host_entry(&host_entry.id).unwrap();
+        assert_eq!(host_selection.source, ResourceSelectionSource::HostEntry);
+        assert!(!host_selection.selection_id.contains("host.rfplugin"));
+        let consumed_host = browser
+            .consume_selection_file(&host_selection.selection_id)
+            .unwrap();
+        assert_eq!(consumed_host.path(), fs::canonicalize(&host_file).unwrap());
+        assert_eq!(
+            browser
+                .consume_selection_file(&host_selection.selection_id)
+                .unwrap_err(),
+            ResourceError::UnknownHandle
+        );
+        drop(consumed_host);
+        assert!(host_file.is_file());
+
+        let upload_selection = browser
+            .register_client_upload("phone.rfplugin", &[5, 6, 7], &uploads)
+            .unwrap();
+        assert_eq!(
+            upload_selection.source,
+            ResourceSelectionSource::ClientUpload
+        );
+        let consumed_upload = browser
+            .consume_selection_file(&upload_selection.selection_id)
+            .unwrap();
+        let uploaded_file = consumed_upload.path().to_path_buf();
+        assert!(uploaded_file.is_file());
+        assert!(!upload_selection.selection_id.contains("phone.rfplugin"));
+        assert_eq!(
+            browser
+                .consume_selection_file(&upload_selection.selection_id)
+                .unwrap_err(),
+            ResourceError::UnknownHandle
+        );
+        drop(consumed_upload);
+        assert!(!uploaded_file.exists());
 
         fs::remove_dir_all(root).unwrap();
     }

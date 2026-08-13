@@ -439,6 +439,21 @@ export interface ResourceEntry {
   can_read: boolean;
 }
 
+export type ResourceSelectionSource = "client_upload" | "host_entry";
+
+/**
+ * Short-lived handle to a file owned by the RackForge host. The native path or
+ * Android content URI intentionally never crosses the host boundary.
+ */
+export interface ResourceSelection {
+  selection_id: string;
+  display_name: string;
+  kind: "file" | "directory";
+  size: number | null;
+  source: ResourceSelectionSource;
+  expires_in_seconds: number;
+}
+
 export interface ResourceGrant {
   grant_id: string;
   resource_id: string;

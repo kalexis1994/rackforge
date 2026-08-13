@@ -25,6 +25,10 @@ archive_tool="$toolchain/llvm-ar"
   printf 'Gradle wrapper is missing at %s.\n' "$android_project/gradlew" >&2
   exit 2
 }
+command -v pnpm >/dev/null 2>&1 || {
+  printf 'pnpm is required to build the shared RackForge UI.\n' >&2
+  exit 2
+}
 
 export ANDROID_HOME="$sdk_root"
 export ANDROID_SDK_ROOT="$sdk_root"
@@ -37,6 +41,8 @@ export CXX_aarch64_linux_android="$clangxx"
 export AR_aarch64_linux_android="$archive_tool"
 
 cd "$repository"
+pnpm --dir web install --frozen-lockfile
+pnpm --dir web build
 rustup target add aarch64-linux-android
 cargo build --locked --release \
   -p rackforge-android-native \
@@ -60,6 +66,11 @@ if [[ -n "${RACKFORGE_BUNDLED_PLUGIN:-}" ]]; then
   install -m 0644 "$RACKFORGE_BUNDLED_PLUGIN" \
     "$bundled_output/bundled/RF-Soundfonts.rfplugin"
 fi
+
+web_output="$android_project/app/build/generated/web-ui/rackforge"
+rm -rf -- "$web_output"
+install -d "$web_output"
+cp -R "$repository/web/dist/." "$web_output/"
 
 cd "$android_project"
 bash ./gradlew assembleDebug --no-daemon

@@ -278,6 +278,49 @@ The backend repeats manifest ownership and resource-kind validation when a
 binding is created. A plugin must use the postMessage method; direct endpoint
 access is not part of the plugin API.
 
+### Shell resource selections
+
+The RackForge shell also uses the explorer for host-level workflows that do
+not belong to a plugin iframe: portable package installation, preset import,
+backup restore and future library management. These workflows share a generic
+`ResourceSelection` rather than a plugin grant:
+
+```json
+{
+  "selection_id": "MCd9oGmHfoMXZHZXhDJaQB4N",
+  "display_name": "RF-Soundfonts.rfplugin",
+  "kind": "file",
+  "size": 184320,
+  "source": "client_upload",
+  "expires_in_seconds": 1800
+}
+```
+
+There are two interchangeable sources:
+
+- A browser or native client selects a file on its own device. The file is
+  streamed into host-owned temporary storage and becomes a `client_upload`.
+- The shell browses the RackForge host with opaque entry handles and converts
+  one entry into a `host_entry` selection.
+
+Neither source reveals a native path or Android content URI. Selections are
+short-lived, single-consumer handles. Host files are never deleted when a
+selection is released; uploaded temporary files are deleted after consumption
+or expiry. A consumer applies its own validation and size policy. For example,
+the resource transport accepts files larger than a portable plugin package,
+while the plugin installer still rejects packages above 512 MB.
+
+The authenticated shell transport is:
+
+- `POST /api/v1/resources/uploads?name={display_name}` with a streamed binary body
+- `POST /api/v1/resources/selections` with an opaque `entry_id`
+
+Android exposes the same contract to the shared shell through
+`rackforge.host@1` method `resource.pick`. The file picker is therefore a host
+capability, not an installation-specific action. Feature endpoints consume a
+`selection_id`; the explorer itself has no knowledge of plugins, presets or
+backups.
+
 RackForge renders this surface with
 [`@svar-ui/react-filemanager`](https://github.com/svar-widgets/react-filemanager)
 under its MIT license. SVAR is a replaceable view dependency only; the resource

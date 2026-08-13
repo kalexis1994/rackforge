@@ -19,19 +19,26 @@ use rackforge_session_api::{
 use rackforge_surface_runtime::{
     ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayPlugin, PlaySound,
 };
+use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{CStr, c_char, c_void};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::slice;
-use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const MAX_FRAMES: u32 = 4_096;
 const MAX_PENDING_MIDI_EVENTS: usize = 256;
+const AUDIO_RENDER_QUEUE_CAPACITY_FRAMES: usize = 2_048;
+const LOW_RENDER_BLOCK_FRAMES: usize = 192;
+const BALANCED_RENDER_BLOCK_FRAMES: usize = 384;
+const LOW_RENDER_AHEAD_FRAMES: usize = 384;
+const BALANCED_RENDER_AHEAD_FRAMES: usize = 1_152;
 
 static ENGINE: OnceLock<Mutex<Option<AndroidEngine>>> = OnceLock::new();
 static AUDIO: OnceLock<Mutex<Option<NativeAudioOutput>>> = OnceLock::new();
@@ -55,6 +62,9 @@ static AUDIO_ENGINE_LOCK_MISSES: AtomicU64 = AtomicU64::new(0);
 static AUDIO_RENDER_ERRORS: AtomicU64 = AtomicU64::new(0);
 static AUDIO_NONFINITE_SAMPLES: AtomicU64 = AtomicU64::new(0);
 static AUDIO_CLIPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
+static AUDIO_RENDER_QUEUE_UNDERRUNS: AtomicU64 = AtomicU64::new(0);
+static AUDIO_RENDER_QUEUE_UNDERRUN_FRAMES: AtomicU64 = AtomicU64::new(0);
+static AUDIO_RENDER_THREAD_PRIORITY_RESULT: AtomicI32 = AtomicI32::new(0);
 static AUDIO_RECOVERY_RAMP_PENDING: AtomicU32 = AtomicU32::new(0);
 static AUDIO_LAST_LEFT_BITS: AtomicU32 = AtomicU32::new(0.0_f32.to_bits());
 static AUDIO_LAST_RIGHT_BITS: AtomicU32 = AtomicU32::new(0.0_f32.to_bits());
@@ -72,6 +82,8 @@ const CONTROLLER_HOME_CHORD_MS: u128 = 250;
 const MASTER_SMOOTHING_FACTOR: f32 = 0.02;
 const DROPOUT_FADE_FRAMES: usize = 64;
 const HOST_CONTROL_HEADER_MS: u64 = 1_500;
+const PRIO_PROCESS: i32 = 0;
+const ANDROID_AUDIO_THREAD_NICE: i32 = -16;
 
 struct AndroidControllerMenu {
     menu: SurfaceMenu,
@@ -353,6 +365,10 @@ type AAudioDataCallback = unsafe extern "C" fn(
 type AAudioErrorCallback =
     unsafe extern "C" fn(stream: *mut AAudioStream, user_data: *mut c_void, error: i32);
 
+unsafe extern "C" {
+    fn setpriority(which: i32, who: u32, priority: i32) -> i32;
+}
+
 #[link(name = "aaudio")]
 unsafe extern "C" {
     fn AAudio_createStreamBuilder(builder: *mut *mut AAudioStreamBuilder) -> i32;
@@ -369,6 +385,10 @@ unsafe extern "C" {
         callback: Option<AAudioDataCallback>,
         user_data: *mut c_void,
     );
+    fn AAudioStreamBuilder_setFramesPerDataCallback(
+        builder: *mut AAudioStreamBuilder,
+        num_frames: i32,
+    );
     fn AAudioStreamBuilder_setErrorCallback(
         builder: *mut AAudioStreamBuilder,
         callback: Option<AAudioErrorCallback>,
@@ -382,6 +402,7 @@ unsafe extern "C" {
     fn AAudioStream_requestStop(stream: *mut AAudioStream) -> i32;
     fn AAudioStream_close(stream: *mut AAudioStream) -> i32;
     fn AAudioStream_getFramesPerBurst(stream: *mut AAudioStream) -> i32;
+    fn AAudioStream_getFramesPerDataCallback(stream: *mut AAudioStream) -> i32;
     fn AAudioStream_setBufferSizeInFrames(stream: *mut AAudioStream, frames: i32) -> i32;
     fn AAudioStream_getBufferSizeInFrames(stream: *mut AAudioStream) -> i32;
     fn AAudioStream_getBufferCapacityInFrames(stream: *mut AAudioStream) -> i32;
@@ -427,8 +448,170 @@ unsafe impl Send for SendablePluginInstance {}
 unsafe impl Send for SendableLoadedPlugin {}
 unsafe impl Sync for SendableLoadedPlugin {}
 
+struct AudioRenderQueue {
+    samples: Box<[UnsafeCell<f32>]>,
+    capacity_frames: usize,
+    read_frame: AtomicUsize,
+    write_frame: AtomicUsize,
+}
+
+// SAFETY: AudioRenderQueue has exactly one producer (the render worker) and
+// one consumer (AAudio's data callback). The producer publishes complete
+// frames with a release store before the consumer reads them, and the
+// consumer publishes released slots before the producer reuses them.
+unsafe impl Send for AudioRenderQueue {}
+unsafe impl Sync for AudioRenderQueue {}
+
+impl AudioRenderQueue {
+    fn new(capacity_frames: usize) -> Self {
+        let samples = (0..capacity_frames * 2)
+            .map(|_| UnsafeCell::new(0.0_f32))
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Self {
+            samples,
+            capacity_frames,
+            read_frame: AtomicUsize::new(0),
+            write_frame: AtomicUsize::new(0),
+        }
+    }
+
+    fn queued_frames(&self) -> usize {
+        self.write_frame
+            .load(Ordering::Acquire)
+            .saturating_sub(self.read_frame.load(Ordering::Acquire))
+    }
+
+    fn push(&self, input: &[f32]) -> bool {
+        if !input.len().is_multiple_of(2) {
+            return false;
+        }
+        let frames = input.len() / 2;
+        let write = self.write_frame.load(Ordering::Relaxed);
+        let read = self.read_frame.load(Ordering::Acquire);
+        if frames
+            > self
+                .capacity_frames
+                .saturating_sub(write.saturating_sub(read))
+        {
+            return false;
+        }
+        for (sample_index, sample) in input.iter().copied().enumerate() {
+            let frame = write + sample_index / 2;
+            let channel = sample_index % 2;
+            let slot = (frame % self.capacity_frames) * 2 + channel;
+            // SAFETY: only the producer writes unpublished ring slots.
+            unsafe { *self.samples[slot].get() = sample };
+        }
+        self.write_frame.store(write + frames, Ordering::Release);
+        true
+    }
+
+    fn pop(&self, output: &mut [f32]) -> usize {
+        debug_assert!(output.len().is_multiple_of(2));
+        let requested_frames = output.len() / 2;
+        let read = self.read_frame.load(Ordering::Relaxed);
+        let write = self.write_frame.load(Ordering::Acquire);
+        let frames = requested_frames.min(write.saturating_sub(read));
+        for (sample_index, output_sample) in output[..frames * 2].iter_mut().enumerate() {
+            let frame = read + sample_index / 2;
+            let channel = sample_index % 2;
+            let slot = (frame % self.capacity_frames) * 2 + channel;
+            // SAFETY: the producer published these slots before advancing
+            // write_frame and cannot reuse them until read_frame advances.
+            *output_sample = unsafe { *self.samples[slot].get() };
+        }
+        self.read_frame.store(read + frames, Ordering::Release);
+        frames
+    }
+}
+
+struct AudioRenderWorker {
+    queue: Arc<AudioRenderQueue>,
+    stop: Arc<AtomicBool>,
+    thread: thread::Thread,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl AudioRenderWorker {
+    fn start(block_frames: usize, render_ahead_frames: usize) -> Result<Self> {
+        let queue = Arc::new(AudioRenderQueue::new(AUDIO_RENDER_QUEUE_CAPACITY_FRAMES));
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_queue = Arc::clone(&queue);
+        let worker_stop = Arc::clone(&stop);
+        let handle = thread::Builder::new()
+            .name("RF-AudioRender".to_owned())
+            .spawn(move || {
+                // Android reserves this nice level for time-sensitive audio
+                // work. The render-ahead queue remains the correctness
+                // mechanism if a vendor kernel declines the priority request.
+                let priority_result =
+                    unsafe { setpriority(PRIO_PROCESS, 0, ANDROID_AUDIO_THREAD_NICE) };
+                AUDIO_RENDER_THREAD_PRIORITY_RESULT.store(priority_result, Ordering::Relaxed);
+                let mut scratch = vec![0.0_f32; block_frames * 2];
+                while !worker_stop.load(Ordering::Acquire) {
+                    if worker_queue.queued_frames() + block_frames > render_ahead_frames {
+                        thread::park_timeout(Duration::from_millis(1));
+                        continue;
+                    }
+                    scratch.fill(0.0);
+                    let rendered = match engine().lock() {
+                        Ok(mut guard) => match guard.as_mut() {
+                            Some(engine) => {
+                                engine.render(block_frames as u32, &mut scratch).is_ok()
+                            }
+                            None => false,
+                        },
+                        Err(_) => false,
+                    };
+                    if !rendered {
+                        AUDIO_RENDER_ERRORS.fetch_add(1, Ordering::Relaxed);
+                        scratch.fill(0.0);
+                    }
+                    if !worker_queue.push(&scratch) {
+                        thread::yield_now();
+                    }
+                }
+            })
+            .context("starting Android audio render worker")?;
+        let worker_thread = handle.thread().clone();
+        let worker = Self {
+            queue,
+            stop,
+            thread: worker_thread,
+            handle: Some(handle),
+        };
+        let deadline = Instant::now() + Duration::from_millis(250);
+        while worker.queue.queued_frames() < render_ahead_frames && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(1));
+        }
+        Ok(worker)
+    }
+
+    fn stop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        self.thread.unpark();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for AudioRenderWorker {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+struct AudioCallbackContext {
+    queue: Arc<AudioRenderQueue>,
+    render_thread: thread::Thread,
+}
+
 struct NativeAudioOutput {
     stream: *mut AAudioStream,
+    callback_context: Box<AudioCallbackContext>,
+    renderer: AudioRenderWorker,
 }
 
 // SAFETY: the stream is controlled through AAudio's thread-safe lifecycle API
@@ -437,39 +620,74 @@ unsafe impl Send for NativeAudioOutput {}
 
 impl NativeAudioOutput {
     fn open(device_id: i32, latency_mode: i32) -> Result<Self> {
-        match latency_mode {
-            0 => match open_aaudio_stream(
+        let (performance_mode, buffer_bursts, callback_frames, render_block, render_ahead) =
+            match latency_mode {
+                0 => (
+                    AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
+                    2,
+                    0,
+                    LOW_RENDER_BLOCK_FRAMES,
+                    LOW_RENDER_AHEAD_FRAMES,
+                ),
+                1 => (
+                    AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
+                    3,
+                    0,
+                    BALANCED_RENDER_BLOCK_FRAMES,
+                    BALANCED_RENDER_AHEAD_FRAMES,
+                ),
+                2 => (
+                    AAUDIO_PERFORMANCE_MODE_NONE,
+                    4,
+                    0,
+                    BALANCED_RENDER_BLOCK_FRAMES,
+                    BALANCED_RENDER_AHEAD_FRAMES,
+                ),
+                _ => bail!("invalid Android latency mode {latency_mode}"),
+            };
+        let renderer = AudioRenderWorker::start(render_block, render_ahead)?;
+        let mut callback_context = Box::new(AudioCallbackContext {
+            queue: Arc::clone(&renderer.queue),
+            render_thread: renderer.thread.clone(),
+        });
+        let user_data = (&mut *callback_context as *mut AudioCallbackContext).cast::<c_void>();
+        let stream = if latency_mode == 0 {
+            match open_aaudio_stream(
                 device_id,
                 AAUDIO_SHARING_MODE_EXCLUSIVE,
-                AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
-                2,
+                performance_mode,
+                buffer_bursts,
+                callback_frames,
+                user_data,
             ) {
-                Ok(stream) => Ok(Self { stream }),
+                Ok(stream) => stream,
                 Err(exclusive_error) => open_aaudio_stream(
                     device_id,
                     AAUDIO_SHARING_MODE_SHARED,
-                    AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
-                    2,
+                    performance_mode,
+                    buffer_bursts,
+                    callback_frames,
+                    user_data,
                 )
-                .map(|stream| Self { stream })
-                .with_context(|| format!("exclusive AAudio open also failed: {exclusive_error:#}")),
-            },
-            1 => open_aaudio_stream(
+                .with_context(|| {
+                    format!("exclusive AAudio open also failed: {exclusive_error:#}")
+                })?,
+            }
+        } else {
+            open_aaudio_stream(
                 device_id,
                 AAUDIO_SHARING_MODE_SHARED,
-                AAUDIO_PERFORMANCE_MODE_LOW_LATENCY,
-                3,
-            )
-            .map(|stream| Self { stream }),
-            2 => open_aaudio_stream(
-                device_id,
-                AAUDIO_SHARING_MODE_SHARED,
-                AAUDIO_PERFORMANCE_MODE_NONE,
-                4,
-            )
-            .map(|stream| Self { stream }),
-            _ => bail!("invalid Android latency mode {latency_mode}"),
-        }
+                performance_mode,
+                buffer_bursts,
+                callback_frames,
+                user_data,
+            )?
+        };
+        Ok(Self {
+            stream,
+            callback_context,
+            renderer,
+        })
     }
 
     fn grow_buffer(&self) -> bool {
@@ -502,6 +720,7 @@ impl Drop for NativeAudioOutput {
             let _ = AAudioStream_close(self.stream);
         }
         self.stream = ptr::null_mut();
+        self.renderer.stop();
     }
 }
 
@@ -1056,6 +1275,8 @@ fn open_aaudio_stream(
     sharing_mode: i32,
     performance_mode: i32,
     buffer_bursts: i32,
+    frames_per_callback: i32,
+    user_data: *mut c_void,
 ) -> Result<*mut AAudioStream> {
     let mut builder = ptr::null_mut();
     unsafe {
@@ -1073,8 +1294,11 @@ fn open_aaudio_stream(
         AAudioStreamBuilder_setFormat(builder, AAUDIO_FORMAT_PCM_FLOAT);
         AAudioStreamBuilder_setChannelCount(builder, 2);
         AAudioStreamBuilder_setSampleRate(builder, SAMPLE_RATE as i32);
-        AAudioStreamBuilder_setDataCallback(builder, Some(render_callback), ptr::null_mut());
-        AAudioStreamBuilder_setErrorCallback(builder, Some(error_callback), ptr::null_mut());
+        if frames_per_callback > 0 {
+            AAudioStreamBuilder_setFramesPerDataCallback(builder, frames_per_callback);
+        }
+        AAudioStreamBuilder_setDataCallback(builder, Some(render_callback), user_data);
+        AAudioStreamBuilder_setErrorCallback(builder, Some(error_callback), user_data);
 
         let mut stream = ptr::null_mut();
         let open_result = AAudioStreamBuilder_openStream(builder, &mut stream);
@@ -1148,6 +1372,7 @@ fn audio_status_json() -> String {
             "running": true,
             "sample_rate": AAudioStream_getSampleRate(output.stream),
             "frames_per_burst": AAudioStream_getFramesPerBurst(output.stream),
+            "frames_per_data_callback": AAudioStream_getFramesPerDataCallback(output.stream),
             "buffer_size_frames": AAudioStream_getBufferSizeInFrames(output.stream),
             "buffer_capacity_frames": AAudioStream_getBufferCapacityInFrames(output.stream),
             "xruns": AAudioStream_getXRunCount(output.stream),
@@ -1160,6 +1385,10 @@ fn audio_status_json() -> String {
             "render_errors": AUDIO_RENDER_ERRORS.load(Ordering::Relaxed),
             "nonfinite_samples": AUDIO_NONFINITE_SAMPLES.load(Ordering::Relaxed),
             "clipped_samples": AUDIO_CLIPPED_SAMPLES.load(Ordering::Relaxed),
+            "render_queue_frames": output.callback_context.queue.queued_frames(),
+            "render_queue_underruns": AUDIO_RENDER_QUEUE_UNDERRUNS.load(Ordering::Relaxed),
+            "render_queue_underrun_frames": AUDIO_RENDER_QUEUE_UNDERRUN_FRAMES.load(Ordering::Relaxed),
+            "render_thread_priority_result": AUDIO_RENDER_THREAD_PRIORITY_RESULT.load(Ordering::Relaxed),
             "callback_count": callback_count,
             "average_callback_us": average_callback_micros,
             "maximum_callback_us": AUDIO_CALLBACK_MAX_NANOS.load(Ordering::Relaxed) as f64 / 1_000.0,
@@ -1172,7 +1401,7 @@ fn audio_status_json() -> String {
 
 unsafe extern "C" fn render_callback(
     _stream: *mut AAudioStream,
-    _user_data: *mut c_void,
+    user_data: *mut c_void,
     audio_data: *mut c_void,
     num_frames: i32,
 ) -> i32 {
@@ -1188,24 +1417,24 @@ unsafe extern "C" fn render_callback(
     if num_frames as u32 > MAX_FRAMES {
         return AAUDIO_CALLBACK_RESULT_CONTINUE;
     }
-    let rendered = match engine().try_lock() {
-        Ok(mut guard) => match guard.as_mut() {
-            Some(engine) => match engine.render(num_frames as u32, output) {
-                Ok(()) => true,
-                Err(_) => {
-                    AUDIO_RENDER_ERRORS.fetch_add(1, Ordering::Relaxed);
-                    false
-                }
-            },
-            None => false,
-        },
-        Err(_) => {
-            AUDIO_ENGINE_LOCK_MISSES.fetch_add(1, Ordering::Relaxed);
-            false
-        }
+    let rendered_frames = if user_data.is_null() {
+        0
+    } else {
+        // SAFETY: NativeAudioOutput owns the boxed context until after AAudio
+        // has stopped and closed the stream.
+        let context = unsafe { &*user_data.cast::<AudioCallbackContext>() };
+        let frames = context.queue.pop(output);
+        context.render_thread.unpark();
+        frames
     };
-    if !rendered {
-        conceal_audio_dropout(output);
+    let requested_frames = num_frames as usize;
+    if rendered_frames < requested_frames {
+        AUDIO_RENDER_QUEUE_UNDERRUNS.fetch_add(1, Ordering::Relaxed);
+        AUDIO_RENDER_QUEUE_UNDERRUN_FRAMES.fetch_add(
+            (requested_frames - rendered_frames) as u64,
+            Ordering::Relaxed,
+        );
+        conceal_audio_dropout(&mut output[rendered_frames * 2..]);
     }
     let output_gain = f32::from_bits(OUTPUT_GAIN_BITS.load(Ordering::Relaxed));
     let level_target = f32::from_bits(MASTER_LEVEL_TARGET_BITS.load(Ordering::Relaxed));
@@ -1214,7 +1443,8 @@ unsafe extern "C" fn render_callback(
     let mut level = f32::from_bits(MASTER_LEVEL_CURRENT_BITS.load(Ordering::Relaxed));
     let mut pan_left = f32::from_bits(MASTER_PAN_LEFT_CURRENT_BITS.load(Ordering::Relaxed));
     let mut pan_right = f32::from_bits(MASTER_PAN_RIGHT_CURRENT_BITS.load(Ordering::Relaxed));
-    let recover = rendered && AUDIO_RECOVERY_RAMP_PENDING.swap(0, Ordering::AcqRel) != 0;
+    let complete = rendered_frames == requested_frames;
+    let recover = complete && AUDIO_RECOVERY_RAMP_PENDING.swap(0, Ordering::AcqRel) != 0;
     let recovery_frames = output.len().div_ceil(2).min(DROPOUT_FADE_FRAMES).max(1);
     let mut nonfinite = 0_u64;
     let mut clipped = 0_u64;
@@ -1228,12 +1458,12 @@ unsafe extern "C" fn render_callback(
             1.0
         };
         let gain = output_gain * level * recovery_gain;
-        let left = if rendered {
+        let left = if index < rendered_frames {
             frame[0] * gain * pan_left
         } else {
             frame[0]
         };
-        let right = if rendered {
+        let right = if index < rendered_frames {
             frame[1] * gain * pan_right
         } else {
             frame[1]
@@ -1569,6 +1799,58 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabAcquirePlan
         controller_plan_json(Ok(messages))
     })();
     result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabMatchesUsbDevice(
+    _env: JNIEnv,
+    _class: JClass,
+    vendor_id: jint,
+    product_id: jint,
+) -> jboolean {
+    let Ok(vendor_id) = u16::try_from(vendor_id) else {
+        return JNI_FALSE;
+    };
+    let Ok(product_id) = u16::try_from(product_id) else {
+        return JNI_FALSE;
+    };
+    if keylab_essential_mk3::controller::matches_usb_device(vendor_id, product_id) {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabMatchesProductName(
+    mut env: JNIEnv,
+    _class: JClass,
+    name: JString,
+) -> jboolean {
+    match java_string(&mut env, name) {
+        Ok(name) if keylab_essential_mk3::controller::matches_product_name(&name) => JNI_TRUE,
+        Ok(_) => JNI_FALSE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabMatchesEndpointName(
+    mut env: JNIEnv,
+    _class: JClass,
+    name: JString,
+) -> jboolean {
+    match java_string(&mut env, name) {
+        Ok(name) if keylab_essential_mk3::controller::matches_endpoint_name_hint(&name) => JNI_TRUE,
+        Ok(_) => JNI_FALSE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -2090,7 +2372,6 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_startNativeAudio(
         {
             bail!("RackForge engine is not initialized");
         }
-        let candidate = NativeAudioOutput::open(device_id, latency_mode)?;
         AUDIO_ERROR.store(AAUDIO_OK, Ordering::Release);
         AUDIO_CALLBACK_COUNT.store(0, Ordering::Relaxed);
         AUDIO_CALLBACK_FRAMES.store(0, Ordering::Relaxed);
@@ -2100,9 +2381,13 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_startNativeAudio(
         AUDIO_RENDER_ERRORS.store(0, Ordering::Relaxed);
         AUDIO_NONFINITE_SAMPLES.store(0, Ordering::Relaxed);
         AUDIO_CLIPPED_SAMPLES.store(0, Ordering::Relaxed);
+        AUDIO_RENDER_QUEUE_UNDERRUNS.store(0, Ordering::Relaxed);
+        AUDIO_RENDER_QUEUE_UNDERRUN_FRAMES.store(0, Ordering::Relaxed);
+        AUDIO_RENDER_THREAD_PRIORITY_RESULT.store(0, Ordering::Relaxed);
         AUDIO_RECOVERY_RAMP_PENDING.store(0, Ordering::Relaxed);
         AUDIO_LAST_LEFT_BITS.store(0.0_f32.to_bits(), Ordering::Relaxed);
         AUDIO_LAST_RIGHT_BITS.store(0.0_f32.to_bits(), Ordering::Relaxed);
+        let candidate = NativeAudioOutput::open(device_id, latency_mode)?;
         *audio()
             .lock()
             .map_err(|_| anyhow::anyhow!("audio lock poisoned"))? = Some(candidate);

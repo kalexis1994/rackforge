@@ -14,7 +14,10 @@ putting the WebView or Java/JNI allocations in the realtime path. AAudio tries
 exclusive low-latency mode first and falls back to a shared stream when the
 device does not expose an exclusive path. Low, balanced and safe modes tune the
 AAudio buffer to two, three and four hardware bursts respectively; Settings
-reports the actual burst size, buffer and xrun count.
+reports the actual burst size, buffer and xrun count. Portable Wasm rendering
+runs on a dedicated audio-priority producer thread into a preallocated lock-free
+queue. Low keeps 384 frames rendered ahead, while balanced and safe keep 1,152,
+so plugin CPU spikes do not run inside or stall AAudio's realtime callback.
 
 PLAY opens the active plugin surface directly. LIVE is a separate performance
 overview, so installing or activating a package is no longer part of normal

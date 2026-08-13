@@ -3,7 +3,12 @@ use rackforge_controller_api::{
     HostControlBinding, HostControlTarget, LITTLE_V1, MidiButtonBinding, MidiControlChangeBinding,
     SurfaceImplementation, SurfaceQuality, negotiate_surface,
 };
+use rackforge_controller_package::{ControllerPackageManifest, DeviceMatcher};
 use std::sync::OnceLock;
+
+const PACKAGE_MANIFEST: &str = include_str!(
+    "../../controllers/arturia-keylab-essential-mk3/package/rackforge-controller.toml"
+);
 
 pub struct KeyLabEssentialMk3;
 
@@ -65,6 +70,54 @@ static DRIVERS: [&'static dyn ControllerDriver; 1] = [&KEYLAB_ESSENTIAL_MK3];
 
 pub fn package_profile() -> &'static ControllerProfile {
     KEYLAB_ESSENTIAL_MK3.profile()
+}
+
+pub fn device_matchers() -> &'static [DeviceMatcher] {
+    static DEVICES: OnceLock<Vec<DeviceMatcher>> = OnceLock::new();
+    DEVICES.get_or_init(|| {
+        toml::from_str::<ControllerPackageManifest>(PACKAGE_MANIFEST)
+            .expect("the embedded KeyLab .rfcontroller manifest must remain valid")
+            .devices
+    })
+}
+
+pub fn matches_usb_device(vendor_id: u16, product_id: u16) -> bool {
+    device_matchers().iter().any(|device| {
+        device.usb_vendor_id == vendor_id && device.usb_product_ids.contains(&product_id)
+    })
+}
+
+pub fn matches_product_name(name: &str) -> bool {
+    let folded = name.trim().to_ascii_lowercase();
+    !folded.is_empty()
+        && device_matchers().iter().any(|device| {
+            device.product_names.iter().any(|product| {
+                let product = product.trim().to_ascii_lowercase();
+                folded == product || folded.contains(&product)
+            })
+        })
+}
+
+pub fn matches_endpoint_name_hint(name: &str) -> bool {
+    let folded = name.trim().to_ascii_lowercase();
+    !folded.is_empty()
+        && device_matchers().iter().any(|device| {
+            device.endpoints.iter().any(|endpoint| {
+                endpoint
+                    .name_contains
+                    .iter()
+                    .all(|part| folded.contains(&part.to_ascii_lowercase()))
+                    && (endpoint.name_contains_any.is_empty()
+                        || endpoint
+                            .name_contains_any
+                            .iter()
+                            .any(|part| folded.contains(&part.to_ascii_lowercase())))
+                    && endpoint
+                        .exclude_contains
+                        .iter()
+                        .all(|part| !folded.contains(&part.to_ascii_lowercase()))
+            })
+        })
 }
 
 pub fn display_driver(port_name: &str) -> Option<&'static dyn ControllerDriver> {
@@ -172,5 +225,16 @@ mod tests {
         assert!(display_driver("KL Essential 61 mk3 DINTHRU 28:1").is_none());
         assert!(display_driver("KL Essential 61 mk3 MCU/HUI 28:2").is_none());
         assert!(display_driver("KL Essential 61 mk3 ALV 28:3").is_none());
+    }
+
+    #[test]
+    fn package_identity_matches_the_supported_android_usb_device() {
+        assert!(matches_usb_device(0x1c75, 0x028c));
+        assert!(!matches_usb_device(0x1c75, 0xffff));
+        assert!(matches_product_name("KeyLab Essential 61 mk3"));
+        assert!(matches_product_name("KeyLab Essential 61 mk3 MIDI"));
+        assert!(!matches_product_name("Generic USB MIDI"));
+        assert!(matches_endpoint_name_hint("KL Essential 61 mk3"));
+        assert!(!matches_endpoint_name_hint("KL Essential 61 mk3 MCU/HUI"));
     }
 }

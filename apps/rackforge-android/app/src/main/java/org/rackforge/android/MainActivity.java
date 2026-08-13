@@ -933,12 +933,29 @@ public final class MainActivity extends Activity {
                             + Uri.encode(pluginId) + "/" + configEntry));
         }
         JSONArray resources = plugin.optJSONArray("resources");
+        JSONObject packageBranding = plugin.optJSONObject("branding");
+        JSONObject branding = null;
+        if (packageBranding != null) {
+            String assetBase = "https://" + APP_HOST + "/plugin-assets/"
+                    + Uri.encode(pluginId) + "/";
+            branding = new JSONObject()
+                    .put("icon_url", assetBase + Uri.encode(packageBranding.getString("icon"), "/"))
+                    .put("banner_url", assetBase + Uri.encode(packageBranding.getString("banner"), "/"))
+                    .put("splash_url", assetBase + Uri.encode(packageBranding.getString("splash"), "/"));
+            if (packageBranding.has("background_color")) {
+                branding.put("background_color", packageBranding.getString("background_color"));
+            }
+            if (packageBranding.has("accent_color")) {
+                branding.put("accent_color", packageBranding.getString("accent_color"));
+            }
+        }
         return new JSONObject()
                 .put("plugin_id", pluginId)
                 .put("plugin_name", plugin.getString("plugin_name"))
                 .put("version", plugin.getString("version"))
                 .put("active", plugin.optBoolean("active"))
                 .put("api_version", plugin.optInt("web_api_version", 0))
+                .put("branding", branding == null ? JSONObject.NULL : branding)
                 .put("surfaces", surfaces)
                 .put("resources", resources == null ? new JSONArray() : resources);
     }

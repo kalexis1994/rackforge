@@ -122,11 +122,12 @@ textarea {
 }
 
 .play-plugin-selector button {
+  position: relative;
   width: 100%;
   min-height: 76px;
   padding: 13px 16px;
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 42px 52px minmax(0, 1fr) auto;
   align-items: center;
   gap: 15px;
   color: var(--muted);
@@ -137,6 +138,59 @@ textarea {
   box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.045);
   cursor: pointer;
   transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.play-plugin-selector button > :not(.plugin-picker-banner, .plugin-picker-shade) {
+  position: relative;
+  z-index: 2;
+}
+
+.plugin-picker-banner,
+.plugin-picker-shade {
+  position: absolute;
+  inset: 0;
+}
+
+.plugin-picker-banner {
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.plugin-picker-shade {
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(2, 10, 16, 0.9) 0%, rgba(2, 10, 16, 0.7) 58%, rgba(2, 10, 16, 0.82) 100%);
+}
+
+.plugin-picker-card.branded {
+  color: #edfaff;
+  background: var(--plugin-background, #07131c);
+  border-color: color-mix(in srgb, var(--plugin-accent, #55e7ff) 45%, transparent);
+}
+
+.play-plugin-selector button.plugin-picker-card.branded.active {
+  color: #fff;
+  background: var(--plugin-background, #07131c);
+  border-color: var(--plugin-accent, #55e7ff);
+  box-shadow: inset 4px 0 0 var(--plugin-accent, #55e7ff), 0 13px 38px rgba(0, 0, 0, 0.24);
+}
+
+.plugin-picker-icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+
+.plugin-picker-icon.plugin-icon-fallback {
+  color: #031018;
+  background: var(--acid);
+  font: 800 11px/1 "Cascadia Mono", "Consolas", monospace;
 }
 
 .play-plugin-selector button.active {
@@ -220,9 +274,34 @@ textarea {
 
 .play-plugin-identity {
   min-width: 0;
-  display: grid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 2px;
   text-align: center;
+}
+
+.play-plugin-identity > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.play-plugin-icon {
+  width: 34px;
+  height: 34px;
+  margin-right: 7px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.play-plugin-icon.plugin-icon-fallback {
+  display: grid;
+  place-items: center;
+  color: #031018;
+  background: var(--acid);
+  font: 800 9px/1 "Cascadia Mono", "Consolas", monospace;
 }
 
 .play-plugin-identity span {
@@ -1284,6 +1363,23 @@ body {
   font-size: 11px;
 }
 
+.plugin-tile.branded {
+  padding: 0;
+  background: #07131c;
+}
+
+.plugin-tile .plugin-icon {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.plugin-tile .plugin-icon-fallback {
+  padding: 10px;
+  font: 800 11px/1 "Cascadia Mono", "Consolas", monospace;
+}
+
 .plugin-tile i {
   position: absolute;
   width: 72px;
@@ -1445,6 +1541,42 @@ body {
   display: block;
   background: #f4f2ec;
   border: 0;
+}
+
+.plugin-frame-stage {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 0;
+  display: flex;
+  overflow: hidden;
+  background: #050c13;
+}
+
+.plugin-frame-stage .plugin-frame {
+  flex: 1 1 0;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.plugin-frame-stage .plugin-frame.loaded {
+  opacity: 1;
+}
+
+.plugin-brand-splash {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #050c13;
+}
+
+.plugin-brand-splash > img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .plugin-surface-state {
@@ -1871,7 +2003,7 @@ body {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
   html,
   body,
   #root {
@@ -1880,23 +2012,51 @@ body {
   }
 
   body::before,
-  body::after {
+  body::after,
+  #root::before,
+  #root::after {
     content: "";
     position: fixed;
-    right: 0;
-    left: 0;
-    height: 1px;
-    background: var(--line);
+    background: rgba(6, 16, 24, 0.42);
     pointer-events: none;
     z-index: 1000;
+    backdrop-filter: blur(14px) saturate(125%);
+  }
+
+  body::before,
+  body::after {
+    right: 0;
+    left: 0;
   }
 
   body::before {
-    top: var(--rackforge-safe-top);
+    top: 0;
+    height: var(--rackforge-safe-top);
+    box-shadow: inset 0 -1px 0 var(--line);
   }
 
   body::after {
+    bottom: 0;
+    height: var(--rackforge-safe-bottom);
+    box-shadow: inset 0 1px 0 var(--line);
+  }
+
+  #root::before,
+  #root::after {
+    top: var(--rackforge-safe-top);
     bottom: var(--rackforge-safe-bottom);
+  }
+
+  #root::before {
+    left: 0;
+    width: var(--rackforge-safe-left);
+    box-shadow: inset -1px 0 0 var(--line);
+  }
+
+  #root::after {
+    right: 0;
+    width: var(--rackforge-safe-right);
+    box-shadow: inset 1px 0 0 var(--line);
   }
 
   .app-shell {
@@ -2387,9 +2547,15 @@ body {
 
 @media (max-width: 480px) {
   .play-plugin-selector button {
-    grid-template-columns: 30px minmax(0, 1fr) auto;
+    grid-template-columns: 26px 42px minmax(0, 1fr) auto;
     gap: 10px;
     padding-inline: 12px;
+  }
+
+  .plugin-picker-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 9px;
   }
 
   .play-plugin-copy strong {
@@ -2436,7 +2602,7 @@ body {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
   .rack-graph-toolbar {
     align-items: stretch;
     flex-direction: column;
@@ -3609,14 +3775,22 @@ body {
     gap: 10px 14px;
   }
 
-  .touch-controller-menu > header,
-  .touch-main-navigation,
-  .touch-controller-exit {
+  .touch-controller-menu > header {
     grid-column: 1 / -1;
   }
 
   .touch-controller-menu .touch-performance-actions {
     align-self: end;
+  }
+
+  .touch-main-navigation,
+  .touch-controller-exit {
+    min-height: 40px;
+    padding: 7px 10px;
+  }
+
+  .touch-main-navigation {
+    display: flex;
   }
 
   .controller-surface-active .piano-key span {
@@ -5020,7 +5194,7 @@ body {
   box-shadow: 0 0 0 4px rgba(85, 231, 255, 0.1);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
   .mobile-menu-panel .nav-mark {
     width: 38px;
     height: 38px;
@@ -5074,4 +5248,335 @@ body {
 .preset-load-target strong,
 .session-stats dd {
   font-family: var(--display-font);
+}
+
+/* A phone in landscape is wide in CSS pixels but remains vertically
+   constrained. Treat it as a horizontal mobile workspace instead of falling
+   through to the compact desktop rail. */
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .topbar {
+    min-height: 58px;
+    padding: 8px 12px;
+    gap: 12px;
+  }
+
+  .plugin-surface-active .topbar {
+    min-height: 58px;
+    flex-basis: 58px;
+  }
+
+  .mobile-menu-button {
+    width: 40px;
+    height: 40px;
+    flex-basis: 40px;
+  }
+
+  .now-playing {
+    grid-template-columns: minmax(0, auto) auto;
+    gap: 0 8px;
+  }
+
+  .now-playing .eyebrow {
+    display: none;
+  }
+
+  .now-playing strong {
+    font-size: 13px;
+  }
+
+  .compact-control {
+    grid-template-columns: minmax(72px, 14vw) 32px;
+  }
+
+  .page,
+  .page.home-page {
+    padding: 16px 18px 28px;
+  }
+
+  .page.plugin-host-page,
+  .page.controller-host-page {
+    padding: 0;
+  }
+
+  .page-heading {
+    max-width: 880px;
+    margin-bottom: 18px;
+  }
+
+  .page-heading h1 {
+    margin: 4px 0 7px;
+    font-size: clamp(30px, 7vh, 42px);
+    line-height: 1;
+  }
+
+  .page-heading p {
+    max-width: 780px;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .hero-grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .hero-card {
+    min-height: 190px;
+    padding: 20px;
+  }
+
+  .hero-card h2 {
+    font-size: clamp(25px, 7vh, 38px);
+  }
+
+  .sound-card::after {
+    width: 135px;
+    height: 135px;
+    border-width: 20px;
+  }
+
+  .session-stats div {
+    padding: 6px 10px;
+  }
+
+  .session-stats dd {
+    font-size: clamp(20px, 6vh, 30px);
+  }
+
+  .section-block {
+    margin-top: 28px;
+  }
+
+  .section-title-row {
+    margin-bottom: 12px;
+  }
+
+  .plugin-grid,
+  .plugin-grid.expanded,
+  .settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-card {
+    min-height: 260px;
+    padding: 20px;
+  }
+
+  .settings-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .settings-copy {
+    margin-top: 15px;
+  }
+
+  .settings-copy h2 {
+    margin-block: 5px 7px;
+    font-size: 21px;
+  }
+
+  .settings-values {
+    margin-top: 16px;
+  }
+
+  .live-shell {
+    min-height: calc(100dvh - 58px);
+  }
+
+  .live-toolbar {
+    margin-bottom: 14px;
+    align-items: center;
+  }
+
+  .live-toolbar h1 {
+    font-size: clamp(30px, 9vh, 44px);
+  }
+
+  .live-content {
+    grid-template-columns: minmax(210px, 0.72fr) minmax(0, 1.6fr);
+    gap: 12px;
+  }
+
+  .active-performance-card {
+    min-height: 180px;
+    padding: 18px;
+  }
+
+  .live-mode-tabs {
+    padding: 9px;
+  }
+
+  .live-surface-tabs button,
+  .live-mode-tabs button,
+  .config-kind-tabs button {
+    min-height: 36px;
+    padding-inline: 12px;
+  }
+
+  .live-target-list {
+    max-height: calc(100dvh - 174px);
+    padding: 9px;
+  }
+
+  .target-card,
+  .sequence-row {
+    min-height: 58px;
+    padding: 8px 10px;
+  }
+
+  .live-loading,
+  .live-empty,
+  .editor-empty {
+    min-height: 190px;
+    padding: 20px;
+  }
+
+  .mobile-menu-backdrop {
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+
+  .mobile-menu-panel {
+    width: min(680px, 88vw);
+    height: 100%;
+    max-height: 100%;
+    border-width: 0 1px 0 0;
+    border-radius: 0 20px 20px 0;
+    transform-origin: left center;
+  }
+
+  .mobile-menu-handle {
+    width: 4px;
+    height: 34px;
+    top: 50%;
+    right: 8px;
+    left: auto;
+    transform: translateY(-50%);
+  }
+
+  .mobile-menu-panel > header {
+    min-height: 64px;
+    padding: 12px 18px 8px;
+  }
+
+  .mobile-menu-heading h2 {
+    font-size: 21px;
+  }
+
+  .mobile-menu-heading p {
+    margin-top: 2px;
+    font-size: 11px;
+  }
+
+  .mobile-menu-scroll {
+    padding: 0 18px 10px;
+  }
+
+  .mobile-menu-section {
+    margin: 7px 3px 5px;
+    font-size: 9px;
+  }
+
+  .mobile-menu-panel .primary-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .mobile-menu-panel .nav-item {
+    min-height: 52px;
+    gap: 10px;
+    padding: 6px 9px;
+    border-radius: 11px;
+  }
+
+  .mobile-menu-panel .nav-item .nav-mark,
+  .mobile-menu-panel .nav-item.active .nav-mark {
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
+  }
+
+  .mobile-menu-panel .nav-copy > span {
+    font-size: 13px;
+  }
+
+  .mobile-menu-panel .nav-copy small {
+    font-size: 9px;
+  }
+
+  .mobile-menu-panel .connection-badge {
+    padding: 8px 18px;
+  }
+
+  .install-plugin-backdrop,
+  .resource-explorer-backdrop {
+    padding: 8px;
+  }
+
+  .install-plugin-dialog {
+    width: min(760px, 100%);
+    max-height: 100%;
+    padding: 14px 18px;
+  }
+
+  .install-plugin-intro {
+    margin: 8px 0 12px;
+  }
+
+  .install-plugin-sources {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .install-source-card {
+    min-height: 70px;
+    padding: 10px;
+  }
+
+  .resource-explorer-dialog {
+    max-width: none;
+    max-height: none;
+    border-radius: 12px;
+  }
+
+  .resource-explorer-header,
+  .resource-explorer-footer {
+    min-height: 52px;
+    padding: 8px 14px;
+  }
+
+  .preset-modal-backdrop {
+    inset-block-start: 52px;
+    padding: 8px;
+  }
+
+  .preset-modal {
+    width: min(900px, 100%);
+    border-radius: 16px;
+  }
+
+  .preset-modal-header,
+  .preset-modal-toolbar {
+    padding: 12px 18px;
+  }
+
+  .preset-modal-header h2 {
+    font-size: 25px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 640px) {
+  .mobile-menu-panel {
+    width: 94vw;
+  }
+
+  .mobile-menu-panel .primary-nav,
+  .hero-grid,
+  .settings-grid,
+  .plugin-grid,
+  .plugin-grid.expanded,
+  .live-content {
+    grid-template-columns: 1fr;
+  }
 }

@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 rackforge-audio-api = { path = "../rackforge-audio-api" }
-rackforge-plugin-api = { path = "../rackforge-plugin-api" }
+rackforge-plugin-api = { path = "../rackforge-plugin-api", features = ["package-validation"] }
 rackforge-plugin-runtime = { path = "../rackforge-plugin-runtime" }
 rackforge-control-api = { path = "../rackforge-control-api" }
 rackforge-midi-api = { path = "../rackforge-midi-api" }

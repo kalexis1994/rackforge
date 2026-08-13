@@ -3798,6 +3798,7 @@ dependencies = [
 name = "rackforge-plugin-api"
 version = "0.1.2"
 dependencies = [
+ "png",
  "rackforge-midi-api",
  "rackforge-program-api",
  "rackforge-surface-api",

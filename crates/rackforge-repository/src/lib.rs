@@ -6,7 +6,9 @@
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signature, VerifyingKey};
-use rackforge_plugin_api::{PluginKind, PluginManifest, validate_plugin_identifier};
+use rackforge_plugin_api::{
+    PluginKind, PluginManifest, validate_branding_assets, validate_plugin_identifier,
+};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -916,6 +918,8 @@ fn read_extracted_manifest(root: &Path) -> Result<PluginManifest, RepositoryErro
         .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
     manifest
         .validate()
+        .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    validate_branding_assets(&manifest, root)
         .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
     Ok(manifest)
 }

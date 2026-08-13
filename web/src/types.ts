@@ -399,12 +399,21 @@ export interface WebAuthStatus {
 
 export type PluginWebSurfaceKind = "play" | "config";
 
+export interface PluginBranding {
+  icon_url: string;
+  banner_url: string;
+  splash_url: string;
+  background_color?: string;
+  accent_color?: string;
+}
+
 export interface PluginWebDescriptor {
   plugin_id: string;
   plugin_name: string;
   version: string;
   active: boolean;
   api_version: number;
+  branding?: PluginBranding | null;
   surfaces: Array<{
     kind: PluginWebSurfaceKind;
     entry_url: string;

@@ -1,5 +1,5 @@
 use crate::{
-    MANIFEST_SCHEMA_VERSION, RUNTIME_DESCRIPTOR_SCHEMA_VERSION,
+    MANIFEST_SCHEMA_VERSION, MIN_MANIFEST_SCHEMA_VERSION, RUNTIME_DESCRIPTOR_SCHEMA_VERSION,
     abi::{is_compatible, pack_version},
     parameter::SchemaError,
 };
@@ -7,6 +7,10 @@ use rackforge_midi_api::{DEFAULT_INPUT_BUS_ID, MidiInputBusId, PluginChannelMode
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(feature = "package-validation")]
+use std::fs;
+#[cfg(feature = "package-validation")]
+use std::io::Cursor;
 use std::path::{Component, Path};
 use thiserror::Error;
 
@@ -112,6 +116,242 @@ pub struct WebUi {
     pub surfaces: Vec<WebSurface>,
 }
 
+/// Visual identity owned by a plugin package and rendered by RackForge.
+///
+/// PNG is deliberately the only supported format: every host can decode it
+/// without executing plugin code and the dimensions are deterministic.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginBranding {
+    pub icon: String,
+    pub banner: String,
+    pub splash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accent_color: Option<String>,
+}
+
+impl PluginBranding {
+    pub fn assets(&self) -> [(BrandingAssetKind, &str); 3] {
+        [
+            (BrandingAssetKind::Icon, self.icon.as_str()),
+            (BrandingAssetKind::Banner, self.banner.as_str()),
+            (BrandingAssetKind::Splash, self.splash.as_str()),
+        ]
+    }
+
+    fn validate(&self) -> Result<(), ManifestError> {
+        for (_, path) in self.assets() {
+            if !is_safe_relative_path(path)
+                || Path::new(path).extension().and_then(|value| value.to_str()) != Some("png")
+            {
+                return Err(ManifestError::UnsafeBrandingPath(path.to_owned()));
+            }
+        }
+        for (field, value) in [
+            ("background_color", self.background_color.as_deref()),
+            ("accent_color", self.accent_color.as_deref()),
+        ] {
+            if let Some(value) = value
+                && !is_hex_color(value)
+            {
+                return Err(ManifestError::InvalidBrandingColor {
+                    field,
+                    value: value.to_owned(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BrandingAssetKind {
+    Icon,
+    Banner,
+    Splash,
+}
+
+impl BrandingAssetKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Icon => "icon",
+            Self::Banner => "banner",
+            Self::Splash => "splash",
+        }
+    }
+
+    pub const fn dimensions(self) -> (u32, u32) {
+        match self {
+            Self::Icon => (512, 512),
+            Self::Banner => (1600, 400),
+            Self::Splash => (1920, 1080),
+        }
+    }
+
+    pub const fn max_file_bytes(self) -> usize {
+        match self {
+            Self::Icon => 2 * 1024 * 1024,
+            Self::Banner => 4 * 1024 * 1024,
+            Self::Splash => 8 * 1024 * 1024,
+        }
+    }
+}
+
+/// Fully decodes a declared branding PNG before the package may be installed
+/// or activated. This catches truncated, corrupt, animated, oversized and
+/// unexpectedly encoded images rather than leaving each UI to interpret them.
+#[cfg(feature = "package-validation")]
+pub fn validate_branding_asset(
+    kind: BrandingAssetKind,
+    bytes: &[u8],
+) -> Result<(), BrandingAssetError> {
+    if bytes.len() > kind.max_file_bytes() {
+        return Err(BrandingAssetError::FileTooLarge {
+            kind,
+            actual: bytes.len(),
+            maximum: kind.max_file_bytes(),
+        });
+    }
+    let decoder = png::Decoder::new(Cursor::new(bytes));
+    let mut reader = decoder
+        .read_info()
+        .map_err(|error| BrandingAssetError::InvalidPng {
+            kind,
+            message: error.to_string(),
+        })?;
+    let info = reader.info();
+    let (expected_width, expected_height) = kind.dimensions();
+    if (info.width, info.height) != (expected_width, expected_height) {
+        return Err(BrandingAssetError::WrongDimensions {
+            kind,
+            expected_width,
+            expected_height,
+            actual_width: info.width,
+            actual_height: info.height,
+        });
+    }
+    if info.bit_depth != png::BitDepth::Eight
+        || !matches!(info.color_type, png::ColorType::Rgb | png::ColorType::Rgba)
+    {
+        return Err(BrandingAssetError::UnsupportedEncoding { kind });
+    }
+    if info.animation_control.is_some() {
+        return Err(BrandingAssetError::Animated { kind });
+    }
+    let output_size = reader
+        .output_buffer_size()
+        .ok_or(BrandingAssetError::UnsupportedEncoding { kind })?;
+    let mut output = vec![0; output_size];
+    reader
+        .next_frame(&mut output)
+        .map_err(|error| BrandingAssetError::InvalidPng {
+            kind,
+            message: error.to_string(),
+        })?;
+    Ok(())
+}
+
+#[cfg(feature = "package-validation")]
+#[derive(Debug, Error)]
+pub enum BrandingAssetError {
+    #[error("{kind:?} PNG is {actual} bytes; maximum is {maximum}")]
+    FileTooLarge {
+        kind: BrandingAssetKind,
+        actual: usize,
+        maximum: usize,
+    },
+    #[error("{kind:?} is not a valid PNG: {message}")]
+    InvalidPng {
+        kind: BrandingAssetKind,
+        message: String,
+    },
+    #[error(
+        "{kind:?} must be {expected_width}x{expected_height}, found {actual_width}x{actual_height}"
+    )]
+    WrongDimensions {
+        kind: BrandingAssetKind,
+        expected_width: u32,
+        expected_height: u32,
+        actual_width: u32,
+        actual_height: u32,
+    },
+    #[error("{kind:?} must be an 8-bit RGB or RGBA PNG")]
+    UnsupportedEncoding { kind: BrandingAssetKind },
+    #[error("{kind:?} must be a static PNG")]
+    Animated { kind: BrandingAssetKind },
+}
+
+/// Verifies every branding file against the canonical package root. Symlinks
+/// and other escapes are rejected even when the manifest path itself is safe.
+#[cfg(feature = "package-validation")]
+pub fn validate_branding_assets(
+    manifest: &PluginManifest,
+    package_root: &Path,
+) -> Result<(), BrandingAssetsError> {
+    let Some(branding) = &manifest.branding else {
+        return Ok(());
+    };
+    let root = fs::canonicalize(package_root).map_err(|error| BrandingAssetsError::Read {
+        kind: None,
+        path: package_root.display().to_string(),
+        message: error.to_string(),
+    })?;
+    for (kind, relative) in branding.assets() {
+        let requested = root.join(relative);
+        let path =
+            fs::canonicalize(&requested).map_err(|_| BrandingAssetsError::MissingOrEscaped {
+                kind,
+                path: relative.to_owned(),
+            })?;
+        if !path.starts_with(&root) || !path.is_file() {
+            return Err(BrandingAssetsError::MissingOrEscaped {
+                kind,
+                path: relative.to_owned(),
+            });
+        }
+        let metadata = fs::metadata(&path).map_err(|error| BrandingAssetsError::Read {
+            kind: Some(kind),
+            path: relative.to_owned(),
+            message: error.to_string(),
+        })?;
+        if metadata.len() > kind.max_file_bytes() as u64 {
+            return Err(BrandingAssetError::FileTooLarge {
+                kind,
+                actual: usize::try_from(metadata.len()).unwrap_or(usize::MAX),
+                maximum: kind.max_file_bytes(),
+            }
+            .into());
+        }
+        let bytes = fs::read(&path).map_err(|error| BrandingAssetsError::Read {
+            kind: Some(kind),
+            path: relative.to_owned(),
+            message: error.to_string(),
+        })?;
+        validate_branding_asset(kind, &bytes)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "package-validation")]
+#[derive(Debug, Error)]
+pub enum BrandingAssetsError {
+    #[error("{kind:?} branding asset is missing or escapes the package: {path:?}")]
+    MissingOrEscaped {
+        kind: BrandingAssetKind,
+        path: String,
+    },
+    #[error("could not read branding {kind:?} at {path:?}: {message}")]
+    Read {
+        kind: Option<BrandingAssetKind>,
+        path: String,
+        message: String,
+    },
+    #[error(transparent)]
+    Invalid(#[from] BrandingAssetError),
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MidiProgramChangePolicy {
@@ -147,6 +387,8 @@ pub struct PluginManifest {
     pub api: ApiRequirement,
     pub kind: PluginKind,
     pub state_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branding: Option<PluginBranding>,
     #[serde(default)]
     pub capabilities: Vec<Capability>,
     #[serde(default)]
@@ -167,8 +409,16 @@ pub struct PluginManifest {
 
 impl PluginManifest {
     pub fn validate(&self) -> Result<(), ManifestError> {
-        if self.schema_version != MANIFEST_SCHEMA_VERSION {
+        if !(MIN_MANIFEST_SCHEMA_VERSION..=MANIFEST_SCHEMA_VERSION).contains(&self.schema_version) {
             return Err(ManifestError::UnsupportedSchema(self.schema_version));
+        }
+        match (self.schema_version, &self.branding) {
+            (MANIFEST_SCHEMA_VERSION, None) => return Err(ManifestError::MissingBranding),
+            (MIN_MANIFEST_SCHEMA_VERSION, Some(_)) => {
+                return Err(ManifestError::BrandingRequiresSchema2);
+            }
+            (_, Some(branding)) => branding.validate()?,
+            _ => {}
         }
         validate_identifier(&self.id, true)
             .map_err(|_| ManifestError::InvalidPluginId(self.id.clone()))?;
@@ -406,10 +656,24 @@ fn is_safe_relative_path(value: &str) -> bool {
             .all(|component| matches!(component, Component::Normal(_)))
 }
 
+fn is_hex_color(value: &str) -> bool {
+    value.len() == 7
+        && value.starts_with('#')
+        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum ManifestError {
     #[error("unsupported manifest schema {0}")]
     UnsupportedSchema(u32),
+    #[error("manifest schema 2 requires a branding section")]
+    MissingBranding,
+    #[error("branding requires manifest schema 2")]
+    BrandingRequiresSchema2,
+    #[error("branding asset must be a safe relative .png path: {0:?}")]
+    UnsafeBrandingPath(String),
+    #[error("branding {field} must be #RRGGBB, found {value:?}")]
+    InvalidBrandingColor { field: &'static str, value: String },
     #[error("unsupported runtime descriptor schema {0}")]
     UnsupportedRuntimeSchema(u32),
     #[error("invalid plugin id {0:?}")]
@@ -488,6 +752,7 @@ mod tests {
             api: ApiRequirement { major: 1, minor: 0 },
             kind: PluginKind::Effect,
             state_version: 1,
+            branding: None,
             capabilities: vec![Capability::AudioInput, Capability::AudioOutput],
             resources: Vec::new(),
             ui_layouts: Vec::new(),
@@ -502,6 +767,65 @@ mod tests {
     #[test]
     fn validates_a_well_formed_manifest() {
         assert_eq!(manifest().validate(), Ok(()));
+    }
+
+    fn branding() -> PluginBranding {
+        PluginBranding {
+            icon: "branding/icon.png".into(),
+            banner: "branding/banner.png".into(),
+            splash: "branding/splash.png".into(),
+            background_color: Some("#07131C".into()),
+            accent_color: Some("#55E7FF".into()),
+        }
+    }
+
+    #[test]
+    fn schema_two_requires_valid_branding() {
+        let mut candidate = manifest();
+        candidate.schema_version = MANIFEST_SCHEMA_VERSION;
+        assert_eq!(candidate.validate(), Err(ManifestError::MissingBranding));
+        candidate.branding = Some(branding());
+        assert_eq!(candidate.validate(), Ok(()));
+        candidate.branding.as_mut().unwrap().icon = "../icon.png".into();
+        assert!(matches!(
+            candidate.validate(),
+            Err(ManifestError::UnsafeBrandingPath(_))
+        ));
+    }
+
+    #[test]
+    fn legacy_schema_cannot_partially_adopt_branding() {
+        let mut candidate = manifest();
+        candidate.branding = Some(branding());
+        assert_eq!(
+            candidate.validate(),
+            Err(ManifestError::BrandingRequiresSchema2)
+        );
+    }
+
+    #[cfg(feature = "package-validation")]
+    #[test]
+    fn branding_png_is_fully_decoded_and_dimension_checked() {
+        fn rgba_png(width: u32, height: u32) -> Vec<u8> {
+            let mut bytes = Vec::new();
+            let mut encoder = png::Encoder::new(&mut bytes, width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer
+                .write_image_data(&vec![0x80; width as usize * height as usize * 4])
+                .unwrap();
+            drop(writer);
+            bytes
+        }
+
+        let valid = rgba_png(512, 512);
+        assert!(validate_branding_asset(BrandingAssetKind::Icon, &valid).is_ok());
+        let wrong = rgba_png(511, 512);
+        assert!(matches!(
+            validate_branding_asset(BrandingAssetKind::Icon, &wrong),
+            Err(BrandingAssetError::WrongDimensions { .. })
+        ));
     }
 
     #[test]

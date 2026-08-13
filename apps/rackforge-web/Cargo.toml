@@ -12,7 +12,7 @@ futures-util = "0.3"
 getrandom.workspace = true
 mime_guess = "2.0"
 rackforge-control-api = { path = "../../crates/rackforge-control-api" }
-rackforge-plugin-api = { path = "../../crates/rackforge-plugin-api" }
+rackforge-plugin-api = { path = "../../crates/rackforge-plugin-api", features = ["package-validation"] }
 rackforge-repository = { path = "../../crates/rackforge-repository" }
 rackforge-resource-api = { path = "../../crates/rackforge-resource-api" }
 rackforge-resource-host = { path = "../../crates/rackforge-resource-host" }

@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
 } from "react";
 import { useSelector } from "react-redux";
@@ -88,6 +89,24 @@ function BrandMark() {
   return (
     <span className="brand-mark" aria-hidden="true">
       <img src="/brand/rackforge-mark.svg" alt="" />
+    </span>
+  );
+}
+
+function PluginIcon({
+  plugin,
+  name,
+  className = "plugin-icon",
+}: {
+  plugin?: PluginWebDescriptor;
+  name: string;
+  className?: string;
+}) {
+  return plugin?.branding ? (
+    <img className={className} src={plugin.branding.icon_url} alt="" />
+  ) : (
+    <span className={`${className} plugin-icon-fallback`} aria-hidden="true">
+      {name.slice(0, 2).toUpperCase()}
     </span>
   );
 }
@@ -364,10 +383,31 @@ function RackForgeApp() {
 
 function useTactileFeedback() {
   useEffect(() => {
-    let pressed: HTMLElement | null = null;
+    const DRAG_THRESHOLD_PX = 10;
+    let gesture: {
+      candidate: HTMLElement;
+      pointerId: number;
+      startX: number;
+      startY: number;
+      cancelled: boolean;
+      pressTimer: number | null;
+    } | null = null;
+    const clearPressTimer = () => {
+      if (gesture?.pressTimer !== null && gesture?.pressTimer !== undefined) {
+        window.clearTimeout(gesture.pressTimer);
+        gesture.pressTimer = null;
+      }
+    };
     const clearPressed = () => {
-      pressed?.classList.remove("rf-pressed");
-      pressed = null;
+      clearPressTimer();
+      gesture?.candidate.classList.remove("rf-pressed");
+      gesture = null;
+    };
+    const cancelGesture = () => {
+      if (!gesture) return;
+      clearPressTimer();
+      gesture.cancelled = true;
+      gesture.candidate.classList.remove("rf-pressed");
     };
     const pointerDown = (event: PointerEvent) => {
       if (event.pointerType === "mouse" && event.button !== 0) return;
@@ -381,29 +421,64 @@ function useTactileFeedback() {
       // when playing quickly or gliding across the keyboard.
       if (candidate.closest(".touch-instrument")) return;
       clearPressed();
-      pressed = candidate;
-      candidate.classList.add("rf-tactile", "rf-pressed");
+      gesture = {
+        candidate,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        cancelled: false,
+        pressTimer: null,
+      };
+      candidate.classList.add("rf-tactile");
+      gesture.pressTimer = window.setTimeout(() => {
+        if (gesture?.candidate === candidate && !gesture.cancelled) {
+          candidate.classList.add("rf-pressed");
+          gesture.pressTimer = null;
+        }
+      }, 70);
+    };
+    const pointerMove = (event: PointerEvent) => {
+      if (!gesture || gesture.pointerId !== event.pointerId || gesture.cancelled) return;
+      if (
+        Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) >
+        DRAG_THRESHOLD_PX
+      ) {
+        cancelGesture();
+      }
+    };
+    const pointerUp = (event: PointerEvent) => {
+      if (!gesture || gesture.pointerId !== event.pointerId) return;
+      const { candidate, startX, startY, cancelled } = gesture;
+      clearPressTimer();
+      candidate.classList.remove("rf-pressed");
+      gesture = null;
+      const releaseTarget = document.elementFromPoint(event.clientX, event.clientY);
+      if (cancelled || !releaseTarget || !candidate.contains(releaseTarget)) return;
       const bounds = candidate.getBoundingClientRect();
       const diameter = Math.max(bounds.width, bounds.height) * 2.1;
       const ripple = document.createElement("span");
       ripple.className = "rf-touch-ripple";
       ripple.style.width = `${diameter}px`;
       ripple.style.height = `${diameter}px`;
-      ripple.style.left = `${event.clientX - bounds.left - diameter / 2}px`;
-      ripple.style.top = `${event.clientY - bounds.top - diameter / 2}px`;
+      ripple.style.left = `${startX - bounds.left - diameter / 2}px`;
+      ripple.style.top = `${startY - bounds.top - diameter / 2}px`;
       candidate.appendChild(ripple);
       ripple.addEventListener("animationend", () => ripple.remove(), { once: true });
       hostHaptic("tap");
     };
     document.addEventListener("pointerdown", pointerDown, { capture: true, passive: true });
-    document.addEventListener("pointerup", clearPressed, { capture: true, passive: true });
+    document.addEventListener("pointermove", pointerMove, { capture: true, passive: true });
+    document.addEventListener("pointerup", pointerUp, { capture: true, passive: true });
     document.addEventListener("pointercancel", clearPressed, { capture: true, passive: true });
+    document.addEventListener("scroll", cancelGesture, { capture: true, passive: true });
     window.addEventListener("blur", clearPressed);
     return () => {
       clearPressed();
       document.removeEventListener("pointerdown", pointerDown, true);
-      document.removeEventListener("pointerup", clearPressed, true);
+      document.removeEventListener("pointermove", pointerMove, true);
+      document.removeEventListener("pointerup", pointerUp, true);
       document.removeEventListener("pointercancel", clearPressed, true);
+      document.removeEventListener("scroll", cancelGesture, true);
       window.removeEventListener("blur", clearPressed);
     };
   }, []);
@@ -1116,6 +1191,9 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
   const activeVersion = installedPlugins.find(
     (plugin) => plugin.plugin_id === active?.plugin_id,
   )?.version;
+  const activeDescriptor = installedPlugins.find(
+    (plugin) => plugin.plugin_id === active?.plugin_id,
+  );
   return (
     <section className="plugin-surface-shell direct-surface">
       <div className="play-plugin-toolbar">
@@ -1131,12 +1209,21 @@ function PlayPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
           <strong>Select plugin</strong>
         </button>
         <div className="play-plugin-identity">
+          {active && (
+            <PluginIcon
+              plugin={activeDescriptor}
+              name={active.plugin_name}
+              className="play-plugin-icon"
+            />
+          )}
+          <div>
           <span>PLAY</span>
           <strong>
             {active
               ? `${active.plugin_name}${formatPluginVersion(activeVersion)}`
               : "Select an instrument"}
           </strong>
+          </div>
         </div>
         <button
           className={`play-header-button presets${presetsOpen ? " active" : ""}`}
@@ -1254,12 +1341,23 @@ function PluginPickerModal({
             const activating = activatingId === plugin.plugin_id;
             return (
               <button
-                className={selected ? "active" : ""}
+                className={`plugin-picker-card${selected ? " active" : ""}${plugin.branding ? " branded" : ""}`}
                 disabled={activatingId !== null}
                 key={plugin.plugin_id}
                 onClick={() => void activate(plugin)}
+                style={plugin.branding ? {
+                  "--plugin-accent": plugin.branding.accent_color,
+                  "--plugin-background": plugin.branding.background_color,
+                } as CSSProperties : undefined}
               >
+                {plugin.branding && (
+                  <>
+                    <img className="plugin-picker-banner" src={plugin.branding.banner_url} alt="" />
+                    <span className="plugin-picker-shade" aria-hidden="true" />
+                  </>
+                )}
                 <span className="play-plugin-number">{String(index + 1).padStart(2, "0")}</span>
+                <PluginIcon plugin={plugin} name={plugin.plugin_name} className="plugin-picker-icon" />
                 <span className="play-plugin-copy">
                   <strong>{plugin.plugin_name}{formatPluginVersion(plugin.version)}</strong>
                   <small>
@@ -1474,7 +1572,7 @@ function PluginsPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
       <div className="plugin-section-heading">
         <span className="card-kicker">Running now</span>
       </div>
-      <PluginGrid instances={running} expanded />
+      <PluginGrid instances={running} plugins={installed} expanded />
       {available.length > 0 && (
         <>
           <div className="plugin-section-heading">
@@ -1484,9 +1582,9 @@ function PluginsPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
           <div className="plugin-grid expanded">
             {available.map((plugin, index) => (
               <article className="plugin-card installed-plugin-card" key={plugin.plugin_id}>
-                <div className={`plugin-tile tile-${(index + running.length) % 4}`}>
-                  <span>{plugin.plugin_name.slice(0, 2).toUpperCase()}</span>
-                  <i />
+                <div className={`plugin-tile tile-${(index + running.length) % 4}${plugin.branding ? " branded" : ""}`}>
+                  <PluginIcon plugin={plugin} name={plugin.plugin_name} />
+                  {!plugin.branding && <i />}
                 </div>
                 <div>
                   <span className="card-kicker">
@@ -1510,16 +1608,35 @@ function PluginsPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
 
 function PluginGrid({
   instances,
+  plugins,
   expanded = false,
 }: {
   instances: PluginInstance[];
+  plugins?: PluginWebDescriptor[];
   expanded?: boolean;
 }) {
+  const [loadedCatalog, setLoadedCatalog] = useState<PluginWebDescriptor[]>([]);
+  useEffect(() => {
+    if (plugins) return;
+    let cancelled = false;
+    hostJson<PluginWebDescriptor[]>("/api/v1/plugins")
+      .then((result) => {
+        if (!cancelled) setLoadedCatalog(result);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadedCatalog([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [plugins]);
+  const catalog = plugins ?? loadedCatalog;
   if (instances.length === 0)
     return <EmptyState title="Waiting for installed plugins" />;
   return (
     <div className={`plugin-grid${expanded ? " expanded" : ""}`}>
       {instances.map((instance, index) => {
+        const plugin = catalog.find((candidate) => candidate.plugin_id === instance.plugin_id);
         const selected = instance.sounds.find(
           (sound) => sound.id === instance.selected_sound_id,
         );
@@ -1529,9 +1646,9 @@ function PluginGrid({
             to={`/plugins/${encodeURIComponent(instance.instance_id)}`}
             key={instance.instance_id}
           >
-            <div className={`plugin-tile tile-${index % 4}`}>
-              <span>{instance.plugin_name.slice(0, 2).toUpperCase()}</span>
-              <i />
+            <div className={`plugin-tile tile-${index % 4}${plugin?.branding ? " branded" : ""}`}>
+              <PluginIcon plugin={plugin} name={instance.plugin_name} />
+              {!plugin?.branding && <i />}
             </div>
             <div>
               <span className="card-kicker">Plugin</span>
@@ -1615,6 +1732,7 @@ function PluginFrame({
   const [descriptorStatus, setDescriptorStatus] = useState<
     "loading" | "ready" | "unavailable" | "error"
   >("loading");
+  const [frameLoaded, setFrameLoaded] = useState(false);
   const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const pendingResourceRequestRef = useRef<string | null>(null);
@@ -2079,14 +2197,32 @@ function PluginFrame({
 
   return (
     <>
-      <iframe
-        ref={frameRef}
-        className="plugin-frame"
-        title={`${instance.plugin_name} ${surface}`}
-        src={selectedSurface.entry_url}
-        sandbox="allow-scripts allow-same-origin"
-        referrerPolicy="same-origin"
-      />
+      <div
+        className="plugin-frame-stage"
+        style={descriptor?.branding?.background_color ? {
+          backgroundColor: descriptor.branding.background_color,
+        } : undefined}
+      >
+        <iframe
+          key={selectedSurface.entry_url}
+          ref={frameRef}
+          className={`plugin-frame${frameLoaded ? " loaded" : ""}`}
+          title={`${instance.plugin_name} ${surface}`}
+          src={selectedSurface.entry_url}
+          sandbox="allow-scripts allow-same-origin"
+          referrerPolicy="same-origin"
+          onLoad={() => setFrameLoaded(true)}
+        />
+        {!frameLoaded && (
+          <div className="plugin-brand-splash" aria-label={`Loading ${instance.plugin_name}`}>
+            {descriptor?.branding ? (
+              <img src={descriptor.branding.splash_url} alt="" />
+            ) : (
+              <RfLoader label={instance.plugin_name} detail="Loading plugin interface…" size="medium" />
+            )}
+          </div>
+        )}
+      </div>
       {resourceRequest ? (
         <Suspense
           fallback={

@@ -208,12 +208,22 @@ struct PublicWebSurface {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct PublicPluginBranding {
+    icon_url: String,
+    banner_url: String,
+    splash_url: String,
+    background_color: Option<String>,
+    accent_color: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct PublicPluginWeb {
     plugin_id: String,
     plugin_name: String,
     version: String,
     active: bool,
     api_version: u16,
+    branding: Option<PublicPluginBranding>,
     surfaces: Vec<PublicWebSurface>,
     resources: Vec<rackforge_plugin_api::ResourceRequirement>,
 }
@@ -939,6 +949,7 @@ impl PluginWebRegistry {
         manifest.validate()?;
         let root = fs::canonicalize(root)
             .with_context(|| format!("resolving plugin root {}", root.display()))?;
+        rackforge_plugin_api::validate_branding_assets(&manifest, &root)?;
         let mut surfaces = Vec::new();
         if let Some(web_ui) = &manifest.web_ui {
             surfaces.reserve(web_ui.surfaces.len());
@@ -958,6 +969,16 @@ impl PluginWebRegistry {
                 });
             }
         }
+        let branding = manifest
+            .branding
+            .as_ref()
+            .map(|branding| PublicPluginBranding {
+                icon_url: plugin_asset_url(&manifest.id, &branding.icon),
+                banner_url: plugin_asset_url(&manifest.id, &branding.banner),
+                splash_url: plugin_asset_url(&manifest.id, &branding.splash),
+                background_color: branding.background_color.clone(),
+                accent_color: branding.accent_color.clone(),
+            });
         Ok(PluginWebPackage {
             root,
             public: PublicPluginWeb {
@@ -969,11 +990,16 @@ impl PluginWebRegistry {
                     .web_ui
                     .as_ref()
                     .map_or(0, |web_ui| web_ui.api_version),
+                branding,
                 surfaces,
                 resources: manifest.resources,
             },
         })
     }
+}
+
+fn plugin_asset_url(plugin_id: &str, asset: &str) -> String {
+    format!("/plugin-assets/{plugin_id}/{}", asset.replace('\\', "/"))
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {

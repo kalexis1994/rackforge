@@ -44,6 +44,10 @@ name ends in `.rfplugin`:
 ```text
 plugin-name-version.rfplugin/
 ├── rackforge-plugin.toml
+├── branding/
+│   ├── icon.png
+│   ├── banner.png
+│   └── splash.png
 ├── component.wasm
 ├── metadata/
 │   ├── runtime.json
@@ -52,6 +56,41 @@ plugin-name-version.rfplugin/
 └── web/
     └── <static plugin-owned surfaces>
 ```
+
+New packages use manifest schema 2 and must include a host-rendered visual
+identity:
+
+```toml
+schema_version = 2
+id = "org.example.instrument"
+name = "Example Instrument"
+vendor = "Example Audio"
+version = "1.0.0"
+kind = "instrument"
+state_version = 1
+
+[api]
+major = 1
+minor = 8
+
+[branding]
+icon = "branding/icon.png"
+banner = "branding/banner.png"
+splash = "branding/splash.png"
+background_color = "#07131C"
+accent_color = "#55E7FF"
+```
+
+All three files are static, 8-bit RGB or RGBA PNGs. The exact dimensions are
+512×512 for the icon, 1600×400 for the banner, and 1920×1080 for the splash.
+RackForge fully decodes them while validating the package, rejects filesystem
+escapes and excessive file sizes, and exposes only host-owned asset URLs to the
+shared UI. See [Plugin branding](PLUGIN_BRANDING.md) for composition rules and
+where each asset appears.
+
+Schema 1 remains loadable so already published plugins do not break. RackForge
+uses its generic plugin identity for those packages; adding any branding field
+requires upgrading the whole manifest to schema 2.
 
 The preferred format is `wasm-v1`: a plugin is compiled once against
 `rackforge-plugin-sdk`, and RackForge runs the same component on every

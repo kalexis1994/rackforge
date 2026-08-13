@@ -1562,6 +1562,7 @@ fn package_descriptor(
         "web_entry": play_entry,
         "config_web_entry": config_entry,
         "web_api_version": manifest.web_ui.as_ref().map_or(0, |web| web.api_version),
+        "branding": manifest.branding,
         "resources": manifest.resources,
         "active": active_plugin.is_some_and(|(id, version)| {
             id == &manifest.id && version == &manifest.version

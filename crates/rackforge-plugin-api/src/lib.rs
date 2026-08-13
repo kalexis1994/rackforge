@@ -11,9 +11,13 @@ pub mod program;
 pub mod state;
 
 pub use manifest::{
-    ApiRequirement, Capability, MidiInputBus, MidiProgramChangePolicy, PluginKind, PluginManifest,
-    PluginMidiContract, PortableAbi, PortableComponent, ResourceKind, ResourceRequirement,
-    RuntimeDescriptor, WebSurface, WebSurfaceKind, WebUi,
+    ApiRequirement, BrandingAssetKind, Capability, MidiInputBus, MidiProgramChangePolicy,
+    PluginBranding, PluginKind, PluginManifest, PluginMidiContract, PortableAbi, PortableComponent,
+    ResourceKind, ResourceRequirement, RuntimeDescriptor, WebSurface, WebSurfaceKind, WebUi,
+};
+#[cfg(feature = "package-validation")]
+pub use manifest::{
+    BrandingAssetError, BrandingAssetsError, validate_branding_asset, validate_branding_assets,
 };
 pub use parameter::{
     EnumChoice, PageDescriptor, ParameterDescriptor, ParameterFlags, ParameterKind,
@@ -38,7 +42,8 @@ pub use state::{
     validate_preset_id, validate_preset_name,
 };
 
-pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub const MIN_MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub const MANIFEST_SCHEMA_VERSION: u32 = 2;
 pub const PARAMETER_SCHEMA_VERSION: u32 = 1;
 pub const PRESET_CATALOG_SCHEMA_VERSION: u32 = 1;
 pub const RUNTIME_DESCRIPTOR_SCHEMA_VERSION: u32 = 1;

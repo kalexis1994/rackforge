@@ -220,12 +220,22 @@ struct PublicWebSurface {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct PublicPluginBranding {
+    icon_url: String,
+    banner_url: String,
+    splash_url: String,
+    background_color: Option<String>,
+    accent_color: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct PublicPluginWeb {
     plugin_id: String,
     plugin_name: String,
     version: String,
     active: bool,
     api_version: u16,
+    branding: Option<PublicPluginBranding>,
     surfaces: Vec<PublicWebSurface>,
     resources: Vec<rackforge_plugin_api::ResourceRequirement>,
 }
@@ -991,6 +1001,16 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
                 version: manifest.version.clone(),
                 active: active.contains(&manifest.id),
                 api_version: manifest.web_ui.as_ref().map_or(0, |web| web.api_version),
+                branding: manifest
+                    .branding
+                    .as_ref()
+                    .map(|branding| PublicPluginBranding {
+                        icon_url: plugin_asset_url(&manifest.id, &branding.icon),
+                        banner_url: plugin_asset_url(&manifest.id, &branding.banner),
+                        splash_url: plugin_asset_url(&manifest.id, &branding.splash),
+                        background_color: branding.background_color.clone(),
+                        accent_color: branding.accent_color.clone(),
+                    }),
                 surfaces,
                 resources: manifest.resources.clone(),
             },
@@ -1006,6 +1026,10 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
         .into_iter()
         .map(|(id, (_, package))| (id, package))
         .collect())
+}
+
+fn plugin_asset_url(plugin_id: &str, asset: &str) -> String {
+    format!("/plugin-assets/{plugin_id}/{}", asset.replace('\\', "/"))
 }
 
 fn internal_error(error: impl std::fmt::Display) -> Response {

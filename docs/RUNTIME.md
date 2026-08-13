@@ -44,6 +44,7 @@ The distributable artifact uses the `.rfplugin` extension:
 instrument-0.1.0.rfplugin
 └── plugin/
     ├── rackforge-plugin.toml
+    ├── branding/              # schema 2 icon, banner, and splash PNGs
     ├── lib/
     │   ├── windows-x86_64/
     │   ├── linux-aarch64/

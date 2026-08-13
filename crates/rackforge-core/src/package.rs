@@ -1,6 +1,6 @@
 use crate::PluginStorage;
 use anyhow::{Context, Result, bail};
-use rackforge_plugin_api::{PluginManifest, ResourceKind};
+use rackforge_plugin_api::{PluginManifest, ResourceKind, validate_branding_assets};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,6 +32,8 @@ impl PluginPackage {
             .parent()
             .context("plugin manifest has no parent directory")?
             .to_path_buf();
+        validate_branding_assets(&manifest, &root)
+            .with_context(|| format!("validating branding in {}", root.display()))?;
         Ok(Self { root, manifest })
     }
 

@@ -196,11 +196,11 @@ export function TouchControllerPage({
   }, [panic]);
 
   useEffect(() => {
-    if (!playable) panic();
+    if (!playable) window.queueMicrotask(panic);
   }, [panic, playable]);
 
   useEffect(() => {
-    panic();
+    window.queueMicrotask(panic);
   }, [panic, session.active_instance_id, session.active_mode, session.live.active_rack_id]);
 
   useEffect(() => {
@@ -224,8 +224,10 @@ export function TouchControllerPage({
 
   useEffect(() => {
     if (octave > maximumOctave) {
-      panic();
-      setOctave(maximumOctave);
+      window.queueMicrotask(() => {
+        panic();
+        setOctave(maximumOctave);
+      });
     }
   }, [maximumOctave, octave, panic]);
 
@@ -382,7 +384,7 @@ export function TouchControllerPage({
               />
             </label>
 
-            <div className={`touch-key-width-control${mode !== "keyboard" ? " disabled" : ""}`}>
+            {mode === "keyboard" ? <div className="touch-key-width-control">
               <div>
                 <span>VISIBLE WHITE KEYS</span>
                 <output>{keyboardWidth === "auto" ? `AUTO · ${visibleWhiteKeys}` : visibleWhiteKeys}</output>
@@ -392,7 +394,6 @@ export function TouchControllerPage({
                     panic();
                     setKeyboardWidth("auto");
                   }}
-                  disabled={mode !== "keyboard"}
                   aria-pressed={keyboardWidth === "auto"}
                 >
                   Auto
@@ -409,7 +410,6 @@ export function TouchControllerPage({
                   panic();
                   setKeyboardWidth(Number(event.target.value));
                 }}
-                disabled={mode !== "keyboard"}
                 aria-label="Visible white keys"
               />
               <datalist id="touch-key-width-marks">
@@ -421,9 +421,9 @@ export function TouchControllerPage({
                 <option value="22" label="22" />
                 <option value="29" label="29" />
               </datalist>
-            </div>
+            </div> : null}
 
-            <div className={`touch-pad-matrix-control${mode !== "pads" ? " disabled" : ""}`}>
+            {mode === "pads" ? <div className="touch-pad-matrix-control">
               <div className="touch-pad-matrix-heading">
                 <span>PAD MATRIX</span>
                 <output>{padMatrix.columns} × {padMatrix.rows} · {padMatrix.columns * padMatrix.rows} pads</output>
@@ -451,7 +451,6 @@ export function TouchControllerPage({
                         ));
                         setPadMatrix(nextMatrix);
                       }}
-                      disabled={mode !== "pads"}
                       role="gridcell"
                       aria-label={`${column} columns by ${row} rows`}
                       aria-selected={column === padMatrix.columns && row === padMatrix.rows}
@@ -459,7 +458,7 @@ export function TouchControllerPage({
                   );
                 })}
               </div>
-            </div>
+            </div> : null}
 
             <div className="touch-performance-actions">
               <button

@@ -1887,6 +1887,35 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabSyncActiveP
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabSyncActiveMode(
+    mut env: JNIEnv,
+    _class: JClass,
+    mode: JString,
+) -> jboolean {
+    let result = (|| -> Result<()> {
+        let mode = match java_string(&mut env, mode)?.as_str() {
+            "idle" => ActiveMode::Idle,
+            "live" => ActiveMode::Live,
+            "play" => ActiveMode::Play,
+            value => bail!("invalid Android controller mode {value:?}"),
+        };
+        controller_menu()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?
+            .menu
+            .sync_active_mode(mode);
+        Ok(())
+    })();
+    match result {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabRenderPlan(
     mut env: JNIEnv,
     _class: JClass,

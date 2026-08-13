@@ -149,6 +149,7 @@ public final class MainActivity extends Activity {
     private static native String keyLabPollLongPress();
     private static native boolean keyLabSyncPlugins(String storeRoot);
     private static native boolean keyLabSyncActivePlugin();
+    private static native boolean keyLabSyncActiveMode(String mode);
     private static native String keyLabRenderPlan();
     private static native boolean startNativeAudio(int deviceId, int latencyMode);
     private static native void setNativeOutputGain(int gainDb);
@@ -183,6 +184,8 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         preferences = getSharedPreferences("rackforge-settings", MODE_PRIVATE);
+        currentPage = "live".equals(preferences.getString("session.active_mode", "play"))
+                ? "live" : "play";
         selectedAudioDeviceKey = preferences.getString("audio.output", "default");
         // Balanced keeps a render-ahead queue for measured portable WASM CPU
         // spikes. Users can still opt into the more aggressive Low profile.
@@ -214,7 +217,8 @@ public final class MainActivity extends Activity {
         registerMidiDeviceUpdates();
         registerThermalMonitoring();
         mainHandler.post(audioHealthPoll);
-        showPlay();
+        if ("live".equals(currentPage)) showLive();
+        else showPlay();
         startEngine();
     }
 
@@ -477,6 +481,7 @@ public final class MainActivity extends Activity {
                                 sendPluginMessage(updatedContext);
                                 if ("plugin.save_program".equals(method)
                                         || "plugin.cancel_program".equals(method)) {
+                                    rememberActivePluginSound();
                                     keyLabSyncActivePlugin();
                                     refreshKeyLabDisplay();
                                 }
@@ -499,6 +504,7 @@ public final class MainActivity extends Activity {
                         if (!selectPluginSound(soundId)) {
                             throw new IllegalStateException("The plugin rejected the selected sound");
                         }
+                        rememberActivePluginSound();
                         if (!keyLabSyncActivePlugin()) {
                             throw new IllegalStateException("The controller did not accept the selected sound");
                         }
@@ -1514,6 +1520,53 @@ public final class MainActivity extends Activity {
         pluginConfigWebEntry = instance.optString("config_web_entry", null);
     }
 
+    private void rememberActivePluginSound() {
+        try {
+            JSONObject instance = new JSONObject(pluginWebContext()).getJSONObject("instance");
+            String pluginId = instance.getString("plugin_id");
+            String soundId = instance.optString("selected_sound_id", "");
+            if (!soundId.isBlank()) {
+                preferences.edit()
+                        .putString("plugin.selected_sound." + pluginId, soundId)
+                        .apply();
+            }
+        } catch (Throwable error) {
+            Log.w("RackForge", "Could not persist the active plugin sound", error);
+        }
+    }
+
+    private void restorePersistedPluginSound() {
+        String preferenceKey = null;
+        try {
+            JSONObject instance = new JSONObject(pluginWebContext()).getJSONObject("instance");
+            String pluginId = instance.getString("plugin_id");
+            preferenceKey = "plugin.selected_sound." + pluginId;
+            String savedSoundId = preferences.getString(preferenceKey, null);
+            if (savedSoundId == null || savedSoundId.isBlank()) {
+                rememberActivePluginSound();
+                return;
+            }
+            JSONArray sounds = instance.optJSONArray("sounds");
+            boolean available = false;
+            if (sounds != null) {
+                for (int index = 0; index < sounds.length(); index++) {
+                    if (savedSoundId.equals(sounds.getJSONObject(index).optString("id"))) {
+                        available = true;
+                        break;
+                    }
+                }
+            }
+            if (!available || !selectPluginSound(savedSoundId)) {
+                preferences.edit().remove(preferenceKey).apply();
+                Log.w("RackForge", "Saved plugin sound is unavailable: " + savedSoundId);
+                rememberActivePluginSound();
+            }
+        } catch (Throwable error) {
+            if (preferenceKey != null) preferences.edit().remove(preferenceKey).apply();
+            Log.w("RackForge", "Could not restore the saved plugin sound", error);
+        }
+    }
+
     private void activatePlugin(String root, String name, String version) {
         if (engineStarting) {
             Toast.makeText(this, "RackForge is already changing plugins", Toast.LENGTH_SHORT).show();
@@ -1541,6 +1594,7 @@ public final class MainActivity extends Activity {
                 }
                 refreshActivePluginMetadata();
                 restoreActivePluginResources();
+                restorePersistedPluginSound();
                 if (!keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath())) {
                     throw new IllegalStateException("The controller plugin catalog could not be synchronized");
                 }
@@ -1569,6 +1623,7 @@ public final class MainActivity extends Activity {
                         activePluginName = previousName;
                         activePluginVersion = previousVersion;
                         restoreActivePluginResources();
+                        restorePersistedPluginSound();
                         keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
                         startAudio();
                         refreshKeyLabDisplay();
@@ -1646,9 +1701,24 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void syncControllerActiveMode(String mode, boolean persist) {
+        try {
+            if (!keyLabSyncActiveMode(mode)) {
+                Log.w("RackForge", "LITTLE could not synchronize active mode " + mode);
+                return;
+            }
+            if (persist) {
+                preferences.edit().putString("session.active_mode", mode).apply();
+            }
+        } catch (Throwable error) {
+            Log.w("RackForge", "LITTLE active mode synchronization failed", error);
+        }
+    }
+
     private void showPlay() {
         currentPage = "play";
         pluginWebSurface = "play";
+        syncControllerActiveMode("play", true);
         updateModeButtons();
         if (audioRunning && pluginWebEntry != null) {
             webView.loadUrl("https://rackforge.local/plugin/" + pluginWebEntry);
@@ -1666,12 +1736,14 @@ public final class MainActivity extends Activity {
         if (pluginConfigWebEntry == null) return;
         currentPage = "plugin-config";
         pluginWebSurface = "config";
+        syncControllerActiveMode("play", true);
         updateModeButtons();
         webView.loadUrl("https://rackforge.local/plugin/" + pluginConfigWebEntry);
     }
 
     private void showIdle() {
         currentPage = "idle";
+        syncControllerActiveMode("idle", false);
         updateModeButtons();
         showEngineState("RackForge idle",
                 "No plugin is active. Choose PLAY and select a plugin to start audio again.");
@@ -1679,6 +1751,7 @@ public final class MainActivity extends Activity {
 
     private void showLive() {
         currentPage = "live";
+        syncControllerActiveMode("live", true);
         updateModeButtons();
         int midiPorts;
         synchronized (openMidiPorts) { midiPorts = openMidiPorts.size(); }
@@ -2042,6 +2115,7 @@ public final class MainActivity extends Activity {
                 }
                 refreshActivePluginMetadata();
                 restoreActivePluginResources();
+                restorePersistedPluginSound();
                 preferences.edit().putString(
                         "plugin.active_root", pluginPackageRoot.getAbsolutePath()).apply();
                 if (!keyLabSyncPlugins(store.getAbsolutePath())) {
@@ -2631,6 +2705,7 @@ public final class MainActivity extends Activity {
                 Log.w("RackForge", "KeyLab could not select sound " + soundId);
                 return;
             }
+            rememberActivePluginSound();
             if (!keyLabSyncActivePlugin()) {
                 Log.w("RackForge", "KeyLab could not confirm sound " + soundId);
                 return;

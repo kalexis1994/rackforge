@@ -27,13 +27,22 @@ const rackForgeSlice = createSlice({
   reducers: {
     connectionChanged(state, action: PayloadAction<ConnectionStatus>) {
       state.connection = action.payload;
-      if (action.payload === "online") state.error = null;
+      if (action.payload === "online" || action.payload === "connecting") {
+        state.error = null;
+      }
     },
     snapshotReceived(state, action: PayloadAction<SessionSnapshot>) {
       if (state.snapshot?.revision !== action.payload.revision) {
         state.snapshot = action.payload;
       }
       state.connection = "online";
+      state.error = null;
+    },
+    hostIdleReceived(state) {
+      state.snapshot = null;
+      state.performance = null;
+      state.performancePending = false;
+      state.connection = "idle";
       state.error = null;
     },
     performanceReceived(
@@ -58,6 +67,7 @@ const rackForgeSlice = createSlice({
 
 export const {
   connectionChanged,
+  hostIdleReceived,
   snapshotReceived,
   performanceReceived,
   performanceEditStarted,

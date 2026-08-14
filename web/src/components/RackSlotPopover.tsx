@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { materializePluginState, requestPluginPreset, requestPluginPresets } from "../gateway";
+import { AsyncActionLabel, AsyncSpinner } from "./AsyncSpinner";
 import type { HostPresetSummary, PluginInstance, RackGraphPosition, RackSlot } from "../types";
 
 type PopoverMode = "attached" | "floating";
@@ -242,7 +243,7 @@ export function RackSlotPopover({
             ))}
           </select>
           <button type="button" disabled={!presetId || busy} onClick={() => void loadPreset()}>
-            Load
+            <AsyncActionLabel active={busy} activeLabel="Loading…">Load</AsyncActionLabel>
           </button>
         </div>
         <button
@@ -258,6 +259,12 @@ export function RackSlotPopover({
       {error ? <div className="rack-slot-popover-error">{error}</div> : null}
       <div className="rack-slot-popover-surface">
         {renderSurface({ instance: editorInstance, onSelectSound: selectSound })}
+        {busy ? (
+          <div className="rack-slot-popover-busy" role="status" aria-live="polite">
+            <AsyncSpinner label="Applying instrument state…" size="medium" />
+            <span>Applying instrument state…</span>
+          </div>
+        ) : null}
       </div>
       <footer>
         <span>{mode === "attached" ? "Attached to node" : "Floating locally"}</span>

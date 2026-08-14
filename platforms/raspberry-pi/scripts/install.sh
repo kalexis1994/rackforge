@@ -15,7 +15,6 @@ test -x "$source_root/target/release/rackforge-store"
 test -x "$source_root/target/release/rackforge-platform-host"
 test -x "$source_root/target/release/rackforge-controller-host"
 test -f "$source_root/platforms/raspberry-pi/config/rackforge.toml"
-test -f "$source_root/config/repositories.toml"
 test -f "$web_source_root/dist/index.html"
 
 install -d \
@@ -38,15 +37,21 @@ do
 done
 
 bundled_plugin="$source_root/bundled-plugins/RF-Soundfonts.rfplugin"
+bundled_default_marker="$root/state/bundled-default-initialized"
 shopt -s nullglob
 installed_plugins=("$root/plugin-store/packages"/*)
 shopt -u nullglob
 bundled_plugins=none
-if [[ -f "$bundled_plugin" && ${#installed_plugins[@]} -eq 0 ]]; then
-  "$root/bin/rackforge-store" install-local \
-    "$bundled_plugin" \
-    "$root/plugin-store"
-  bundled_plugins=org.rackforge.rf-soundfonts
+if [[ ! -f "$bundled_default_marker" ]]; then
+  if [[ -f "$bundled_plugin" && ${#installed_plugins[@]} -eq 0 ]]; then
+    "$root/bin/rackforge-store" install-local \
+      "$bundled_plugin" \
+      "$root/plugin-store"
+    bundled_plugins=org.rackforge.rf-soundfonts
+  fi
+  if [[ -f "$bundled_plugin" || ${#installed_plugins[@]} -gt 0 ]]; then
+    printf '1\n' > "$bundled_default_marker"
+  fi
 fi
 
 controller_package="$source_root/controller-packages/org.rackforge.arturia-keylab-essential-mk3.rfcontroller"
@@ -63,12 +68,6 @@ if [ ! -f "$root/config/rackforge.toml" ]; then
   install -m 0644 \
     "$source_root/platforms/raspberry-pi/config/rackforge.toml" \
     "$root/config/rackforge.toml"
-fi
-
-if [ ! -f "$root/config/repositories.toml" ]; then
-  install -m 0644 \
-    "$source_root/config/repositories.toml" \
-    "$root/config/repositories.toml"
 fi
 
 web_stage="$(mktemp -d "$root/.web-stage.XXXXXX")"

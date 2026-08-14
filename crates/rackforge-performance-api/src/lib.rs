@@ -1046,6 +1046,48 @@ impl LivePerformanceState {
         self.active = Some(location);
         self.active_rack_id = Some(rack_id);
     }
+
+    /// Removes navigation targets invalidated by a library edit while keeping
+    /// the Rack that is already sounding as the safest possible fallback.
+    pub fn reconcile(&mut self, library: &PerformanceLibrary) {
+        self.rack = self
+            .rack
+            .take()
+            .filter(|location| library.resolve(location).is_ok());
+        self.song = self
+            .song
+            .take()
+            .filter(|location| library.resolve(location).is_ok());
+        self.setlist = self
+            .setlist
+            .take()
+            .filter(|location| library.resolve(location).is_ok());
+
+        let active_still_matches = self
+            .active
+            .as_ref()
+            .and_then(|location| library.resolve(location).ok())
+            .is_some_and(|rack| self.active_rack_id.as_ref() == Some(&rack.id));
+        if active_still_matches {
+            return;
+        }
+
+        if let Some(rack_id) = self
+            .active_rack_id
+            .clone()
+            .filter(|rack_id| library.rack(rack_id).is_some())
+        {
+            let location = LiveLocation::Rack {
+                rack_id: rack_id.clone(),
+            };
+            self.mode = LiveBrowseMode::Rack;
+            self.rack = Some(location.clone());
+            self.active = Some(location);
+            self.active_rack_id = Some(rack_id);
+        } else if self.active_rack_id.is_none() {
+            self.active = None;
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1482,6 +1524,32 @@ mod tests {
         assert_eq!(state.rack, Some(rack));
         assert_eq!(state.song, Some(song.clone()));
         assert_eq!(state.active, Some(song));
+        state.validate(&library).unwrap();
+    }
+
+    #[test]
+    fn live_state_reconciles_a_deleted_setlist_to_the_sounding_rack() {
+        let mut library = library();
+        let setlist = LiveLocation::Setlist {
+            setlist_id: SetlistId::new("setlist.friday").unwrap(),
+            entry_id: SetlistEntryId::new("entry.opener").unwrap(),
+            part_id: SongPartId::new("part.intro").unwrap(),
+        };
+        let rack_id = RackId::new("rack.stage-piano").unwrap();
+        let mut state = LivePerformanceState::default();
+        state.activate(setlist, rack_id.clone());
+
+        library.setlists.clear();
+        state.reconcile(&library);
+
+        let rack = LiveLocation::Rack {
+            rack_id: rack_id.clone(),
+        };
+        assert_eq!(state.mode, LiveBrowseMode::Rack);
+        assert_eq!(state.setlist, None);
+        assert_eq!(state.rack, Some(rack.clone()));
+        assert_eq!(state.active, Some(rack));
+        assert_eq!(state.active_rack_id, Some(rack_id));
         state.validate(&library).unwrap();
     }
 

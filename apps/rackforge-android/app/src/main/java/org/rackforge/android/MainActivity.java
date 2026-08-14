@@ -174,6 +174,8 @@ public final class MainActivity extends Activity {
 
     private static native String installPluginFile(String archivePath, String storeRoot);
     private static native String installedPlugins(String storeRoot);
+    private static native String uninstallPlugin(String pluginId, String storeRoot,
+            String dataRoot, boolean deletePresets, boolean deletePluginData);
     private static native boolean activateInstalledPlugin(String packageRoot, String storeRoot, String dataRoot);
     private static native String pluginPackageRoot();
     private static native String pluginWebEntry();
@@ -876,6 +878,14 @@ public final class MainActivity extends Activity {
                             plugin.optString("plugin_name", pluginId),
                             plugin.optString("version")));
                     return;
+                } else if ("DELETE".equals(method)
+                        && path.startsWith("/api/v1/plugins/")) {
+                    String pluginId = path.substring("/api/v1/plugins/".length());
+                    JSONObject body = requestBody(params);
+                    result = uninstallPluginPackage(
+                            pluginId,
+                            body.optBoolean("delete_presets", false),
+                            body.optBoolean("delete_plugin_data", false));
                 } else if ("GET".equals(method) && path.startsWith("/api/v1/plugins/")) {
                     String pluginId = path.substring("/api/v1/plugins/".length());
                     JSONObject descriptor = sharedPluginDescriptor(pluginId);
@@ -885,12 +895,6 @@ public final class MainActivity extends Activity {
                         return;
                     }
                     result = descriptor;
-                } else if ("GET".equals(method) && "/api/v1/repositories".equals(path)) {
-                    result = new JSONObject()
-                            .put("schema_version", 1)
-                            .put("repositories", new JSONArray());
-                } else if ("GET".equals(method) && "/api/v1/store/catalog".equals(path)) {
-                    result = new JSONObject().put("repositories", new JSONArray());
                 } else {
                     respondNativeHost(requestId, false, 404,
                             "Android host route is not available: " + path, null);
@@ -991,10 +995,145 @@ public final class MainActivity extends Activity {
                 .put("plugin_name", plugin.getString("plugin_name"))
                 .put("version", plugin.getString("version"))
                 .put("active", plugin.optBoolean("active") && !engineStarting)
+                .put("managed", true)
                 .put("api_version", plugin.optInt("web_api_version", 0))
                 .put("branding", branding == null ? JSONObject.NULL : branding)
                 .put("surfaces", surfaces)
                 .put("resources", resources == null ? new JSONArray() : resources);
+    }
+
+    private JSONObject uninstallPluginPackage(String pluginId,
+            boolean deletePresets, boolean deletePluginData) throws Exception {
+        if (engineStarting) {
+            throw new IllegalStateException("RackForge is already changing plugins.");
+        }
+        JSONObject target = installedPluginRecord(pluginId);
+        if (target == null) {
+            throw new IllegalArgumentException("Plugin is not installed or compatible.");
+        }
+        boolean wasActive = target.optBoolean("active") || !target.isNull("active_version");
+        engineStarting = true;
+        try {
+            if (wasActive) {
+                releaseAllVirtualMidi();
+                releaseMidiNotes();
+                audioRunning = false;
+                stopNativeAudio();
+                stopService(new Intent(this, AudioEngineService.class));
+            }
+            String payload = uninstallPlugin(
+                    pluginId,
+                    pluginStoreRoot().getAbsolutePath(),
+                    pluginDataRoot().getAbsolutePath(),
+                    deletePresets,
+                    deletePluginData);
+            if (payload == null || payload.isBlank()) {
+                throw new IllegalStateException("The native runtime did not remove the plugin.");
+            }
+            JSONObject removed = new JSONObject(payload);
+            if (deletePluginData && removed.optBoolean("plugin_data_deleted", false)) {
+                clearPluginDataPreferences(pluginId);
+            }
+            if (wasActive) {
+                preferences.edit().remove("plugin.active_root").apply();
+                List<String> candidates = startupPluginRoots(pluginStoreRoot());
+                boolean activated = false;
+                Throwable activationError = null;
+                for (String root : candidates) {
+                    try {
+                        if (!activateInstalledPlugin(root, pluginStoreRoot().getAbsolutePath(),
+                                pluginDataRoot().getAbsolutePath())) {
+                            throw new IllegalStateException("The fallback plugin was rejected.");
+                        }
+                        activated = true;
+                        break;
+                    } catch (Throwable error) {
+                        activationError = error;
+                        Log.w("RackForge", "Fallback plugin is unavailable: " + root, error);
+                    }
+                }
+                if (activated) {
+                    refreshActivePluginMetadata();
+                    restoreActivePluginResources();
+                    restorePersistedPluginSound();
+                    preferences.edit().putString(
+                            "plugin.active_root", pluginPackageRoot.getAbsolutePath()).apply();
+                    startAudio();
+                    currentPage = "play";
+                    pluginWebSurface = "play";
+                } else {
+                    activePluginName = "No plugin";
+                    activePluginVersion = "";
+                    pluginPackageRoot = null;
+                    pluginWebEntry = null;
+                    pluginConfigWebEntry = null;
+                    currentPage = "idle";
+                    if (activationError != null) {
+                        removed.put("fallback_warning",
+                                activationError.getMessage() == null
+                                        ? activationError.toString()
+                                        : activationError.getMessage());
+                    }
+                }
+            }
+            if (!keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath())) {
+                removed.put("controller_warning", "Controller plugin catalog could not be synchronized.");
+            }
+            runOnUiThread(() -> {
+                if (activePluginLabel != null) activePluginLabel.setText(activePluginDisplayName());
+                if (wasActive && pluginPackageRoot == null) showIdle();
+                else if (wasActive) showPlay();
+                else emitSessionSnapshot();
+            });
+            return removed;
+        } catch (Throwable error) {
+            if (wasActive) {
+                try {
+                    if (installedPluginRecord(pluginId) != null && !audioRunning) startAudio();
+                } catch (Throwable recoveryError) {
+                    error.addSuppressed(recoveryError);
+                    Log.e("RackForge", "Could not restore audio after uninstall failure", recoveryError);
+                }
+            }
+            if (error instanceof Exception) throw (Exception) error;
+            throw new IllegalStateException(error);
+        } finally {
+            engineStarting = false;
+        }
+    }
+
+    private void clearPluginDataPreferences(String pluginId) {
+        String[] prefixes = {
+                "resource.binding." + pluginId + ".",
+                "resource.active_grant." + pluginId + ".",
+                "resource.active_entry." + pluginId + "."
+        };
+        Set<String> grantIds = new HashSet<>();
+        SharedPreferences.Editor editor = preferences.edit();
+        for (Map.Entry<String, ?> entry : preferences.getAll().entrySet()) {
+            boolean owned = false;
+            for (String prefix : prefixes) {
+                if (entry.getKey().startsWith(prefix)) {
+                    owned = true;
+                    break;
+                }
+            }
+            if (!owned) continue;
+            if (entry.getValue() instanceof String) {
+                String grantId = (String) entry.getValue();
+                if (!grantId.isBlank() && !"__grant_root__".equals(grantId)) {
+                    grantIds.add(grantId);
+                }
+            }
+            editor.remove(entry.getKey());
+        }
+        editor.remove("plugin.selected_sound." + pluginId);
+        for (String grantId : grantIds) {
+            editor.remove("resource.uri." + grantId);
+            editor.remove("resource.name." + grantId);
+            editor.remove("resource.kind." + grantId);
+        }
+        editor.apply();
     }
 
     private JSONObject sharedDiagnostics() throws Exception {
@@ -2495,6 +2634,42 @@ public final class MainActivity extends Activity {
             card.addView(configure, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
+        Button remove = button("Remove plugin");
+        remove.setTextColor(0xFFFF8794);
+        remove.setOnClickListener(view -> {
+            boolean[] cleanup = {false, false};
+            new AlertDialog.Builder(this)
+                    .setTitle("Remove " + pluginName + "?")
+                    .setMultiChoiceItems(new String[] {
+                            "Delete RackForge presets",
+                            "Delete imported resources and plugin data"
+                    }, cleanup, (dialog, which, checked) -> cleanup[which] = checked)
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Remove", (dialog, which) -> {
+                        if (installedPluginsDialog != null) installedPluginsDialog.dismiss();
+                        new Thread(() -> {
+                            try {
+                                uninstallPluginPackage(
+                                        plugin.getString("plugin_id"),
+                                        cleanup[0],
+                                        cleanup[1]);
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        pluginName + " removed", Toast.LENGTH_LONG).show());
+                            } catch (Throwable error) {
+                                Log.e("RackForge", "Could not remove plugin", error);
+                                runOnUiThread(() -> new AlertDialog.Builder(this)
+                                        .setTitle("Could not remove " + pluginName)
+                                        .setMessage(error.getMessage() == null
+                                                ? error.toString() : error.getMessage())
+                                        .setPositiveButton("Close", null)
+                                        .show());
+                            }
+                        }, "rackforge-plugin-uninstall").start();
+                    })
+                    .show();
+        });
+        card.addView(remove, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return card;
     }
 
@@ -3228,8 +3403,12 @@ public final class MainActivity extends Activity {
     }
 
     private void installBundledDefaultPluginIfEmpty(File store) throws Exception {
+        if (preferences.getBoolean("plugin.bundled_default_initialized", false)) return;
         JSONObject catalog = new JSONObject(installedPlugins(store.getAbsolutePath()));
-        if (catalog.getJSONArray("plugins").length() != 0) return;
+        if (catalog.getJSONArray("plugins").length() != 0) {
+            preferences.edit().putBoolean("plugin.bundled_default_initialized", true).apply();
+            return;
+        }
 
         String assetName = "RF-Soundfonts.rfplugin";
         boolean available = false;
@@ -3261,6 +3440,7 @@ public final class MainActivity extends Activity {
             JSONObject installed = new JSONObject(descriptor);
             Log.i("RackForge", "Bundled default plugin ready: "
                     + installed.optString("plugin_name", "RF-Soundfonts"));
+            preferences.edit().putBoolean("plugin.bundled_default_initialized", true).apply();
         } finally {
             if (!archive.delete() && archive.exists()) archive.deleteOnExit();
         }

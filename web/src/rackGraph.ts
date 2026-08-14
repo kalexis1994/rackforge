@@ -6,11 +6,12 @@ import type {
   RackGraphPosition,
   RackSlot,
 } from "./types";
+import { scopedId } from "./ids";
 
 export const RACK_GRAPH_SCHEMA_VERSION = 2;
 
 export function rackGraphId(prefix: string) {
-  return `${prefix}.${crypto.randomUUID().replaceAll("-", "")}`;
+  return scopedId(prefix);
 }
 
 export function graphFromSlots(slots: RackSlot[]): RackGraph {
@@ -19,7 +20,9 @@ export function graphFromSlots(slots: RackSlot[]): RackGraph {
     kind: { kind: "midi_input", bus_id: "main" },
     position: { x: 0, y: 0 },
   };
-  const audioBuses = [...new Set(slots.map((slot) => slot.audio_output_bus))].sort();
+  const audioBuses = [
+    ...new Set(["main", ...slots.map((slot) => slot.audio_output_bus)]),
+  ].sort();
   const midiBuses = [
     ...new Set(
       slots.flatMap((slot) =>

@@ -369,6 +369,9 @@ impl SessionState {
             SessionEvent::LiveTargetActivated { location, rack_id } => {
                 self.live.activate(location.clone(), rack_id.clone());
             }
+            SessionEvent::LiveStateReconciled { live } => {
+                self.live = live.clone();
+            }
             SessionEvent::SoundSelected {
                 instance_id,
                 sound_id,
@@ -708,6 +711,9 @@ pub enum SessionEvent {
     LiveTargetActivated {
         location: LiveLocation,
         rack_id: RackId,
+    },
+    LiveStateReconciled {
+        live: LivePerformanceState,
     },
     SoundSelected {
         instance_id: InstanceId,

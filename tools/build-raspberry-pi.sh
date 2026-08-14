@@ -81,7 +81,7 @@ done
 cp -a "$repository/hardware/controllers" "$release/hardware/controllers"
 cp "$repository/THIRD_PARTY_NOTICES.md" "$release/THIRD_PARTY_NOTICES.md"
 
-revision="${GITHUB_SHA:-$(git rev-parse HEAD)}"
+revision="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || printf 'unknown')}"
 default_plugin=none
 if [[ -f "$release/bundled-plugins/RF-Soundfonts.rfplugin" ]]; then
   default_plugin=org.rackforge.rf-soundfonts
@@ -114,7 +114,13 @@ EOF
 
 mkdir -p "$output_directory"
 output_directory="$(cd "$output_directory" && pwd)"
-epoch="${SOURCE_DATE_EPOCH:-$(git show -s --format=%ct HEAD)}"
+if [[ -n "${SOURCE_DATE_EPOCH:-}" ]]; then
+  epoch="$SOURCE_DATE_EPOCH"
+elif epoch="$(git show -s --format=%ct HEAD 2>/dev/null)" && [[ -n "$epoch" ]]; then
+  :
+else
+  epoch="$(date +%s)"
+fi
 tar \
   --sort=name \
   --mtime="@$epoch" \

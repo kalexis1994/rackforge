@@ -25,6 +25,7 @@ test -f "$systemd_root/rackforge-platform-host.service"
 test -f "$systemd_root/rackforge-controller-host.service"
 test -f "$systemd_root/rackforge-web.service"
 test -f "$systemd_root/rackforge-audio.service"
+test -f "$systemd_root/rackforge-audio.path"
 
 sudo groupadd --system --force rackforge
 sudo usermod -a -G rackforge "$service_user"
@@ -68,16 +69,26 @@ rackforge_render_systemd_unit \
 rackforge_render_systemd_unit \
   "$systemd_root/rackforge-audio.service" \
   /etc/systemd/system/rackforge-audio.service
+rackforge_render_systemd_unit \
+  "$systemd_root/rackforge-audio.path" \
+  /etc/systemd/system/rackforge-audio.path
 sudo systemctl daemon-reload
 sudo systemctl enable \
   rackforge-platform-host.service \
   rackforge-controller-host.service \
   rackforge-web.service \
-  rackforge-audio.service
+  rackforge-audio.service \
+  rackforge-audio.path
 sudo systemctl restart \
   rackforge-platform-host.service \
   rackforge-controller-host.service \
-  rackforge-web.service
+  rackforge-web.service \
+  rackforge-audio.path
+if [[ -f "$root/config/audio.toml" ]]; then
+  sudo systemctl restart rackforge-audio.service
+else
+  sudo systemctl stop rackforge-audio.service
+fi
 
 if [[ "$optimize" == --optimize ]]; then
   bash "$source_root/platforms/raspberry-pi/scripts/optimize-appliance.sh" apply

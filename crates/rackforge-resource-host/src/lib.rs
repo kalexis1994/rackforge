@@ -1,8 +1,8 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rackforge_resource_api::{
-    BindResourceRequest, BrowseGrantRequest, GrantedResourceEntry, ResourceBrowser, ResourceEntry,
-    ResourceEntryKind, ResourceError, ResourceGrant, ResourceMount, ResourceSelection,
-    ResourceSelectionSource,
+    BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, GrantedResourceEntry,
+    ResourceBrowser, ResourceEntry, ResourceEntryKind, ResourceError, ResourceGrant, ResourceMount,
+    ResourceSelection, ResourceSelectionSource,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -92,6 +92,10 @@ struct GrantRecord {
     path: PathBuf,
     display_name: String,
     kind: ResourceEntryKind,
+    /// Client uploads are host-owned staging files. Old grant stores omit the
+    /// field and therefore remain non-owned and are never deleted by upgrade.
+    #[serde(default)]
+    owned: bool,
 }
 
 impl NativeResourceBrowser {
@@ -432,6 +436,148 @@ impl NativeResourceBrowser {
         }
         Ok(())
     }
+
+    /// Transfers a short-lived selection into a plugin resource grant.
+    /// Uploaded files stay private inside host storage and become owned by the
+    /// grant until the plugin successfully installs them.
+    pub fn bind_selection(
+        &self,
+        request: &BindSelectionRequest,
+        expected_kind: ResourceEntryKind,
+    ) -> Result<ResourceGrant, ResourceError> {
+        if request.plugin_id.trim().is_empty()
+            || request.resource_id.trim().is_empty()
+            || request.selection_id.trim().is_empty()
+        {
+            return Err(ResourceError::InvalidRequest(
+                "plugin_id, resource_id and selection_id are required".into(),
+            ));
+        }
+        let mut state = self.state.lock().map_err(|_| poisoned())?;
+        prune_expired_selections(&mut state);
+        let selection = state
+            .selections
+            .remove(&request.selection_id)
+            .ok_or(ResourceError::UnknownHandle)?;
+        if selection.kind != expected_kind {
+            state
+                .selections
+                .insert(request.selection_id.clone(), selection);
+            return Err(ResourceError::InvalidRequest(
+                "selected entry has the wrong resource kind".into(),
+            ));
+        }
+        let path = match fs::canonicalize(&selection.path) {
+            Ok(path)
+                if path.starts_with(&selection.scope_root)
+                    && match selection.kind {
+                        ResourceEntryKind::File => path.is_file(),
+                        ResourceEntryKind::Directory => path.is_dir(),
+                    } =>
+            {
+                path
+            }
+            _ => {
+                if selection.owned && selection.path.is_file() {
+                    let _ = fs::remove_file(&selection.path);
+                }
+                return Err(ResourceError::OutsideMount);
+            }
+        };
+        if let Some(existing) = state.grants.iter().find(|grant| {
+            grant.plugin_id == request.plugin_id
+                && grant.resource_id == request.resource_id
+                && grant.path == path
+        }) {
+            return Ok(ResourceGrant {
+                grant_id: existing.grant_id.clone(),
+                resource_id: existing.resource_id.clone(),
+                display_name: existing.display_name.clone(),
+                kind: existing.kind,
+            });
+        }
+        let grant = GrantRecord {
+            grant_id: random_handle()?,
+            plugin_id: request.plugin_id.clone(),
+            resource_id: request.resource_id.clone(),
+            path,
+            display_name: selection.display_name.clone(),
+            kind: selection.kind,
+            owned: selection.owned,
+        };
+        let response = ResourceGrant {
+            grant_id: grant.grant_id.clone(),
+            resource_id: grant.resource_id.clone(),
+            display_name: grant.display_name.clone(),
+            kind: grant.kind,
+        };
+        state.grants.push(grant);
+        if let Some(grants_path) = self.grants_path.as_deref()
+            && let Err(error) = persist_grants(grants_path, &state.grants)
+        {
+            state.grants.pop();
+            state
+                .selections
+                .insert(request.selection_id.clone(), selection);
+            return Err(error);
+        }
+        Ok(response)
+    }
+
+    /// Releases only grants backed by a client upload. Host-selected grants
+    /// are persistent references to user files and are never deleted here.
+    pub fn release_owned_grant(
+        &self,
+        plugin_id: &str,
+        grant_id: &str,
+    ) -> Result<bool, ResourceError> {
+        let mut state = self.state.lock().map_err(|_| poisoned())?;
+        let Some(index) = state.grants.iter().position(|grant| {
+            grant.plugin_id == plugin_id && grant.grant_id == grant_id && grant.owned
+        }) else {
+            return Ok(false);
+        };
+        let grant = state.grants.remove(index);
+        if let Some(grants_path) = self.grants_path.as_deref()
+            && let Err(error) = persist_grants(grants_path, &state.grants)
+        {
+            state.grants.insert(index, grant);
+            return Err(error);
+        }
+        if grant.path.is_file() {
+            fs::remove_file(grant.path).map_err(backend)?;
+        }
+        Ok(true)
+    }
+
+    /// Revokes every file-system grant owned by one plugin. Client-uploaded
+    /// staging files are deleted; host-selected user files are only unbound.
+    pub fn release_plugin_grants(&self, plugin_id: &str) -> Result<usize, ResourceError> {
+        let mut state = self.state.lock().map_err(|_| poisoned())?;
+        let previous = state.grants.clone();
+        let removed = previous
+            .iter()
+            .filter(|grant| grant.plugin_id == plugin_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        if removed.is_empty() {
+            return Ok(0);
+        }
+        state.grants.retain(|grant| grant.plugin_id != plugin_id);
+        if let Some(grants_path) = self.grants_path.as_deref()
+            && let Err(error) = persist_grants(grants_path, &state.grants)
+        {
+            state.grants = previous;
+            return Err(error);
+        }
+        drop(state);
+        for grant in &removed {
+            if grant.owned && grant.path.is_file() {
+                fs::remove_file(&grant.path).map_err(backend)?;
+            }
+        }
+        Ok(removed.len())
+    }
 }
 
 fn register_selection(
@@ -596,6 +742,7 @@ impl ResourceBrowser for NativeResourceBrowser {
             path: entry.path.clone(),
             display_name: public.name,
             kind: public.kind,
+            owned: false,
         };
         let response = ResourceGrant {
             grant_id: grant.grant_id.clone(),
@@ -1007,6 +1154,63 @@ mod tests {
         drop(consumed_upload);
         assert!(!uploaded_file.exists());
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_client_upload_can_become_a_private_plugin_grant() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-resource-upload-grant-test-{}-{}",
+            std::process::id(),
+            unix_seconds()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        let library = root.join("library");
+        let uploads = root.join("uploads");
+        fs::create_dir_all(&library).unwrap();
+        let browser = NativeResourceBrowser::new_persistent(
+            [NativeMount {
+                name: "Test".into(),
+                root: library,
+                read_only: true,
+            }],
+            root.join("state/grants.json"),
+        )
+        .unwrap();
+        let selection = browser
+            .register_client_upload("firmware.zip", &[1, 2, 3, 4], &uploads)
+            .unwrap();
+        let grant = browser
+            .bind_selection(
+                &BindSelectionRequest {
+                    plugin_id: "org.rackforge.rf-m1".into(),
+                    resource_id: "firmware-import".into(),
+                    selection_id: selection.selection_id.clone(),
+                },
+                ResourceEntryKind::File,
+            )
+            .unwrap();
+        assert_eq!(grant.display_name, "firmware.zip");
+        let uploaded = browser
+            .resolve_granted_file("org.rackforge.rf-m1", &grant.grant_id, None)
+            .unwrap();
+        assert!(uploaded.is_file());
+        assert_eq!(
+            browser
+                .consume_selection_file(&selection.selection_id)
+                .unwrap_err(),
+            ResourceError::UnknownHandle
+        );
+        assert_eq!(
+            browser
+                .release_plugin_grants("org.rackforge.rf-m1")
+                .unwrap(),
+            1
+        );
+        assert!(!uploaded.exists());
+        assert!(browser.grants("org.rackforge.rf-m1").unwrap().is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 }

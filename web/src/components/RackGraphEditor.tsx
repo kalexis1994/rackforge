@@ -251,7 +251,9 @@ function dependsOn(
 interface RackGraphEditorProps {
   rack: RackDefinition;
   racks: RackDefinition[];
-  onChange: (rack: RackDefinition) => void;
+  onChange: (
+    update: RackDefinition | ((current: RackDefinition) => RackDefinition),
+  ) => void;
   canAddInstrument: boolean;
   onAddInstrument: (position: RackGraphPosition) => void;
   instances: PluginInstance[];
@@ -446,18 +448,27 @@ export default function RackGraphEditor({
     ? childRackId
     : (childOptions[0]?.id ?? "");
 
-  const updateGraph = useCallback(
-    (next: RackDefinition["graph"]) => onChange({ ...materialized, graph: next }),
-    [materialized, onChange],
-  );
-  const updateSlot = useCallback((nextSlot: RackDefinition["slots"][number]) => {
-    onChange({
-      ...materialized,
-      slots: materialized.slots.map((slot) =>
-        slot.id === nextSlot.id ? nextSlot : slot,
-      ),
+  const updateGraph = useCallback((
+    update: (
+      graph: NonNullable<RackDefinition["graph"]>,
+    ) => NonNullable<RackDefinition["graph"]>,
+  ) => {
+    onChange((currentRack) => {
+      const current = materializeRackGraph(currentRack);
+      return { ...current, graph: update(current.graph!) };
     });
-  }, [materialized, onChange]);
+  }, [onChange]);
+  const updateSlot = useCallback((nextSlot: RackDefinition["slots"][number]) => {
+    onChange((currentRack) => {
+      const current = materializeRackGraph(currentRack);
+      return {
+        ...current,
+        slots: current.slots.map((slot) =>
+          slot.id === nextSlot.id ? nextSlot : slot,
+        ),
+      };
+    });
+  }, [onChange]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<CanvasNode>[]) => {
@@ -471,8 +482,7 @@ export default function RackGraphEditor({
 
   const persistNodePosition = useCallback(
     (nodeId: string, position: RackGraphPosition) => {
-      const graph = materialized.graph!;
-      updateGraph({
+      updateGraph((graph) => ({
         ...graph,
         nodes: graph.nodes.map((node) =>
           node.id === nodeId ? { ...node, position } : node,
@@ -482,9 +492,9 @@ export default function RackGraphEditor({
             ? { ...label, position }
             : label,
         ),
-      });
+      }));
     },
-    [materialized.graph, updateGraph],
+    [updateGraph],
   );
 
   const connect = useCallback(
@@ -493,47 +503,46 @@ export default function RackGraphEditor({
       const target = decodeHandle(connection.targetHandle);
       if (!connection.source || !connection.target || !source || !target) return;
       if (source.signal !== target.signal) return;
-      const graph = materialized.graph!;
-      const duplicate = graph.edges.some(
-        (edge) =>
-          edge.signal === source.signal &&
-          edge.source.node_id === connection.source &&
-          edge.source.port_id === source.portId &&
-          edge.target.node_id === connection.target &&
-          edge.target.port_id === target.portId,
-      );
-      if (duplicate) return;
-      updateGraph({
-        ...graph,
-        edges: [
-          ...graph.edges,
-          {
-            id: rackGraphId("edge"),
-            signal: source.signal,
-            source: { node_id: connection.source, port_id: source.portId },
-            target: { node_id: connection.target, port_id: target.portId },
-          },
-        ],
+      updateGraph((graph) => {
+        const duplicate = graph.edges.some(
+          (edge) =>
+            edge.signal === source.signal &&
+            edge.source.node_id === connection.source &&
+            edge.source.port_id === source.portId &&
+            edge.target.node_id === connection.target &&
+            edge.target.port_id === target.portId,
+        );
+        if (duplicate) return graph;
+        return {
+          ...graph,
+          edges: [
+            ...graph.edges,
+            {
+              id: rackGraphId("edge"),
+              signal: source.signal,
+              source: { node_id: connection.source, port_id: source.portId },
+              target: { node_id: connection.target, port_id: target.portId },
+            },
+          ],
+        };
       });
     },
-    [materialized.graph, updateGraph],
+    [updateGraph],
   );
 
   const removeEdges = useCallback(
     (removed: Edge[]) => {
       const removedIds = new Set(removed.map((edge) => edge.id));
-      const graph = materialized.graph!;
-      updateGraph({
+      updateGraph((graph) => ({
         ...graph,
         edges: graph.edges.filter((edge) => !removedIds.has(edge.id)),
-      });
+      }));
     },
-    [materialized.graph, updateGraph],
+    [updateGraph],
   );
 
   const addLabel = useCallback(
     (kind: RackGraphLabel["kind"], position: RackGraphPosition) => {
-      const graph = materialized.graph!;
       const label: RackGraphLabel = {
         id: rackGraphId("label"),
         text: kind === "section" ? "New section" : "New note",
@@ -543,75 +552,78 @@ export default function RackGraphEditor({
         width: kind === "section" ? 640 : 240,
         height: kind === "section" ? 320 : 100,
       };
-      updateGraph({ ...graph, labels: [...(graph.labels ?? []), label] });
+      updateGraph((graph) => ({
+        ...graph,
+        labels: [...(graph.labels ?? []), label],
+      }));
       setSelectedId(`label:${label.id}`);
     },
-    [materialized.graph, updateGraph],
+    [updateGraph],
   );
 
   const addChildRack = useCallback((position: RackGraphPosition) => {
     if (!activeChildRackId) return;
-    const graph = materialized.graph!;
-    const midiInput = graph.nodes.find((node) => node.kind.kind === "midi_input");
-    const audioOutput = graph.nodes.find(
-      (node) => node.kind.kind === "audio_output" && node.kind.bus_id === "main",
-    );
-    if (!midiInput || !audioOutput) return;
     const nodeId = rackGraphId("rack");
-    updateGraph({
-      ...graph,
-      nodes: [
-        ...graph.nodes,
-        {
-          id: nodeId,
-          kind: { kind: "rack", rack_id: activeChildRackId },
-          position,
-        },
-      ],
-      edges: [
-        ...graph.edges,
-        {
-          id: rackGraphId("edge.midi"),
-          signal: "midi",
-          source: { node_id: midiInput.id, port_id: "out" },
-          target: { node_id: nodeId, port_id: "midi_in" },
-        },
-        {
-          id: rackGraphId("edge.audio"),
-          signal: "audio",
-          source: { node_id: nodeId, port_id: "audio_out" },
-          target: { node_id: audioOutput.id, port_id: "in" },
-        },
-      ],
+    updateGraph((graph) => {
+      const midiInput = graph.nodes.find((node) => node.kind.kind === "midi_input");
+      const audioOutput = graph.nodes.find(
+        (node) => node.kind.kind === "audio_output" && node.kind.bus_id === "main",
+      );
+      if (!midiInput || !audioOutput) return graph;
+      return {
+        ...graph,
+        nodes: [
+          ...graph.nodes,
+          {
+            id: nodeId,
+            kind: { kind: "rack", rack_id: activeChildRackId },
+            position,
+          },
+        ],
+        edges: [
+          ...graph.edges,
+          {
+            id: rackGraphId("edge.midi"),
+            signal: "midi",
+            source: { node_id: midiInput.id, port_id: "out" },
+            target: { node_id: nodeId, port_id: "midi_in" },
+          },
+          {
+            id: rackGraphId("edge.audio"),
+            signal: "audio",
+            source: { node_id: nodeId, port_id: "audio_out" },
+            target: { node_id: audioOutput.id, port_id: "in" },
+          },
+        ],
+      };
     });
-  }, [activeChildRackId, materialized.graph, updateGraph]);
+  }, [activeChildRackId, updateGraph]);
 
   const removeSelected = useCallback(() => {
     if (!selectedId) return;
     if (selectedId.startsWith("label:")) {
-      const graph = materialized.graph!;
       const labelId = selectedId.slice("label:".length);
-      updateGraph({
+      updateGraph((graph) => ({
         ...graph,
         labels: (graph.labels ?? []).filter((label) => label.id !== labelId),
-      });
+      }));
       setSelectedId(undefined);
       return;
     }
     const node = materialized.graph!.nodes.find((candidate) => candidate.id === selectedId);
     if (!node || node.kind.kind === "midi_input" || node.kind.kind.endsWith("output")) return;
     if (node.kind.kind === "plugin") {
-      onChange(removeSlotFromRack(materialized, node.kind.slot_id));
+      const slotId = node.kind.slot_id;
+      onChange((current) => removeSlotFromRack(current, slotId));
     } else {
-      const graph = materialized.graph!;
-      updateGraph({
+      updateGraph((graph) => ({
         ...graph,
         nodes: graph.nodes.filter((candidate) => candidate.id !== selectedId),
         edges: graph.edges.filter(
           (edge) =>
             edge.source.node_id !== selectedId && edge.target.node_id !== selectedId,
         ),
-      });
+      }));
     }
     setSelectedId(undefined);
   }, [materialized, onChange, selectedId, setSelectedId, updateGraph]);
@@ -643,15 +655,14 @@ export default function RackGraphEditor({
   const updateSelectedLabel = useCallback(
     (patch: Partial<RackGraphLabel>) => {
       if (!selectedLabel) return;
-      const graph = materialized.graph!;
-      updateGraph({
+      updateGraph((graph) => ({
         ...graph,
         labels: (graph.labels ?? []).map((label) =>
           label.id === selectedLabel.id ? { ...label, ...patch } : label,
         ),
-      });
+      }));
     },
-    [materialized.graph, selectedLabel, updateGraph],
+    [selectedLabel, updateGraph],
   );
 
   return (

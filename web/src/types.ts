@@ -1,4 +1,4 @@
-export type ConnectionStatus = "connecting" | "online" | "offline";
+export type ConnectionStatus = "connecting" | "online" | "idle" | "offline";
 
 export interface HostAudioDriver {
   name: string;
@@ -361,65 +361,6 @@ export interface WebPublicConfig {
   configurable?: boolean;
 }
 
-export interface PluginRepositoryConfig {
-  id: string;
-  name: string;
-  base_url: string;
-  public_key: string;
-  enabled: boolean;
-  allow_insecure_http: boolean;
-}
-
-export interface PluginRepositoryFile {
-  schema_version: number;
-  repositories: PluginRepositoryConfig[];
-}
-
-export interface StoreArtifact {
-  platform: string;
-  url: string;
-  size: number;
-  sha256: string;
-}
-
-export interface StoreRelease {
-  version: string;
-  published_at: string;
-  artifacts: StoreArtifact[];
-}
-
-export interface StorePlugin {
-  id: string;
-  name: string;
-  summary: string;
-  license: string;
-  homepage?: string;
-  releases: StoreRelease[];
-  installed: boolean;
-  installed_versions: string[];
-  active_version?: string;
-  latest_version?: string;
-  update_available: boolean;
-}
-
-export interface StoreRepositoryCatalog {
-  repository_id: string;
-  name: string;
-  status: "available" | "disabled" | "error";
-  error?: string;
-  catalog?: {
-    schema_version: number;
-    repository_id: string;
-    name: string;
-    generated_at: string;
-    plugins: StorePlugin[];
-  };
-}
-
-export interface StoreCatalogResponse {
-  repositories: StoreRepositoryCatalog[];
-}
-
 export interface WebAuthStatus {
   status: "ok";
   /// Whether this host decides access by PIN at all. Desktop serves the
@@ -451,6 +392,7 @@ export interface PluginWebDescriptor {
   plugin_name: string;
   version: string;
   active: boolean;
+  managed: boolean;
   api_version: number;
   branding?: PluginBranding | null;
   surfaces: Array<{

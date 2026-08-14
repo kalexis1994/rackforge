@@ -199,12 +199,16 @@ export async function hostJson<T>(
   const bridge = nativeBridge();
   if (bridge) {
     const headers = Object.fromEntries(new Headers(init.headers).entries());
+    const method = init.method ?? "GET";
+    const timeoutMs = method.toUpperCase() === "DELETE" && path.startsWith("/api/v1/plugins/")
+      ? 2 * 60_000
+      : NATIVE_REQUEST_TIMEOUT_MS;
     return requestNative<T>("http.request", {
       path,
-      method: init.method ?? "GET",
+      method,
       headers,
       body: typeof init.body === "string" ? init.body : null,
-    });
+    }, timeoutMs);
   }
   const response = await fetch(path, init);
   if (!response.ok) throw await responseError(response);

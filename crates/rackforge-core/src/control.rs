@@ -633,7 +633,15 @@ fn load_plugin_resource(
             Some(snapshot.revision),
         );
     };
-    let install_path = if persist {
+    let import_targets = requirement.import_targets.clone();
+    if !import_targets.is_empty() && !persist {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            "resource archives must be installed into private plugin storage",
+            Some(snapshot.revision),
+        );
+    }
+    let install_path = if persist && import_targets.is_empty() {
         let Some(relative) = requirement.data_path.as_deref() else {
             return error_response(
                 ControlErrorCode::InvalidRequest,
@@ -673,13 +681,6 @@ fn load_plugin_resource(
             );
         }
     };
-    if let Err(error) = runtime.0.validate_resource_file(resource_id, &path) {
-        return error_response(
-            ControlErrorCode::Rejected,
-            format!("plugin rejected resource {resource_id:?}: {error:#}"),
-            Some(snapshot.revision),
-        );
-    }
     let mut resources = match context.dynamic_resources.lock() {
         Ok(resources) => resources.get(instance_id).cloned().unwrap_or_default(),
         Err(_) => {
@@ -689,8 +690,7 @@ fn load_plugin_resource(
             );
         }
     };
-    resources.insert(resource_id.to_owned(), path.to_path_buf());
-    if let Some(relative) = install_path.as_deref() {
+    if !import_targets.is_empty() {
         let Some(storage) = context.storage.as_ref() else {
             return error_response(
                 ControlErrorCode::Unavailable,
@@ -698,15 +698,67 @@ fn load_plugin_resource(
                 Some(snapshot.revision),
             );
         };
-        match storage.copy_file_atomic(plugin_id, relative, &path) {
-            Ok(installed) => {
-                resources.insert(resource_id.to_owned(), installed);
-            }
+        let imported = match runtime.0.import_resource_archive(resource_id, &path) {
+            Ok(imported) => imported,
             Err(error) => {
-                return internal_error(
-                    format!("could not install plugin resource: {error:#}"),
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    format!("plugin rejected resource archive {resource_id:?}: {error:#}"),
                     Some(snapshot.revision),
                 );
+            }
+        };
+        for (target_id, bytes) in imported {
+            let Some(relative) = manifest
+                .resources
+                .iter()
+                .find(|resource| resource.id == target_id)
+                .and_then(|resource| resource.data_path.as_deref())
+            else {
+                return internal_error(
+                    format!("imported resource {target_id:?} has no private data_path"),
+                    Some(snapshot.revision),
+                );
+            };
+            match storage.write_atomic(plugin_id, Path::new(relative), &bytes) {
+                Ok(installed) => {
+                    resources.insert(target_id, installed);
+                }
+                Err(error) => {
+                    return internal_error(
+                        format!("could not install imported resource {target_id:?}: {error:#}"),
+                        Some(snapshot.revision),
+                    );
+                }
+            }
+        }
+    } else {
+        if let Err(error) = runtime.0.validate_resource_file(resource_id, &path) {
+            return error_response(
+                ControlErrorCode::Rejected,
+                format!("plugin rejected resource {resource_id:?}: {error:#}"),
+                Some(snapshot.revision),
+            );
+        }
+        resources.insert(resource_id.to_owned(), path.to_path_buf());
+        if let Some(relative) = install_path.as_deref() {
+            let Some(storage) = context.storage.as_ref() else {
+                return error_response(
+                    ControlErrorCode::Unavailable,
+                    "private plugin storage is unavailable",
+                    Some(snapshot.revision),
+                );
+            };
+            match storage.copy_file_atomic(plugin_id, relative, &path) {
+                Ok(installed) => {
+                    resources.insert(resource_id.to_owned(), installed);
+                }
+                Err(error) => {
+                    return internal_error(
+                        format!("could not install plugin resource: {error:#}"),
+                        Some(snapshot.revision),
+                    );
+                }
             }
         }
     }
@@ -940,7 +992,7 @@ fn edit_performance(
             current_revision(context),
         );
     }
-    let (session_revision, live) = match context.store.lock() {
+    let (session_revision, mut live) = match context.store.lock() {
         Ok(store) => (store.state().revision, store.state().live.clone()),
         Err(_) => return internal_error("session store lock is poisoned", None),
     };
@@ -989,17 +1041,41 @@ fn edit_performance(
             Some(session_revision),
         );
     }
-    if let Err(error) = repository.apply_edit(&expected_revision, edit, &live) {
+    let previous_live = live.clone();
+    if let Err(error) = repository.apply_edit(&expected_revision, edit, &mut live) {
         return error_response(
             ControlErrorCode::Rejected,
             error.to_string(),
             Some(session_revision),
         );
     }
+    let revision = repository.revision();
+    let library = repository.library().clone();
+    drop(repository);
+
+    if live != previous_live {
+        let checkpoint_state = match context.store.lock() {
+            Ok(mut store) => {
+                if let Err(error) = store.record(
+                    None,
+                    SessionEvent::LiveStateReconciled { live: live.clone() },
+                ) {
+                    return internal_error(error.to_string(), Some(store.state().revision));
+                }
+                Some(store.snapshot())
+            }
+            Err(_) => return internal_error("session store lock is poisoned", None),
+        };
+        if let (Some(checkpoint), Some(state)) = (&context.checkpoint, checkpoint_state.as_ref())
+            && let Err(error) = checkpoint.save(state)
+        {
+            eprintln!("SESSION_CHECKPOINT_ERROR {error:#}");
+        }
+    }
     let snapshot = PerformanceSnapshot {
         schema_version: PERFORMANCE_SNAPSHOT_SCHEMA_VERSION,
-        revision: repository.revision(),
-        library: repository.library().clone(),
+        revision,
+        library,
         live,
     };
     ControlResponse::PerformanceEdited {
@@ -1808,6 +1884,34 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             }
         }
         SessionCommand::PreviewRack { rack } => {
+            let graph = rack.resolved_graph();
+            let graph_plugins = graph
+                .nodes
+                .iter()
+                .filter(|node| {
+                    matches!(
+                        node.kind,
+                        rackforge_performance_api::RackGraphNodeKind::Plugin { .. }
+                    )
+                })
+                .count();
+            let graph_children = graph
+                .nodes
+                .iter()
+                .filter(|node| {
+                    matches!(
+                        node.kind,
+                        rackforge_performance_api::RackGraphNodeKind::Rack { .. }
+                    )
+                })
+                .count();
+            println!(
+                "LIVE_RACK_PREVIEW_REQUESTED rack={} slots={} graph_plugins={} graph_children={}",
+                rack.id,
+                rack.slots.len(),
+                graph_plugins,
+                graph_children
+            );
             let mut library = match context.performance_repository.lock() {
                 Ok(repository) => repository.library().clone(),
                 Err(_) => {
@@ -1826,11 +1930,30 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             } else {
                 library.racks.push(rack.clone());
             }
-            let (instance_id, slots) =
-                match prepare_rack_runtime(&snapshot, &library, &rack.id, &context.state_store) {
-                    Ok(runtime) => runtime,
-                    Err(failure) => return failure.into_response(),
-                };
+            let runtime = if rack.slots.is_empty() && graph_children == 0 {
+                snapshot
+                    .active_instance()
+                    .map(|instance| (instance.instance_id.clone(), Vec::new()))
+                    .ok_or_else(|| {
+                        control_failure(
+                            ControlErrorCode::Unavailable,
+                            "the LIVE session has no active plugin instance",
+                            Some(snapshot.revision),
+                        )
+                    })
+            } else {
+                prepare_rack_runtime(&snapshot, &library, &rack.id, &context.state_store)
+            };
+            let (instance_id, slots) = match runtime {
+                Ok(runtime) => runtime,
+                Err(failure) => {
+                    eprintln!(
+                        "LIVE_RACK_PREVIEW_REJECTED rack={} error={}",
+                        rack.id, failure.message
+                    );
+                    return failure.into_response();
+                }
+            };
             let rack_id = rack.id.as_str().to_owned();
             let (reply_sender, reply_receiver) = sync_channel(1);
             if let Err(failure) = send_audio(
@@ -1846,7 +1969,13 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             }
             match receive_audio(reply_receiver, "preview Rack") {
                 Ok(()) => command_applied_without_events(context, command_ref),
-                Err(failure) => failure.into_response(),
+                Err(failure) => {
+                    eprintln!(
+                        "LIVE_RACK_PREVIEW_FAILED rack={} error={}",
+                        rack.id, failure.message
+                    );
+                    failure.into_response()
+                }
             }
         }
         SessionCommand::SelectSound {
@@ -2899,6 +3028,7 @@ fn record_command_events(
                 | SessionEvent::ActiveInstanceChanged { .. }
                 | SessionEvent::LiveBrowseModeChanged { .. }
                 | SessionEvent::LiveTargetActivated { .. }
+                | SessionEvent::LiveStateReconciled { .. }
                 | SessionEvent::SoundSelected { .. }
                 | SessionEvent::ProgramSaved { .. }
         )

@@ -3,6 +3,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type CSSProperties,
@@ -22,6 +23,7 @@ import {
   Play,
   RadioTower,
   Settings2,
+  Trash2,
   X,
 } from "lucide-react";
 import {
@@ -46,6 +48,7 @@ import {
   stopGateway,
 } from "./gateway";
 import { RfLoader } from "./components/RfLoader";
+import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
 import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
 import {
   bindNativePluginResource,
@@ -74,10 +77,7 @@ import type {
   ResourceEntry,
   ResourceGrant,
   ResourceSelection,
-  PluginRepositoryConfig,
-  PluginRepositoryFile,
   SessionSnapshot,
-  StoreCatalogResponse,
   WebAuthStatus,
   WebPublicConfig,
 } from "./types";
@@ -187,7 +187,7 @@ const navItems = [
   },
   {
     path: "/plugins",
-    label: "Plugins",
+    label: "Plugin Manager",
     detail: "Install, manage and configure instruments",
     section: "system",
     icon: Blocks,
@@ -219,8 +219,7 @@ const audioMidiItem = {
 
 const installedPluginsItem = {
   ...navItems[4],
-  label: "Installed plugins",
-  detail: "Manage versions and active instruments",
+  detail: "Install, manage and configure instruments",
 };
 
 const aboutItem = {
@@ -478,7 +477,12 @@ function RackForgeApp() {
             />
             <Route
               path="/plugins"
-              element={<PluginsPage snapshot={snapshot} />}
+              element={
+                <PluginsPage
+                  snapshot={snapshot}
+                  onInstall={() => setInstallPluginOpen(true)}
+                />
+              }
             />
             <Route
               path="/plugins/:instanceId"
@@ -491,9 +495,6 @@ function RackForgeApp() {
                   initial={settingsBootstrap}
                   onConfigChange={(config) => setSettingsBootstrap((current) =>
                     current ? { ...current, config } : current
-                  )}
-                  onRepositoriesChange={(repositoryFile) => setSettingsBootstrap((current) =>
-                    current ? { ...current, repositoryFile } : current
                   )}
                   onAudioChange={(audioSettings) => setSettingsBootstrap((current) =>
                     current ? { ...current, audioSettings } : current
@@ -524,10 +525,6 @@ function RackForgeApp() {
         <MobileNavigation
           connection={connection}
           onClose={() => setMobileMenuOpen(false)}
-          onInstall={() => {
-            setMobileMenuOpen(false);
-            setInstallPluginOpen(true);
-          }}
           performanceSurface={
             location.pathname === "/play"
               ? "play"
@@ -952,14 +949,12 @@ function NavigationLinks({
 function MobileNavigation({
   connection,
   onClose,
-  onInstall,
   performanceSurface,
   liveWorkspaceActive,
   onPerformanceAction,
 }: {
   connection: string;
   onClose: () => void;
-  onInstall: () => void;
   performanceSurface?: "play" | "live";
   liveWorkspaceActive: boolean;
   onPerformanceAction: (
@@ -1109,17 +1104,6 @@ function MobileNavigation({
             detailed
             onNavigate={requestClose}
           />
-          <nav className="primary-nav mobile-menu-actions" aria-label="RackForge system actions">
-            <button className="nav-item" onClick={onInstall}>
-              <span className="nav-mark">
-                <Download aria-hidden="true" strokeWidth={1.9} />
-              </span>
-              <span className="nav-copy">
-                <span>Install plugin</span>
-                <small>Choose a portable .rfplugin package</small>
-              </span>
-            </button>
-          </nav>
           <NavigationLinks
             items={[installedPluginsItem, aboutItem]}
             detailed
@@ -1366,7 +1350,12 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
             if (file) void uploadClientFile(file);
           }}
         />
-        {status ? <p className="install-plugin-status">{status}</p> : null}
+        {status ? (
+          <p className="install-plugin-status async-status-line">
+            <AsyncSpinner label={status} />
+            <span>{status}</span>
+          </p>
+        ) : null}
         {error ? <p className="install-plugin-error">{error}</p> : null}
         {activationError ? (
           <p className="install-plugin-error">
@@ -1541,13 +1530,16 @@ function PinGatePage({
             />
           )}
           <button className="primary-button" disabled={!complete || blocked}>
-            {lockedFor > 0
-              ? `Wait ${lockedFor}s`
-              : submitting
-                ? "Checking…"
-                : enrolling
-                  ? "Set PIN"
-                  : "Unlock"}
+            {lockedFor > 0 ? (
+              `Wait ${lockedFor}s`
+            ) : (
+              <AsyncActionLabel
+                  active={submitting}
+                  activeLabel={enrolling ? "Saving PIN…" : "Checking…"}
+              >
+                {enrolling ? "Set PIN" : "Unlock"}
+              </AsyncActionLabel>
+            )}
           </button>
         </form>
         {error && <div className="pairing-error">{error}</div>}
@@ -1565,12 +1557,18 @@ function ConnectionBadge({ status }: { status: string }) {
   const label =
     status === "online"
       ? "System ready"
-      : status === "connecting"
-        ? "Connecting"
-        : "System offline";
+      : status === "idle"
+        ? "No plugin installed"
+        : status === "connecting"
+          ? "Connecting"
+          : "System offline";
   return (
     <div className={`connection-badge ${status}`}>
-      <span className="status-dot" />
+      {status === "connecting" ? (
+        <AsyncSpinner label="Connecting to RackForge Core…" />
+      ) : (
+        <span className="status-dot" />
+      )}
       <span>{label}</span>
     </div>
   );
@@ -2010,8 +2008,11 @@ function PluginPickerModal({
                   </small>
                 </span>
                 <span className="play-plugin-status">
-                  {selected ? "PLAYING" : activating ? "LOADING" : "SELECT"}
-                  <i aria-hidden="true">→</i>
+                  {activating ? (
+                    <AsyncActionLabel active activeLabel="Loading…">SELECT</AsyncActionLabel>
+                  ) : (
+                    <>{selected ? "PLAYING" : "SELECT"}<i aria-hidden="true">→</i></>
+                  )}
                 </span>
               </button>
             );
@@ -2046,7 +2047,11 @@ function PresetModal({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameName, setRenameName] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<{
+    kind: "load" | "save" | "rename" | "delete";
+    presetId?: string;
+  } | null>(null);
+  const busy = busyAction !== null;
   const [message, setMessage] = useState<string | null>(null);
   const refresh = useCallback(() =>
     requestPluginPresets(instance.plugin_id)
@@ -2063,17 +2068,17 @@ function PresetModal({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [onClose]);
   const load = (preset: HostPresetSummary) => {
-    setBusy(true);
+    setBusyAction({ kind: "load", presetId: preset.id });
     setMessage(null);
     loadPluginPreset(instance.instance_id, preset.id)
       .then(onClose)
       .catch((error: Error) => setMessage(error.message))
-      .finally(() => setBusy(false));
+      .finally(() => setBusyAction(null));
   };
   const save = (event: FormEvent) => {
     event.preventDefault();
     if (!name.trim()) return;
-    setBusy(true);
+    setBusyAction({ kind: "save" });
     setMessage(null);
     savePluginPreset(instance.instance_id, name.trim())
       .then((preset) => {
@@ -2083,12 +2088,12 @@ function PresetModal({
         return refresh();
       })
       .catch((error: Error) => setMessage(error.message))
-      .finally(() => setBusy(false));
+      .finally(() => setBusyAction(null));
   };
   const rename = (event: FormEvent, preset: HostPresetSummary) => {
     event.preventDefault();
     if (!renameName.trim()) return;
-    setBusy(true);
+    setBusyAction({ kind: "rename", presetId: preset.id });
     setMessage(null);
     renamePluginPreset(instance.plugin_id, preset.id, renameName.trim())
       .then((renamed) => {
@@ -2098,10 +2103,10 @@ function PresetModal({
         return refresh();
       })
       .catch((error: Error) => setMessage(error.message))
-      .finally(() => setBusy(false));
+      .finally(() => setBusyAction(null));
   };
   const remove = (preset: HostPresetSummary) => {
-    setBusy(true);
+    setBusyAction({ kind: "delete", presetId: preset.id });
     setMessage(null);
     deletePluginPreset(instance.plugin_id, preset.id)
       .then(() => {
@@ -2110,7 +2115,7 @@ function PresetModal({
         return refresh();
       })
       .catch((error: Error) => setMessage(error.message))
-      .finally(() => setBusy(false));
+      .finally(() => setBusyAction(null));
   };
   return (
     <div className="preset-modal-backdrop" onMouseDown={(event) => {
@@ -2136,7 +2141,11 @@ function PresetModal({
               <span>Preset name</span>
               <input autoFocus maxLength={96} value={name} onChange={(event) => setName(event.target.value)} placeholder="Warm Strings" />
             </label>
-            <button disabled={busy || !name.trim()} type="submit">{busy ? "Saving…" : "Capture state"}</button>
+            <button disabled={busy || !name.trim()} type="submit">
+              <AsyncActionLabel active={busyAction?.kind === "save"} activeLabel="Saving…">
+                Capture state
+              </AsyncActionLabel>
+            </button>
           </form>
         )}
         {message && <p className="preset-message">{message}</p>}
@@ -2148,14 +2157,28 @@ function PresetModal({
               {renamingId === preset.id ? (
                 <form className="preset-rename-form" onSubmit={(event) => rename(event, preset)}>
                   <input autoFocus maxLength={96} value={renameName} onChange={(event) => setRenameName(event.target.value)} />
-                  <button disabled={busy || !renameName.trim()} type="submit">Save</button>
+                  <button disabled={busy || !renameName.trim()} type="submit">
+                    <AsyncActionLabel
+                      active={busyAction?.kind === "rename" && busyAction.presetId === preset.id}
+                      activeLabel="Renaming…"
+                    >
+                      Save
+                    </AsyncActionLabel>
+                  </button>
                   <button type="button" onClick={() => setRenamingId(null)}>Cancel</button>
                 </form>
               ) : (
                 <>
                   <button className="preset-load-target" disabled={busy} onClick={() => load(preset)}>
                     <span><strong>{preset.name}</strong><small>State v{preset.state_version} · Plugin {preset.plugin_version}</small></span>
-                    <i>LOAD →</i>
+                    <i>
+                      <AsyncActionLabel
+                        active={busyAction?.kind === "load" && busyAction.presetId === preset.id}
+                        activeLabel="Loading…"
+                      >
+                        LOAD →
+                      </AsyncActionLabel>
+                    </i>
                   </button>
                   <div className="preset-row-actions">
                     <button disabled={busy} onClick={() => {
@@ -2171,7 +2194,14 @@ function PresetModal({
                 <div className="preset-delete-confirm">
                   <span>Delete “{preset.name}”?</span>
                   <button onClick={() => setDeletingId(null)}>Cancel</button>
-                  <button className="danger" disabled={busy} onClick={() => remove(preset)}>{busy ? "Deleting…" : "Delete"}</button>
+                  <button className="danger" disabled={busy} onClick={() => remove(preset)}>
+                    <AsyncActionLabel
+                      active={busyAction?.kind === "delete" && busyAction.presetId === preset.id}
+                      activeLabel="Deleting…"
+                    >
+                      Delete
+                    </AsyncActionLabel>
+                  </button>
                 </div>
               )}
             </article>
@@ -2182,8 +2212,150 @@ function PresetModal({
   );
 }
 
-function PluginsPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
+interface PluginRemovalOptions {
+  delete_presets: boolean;
+  delete_plugin_data: boolean;
+}
+
+interface PluginRemovalResult {
+  cleanup_pending?: boolean;
+  presets_deleted?: boolean;
+  plugin_data_deleted?: boolean;
+  user_data_cleanup_warning?: string | null;
+}
+
+function pluginRemovalSummary(result: PluginRemovalResult) {
+  const parts = ["Plugin package removed."];
+  parts.push(result.presets_deleted ? "Presets deleted." : "Presets preserved.");
+  parts.push(
+    result.plugin_data_deleted
+      ? "Imported resources and private plugin data deleted."
+      : "Imported resources and private plugin data preserved.",
+  );
+  if (result.cleanup_pending) {
+    parts.push("Locked package files will be cleaned after RackForge closes.");
+  }
+  if (result.user_data_cleanup_warning) {
+    parts.push(`Some selected user data could not be removed: ${result.user_data_cleanup_warning}`);
+  }
+  return parts.join(" ");
+}
+
+function PluginRemovalDialog({
+  pluginName,
+  active,
+  removing,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  pluginName: string;
+  active: boolean;
+  removing: boolean;
+  error?: string | null;
+  onClose: () => void;
+  onConfirm: (options: PluginRemovalOptions) => Promise<void>;
+}) {
+  const [deletePresets, setDeletePresets] = useState(false);
+  const [deletePluginData, setDeletePluginData] = useState(false);
+  const titleId = useId();
+  const descriptionId = useId();
+
+  return (
+    <div
+      className="preset-modal-backdrop plugin-remove-backdrop"
+      onMouseDown={(event) => {
+        if (!removing && event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="preset-modal plugin-remove-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+      >
+        <header className="preset-modal-header">
+          <div>
+            <span className="eyebrow">Installed plugin</span>
+            <h2 id={titleId}>Remove {pluginName}?</h2>
+          </div>
+          <button className="preset-modal-close" disabled={removing} onClick={onClose} aria-label="Close">×</button>
+        </header>
+        <div className="plugin-remove-copy" id={descriptionId}>
+          <p>RackForge will always remove every installed version of this plugin package.</p>
+          <fieldset className="plugin-remove-options" disabled={removing}>
+            <legend>Also remove user data</legend>
+            <label>
+              <input
+                type="checkbox"
+                checked={deletePresets}
+                onChange={(event) => setDeletePresets(event.target.checked)}
+              />
+              <span>
+                <strong>Delete RackForge presets</strong>
+                <small>Named presets are removed. State still referenced by racks or songs remains safe.</small>
+              </span>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={deletePluginData}
+                onChange={(event) => setDeletePluginData(event.target.checked)}
+              />
+              <span>
+                <strong>Delete imported resources and plugin data</strong>
+                <small>Removes extracted firmware or ROMs, custom programs and private caches.</small>
+              </span>
+            </label>
+          </fieldset>
+          <p className="plugin-remove-note">The archive selected for an import is temporary and is already discarded after a successful import.</p>
+          {active ? <p>It is currently active, so sound will stop briefly while RackForge selects another available instrument.</p> : null}
+          {error ? <p className="form-error">{error}</p> : null}
+        </div>
+        <footer className="plugin-remove-actions">
+          <button className="secondary-button" disabled={removing} onClick={onClose}>Cancel</button>
+          <button
+            className="danger-button"
+            disabled={removing}
+            onClick={() => void onConfirm({
+              delete_presets: deletePresets,
+              delete_plugin_data: deletePluginData,
+            })}
+          >
+            <AsyncActionLabel active={removing} activeLabel="Removing plugin…">
+              Remove plugin
+            </AsyncActionLabel>
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function PluginsPage({
+  snapshot,
+  onInstall,
+}: {
+  snapshot: SessionSnapshot | null;
+  onInstall: () => void;
+}) {
+  const location = useLocation();
   const [installed, setInstalled] = useState<PluginWebDescriptor[]>([]);
+  const [pendingRemoval, setPendingRemoval] = useState<PluginWebDescriptor | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removalError, setRemovalError] = useState<string | null>(null);
+  const [removalMessage, setRemovalMessage] = useState<string | null>(() => {
+    const state = location.state as { pluginRemovalMessage?: unknown } | null;
+    return typeof state?.pluginRemovalMessage === "string"
+      ? state.pluginRemovalMessage
+      : null;
+  });
+
+  const refreshInstalled = useCallback(async () => {
+    const plugins = await hostJson<PluginWebDescriptor[]>("/api/v1/plugins");
+    setInstalled(plugins);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2199,23 +2371,69 @@ function PluginsPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
     };
   }, []);
 
+  const removePlugin = async (options: PluginRemovalOptions) => {
+    if (!pendingRemoval) return;
+    setRemoving(true);
+    setRemovalError(null);
+    setRemovalMessage(null);
+    try {
+      const result = await hostJson<PluginRemovalResult>(
+        `/api/v1/plugins/${encodeURIComponent(pendingRemoval.plugin_id)}`,
+        {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(options),
+        },
+      );
+      setPendingRemoval(null);
+      await refreshInstalled();
+      setRemovalMessage(pluginRemovalSummary(result));
+    } catch (error) {
+      setRemovalError(
+        error instanceof Error ? error.message : "Could not remove the plugin.",
+      );
+    } finally {
+      setRemoving(false);
+    }
+  };
+
   const running = snapshot?.instances ?? [];
   const runningPluginIds = new Set(running.map((instance) => instance.plugin_id));
+  const requestRemoval = (plugin: PluginWebDescriptor) => {
+    setRemovalError(null);
+    setPendingRemoval(
+      runningPluginIds.has(plugin.plugin_id) && !plugin.active
+        ? { ...plugin, active: true }
+        : plugin,
+    );
+  };
   const available = installed.filter(
     (plugin) => !runningPluginIds.has(plugin.plugin_id),
   );
 
   return (
     <>
-      <PageHeading
-        eyebrow="Plugin configuration"
-        title="Installed sound engines"
-        detail="Open a running plugin to configure its libraries, resources and compatibility options. Musical controls remain in Play."
-      />
+      <div className="plugin-manager-heading">
+        <PageHeading
+          eyebrow="Instrument library"
+          title="Plugin Manager"
+          detail="Install, configure and remove portable RackForge instruments. Musical controls remain in Play."
+        />
+        <button className="primary-button plugin-install-button" onClick={onInstall}>
+          <Download aria-hidden="true" />
+          Install plugin
+        </button>
+      </div>
       <div className="plugin-section-heading">
         <span className="card-kicker">Running now</span>
       </div>
-      <PluginGrid instances={running} plugins={installed} expanded />
+      {removalMessage ? <p className="plugin-removal-message">{removalMessage}</p> : null}
+      <PluginGrid
+        instances={running}
+        plugins={installed}
+        expanded
+        onRemove={requestRemoval}
+      />
       {available.length > 0 && (
         <>
           <div className="plugin-section-heading">
@@ -2239,12 +2457,33 @@ function PluginsPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
                     {plugin.surfaces.length === 0 ? " · No Web view" : " · Web view ready"}
                   </p>
                 </div>
-                <span className="plugin-installed-mark" aria-label="Installed">✓</span>
+                {plugin.managed ? (
+                  <button
+                    className="plugin-remove-button"
+                    onClick={() => requestRemoval(plugin)}
+                    aria-label={`Remove ${plugin.plugin_name}`}
+                  >
+                    <Trash2 aria-hidden="true" />
+                    <span>Remove</span>
+                  </button>
+                ) : (
+                  <span className="plugin-installed-mark" aria-label="Installed">✓</span>
+                )}
               </article>
             ))}
           </div>
         </>
       )}
+      {pendingRemoval ? (
+        <PluginRemovalDialog
+          pluginName={pendingRemoval.plugin_name}
+          active={pendingRemoval.active}
+          removing={removing}
+          error={removalError}
+          onClose={() => setPendingRemoval(null)}
+          onConfirm={removePlugin}
+        />
+      ) : null}
     </>
   );
 }
@@ -2253,10 +2492,12 @@ function PluginGrid({
   instances,
   plugins,
   expanded = false,
+  onRemove,
 }: {
   instances: PluginInstance[];
   plugins?: PluginWebDescriptor[];
   expanded?: boolean;
+  onRemove?: (plugin: PluginWebDescriptor) => void;
 }) {
   const [loadedCatalog, setLoadedCatalog] = useState<PluginWebDescriptor[]>([]);
   useEffect(() => {
@@ -2284,22 +2525,27 @@ function PluginGrid({
           (sound) => sound.id === instance.selected_sound_id,
         );
         return (
-          <NavLink
-            className="plugin-card"
-            to={`/plugins/${encodeURIComponent(instance.instance_id)}`}
-            key={instance.instance_id}
-          >
-            <div className={`plugin-tile tile-${index % 4}${plugin?.branding ? " branded" : ""}`}>
-              <PluginIcon plugin={plugin} name={instance.plugin_name} />
-              {!plugin?.branding && <i />}
-            </div>
-            <div>
-              <span className="card-kicker">Plugin</span>
-              <h3>{instance.plugin_name}</h3>
-              <p>{selected?.name ?? `${instance.sounds.length} programs`}</p>
-            </div>
-            <span className="round-arrow">→</span>
-          </NavLink>
+          <div className="plugin-card-shell" key={instance.instance_id}>
+            <NavLink
+              className="plugin-card"
+              to={`/plugins/${encodeURIComponent(instance.instance_id)}`}
+            >
+              <div className={`plugin-tile tile-${index % 4}${plugin?.branding ? " branded" : ""}`}>
+                <PluginIcon plugin={plugin} name={instance.plugin_name} />
+                {!plugin?.branding && <i />}
+              </div>
+              <div>
+                <span className="card-kicker">Plugin</span>
+                <h3>{instance.plugin_name}</h3>
+                <p>{selected?.name ?? `${instance.sounds.length} programs`}</p>
+              </div>
+            </NavLink>
+            {plugin?.managed && onRemove ? (
+              <button className="plugin-card-remove" onClick={() => onRemove(plugin)} aria-label={`Remove ${plugin.plugin_name}`} title="Remove plugin">
+                <Trash2 aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
         );
       })}
     </div>
@@ -2342,6 +2588,54 @@ function PluginSurfaceState({
 }
 
 function PluginConfigSurface({ instance }: { instance: PluginInstance }) {
+  const navigate = useNavigate();
+  const [descriptor, setDescriptor] = useState<PluginWebDescriptor | null>(null);
+  const [showRemove, setShowRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    hostJson<PluginWebDescriptor>(
+      `/api/v1/plugins/${encodeURIComponent(instance.plugin_id)}`,
+    )
+      .then((plugin) => {
+        if (!cancelled) setDescriptor(plugin);
+      })
+      .catch(() => {
+        if (!cancelled) setDescriptor(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [instance.plugin_id]);
+
+  const removePlugin = async (options: PluginRemovalOptions) => {
+    if (!descriptor) return;
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      const result = await hostJson<PluginRemovalResult>(
+        `/api/v1/plugins/${encodeURIComponent(descriptor.plugin_id)}`,
+        {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(options),
+        },
+      );
+      navigate("/plugins", {
+        replace: true,
+        state: { pluginRemovalMessage: pluginRemovalSummary(result) },
+      });
+    } catch (error) {
+      setRemoveError(
+        error instanceof Error ? error.message : "Could not remove the plugin.",
+      );
+    } finally {
+      setRemoving(false);
+    }
+  };
+
   return (
     <section className="plugin-surface-shell">
       <div className="plugin-surface-toolbar">
@@ -2354,12 +2648,34 @@ function PluginConfigSurface({ instance }: { instance: PluginInstance }) {
             <strong>{instance.plugin_name}</strong>
           </div>
         </div>
+        {descriptor?.managed ? (
+          <button
+            className="plugin-detail-remove-button"
+            onClick={() => {
+              setRemoveError(null);
+              setShowRemove(true);
+            }}
+          >
+            <Trash2 aria-hidden="true" />
+            <span>Remove plugin</span>
+          </button>
+        ) : null}
       </div>
       <PluginFrame
         key={instance.instance_id}
         instance={instance}
         surface="config"
       />
+      {showRemove && descriptor ? (
+        <PluginRemovalDialog
+          pluginName={descriptor.plugin_name}
+          active
+          removing={removing}
+          error={removeError}
+          onClose={() => setShowRemove(false)}
+          onConfirm={removePlugin}
+        />
+      ) : null}
     </section>
   );
 }
@@ -2382,6 +2698,7 @@ export function PluginFrame({
     "loading" | "ready" | "unavailable" | "error"
   >("loading");
   const [frameLoaded, setFrameLoaded] = useState(false);
+  const [resourceBusy, setResourceBusy] = useState<string | null>(null);
   const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const pendingResourceRequestRef = useRef<string | null>(null);
@@ -2676,6 +2993,10 @@ export function PluginFrame({
         (params.entry_id === null || params.entry_id === undefined ||
           typeof params.entry_id === "string")
       ) {
+        const operationLabel = event.data.method === "plugin.install_resource"
+          ? "Installing resource…"
+          : "Loading resource…";
+        setResourceBusy(operationLabel);
         postResourceApi("/api/v1/resources/load", {
           plugin_id: instance.plugin_id,
           instance_id: instance.instance_id,
@@ -2690,7 +3011,8 @@ export function PluginFrame({
               false,
               error instanceof Error ? error.message : "Could not load this resource.",
             ),
-          );
+          )
+          .finally(() => setResourceBusy(null));
       } else if (
         event.data.method === "plugin.set_surface_info" &&
         surface === "play" &&
@@ -2911,6 +3233,13 @@ export function PluginFrame({
             )}
           </div>
         )}
+        {resourceBusy ? (
+          <div className="plugin-operation-overlay" role="status" aria-live="polite">
+            <AsyncSpinner label={resourceBusy} size="large" />
+            <strong>{resourceBusy}</strong>
+            <small>RackForge is validating and applying the selected file.</small>
+          </div>
+        ) : null}
       </div>
       {resourceRequest ? (
         <Suspense
@@ -3042,7 +3371,9 @@ function ChangePinCard() {
           disabled={busy}
         />
         <button className="secondary-button" disabled={!ready || busy}>
-          {busy ? "Changing…" : "Change PIN"}
+          <AsyncActionLabel active={busy} activeLabel="Changing PIN…">
+            Change PIN
+          </AsyncActionLabel>
         </button>
       </form>
       {note && (
@@ -3054,7 +3385,6 @@ function ChangePinCard() {
 
 interface HostSettingsBootstrap {
   config: WebPublicConfig | null;
-  repositoryFile: PluginRepositoryFile | null;
   audioSettings: HostAudioSettings | null;
 }
 
@@ -3063,11 +3393,9 @@ let hostSettingsBootstrapPromise: Promise<HostSettingsBootstrap> | null = null;
 function requestHostSettingsBootstrap() {
   hostSettingsBootstrapPromise ??= Promise.all([
     hostJson<WebPublicConfig>("/api/v1/config").catch(() => null),
-    hostJson<PluginRepositoryFile>("/api/v1/repositories").catch(() => null),
     hostJson<HostAudioSettings>("/api/v1/host/audio").catch(() => null),
-  ]).then(([config, repositoryFile, audioSettings]) => ({
+  ]).then(([config, audioSettings]) => ({
     config,
-    repositoryFile,
     audioSettings,
   }));
   return hostSettingsBootstrapPromise;
@@ -3076,12 +3404,10 @@ function requestHostSettingsBootstrap() {
 function SettingsPage({
   initial,
   onConfigChange,
-  onRepositoriesChange,
   onAudioChange,
 }: {
   initial: HostSettingsBootstrap;
   onConfigChange: (config: WebPublicConfig) => void;
-  onRepositoriesChange: (repositoryFile: PluginRepositoryFile) => void;
   onAudioChange: (audioSettings: HostAudioSettings) => void;
 }) {
   const [config, setConfig] = useState<WebPublicConfig | null>(initial.config);
@@ -3090,17 +3416,13 @@ function SettingsPage({
   );
   const [webBusy, setWebBusy] = useState(false);
   const [webMessage, setWebMessage] = useState<string | null>(null);
-  const [repositoryFile, setRepositoryFile] =
-    useState<PluginRepositoryFile | null>(initial.repositoryFile);
-  const [catalog, setCatalog] = useState<StoreCatalogResponse | null>(null);
-  const [storeBusy, setStoreBusy] = useState(false);
-  const [storeMessage, setStoreMessage] = useState<string | null>(null);
   const [audioSettings, setAudioSettings] = useState<HostAudioSettings | null>(initial.audioSettings);
   const [audioDraft, setAudioDraft] = useState<HostAudioPreferences | null>(initial.audioSettings?.preferences ?? null);
-  const [audioBusy, setAudioBusy] = useState(false);
+  const [audioOperation, setAudioOperation] = useState<"refresh" | "test" | "save" | null>(null);
+  const audioBusy = audioOperation !== null;
   const [audioMessage, setAudioMessage] = useState<string | null>(null);
   const loadAudioSettings = useCallback(async () => {
-    setAudioBusy(true);
+    setAudioOperation("refresh");
     setAudioMessage(null);
     try {
       const settings = await hostJson<HostAudioSettings>("/api/v1/host/audio");
@@ -3110,7 +3432,7 @@ function SettingsPage({
     } catch (error) {
       setAudioMessage(error instanceof Error ? error.message : "Device refresh failed.");
     } finally {
-      setAudioBusy(false);
+      setAudioOperation(null);
     }
   }, [onAudioChange]);
 
@@ -3147,7 +3469,7 @@ function SettingsPage({
   };
   const saveAudioSettings = async () => {
     if (!audioDraft) return;
-    setAudioBusy(true);
+    setAudioOperation("save");
     setAudioMessage(null);
     try {
       const settings = await hostJson<HostAudioSettings>("/api/v1/host/audio", {
@@ -3162,11 +3484,11 @@ function SettingsPage({
     } catch (error) {
       setAudioMessage(error instanceof Error ? error.message : "Audio settings failed.");
     } finally {
-      setAudioBusy(false);
+      setAudioOperation(null);
     }
   };
   const testAudio = async () => {
-    setAudioBusy(true);
+    setAudioOperation("test");
     setAudioMessage(null);
     try {
       await hostJson("/api/v1/host/audio/test", { method: "POST" });
@@ -3174,20 +3496,8 @@ function SettingsPage({
     } catch (error) {
       setAudioMessage(error instanceof Error ? error.message : "Audio test failed.");
     } finally {
-      setAudioBusy(false);
+      setAudioOperation(null);
     }
-  };
-
-  const updateRepository = (
-    index: number,
-    patch: Partial<PluginRepositoryConfig>,
-  ) => {
-    setRepositoryFile((current) => {
-      if (!current) return current;
-      const repositories = [...current.repositories];
-      repositories[index] = { ...repositories[index], ...patch };
-      return { ...current, repositories };
-    });
   };
 
   const saveWebSettings = async () => {
@@ -3208,74 +3518,6 @@ function SettingsPage({
       setWebMessage(error instanceof Error ? error.message : "HTTP settings failed.");
     } finally {
       setWebBusy(false);
-    }
-  };
-
-  const saveRepositories = async () => {
-    if (!repositoryFile) return;
-    setStoreBusy(true);
-    setStoreMessage(null);
-    try {
-      const body = await hostJson<{
-        status: "ok";
-        config: PluginRepositoryFile;
-      }>("/api/v1/repositories", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(repositoryFile),
-      });
-      setRepositoryFile(body.config);
-      onRepositoriesChange(body.config);
-      setStoreMessage("Repository configuration saved.");
-    } catch (error) {
-      setStoreMessage(error instanceof Error ? error.message : "Save failed.");
-    } finally {
-      setStoreBusy(false);
-    }
-  };
-
-  const refreshCatalog = async () => {
-    setStoreBusy(true);
-    setStoreMessage(null);
-    try {
-      const body = await hostJson<StoreCatalogResponse>("/api/v1/store/catalog");
-      setCatalog(body);
-      setStoreMessage("Signed catalogs refreshed.");
-    } catch (error) {
-      setStoreMessage(error instanceof Error ? error.message : "Refresh failed.");
-    } finally {
-      setStoreBusy(false);
-    }
-  };
-
-  const installPlugin = async (repositoryId: string, pluginId: string) => {
-    setStoreBusy(true);
-    setStoreMessage(`Installing ${pluginId}…`);
-    try {
-      const body = await hostJson<{
-        plugin_id: string;
-        version: string;
-        already_installed?: boolean;
-        activation_required?: boolean;
-      }>("/api/v1/store/install", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repository_id: repositoryId, plugin_id: pluginId }),
-      });
-      setStoreMessage(`Activating ${body.plugin_id}…`);
-      await activateInstalledPlugin({
-        plugin_id: body.plugin_id,
-        version: body.version,
-        already_installed: body.already_installed ?? false,
-        activation_required: body.activation_required ?? true,
-      });
-      setStoreMessage(
-        `${body.plugin_id} ${body.version} installed and active.`,
-      );
-    } catch (error) {
-      setStoreMessage(error instanceof Error ? error.message : "Installation failed.");
-    } finally {
-      setStoreBusy(false);
     }
   };
 
@@ -3366,11 +3608,21 @@ function SettingsPage({
               </fieldset>
               <pre>{audioSettings.runtime_status}</pre>
               <div className="host-audio-actions">
-                <button className="secondary-button" disabled={audioBusy} onClick={() => void loadAudioSettings()}>Refresh devices</button>
-                <button className="secondary-button" disabled={audioBusy} onClick={() => void testAudio()}>Test note</button>
-                <button className="primary-button" disabled={audioBusy} onClick={() => void saveAudioSettings()}>{audioBusy ? "Working…" : "Apply"}</button>
+                <button className="secondary-button" disabled={audioBusy} onClick={() => void loadAudioSettings()}>
+                  <AsyncActionLabel active={audioOperation === "refresh"} activeLabel="Refreshing…">
+                    Refresh devices
+                  </AsyncActionLabel>
+                </button>
+                <button className="secondary-button" disabled={audioBusy} onClick={() => void testAudio()}>
+                  <AsyncActionLabel active={audioOperation === "test"} activeLabel="Playing…">
+                    Test note
+                  </AsyncActionLabel>
+                </button>
+                <button className="primary-button" disabled={audioBusy} onClick={() => void saveAudioSettings()}>
+                  <AsyncActionLabel active={audioOperation === "save"} activeLabel="Applying…">Apply</AsyncActionLabel>
+                </button>
               </div>
-              {audioMessage ? <p className="repository-message">{audioMessage}</p> : null}
+              {audioMessage ? <p className="settings-message">{audioMessage}</p> : null}
             </div>
           </article>
         ) : null}
@@ -3403,7 +3655,7 @@ function SettingsPage({
           </dl>
           {config?.configurable && webDraft ? (
             <div className="web-server-settings-form">
-              <label className="repository-check">
+              <label className="settings-check">
                 <input type="checkbox" checked={webDraft.enabled} onChange={(event) => setWebDraft({ ...webDraft, enabled: event.target.checked })} />
                 <span>Enable HTTP server</span>
               </label>
@@ -3411,193 +3663,16 @@ function SettingsPage({
                 <span>Port</span>
                 <input type="number" min="1024" max="65535" disabled={!webDraft.enabled} value={webDraft.port} onChange={(event) => setWebDraft({ ...webDraft, port: Number(event.target.value) })} />
               </label>
-              <button className="secondary-button" disabled={webBusy || webDraft.port < 1024 || webDraft.port > 65535} onClick={() => void saveWebSettings()}>{webBusy ? "Applying…" : "Apply server settings"}</button>
+              <button className="secondary-button" disabled={webBusy || webDraft.port < 1024 || webDraft.port > 65535} onClick={() => void saveWebSettings()}>
+                <AsyncActionLabel active={webBusy} activeLabel="Applying…">
+                  Apply server settings
+                </AsyncActionLabel>
+              </button>
               {webMessage ? <p>{webMessage}</p> : null}
             </div>
           ) : null}
         </article>
         <ChangePinCard />
-        <article className="settings-card repository-settings-card">
-          <div className="settings-icon">⬡</div>
-          <div className="settings-copy">
-            <span className="card-kicker">Plugin stores</span>
-            <h2>Signed repositories</h2>
-            <p>
-              Catalog signatures and package hashes are checked before any
-              native plugin is installed.
-            </p>
-          </div>
-          <div className="repository-editor">
-            {repositoryFile?.repositories.map((repository, index) => (
-              <div className="repository-form" key={`${repository.id}-${index}`}>
-                <label>
-                  <span>Name</span>
-                  <input
-                    value={repository.name}
-                    onChange={(event) =>
-                      updateRepository(index, { name: event.target.value })
-                    }
-                  />
-                </label>
-                <label>
-                  <span>Repository ID</span>
-                  <input
-                    value={repository.id}
-                    onChange={(event) =>
-                      updateRepository(index, { id: event.target.value })
-                    }
-                  />
-                </label>
-                <label className="repository-wide-field">
-                  <span>Base URL</span>
-                  <input
-                    value={repository.base_url}
-                    onChange={(event) =>
-                      updateRepository(index, { base_url: event.target.value })
-                    }
-                  />
-                </label>
-                <label className="repository-wide-field">
-                  <span>Ed25519 public key</span>
-                  <input
-                    value={repository.public_key}
-                    onChange={(event) =>
-                      updateRepository(index, { public_key: event.target.value })
-                    }
-                    spellCheck={false}
-                  />
-                </label>
-                <label className="repository-check">
-                  <input
-                    type="checkbox"
-                    checked={repository.enabled}
-                    onChange={(event) =>
-                      updateRepository(index, { enabled: event.target.checked })
-                    }
-                  />
-                  <span>Enabled</span>
-                </label>
-                <label className="repository-check">
-                  <input
-                    type="checkbox"
-                    checked={repository.allow_insecure_http}
-                    onChange={(event) =>
-                      updateRepository(index, {
-                        allow_insecure_http: event.target.checked,
-                      })
-                    }
-                  />
-                  <span>Allow HTTP for this LAN</span>
-                </label>
-                <button
-                  className="text-button danger-text-button"
-                  disabled={storeBusy}
-                  onClick={() =>
-                    setRepositoryFile((current) =>
-                      current
-                        ? {
-                            ...current,
-                            repositories: current.repositories.filter(
-                              (_, candidate) => candidate !== index,
-                            ),
-                          }
-                        : current,
-                    )
-                  }
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-            {repositoryFile?.repositories.length === 0 && (
-              <p className="repository-empty">No plugin repository configured.</p>
-            )}
-            <div className="repository-actions">
-              <button
-                className="secondary-button"
-                disabled={!repositoryFile || storeBusy}
-                onClick={() =>
-                  setRepositoryFile((current) =>
-                    current
-                      ? {
-                          ...current,
-                          repositories: [
-                            ...current.repositories,
-                            {
-                              id: "org.example.community",
-                              name: "Community Store",
-                              base_url: "https://",
-                              public_key: "",
-                              enabled: true,
-                              allow_insecure_http: false,
-                            },
-                          ],
-                        }
-                      : current,
-                  )
-                }
-              >
-                Add repository
-              </button>
-              <button
-                className="secondary-button"
-                disabled={!repositoryFile || storeBusy}
-                onClick={saveRepositories}
-              >
-                Save
-              </button>
-              <button
-                className="primary-button"
-                disabled={storeBusy}
-                onClick={refreshCatalog}
-              >
-                {storeBusy ? "Working…" : "Refresh stores"}
-              </button>
-            </div>
-            {storeMessage && <p className="repository-message">{storeMessage}</p>}
-          </div>
-        </article>
-        {catalog?.repositories.map((repository) => (
-          <article className="settings-card store-catalog-card" key={repository.repository_id}>
-            <div className="settings-copy">
-              <span className="card-kicker">{repository.status}</span>
-              <h2>{repository.name}</h2>
-              {repository.error && <p>{repository.error}</p>}
-            </div>
-            <div className="store-plugin-list">
-              {repository.catalog?.plugins.map((plugin) => (
-                <div className="store-plugin" key={plugin.id}>
-                  <div>
-                    <strong>{plugin.name}</strong>
-                    <span>{plugin.latest_version ?? "No release"}</span>
-                    <p>{plugin.summary}</p>
-                    <small>
-                      {plugin.license}
-                      {plugin.active_version
-                        ? ` · Active ${plugin.active_version}`
-                        : plugin.installed
-                          ? ` · Installed ${plugin.installed_versions.join(", ")}`
-                          : ""}
-                    </small>
-                  </div>
-                  <button
-                    className="secondary-button"
-                    disabled={
-                      storeBusy || (plugin.installed && !plugin.update_available)
-                    }
-                    onClick={() => installPlugin(repository.repository_id, plugin.id)}
-                  >
-                    {plugin.update_available
-                      ? "Update"
-                      : plugin.installed
-                        ? "Installed"
-                        : "Install"}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </article>
-        ))}
       </section>
     </>
   );
@@ -3660,7 +3735,9 @@ function DiagnosticsPage() {
       />
       <div className="diagnostics-actions">
         <button className="primary-button" disabled={refreshing} onClick={() => void refresh()}>
-          {refreshing ? "Refreshing…" : "Refresh devices"}
+          <AsyncActionLabel active={refreshing} activeLabel="Refreshing…">
+            Refresh devices
+          </AsyncActionLabel>
         </button>
       </div>
       {error ? <p className="form-error">{error}</p> : null}

@@ -3,7 +3,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use rackforge_plugin_api::PluginManifest;
 use rackforge_repository::{
     RepositoryConfig, RepositoryFile, fetch_repository, install_archive, install_local_archive,
-    repository_platform_key, verify_catalog,
+    repository_platform_key, uninstall_plugin, verify_catalog,
 };
 use sha2::{Digest, Sha256};
 use std::env;
@@ -55,12 +55,24 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
         [command, package, store_root] if command == "install-local" => {
             install_local(package, store_root)
         }
+        [command, plugin_id, store_root] if command == "uninstall" => {
+            uninstall(plugin_id, store_root)
+        }
         [command, package, output] if command == "pack" => pack(package, output),
         [command, package, component, output] if command == "pack-wasm" => {
             pack_wasm(package, component, output)
         }
         _ => Err(usage().into()),
     }
+}
+
+fn uninstall(plugin_id: &str, store_root: &str) -> Result<(), String> {
+    let removed = uninstall_plugin(store_root, plugin_id).map_err(|error| error.to_string())?;
+    println!(
+        "PLUGIN_UNINSTALLED id={} versions={} cleanup_pending={} user_data_preserved=true",
+        removed.plugin_id, removed.removed_versions, removed.cleanup_pending
+    );
+    Ok(())
 }
 
 fn install_local(package_path: &str, store_root: &str) -> Result<(), String> {
@@ -347,5 +359,5 @@ fn hex_digest(bytes: &[u8]) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  rackforge-store keygen SECRET_KEY PUBLIC_KEY\n  rackforge-store sign INDEX_JSON SECRET_KEY INDEX_SIG\n  rackforge-store verify INDEX_JSON INDEX_SIG REPOSITORIES_TOML REPOSITORY_ID\n  rackforge-store list REPOSITORIES_TOML\n  rackforge-store install REPOSITORIES_TOML REPOSITORY_ID PLUGIN_ID STORE_ROOT [VERSION]\n  rackforge-store install-local PACKAGE.rfplugin STORE_ROOT\n  rackforge-store pack PACKAGE_DIRECTORY OUTPUT.rfplugin\n  rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin"
+    "usage:\n  rackforge-store keygen SECRET_KEY PUBLIC_KEY\n  rackforge-store sign INDEX_JSON SECRET_KEY INDEX_SIG\n  rackforge-store verify INDEX_JSON INDEX_SIG REPOSITORIES_TOML REPOSITORY_ID\n  rackforge-store list REPOSITORIES_TOML\n  rackforge-store install REPOSITORIES_TOML REPOSITORY_ID PLUGIN_ID STORE_ROOT [VERSION]\n  rackforge-store install-local PACKAGE.rfplugin STORE_ROOT\n  rackforge-store uninstall PLUGIN_ID STORE_ROOT\n  rackforge-store pack PACKAGE_DIRECTORY OUTPUT.rfplugin\n  rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin"
 }

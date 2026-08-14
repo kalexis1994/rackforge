@@ -1,4 +1,13 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   dispatchCommand,
   dispatchPerformanceEdit,
@@ -6,7 +15,10 @@ import {
   requestPluginPresets,
 } from "./gateway";
 import { RfLoader } from "./components/RfLoader";
+import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
 import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
+import { scopedId } from "./ids";
+import { isNativeHost } from "./host";
 import {
   addSlotToRack,
   graphFromSlots,
@@ -32,6 +44,12 @@ const RackGraphEditor = lazy(() => import("./components/RackGraphEditor"));
 
 type ConfigKind = "rack" | "song" | "setlist";
 
+interface PendingPerformanceDelete {
+  kind: ConfigKind;
+  id: string;
+  name: string;
+}
+
 interface LivePageProps {
   session: SessionSnapshot | null;
   performance: PerformanceSnapshot | null;
@@ -52,7 +70,7 @@ const kindLabels: Record<ConfigKind, string> = {
 };
 
 function performanceId(prefix: string) {
-  return `${prefix}.${crypto.randomUUID().replaceAll("-", "")}`;
+  return scopedId(prefix);
 }
 
 function clone<T>(value: T): T {
@@ -357,7 +375,7 @@ function SetlistTargets({
   return (
     <div className="sequence-list">
       {setlists.map((setlist) => (
-        <section className="sequence-group" key={setlist.id}>
+        <section className="sequence-group setlist-target-group" key={setlist.id}>
           <header>
             <span className="card-kicker">Setlist</span>
             <h3>{setlist.name}</h3>
@@ -420,17 +438,25 @@ function PerformanceConfig({
   renderPluginSurface: LivePageProps["renderPluginSurface"];
 }) {
   const [kind, setKind] = useState<ConfigKind>("rack");
-  const [selectedId, setSelectedId] = useState<string | null>(
-    performance.library.racks[0]?.id ?? null,
-  );
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [rackWorkspaceId, setRackWorkspaceId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<PendingPerformanceDelete | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const items =
     kind === "rack"
       ? performance.library.racks
       : kind === "song"
         ? performance.library.songs
         : performance.library.setlists;
+  const selectedExists = selectedId === "new"
+    || items.some((item) => item.id === selectedId);
+  const activeSelectedId = selectedExists ? selectedId : null;
+  const activeRackWorkspaceId = rackWorkspaceId === "new"
+    || performance.library.racks.some((rack) => rack.id === rackWorkspaceId)
+    ? rackWorkspaceId
+    : null;
 
   useEffect(() => {
     if (!editorDirty) return;
@@ -440,14 +466,17 @@ function PerformanceConfig({
   }, [editorDirty]);
 
   useEffect(() => {
-    const closeWorkspace = () => setRackWorkspaceId(null);
+    const closeWorkspace = () => {
+      setRackWorkspaceId(null);
+      setSelectedId(null);
+    };
     window.addEventListener("rackforge:close-rack-workspace", closeWorkspace);
     return () => window.removeEventListener("rackforge:close-rack-workspace", closeWorkspace);
   }, []);
 
-  const workspaceRackName = rackWorkspaceId === "new"
+  const workspaceRackName = activeRackWorkspaceId === "new"
     ? "New Rack"
-    : performance.library.racks.find((rack) => rack.id === rackWorkspaceId)?.name;
+    : performance.library.racks.find((rack) => rack.id === activeRackWorkspaceId)?.name;
   useEffect(() => {
     const workspace = workspaceRackName
       ? { kind: "rack" as const, name: workspaceRackName }
@@ -479,20 +508,39 @@ function PerformanceConfig({
     proceed(() => {
     setRackWorkspaceId(null);
     setKind(next);
-    const collection =
-      next === "rack"
-        ? performance.library.racks
-        : next === "song"
-          ? performance.library.songs
-          : performance.library.setlists;
-    setSelectedId(collection[0]?.id ?? null);
+    setSelectedId(null);
     });
   };
+  const requestDelete = (item: { id: string; name: string }) => {
+    setDeleteError(null);
+    setPendingDelete({ kind, id: item.id, name: item.name });
+  };
+  const confirmDelete = async () => {
+    if (!pendingDelete || deleteBusy || pending) return;
+    const edit: PerformanceEdit = pendingDelete.kind === "rack"
+      ? { kind: "delete_rack", rack_id: pendingDelete.id }
+      : pendingDelete.kind === "song"
+        ? { kind: "delete_song", song_id: pendingDelete.id }
+        : { kind: "delete_setlist", setlist_id: pendingDelete.id };
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await dispatchEdit(performance.revision, edit);
+      setPendingDelete(null);
+    } catch (reason) {
+      setDeleteError(
+        reason instanceof Error ? reason.message : `Could not delete ${pendingDelete.name}.`,
+      );
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
 
-  return (
-    <div className={`performance-config${rackWorkspaceId ? " rack-graph-workspace" : ""}`}>
-      <aside className="config-library">
-        <div className="config-kind-tabs">
+  if (activeSelectedId === null) {
+    return (
+      <>
+      <div className="live-browser config-library-browser">
+        <div className="live-mode-tabs" role="tablist" aria-label="Configuration type">
           {(["rack", "song", "setlist"] as ConfigKind[]).map((item) => (
             <button
               key={item}
@@ -503,87 +551,193 @@ function PerformanceConfig({
             </button>
           ))}
         </div>
-        <button
-          className="new-performance-button"
-          onClick={() => selectItem("new")}
-          disabled={
-            (kind === "song" && performance.library.racks.length === 0) ||
-            (kind === "setlist" && performance.library.songs.length === 0)
-          }
-        >
-          <span>＋</span> New {kind}
-        </button>
-        <div className="config-item-list">
-          {items.map((item) => (
-            <button
-              key={item.id}
-              className={selectedId === item.id ? "active" : ""}
-              onClick={() => selectItem(item.id)}
-            >
-              <span>{item.name}</span>
-              <small>{item.enabled ? "Enabled" : "Disabled"}</small>
-            </button>
-          ))}
+        <div className="config-library-heading">
+          <div>
+            <span className="card-kicker">Performance library</span>
+            <h2>{kindLabels[kind]}</h2>
+          </div>
+          <button
+            className="new-performance-button"
+            onClick={() => selectItem("new")}
+            disabled={
+              (kind === "song" && performance.library.racks.length === 0) ||
+              (kind === "setlist" && performance.library.songs.length === 0)
+            }
+          >
+            <span>＋</span> New {kind}
+          </button>
         </div>
-      </aside>
+        {items.length === 0 ? (
+          <div className="config-library-empty">
+            <strong>No {kindLabels[kind]} yet</strong>
+            <p>Create one with the New {kindLabels[kind].slice(0, -1)} button.</p>
+          </div>
+        ) : (
+          <div className="target-grid config-target-grid">
+            {items.map((item, index) => {
+              const detail = kind === "rack"
+                ? `${"slots" in item ? item.slots.length : 0} slots`
+                : kind === "song"
+                  ? `${"parts" in item ? item.parts.length : 0} parts`
+                  : `${"entries" in item ? item.entries.length : 0} entries`;
+              return (
+                <article className="target-card config-target-card" key={item.id}>
+                  <span className="target-index">{String(index + 1).padStart(2, "0")}</span>
+                  <div>
+                    <h3>{item.name}</h3>
+                    <p>{detail} · {item.enabled ? "Enabled" : "Disabled"}</p>
+                  </div>
+                  <div className="config-card-actions">
+                    <button className="config-card-edit" onClick={() => selectItem(item.id)}>
+                      Edit
+                    </button>
+                    <button
+                      className="config-card-delete"
+                      disabled={pending}
+                      onClick={() => requestDelete(item)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {pendingDelete ? (
+        <PerformanceDeleteDialog
+          target={pendingDelete}
+          deleting={deleteBusy || pending}
+          error={deleteError}
+          onClose={() => {
+            if (deleteBusy || pending) return;
+            setPendingDelete(null);
+            setDeleteError(null);
+          }}
+          onConfirm={confirmDelete}
+        />
+      ) : null}
+      </>
+    );
+  }
+
+  return (
+    <div className={`performance-config editor-workspace${activeRackWorkspaceId ? " rack-graph-workspace" : ""}`}>
       <main className="config-editor">
         {kind === "rack" && (
           <RackEditor
-            key={`rack:${selectedId ?? "empty"}`}
+            key={`rack:${activeSelectedId ?? "empty"}`}
             rack={
-              selectedId === "new"
-                ? newRack(session?.instances ?? [])
-                : performance.library.racks.find((item) => item.id === selectedId)
+              activeSelectedId === "new"
+                ? newRack()
+                : performance.library.racks.find((item) => item.id === activeSelectedId)
             }
             instances={session?.instances ?? []}
+            session={session}
             performance={performance}
             pending={pending}
-            immersive={rackWorkspaceId !== null}
+            immersive={activeRackWorkspaceId !== null}
             renderPluginSurface={renderPluginSurface}
             onDirtyChange={setEditorDirty}
-            onSaved={(id) => setSelectedId(id)}
-            onDeleted={() =>
-              setSelectedId(performance.library.racks[0]?.id ?? null)
-            }
+            onSaved={(id) => {
+              setSelectedId(id);
+              setRackWorkspaceId(id);
+            }}
+            onDeleted={() => {
+              setSelectedId(null);
+              setRackWorkspaceId(null);
+            }}
           />
         )}
         {kind === "song" && (
           <SongEditor
-            key={`song:${selectedId ?? "empty"}`}
+            key={`song:${activeSelectedId ?? "empty"}`}
             song={
-              selectedId === "new"
+              activeSelectedId === "new"
                 ? newSong(performance)
-                : performance.library.songs.find((item) => item.id === selectedId)
+                : performance.library.songs.find((item) => item.id === activeSelectedId)
             }
             performance={performance}
             pending={pending}
             onDirtyChange={setEditorDirty}
             onSaved={(id) => setSelectedId(id)}
-            onDeleted={() =>
-              setSelectedId(performance.library.songs[0]?.id ?? null)
-            }
+            onDeleted={() => setSelectedId(null)}
           />
         )}
         {kind === "setlist" && (
           <SetlistEditor
-            key={`setlist:${selectedId ?? "empty"}`}
+            key={`setlist:${activeSelectedId ?? "empty"}`}
             setlist={
-              selectedId === "new"
+              activeSelectedId === "new"
                 ? newSetlist(performance)
                 : performance.library.setlists.find(
-                    (item) => item.id === selectedId,
+                    (item) => item.id === activeSelectedId,
                   )
             }
             performance={performance}
             pending={pending}
             onDirtyChange={setEditorDirty}
             onSaved={(id) => setSelectedId(id)}
-            onDeleted={() =>
-              setSelectedId(performance.library.setlists[0]?.id ?? null)
-            }
+            onDeleted={() => setSelectedId(null)}
           />
         )}
       </main>
+    </div>
+  );
+}
+
+function PerformanceDeleteDialog({
+  target,
+  deleting,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  target: PendingPerformanceDelete;
+  deleting: boolean;
+  error: string | null;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const label = kindLabels[target.kind].slice(0, -1);
+  return (
+    <div
+      className="preset-modal-backdrop performance-delete-backdrop"
+      onMouseDown={(event) => {
+        if (!deleting && event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        className="preset-modal performance-delete-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+      >
+        <header className="preset-modal-header">
+          <div>
+            <span className="eyebrow">Performance library</span>
+            <h2 id={titleId}>Delete {target.name}?</h2>
+          </div>
+          <button className="preset-modal-close" disabled={deleting} onClick={onClose} aria-label="Close">×</button>
+        </header>
+        <div className="performance-delete-copy" id={descriptionId}>
+          <p>This permanently removes the {label} from the RackForge performance library.</p>
+          <p>Deletion will be blocked if another Song or Setlist still depends on it.</p>
+          {error ? <p className="form-error">{error}</p> : null}
+        </div>
+        <footer className="performance-delete-actions">
+          <button className="secondary-button" disabled={deleting} onClick={onClose}>Cancel</button>
+          <button className="danger-button" disabled={deleting} onClick={() => void onConfirm()}>
+            <AsyncActionLabel active={deleting} activeLabel={`Deleting ${label}…`}>
+              Delete {label}
+            </AsyncActionLabel>
+          </button>
+        </footer>
+      </section>
     </div>
   );
 }
@@ -594,6 +748,7 @@ function defaultSlot(instances: PluginInstance[]): RackSlot {
     id: performanceId("slot"),
     name: instance?.plugin_name ?? "Instrument",
     plugin_id: instance?.plugin_id ?? "org.rackforge.missing",
+    legacy_program_id: instance?.selected_sound_id,
     enabled: true,
     midi_note_low: 0,
     midi_note_high: 127,
@@ -605,8 +760,8 @@ function defaultSlot(instances: PluginInstance[]): RackSlot {
   };
 }
 
-function newRack(instances: PluginInstance[]): RackDefinition {
-  const slots = [defaultSlot(instances)];
+function newRack(): RackDefinition {
+  const slots: RackSlot[] = [];
   return {
     schema_version: 1,
     id: performanceId("rack"),
@@ -669,7 +824,14 @@ function EditorHeader({
       <div>
         <span className="card-kicker">{eyebrow}</span>
         <h2>{title}</h2>
-        <small>{dirty ? "Unsaved changes" : "Saved"}</small>
+        {pending ? (
+          <small className="async-status-line">
+            <AsyncSpinner label="Applying changes…" />
+            <span>Applying changes…</span>
+          </small>
+        ) : (
+          <small>{dirty ? "Unsaved changes" : "Saved"}</small>
+        )}
       </div>
       <div className="editor-actions">
         {onDelete && (
@@ -681,7 +843,7 @@ function EditorHeader({
           Reset
         </button>
         <button className="save-button" onClick={onSave} disabled={!dirty || pending}>
-          {pending ? "Saving…" : "Save"}
+          Save
         </button>
       </div>
     </header>
@@ -740,6 +902,7 @@ function dispatchEdit(
 function RackEditor({
   rack,
   instances,
+  session,
   performance,
   pending,
   immersive,
@@ -750,26 +913,72 @@ function RackEditor({
 }: {
   rack?: RackDefinition;
   instances: PluginInstance[];
+  session: SessionSnapshot | null;
   performance: PerformanceSnapshot;
   pending: boolean;
   immersive: boolean;
   renderPluginSurface: LivePageProps["renderPluginSurface"];
   onDirtyChange: (dirty: boolean) => void;
   onSaved: (id: string) => void;
-  onDeleted: () => void;
+  onDeleted: (nextId: string | null) => void;
 }) {
-  const original = rack;
+  const original = rack ? materializeRackGraph(rack) : undefined;
   const [draft, setDraft] = useState(() =>
-    rack ? clone(materializeRackGraph(rack)) : undefined,
+    original ? clone(original) : undefined,
   );
   const [baseRevision, setBaseRevision] = useState(performance.revision);
   const [error, setError] = useState<string | null>(null);
+  const previewSupported = !isNativeHost();
+  const previewOriginRef = useRef({
+    mode: session?.active_mode ?? "idle",
+    active: performance.live.active,
+  });
+  const lastPreviewPayloadRef = useRef<string | null>(null);
+  const previewId = draft?.id;
+  // Keep an immutable payload for the debounced preview. Depending on a
+  // hand-picked fingerprint and reading the latest value from a ref allowed
+  // graph edits to be visually committed without publishing the new Rack to
+  // Core. The serialized draft makes every audible graph/state change part of
+  // the effect dependency and guarantees that the timer sends that exact
+  // revision.
+  const previewPayload = draft ? JSON.stringify(draft) : null;
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(original);
   const isNew = !!draft && !performance.library.racks.some((item) => item.id === draft.id);
   useEffect(() => {
     onDirtyChange(dirty || isNew);
     return () => onDirtyChange(false);
   }, [dirty, isNew, onDirtyChange]);
+  useEffect(() => {
+    if (!previewSupported || !previewId) return;
+    dispatchCommand({ type: "set_active_mode", mode: "live" });
+    const origin = previewOriginRef.current;
+    return () => {
+      dispatchCommand({ type: "set_active_mode", mode: origin.mode });
+      if (origin.mode === "live" && origin.active) {
+        dispatchCommand({ type: "activate_live_target", location: origin.active });
+      }
+    };
+  }, [previewId, previewSupported]);
+  useEffect(() => {
+    if (!previewSupported || previewPayload === null) return;
+    if (lastPreviewPayloadRef.current === previewPayload) return;
+    const timer = window.setTimeout(() => {
+      const previewRack = JSON.parse(previewPayload) as RackDefinition;
+      lastPreviewPayloadRef.current = previewPayload;
+      dispatchCommand({ type: "preview_rack", rack: previewRack });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [previewPayload, previewSupported]);
+  const addInstrument = useCallback((position?: RackGraphPosition) => {
+    if (!draft) return;
+    const next = addSlotToRack(draft, defaultSlot(instances), position);
+    setDraft(next);
+    if (previewSupported) {
+      const payload = JSON.stringify(next);
+      lastPreviewPayloadRef.current = payload;
+      dispatchCommand({ type: "preview_rack", rack: next });
+    }
+  }, [draft, instances, previewSupported]);
   const validate = useCallback(() => {
     if (!draft) return "Select a Rack or create a new one.";
     const nameError = validationName(draft.name);
@@ -795,7 +1004,7 @@ function RackEditor({
         rack: draft,
       });
       const saved = snapshot.library.racks.find((item) => item.id === draft.id);
-      if (saved) setDraft(clone(saved));
+      if (saved) setDraft(clone(materializeRackGraph(saved)));
       setBaseRevision(snapshot.revision);
       onSaved(draft.id);
     } catch (reason) {
@@ -833,11 +1042,11 @@ function RackEditor({
     )
       return;
     try {
-      await dispatchEdit(baseRevision, {
+      const snapshot = await dispatchEdit(baseRevision, {
         kind: "delete_rack",
         rack_id: draft.id,
       });
-      onDeleted();
+      onDeleted(snapshot.library.racks[0]?.id ?? null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not delete Rack.");
     }
@@ -855,9 +1064,7 @@ function RackEditor({
         pending={pending}
         onSave={save}
         onReset={() => {
-          setDraft(
-            original ? clone(materializeRackGraph(original)) : newRack(instances),
-          );
+          setDraft(original ? clone(original) : newRack());
           setBaseRevision(performance.revision);
           setError(null);
         }}
@@ -879,11 +1086,14 @@ function RackEditor({
           <RackGraphEditor
             rack={draft}
             racks={performance.library.racks}
-            onChange={setDraft}
-            canAddInstrument={draft.slots.length < 32 && instances.length > 0}
-            onAddInstrument={(position: RackGraphPosition) =>
-              setDraft(addSlotToRack(draft, defaultSlot(instances), position))
+            onChange={(update) =>
+              setDraft((current) => {
+                if (!current) return current;
+                return typeof update === "function" ? update(current) : update;
+              })
             }
+            canAddInstrument={draft.slots.length < 32 && instances.length > 0}
+            onAddInstrument={addInstrument}
             instances={instances}
             renderPluginSurface={renderPluginSurface}
           />
@@ -894,7 +1104,8 @@ function RackEditor({
         detail="Configure plugin state, MIDI filters and mix for each instrument node."
         action={
           <button
-            onClick={() => setDraft(addSlotToRack(draft, defaultSlot(instances)))}
+            type="button"
+            onClick={() => addInstrument()}
             disabled={draft.slots.length >= 32 || instances.length === 0}
           >
             ＋ Add Slot
@@ -1019,7 +1230,9 @@ function SlotEditor({
                 <option value="">{presets.length ? "Choose a preset" : "No saved presets"}</option>
                 {visiblePresets.map((preset) => <option value={preset.id} key={preset.id}>{preset.name}</option>)}
               </select>
-              <button type="button" disabled={!presetId || presetBusy} onClick={loadPreset}>{presetBusy ? "Loading…" : "Load"}</button>
+              <button type="button" disabled={!presetId || presetBusy} onClick={loadPreset}>
+                <AsyncActionLabel active={presetBusy} activeLabel="Loading…">Load</AsyncActionLabel>
+              </button>
             </div>
             <small>{slot.state ? "State copied into this Slot · independent from its preset" : "Default plugin state"}</small>
             {visiblePresetError && <small className="field-error">{visiblePresetError}</small>}
@@ -1098,7 +1311,7 @@ function SongEditor({
   pending: boolean;
   onDirtyChange: (dirty: boolean) => void;
   onSaved: (id: string) => void;
-  onDeleted: () => void;
+  onDeleted: (nextId: string | null) => void;
 }) {
   const original = song;
   const [draft, setDraft] = useState(() => (song ? clone(song) : undefined));
@@ -1140,11 +1353,11 @@ function SongEditor({
     }
     if (!window.confirm(`Delete Song “${draft.name}”? This cannot be undone.`)) return;
     try {
-      await dispatchEdit(baseRevision, {
+      const snapshot = await dispatchEdit(baseRevision, {
         kind: "delete_song",
         song_id: draft.id,
       });
-      onDeleted();
+      onDeleted(snapshot.library.songs[0]?.id ?? null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not delete Song.");
     }
@@ -1178,7 +1391,7 @@ function SetlistEditor({
   pending: boolean;
   onDirtyChange: (dirty: boolean) => void;
   onSaved: (id: string) => void;
-  onDeleted: () => void;
+  onDeleted: (nextId: string | null) => void;
 }) {
   const original = setlist;
   const [draft, setDraft] = useState(() => (setlist ? clone(setlist) : undefined));
@@ -1211,11 +1424,11 @@ function SetlistEditor({
   const remove = async () => {
     if (!window.confirm(`Delete Setlist “${draft.name}”? This cannot be undone.`)) return;
     try {
-      await dispatchEdit(baseRevision, {
+      const snapshot = await dispatchEdit(baseRevision, {
         kind: "delete_setlist",
         setlist_id: draft.id,
       });
-      onDeleted();
+      onDeleted(snapshot.library.setlists[0]?.id ?? null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not delete Setlist.");
     }

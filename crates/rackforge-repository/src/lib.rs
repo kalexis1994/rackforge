@@ -123,6 +123,49 @@ pub struct InstalledPackage {
     pub already_installed: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UninstalledPackage {
+    pub plugin_id: String,
+    pub removed_versions: usize,
+    /// A renamed tombstone remains when the operating system still has a
+    /// plugin binary open. It is outside the package catalog and can be
+    /// cleaned after the host exits without making the plugin visible again.
+    pub cleanup_pending: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PluginUserDataRemovalOptions {
+    pub presets: bool,
+    pub plugin_data: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PluginUserDataRemoval {
+    pub preset_files_removed: usize,
+    pub data_namespaces_removed: usize,
+}
+
+/// Retries deletion of packages that were atomically removed from discovery
+/// while a host process still had a native module mapped.
+pub fn cleanup_uninstall_tombstones(
+    store_root: impl AsRef<Path>,
+) -> Result<usize, RepositoryError> {
+    let root = ensure_real_directory(store_root.as_ref())?;
+    let trash_root = ensure_real_child(&root, ".uninstall")?;
+    let mut removed = 0;
+    for entry in fs::read_dir(&trash_root)? {
+        let entry = entry?;
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            continue;
+        }
+        if fs::remove_dir_all(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 /// Metadata obtained by fully extracting and validating a user-selected
 /// `.rfplugin`, without making it an installed package.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -599,6 +642,199 @@ pub fn install_local_archive(
         let _ = fs::remove_dir_all(&stage);
     }
     result
+}
+
+/// Removes every managed version and installation record for one plugin.
+///
+/// Plugin-owned data is deliberately outside `plugin-store` and is never
+/// touched here. Package directories are renamed out of the catalog before
+/// deletion, so a mapped native binary on Windows cannot leave a half-visible
+/// installation behind.
+pub fn uninstall_plugin(
+    store_root: impl AsRef<Path>,
+    plugin_id: &str,
+) -> Result<UninstalledPackage, RepositoryError> {
+    validate_plugin_identifier(plugin_id)
+        .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    let root = ensure_real_directory(store_root.as_ref())?;
+    let packages_root = ensure_real_child(&root, "packages")?;
+    let records_root = ensure_real_child(&root, "records")?;
+    let trash_root = ensure_real_child(&root, ".uninstall")?;
+    let package_root = packages_root.join(plugin_id);
+    let record_root = records_root.join(plugin_id);
+
+    let package_metadata = match fs::symlink_metadata(&package_root) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => metadata,
+        Ok(_) => {
+            return Err(RepositoryError::UnsafeArchive(
+                "managed plugin path is not a real directory".into(),
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(RepositoryError::PluginNotFound(plugin_id.into()));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let _ = package_metadata;
+    let removed_versions = fs::read_dir(&package_root)?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .count();
+
+    let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
+    let package_tombstone = trash_root.join(format!(
+        "{}-{serial}-packages-{plugin_id}",
+        std::process::id()
+    ));
+    let record_tombstone = trash_root.join(format!(
+        "{}-{serial}-records-{plugin_id}",
+        std::process::id()
+    ));
+    if package_tombstone.exists() || record_tombstone.exists() {
+        return Err(RepositoryError::UnsafeArchive(
+            "plugin uninstall staging path already exists".into(),
+        ));
+    }
+
+    fs::rename(&package_root, &package_tombstone)?;
+    let records_moved = if record_root.exists() {
+        let metadata = fs::symlink_metadata(&record_root)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            let _ = fs::rename(&package_tombstone, &package_root);
+            return Err(RepositoryError::UnsafeArchive(
+                "managed plugin record path is not a real directory".into(),
+            ));
+        }
+        if let Err(error) = fs::rename(&record_root, &record_tombstone) {
+            let _ = fs::rename(&package_tombstone, &package_root);
+            return Err(error.into());
+        }
+        true
+    } else {
+        false
+    };
+
+    let mut cleanup_pending = fs::remove_dir_all(&package_tombstone).is_err();
+    if records_moved && fs::remove_dir_all(&record_tombstone).is_err() {
+        cleanup_pending = true;
+    }
+    Ok(UninstalledPackage {
+        plugin_id: plugin_id.into(),
+        removed_versions,
+        cleanup_pending,
+    })
+}
+
+/// Removes user-owned state selected explicitly during plugin uninstall.
+///
+/// RackForge presets and private plugin data are separate namespaces. State
+/// blobs are intentionally retained because racks and songs may still refer
+/// to them even after their named presets are removed. The `resources`
+/// namespace is an Android compatibility layout; current desktop and Linux
+/// hosts keep the same data under `plugins`.
+pub fn remove_plugin_user_data(
+    data_root: impl AsRef<Path>,
+    plugin_id: &str,
+    options: PluginUserDataRemovalOptions,
+) -> Result<PluginUserDataRemoval, RepositoryError> {
+    validate_plugin_identifier(plugin_id)
+        .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    if !options.presets && !options.plugin_data {
+        return Ok(PluginUserDataRemoval::default());
+    }
+
+    let data_root = data_root.as_ref();
+    let metadata = match fs::symlink_metadata(data_root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(PluginUserDataRemoval::default());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(RepositoryError::UnsafeArchive(
+            "plugin data root is not a real directory".into(),
+        ));
+    }
+    let data_root = fs::canonicalize(data_root)?;
+    let mut targets = Vec::new();
+    if options.presets
+        && let Some(target) = inspect_owned_namespace(
+            &data_root,
+            &data_root.join("states").join("presets").join(plugin_id),
+        )?
+    {
+        targets.push((target.0, true, target.1));
+    }
+    if options.plugin_data {
+        for namespace in ["plugins", "addons", "resources"] {
+            if let Some(target) =
+                inspect_owned_namespace(&data_root, &data_root.join(namespace).join(plugin_id))?
+            {
+                targets.push((target.0, false, target.1));
+            }
+        }
+    }
+
+    let mut removed = PluginUserDataRemoval::default();
+    for (target, presets, file_count) in targets {
+        fs::remove_dir_all(target)?;
+        if presets {
+            removed.preset_files_removed += file_count;
+        } else {
+            removed.data_namespaces_removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn inspect_owned_namespace(
+    data_root: &Path,
+    namespace: &Path,
+) -> Result<Option<(PathBuf, usize)>, RepositoryError> {
+    let metadata = match fs::symlink_metadata(namespace) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(RepositoryError::UnsafeArchive(format!(
+            "plugin user-data namespace is not a real directory: {}",
+            namespace.display()
+        )));
+    }
+    let canonical = fs::canonicalize(namespace)?;
+    if canonical == data_root || !canonical.starts_with(data_root) {
+        return Err(RepositoryError::UnsafeArchive(
+            "plugin user-data namespace escaped its root".into(),
+        ));
+    }
+    let files_removed = inspect_owned_tree(&canonical)?;
+    Ok(Some((canonical, files_removed)))
+}
+
+fn inspect_owned_tree(path: &Path) -> Result<usize, RepositoryError> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Err(RepositoryError::UnsafeArchive(format!(
+            "plugin user data cannot contain symbolic links: {}",
+            path.display()
+        )));
+    }
+    if metadata.is_file() {
+        return Ok(1);
+    }
+    if !metadata.is_dir() {
+        return Err(RepositoryError::UnsafeArchive(format!(
+            "plugin user data contains an unsupported entry: {}",
+            path.display()
+        )));
+    }
+    let mut files_removed = 0;
+    for entry in fs::read_dir(path)? {
+        files_removed += inspect_owned_tree(&entry?.path())?;
+    }
+    Ok(files_removed)
 }
 
 /// Fully validates a user-selected `.rfplugin` and returns the identity of the
@@ -1279,6 +1515,152 @@ preset_catalog = "metadata/presets.json"
                 .unwrap()
                 .already_installed
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn uninstalls_every_managed_version_but_preserves_plugin_data() {
+        let wasm = b"\0asm\x01\0\0\0";
+        let bytes = archive(&[
+            ("rackforge-plugin.toml", portable_manifest()),
+            ("component.wasm", wasm),
+            ("metadata/runtime.json", b"{}"),
+            ("metadata/parameters.json", b"{}"),
+            ("metadata/presets.json", b"{}"),
+        ]);
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-uninstall-{}-{}",
+            std::process::id(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        install_local_archive(&root, &bytes).unwrap();
+        let data = root.join("data/plugins/org.rackforge.synth/user-preset.bin");
+        fs::create_dir_all(data.parent().unwrap()).unwrap();
+        fs::write(&data, b"user state").unwrap();
+
+        let removed = uninstall_plugin(&root, "org.rackforge.synth").unwrap();
+        assert_eq!(removed.plugin_id, "org.rackforge.synth");
+        assert_eq!(removed.removed_versions, 1);
+        assert!(!removed.cleanup_pending);
+        assert!(!root.join("packages/org.rackforge.synth").exists());
+        assert!(!root.join("records/org.rackforge.synth").exists());
+        assert_eq!(fs::read(data).unwrap(), b"user state");
+        assert!(matches!(
+            uninstall_plugin(&root, "org.rackforge.synth"),
+            Err(RepositoryError::PluginNotFound(_))
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plugin_user_data_cleanup_keeps_unselected_data_and_shared_state_blobs() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-user-data-{}-{}",
+            std::process::id(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let plugin_id = "org.rackforge.synth";
+        let preset = root.join(format!("states/presets/{plugin_id}/stage.json"));
+        let state_blob = root.join("states/blobs/aa/aa.rfstate");
+        let resource = root.join(format!("plugins/{plugin_id}/firmware/m1.bin"));
+        let android_resource = root.join(format!("resources/{plugin_id}/pcm.resource"));
+        let other_plugin = root.join("plugins/org.rackforge.other/keep.bin");
+        for path in [
+            &preset,
+            &state_blob,
+            &resource,
+            &android_resource,
+            &other_plugin,
+        ] {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"owned").unwrap();
+        }
+
+        let presets = remove_plugin_user_data(
+            &root,
+            plugin_id,
+            PluginUserDataRemovalOptions {
+                presets: true,
+                plugin_data: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(presets.preset_files_removed, 1);
+        assert_eq!(presets.data_namespaces_removed, 0);
+        assert!(!preset.exists());
+        assert!(state_blob.is_file());
+        assert!(resource.is_file());
+
+        let data = remove_plugin_user_data(
+            &root,
+            plugin_id,
+            PluginUserDataRemovalOptions {
+                presets: false,
+                plugin_data: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(data.preset_files_removed, 0);
+        assert_eq!(data.data_namespaces_removed, 2);
+        assert!(!resource.exists());
+        assert!(!android_resource.exists());
+        assert!(state_blob.is_file());
+        assert!(other_plugin.is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plugin_user_data_cleanup_does_nothing_without_explicit_options() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-user-data-preserve-{}-{}",
+            std::process::id(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let resource = root.join("plugins/org.rackforge.synth/firmware.bin");
+        fs::create_dir_all(resource.parent().unwrap()).unwrap();
+        fs::write(&resource, b"owned").unwrap();
+
+        assert_eq!(
+            remove_plugin_user_data(
+                &root,
+                "org.rackforge.synth",
+                PluginUserDataRemovalOptions::default(),
+            )
+            .unwrap(),
+            PluginUserDataRemoval::default()
+        );
+        assert!(resource.is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn uninstall_rejects_unsafe_plugin_identifiers() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-uninstall-unsafe-{}-{}",
+            std::process::id(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        assert!(uninstall_plugin(&root, "../escape").is_err());
+        if root.exists() {
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn cleanup_removes_only_real_uninstall_tombstone_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-uninstall-cleanup-{}-{}",
+            std::process::id(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let tombstone = root.join(".uninstall/previous-host-package");
+        fs::create_dir_all(&tombstone).unwrap();
+        fs::write(tombstone.join("mapped-plugin.dll"), b"old").unwrap();
+        fs::write(root.join(".uninstall/README"), b"do not follow files").unwrap();
+
+        assert_eq!(cleanup_uninstall_tombstones(&root).unwrap(), 1);
+        assert!(!tombstone.exists());
+        assert!(root.join(".uninstall/README").is_file());
         fs::remove_dir_all(root).unwrap();
     }
 

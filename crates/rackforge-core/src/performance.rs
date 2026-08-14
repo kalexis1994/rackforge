@@ -94,7 +94,7 @@ impl PerformanceRepository {
         &mut self,
         expected_revision: &LibraryRevision,
         edit: PerformanceEdit,
-        live: &LivePerformanceState,
+        live: &mut LivePerformanceState,
     ) -> Result<()> {
         let current_revision = self.revision();
         if &current_revision != expected_revision {
@@ -106,9 +106,12 @@ impl PerformanceRepository {
         }
         let mut candidate = self.library.clone();
         edit.apply_to(&mut candidate)?;
-        live.validate(&candidate)?;
+        let mut candidate_live = live.clone();
+        candidate_live.reconcile(&candidate);
+        candidate_live.validate(&candidate)?;
         self.persist_edit(&edit)?;
         self.library = candidate;
+        *live = candidate_live;
         Ok(())
     }
 
@@ -484,20 +487,20 @@ mod tests {
         let mut repository =
             PerformanceRepository::load_or_bootstrap(Some(&root), bootstrap()).unwrap();
         let revision = repository.revision();
-        let live = repository.initial_live_state();
+        let mut live = repository.initial_live_state();
         let mut rack = repository.library().racks[0].clone();
         rack.name = "Stage Piano".into();
         repository
             .apply_edit(
                 &revision,
                 PerformanceEdit::PutRack { rack: rack.clone() },
-                &live,
+                &mut live,
             )
             .unwrap();
         assert_ne!(repository.revision(), revision);
         assert!(
             repository
-                .apply_edit(&revision, PerformanceEdit::PutRack { rack }, &live)
+                .apply_edit(&revision, PerformanceEdit::PutRack { rack }, &mut live)
                 .unwrap_err()
                 .to_string()
                 .contains("conflict")
@@ -514,15 +517,55 @@ mod tests {
         let mut repository =
             PerformanceRepository::load_or_bootstrap(Some(&root), bootstrap()).unwrap();
         let revision = repository.revision();
-        let live = repository.initial_live_state();
+        let mut live = repository.initial_live_state();
         let rack_id = repository.library().racks[0].id.clone();
         assert!(
             repository
-                .apply_edit(&revision, PerformanceEdit::DeleteRack { rack_id }, &live,)
+                .apply_edit(
+                    &revision,
+                    PerformanceEdit::DeleteRack { rack_id },
+                    &mut live,
+                )
                 .is_err()
         );
         assert_eq!(repository.revision(), revision);
         assert_eq!(repository.library().racks.len(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deleting_the_active_setlist_preserves_its_sounding_rack() {
+        let root = temporary_root("delete-active-setlist");
+        let mut repository =
+            PerformanceRepository::load_or_bootstrap(Some(&root), bootstrap()).unwrap();
+        let revision = repository.revision();
+        let rack_id = repository.library().racks[0].id.clone();
+        let setlist_id = repository.library().setlists[0].id.clone();
+        let location = LiveLocation::Setlist {
+            setlist_id: setlist_id.clone(),
+            entry_id: repository.library().setlists[0].entries[0].id.clone(),
+            part_id: repository.library().songs[0].parts[0].id.clone(),
+        };
+        let mut live = LivePerformanceState::default();
+        live.activate(location, rack_id.clone());
+
+        repository
+            .apply_edit(
+                &revision,
+                PerformanceEdit::DeleteSetlist { setlist_id },
+                &mut live,
+            )
+            .unwrap();
+
+        assert!(repository.library().setlists.is_empty());
+        assert_eq!(
+            live.active,
+            Some(LiveLocation::Rack {
+                rack_id: rack_id.clone(),
+            })
+        );
+        assert_eq!(live.active_rack_id, Some(rack_id));
+        live.validate(repository.library()).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 }

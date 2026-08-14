@@ -30,8 +30,9 @@ use rackforge_plugin_api::{
     ProgramEditRequest, ProgramEditorValue, ProgramFieldEditRequest,
 };
 use rackforge_repository::{
-    InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, inspect_local_archive,
-    install_local_archive,
+    InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions,
+    cleanup_uninstall_tombstones, inspect_local_archive, install_local_archive,
+    remove_plugin_user_data, uninstall_plugin,
 };
 use rackforge_session_api::{
     AuditionEndReason, BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId,
@@ -1338,6 +1339,18 @@ impl DesktopApp {
                 } => {
                     let _ = response.send(self.activate_plugin_id(&plugin_id));
                 }
+                web::DesktopControlCall::UninstallPlugin {
+                    plugin_id,
+                    delete_presets,
+                    delete_plugin_data,
+                    response,
+                } => {
+                    let _ = response.send(self.uninstall_plugin_id(
+                        &plugin_id,
+                        delete_presets,
+                        delete_plugin_data,
+                    ));
+                }
                 web::DesktopControlCall::AudioSettings { response } => {
                     #[cfg(windows)]
                     let _ = response.send(
@@ -1429,6 +1442,92 @@ impl DesktopApp {
             mode: ActiveMode::Play,
         });
         Ok(())
+    }
+
+    fn uninstall_plugin_id(
+        &mut self,
+        plugin_id: &str,
+        delete_presets: bool,
+        delete_plugin_data: bool,
+    ) -> Result<serde_json::Value, String> {
+        let store_root = self
+            .options
+            .plugin_store_root
+            .as_deref()
+            .ok_or_else(|| "Desktop plugin storage is unavailable".to_owned())?;
+        if self
+            .options
+            .plugins_root
+            .join(plugin_id)
+            .join("rackforge-plugin.toml")
+            .is_file()
+        {
+            return Err(
+                "This plugin is part of the host installation and cannot be removed from the package manager."
+                    .into(),
+            );
+        }
+        if self
+            .session
+            .read()
+            .is_ok_and(|session| session.audition.is_some() || session.program_draft.is_some())
+        {
+            return Err("Finish or cancel the active plugin edit before removing it".into());
+        }
+
+        // Drop every audio and DSP instance before renaming package roots.
+        // Native libraries are process-lifetime by design, so Windows may
+        // leave the tombstone for cleanup after exit, but it disappears from
+        // discovery immediately and cannot be selected again.
+        #[cfg(windows)]
+        {
+            self.audio = None;
+        }
+        self.plugins.clear();
+        let removed = match uninstall_plugin(store_root, plugin_id) {
+            Ok(removed) => removed,
+            Err(error) => {
+                let recovery = self.reload_plugins().err();
+                return Err(match recovery {
+                    Some(recovery) => format!(
+                        "Could not remove plugin: {error}. Desktop also could not restore its runtime: {recovery:#}"
+                    ),
+                    None => format!("Could not remove plugin: {error}"),
+                });
+            }
+        };
+        let warnings = self.reload_plugins().map_err(|error| {
+            format!("Plugin was removed, but Desktop could not reload: {error:#}")
+        })?;
+        let user_data_cleanup = remove_plugin_user_data(
+            &self.options.data_root,
+            plugin_id,
+            PluginUserDataRemovalOptions {
+                presets: delete_presets,
+                plugin_data: delete_plugin_data,
+            },
+        );
+        let (presets_deleted, plugin_data_deleted, user_data_cleanup_warning) =
+            match user_data_cleanup {
+                Ok(_) => (delete_presets, delete_plugin_data, None),
+                Err(error) => (false, false, Some(error.to_string())),
+            };
+        if let Some(warning) = warnings.first() {
+            self.status = format!("Plugin removed · {warning}");
+        } else {
+            self.status = format!("Plugin removed: {plugin_id}");
+        }
+        Ok(serde_json::json!({
+            "status":"uninstalled",
+            "plugin_id":removed.plugin_id,
+            "removed_versions":removed.removed_versions,
+            "cleanup_pending":removed.cleanup_pending,
+            "restart_requested":false,
+            "user_data_preserved":!presets_deleted && !plugin_data_deleted,
+            "presets_deleted":presets_deleted,
+            "plugin_data_deleted":plugin_data_deleted,
+            "user_data_cleanup_warning":user_data_cleanup_warning
+        }))
     }
 
     fn load_plugin_resource(
@@ -1877,19 +1976,42 @@ impl DesktopApp {
                         ),
                     };
                 }
-                let live = self
+                let mut live = self
                     .session
                     .read()
                     .expect("session lock poisoned")
                     .live
                     .clone();
+                let previous_live = live.clone();
                 match self
                     .performance_repository
-                    .apply_edit(&expected_revision, edit, &live)
+                    .apply_edit(&expected_revision, edit, &mut live)
                 {
-                    Ok(()) => ControlResponse::PerformanceEdited {
-                        snapshot: Box::new(self.performance_snapshot()),
-                    },
+                    Ok(()) => {
+                        if live != previous_live {
+                            if let Err(error) = self.apply_program_events(
+                                vec![SessionEvent::LiveStateReconciled { live }],
+                                None,
+                            ) {
+                                return ControlResponse::Error {
+                                    code: ControlErrorCode::Internal,
+                                    message: format!(
+                                        "Performance changed, but LIVE navigation could not be saved: {error}"
+                                    ),
+                                    current_revision: Some(
+                                        self.session
+                                            .read()
+                                            .expect("session lock poisoned")
+                                            .revision,
+                                    ),
+                                };
+                            }
+                            self.persist_session_checkpoint();
+                        }
+                        ControlResponse::PerformanceEdited {
+                            snapshot: Box::new(self.performance_snapshot()),
+                        }
+                    }
                     Err(error) => ControlResponse::Error {
                         code: ControlErrorCode::Rejected,
                         message: format!("Could not save performance library: {error:#}"),
@@ -3309,6 +3431,9 @@ fn load_desktop_plugins(options: &Options) -> Result<(Vec<DesktopPlugin>, Vec<St
             options.data_root.display()
         )
     })?;
+    if let Some(store_root) = options.plugin_store_root.as_deref() {
+        let _ = cleanup_uninstall_tombstones(store_root);
+    }
 
     let mut package_roots = direct_package_roots(&options.plugins_root)?;
     if let Some(store_root) = options.plugin_store_root.as_deref() {
@@ -3486,11 +3611,22 @@ fn install_bundled_default_plugin(options: &Options) -> Result<()> {
     let Some(store_root) = options.plugin_store_root.as_deref() else {
         return Ok(());
     };
+    let marker = options
+        .rackforge_root
+        .join("state")
+        .join("bundled-default-initialized");
+    if marker.is_file() {
+        return Ok(());
+    }
     let packages_root = store_root.join("packages");
     if fs::read_dir(&packages_root)
         .ok()
         .is_some_and(|mut entries| entries.next().is_some())
     {
+        if let Some(parent) = marker.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&marker, b"1\n")?;
         return Ok(());
     }
     let installed = install_local_archive(store_root, bytes)
@@ -3502,6 +3638,10 @@ fn install_bundled_default_plugin(options: &Options) -> Result<()> {
         installed.path.display(),
         installed.already_installed
     );
+    if let Some(parent) = marker.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&marker, b"1\n")?;
     Ok(())
 }
 

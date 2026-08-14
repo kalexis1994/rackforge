@@ -13,9 +13,9 @@ use rackforge_control_api::{ClientId, ControlRequest, ControlResponse};
 use rackforge_core::PluginPackage;
 use rackforge_repository::{MAX_PACKAGE_BYTES, install_local_archive};
 use rackforge_resource_api::{
-    BindResourceRequest, BrowseGrantRequest, ListGrantsRequest, LoadGrantedResourceRequest,
-    MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser, ResourceEntryKind, ResourceError,
-    SelectHostEntryRequest,
+    BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, ListGrantsRequest,
+    LoadGrantedResourceRequest, MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser, ResourceEntryKind,
+    ResourceError, SelectHostEntryRequest,
 };
 use rackforge_resource_host::NativeResourceBrowser;
 use rackforge_session_api::SessionState;
@@ -65,6 +65,13 @@ struct InstallSelectedPluginRequest {
     selection_id: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct UninstallPluginRequest {
+    delete_presets: bool,
+    delete_plugin_data: bool,
+}
+
 pub enum DesktopControlCall {
     Session {
         request: ControlRequest,
@@ -84,6 +91,12 @@ pub enum DesktopControlCall {
     ActivatePlugin {
         plugin_id: String,
         response: Sender<Result<(), String>>,
+    },
+    UninstallPlugin {
+        plugin_id: String,
+        delete_presets: bool,
+        delete_plugin_data: bool,
+        response: Sender<Result<Value, String>>,
     },
     AudioSettings {
         response: Sender<Result<Value, String>>,
@@ -253,6 +266,7 @@ struct PublicPluginWeb {
     plugin_name: String,
     version: String,
     active: bool,
+    managed: bool,
     api_version: u16,
     branding: Option<PublicPluginBranding>,
     surfaces: Vec<PublicWebSurface>,
@@ -355,13 +369,14 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
         )
         .route("/api/v1/host/audio/test", post(test_audio))
         .route("/api/v1/plugins", get(plugin_catalog))
-        .route("/api/v1/plugins/{plugin_id}", get(plugin_descriptor))
+        .route(
+            "/api/v1/plugins/{plugin_id}",
+            get(plugin_descriptor).delete(uninstall_managed_plugin),
+        )
         .route(
             "/api/v1/plugins/{plugin_id}/activate",
             post(activate_plugin),
         )
-        .route("/api/v1/repositories", get(empty_repositories))
-        .route("/api/v1/store/catalog", get(empty_store))
         .route("/ws/v1/session", get(session_socket))
         .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_asset));
     let router = if allow_native_resources {
@@ -377,6 +392,10 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
                 get(resource_entries),
             )
             .route("/api/v1/resources/bind", post(bind_resource))
+            .route(
+                "/api/v1/resources/bind-selection",
+                post(bind_resource_selection),
+            )
             .route("/api/v1/resources/grants", post(resource_grants))
             .route("/api/v1/resources/status", post(resource_status))
             .route("/api/v1/resources/browse", post(browse_resource_grant))
@@ -568,6 +587,82 @@ async fn activate_plugin(
             .into_response(),
         _ => resource_error(ResourceError::Backend(
             "Desktop runtime did not finish activating the plugin".into(),
+        )),
+    }
+}
+
+async fn uninstall_managed_plugin(
+    AxumPath(plugin_id): AxumPath<String>,
+    State(state): State<WebState>,
+    request: Option<Json<UninstallPluginRequest>>,
+) -> Response {
+    let request = request.map(|Json(request)| request).unwrap_or_default();
+    let package = match discover_web_packages(&state) {
+        Ok(packages) => packages
+            .get(&plugin_id)
+            .map(|package| package.public.managed),
+        Err(error) => return internal_error(error),
+    };
+    match package {
+        None => return StatusCode::NOT_FOUND.into_response(),
+        Some(false) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "status":"error",
+                    "message":"This plugin is part of the host installation and cannot be removed from the package manager."
+                })),
+            )
+                .into_response();
+        }
+        Some(true) => {}
+    }
+    let (response_sender, response_receiver) = mpsc::channel();
+    if state
+        .control
+        .send(DesktopControlCall::UninstallPlugin {
+            plugin_id,
+            delete_presets: request.delete_presets,
+            delete_plugin_data: request.delete_plugin_data,
+            response: response_sender,
+        })
+        .is_err()
+    {
+        return resource_error(ResourceError::Backend(
+            "Desktop runtime is shutting down".into(),
+        ));
+    }
+    match tokio::task::spawn_blocking(move || {
+        response_receiver.recv_timeout(Duration::from_secs(45))
+    })
+    .await
+    {
+        Ok(Ok(Ok(mut result))) => {
+            if request.delete_plugin_data
+                && result
+                    .get("plugin_data_deleted")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                && let Err(error) = state.resource_browser.release_plugin_grants(
+                    result
+                        .get("plugin_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                )
+            {
+                result["user_data_cleanup_warning"] = Value::String(format!(
+                    "private data was deleted, but resource grants could not be revoked: {error}"
+                ));
+            }
+            Json(result).into_response()
+        }
+        Ok(Ok(Err(message))) => (
+            StatusCode::CONFLICT,
+            Json(json!({"status":"error", "message":message})),
+        )
+            .into_response(),
+        _ => resource_error(ResourceError::Backend(
+            "Desktop runtime did not finish removing the plugin".into(),
         )),
     }
 }
@@ -776,6 +871,42 @@ async fn bind_resource(
     }
 }
 
+async fn bind_resource_selection(
+    State(state): State<WebState>,
+    Json(request): Json<BindSelectionRequest>,
+) -> Response {
+    let packages = match discover_web_packages(&state) {
+        Ok(packages) => packages,
+        Err(error) => return internal_error(error),
+    };
+    let Some(package) = packages.get(&request.plugin_id) else {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    };
+    let Some(requirement) = package
+        .public
+        .resources
+        .iter()
+        .find(|resource| resource.id == request.resource_id)
+    else {
+        return resource_error(ResourceError::InvalidRequest(
+            "resource is not declared by this plugin".into(),
+        ));
+    };
+    let expected_kind = match requirement.kind {
+        rackforge_plugin_api::ResourceKind::File => ResourceEntryKind::File,
+        rackforge_plugin_api::ResourceKind::Directory => ResourceEntryKind::Directory,
+    };
+    match state
+        .resource_browser
+        .bind_selection(&request, expected_kind)
+    {
+        Ok(grant) => Json(grant).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
 async fn resource_grants(
     State(state): State<WebState>,
     Json(request): Json<ListGrantsRequest>,
@@ -886,6 +1017,9 @@ async fn load_granted_resource(
         Ok(path) => path,
         Err(error) => return resource_error(error),
     };
+    let uploaded_grant = request
+        .persist
+        .then(|| (request.plugin_id.clone(), request.grant_id.clone()));
     let (response_sender, response_receiver) = mpsc::channel();
     if state
         .control
@@ -907,7 +1041,14 @@ async fn load_granted_resource(
     })
     .await
     {
-        Ok(Ok(Ok(()))) => Json(json!({"status":"ok"})).into_response(),
+        Ok(Ok(Ok(()))) => {
+            if let Some((plugin_id, grant_id)) = uploaded_grant {
+                let _ = state
+                    .resource_browser
+                    .release_owned_grant(&plugin_id, &grant_id);
+            }
+            Json(json!({"status":"ok"})).into_response()
+        }
         Ok(Ok(Err(message))) => resource_error(ResourceError::Backend(message)),
         _ => resource_error(ResourceError::Backend(
             "Desktop runtime did not finish loading the resource".into(),
@@ -962,14 +1103,6 @@ async fn plugin_asset(
             .expect("valid plugin asset response"),
         Err(error) => internal_error(error),
     }
-}
-
-async fn empty_repositories() -> Json<Value> {
-    Json(json!({"schema_version":1, "repositories":[]}))
-}
-
-async fn empty_store() -> Json<Value> {
-    Json(json!({"repositories":[]}))
 }
 
 async fn session_socket(ws: WebSocketUpgrade, State(state): State<WebState>) -> impl IntoResponse {
@@ -1145,6 +1278,10 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
                 });
             }
         }
+        let managed = state.plugin_store_root.as_ref().is_some_and(|store| {
+            fs::canonicalize(store.join("packages"))
+                .is_ok_and(|packages| root.starts_with(&packages) && root != packages)
+        });
         let candidate = PluginWebPackage {
             root,
             public: PublicPluginWeb {
@@ -1152,6 +1289,7 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
                 plugin_name: manifest.name.clone(),
                 version: manifest.version.clone(),
                 active: active.contains(&manifest.id),
+                managed,
                 api_version: manifest.web_ui.as_ref().map_or(0, |web| web.api_version),
                 branding: manifest
                     .branding

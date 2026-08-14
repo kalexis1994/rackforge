@@ -12,7 +12,10 @@ use rackforge_plugin_api::{
     ProgramEditRequest, ProgramEditorValue, ProgramEditorView, ProgramFieldEditRequest,
     WebSurfaceKind, abi::MidiEventV1,
 };
-use rackforge_repository::install_local_archive;
+use rackforge_repository::{
+    PluginUserDataRemovalOptions, cleanup_uninstall_tombstones, install_local_archive,
+    remove_plugin_user_data, uninstall_plugin,
+};
 use rackforge_session_api::{
     HostControlTarget, InstanceId, MasterLevel, MasterPan, ProgramDraftState,
 };
@@ -1623,6 +1626,7 @@ fn package_descriptor(
 }
 
 fn installed_plugins_json(store_root: &Path) -> Result<String> {
+    let _ = cleanup_uninstall_tombstones(store_root);
     let packages_root = store_root.join("packages");
     std::fs::create_dir_all(&packages_root)
         .with_context(|| format!("creating {}", packages_root.display()))?;
@@ -2079,6 +2083,67 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_installedPlugins(
     let result = (|| -> Result<String> {
         let store_root = PathBuf::from(java_string(&mut env, store_root)?);
         installed_plugins_json(&store_root)
+    })();
+    result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_uninstallPlugin(
+    mut env: JNIEnv,
+    _class: JClass,
+    plugin_id: JString,
+    store_root: JString,
+    data_root: JString,
+    delete_presets: jboolean,
+    delete_plugin_data: jboolean,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let plugin_id = java_string(&mut env, plugin_id)?;
+        let store_root = PathBuf::from(java_string(&mut env, store_root)?);
+        let data_root = PathBuf::from(java_string(&mut env, data_root)?);
+        let is_active = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+            .as_ref()
+            .is_some_and(|active| active.plugin_id == plugin_id);
+        let removed = uninstall_plugin(&store_root, &plugin_id)
+            .context("removing the managed plugin package")?;
+        if is_active {
+            midi_queue()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("MIDI queue lock poisoned"))?
+                .clear();
+            *engine()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("engine lock poisoned"))? = None;
+        }
+        let delete_presets = delete_presets == JNI_TRUE;
+        let delete_plugin_data = delete_plugin_data == JNI_TRUE;
+        let user_data_cleanup = remove_plugin_user_data(
+            &data_root,
+            &plugin_id,
+            PluginUserDataRemovalOptions {
+                presets: delete_presets,
+                plugin_data: delete_plugin_data,
+            },
+        );
+        let (presets_deleted, plugin_data_deleted, user_data_cleanup_warning) =
+            match user_data_cleanup {
+                Ok(_) => (delete_presets, delete_plugin_data, None),
+                Err(error) => (false, false, Some(error.to_string())),
+            };
+        Ok(serde_json::json!({
+            "status":"uninstalled",
+            "plugin_id":removed.plugin_id,
+            "removed_versions":removed.removed_versions,
+            "cleanup_pending":removed.cleanup_pending,
+            "restart_requested":false,
+            "user_data_preserved":!presets_deleted && !plugin_data_deleted,
+            "presets_deleted":presets_deleted,
+            "plugin_data_deleted":plugin_data_deleted,
+            "user_data_cleanup_warning":user_data_cleanup_warning
+        })
+        .to_string())
     })();
     result_string(&mut env, result)
 }

@@ -95,10 +95,11 @@ Artifact URLs are resolved relative to `v1/index.json`. Cross-origin artifact
 URLs are rejected in v1, keeping credentials, redirects and trust boundaries
 simple.
 
-## Device UI
+## Product integration status
 
-The LITTLE system menu will expose `PLUGIN STORES` with repository status,
-refresh and package browsing. Network work runs outside the audio thread and
-uses the shared asynchronous spinner/result pattern. The Web interface can add
-descriptions, license links, versions and progress without changing the
-repository or installer contracts.
+RackForge hosts do not expose repository configuration, remote catalog
+browsing, or remote package installation in LITTLE, Web, Desktop, or Android.
+Plugins are installed from user-selected local `.rfplugin` packages. The
+protocol and signing tools in this document are retained for publisher tooling
+and possible future distribution work, but are disconnected from the runtime
+product surfaces.

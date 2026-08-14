@@ -12,6 +12,7 @@ Group=@RACKFORGE_GROUP@
 SupplementaryGroups=audio rackforge
 Environment=RACKFORGE_ROOT=@RACKFORGE_ROOT@
 WorkingDirectory=@RACKFORGE_ROOT@
+ExecCondition=/usr/bin/test -f @RACKFORGE_ROOT@/config/audio.toml
 
 # Real-time grant. The host requests SCHED_FIFO and mlockall on its audio
 # thread; without these limits that request is refused and the engine keeps

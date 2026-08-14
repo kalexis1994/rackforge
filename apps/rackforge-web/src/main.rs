@@ -16,14 +16,13 @@ use futures_util::{SinkExt, StreamExt};
 use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_plugin_api::{PluginManifest, WebSurfaceKind};
 use rackforge_repository::{
-    InstallationRecord, InstalledPackage, MAX_PACKAGE_BYTES, RepositoryFile, RepositoryIndex,
-    RepositoryPlugin, fetch_repository, install_archive, install_local_archive,
-    repository_platform_key,
+    InstalledPackage, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions, RepositoryError,
+    cleanup_uninstall_tombstones, install_local_archive, remove_plugin_user_data, uninstall_plugin,
 };
 use rackforge_resource_api::{
-    BindResourceRequest, BrowseGrantRequest, ListGrantsRequest, LoadGrantedResourceRequest,
-    MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser, ResourceEntryKind, ResourceError,
-    SelectHostEntryRequest,
+    BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, ListGrantsRequest,
+    LoadGrantedResourceRequest, MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser, ResourceEntryKind,
+    ResourceError, SelectHostEntryRequest,
 };
 use rackforge_resource_host::NativeResourceBrowser;
 use semver::Version;
@@ -31,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     env, fs,
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     path::{Component, Path, PathBuf},
@@ -120,8 +119,6 @@ struct AppState {
     control_socket: PathBuf,
     public_config: Arc<RwLock<WebConfig>>,
     auth: Arc<AuthManager>,
-    repository_config_path: PathBuf,
-    repositories: Arc<RwLock<RepositoryFile>>,
     plugins_root: PathBuf,
     plugin_store_root: PathBuf,
     data_root: PathBuf,
@@ -129,63 +126,17 @@ struct AppState {
     resource_upload_root: PathBuf,
 }
 
-#[derive(Clone, Debug, Serialize)]
-struct RepositoryCatalogResponse {
-    repositories: Vec<RepositoryCatalogEntry>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct RepositoryCatalogEntry {
-    repository_id: String,
-    name: String,
-    status: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    catalog: Option<StoreRepositoryCatalog>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct StoreRepositoryCatalog {
-    schema_version: u32,
-    repository_id: String,
-    name: String,
-    generated_at: String,
-    plugins: Vec<StorePluginStatus>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct StorePluginStatus {
-    #[serde(flatten)]
-    plugin: RepositoryPlugin,
-    installed: bool,
-    installed_versions: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    active_version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    latest_version: Option<String>,
-    update_available: bool,
-}
-
-#[derive(Clone, Debug, Default)]
-struct InstalledPlugin {
-    versions: BTreeSet<String>,
-    active_version: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct InstallPluginRequest {
-    repository_id: String,
-    plugin_id: String,
-    #[serde(default)]
-    version: Option<String>,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InstallSelectedPluginRequest {
     selection_id: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct UninstallPluginRequest {
+    delete_presets: bool,
+    delete_plugin_data: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -223,6 +174,7 @@ struct PublicPluginWeb {
     plugin_name: String,
     version: String,
     active: bool,
+    managed: bool,
     api_version: u16,
     branding: Option<PublicPluginBranding>,
     surfaces: Vec<PublicWebSurface>,
@@ -529,8 +481,6 @@ async fn main() -> Result<()> {
     let root = rackforge_root();
     let config_path = root.join("config").join("rackforge.toml");
     let config = load_config(&config_path)?;
-    let repository_config_path = root.join("config").join("repositories.toml");
-    let repositories = load_repository_config(&repository_config_path)?;
     config.web.validate()?;
     let shared_config = Arc::new(RwLock::new(config.web.clone()));
     let auth = Arc::new(AuthManager::load(
@@ -561,8 +511,6 @@ async fn main() -> Result<()> {
         control_socket: root.join("state").join(CONTROL_SOCKET_NAME),
         public_config: shared_config,
         auth,
-        repository_config_path,
-        repositories: Arc::new(RwLock::new(repositories)),
         plugins_root: root.join("plugins"),
         plugin_store_root: root.join("plugin-store"),
         data_root: root.join("data"),
@@ -579,7 +527,10 @@ async fn main() -> Result<()> {
         .route("/api/v1/auth/pin", post(set_pin))
         .route("/api/v1/config", get(public_config))
         .route("/api/v1/plugins", get(plugin_web_catalog))
-        .route("/api/v1/plugins/{plugin_id}", get(plugin_web_descriptor))
+        .route(
+            "/api/v1/plugins/{plugin_id}",
+            get(plugin_web_descriptor).delete(uninstall_managed_plugin),
+        )
         .route(
             "/api/v1/plugins/{plugin_id}/activate",
             post(activate_plugin),
@@ -594,6 +545,10 @@ async fn main() -> Result<()> {
             get(resource_entries),
         )
         .route("/api/v1/resources/bind", post(bind_resource))
+        .route(
+            "/api/v1/resources/bind-selection",
+            post(bind_resource_selection),
+        )
         .route("/api/v1/resources/grants", post(resource_grants))
         .route("/api/v1/resources/status", post(resource_status))
         .route("/api/v1/resources/browse", post(browse_resource_grant))
@@ -604,12 +559,6 @@ async fn main() -> Result<()> {
                 .layer(DefaultBodyLimit::max(MAX_CLIENT_UPLOAD_BYTES as usize)),
         )
         .route("/api/v1/resources/selections", post(select_host_resource))
-        .route(
-            "/api/v1/repositories",
-            get(repository_config).put(replace_repository_config),
-        )
-        .route("/api/v1/store/catalog", get(repository_catalog))
-        .route("/api/v1/store/install", post(install_store_plugin))
         .route("/api/v1/plugins/install", post(install_selected_plugin))
         .route("/ws/v1/session", get(session_socket))
         .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_web_asset))
@@ -649,19 +598,6 @@ fn load_config(path: &Path) -> Result<RackForgeConfig> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             Ok(RackForgeConfig::default())
         }
-        Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
-    }
-}
-
-fn load_repository_config(path: &Path) -> Result<RepositoryFile> {
-    match fs::read(path) {
-        Ok(bytes) => RepositoryFile::parse_toml(&bytes)
-            .map_err(anyhow::Error::from)
-            .with_context(|| format!("parsing repository config {}", path.display())),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(RepositoryFile {
-            schema_version: 1,
-            repositories: Vec::new(),
-        }),
         Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
     }
 }
@@ -845,20 +781,6 @@ fn persist_web_config(path: &Path, web: &WebConfig) -> Result<()> {
     fs::rename(&temporary, path).with_context(|| format!("installing {}", path.display()))
 }
 
-fn persist_repository_config(path: &Path, repositories: &RepositoryFile) -> Result<()> {
-    repositories
-        .validate()
-        .map_err(anyhow::Error::from)
-        .context("validating repository configuration")?;
-    let text =
-        toml::to_string_pretty(repositories).context("formatting repository configuration")?;
-    let parent = path.parent().context("repository config has no parent")?;
-    fs::create_dir_all(parent)?;
-    let temporary = path.with_extension("toml.new");
-    fs::write(&temporary, text).with_context(|| format!("writing {}", temporary.display()))?;
-    fs::rename(&temporary, path).with_context(|| format!("installing {}", path.display()))
-}
-
 fn local_lan_ipv4() -> Option<Ipv4Addr> {
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
     socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
@@ -870,6 +792,7 @@ fn local_lan_ipv4() -> Option<Ipv4Addr> {
 
 impl PluginWebRegistry {
     fn scan(plugins_root: &Path, plugin_store_root: &Path) -> Result<Self> {
+        let _ = cleanup_uninstall_tombstones(plugin_store_root);
         let mut packages = BTreeMap::new();
         Self::scan_directory(plugins_root, true, &mut packages)?;
 
@@ -991,6 +914,10 @@ impl PluginWebRegistry {
                 plugin_name: manifest.name,
                 version: manifest.version,
                 active,
+                // Raspberry Pi packages may still live in the legacy
+                // `plugins/` directory. They are host-managed installations
+                // too; the uninstall endpoint handles both layouts safely.
+                managed: true,
                 api_version: manifest
                     .web_ui
                     .as_ref()
@@ -1115,252 +1042,6 @@ async fn public_config(
     ))
 }
 
-async fn repository_config(
-    headers: HeaderMap,
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<RepositoryFile>, StatusCode> {
-    require_authorized(&state, &headers)?;
-    Ok(Json(
-        state
-            .repositories
-            .read()
-            .expect("repository config lock poisoned")
-            .clone(),
-    ))
-}
-
-async fn replace_repository_config(
-    headers: HeaderMap,
-    State(state): State<Arc<AppState>>,
-    Json(repositories): Json<RepositoryFile>,
-) -> Response {
-    if require_authorized(&state, &headers).is_err() {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    if let Err(error) = repositories.validate() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"status": "error", "message": error.to_string()})),
-        )
-            .into_response();
-    }
-    let path = state.repository_config_path.clone();
-    let candidate = repositories.clone();
-    match tokio::task::spawn_blocking(move || persist_repository_config(&path, &candidate)).await {
-        Ok(Ok(())) => {
-            *state
-                .repositories
-                .write()
-                .expect("repository config lock poisoned") = repositories.clone();
-            Json(json!({"status": "ok", "config": repositories})).into_response()
-        }
-        Ok(Err(error)) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"status": "error", "message": error.to_string()})),
-        )
-            .into_response(),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"status": "error", "message": error.to_string()})),
-        )
-            .into_response(),
-    }
-}
-
-async fn repository_catalog(headers: HeaderMap, State(state): State<Arc<AppState>>) -> Response {
-    if require_authorized(&state, &headers).is_err() {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    let repositories = state
-        .repositories
-        .read()
-        .expect("repository config lock poisoned")
-        .repositories
-        .clone();
-    let plugins_root = state.plugins_root.clone();
-    let plugin_store_root = state.plugin_store_root.clone();
-    match tokio::task::spawn_blocking(move || {
-        let installed = scan_installed_plugins(&plugins_root, &plugin_store_root);
-        repositories
-            .into_iter()
-            .map(|repository| {
-                if !repository.enabled {
-                    return RepositoryCatalogEntry {
-                        repository_id: repository.id,
-                        name: repository.name,
-                        status: "disabled",
-                        error: None,
-                        catalog: None,
-                    };
-                }
-                match fetch_repository(&repository) {
-                    Ok(verified) => RepositoryCatalogEntry {
-                        repository_id: repository.id,
-                        name: repository.name,
-                        status: "available",
-                        error: None,
-                        catalog: Some(enrich_repository_catalog(verified.index, &installed)),
-                    },
-                    Err(error) => RepositoryCatalogEntry {
-                        repository_id: repository.id,
-                        name: repository.name,
-                        status: "error",
-                        error: Some(error.to_string()),
-                        catalog: None,
-                    },
-                }
-            })
-            .collect()
-    })
-    .await
-    {
-        Ok(repositories) => Json(RepositoryCatalogResponse { repositories }).into_response(),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"status": "error", "message": error.to_string()})),
-        )
-            .into_response(),
-    }
-}
-
-fn enrich_repository_catalog(
-    catalog: RepositoryIndex,
-    installed: &BTreeMap<String, InstalledPlugin>,
-) -> StoreRepositoryCatalog {
-    let plugins = catalog
-        .plugins
-        .into_iter()
-        .map(|plugin| {
-            let latest_version = plugin
-                .releases
-                .iter()
-                .filter_map(|release| Version::parse(&release.version).ok())
-                .max()
-                .map(|version| version.to_string());
-            let installation = installed.get(&plugin.id);
-            let installed_versions = installation
-                .map(|entry| entry.versions.iter().cloned().collect())
-                .unwrap_or_default();
-            let active_version = installation.and_then(|entry| entry.active_version.clone());
-            let is_installed = installation.is_some_and(|entry| !entry.versions.is_empty());
-            let update_available = latest_version.as_ref().is_some_and(|latest| {
-                is_installed && installation.is_some_and(|entry| !entry.versions.contains(latest))
-            });
-            StorePluginStatus {
-                plugin,
-                installed: is_installed,
-                installed_versions,
-                active_version,
-                latest_version,
-                update_available,
-            }
-        })
-        .collect();
-    StoreRepositoryCatalog {
-        schema_version: catalog.schema_version,
-        repository_id: catalog.repository_id,
-        name: catalog.name,
-        generated_at: catalog.generated_at,
-        plugins,
-    }
-}
-
-fn scan_installed_plugins(
-    active_root: &Path,
-    store_root: &Path,
-) -> BTreeMap<String, InstalledPlugin> {
-    let mut installed = BTreeMap::new();
-    if let Ok(entries) = fs::read_dir(active_root) {
-        for entry in entries.flatten() {
-            let manifest_path = entry.path().join("rackforge-plugin.toml");
-            let Ok(text) = fs::read_to_string(manifest_path) else {
-                continue;
-            };
-            let Ok(manifest) = toml::from_str::<PluginManifest>(&text) else {
-                continue;
-            };
-            if manifest.validate().is_err() {
-                continue;
-            }
-            let plugin = installed
-                .entry(manifest.id)
-                .or_insert_with(InstalledPlugin::default);
-            plugin.versions.insert(manifest.version.clone());
-            plugin.active_version = Some(manifest.version);
-        }
-    }
-
-    let records_root = store_root.join("records");
-    if let Ok(plugin_directories) = fs::read_dir(records_root) {
-        for plugin_directory in plugin_directories.flatten() {
-            let Ok(records) = fs::read_dir(plugin_directory.path()) else {
-                continue;
-            };
-            for record in records.flatten() {
-                let Ok(bytes) = fs::read(record.path()) else {
-                    continue;
-                };
-                let Ok(record) = serde_json::from_slice::<InstallationRecord>(&bytes) else {
-                    continue;
-                };
-                installed
-                    .entry(record.plugin_id)
-                    .or_insert_with(InstalledPlugin::default)
-                    .versions
-                    .insert(record.version);
-            }
-        }
-    }
-    installed
-}
-
-async fn install_store_plugin(
-    headers: HeaderMap,
-    State(state): State<Arc<AppState>>,
-    Json(request): Json<InstallPluginRequest>,
-) -> Response {
-    if require_authorized(&state, &headers).is_err() {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    let repository = state
-        .repositories
-        .read()
-        .expect("repository config lock poisoned")
-        .repositories
-        .iter()
-        .find(|repository| repository.id == request.repository_id && repository.enabled)
-        .cloned();
-    let Some(repository) = repository else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"status": "error", "message": "repository is missing or disabled"})),
-        )
-            .into_response();
-    };
-    let store_root = state.plugin_store_root.clone();
-    match tokio::task::spawn_blocking(move || {
-        let verified = fetch_repository(&repository)?;
-        let platform = repository_platform_key()?;
-        let selected = verified.select(&request.plugin_id, request.version.as_deref(), platform)?;
-        let bytes = verified.download(&selected)?;
-        install_archive(store_root, &selected, &bytes)
-    })
-    .await
-    {
-        Ok(Ok(installed)) => Json(install_response(installed)).into_response(),
-        Ok(Err(error)) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"status": "error", "message": error.to_string()})),
-        )
-            .into_response(),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"status": "error", "message": error.to_string()})),
-        )
-            .into_response(),
-    }
-}
-
 fn install_response(installed: InstalledPackage) -> InstallPluginResponse {
     InstallPluginResponse {
         plugin_id: installed.record.plugin_id,
@@ -1408,9 +1089,21 @@ async fn activate_plugin(
     if require_authorized(&state, &headers).is_err() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let snapshot = match core_request(&state.control_socket, &json!({"op":"snapshot"})).await {
-        Ok(snapshot) => snapshot,
-        Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+    // Installing the first plugin recreates audio.toml. The systemd path unit
+    // then starts Core, which may need several seconds to validate resources
+    // and open the audio interface. Activation is one operation from the UI's
+    // perspective, so wait for that supervised startup instead of exposing a
+    // transient missing-socket error to the user.
+    let startup_deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let snapshot = loop {
+        match core_request(&state.control_socket, &json!({"op":"snapshot"})).await {
+            Ok(snapshot) => break snapshot,
+            Err(error) if std::time::Instant::now() < startup_deadline => {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                let _ = error;
+            }
+            Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+        }
     };
     let Some(instance_id) = snapshot
         .pointer("/snapshot/instances")
@@ -1463,6 +1156,307 @@ async fn activate_plugin(
         }
     }
     Json(json!({"status":"active", "plugin_id":plugin_id})).into_response()
+}
+
+fn replace_startup_plugin(audio_config_path: &Path, package_root: &Path) -> Result<Vec<u8>> {
+    let previous = fs::read(audio_config_path)
+        .with_context(|| format!("reading {}", audio_config_path.display()))?;
+    write_startup_plugin(&previous, audio_config_path, package_root)?;
+    Ok(previous)
+}
+
+fn write_startup_plugin(
+    source: &[u8],
+    audio_config_path: &Path,
+    package_root: &Path,
+) -> Result<()> {
+    let mut document = toml::from_str::<toml::Value>(
+        std::str::from_utf8(source).context("audio configuration is not UTF-8")?,
+    )
+    .context("parsing audio configuration")?;
+    let table = document
+        .as_table_mut()
+        .context("audio configuration root is not a TOML table")?;
+    table.insert(
+        "package".into(),
+        toml::Value::String(package_root.to_string_lossy().into_owned()),
+    );
+    // A preset belongs to the old instrument and must not be applied to the
+    // fallback package after Core restarts.
+    table.remove("preset");
+    let temporary = audio_config_path.with_extension("toml.plugin-uninstall-new");
+    fs::write(&temporary, toml::to_string_pretty(&document)?)
+        .with_context(|| format!("writing {}", temporary.display()))?;
+    fs::rename(&temporary, audio_config_path)
+        .with_context(|| format!("replacing {}", audio_config_path.display()))?;
+    Ok(())
+}
+
+fn ensure_startup_plugin(root: &Path, package_root: &Path) -> Result<bool> {
+    let active = root.join("config/audio.toml");
+    if active.is_file() {
+        return Ok(false);
+    }
+    let inactive = root.join("config/audio.toml.inactive");
+    let example = root.join("config/audio.toml.example");
+    let source_path = if inactive.is_file() {
+        inactive
+    } else {
+        example
+    };
+    let source = fs::read(&source_path).with_context(|| {
+        format!(
+            "reading inactive audio configuration {}",
+            source_path.display()
+        )
+    })?;
+    write_startup_plugin(&source, &active, package_root)?;
+    Ok(true)
+}
+
+fn deactivate_startup_plugin(audio_config_path: &Path) -> Result<Vec<u8>> {
+    let previous = fs::read(audio_config_path)
+        .with_context(|| format!("reading {}", audio_config_path.display()))?;
+    let inactive = audio_config_path.with_extension("toml.inactive");
+    let temporary = audio_config_path.with_extension("toml.inactive-new");
+    fs::write(&temporary, &previous).with_context(|| format!("writing {}", temporary.display()))?;
+    fs::rename(&temporary, &inactive)
+        .with_context(|| format!("replacing {}", inactive.display()))?;
+    fs::remove_file(audio_config_path)
+        .with_context(|| format!("deactivating {}", audio_config_path.display()))?;
+    Ok(previous)
+}
+
+fn restore_startup_plugin(audio_config_path: &Path, previous: &[u8]) -> Result<()> {
+    let temporary = audio_config_path.with_extension("toml.plugin-uninstall-rollback");
+    fs::write(&temporary, previous).with_context(|| format!("writing {}", temporary.display()))?;
+    fs::rename(&temporary, audio_config_path)
+        .with_context(|| format!("restoring {}", audio_config_path.display()))
+}
+
+fn uninstall_legacy_plugin(
+    plugins_root: &Path,
+    store_root: &Path,
+    plugin_id: &str,
+) -> Result<(usize, bool)> {
+    let plugins_root = fs::canonicalize(plugins_root)
+        .with_context(|| format!("resolving {}", plugins_root.display()))?;
+    let trash_root = store_root.join(".uninstall");
+    fs::create_dir_all(&trash_root)
+        .with_context(|| format!("creating {}", trash_root.display()))?;
+    let trash_root = fs::canonicalize(&trash_root)
+        .with_context(|| format!("resolving {}", trash_root.display()))?;
+    let serial = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let mut moved = Vec::<(PathBuf, PathBuf)>::new();
+
+    for entry in fs::read_dir(&plugins_root)? {
+        let entry = entry?;
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            continue;
+        }
+        let manifest_path = entry.path().join("rackforge-plugin.toml");
+        if !manifest_path.is_file() {
+            continue;
+        }
+        let manifest: PluginManifest = match fs::read_to_string(&manifest_path)
+            .ok()
+            .and_then(|text| toml::from_str(&text).ok())
+        {
+            Some(manifest) => manifest,
+            None => continue,
+        };
+        if manifest.validate().is_err() || manifest.id != plugin_id {
+            continue;
+        }
+        let source = fs::canonicalize(entry.path())?;
+        if source == plugins_root || !source.starts_with(&plugins_root) {
+            bail!("legacy plugin path escapes the RackForge plugin directory");
+        }
+        let destination = trash_root.join(format!(
+            "legacy-{}-{serial}-{}",
+            std::process::id(),
+            moved.len()
+        ));
+        if let Err(error) = fs::rename(&source, &destination) {
+            for (original, tombstone) in moved.iter().rev() {
+                let _ = fs::rename(tombstone, original);
+            }
+            return Err(error).context("moving legacy plugin out of discovery");
+        }
+        moved.push((source, destination));
+    }
+
+    let removed = moved.len();
+    let cleanup_pending = moved
+        .into_iter()
+        .any(|(_, tombstone)| fs::remove_dir_all(tombstone).is_err());
+    Ok((removed, cleanup_pending))
+}
+
+async fn uninstall_managed_plugin(
+    AxumPath(plugin_id): AxumPath<String>,
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    request: Option<Json<UninstallPluginRequest>>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let request = request.map(|Json(request)| request).unwrap_or_default();
+    let registry = match PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root) {
+        Ok(registry) => registry,
+        Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+    };
+    if !registry.packages.contains_key(&plugin_id) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let root = state
+        .plugin_store_root
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let configured_primary = fs::read_to_string(root.join("config/audio.toml"))
+        .ok()
+        .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
+        .and_then(|document| document.get("package")?.as_str().map(PathBuf::from))
+        .and_then(|path| fs::canonicalize(path).ok());
+    let configured_primary_plugin_id = configured_primary
+        .as_ref()
+        .and_then(|path| fs::read_to_string(path.join("rackforge-plugin.toml")).ok())
+        .and_then(|text| toml::from_str::<PluginManifest>(&text).ok())
+        .map(|manifest| manifest.id);
+    let audio_config_path = root.join("config/audio.toml");
+    let fallback = registry
+        .packages
+        .values()
+        .find(|candidate| candidate.public.plugin_id != plugin_id)
+        .map(|candidate| candidate.root.clone());
+    let mut startup_config_deactivated = false;
+    let previous_audio_config = if configured_primary_plugin_id.as_deref() == Some(&plugin_id) {
+        let update = if let Some(fallback) = fallback {
+            replace_startup_plugin(&audio_config_path, &fallback)
+        } else {
+            startup_config_deactivated = true;
+            deactivate_startup_plugin(&audio_config_path)
+        };
+        match update {
+            Ok(previous) => Some(previous),
+            Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+        }
+    } else {
+        None
+    };
+
+    let engine_pid = fs::read_to_string(root.join("state/audio-engine.lock"))
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .filter(|pid| {
+            fs::read_link(format!("/proc/{pid}/exe"))
+                .ok()
+                .and_then(|path| path.file_name().map(|name| name.to_owned()))
+                .is_some_and(|name| name == "rackforge-core")
+        });
+    let store_root = state.plugin_store_root.clone();
+    let legacy_plugins_root = state.plugins_root.clone();
+    let uninstall_id = plugin_id.clone();
+    let removal = tokio::task::spawn_blocking(move || -> Result<(usize, bool)> {
+        let managed = match uninstall_plugin(&store_root, &uninstall_id) {
+            Ok(removed) => Some(removed),
+            Err(RepositoryError::PluginNotFound(_)) => None,
+            Err(error) => return Err(error.into()),
+        };
+        let legacy = uninstall_legacy_plugin(&legacy_plugins_root, &store_root, &uninstall_id)?;
+        let removed_versions = managed
+            .as_ref()
+            .map_or(0, |removed| removed.removed_versions)
+            .saturating_add(legacy.0);
+        let cleanup_pending = managed.is_some_and(|removed| removed.cleanup_pending) || legacy.1;
+        if removed_versions == 0 {
+            bail!("plugin package is no longer installed");
+        }
+        Ok((removed_versions, cleanup_pending))
+    })
+    .await;
+    let (removed_versions, cleanup_pending) = match removal {
+        Ok(Ok(removed)) => removed,
+        Ok(Err(error)) => {
+            if let Some(previous) = previous_audio_config.as_deref() {
+                let _ = restore_startup_plugin(&audio_config_path, previous);
+                if startup_config_deactivated {
+                    let _ = fs::remove_file(audio_config_path.with_extension("toml.inactive"));
+                }
+            }
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({"status":"error", "message":error.to_string()})),
+            )
+                .into_response();
+        }
+        Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+    };
+
+    let _ = core_request(
+        &state.control_socket,
+        &json!({
+            "op":"dispatch",
+            "envelope":{
+                "schema_version":rackforge_control_api::SESSION_SCHEMA_VERSION,
+                "client_id":"web.plugin-uninstall",
+                "command_id":PLUGIN_ACTIVATION_SERIAL.fetch_add(1, Ordering::Relaxed),
+                "command":{"type":"emergency_stop"}
+            }
+        }),
+    )
+    .await;
+
+    let restart_requested = engine_pid.is_some_and(|pid| {
+        std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status()
+            .is_ok_and(|status| status.success())
+    });
+    let cleanup_data_root = state.data_root.clone();
+    let cleanup_plugin_id = plugin_id.clone();
+    let user_data_cleanup = tokio::task::spawn_blocking(move || {
+        remove_plugin_user_data(
+            cleanup_data_root,
+            &cleanup_plugin_id,
+            PluginUserDataRemovalOptions {
+                presets: request.delete_presets,
+                plugin_data: request.delete_plugin_data,
+            },
+        )
+    })
+    .await;
+    let (presets_deleted, plugin_data_deleted, mut user_data_cleanup_warning) =
+        match user_data_cleanup {
+            Ok(Ok(_)) => (request.delete_presets, request.delete_plugin_data, None),
+            Ok(Err(error)) => (false, false, Some(error.to_string())),
+            Err(error) => (false, false, Some(error.to_string())),
+        };
+    if plugin_data_deleted
+        && let Err(error) = state.resource_browser.release_plugin_grants(&plugin_id)
+    {
+        user_data_cleanup_warning = Some(format!(
+            "private data was deleted, but resource grants could not be revoked: {error}"
+        ));
+    }
+    Json(json!({
+        "status":"uninstalled",
+        "plugin_id":plugin_id,
+        "removed_versions":removed_versions,
+        "cleanup_pending":cleanup_pending,
+        "restart_requested":restart_requested,
+        "engine_idle":startup_config_deactivated,
+        "user_data_preserved":!presets_deleted && !plugin_data_deleted,
+        "presets_deleted":presets_deleted,
+        "plugin_data_deleted":plugin_data_deleted,
+        "user_data_cleanup_warning":user_data_cleanup_warning
+    }))
+    .into_response()
 }
 
 /// Streams a file selected on the browser's device into host-owned storage and
@@ -1599,7 +1593,23 @@ async fn install_selected_plugin(
     })
     .await
     {
-        Ok(Ok(installed)) => Json(install_response(installed)).into_response(),
+        Ok(Ok(installed)) => {
+            let root = state
+                .plugin_store_root
+                .parent()
+                .unwrap_or_else(|| Path::new("."));
+            if let Err(error) = ensure_startup_plugin(root, &installed.path) {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "status":"error",
+                        "message":format!("the package was installed, but its audio runtime could not be prepared: {error:#}")
+                    })),
+                )
+                    .into_response();
+            }
+            Json(install_response(installed)).into_response()
+        }
         Ok(Err(error)) => (
             StatusCode::BAD_REQUEST,
             Json(json!({"status": "error", "message": error.to_string()})),
@@ -1696,6 +1706,46 @@ async fn bind_resource(
         Ok(_) => resource_error(ResourceError::InvalidRequest(
             "selected entry has the wrong resource kind".into(),
         )),
+        Err(error) => resource_error(error),
+    }
+}
+
+async fn bind_resource_selection(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<BindSelectionRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let registry = match PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root) {
+        Ok(registry) => registry,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let Some(package) = registry.packages.get(&request.plugin_id) else {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    };
+    let Some(requirement) = package
+        .public
+        .resources
+        .iter()
+        .find(|resource| resource.id == request.resource_id)
+    else {
+        return resource_error(ResourceError::InvalidRequest(
+            "resource is not declared by this plugin".into(),
+        ));
+    };
+    let expected_kind = match requirement.kind {
+        rackforge_plugin_api::ResourceKind::File => ResourceEntryKind::File,
+        rackforge_plugin_api::ResourceKind::Directory => ResourceEntryKind::Directory,
+    };
+    match state
+        .resource_browser
+        .bind_selection(&request, expected_kind)
+    {
+        Ok(grant) => Json(grant).into_response(),
         Err(error) => resource_error(error),
     }
 }
@@ -1819,6 +1869,9 @@ async fn load_granted_resource(
         Ok(path) => path,
         Err(error) => return resource_error(error),
     };
+    let uploaded_grant = request
+        .persist
+        .then(|| (request.plugin_id.clone(), request.grant_id.clone()));
     let control = json!({
         "op": "load_plugin_resource",
         "plugin_id": request.plugin_id,
@@ -1831,6 +1884,11 @@ async fn load_granted_resource(
         Ok(response)
             if response.get("status").and_then(Value::as_str) == Some("plugin_resource_loaded") =>
         {
+            if let Some((plugin_id, grant_id)) = uploaded_grant {
+                let _ = state
+                    .resource_browser
+                    .release_owned_grant(&plugin_id, &grant_id);
+            }
             Json(json!({"status":"ok"})).into_response()
         }
         Ok(response) => {
@@ -1980,23 +2038,69 @@ async fn handle_session_socket(socket: axum::extract::ws::WebSocket, state: Arc<
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut last_revision = None;
     let mut virtual_midi_clients = std::collections::BTreeSet::<String>::new();
+    let mut core_unavailable_since = None::<std::time::Instant>;
+    let mut core_notice = None::<&'static str>;
 
-    if let Ok(snapshot) = core_request(&state.control_socket, &json!({"op":"snapshot"})).await {
-        last_revision = snapshot
-            .pointer("/snapshot/revision")
-            .and_then(Value::as_u64);
-        let _ = sender
-            .send(Message::Text(snapshot.to_string().into()))
-            .await;
+    match core_request(&state.control_socket, &json!({"op":"snapshot"})).await {
+        Ok(snapshot) => {
+            last_revision = snapshot
+                .pointer("/snapshot/revision")
+                .and_then(Value::as_u64);
+            let _ = sender
+                .send(Message::Text(snapshot.to_string().into()))
+                .await;
+        }
+        Err(error) => {
+            let message = session_core_error(&state, &error);
+            if message.get("status").and_then(Value::as_str) == Some("gateway_error") {
+                core_unavailable_since = Some(std::time::Instant::now());
+                core_notice = Some("core_restarting");
+            }
+            let message = if core_notice == Some("core_restarting") {
+                json!({"status":"core_restarting"})
+            } else {
+                message
+            };
+            let _ = sender.send(Message::Text(message.to_string().into())).await;
+        }
     }
 
     loop {
         tokio::select! {
             _ = ticker.tick() => {
-                let Some(revision) = last_revision else { continue };
+                let Some(revision) = last_revision else {
+                    match core_request(&state.control_socket, &json!({"op":"snapshot"})).await {
+                        Ok(snapshot) => {
+                            last_revision = snapshot.pointer("/snapshot/revision").and_then(Value::as_u64);
+                            core_unavailable_since = None;
+                            core_notice = None;
+                            if sender.send(Message::Text(snapshot.to_string().into())).await.is_err() { break; }
+                        }
+                        Err(error) => {
+                            let fallback = session_core_error(&state, &error);
+                            let (notice, message) = if fallback.get("status").and_then(Value::as_str) == Some("host_idle") {
+                                ("host_idle", fallback)
+                            } else {
+                                let since = core_unavailable_since.get_or_insert_with(std::time::Instant::now);
+                                if since.elapsed() >= Duration::from_secs(10) {
+                                    ("gateway_error", fallback)
+                                } else {
+                                    ("core_restarting", json!({"status":"core_restarting"}))
+                                }
+                            };
+                            if core_notice != Some(notice) {
+                                core_notice = Some(notice);
+                                if sender.send(Message::Text(message.to_string().into())).await.is_err() { break; }
+                            }
+                        }
+                    }
+                    continue;
+                };
                 let events = json!({"op":"events", "after_revision": revision});
                 match core_request(&state.control_socket, &events).await {
                     Ok(response) => {
+                        core_unavailable_since = None;
+                        core_notice = None;
                         let current = response.get("current_revision").and_then(Value::as_u64);
                         if current.is_some_and(|value| value != revision) {
                             if let Ok(snapshot) = core_request(&state.control_socket, &json!({"op":"snapshot"})).await {
@@ -2005,9 +2109,14 @@ async fn handle_session_socket(socket: axum::extract::ws::WebSocket, state: Arc<
                             }
                         }
                     }
-                    Err(error) => {
-                        let message = json!({"status":"gateway_error","message":error.to_string()});
-                        if sender.send(Message::Text(message.to_string().into())).await.is_err() { break; }
+                    Err(_) => {
+                        last_revision = None;
+                        core_unavailable_since = Some(std::time::Instant::now());
+                        if core_notice != Some("core_restarting") {
+                            core_notice = Some("core_restarting");
+                            let message = json!({"status":"core_restarting"});
+                            if sender.send(Message::Text(message.to_string().into())).await.is_err() { break; }
+                        }
                     }
                 }
             }
@@ -2050,7 +2159,7 @@ async fn handle_session_socket(socket: axum::extract::ws::WebSocket, state: Arc<
                                 }
                             }
                             Err(error) => {
-                                let response = json!({"status":"gateway_error","message":error.to_string()});
+                                let response = session_core_error(&state, &error);
                                 let _ = sender.send(Message::Text(response.to_string().into())).await;
                             }
                         }
@@ -2070,6 +2179,19 @@ async fn handle_session_socket(socket: axum::extract::ws::WebSocket, state: Arc<
             &json!({"op":"release_virtual_midi", "client_id":client_id}),
         )
         .await;
+    }
+}
+
+fn session_core_error(state: &AppState, error: &anyhow::Error) -> Value {
+    let no_plugins = PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root)
+        .is_ok_and(|registry| registry.packages.is_empty());
+    if no_plugins {
+        json!({
+            "status": "host_idle",
+            "reason": "no_plugin_installed"
+        })
+    } else {
+        json!({"status":"gateway_error","message":error.to_string()})
     }
 }
 
@@ -2326,44 +2448,6 @@ mod tests {
     }
 
     #[test]
-    fn active_plugin_identity_marks_the_catalog_plugin_as_installed() {
-        let root = std::env::temp_dir().join(format!(
-            "rackforge-web-installed-test-{}-{}",
-            std::process::id(),
-            TEST_SERIAL.fetch_add(1, Ordering::Relaxed)
-        ));
-        let active = root.join("plugins").join("rf-dls");
-        let store = root.join("plugin-store");
-        fs::create_dir_all(&active).unwrap();
-        fs::write(
-            active.join("rackforge-plugin.toml"),
-            r#"schema_version = 1
-id = "org.rackforge.rf-dls"
-name = "RF-DLS"
-vendor = "RackForge"
-version = "0.1.0"
-kind = "instrument"
-state_version = 1
-capabilities = ["audio_output"]
-ui_layouts = ["little@1"]
-
-[api]
-major = 1
-minor = 5
-
-[binaries]
-linux-aarch64 = "lib/rf-dls.so"
-"#,
-        )
-        .unwrap();
-        let inventory = scan_installed_plugins(&root.join("plugins"), &store);
-        let installed = inventory.get("org.rackforge.rf-dls").unwrap();
-        assert!(installed.versions.contains("0.1.0"));
-        assert_eq!(installed.active_version.as_deref(), Some("0.1.0"));
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
     fn installed_native_plugin_without_web_ui_is_discoverable() {
         let root = std::env::temp_dir().join(format!(
             "rackforge-web-registry-test-{}-{}",
@@ -2403,6 +2487,56 @@ linux-aarch64 = "lib/librackforge_rf_kr106.so"
         assert_eq!(discovered.public.version, "0.1.0");
         assert!(!discovered.public.active);
         assert!(discovered.public.surfaces.is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn first_installed_plugin_reactivates_the_preserved_audio_configuration() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-web-first-plugin-test-{}-{}",
+            std::process::id(),
+            TEST_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let config = root.join("config");
+        let package = root.join("plugin-store/packages/org.rackforge.test/1.0.0");
+        fs::create_dir_all(&config).unwrap();
+        fs::create_dir_all(&package).unwrap();
+        fs::write(
+            config.join("audio.toml.inactive"),
+            r#"schema_version = 2
+package = "/old/plugin"
+data_root = "/rackforge/data"
+preset = "old.preset"
+"#,
+        )
+        .unwrap();
+
+        assert!(ensure_startup_plugin(&root, &package).unwrap());
+        let active = fs::read_to_string(config.join("audio.toml")).unwrap();
+        assert!(active.contains(package.to_string_lossy().as_ref()));
+        assert!(!active.contains("old.preset"));
+        assert!(config.join("audio.toml.inactive").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn removing_the_last_plugin_leaves_an_inactive_audio_configuration() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-web-last-plugin-test-{}-{}",
+            std::process::id(),
+            TEST_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let config = root.join("config");
+        let active = config.join("audio.toml");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(&active, "schema_version = 2\npackage = \"/plugin\"\n").unwrap();
+
+        let previous = deactivate_startup_plugin(&active).unwrap();
+        assert!(!active.exists());
+        assert_eq!(
+            fs::read(config.join("audio.toml.inactive")).unwrap(),
+            previous
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

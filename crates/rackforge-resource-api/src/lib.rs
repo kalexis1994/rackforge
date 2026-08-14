@@ -79,6 +79,19 @@ pub struct BindResourceRequest {
     pub entry_id: String,
 }
 
+/// Turns a short-lived explorer selection into a plugin-owned grant.
+///
+/// This is how a file uploaded by a remote browser enters the same resource
+/// flow as a file selected directly on the host. Neither caller receives the
+/// native staging path.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BindSelectionRequest {
+    pub plugin_id: String,
+    pub resource_id: String,
+    pub selection_id: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResourceGrant {

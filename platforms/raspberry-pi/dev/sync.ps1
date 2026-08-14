@@ -9,9 +9,24 @@ $source = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..\..")).Path
 $archive = Join-Path ([System.IO.Path]::GetTempPath()) (
     "rackforge-raspberry-{0}.tar" -f [guid]::NewGuid().ToString("N")
 )
+$fileList = $null
 
 try {
-    & tar -C $source --exclude=target --exclude=.git --exclude=web/node_modules -cf $archive .
+    $tracked = @(& git -C $source ls-files)
+    if ($LASTEXITCODE -ne 0 -or $tracked.Count -eq 0) {
+        throw "No se pudo enumerar el contenido versionado."
+    }
+    $deploymentFiles = @(
+        $tracked | Where-Object {
+            $_ -ne "config/repositories.toml" -and
+            (Test-Path -LiteralPath (Join-Path $source $_))
+        }
+    )
+    $fileList = Join-Path ([System.IO.Path]::GetTempPath()) (
+        "rackforge-raspberry-files-{0}.txt" -f [guid]::NewGuid().ToString("N")
+    )
+    [IO.File]::WriteAllLines($fileList, $deploymentFiles, [Text.UTF8Encoding]::new($false))
+    & tar -C $source -cf $archive -T $fileList
     if ($LASTEXITCODE -ne 0) {
         throw "No se pudo crear el paquete de despliegue."
     }
@@ -42,6 +57,9 @@ printf 'deployed=%s\n' '$RemoteRoot/current'
     }
 }
 finally {
+    if ($fileList -and (Test-Path -LiteralPath $fileList)) {
+        Remove-Item -LiteralPath $fileList -Force
+    }
     if (Test-Path -LiteralPath $archive) {
         Remove-Item -LiteralPath $archive -Force
     }

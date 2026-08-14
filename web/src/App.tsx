@@ -61,7 +61,7 @@ import {
   selectNativeResource,
   syncNativeRoute,
 } from "./host";
-import { LivePage } from "./LivePage";
+import { LivePage, type PerformanceGraphWorkspace } from "./LivePage";
 import { TouchControllerPage } from "./TouchControllerPage";
 import type { RootState } from "./store";
 import type {
@@ -302,7 +302,7 @@ function RackForgeApp() {
   const [installPluginOpen, setInstallPluginOpen] = useState(false);
   const [playOverlay, setPlayOverlay] = useState<"plugins" | "presets" | null>(null);
   const [liveSurface, setLiveSurface] = useState<"perform" | "configure">("perform");
-  const [liveWorkspace, setLiveWorkspace] = useState<{ kind: "rack"; name: string } | null>(null);
+  const [liveWorkspace, setLiveWorkspace] = useState<PerformanceGraphWorkspace | null>(null);
   const [rackGraphOverlayOpen, setRackGraphOverlayOpen] = useState(false);
   const [playTransitionOpen, setPlayTransitionOpen] = useState(false);
   const [settingsBootstrap, setSettingsBootstrap] = useState<HostSettingsBootstrap | null>(null);
@@ -399,7 +399,7 @@ function RackForgeApp() {
       isControllerSurface ? " controller-surface-active" : ""
     }${isPerformanceSurface ? " performance-surface-active" : ""}${
       isLiveSurface ? " live-surface-active" : ""
-    }${liveWorkspace ? " rack-workspace-active" : ""
+    }${liveWorkspace ? " graph-workspace-active" : ""
     }${showControllerDock ? " controller-dock-active" : ""
     }`}>
       <aside className="rail">
@@ -415,23 +415,29 @@ function RackForgeApp() {
             : undefined}
         />
         {liveWorkspace ? (
-          <nav className="rail-context-actions" aria-label="Rack editor actions">
-            <span className="rail-context-label">Rack editor</span>
+          <nav className="rail-context-actions" aria-label="Graph editor actions">
+            <span className="rail-context-label">
+              {liveWorkspace.kind === "rack" ? "Rack editor" : "Song Part editor"}
+            </span>
             <button
               type="button"
               className="nav-item"
-              onClick={() => window.dispatchEvent(new Event("rackforge:save-rack-workspace"))}
+              onClick={() => window.dispatchEvent(new Event("rackforge:save-graph-workspace"))}
             >
               <span className="nav-mark"><Activity aria-hidden="true" strokeWidth={1.9} /></span>
-              <span className="nav-copy"><span>Save Rack</span></span>
+              <span className="nav-copy">
+                <span>{liveWorkspace.kind === "rack" ? "Save Rack" : "Save Song Part"}</span>
+              </span>
             </button>
             <button
               type="button"
               className="nav-item"
-              onClick={() => window.dispatchEvent(new Event("rackforge:close-rack-workspace"))}
+              onClick={() => window.dispatchEvent(new Event("rackforge:close-graph-workspace"))}
             >
               <span className="nav-mark"><Blocks aria-hidden="true" strokeWidth={1.9} /></span>
-              <span className="nav-copy"><span>Back to LIVE</span></span>
+              <span className="nav-copy">
+                <span>{liveWorkspace.kind === "rack" ? "Back to LIVE" : "Back to Song"}</span>
+              </span>
             </button>
           </nav>
         ) : null}
@@ -450,8 +456,8 @@ function RackForgeApp() {
           <FloatingPerformanceMenuButton
             menuOpen={mobileMenuOpen}
             onOpen={() => setMobileMenuOpen(true)}
-            showRackDetails={liveWorkspace !== null}
-            rackDetailsButtonVisible={liveWorkspace !== null && !rackGraphOverlayOpen}
+            showGraphDetails={liveWorkspace !== null}
+            graphDetailsButtonVisible={liveWorkspace !== null && !rackGraphOverlayOpen}
           />
         ) : null}
         {error && <div className="error-banner">{error}</div>}
@@ -562,6 +568,7 @@ function RackForgeApp() {
                 : undefined
           }
           liveWorkspaceActive={liveWorkspace !== null}
+          liveWorkspaceKind={liveWorkspace?.kind}
           onPlayRequest={requestPlayNavigation}
           onPerformanceAction={(action) => {
             setMobileMenuOpen(false);
@@ -570,10 +577,10 @@ function RackForgeApp() {
             if (action === "live-perform") setLiveSurface("perform");
             if (action === "live-configure") setLiveSurface("configure");
             if (action === "live-save-editor") {
-              window.dispatchEvent(new Event("rackforge:save-rack-workspace"));
+              window.dispatchEvent(new Event("rackforge:save-graph-workspace"));
             }
             if (action === "live-close-editor") {
-              window.dispatchEvent(new Event("rackforge:close-rack-workspace"));
+              window.dispatchEvent(new Event("rackforge:close-graph-workspace"));
             }
           }}
         />
@@ -614,13 +621,13 @@ function readPerformanceMenuPosition() {
 function FloatingPerformanceMenuButton({
   menuOpen,
   onOpen,
-  showRackDetails,
-  rackDetailsButtonVisible,
+  showGraphDetails,
+  graphDetailsButtonVisible,
 }: {
   menuOpen: boolean;
   onOpen: () => void;
-  showRackDetails: boolean;
-  rackDetailsButtonVisible: boolean;
+  showGraphDetails: boolean;
+  graphDetailsButtonVisible: boolean;
 }) {
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [position, setPosition] = useState(readPerformanceMenuPosition);
@@ -691,7 +698,7 @@ function FloatingPerformanceMenuButton({
     const shell = button.closest(".app-shell")?.getBoundingClientRect();
     if (!shell) return;
     const availableX = Math.max(1, shell.width - button.offsetWidth - 16);
-    const verticalOffset = showRackDetails ? 110 : 60;
+    const verticalOffset = showGraphDetails ? 110 : 60;
     const availableY = Math.max(1, shell.height - verticalOffset);
     const nextPosition = {
       x: Math.min(1, Math.max(0, (clientX - shell.left - gesture.grabX - 8) / availableX)),
@@ -699,7 +706,7 @@ function FloatingPerformanceMenuButton({
     };
     positionRef.current = nextPosition;
     setPosition(nextPosition);
-  }, [showRackDetails]);
+  }, [showGraphDetails]);
 
   const finishGesture = useCallback((pointerId?: number) => {
     const gesture = gestureRef.current;
@@ -756,7 +763,7 @@ function FloatingPerformanceMenuButton({
   }, [finishGesture, stopDragCue]);
 
   const anchorLeft = `calc(8px + ${position.x * 100}% - ${position.x * 60}px)`;
-  const anchorTopOffset = position.y * (showRackDetails ? 110 : 60);
+  const anchorTopOffset = position.y * (showGraphDetails ? 110 : 60);
   const anchorTop = `calc(8px + ${position.y * 100}% - ${anchorTopOffset}px)`;
 
   return (
@@ -819,7 +826,7 @@ function FloatingPerformanceMenuButton({
     >
       <Menu aria-hidden="true" />
     </button>
-    {rackDetailsButtonVisible ? (
+    {graphDetailsButtonVisible ? (
       <button
         type="button"
         className="rack-details-floating-button"
@@ -827,8 +834,8 @@ function FloatingPerformanceMenuButton({
           left: anchorLeft,
           top: `calc(60px + ${position.y * 100}% - ${anchorTopOffset}px)`,
         }}
-        aria-label="Open Rack details"
-        onClick={() => window.dispatchEvent(new Event("rackforge:open-rack-details"))}
+        aria-label="Open workspace details"
+        onClick={() => window.dispatchEvent(new Event("rackforge:open-graph-details"))}
       >
         <Settings2 aria-hidden="true" strokeWidth={1.9} />
       </button>
@@ -1025,6 +1032,7 @@ function MobileNavigation({
   onClose,
   performanceSurface,
   liveWorkspaceActive,
+  liveWorkspaceKind,
   onPlayRequest,
   onPerformanceAction,
 }: {
@@ -1032,6 +1040,7 @@ function MobileNavigation({
   onClose: () => void;
   performanceSurface?: "play" | "live";
   liveWorkspaceActive: boolean;
+  liveWorkspaceKind?: PerformanceGraphWorkspace["kind"];
   onPlayRequest: () => void;
   onPerformanceAction: (
     action: "select-plugin" | "presets" | "live-perform" | "live-configure" | "live-save-editor" | "live-close-editor",
@@ -1127,7 +1136,7 @@ function MobileNavigation({
                         >
                           <span className="nav-mark"><Activity aria-hidden="true" strokeWidth={1.9} /></span>
                           <span className="nav-copy">
-                            <span>Save Rack</span>
+                            <span>Save workspace</span>
                             <small>Store this portable node graph</small>
                           </span>
                         </button>
@@ -1137,8 +1146,8 @@ function MobileNavigation({
                         >
                           <span className="nav-mark"><Blocks aria-hidden="true" strokeWidth={1.9} /></span>
                           <span className="nav-copy">
-                            <span>Back to LIVE library</span>
-                            <small>Close the full-screen node workspace</small>
+                            <span>{liveWorkspaceKind === "song_part" ? "Back to Song" : "Back to LIVE library"}</span>
+                            <small>{liveWorkspaceKind === "song_part" ? "Close the Song Part graph" : "Close the full-screen Rack workspace"}</small>
                           </span>
                         </button>
                       </>

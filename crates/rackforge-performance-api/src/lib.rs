@@ -824,12 +824,64 @@ impl RackDefinition {
 pub struct SongPart {
     pub id: SongPartId,
     pub name: String,
+    /// Compatibility route used by Song documents written before Parts owned
+    /// a graph. New editors materialize `content`; old documents continue to
+    /// resolve this Rack without an eager on-disk migration.
     pub rack_id: RackId,
+    /// A self-contained playable graph for this Part. It can host direct
+    /// instruments and/or reusable child Racks. When absent, `rack_id` is the
+    /// complete Part, preserving the original v1 Song contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<SongPartGraph>,
 }
 
 impl SongPart {
     fn validate(&self) -> Result<(), PerformanceError> {
-        validate_name(&self.name)
+        validate_name(&self.name)?;
+        if let Some(content) = &self.content {
+            content.as_rack(self).validate()?;
+        }
+        Ok(())
+    }
+
+    /// Returns the stable synthetic Rack used by the audio compiler for a
+    /// graph-backed Part. SongPartId and RackId intentionally share the same
+    /// portable identifier grammar, so no platform-specific ID is invented.
+    pub fn playable_rack(&self) -> Option<RackDefinition> {
+        self.content.as_ref().map(|content| content.as_rack(self))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SongPartGraph {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keyboard_parts: Option<RackKeyboardParts>,
+    #[serde(default)]
+    pub slots: Vec<RackSlot>,
+    pub graph: RackGraph,
+}
+
+impl SongPartGraph {
+    pub fn from_rack(rack: &RackDefinition) -> Self {
+        Self {
+            keyboard_parts: rack.keyboard_parts,
+            slots: rack.slots.clone(),
+            graph: rack.resolved_graph(),
+        }
+    }
+
+    pub fn as_rack(&self, part: &SongPart) -> RackDefinition {
+        RackDefinition {
+            schema_version: PERFORMANCE_SCHEMA_VERSION,
+            id: RackId::new(part.id.as_str().to_owned())
+                .expect("validated Song Part id is also a valid Rack id"),
+            name: part.name.clone(),
+            enabled: true,
+            keyboard_parts: self.keyboard_parts,
+            slots: self.slots.clone(),
+            graph: Some(self.graph.clone()),
+        }
     }
 }
 
@@ -992,8 +1044,18 @@ impl PerformanceLibrary {
         for song in &self.songs {
             song.validate()?;
             for part in &song.parts {
-                if !self.racks.iter().any(|rack| rack.id == part.rack_id) {
+                if part.content.is_none() && !self.racks.iter().any(|rack| rack.id == part.rack_id)
+                {
                     return Err(PerformanceError::MissingRack(part.rack_id.clone()));
+                }
+                if let Some(content) = &part.content {
+                    for node in &content.graph.nodes {
+                        if let RackGraphNodeKind::Rack { rack_id } = &node.kind
+                            && !self.racks.iter().any(|candidate| candidate.id == *rack_id)
+                        {
+                            return Err(PerformanceError::MissingRack(rack_id.clone()));
+                        }
+                    }
                 }
             }
         }
@@ -1068,6 +1130,63 @@ impl PerformanceLibrary {
         self.rack(rack_id)
             .ok_or_else(|| PerformanceError::MissingRack(rack_id.clone()))
     }
+
+    /// Resolves the actual playable graph for a LIVE location. Rack locations
+    /// are cloned; graph-backed Song Parts are converted to a stable synthetic
+    /// Rack understood by the existing cross-platform graph compiler.
+    pub fn resolve_playable(
+        &self,
+        location: &LiveLocation,
+    ) -> Result<RackDefinition, PerformanceError> {
+        match location {
+            LiveLocation::Rack { rack_id } => self
+                .rack(rack_id)
+                .cloned()
+                .ok_or_else(|| PerformanceError::MissingRack(rack_id.clone())),
+            LiveLocation::Song { song_id, part_id } => {
+                let song = self
+                    .song(song_id)
+                    .ok_or_else(|| PerformanceError::MissingSong(song_id.clone()))?;
+                let part = song
+                    .parts
+                    .iter()
+                    .find(|part| &part.id == part_id)
+                    .ok_or_else(|| PerformanceError::MissingSongPart(part_id.clone()))?;
+                part.playable_rack().map(Ok).unwrap_or_else(|| {
+                    self.rack(&part.rack_id)
+                        .cloned()
+                        .ok_or_else(|| PerformanceError::MissingRack(part.rack_id.clone()))
+                })
+            }
+            LiveLocation::Setlist {
+                setlist_id,
+                entry_id,
+                part_id,
+            } => {
+                let setlist = self
+                    .setlist(setlist_id)
+                    .ok_or_else(|| PerformanceError::MissingSetlist(setlist_id.clone()))?;
+                let entry = setlist
+                    .entries
+                    .iter()
+                    .find(|entry| &entry.id == entry_id)
+                    .ok_or_else(|| PerformanceError::MissingSetlistEntry(entry_id.clone()))?;
+                let song = self
+                    .song(&entry.song_id)
+                    .ok_or_else(|| PerformanceError::MissingSong(entry.song_id.clone()))?;
+                let part = song
+                    .parts
+                    .iter()
+                    .find(|part| &part.id == part_id)
+                    .ok_or_else(|| PerformanceError::MissingSongPart(part_id.clone()))?;
+                part.playable_rack().map(Ok).unwrap_or_else(|| {
+                    self.rack(&part.rack_id)
+                        .cloned()
+                        .ok_or_else(|| PerformanceError::MissingRack(part.rack_id.clone()))
+                })
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -1134,11 +1253,11 @@ impl LivePerformanceState {
                 if location.mode() != expected {
                     return Err(PerformanceError::MismatchedLiveLocation);
                 }
-                library.resolve(location)?;
+                library.resolve_playable(location)?;
             }
         }
         if let Some(active) = &self.active {
-            let rack = library.resolve(active)?;
+            let rack = library.resolve_playable(active)?;
             if self.active_rack_id.as_ref() != Some(&rack.id) {
                 return Err(PerformanceError::MismatchedActiveRack);
             }
@@ -1173,20 +1292,20 @@ impl LivePerformanceState {
         self.rack = self
             .rack
             .take()
-            .filter(|location| library.resolve(location).is_ok());
+            .filter(|location| library.resolve_playable(location).is_ok());
         self.song = self
             .song
             .take()
-            .filter(|location| library.resolve(location).is_ok());
+            .filter(|location| library.resolve_playable(location).is_ok());
         self.setlist = self
             .setlist
             .take()
-            .filter(|location| library.resolve(location).is_ok());
+            .filter(|location| library.resolve_playable(location).is_ok());
 
         let active_still_matches = self
             .active
             .as_ref()
-            .and_then(|location| library.resolve(location).ok())
+            .and_then(|location| library.resolve_playable(location).ok())
             .is_some_and(|rack| self.active_rack_id.as_ref() == Some(&rack.id));
         if active_still_matches {
             return;
@@ -1543,6 +1662,7 @@ mod tests {
                     id: SongPartId::new("part.intro").unwrap(),
                     name: "Intro".into(),
                     rack_id,
+                    content: None,
                 }],
             }],
             setlists: vec![SetlistDefinition {
@@ -1582,6 +1702,80 @@ mod tests {
                 "rack.stage-piano"
             );
         }
+    }
+
+    #[test]
+    fn graph_backed_song_part_is_a_stable_playable_root() {
+        let mut library = library();
+        let child_id = library.racks[0].id.clone();
+        let part = &mut library.songs[0].parts[0];
+        let mut graph = RackGraph::from_slots(&[]);
+        graph.nodes.extend([
+            RackGraphNode {
+                id: RackGraphNodeId::new("rack.layer").unwrap(),
+                kind: RackGraphNodeKind::Rack {
+                    rack_id: child_id.clone(),
+                },
+                position: RackGraphPosition { x: 360, y: 0 },
+            },
+            RackGraphNode {
+                id: RackGraphNodeId::new("output.audio.00").unwrap(),
+                kind: RackGraphNodeKind::AudioOutput {
+                    bus_id: "main".into(),
+                },
+                position: RackGraphPosition { x: 720, y: 0 },
+            },
+        ]);
+        graph.edges.extend([
+            RackGraphEdge {
+                id: RackGraphEdgeId::new("layer.midi").unwrap(),
+                signal: RackGraphSignal::Midi,
+                source: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("input.midi").unwrap(),
+                    port_id: "out".into(),
+                },
+                target: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("rack.layer").unwrap(),
+                    port_id: "midi_in".into(),
+                },
+                midi_transform: Some(RackMidiTransform::default()),
+            },
+            RackGraphEdge {
+                id: RackGraphEdgeId::new("layer.audio").unwrap(),
+                signal: RackGraphSignal::Audio,
+                source: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("rack.layer").unwrap(),
+                    port_id: "audio_out".into(),
+                },
+                target: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("output.audio.00").unwrap(),
+                    port_id: "in".into(),
+                },
+                midi_transform: None,
+            },
+        ]);
+        part.content = Some(SongPartGraph {
+            keyboard_parts: None,
+            slots: Vec::new(),
+            graph,
+        });
+        part.rack_id = RackId::new("rack.legacy-may-be-missing").unwrap();
+
+        library.validate().unwrap();
+        let location = LiveLocation::Song {
+            song_id: SongId::new("song.opener").unwrap(),
+            part_id: SongPartId::new("part.intro").unwrap(),
+        };
+        let playable = library.resolve_playable(&location).unwrap();
+        assert_eq!(playable.id.as_str(), "part.intro");
+        assert!(playable.slots.is_empty());
+        assert!(playable.resolved_graph().nodes.iter().any(|node| {
+            matches!(&node.kind, RackGraphNodeKind::Rack { rack_id } if rack_id == &child_id)
+        }));
+
+        let mut live = LivePerformanceState::default();
+        live.activate(location, playable.id);
+        live.validate(&library).unwrap();
     }
 
     #[test]

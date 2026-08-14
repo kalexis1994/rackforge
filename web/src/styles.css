@@ -35,6 +35,11 @@
   --acid: #c9f254;
   --orange: #ff7557;
   --blue: #6d91f7;
+  --entity-instrument: #4d8dff;
+  --entity-rack: #ad7cff;
+  --entity-song: #55d98b;
+  --entity-song-part: #c7df62;
+  --entity-setlist: #ff9b4a;
   --display-font: "Chakra Petch", "Segoe UI", Arial, sans-serif;
   --rackforge-system-top-inset: 0px;
   --rackforge-system-right-inset: 0px;
@@ -2516,7 +2521,7 @@ body {
   .app-shell.plugin-surface-active,
   .app-shell.performance-surface-active,
   .app-shell.live-surface-active,
-  .app-shell.rack-workspace-active {
+  .app-shell.graph-workspace-active {
     width: auto;
     height: auto;
     min-width: 0;
@@ -4967,6 +4972,110 @@ body {
   white-space: nowrap;
 }
 
+/* Portable performance entity palette. These classes carry meaning across
+   graph nodes, LIVE targets and CONFIG documents rather than styling one
+   isolated screen. */
+.entity-instrument { --entity-color: var(--entity-instrument); }
+.entity-rack { --entity-color: var(--entity-rack); }
+.entity-song { --entity-color: var(--entity-song); }
+.entity-song-part {
+  --entity-color: var(--entity-song-part);
+  --entity-secondary: var(--entity-song);
+}
+.entity-setlist { --entity-color: var(--entity-setlist); }
+
+.live-mode-tabs button[class*="entity-"] {
+  color: color-mix(in srgb, var(--entity-color) 76%, var(--ink));
+  border-color: color-mix(in srgb, var(--entity-color) 26%, transparent);
+  background: color-mix(in srgb, var(--entity-color) 7%, transparent);
+}
+
+.live-mode-tabs button[class*="entity-"].active {
+  color: #051016;
+  border-color: var(--entity-color);
+  background: var(--entity-color);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.48),
+    0 7px 22px color-mix(in srgb, var(--entity-color) 18%, transparent);
+}
+
+.target-card[class*="entity-"] {
+  border-color: color-mix(in srgb, var(--entity-color) 30%, transparent);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--entity-color) 11%, transparent), transparent 44%),
+    rgba(8, 23, 33, 0.58);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--entity-color) 78%, transparent);
+}
+
+.target-card[class*="entity-"] .target-index,
+.target-card[class*="entity-"] .card-kicker,
+.sequence-group[class*="entity-"] > header .card-kicker {
+  color: var(--entity-color);
+}
+
+.sequence-group.entity-song:not(.setlist-target-group) {
+  border-color: color-mix(in srgb, var(--entity-color) 27%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--entity-color) 7%, transparent), transparent 36%),
+    rgba(4, 11, 17, 0.34);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--entity-color) 62%, transparent);
+}
+
+.setlist-target-group.entity-setlist > header {
+  padding: 9px 11px 10px;
+  border: 1px solid color-mix(in srgb, var(--entity-color) 28%, transparent);
+  border-radius: 10px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--entity-color) 12%, transparent), transparent 54%);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--entity-color) 76%, transparent);
+}
+
+.sequence-row.entity-song-part {
+  border-color: color-mix(in srgb, var(--entity-color) 25%, transparent);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--entity-secondary) 9%, transparent),
+      color-mix(in srgb, var(--entity-color) 8%, transparent) 48%,
+      transparent
+    ),
+    rgba(8, 23, 33, 0.54);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--entity-color) 70%, transparent);
+}
+
+[class*="entity-"] .activate-button {
+  color: var(--entity-color);
+  border-color: color-mix(in srgb, var(--entity-color) 35%, transparent);
+  background: color-mix(in srgb, var(--entity-color) 9%, transparent);
+}
+
+[class*="entity-"] .activate-button.active {
+  color: #051016;
+  border-color: var(--entity-color);
+  background: var(--entity-color);
+}
+
+.performance-form[class*="entity-"] > .editor-header {
+  border-color: color-mix(in srgb, var(--entity-color) 25%, var(--line));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--entity-color) 70%, transparent);
+}
+
+.performance-form[class*="entity-"] > .editor-header .card-kicker,
+.performance-form[class*="entity-"] > .editor-section > header .card-kicker {
+  color: var(--entity-color);
+}
+
+.slot-editor.entity-instrument {
+  border-color: color-mix(in srgb, var(--entity-color) 26%, var(--line));
+  background:
+    linear-gradient(120deg, color-mix(in srgb, var(--entity-color) 7%, transparent), transparent 42%),
+    var(--glass);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--entity-color) 66%, transparent), var(--glass-shadow);
+}
+
+.slot-editor.entity-instrument .slot-number {
+  color: var(--entity-color);
+}
+
 .performance-config {
   min-height: 620px;
   display: grid;
@@ -5571,6 +5680,214 @@ body {
 
 .sequence-editor-row > strong {
   font-size: 12px;
+}
+
+.song-part-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(210px, 270px) minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.song-editor-form:not(.immersive) .song-part-editor-layout {
+  display: block;
+}
+
+.song-editor-form:not(.immersive) .song-part-navigator {
+  width: 100%;
+}
+
+.song-editor-form:not(.immersive) .song-part-order-actions {
+  grid-auto-flow: column;
+  align-items: center;
+}
+
+.song-part-navigator {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.song-part-nav-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 6px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--entity-secondary) 6%, transparent), transparent 52%),
+    rgba(4, 17, 25, 0.72);
+  border: 1px solid color-mix(in srgb, var(--entity-color) 18%, transparent);
+  border-radius: 10px;
+}
+
+.song-part-nav-item.active {
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--entity-secondary) 16%, transparent),
+    color-mix(in srgb, var(--entity-color) 13%, transparent)
+  );
+  border-color: color-mix(in srgb, var(--entity-color) 58%, transparent);
+  box-shadow: inset 3px 0 0 var(--entity-color);
+}
+
+.song-part-select {
+  min-width: 0;
+  padding: 7px 8px;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 8px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.song-part-select > span {
+  grid-row: 1 / 3;
+  color: var(--entity-color);
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.68rem;
+}
+
+.song-part-select strong,
+.song-part-select small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-part-select small {
+  color: var(--muted);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.song-part-order-actions {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+}
+
+.song-part-order-actions button {
+  width: 28px;
+  height: 25px;
+  padding: 0;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+}
+
+.song-part-order-actions button:last-child:not(:disabled) {
+  color: #ff9cab;
+}
+
+.song-part-order-actions .song-part-edit-graph {
+  width: auto;
+  padding: 0 10px;
+  color: var(--entity-song-part);
+  border-color: color-mix(in srgb, var(--entity-song-part) 28%, transparent);
+}
+
+.song-part-graph-workspace {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.song-part-graph-header {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 10px 12px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--entity-secondary) 9%, transparent), color-mix(in srgb, var(--entity-color) 7%, transparent)),
+    rgba(4, 17, 25, 0.76);
+  border: 1px solid color-mix(in srgb, var(--entity-color) 22%, transparent);
+  border-radius: 10px;
+}
+
+.song-part-graph-header label,
+.song-part-graph-header > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.song-part-graph-header span {
+  color: var(--muted);
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.song-part-graph-header input {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  color: var(--ink);
+  background: #06131c;
+  border: 1px solid rgba(98, 218, 238, 0.2);
+  border-radius: 7px;
+}
+
+.song-part-graph-header strong {
+  min-height: 38px;
+  display: grid;
+  place-items: center;
+  padding: 0 12px;
+  color: var(--entity-color);
+  background: color-mix(in srgb, var(--entity-color) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--entity-color) 20%, transparent);
+  border-radius: 7px;
+}
+
+.song-part-instrument-settings {
+  display: grid;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+@media (max-width: 900px) {
+  .song-part-editor-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .song-part-navigator {
+    grid-auto-flow: row;
+    grid-auto-rows: auto;
+    width: 100%;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 520px), (orientation: landscape) and (max-height: 600px) and (max-width: 900px) {
+  .song-editor-form:not(.immersive) .song-part-nav-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .song-editor-form:not(.immersive) .song-part-order-actions {
+    justify-content: end;
+  }
+
+  .song-part-graph-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 7px 8px;
+  }
+
+  .song-part-graph-header input,
+  .song-part-graph-header strong {
+    min-height: 34px;
+  }
 }
 
 .rack-graph-editor {
@@ -6382,20 +6699,20 @@ body {
    the regular navigation rail remains available; only compact viewports move
    navigation behind the floating menu. CSS pixels already account for the
    operating-system DPI/display scale. */
-.app-shell.rack-workspace-active {
+.app-shell.graph-workspace-active {
   width: auto;
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
 }
 
-.rack-workspace-active .topbar,
-.rack-workspace-active .live-toolbar,
-.rack-workspace-active .config-library {
+.graph-workspace-active .topbar,
+.graph-workspace-active .live-toolbar,
+.graph-workspace-active .config-library {
   display: none;
 }
 
-.rack-workspace-active .workspace {
+.graph-workspace-active .workspace {
   grid-column: 2;
   height: 100%;
   min-height: 0;
@@ -6404,7 +6721,7 @@ body {
   overflow: hidden;
 }
 
-.rack-workspace-active .page.live-host-page {
+.graph-workspace-active .page.live-host-page {
   width: 100%;
   max-width: none;
   height: 0;
@@ -6416,7 +6733,7 @@ body {
   overflow: hidden;
 }
 
-.rack-workspace-active .live-shell {
+.graph-workspace-active .live-shell {
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -6425,7 +6742,7 @@ body {
   overflow: hidden;
 }
 
-.rack-workspace-active .live-performance-bar {
+.graph-workspace-active .live-performance-bar {
   width: 100%;
   min-height: 22px;
   height: 22px;
@@ -6441,7 +6758,7 @@ body {
   z-index: 4;
 }
 
-.rack-workspace-active .performance-info-slot {
+.graph-workspace-active .performance-info-slot {
   min-width: 0;
   padding: 0 6px;
   display: flex;
@@ -6452,19 +6769,19 @@ body {
   white-space: nowrap;
 }
 
-.rack-workspace-active .performance-info-slot + .performance-info-slot {
+.graph-workspace-active .performance-info-slot + .performance-info-slot {
   border-left: 1px solid rgba(123, 207, 225, 0.16);
 }
 
-.rack-workspace-active .performance-info-left { justify-content: flex-start; }
-.rack-workspace-active .performance-info-right { justify-content: flex-end; }
-.rack-workspace-active .performance-info-bar span {
+.graph-workspace-active .performance-info-left { justify-content: flex-start; }
+.graph-workspace-active .performance-info-right { justify-content: flex-end; }
+.graph-workspace-active .performance-info-bar span {
   flex: 0 0 auto;
   color: var(--muted);
   font-size: 6px;
   letter-spacing: 0.11em;
 }
-.rack-workspace-active .performance-info-bar strong {
+.graph-workspace-active .performance-info-bar strong {
   min-width: 0;
   overflow: hidden;
   font-size: 8px;
@@ -6474,24 +6791,24 @@ body {
 }
 
 @media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
-  .app-shell.rack-workspace-active {
+  .app-shell.graph-workspace-active {
     height: auto;
     grid-template-columns: 1fr;
   }
 
-  .rack-workspace-active .rail {
+  .graph-workspace-active .rail {
     display: none;
   }
 
-  .rack-workspace-active .workspace {
+  .graph-workspace-active .workspace {
     grid-column: 1;
   }
 
-  .rack-workspace-active .live-performance-bar {
+  .graph-workspace-active .live-performance-bar {
     padding-left: 58px;
   }
 
-  .rack-workspace-active .performance-menu-button {
+  .graph-workspace-active .performance-menu-button {
     position: absolute;
     z-index: 36;
     width: 44px;
@@ -6511,12 +6828,15 @@ body {
   }
 }
 
-.rack-workspace-active .performance-config.rack-graph-workspace,
-.rack-workspace-active .config-editor,
-.rack-workspace-active .rack-editor-form.immersive,
-.rack-workspace-active .rack-editor-form.immersive > .editor-section,
-.rack-workspace-active .rack-editor-form.immersive > .editor-section > .editor-section-content,
-.rack-workspace-active .rack-graph-editor {
+.graph-workspace-active .performance-config.graph-workspace,
+.graph-workspace-active .config-editor,
+.graph-workspace-active .rack-editor-form.immersive,
+.graph-workspace-active .song-editor-form.immersive,
+.graph-workspace-active .rack-editor-form.immersive > .editor-section,
+.graph-workspace-active .rack-editor-form.immersive > .editor-section > .editor-section-content,
+.graph-workspace-active .song-editor-form.immersive > .editor-section,
+.graph-workspace-active .song-editor-form.immersive > .editor-section > .editor-section-content,
+.graph-workspace-active .rack-graph-editor {
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -6525,7 +6845,7 @@ body {
   max-height: 100%;
 }
 
-.rack-workspace-active .performance-config.rack-graph-workspace {
+.graph-workspace-active .performance-config.graph-workspace {
   width: auto;
   height: 0;
   display: block;
@@ -6533,18 +6853,20 @@ body {
   overflow: hidden;
 }
 
-.rack-workspace-active .config-editor {
+.graph-workspace-active .config-editor {
   position: relative;
 }
 
-.rack-workspace-active .rack-editor-form.immersive {
+.graph-workspace-active .rack-editor-form.immersive,
+.graph-workspace-active .song-editor-form.immersive {
   position: relative;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.rack-workspace-details-panel {
+.rack-workspace-details-panel,
+.song-workspace-details-panel {
   position: absolute;
   top: 12px;
   left: 12px;
@@ -6712,6 +7034,39 @@ body {
   border-top: 1px solid rgba(123, 207, 225, 0.16);
 }
 
+.song-workspace-details-panel {
+  width: min(350px, calc(100% - 24px));
+}
+
+.song-details-fields {
+  max-height: min(62dvh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.song-part-details-summary {
+  min-height: 40px;
+  display: grid;
+  gap: 3px;
+  align-content: center;
+  padding: 7px 9px;
+  background: color-mix(in srgb, var(--entity-song-part) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--entity-song-part) 18%, transparent);
+  border-radius: 8px;
+}
+
+.song-part-details-summary span {
+  color: var(--muted);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.song-part-details-summary strong {
+  color: var(--entity-song-part);
+  font-size: 10px;
+}
+
 .rack-workspace-details > footer > div {
   display: flex;
   gap: 6px;
@@ -6721,6 +7076,62 @@ body {
   min-height: 30px;
   padding: 0 11px;
   border-radius: 8px;
+}
+
+.rack-workspace-details > footer .workspace-exit-button,
+.rack-workspace-details > footer .save-button,
+.rack-workspace-details > footer .async-action-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.rack-workspace-details > footer button svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  stroke-width: 2;
+}
+
+.rack-workspace-details > footer .workspace-exit-button {
+  color: #a7bac3;
+  background: rgba(124, 154, 167, 0.07);
+  border: 1px solid rgba(147, 178, 190, 0.2);
+}
+
+.rack-workspace-details > footer .workspace-exit-button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: rgba(147, 198, 213, 0.38);
+  background: rgba(124, 178, 195, 0.13);
+}
+
+.rack-workspace-details > footer .save-button {
+  min-width: 82px;
+  color: #03131a;
+  font-weight: 800;
+  letter-spacing: 0.025em;
+  background: linear-gradient(135deg, #9af3ff 0%, #58deef 58%, #43c9df 100%);
+  border: 1px solid rgba(166, 246, 255, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.68),
+    0 5px 16px rgba(45, 211, 235, 0.2);
+  transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+}
+
+.rack-workspace-details > footer .save-button:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.78),
+    0 8px 20px rgba(45, 211, 235, 0.28);
+}
+
+.rack-workspace-details > footer button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  filter: saturate(0.55);
+  box-shadow: none;
 }
 
 .rack-details-preview {
@@ -6743,7 +7154,8 @@ body {
 }
 
 @media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
-  .rack-workspace-details-panel {
+  .rack-workspace-details-panel,
+  .song-workspace-details-panel {
     display: none;
   }
 
@@ -6808,34 +7220,41 @@ body {
   }
 }
 
-.rack-workspace-active .rack-editor-form.immersive > .editor-header,
-.rack-workspace-active .rack-editor-form.immersive > .basic-fields,
-.rack-workspace-active .rack-editor-form.immersive > .editor-section:last-child {
+.graph-workspace-active .rack-editor-form.immersive > .editor-header,
+.graph-workspace-active .rack-editor-form.immersive > .basic-fields,
+.graph-workspace-active .rack-editor-form.immersive > .editor-section:last-child,
+.graph-workspace-active .song-editor-form.immersive > .editor-header,
+.graph-workspace-active .song-editor-form.immersive > .basic-fields,
+.graph-workspace-active .song-editor-form.immersive > .rack-preview-status,
+.graph-workspace-active .song-editor-form.immersive > .form-error {
   display: none;
 }
 
-.rack-workspace-active .rack-editor-form.immersive > .editor-section {
+.graph-workspace-active .rack-editor-form.immersive > .editor-section,
+.graph-workspace-active .song-editor-form.immersive > .editor-section {
   border: 0;
   flex: 1 1 0;
   overflow: hidden;
 }
 
-.rack-workspace-active .rack-editor-form.immersive > .editor-section > header {
+.graph-workspace-active .rack-editor-form.immersive > .editor-section > header,
+.graph-workspace-active .song-editor-form.immersive > .editor-section > header {
   display: none;
 }
 
-.rack-workspace-active .rack-editor-form.immersive > .editor-section > .editor-section-content {
+.graph-workspace-active .rack-editor-form.immersive > .editor-section > .editor-section-content,
+.graph-workspace-active .song-editor-form.immersive > .editor-section > .editor-section-content {
   padding: 0;
   display: block;
 }
 
-.rack-workspace-active .rack-graph-editor {
+.graph-workspace-active .rack-graph-editor {
   display: flex;
   flex-direction: column;
   border: 0;
 }
 
-.rack-workspace-active .rack-graph-canvas {
+.graph-workspace-active .rack-graph-canvas {
   width: 100%;
   max-width: 100%;
   height: 0;
@@ -6844,22 +7263,47 @@ body {
   overflow: hidden;
 }
 
-.rack-workspace-active .rack-graph-canvas > .react-flow {
+.graph-workspace-active .rack-graph-canvas > .react-flow {
   position: absolute;
   inset: 0;
   width: auto;
   height: auto;
 }
 
-.rack-workspace-active .rack-graph-canvas .react-flow__minimap {
+.graph-workspace-active .rack-graph-canvas .react-flow__minimap {
   width: 116px;
   height: 76px;
 }
 
-.rack-workspace-active .rack-graph-hint {
+.graph-workspace-active .rack-graph-hint {
   margin: 0;
   padding: 5px 10px;
   flex: 0 0 auto;
+}
+
+.graph-workspace-active .song-part-editor-layout,
+.graph-workspace-active .song-part-graph-workspace {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.graph-workspace-active .song-part-editor-layout {
+  display: block;
+}
+
+.graph-workspace-active .song-part-navigator,
+.graph-workspace-active .song-part-graph-header,
+.graph-workspace-active .song-part-instrument-settings {
+  display: none;
+}
+
+.graph-workspace-active .song-part-graph-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
 }
 
 .rack-graph-label-tools {
@@ -6966,6 +7410,7 @@ body {
 }
 
 .rack-flow-node {
+  --node-color: var(--acid);
   width: 190px;
   min-height: 70px;
   padding: 12px 14px;
@@ -6980,8 +7425,11 @@ body {
 }
 
 .rack-flow-node.selected {
-  border-color: var(--acid);
-  box-shadow: 0 0 0 1px rgba(98, 223, 241, 0.28), 0 12px 30px rgba(0, 0, 0, 0.38);
+  border-color: var(--node-color);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--node-color) 28%, transparent),
+    0 12px 30px rgba(0, 0, 0, 0.38),
+    0 0 22px color-mix(in srgb, var(--node-color) 10%, transparent);
 }
 
 .rack-flow-node.midi_input,
@@ -6990,9 +7438,16 @@ body {
   background: linear-gradient(145deg, #152932, #0b1920);
 }
 
+.rack-flow-node.plugin {
+  --node-color: var(--entity-instrument);
+  border-color: color-mix(in srgb, var(--node-color) 48%, transparent);
+  background: linear-gradient(145deg, #14284a, #0b172d);
+}
+
 .rack-flow-node.rack {
-  border-color: rgba(169, 126, 255, 0.42);
-  background: linear-gradient(145deg, #211a35, #111224);
+  --node-color: var(--entity-rack);
+  border-color: color-mix(in srgb, var(--node-color) 48%, transparent);
+  background: linear-gradient(145deg, #291d42, #151127);
 }
 
 .rack-flow-node-icon {
@@ -7002,16 +7457,18 @@ body {
   place-items: center;
   border: 1px solid rgba(98, 223, 241, 0.28);
   border-radius: 5px;
-  color: var(--acid);
+  color: var(--node-color);
   font-family: var(--mono);
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.06em;
 }
 
+.rack-flow-node.plugin .rack-flow-node-icon,
 .rack-flow-node.rack .rack-flow-node-icon {
-  border-color: rgba(169, 126, 255, 0.5);
-  color: #b99cff;
+  border-color: color-mix(in srgb, var(--node-color) 55%, transparent);
+  color: var(--node-color);
+  background: color-mix(in srgb, var(--node-color) 7%, transparent);
 }
 
 .rack-flow-node strong,
@@ -7114,7 +7571,7 @@ body {
     display: none;
   }
 
-  .rack-workspace-active .rack-graph-hint {
+  .graph-workspace-active .rack-graph-hint {
     display: none;
   }
 }

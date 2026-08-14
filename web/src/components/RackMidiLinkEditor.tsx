@@ -4,7 +4,8 @@ import { ScrubNumberField } from "./ScrubNumberField";
 
 interface RackMidiLinkEditorProps {
   edge: RackGraphEdge;
-  fallback: RackMidiTransform;
+  fallback?: RackMidiTransform;
+  targetLabel?: string;
   style?: CSSProperties;
   onApply: (transform: RackMidiTransform) => void;
   onClose: () => void;
@@ -108,11 +109,14 @@ function SourceChannelPicker({
 export function RackMidiLinkEditor({
   edge,
   fallback,
+  targetLabel = "Instrument",
   style,
   onApply,
   onClose,
 }: RackMidiLinkEditorProps) {
-  const [draft, setDraft] = useState<RackMidiTransform>(edge.midi_transform ?? fallback);
+  const [draft, setDraft] = useState<RackMidiTransform>(
+    edge.midi_transform ?? fallback ?? identityTransform,
+  );
 
   const patch = (next: Partial<RackMidiTransform>) => setDraft((current) => ({ ...current, ...next }));
   const valid = draft.note_low <= draft.note_high
@@ -133,7 +137,7 @@ export function RackMidiLinkEditor({
       <header>
         <div>
           <span>MIDI CONNECTION</span>
-          <strong>Input → Instrument</strong>
+          <strong>Input → {targetLabel}</strong>
         </div>
         <button type="button" className="rack-midi-close" aria-label="Close" onClick={onClose}>×</button>
       </header>

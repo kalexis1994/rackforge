@@ -1868,6 +1868,11 @@ impl Menu {
                         && let Some(part) = song.parts.get_mut(self.performance_child_index)
                     {
                         part.rack_id = rack_id;
+                        // LITTLE exposes a compact single-Rack picker rather
+                        // than the visual graph editor. Choosing a Rack is an
+                        // explicit request to replace any graph-backed Part
+                        // with that legacy-compatible single-Rack route.
+                        part.content = None;
                         self.performance_dirty = true;
                     }
                     self.page = Page::ConfigSongPartEditor;
@@ -1962,6 +1967,7 @@ impl Menu {
                         id: SongPartId::new("part.001").unwrap(),
                         name: "MAIN".into(),
                         rack_id: rack.id.clone(),
+                        content: None,
                     }],
                 }))
             }
@@ -2474,6 +2480,7 @@ impl Menu {
                     id: SongPartId::new(id).unwrap(),
                     name: format!("PART {}", song.parts.len() + 1),
                     rack_id: rack.id.clone(),
+                    content: None,
                 });
                 self.performance_child_index = song.parts.len();
                 self.performance_dirty = true;
@@ -3626,10 +3633,13 @@ impl Menu {
             );
         }
         let part = &song.parts[self.performance_child_index - 1];
-        let rack = self
-            .performance_library
-            .rack(&part.rack_id)
-            .map_or("MISSING RACK", |value| value.name.as_str());
+        let rack = if part.content.is_some() {
+            "PART GRAPH"
+        } else {
+            self.performance_library
+                .rack(&part.rack_id)
+                .map_or("MISSING RACK", |value| value.name.as_str())
+        };
         Screen::with_header(
             indexed_title("PARTS", self.performance_child_index, song.parts.len() + 1),
             &part.name,
@@ -3644,6 +3654,7 @@ impl Menu {
         let part = &song.parts[self.performance_child_index];
         let detail = match self.performance_child_editor_index {
             0 => part.name.clone(),
+            1 if part.content.is_some() => "Replace graph with Rack".into(),
             1 => self
                 .performance_library
                 .rack(&part.rack_id)
@@ -6740,6 +6751,7 @@ mod tests {
                 id: part_id.clone(),
                 name: "Intro".into(),
                 rack_id: rack_id.clone(),
+                content: None,
             }],
         };
         let setlist = SetlistDefinition {

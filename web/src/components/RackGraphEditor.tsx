@@ -154,6 +154,20 @@ const nodeTypes: NodeTypes = {
   labelNode: LabelCard,
 };
 
+const graphNodeColors: Record<CanvasNodeData["kind"], string> = {
+  plugin: "#4d8dff",
+  rack: "#ad7cff",
+  midi_input: "#58d9ee",
+  audio_input: "#f2b25e",
+  midi_output: "#58d9ee",
+  audio_output: "#f2b25e",
+  label: "#70838e",
+};
+
+function graphMiniMapNodeColor(node: CanvasNode) {
+  return graphNodeColors[node.data.kind];
+}
+
 const RackFlowEdge = memo(function RackFlowEdge({
   id,
   sourceX,
@@ -308,7 +322,7 @@ function toCanvasEdges(
       signal: edge.signal,
       editable: edge.signal === "midi"
         && nodeKinds.get(edge.source.node_id) === "midi_input"
-        && nodeKinds.get(edge.target.node_id) === "plugin",
+        && ["plugin", "rack"].includes(nodeKinds.get(edge.target.node_id) ?? ""),
       onOpen,
       onSelect,
     },
@@ -490,7 +504,8 @@ export default function RackGraphEditor({
       !edge
       || edge.signal !== "midi"
       || source?.kind.kind !== "midi_input"
-      || target?.kind.kind !== "plugin"
+      || !target
+      || !["plugin", "rack"].includes(target.kind.kind)
     ) return;
     const anchor = createMenuAnchor(clientX, clientY, 486, 650);
     if (!anchor) return;
@@ -559,15 +574,36 @@ export default function RackGraphEditor({
     () => toCanvasNodes(materialized, racks),
     [materialized, racks],
   );
-  const [interactiveState, setInteractiveState] = useState(() => ({
-    source: mappedNodes,
-    nodes: mappedNodes,
-  }));
-  let interactiveNodes = interactiveState.nodes;
-  if (interactiveState.source !== mappedNodes) {
-    interactiveNodes = mappedNodes;
-    setInteractiveState({ source: mappedNodes, nodes: mappedNodes });
-  }
+  const [interactiveNodes, setInteractiveNodes] = useState(mappedNodes);
+  const interactiveRackIdRef = useRef(rack.id);
+  useLayoutEffect(() => {
+    const changedRack = interactiveRackIdRef.current !== rack.id;
+    interactiveRackIdRef.current = rack.id;
+    setInteractiveNodes((current) => {
+      if (changedRack) return mappedNodes;
+
+      // React Flow enriches controlled nodes with measured dimensions and
+      // transient interaction state. Preview/session refreshes can recreate
+      // the Rack prop without changing its graph; replacing every node with
+      // the raw mapped version makes Android WebView discard and rebuild the
+      // complete transformed layer. Reconcile by id so those refreshes cannot
+      // make a valid persisted graph flash blank or remain visually empty.
+      const currentById = new Map(current.map((node) => [node.id, node]));
+      return mappedNodes.map((node) => {
+        const existing = currentById.get(node.id);
+        if (!existing) return node;
+        return {
+          ...node,
+          selected: existing.selected,
+          dragging: existing.dragging,
+          measured: existing.measured,
+          width: existing.width,
+          height: existing.height,
+          position: existing.dragging ? existing.position : node.position,
+        };
+      });
+    });
+  }, [mappedNodes, rack.id]);
   const edges = useMemo(
     () => toCanvasEdges(
       materialized.graph!.edges,
@@ -618,10 +654,15 @@ export default function RackGraphEditor({
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<CanvasNode>[]) => {
-      setInteractiveState((current) => ({
-        ...current,
-        nodes: applyNodeChanges(changes, current.nodes),
-      }));
+      setInteractiveNodes((current) => applyNodeChanges(
+        changes.filter((change) => {
+          if (change.type !== "remove") return true;
+          return current.some(
+            (node) => node.id === change.id && node.data.kind === "label",
+          );
+        }),
+        current,
+      ));
     },
     [],
   );
@@ -813,6 +854,9 @@ export default function RackGraphEditor({
   const midiEditorTargetSlot = midiEditorTargetSlotId
     ? materialized.slots.find((slot) => slot.id === midiEditorTargetSlotId)
     : undefined;
+  const midiEditorTargetLabel = midiEditorTargetNode
+    ? nodeTitle(midiEditorTargetNode, materialized, racks)[0]
+    : undefined;
 
   const updateSelectedLabel = useCallback(
     (patch: Partial<RackGraphLabel>) => {
@@ -917,7 +961,12 @@ export default function RackGraphEditor({
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} />
-          <MiniMap pannable zoomable nodeStrokeWidth={3} />
+          <MiniMap
+            pannable
+            zoomable
+            nodeColor={graphMiniMapNodeColor}
+            nodeStrokeWidth={3}
+          />
           <Controls
             position="top-right"
             orientation="horizontal"
@@ -1007,11 +1056,14 @@ export default function RackGraphEditor({
               renderSurface={renderPluginSurface}
             />
           ) : null}
-          {midiLinkEditor && midiEditorEdge && midiEditorTargetSlot ? (
+          {midiLinkEditor && midiEditorEdge && midiEditorTargetNode ? (
             <RackMidiLinkEditor
               key={midiEditorEdge.id}
               edge={midiEditorEdge}
-              fallback={midiTransformFromSlot(midiEditorTargetSlot)}
+              fallback={midiEditorTargetSlot
+                ? midiTransformFromSlot(midiEditorTargetSlot)
+                : undefined}
+              targetLabel={midiEditorTargetLabel}
               style={menuStyle(midiLinkEditor.anchor)}
               onClose={() => setMidiLinkEditor(null)}
               onApply={(midi_transform) => {

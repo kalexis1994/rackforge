@@ -239,6 +239,13 @@ export interface SongPart {
   id: string;
   name: string;
   rack_id: string;
+  content?: SongPartGraph;
+}
+
+export interface SongPartGraph {
+  keyboard_parts?: RackKeyboardParts;
+  slots: RackSlot[];
+  graph: RackGraph;
 }
 
 export interface SongDefinition {

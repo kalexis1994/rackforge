@@ -6,6 +6,8 @@ import type {
   RackGraphPosition,
   RackMidiTransform,
   RackSlot,
+  SongPart,
+  SongPartGraph,
 } from "./types";
 import { scopedId } from "./ids";
 
@@ -145,6 +147,80 @@ export function graphFromSlots(slots: RackSlot[]): RackGraph {
     nodes,
     edges,
     labels: [],
+  };
+}
+
+export function graphFromRackReference(rackId: string): RackGraph {
+  return {
+    schema_version: RACK_GRAPH_SCHEMA_VERSION,
+    nodes: [
+      {
+        id: "input.midi",
+        kind: { kind: "midi_input", bus_id: "main" },
+        position: { x: 0, y: 0 },
+      },
+      {
+        id: "rack.01",
+        kind: { kind: "rack", rack_id: rackId },
+        position: { x: 360, y: 0 },
+      },
+      {
+        id: "output.audio.00",
+        kind: { kind: "audio_output", bus_id: "main" },
+        position: { x: 720, y: 0 },
+      },
+    ],
+    edges: [
+      {
+        id: "midi.01",
+        signal: "midi",
+        source: { node_id: "input.midi", port_id: "out" },
+        target: { node_id: "rack.01", port_id: "midi_in" },
+        midi_transform: {
+          source_channels: [],
+          note_low: 0,
+          note_high: 127,
+          transpose: 0,
+          notes_only: false,
+          velocity_input_low: 0,
+          velocity_input_high: 127,
+          velocity_output_low: 0,
+          velocity_output_high: 127,
+        },
+      },
+      {
+        id: "audio.01",
+        signal: "audio",
+        source: { node_id: "rack.01", port_id: "audio_out" },
+        target: { node_id: "output.audio.00", port_id: "in" },
+      },
+    ],
+    labels: [],
+  };
+}
+
+export function songPartAsRack(part: SongPart): RackDefinition {
+  const content = part.content ?? {
+    slots: [],
+    graph: graphFromRackReference(part.rack_id),
+  };
+  return {
+    schema_version: 1,
+    id: part.id,
+    name: part.name,
+    enabled: true,
+    keyboard_parts: content.keyboard_parts,
+    slots: content.slots,
+    graph: content.graph,
+  };
+}
+
+export function songPartGraphFromRack(rack: RackDefinition): SongPartGraph {
+  const materialized = normalizeRackGraphGeometry(rack);
+  return {
+    keyboard_parts: materialized.keyboard_parts,
+    slots: materialized.slots,
+    graph: materialized.graph!,
   };
 }
 

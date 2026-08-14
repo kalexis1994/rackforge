@@ -1,11 +1,12 @@
 # LIVE performance model
 
-RackForge separates the object that sounds from the collections used to reach
-it. `Rack` is the only directly playable object. `Song` and `Setlist` provide
-ordered navigation without copying Rack state.
+RackForge separates reusable graphs from the collections used to navigate a
+performance. A `Rack` is directly playable and reusable. A `Song Part` is an
+activatable scene with its own graph; `Song` and `Setlist` provide ordered
+navigation.
 
 ```text
-Setlist -> Song -> Part -> Rack -> node graph -> plugins / child Racks
+Setlist -> Song -> Part -> node graph -> plugins / child Racks
 ```
 
 LIVE exposes three peer entry modes:
@@ -85,10 +86,14 @@ resolved active Rack ID. Cursor-only movement remains local to the surface.
 
 ## Activation transaction
 
-Core resolves a `LiveLocation` to one Rack, verifies that its plugin graph can
-be executed by the current engine, asks the audio thread to apply it and only
-then publishes session events. A rejected Rack leaves both audio and session
-state unchanged.
+Core resolves a `LiveLocation` to a playable graph. A legacy Part resolves its
+single referenced Rack; a graph-backed Part becomes a stable synthetic root
+Rack. Core verifies that graph, asks the audio thread to apply it and only then
+publishes session events. A rejected graph leaves both audio and session state
+unchanged.
+
+The detailed Song/Part ownership, editing and migration contract is documented
+in [Song Parts and performance graphs](song-parts.md).
 
 The current engine creates one independent plugin instance per enabled Slot,
 routes MIDI to every matching instance, applies Slot level/pan, and sums the

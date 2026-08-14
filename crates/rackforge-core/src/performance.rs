@@ -297,6 +297,7 @@ fn bootstrap_library(bootstrap: PerformanceBootstrap) -> Result<PerformanceLibra
                 id: part_id.clone(),
                 name: "Main".into(),
                 rack_id,
+                content: None,
             }],
         }],
         setlists: vec![SetlistDefinition {

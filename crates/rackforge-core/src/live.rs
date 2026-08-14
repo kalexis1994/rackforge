@@ -1,5 +1,8 @@
 use crate::audio::{OpenedAudioOutput, discover_audio_devices, open_audio_output_from_inventory};
-use crate::control::{self, AudioControlCommand, RackSlotRuntimeSpec, RackSlotStateLoad};
+use crate::control::{
+    self, AudioControlCommand, MAX_EVENTS_PER_BLOCK, RackMidiStageRuntimeSpec, RackSlotRuntimeSpec,
+    RackSlotStateLoad,
+};
 use crate::live_midi_state::{
     MidiControllerState, MidiControllerStates, ReservedMidiControls, matches_midi_input_channel,
     plugin_midi_event,
@@ -8,7 +11,7 @@ use crate::midi_hotplug::{
     self, SupervisedSource, is_performance_midi_input, stable_alsa_source_id,
 };
 use crate::performance::{PerformanceBootstrap, PerformanceRepository};
-use crate::rack_graph::compile_instrument_rack;
+use crate::rack_graph::compile_instrument_definition;
 use crate::realtime::{self, XrunMonitor};
 use crate::session::SessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
@@ -26,6 +29,7 @@ use rackforge_midi_api::{
     MidiRouteTransform, MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry,
     MidiSourceSelector, MidiTargetId, PluginChannelModel,
 };
+#[cfg(test)]
 use rackforge_performance_api::RackKeyboardParts;
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{ParameterKind, PluginKind};
@@ -36,17 +40,20 @@ use rackforge_session_api::{
     SurfaceMode,
 };
 use semver::Version;
+use std::cell::UnsafeCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::{env, fs, thread};
 
-const MAX_EVENTS_PER_BLOCK: usize = 256;
 const MIDI_QUEUE_CAPACITY: usize = 2_048;
 const AUDIO_CONTROL_QUEUE_CAPACITY: usize = 64;
 const MASTER_LEVEL_SMOOTHING_FRAMES: u32 = 480;
 const VIRTUAL_MIDI_SOURCE_ID: &str = "rackforge.virtual.touch";
+const AUDIO_WORKER_PRIORITY: i32 = realtime::DEFAULT_AUDIO_PRIORITY - 1;
+const WORKER_SHUTDOWN_EPOCH: u64 = u64::MAX;
 
 struct MasterGain {
     current: f32,
@@ -122,22 +129,320 @@ struct RackSlotVoice<'plugin> {
     slot_id: String,
     plugin: &'plugin LoadedPlugin,
     instance: PluginInstance<'plugin>,
-    midi_input_channels: Vec<u8>,
-    midi_note_low: u8,
-    midi_note_high: u8,
-    midi_transpose: i8,
-    midi_target_channel: Option<u8>,
-    midi_notes_only: bool,
-    midi_velocity_input_low: u8,
-    midi_velocity_input_high: u8,
-    midi_velocity_output_low: u8,
-    midi_velocity_output_high: u8,
-    keyboard_parts: Option<RackKeyboardParts>,
+    midi_stages: Vec<RackMidiStageRuntimeSpec>,
     level: f32,
     pan: f32,
     output: Vec<f32>,
     events: Vec<MidiEventV1>,
     process_faulted: bool,
+}
+
+struct PreparedPortableRackVoices(Vec<RackSlotVoice<'static>>);
+
+// SAFETY: this wrapper is created only after checking that every voice uses
+// RackForge's portable wasm-v1 backend. Ownership then moves from the audio
+// loop to the reclaimer thread solely for destruction.
+unsafe impl Send for PreparedPortableRackVoices {}
+
+enum RetiredAudioRuntime {
+    Standalone(control::PreparedPluginInstance),
+    PortableRack(PreparedPortableRackVoices),
+}
+
+fn retire_portable_rack(
+    voices: Vec<RackSlotVoice<'static>>,
+    deferred: &mut Vec<RetiredAudioRuntime>,
+) -> Result<(), Vec<RackSlotVoice<'static>>> {
+    if voices.is_empty() {
+        return Ok(());
+    }
+    if voices
+        .iter()
+        .all(|voice| voice.plugin.manifest().portable_component().is_some())
+    {
+        deferred.push(RetiredAudioRuntime::PortableRack(
+            PreparedPortableRackVoices(voices),
+        ));
+        Ok(())
+    } else {
+        Err(voices)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RackRenderJob {
+    voices: *mut RackSlotVoice<'static>,
+    start: usize,
+    end: usize,
+    period_frames: u32,
+    channels: u32,
+}
+
+struct RackRenderWorkerShared {
+    published_epoch: AtomicU64,
+    completed_epoch: AtomicU64,
+    failure: AtomicU8,
+    job: UnsafeCell<RackRenderJob>,
+    coordinator: thread::Thread,
+}
+
+// SAFETY: the coordinator is the only writer of `job`, publishes it with a
+// Release store, and never mutates or relocates the voice slice until every
+// worker has acknowledged that epoch. Each worker receives a disjoint range.
+unsafe impl Send for RackRenderWorkerShared {}
+// SAFETY: synchronization and range ownership are the same as above; the raw
+// pointer is never dereferenced outside the published epoch.
+unsafe impl Sync for RackRenderWorkerShared {}
+
+struct RackRenderWorker {
+    shared: Arc<RackRenderWorkerShared>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+struct RackRenderPool {
+    workers: Vec<RackRenderWorker>,
+    epoch: u64,
+}
+
+fn automatic_audio_worker_capacity(available_cpus: usize) -> usize {
+    match available_cpus {
+        0 | 1 => 0,
+        // On two-core systems the coordinator sleeps while both workers run.
+        // On larger systems one core remains available for the coordinator,
+        // device IRQs and the rest of the host.
+        2 => 2,
+        count => count - 1,
+    }
+    .min(control::MAX_ACTIVE_RACK_SLOTS)
+}
+
+fn rack_render_range(
+    voice_count: usize,
+    active_workers: usize,
+    worker_index: usize,
+) -> std::ops::Range<usize> {
+    let chunk_size = voice_count.div_ceil(active_workers);
+    let start = worker_index * chunk_size;
+    start..(start + chunk_size).min(voice_count)
+}
+
+fn requested_audio_worker_capacity(available_cpus: usize) -> usize {
+    let automatic = automatic_audio_worker_capacity(available_cpus);
+    let Some(value) = env::var_os("RACKFORGE_AUDIO_WORKERS") else {
+        return automatic;
+    };
+    let Some(value) = value.to_str() else {
+        eprintln!("AUDIO_WORKERS_INVALID value=non-utf8 fallback=auto:{automatic}");
+        return automatic;
+    };
+    match value.parse::<usize>() {
+        Ok(requested) => requested.min(control::MAX_ACTIVE_RACK_SLOTS),
+        Err(_) => {
+            eprintln!("AUDIO_WORKERS_INVALID value={value:?} fallback=auto:{automatic}");
+            automatic
+        }
+    }
+}
+
+impl RackRenderPool {
+    fn automatic() -> Self {
+        let available_cpus = thread::available_parallelism().map_or(1, |count| count.get());
+        let requested_workers = requested_audio_worker_capacity(available_cpus);
+        let coordinator = thread::current();
+        let mut workers = Vec::with_capacity(requested_workers);
+        for index in 0..requested_workers {
+            let shared = Arc::new(RackRenderWorkerShared {
+                published_epoch: AtomicU64::new(0),
+                completed_epoch: AtomicU64::new(0),
+                failure: AtomicU8::new(0),
+                job: UnsafeCell::new(RackRenderJob {
+                    voices: std::ptr::null_mut(),
+                    start: 0,
+                    end: 0,
+                    period_frames: 0,
+                    channels: 0,
+                }),
+                coordinator: coordinator.clone(),
+            });
+            let worker_shared = Arc::clone(&shared);
+            let handle = match thread::Builder::new()
+                .name(format!("rackforge-audio-worker-{index}"))
+                .spawn(move || rack_render_worker(index, worker_shared))
+            {
+                Ok(handle) => handle,
+                Err(error) => {
+                    eprintln!(
+                        "AUDIO_WORKER_SPAWN_FAILED index={index} error={error} \
+                         active_workers={}",
+                        workers.len()
+                    );
+                    break;
+                }
+            };
+            workers.push(RackRenderWorker {
+                shared,
+                handle: Some(handle),
+            });
+        }
+        println!(
+            "AUDIO_PARALLEL_READY mode={} detected_cpus={available_cpus} workers={}",
+            if env::var_os("RACKFORGE_AUDIO_WORKERS").is_some() {
+                "manual"
+            } else {
+                "auto"
+            },
+            workers.len()
+        );
+        Self { workers, epoch: 0 }
+    }
+
+    /// Processes independent leaf instruments in parallel. Returns `false`
+    /// when serial execution is cheaper or is the only safe option.
+    fn process(
+        &mut self,
+        voices: &mut [RackSlotVoice<'static>],
+        period_frames: u32,
+        channels: u32,
+    ) -> bool {
+        let active_workers = voices.len().min(self.workers.len());
+        if active_workers < 2 {
+            return false;
+        }
+        self.epoch = self.epoch.wrapping_add(1);
+        if self.epoch == 0 || self.epoch == WORKER_SHUTDOWN_EPOCH {
+            self.epoch = 1;
+        }
+        let epoch = self.epoch;
+        let voices_ptr = voices.as_mut_ptr();
+
+        for (index, worker) in self.workers.iter().take(active_workers).enumerate() {
+            let range = rack_render_range(voices.len(), active_workers, index);
+            // SAFETY: this worker completed the previous epoch before this
+            // method returned. The job is fully written before publication.
+            unsafe {
+                *worker.shared.job.get() = RackRenderJob {
+                    voices: voices_ptr,
+                    start: range.start,
+                    end: range.end,
+                    period_frames,
+                    channels,
+                };
+            }
+            worker.shared.failure.store(0, Ordering::Relaxed);
+            worker
+                .shared
+                .published_epoch
+                .store(epoch, Ordering::Release);
+            if let Some(handle) = &worker.handle {
+                handle.thread().unpark();
+            }
+        }
+
+        while self
+            .workers
+            .iter()
+            .take(active_workers)
+            .any(|worker| worker.shared.completed_epoch.load(Ordering::Acquire) != epoch)
+        {
+            thread::park();
+        }
+
+        for worker in self.workers.iter().take(active_workers) {
+            if worker.shared.failure.load(Ordering::Acquire) == 0 {
+                continue;
+            }
+            // SAFETY: every worker has completed the epoch, so the coordinator
+            // exclusively owns the voice slice again.
+            let job = unsafe { *worker.shared.job.get() };
+            for voice in &mut voices[job.start..job.end] {
+                voice.output.fill(0.0);
+                voice.process_faulted = true;
+            }
+            eprintln!(
+                "AUDIO_WORKER_PANIC range={}..{} action=quarantine",
+                job.start, job.end
+            );
+        }
+        true
+    }
+}
+
+impl Drop for RackRenderPool {
+    fn drop(&mut self) {
+        for worker in &self.workers {
+            worker
+                .shared
+                .published_epoch
+                .store(WORKER_SHUTDOWN_EPOCH, Ordering::Release);
+            if let Some(handle) = &worker.handle {
+                handle.thread().unpark();
+            }
+        }
+        for worker in &mut self.workers {
+            if let Some(handle) = worker.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+}
+
+fn rack_render_worker(index: usize, shared: Arc<RackRenderWorkerShared>) {
+    let realtime_status = realtime::engage(AUDIO_WORKER_PRIORITY);
+    println!("AUDIO_WORKER_READY index={index} {realtime_status}");
+    let mut observed_epoch = 0;
+    loop {
+        let epoch = shared.published_epoch.load(Ordering::Acquire);
+        if epoch == observed_epoch {
+            thread::park();
+            continue;
+        }
+        if epoch == WORKER_SHUTDOWN_EPOCH {
+            return;
+        }
+        // SAFETY: the Release/Acquire epoch handoff publishes a complete job,
+        // and the coordinator guarantees non-overlapping voice ranges.
+        let job = unsafe { *shared.job.get() };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // SAFETY: `job.voices` points to the stable coordinator-owned
+            // slice for this epoch. Only this worker touches start..end.
+            let voices = unsafe {
+                std::slice::from_raw_parts_mut(job.voices.add(job.start), job.end - job.start)
+            };
+            for voice in voices {
+                process_rack_voice(voice, job.period_frames, job.channels);
+            }
+        }));
+        if result.is_err() {
+            shared.failure.store(1, Ordering::Release);
+        }
+        observed_epoch = epoch;
+        shared.completed_epoch.store(epoch, Ordering::Release);
+        shared.coordinator.unpark();
+    }
+}
+
+fn process_rack_voice(voice: &mut RackSlotVoice<'_>, period_frames: u32, channels: u32) {
+    voice.output.fill(0.0);
+    if voice.process_faulted {
+        return;
+    }
+    let process_result = voice.instance.process_interleaved(
+        &[],
+        &mut voice.output,
+        period_frames,
+        0,
+        channels,
+        &voice.events,
+        &[],
+    );
+    if let Err(error) = process_result {
+        voice.output.fill(0.0);
+        voice.process_faulted = true;
+        eprintln!(
+            "PLUGIN_PROCESS_QUARANTINED context=rack-slot:{} action=silence error={error}",
+            voice.slot_id
+        );
+    }
 }
 
 struct StandaloneVoice<'plugin> {
@@ -180,17 +485,7 @@ fn create_rack_voices<'plugin>(
             slot_id: spec.slot_id.clone(),
             plugin,
             instance,
-            midi_input_channels: spec.midi_input_channels.clone(),
-            midi_note_low: spec.midi_note_low,
-            midi_note_high: spec.midi_note_high,
-            midi_transpose: spec.midi_transpose,
-            midi_target_channel: spec.midi_target_channel,
-            midi_notes_only: spec.midi_notes_only,
-            midi_velocity_input_low: spec.midi_velocity_input_low,
-            midi_velocity_input_high: spec.midi_velocity_input_high,
-            midi_velocity_output_low: spec.midi_velocity_output_low,
-            midi_velocity_output_high: spec.midi_velocity_output_high,
-            keyboard_parts: spec.keyboard_parts,
+            midi_stages: spec.midi_stages.clone(),
             level: f32::from(spec.level_per_mille) / 1_000.0,
             pan: f32::from(spec.pan_per_mille) / 1_000.0,
             output: vec![0.0; period_frames as usize * channels as usize],
@@ -199,6 +494,25 @@ fn create_rack_voices<'plugin>(
         });
     }
     Ok(voices)
+}
+
+fn rack_voices_from_prepared(
+    prepared: Vec<control::PreparedRackSlot>,
+) -> Vec<RackSlotVoice<'static>> {
+    prepared
+        .into_iter()
+        .map(|prepared| RackSlotVoice {
+            slot_id: prepared.slot_id,
+            plugin: prepared.plugin,
+            instance: prepared.instance.0,
+            midi_stages: prepared.midi_stages,
+            level: f32::from(prepared.level_per_mille) / 1_000.0,
+            pan: f32::from(prepared.pan_per_mille) / 1_000.0,
+            output: prepared.output,
+            events: prepared.events,
+            process_faulted: false,
+        })
+        .collect()
 }
 
 impl MasterBalance {
@@ -601,12 +915,13 @@ pub fn run(config: LiveConfig) -> Result<()> {
         live_state.deactivate();
     }
     let mut initial_rack_specs = Vec::new();
-    if let Some(rack) = live_state
-        .active
-        .as_ref()
-        .and_then(|location| performance_repository.library().resolve(location).ok())
-    {
-        let compiled_slots = compile_instrument_rack(&performance_library, &rack.id)?;
+    if let Some(rack) = live_state.active.as_ref().and_then(|location| {
+        performance_repository
+            .library()
+            .resolve_playable(location)
+            .ok()
+    }) {
+        let compiled_slots = compile_instrument_definition(&performance_library, &rack)?;
         if compiled_slots.len() > control::MAX_ACTIVE_RACK_SLOTS {
             bail!(
                 "initial Rack {} compiles to {} Slots; this engine supports at most {}",
@@ -628,17 +943,14 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 slot_id: compiled.runtime_slot_id,
                 plugin_id: slot.plugin_id.clone(),
                 state,
-                midi_input_channels: compiled.midi_transform.source_channels,
-                midi_note_low: compiled.midi_transform.note_low,
-                midi_note_high: compiled.midi_transform.note_high,
-                midi_transpose: compiled.midi_transform.transpose,
-                midi_target_channel: compiled.midi_transform.target_channel,
-                midi_notes_only: compiled.midi_transform.notes_only,
-                midi_velocity_input_low: compiled.midi_transform.velocity_input_low,
-                midi_velocity_input_high: compiled.midi_transform.velocity_input_high,
-                midi_velocity_output_low: compiled.midi_transform.velocity_output_low,
-                midi_velocity_output_high: compiled.midi_transform.velocity_output_high,
-                keyboard_parts: compiled.keyboard_parts,
+                midi_stages: compiled
+                    .midi_stages
+                    .iter()
+                    .map(|stage| RackMidiStageRuntimeSpec {
+                        transform: stage.transform.clone(),
+                        keyboard_parts: stage.keyboard_parts,
+                    })
+                    .collect(),
                 level_per_mille: slot.level_per_mille,
                 pan_per_mille: slot.pan_per_mille,
             });
@@ -979,10 +1291,17 @@ fn audio_loop(
     let mut master_balance = MasterBalance::new(initial_master_pan);
     let mut reserved_midi_controls = ReservedMidiControls::with_sources(midi_source_count);
     let mut pending_virtual_midi = Vec::with_capacity(32);
-    let (retired_sender, retired_receiver) = mpsc::sync_channel(16);
+    let (retired_sender, retired_receiver) = mpsc::sync_channel::<RetiredAudioRuntime>(16);
     let _retired_reclaimer = thread::Builder::new()
         .name("rackforge-live-voice-reclaimer".into())
-        .spawn(move || while retired_receiver.recv().is_ok() {})?;
+        .spawn(move || {
+            while let Ok(retired) = retired_receiver.recv() {
+                match retired {
+                    RetiredAudioRuntime::Standalone(instance) => drop(instance),
+                    RetiredAudioRuntime::PortableRack(voices) => drop(voices.0),
+                }
+            }
+        })?;
     let mut deferred_retire = Vec::with_capacity(16);
 
     // Engaged here, not during setup: `SCHED_FIFO` is a per-thread property and
@@ -993,6 +1312,7 @@ fn audio_loop(
     if let Some(remedy) = realtime_status.remedy() {
         eprintln!("REALTIME_REMEDY {remedy}");
     }
+    let mut rack_renderer = RackRenderPool::automatic();
     let mut xruns = XrunMonitor::new(output_rate as u32, period_frames);
 
     loop {
@@ -1077,16 +1397,20 @@ fn audio_loop(
                     if mode != SurfaceMode::Live && !rack_voices.is_empty() {
                         let released = rack_voices.len();
                         events.clear();
-                        for voice in &mut rack_voices {
-                            voice.events.clear();
-                            if let Err(error) = voice.instance.reset() {
-                                eprintln!(
-                                    "LIVE_RACK_RELEASE_RESET_FAILED slot={} error={error:#}",
-                                    voice.slot_id
-                                );
+                        let retired = std::mem::take(&mut rack_voices);
+                        if let Err(mut native_voices) =
+                            retire_portable_rack(retired, &mut deferred_retire)
+                        {
+                            for voice in &mut native_voices {
+                                voice.events.clear();
+                                if let Err(error) = voice.instance.reset() {
+                                    eprintln!(
+                                        "LIVE_RACK_RELEASE_RESET_FAILED slot={} error={error:#}",
+                                        voice.slot_id
+                                    );
+                                }
                             }
                         }
-                        rack_voices.clear();
                         println!("LIVE_RACK_RELEASED reason=surface-mode-change voices={released}");
                     }
                     let requested_mode = resolve_render_mode(mode, rack_voices.len());
@@ -1306,7 +1630,9 @@ fn audio_loop(
                     let result =
                         standalone_voice_mut(standalone_voices, &instance_id).map(|voice| {
                             let retired = std::mem::replace(&mut voice.instance, instance.0);
-                            deferred_retire.push(control::PreparedPluginInstance(retired));
+                            deferred_retire.push(RetiredAudioRuntime::Standalone(
+                                control::PreparedPluginInstance(retired),
+                            ));
                         });
                     let _ = reply.send(result);
                 }
@@ -1314,17 +1640,29 @@ fn audio_loop(
                     rack_id,
                     instance_id,
                     slots,
+                    prepared_slots,
                     reply,
                 } => {
-                    let result = create_rack_voices(
-                        plugins,
-                        &slots,
-                        output_rate as u32,
-                        period_frames as u32,
-                        channels as u32,
-                    )
+                    let result = match prepared_slots {
+                        Some(prepared) => Ok(rack_voices_from_prepared(prepared)),
+                        None => create_rack_voices(
+                            plugins,
+                            &slots,
+                            output_rate as u32,
+                            period_frames as u32,
+                            channels as u32,
+                        ),
+                    }
                     .map(|voices| {
-                        rack_voices = voices;
+                        let retired = std::mem::replace(&mut rack_voices, voices);
+                        if let Err(native_voices) =
+                            retire_portable_rack(retired, &mut deferred_retire)
+                        {
+                            // Native ABI instances do not yet promise safe
+                            // cross-thread destruction, so retain the previous
+                            // behavior for that compatibility path.
+                            drop(native_voices);
+                        }
                         render_mode = AudioRenderMode::Rack;
                         println!(
                             "LIVE_RACK_ACTIVATED rack={rack_id} instance={instance_id} slots={}",
@@ -1597,19 +1935,9 @@ fn audio_loop(
                 }
                 AudioRenderMode::Rack => {
                     for voice in &mut rack_voices {
-                        if let Some(routed) = route_rack_event_transformed(
+                        if let Some(routed) = route_rack_event_through_stages(
                             event,
-                            &voice.midi_input_channels,
-                            voice.midi_note_low,
-                            voice.midi_note_high,
-                            voice.midi_transpose,
-                            voice.midi_target_channel,
-                            voice.midi_notes_only,
-                            voice.midi_velocity_input_low,
-                            voice.midi_velocity_input_high,
-                            voice.midi_velocity_output_low,
-                            voice.midi_velocity_output_high,
-                            voice.keyboard_parts,
+                            &voice.midi_stages,
                             virtual_play_route,
                         ) {
                             if voice.events.len() < MAX_EVENTS_PER_BLOCK {
@@ -1641,21 +1969,9 @@ fn audio_loop(
                 }
                 AudioRenderMode::Rack => {
                     for voice in &mut rack_voices {
-                        if let Some(routed) = route_rack_event_transformed(
-                            event,
-                            &voice.midi_input_channels,
-                            voice.midi_note_low,
-                            voice.midi_note_high,
-                            voice.midi_transpose,
-                            voice.midi_target_channel,
-                            voice.midi_notes_only,
-                            voice.midi_velocity_input_low,
-                            voice.midi_velocity_input_high,
-                            voice.midi_velocity_output_low,
-                            voice.midi_velocity_output_high,
-                            voice.keyboard_parts,
-                            play_route,
-                        ) {
+                        if let Some(routed) =
+                            route_rack_event_through_stages(event, &voice.midi_stages, play_route)
+                        {
                             if voice.events.len() < MAX_EVENTS_PER_BLOCK {
                                 voice.events.push(routed);
                             } else {
@@ -1695,26 +2011,13 @@ fn audio_loop(
                 }
             }
             AudioRenderMode::Rack => {
-                for voice in &mut rack_voices {
-                    voice.output.fill(0.0);
-                    if voice.process_faulted {
-                        continue;
+                if !rack_renderer.process(&mut rack_voices, period_frames as u32, channels as u32) {
+                    for voice in &mut rack_voices {
+                        process_rack_voice(voice, period_frames as u32, channels as u32);
                     }
-                    let process_result = voice.instance.process_interleaved(
-                        &input,
-                        &mut voice.output,
-                        period_frames as u32,
-                        0,
-                        channels as u32,
-                        &voice.events,
-                        &[],
-                    );
-                    if quarantine_failed_process(
-                        process_result,
-                        &mut voice.output,
-                        &format!("rack-slot:{}", voice.slot_id),
-                    ) {
-                        voice.process_faulted = true;
+                }
+                for voice in &rack_voices {
+                    if voice.process_faulted {
                         continue;
                     }
                     mix_rack_slot(
@@ -2044,6 +2347,7 @@ fn reconfigure_audio_output(
     }
 }
 
+#[cfg(test)]
 fn route_rack_event_transformed(
     event: IngressMidiEvent,
     midi_input_channels: &[u8],
@@ -2059,62 +2363,106 @@ fn route_rack_event_transformed(
     keyboard_parts: Option<RackKeyboardParts>,
     play_route: &CompiledMidiRoute,
 ) -> Option<MidiEventV1> {
-    let status = event.packet.data[0] & 0xf0;
-    if midi_notes_only && !matches!(status, 0x80 | 0x90) {
-        return None;
-    }
-    let keyed_message = matches!(status, 0x80 | 0x90 | 0xa0) && event.packet.length >= 2;
-    let part_transpose = if let Some(parts) = keyboard_parts {
-        let part = if keyed_message {
-            let note = event.packet.data[1];
-            match parts.split_key {
-                Some(split) if note >= split => parts.part_2,
-                _ => parts.part_1,
-            }
-        } else if parts.split_key.is_some()
-            && midi_input_channels.contains(&parts.part_2.midi_channel)
-        {
-            parts.part_2
-        } else {
-            parts.part_1
-        };
-        if !midi_input_channels.is_empty() && !midi_input_channels.contains(&part.midi_channel) {
-            return None;
-        }
-        part.transpose
-    } else {
-        let source_channel = (event.packet.data[0] & 0x0f) + 1;
-        if !midi_input_channels.is_empty() && !midi_input_channels.contains(&source_channel) {
-            return None;
-        }
-        0
+    let stage = RackMidiStageRuntimeSpec {
+        transform: rackforge_performance_api::RackMidiTransform {
+            source_channels: midi_input_channels.to_vec(),
+            target_channel: midi_target_channel,
+            note_low: midi_note_low,
+            note_high: midi_note_high,
+            transpose: midi_transpose,
+            notes_only: midi_notes_only,
+            velocity_input_low: midi_velocity_input_low,
+            velocity_input_high: midi_velocity_input_high,
+            velocity_output_low: midi_velocity_output_low,
+            velocity_output_high: midi_velocity_output_high,
+        },
+        keyboard_parts,
     };
-    if keyed_message {
-        let note = event.packet.data[1];
-        if !(midi_note_low..=midi_note_high).contains(&note) {
+    route_rack_event_through_stages(event, std::slice::from_ref(&stage), play_route)
+}
+
+/// Applies graph MIDI cables in their actual nesting order. The first stage
+/// sees the physical/controller event, then each child Rack receives the
+/// packet produced by its parent. No allocation or transform approximation is
+/// performed on the realtime path.
+fn route_rack_event_through_stages(
+    event: IngressMidiEvent,
+    stages: &[RackMidiStageRuntimeSpec],
+    play_route: &CompiledMidiRoute,
+) -> Option<MidiEventV1> {
+    if stages.is_empty() {
+        return play_route
+            .route(event)
+            .map(|routed| plugin_midi_event(routed.packet));
+    }
+
+    let mut packet = event.packet;
+    for (index, stage) in stages.iter().enumerate() {
+        let transform = &stage.transform;
+        let status = packet.data[0] & 0xf0;
+        if transform.notes_only && !matches!(status, 0x80 | 0x90) {
             return None;
         }
-    }
-    let mut packet = play_route.route(event)?.packet;
-    if keyed_message {
-        let transposed =
-            i16::from(packet.data[1]) + i16::from(part_transpose) + i16::from(midi_transpose);
-        if !(0..=127).contains(&transposed) {
+        let keyed_message = matches!(status, 0x80 | 0x90 | 0xa0) && packet.length >= 2;
+        let part_transpose = if let Some(parts) = stage.keyboard_parts {
+            let part = if keyed_message {
+                let note = packet.data[1];
+                match parts.split_key {
+                    Some(split) if note >= split => parts.part_2,
+                    _ => parts.part_1,
+                }
+            } else if parts.split_key.is_some()
+                && transform
+                    .source_channels
+                    .contains(&parts.part_2.midi_channel)
+            {
+                parts.part_2
+            } else {
+                parts.part_1
+            };
+            if !transform.source_channels.is_empty()
+                && !transform.source_channels.contains(&part.midi_channel)
+            {
+                return None;
+            }
+            part.transpose
+        } else {
+            let source_channel = (packet.data[0] & 0x0f) + 1;
+            if !transform.source_channels.is_empty()
+                && !transform.source_channels.contains(&source_channel)
+            {
+                return None;
+            }
+            0
+        };
+        if keyed_message && !(transform.note_low..=transform.note_high).contains(&packet.data[1]) {
             return None;
         }
-        packet.data[1] = transposed as u8;
-    }
-    if status == 0x90 && packet.length >= 3 && packet.data[2] > 0 {
-        packet.data[2] = map_midi_velocity(
-            packet.data[2],
-            midi_velocity_input_low,
-            midi_velocity_input_high,
-            midi_velocity_output_low,
-            midi_velocity_output_high,
-        );
-    }
-    if let Some(channel) = midi_target_channel {
-        if matches!(status, 0x80..=0xe0) {
+
+        if index == 0 {
+            packet = play_route.route(event)?.packet;
+        }
+        if keyed_message {
+            let transposed = i16::from(packet.data[1])
+                + i16::from(part_transpose)
+                + i16::from(transform.transpose);
+            if !(0..=127).contains(&transposed) {
+                return None;
+            }
+            packet.data[1] = transposed as u8;
+        }
+        if status == 0x90 && packet.length >= 3 && packet.data[2] > 0 {
+            packet.data[2] = map_midi_velocity(
+                packet.data[2],
+                transform.velocity_input_low,
+                transform.velocity_input_high,
+                transform.velocity_output_low,
+                transform.velocity_output_high,
+            );
+        }
+        if let Some(channel) = transform.target_channel
+            && matches!(status, 0x80..=0xe0)
+        {
             packet.data[0] = (packet.data[0] & 0xf0) | (channel - 1);
         }
     }
@@ -2126,11 +2474,20 @@ fn replay_rack_controller_state(
     play_route: &CompiledMidiRoute,
     voice: &mut RackSlotVoice<'_>,
 ) -> usize {
-    if voice.midi_notes_only {
+    if voice
+        .midi_stages
+        .iter()
+        .any(|stage| stage.transform.notes_only)
+    {
         return 0;
     }
+    let first_channels = voice
+        .midi_stages
+        .first()
+        .map(|stage| stage.transform.source_channels.as_slice())
+        .unwrap_or_default();
     let initial_len = voice.events.len();
-    let omitted = if voice.midi_input_channels.is_empty() {
+    let omitted = if first_channels.is_empty() {
         controller_states.replay_routed_into(
             play_route,
             None,
@@ -2138,8 +2495,7 @@ fn replay_rack_controller_state(
             MAX_EVENTS_PER_BLOCK,
         )
     } else {
-        voice
-            .midi_input_channels
+        first_channels
             .iter()
             .map(|channel| {
                 controller_states.replay_routed_into(
@@ -2151,13 +2507,38 @@ fn replay_rack_controller_state(
             })
             .sum()
     };
-    if let Some(channel) = voice.midi_target_channel {
-        for event in &mut voice.events[initial_len..] {
-            if matches!(event.data[0] & 0xf0, 0x80..=0xe0) {
+
+    // The controller-state store replays through the global route first.
+    // Compact the appended tail in place while applying the same parent →
+    // child channel chain used for live events. Intentional filtering is not
+    // counted as a realtime-capacity omission.
+    let mut write = initial_len;
+    for read in initial_len..voice.events.len() {
+        let mut event = voice.events[read];
+        let mut accepted = true;
+        for (index, stage) in voice.midi_stages.iter().enumerate() {
+            let transform = &stage.transform;
+            if index > 0 {
+                let channel = (event.data[0] & 0x0f) + 1;
+                if !transform.source_channels.is_empty()
+                    && !transform.source_channels.contains(&channel)
+                {
+                    accepted = false;
+                    break;
+                }
+            }
+            if let Some(channel) = transform.target_channel
+                && matches!(event.data[0] & 0xf0, 0x80..=0xe0)
+            {
                 event.data[0] = (event.data[0] & 0xf0) | (channel - 1);
             }
         }
+        if accepted {
+            voice.events[write] = event;
+            write += 1;
+        }
     }
+    voice.events.truncate(write);
     omitted
 }
 
@@ -2246,7 +2627,7 @@ fn write_period(
 mod tests {
     use super::*;
     use rackforge_midi_api::MidiSourceId;
-    use rackforge_performance_api::RackKeyboardPart;
+    use rackforge_performance_api::{RackKeyboardPart, RackMidiTransform};
     use rackforge_session_api::{
         HostActionBinding, HostActionTarget, HostControlTarget, MidiButtonBinding,
         MidiControlChangeBinding,
@@ -2257,6 +2638,32 @@ mod tests {
             frame: 0,
             length,
             data,
+        }
+    }
+
+    #[test]
+    fn automatic_audio_workers_scale_with_cpu_capacity() {
+        assert_eq!(automatic_audio_worker_capacity(1), 0);
+        assert_eq!(automatic_audio_worker_capacity(2), 2);
+        assert_eq!(automatic_audio_worker_capacity(4), 3);
+        assert_eq!(
+            automatic_audio_worker_capacity(64),
+            control::MAX_ACTIVE_RACK_SLOTS
+        );
+    }
+
+    #[test]
+    fn rack_render_ranges_cover_every_voice_once() {
+        for voice_count in 2..=control::MAX_ACTIVE_RACK_SLOTS {
+            for worker_count in 2..=voice_count {
+                let mut covered = vec![0_u8; voice_count];
+                for worker in 0..worker_count {
+                    for voice in rack_render_range(voice_count, worker_count, worker) {
+                        covered[voice] += 1;
+                    }
+                }
+                assert!(covered.into_iter().all(|visits| visits == 1));
+            }
         }
     }
 
@@ -2523,6 +2930,64 @@ mod tests {
                 &route,
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn nested_rack_midi_connections_run_in_parent_to_child_order() {
+        let mut sources = MidiSourceRegistry::default();
+        sources
+            .register(
+                MidiSourceKey::new(0),
+                MidiSourceDescriptor {
+                    id: MidiSourceId::new("controller.primary").unwrap(),
+                    name: "Primary".into(),
+                    primary: true,
+                },
+            )
+            .unwrap();
+        let route = compile_default_play_route(&sources, PluginChannelModel::SinglePart).unwrap();
+        let event = |message: &[u8]| IngressMidiEvent {
+            source: MidiSourceKey::new(0),
+            packet: MidiPacket::new(0, message).unwrap(),
+        };
+        let stages = [
+            RackMidiStageRuntimeSpec {
+                transform: RackMidiTransform {
+                    source_channels: vec![4],
+                    target_channel: Some(7),
+                    note_low: 36,
+                    note_high: 72,
+                    transpose: 12,
+                    ..RackMidiTransform::default()
+                },
+                keyboard_parts: None,
+            },
+            RackMidiStageRuntimeSpec {
+                transform: RackMidiTransform {
+                    source_channels: vec![7],
+                    target_channel: Some(9),
+                    note_low: 60,
+                    note_high: 84,
+                    transpose: -12,
+                    ..RackMidiTransform::default()
+                },
+                keyboard_parts: None,
+            },
+        ];
+
+        let routed = route_rack_event_through_stages(event(&[0x93, 48, 100]), &stages, &route)
+            .expect("the child Rack should receive the parent-mapped event");
+        assert_eq!(routed.data, [0x98, 48, 100]);
+        assert!(
+            route_rack_event_through_stages(event(&[0x92, 48, 100]), &stages, &route).is_none()
+        );
+
+        let mut rejecting_child = stages.clone();
+        rejecting_child[1].transform.source_channels = vec![8];
+        assert!(
+            route_rack_event_through_stages(event(&[0x93, 48, 100]), &rejecting_child, &route,)
+                .is_none()
         );
     }
 

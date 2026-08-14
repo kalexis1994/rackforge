@@ -1,6 +1,6 @@
 use crate::PluginStorage;
 use crate::performance::PerformanceRepository;
-use crate::rack_graph::compile_instrument_rack;
+use crate::rack_graph::{CompiledRackSlot, compile_instrument_definition, compile_instrument_rack};
 use crate::session::SharedSessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
 use crate::{LoadedPlugin, PluginInstance, PluginStateStore};
@@ -15,8 +15,9 @@ use rackforge_midi_api::MidiPacket;
 use rackforge_performance_api::PerformanceLibrary;
 use rackforge_performance_api::{
     LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
-    RackDefinition, RackId, RackKeyboardParts,
+    RackDefinition, RackId, RackKeyboardParts, RackMidiTransform,
 };
+use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{
     Capability, ParameterSchema, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
     ProgramEditRequest, ProgramEditorView, ProgramFieldEditRequest, ResourceKind,
@@ -44,6 +45,7 @@ const AUDIO_RECONFIGURE_TIMEOUT: Duration = Duration::from_secs(8);
 const AUDITION_LEASE_TIMEOUT: Duration = Duration::from_secs(15);
 const AUDITION_WATCHDOG_PERIOD: Duration = Duration::from_millis(250);
 pub const MAX_ACTIVE_RACK_SLOTS: usize = 8;
+pub const MAX_EVENTS_PER_BLOCK: usize = 256;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RackSlotStateLoad {
@@ -53,21 +55,17 @@ pub enum RackSlotStateLoad {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RackMidiStageRuntimeSpec {
+    pub transform: RackMidiTransform,
+    pub keyboard_parts: Option<RackKeyboardParts>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RackSlotRuntimeSpec {
     pub slot_id: String,
     pub plugin_id: String,
     pub state: RackSlotStateLoad,
-    pub midi_input_channels: Vec<u8>,
-    pub midi_note_low: u8,
-    pub midi_note_high: u8,
-    pub midi_transpose: i8,
-    pub midi_target_channel: Option<u8>,
-    pub midi_notes_only: bool,
-    pub midi_velocity_input_low: u8,
-    pub midi_velocity_input_high: u8,
-    pub midi_velocity_output_low: u8,
-    pub midi_velocity_output_high: u8,
-    pub keyboard_parts: Option<RackKeyboardParts>,
+    pub midi_stages: Vec<RackMidiStageRuntimeSpec>,
     pub level_per_mille: u16,
     pub pan_per_mille: i16,
 }
@@ -119,6 +117,7 @@ pub enum AudioControlCommand {
         rack_id: String,
         instance_id: InstanceId,
         slots: Vec<RackSlotRuntimeSpec>,
+        prepared_slots: Option<Vec<PreparedRackSlot>>,
         reply: SyncSender<Result<(), String>>,
     },
     BeginAudition {
@@ -196,6 +195,22 @@ pub struct PreparedPluginInstance(pub PluginInstance<'static>);
 // SAFETY: this wrapper is constructed only for a portable wasm-v1 instance.
 // Ownership moves from the control worker to the single audio loop.
 unsafe impl Send for PreparedPluginInstance {}
+
+pub struct PreparedRackSlot {
+    pub slot_id: String,
+    pub midi_stages: Vec<RackMidiStageRuntimeSpec>,
+    pub level_per_mille: u16,
+    pub pan_per_mille: i16,
+    pub plugin: &'static LoadedPlugin,
+    pub instance: PreparedPluginInstance,
+    pub output: Vec<f32>,
+    pub events: Vec<MidiEventV1>,
+}
+
+// SAFETY: `PreparedRackSlot` is produced only from `PortableControlPlugin`,
+// which admits RackForge's immutable wasm-v1 backend. The instance has not
+// been published anywhere else and ownership moves once to the audio loop.
+unsafe impl Send for PreparedRackSlot {}
 
 #[derive(Clone, Copy)]
 pub struct PortableControlPlugin(&'static LoadedPlugin);
@@ -1887,9 +1902,9 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     Some(snapshot.revision),
                 );
             }
-            let (library, rack_id) = match context.performance_repository.lock() {
-                Ok(repository) => match repository.library().resolve(&location) {
-                    Ok(rack) if rack.enabled => (repository.library().clone(), rack.id.clone()),
+            let (library, rack) = match context.performance_repository.lock() {
+                Ok(repository) => match repository.library().resolve_playable(&location) {
+                    Ok(rack) if rack.enabled => (repository.library().clone(), rack),
                     Ok(_) => {
                         return error_response(
                             ControlErrorCode::Rejected,
@@ -1912,11 +1927,26 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     );
                 }
             };
-            let (instance_id, slots) =
-                match prepare_rack_runtime(&snapshot, &library, &rack_id, &context.state_store) {
-                    Ok(runtime) => runtime,
+            let rack_id = rack.id.clone();
+            let (instance_id, slots) = match prepare_rack_definition_runtime(
+                &snapshot,
+                &library,
+                &rack,
+                &context.state_store,
+            ) {
+                Ok(runtime) => runtime,
+                Err(failure) => return failure.into_response(),
+            };
+            let prepared_slots =
+                match prepare_portable_rack_slots(context, snapshot.revision, &slots) {
+                    Ok(prepared) => prepared,
                     Err(failure) => return failure.into_response(),
                 };
+            let slots = if prepared_slots.is_some() {
+                Vec::new()
+            } else {
+                slots
+            };
             let (reply_sender, reply_receiver) = sync_channel(1);
             if let Err(failure) = send_audio(
                 context,
@@ -1924,6 +1954,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     rack_id: rack_id.as_str().to_owned(),
                     instance_id: instance_id.clone(),
                     slots,
+                    prepared_slots,
                     reply: reply_sender,
                 },
             ) {
@@ -2008,6 +2039,16 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 }
             };
             let rack_id = rack.id.as_str().to_owned();
+            let prepared_slots =
+                match prepare_portable_rack_slots(context, snapshot.revision, &slots) {
+                    Ok(prepared) => prepared,
+                    Err(failure) => return failure.into_response(),
+                };
+            let slots = if prepared_slots.is_some() {
+                Vec::new()
+            } else {
+                slots
+            };
             let (reply_sender, reply_receiver) = sync_channel(1);
             if let Err(failure) = send_audio(
                 context,
@@ -2015,6 +2056,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     rack_id,
                     instance_id,
                     slots,
+                    prepared_slots,
                     reply: reply_sender,
                 },
             ) {
@@ -2882,6 +2924,122 @@ fn prepare_rack_runtime(
             Some(snapshot.revision),
         )
     })?;
+    prepare_compiled_rack_runtime(snapshot, rack_id.as_str(), compiled_slots, state_store)
+}
+
+fn prepare_portable_rack_slots(
+    context: &ControlContext,
+    revision: Revision,
+    specs: &[RackSlotRuntimeSpec],
+) -> Result<Option<Vec<PreparedRackSlot>>, ControlFailure> {
+    if specs
+        .iter()
+        .any(|spec| !context.portable_plugins.contains_key(&spec.plugin_id))
+    {
+        // Native plugin instances may have thread-affinity requirements. Keep
+        // their existing audio-thread construction path until the native ABI
+        // explicitly guarantees transferable instances.
+        return Ok(None);
+    }
+
+    let mut prepared = Vec::with_capacity(specs.len());
+    let mut warmup_output = vec![
+        0.0_f32;
+        context.plugin_maximum_frames as usize
+            * context.plugin_output_channels as usize
+    ];
+    for spec in specs {
+        let plugin = context.portable_plugins[&spec.plugin_id].0;
+        let mut instance = plugin.create_instance().map_err(|error| {
+            control_failure(
+                ControlErrorCode::Internal,
+                format!("preparing Rack Slot {}: {error:#}", spec.slot_id),
+                Some(revision),
+            )
+        })?;
+        match &spec.state {
+            RackSlotStateLoad::Default => {}
+            RackSlotStateLoad::Opaque(bytes) => instance.load_state(bytes).map_err(|error| {
+                control_failure(
+                    ControlErrorCode::Rejected,
+                    format!("restoring Rack Slot {} state: {error:#}", spec.slot_id),
+                    Some(revision),
+                )
+            })?,
+            RackSlotStateLoad::LegacyPreset(preset_id) => {
+                instance.load_preset(preset_id).map_err(|error| {
+                    control_failure(
+                        ControlErrorCode::Rejected,
+                        format!(
+                            "loading legacy program {preset_id:?} for Rack Slot {}: {error:#}",
+                            spec.slot_id
+                        ),
+                        Some(revision),
+                    )
+                })?;
+            }
+        }
+        instance
+            .activate(
+                context.plugin_sample_rate,
+                context.plugin_maximum_frames,
+                0,
+                context.plugin_output_channels,
+            )
+            .map_err(|error| {
+                control_failure(
+                    ControlErrorCode::Rejected,
+                    format!("activating Rack Slot {}: {error:#}", spec.slot_id),
+                    Some(revision),
+                )
+            })?;
+
+        // Touch code/data pages and plugin-owned buffers before ownership is
+        // transferred to the deadline-bound audio loop. The silent block is
+        // intentionally discarded; it prevents first-use work from becoming
+        // an audible graph-transition XRUN.
+        warmup_output.fill(0.0);
+        instance
+            .process_interleaved(
+                &[],
+                &mut warmup_output,
+                context.plugin_maximum_frames,
+                0,
+                context.plugin_output_channels,
+                &[],
+                &[],
+            )
+            .map_err(|error| {
+                control_failure(
+                    ControlErrorCode::Rejected,
+                    format!("warming Rack Slot {}: {error:#}", spec.slot_id),
+                    Some(revision),
+                )
+            })?;
+        prepared.push(PreparedRackSlot {
+            slot_id: spec.slot_id.clone(),
+            midi_stages: spec.midi_stages.clone(),
+            level_per_mille: spec.level_per_mille,
+            pan_per_mille: spec.pan_per_mille,
+            plugin,
+            instance: PreparedPluginInstance(instance),
+            output: vec![
+                0.0;
+                context.plugin_maximum_frames as usize
+                    * context.plugin_output_channels as usize
+            ],
+            events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
+        });
+    }
+    Ok(Some(prepared))
+}
+
+fn prepare_compiled_rack_runtime(
+    snapshot: &rackforge_session_api::SessionState,
+    rack_id: &str,
+    compiled_slots: Vec<CompiledRackSlot>,
+    state_store: &Arc<Mutex<PluginStateStore>>,
+) -> Result<(InstanceId, Vec<RackSlotRuntimeSpec>), ControlFailure> {
     if compiled_slots.len() > MAX_ACTIVE_RACK_SLOTS {
         return Err(control_failure(
             ControlErrorCode::Rejected,
@@ -2950,22 +3108,35 @@ fn prepare_rack_runtime(
             slot_id: compiled.runtime_slot_id,
             plugin_id: slot.plugin_id.clone(),
             state,
-            midi_input_channels: compiled.midi_transform.source_channels,
-            midi_note_low: compiled.midi_transform.note_low,
-            midi_note_high: compiled.midi_transform.note_high,
-            midi_transpose: compiled.midi_transform.transpose,
-            midi_target_channel: compiled.midi_transform.target_channel,
-            midi_notes_only: compiled.midi_transform.notes_only,
-            midi_velocity_input_low: compiled.midi_transform.velocity_input_low,
-            midi_velocity_input_high: compiled.midi_transform.velocity_input_high,
-            midi_velocity_output_low: compiled.midi_transform.velocity_output_low,
-            midi_velocity_output_high: compiled.midi_transform.velocity_output_high,
-            keyboard_parts: compiled.keyboard_parts,
+            midi_stages: compiled
+                .midi_stages
+                .iter()
+                .map(|stage| RackMidiStageRuntimeSpec {
+                    transform: stage.transform.clone(),
+                    keyboard_parts: stage.keyboard_parts,
+                })
+                .collect(),
             level_per_mille: slot.level_per_mille,
             pan_per_mille: slot.pan_per_mille,
         });
     }
     Ok((active_instance.instance_id.clone(), specs))
+}
+
+fn prepare_rack_definition_runtime(
+    snapshot: &rackforge_session_api::SessionState,
+    library: &rackforge_performance_api::PerformanceLibrary,
+    rack: &RackDefinition,
+    state_store: &Arc<Mutex<PluginStateStore>>,
+) -> Result<(InstanceId, Vec<RackSlotRuntimeSpec>), ControlFailure> {
+    let compiled_slots = compile_instrument_definition(library, rack).map_err(|error| {
+        control_failure(
+            ControlErrorCode::Rejected,
+            format!("Rack {} cannot run: {error}", rack.id),
+            Some(snapshot.revision),
+        )
+    })?;
+    prepare_compiled_rack_runtime(snapshot, rack.id.as_str(), compiled_slots, state_store)
 }
 
 fn send_audio(
@@ -3629,6 +3800,7 @@ mod tests {
                 rack_id,
                 instance_id,
                 slots,
+                prepared_slots: _,
                 reply,
             } => {
                 assert_eq!(rack_id, "rack.test");
@@ -3638,7 +3810,8 @@ mod tests {
                     slots[0].state,
                     RackSlotStateLoad::LegacyPreset("piano".into())
                 );
-                assert!(slots[0].midi_input_channels.is_empty());
+                assert_eq!(slots[0].midi_stages.len(), 1);
+                assert!(slots[0].midi_stages[0].transform.source_channels.is_empty());
                 assert_eq!(slots[0].level_per_mille, 1_000);
                 assert_eq!(slots[0].pan_per_mille, 0);
                 reply.send(Ok(())).unwrap();

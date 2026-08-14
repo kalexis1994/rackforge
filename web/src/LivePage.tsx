@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { LogOut, Save } from "lucide-react";
 import {
   dispatchCommand,
   dispatchCommandAwait,
@@ -22,10 +23,13 @@ import { scopedId } from "./ids";
 import { isNativeHost } from "./host";
 import {
   addSlotToRack,
+  graphFromRackReference,
   graphFromSlots,
   materializeRackGraph,
   normalizeRackGraphGeometry,
   removeSlotFromRack,
+  songPartAsRack,
+  songPartGraphFromRack,
 } from "./rackGraph";
 import type {
   LiveBrowseMode,
@@ -40,11 +44,17 @@ import type {
   SessionSnapshot,
   SetlistDefinition,
   SongDefinition,
+  SongPart,
 } from "./types";
 
 const RackGraphEditor = lazy(() => import("./components/RackGraphEditor"));
 
 type ConfigKind = "rack" | "song" | "setlist";
+
+export interface PerformanceGraphWorkspace {
+  kind: "rack" | "song_part";
+  name: string;
+}
 
 interface PendingPerformanceDelete {
   kind: ConfigKind;
@@ -69,7 +79,7 @@ interface LivePageProps {
   pending: boolean;
   surface: "perform" | "configure";
   onSurfaceChange: (surface: "perform" | "configure") => void;
-  onWorkspaceChange: (workspace: { kind: "rack"; name: string } | null) => void;
+  onWorkspaceChange: (workspace: PerformanceGraphWorkspace | null) => void;
   renderPluginSurface: (options: {
     instance: PluginInstance;
     onSelectSound: (soundId: string) => Promise<unknown>;
@@ -112,7 +122,13 @@ function rackCascadePlan(
 
   const racks = performance.library.racks.filter((rack) => rackIds.has(rack.id));
   const songs = performance.library.songs.filter((song) =>
-    song.parts.some((part) => rackIds.has(part.rack_id)),
+    song.parts.some((part) =>
+      part.content
+        ? part.content.graph.nodes.some(
+            (node) => node.kind.kind === "rack" && rackIds.has(node.kind.rack_id),
+          )
+        : rackIds.has(part.rack_id),
+    ),
   );
   const songIds = new Set(songs.map((song) => song.id));
   const setlists = performance.library.setlists.flatMap((setlist) => {
@@ -201,9 +217,9 @@ export function LivePage({
   onWorkspaceChange,
   renderPluginSurface,
 }: LivePageProps) {
-  const [workspace, setWorkspace] = useState<{ kind: "rack"; name: string } | null>(null);
+  const [workspace, setWorkspace] = useState<PerformanceGraphWorkspace | null>(null);
   const handleWorkspaceChange = useCallback(
-    (next: { kind: "rack"; name: string } | null) => {
+    (next: PerformanceGraphWorkspace | null) => {
       setWorkspace(next);
       onWorkspaceChange(next);
     },
@@ -222,7 +238,10 @@ export function LivePage({
         left={{ label: "Mode", value: "LIVE" }}
         center={
           workspace
-            ? { label: "Rack", value: workspace.name }
+            ? {
+                label: workspace.kind === "rack" ? "Rack" : "Song Part",
+                value: workspace.name,
+              }
             : surface === "perform"
             ? { label: "Active", value: active.title }
             : { label: "Workspace", value: "Configure" }
@@ -322,7 +341,7 @@ function PerformanceBrowser({
           {(["rack", "song", "setlist"] as LiveBrowseMode[]).map((item) => (
             <button
               key={item}
-              className={mode === item ? "active" : ""}
+              className={`entity-${item}${mode === item ? " active" : ""}`}
               onClick={() =>
                 dispatchCommand({ type: "set_live_browse_mode", mode: item })
               }
@@ -381,7 +400,7 @@ function RackTargets({
       {racks.map((rack) => {
         const location: LiveLocation = { kind: "rack", rack_id: rack.id };
         return (
-          <article className="target-card" key={rack.id}>
+          <article className="target-card entity-rack" key={rack.id}>
             <span className="target-index">{String(racks.indexOf(rack) + 1).padStart(2, "0")}</span>
             <div>
               <h3>{rack.name}</h3>
@@ -410,7 +429,7 @@ function SongTargets({
   return (
     <div className="sequence-list">
       {songs.map((song) => (
-        <section className="sequence-group" key={song.id}>
+        <section className="sequence-group entity-song" key={song.id}>
           <header>
             <span className="card-kicker">Song</span>
             <h3>{song.name}</h3>
@@ -424,13 +443,14 @@ function SongTargets({
             const rack = performance.library.racks.find(
               (item) => item.id === part.rack_id,
             );
+            const graphBacked = part.content !== undefined;
             return (
-              <div className="sequence-row" key={part.id}>
+              <div className="sequence-row entity-song-part" key={part.id}>
                 <span>{part.name}</span>
-                <small>{rack?.name ?? "Missing Rack"}</small>
+                <small>{graphBacked ? "Part graph" : (rack?.name ?? "Missing Rack")}</small>
                 <ActivateButton
                   active={sameLocation(performance.live.active, location)}
-                  disabled={!rack?.enabled}
+                  disabled={graphBacked ? false : !rack?.enabled}
                   onClick={() => activate(location)}
                 />
               </div>
@@ -454,7 +474,7 @@ function SetlistTargets({
   return (
     <div className="sequence-list">
       {setlists.map((setlist) => (
-        <section className="sequence-group setlist-target-group" key={setlist.id}>
+        <section className="sequence-group setlist-target-group entity-setlist" key={setlist.id}>
           <header>
             <span className="card-kicker">Setlist</span>
             <h3>{setlist.name}</h3>
@@ -473,15 +493,16 @@ function SetlistTargets({
               const rack = performance.library.racks.find(
                 (item) => item.id === part.rack_id,
               );
+              const graphBacked = part.content !== undefined;
               return (
-                <div className="sequence-row setlist-row" key={`${entry.id}:${part.id}`}>
+                <div className="sequence-row setlist-row entity-song-part" key={`${entry.id}:${part.id}`}>
                   <span>
                     {entryIndex + 1}.{partIndex + 1} {song?.name ?? "Missing Song"}
                   </span>
                   <small>{part.name}</small>
                   <ActivateButton
                     active={sameLocation(performance.live.active, location)}
-                    disabled={!song?.enabled || !rack?.enabled}
+                    disabled={!song?.enabled || (graphBacked ? false : !rack?.enabled)}
                     onClick={() => activate(location)}
                   />
                 </div>
@@ -513,13 +534,15 @@ function PerformanceConfig({
   session: SessionSnapshot | null;
   performance: PerformanceSnapshot;
   pending: boolean;
-  onWorkspaceChange: (workspace: { kind: "rack"; name: string } | null) => void;
+  onWorkspaceChange: (workspace: PerformanceGraphWorkspace | null) => void;
   renderPluginSurface: LivePageProps["renderPluginSurface"];
 }) {
   const [kind, setKind] = useState<ConfigKind>("rack");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
+  const [editorResetEpoch, setEditorResetEpoch] = useState(0);
   const [rackWorkspaceId, setRackWorkspaceId] = useState<string | null>(null);
+  const [songPartWorkspace, setSongPartWorkspace] = useState<{ id: string; name: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingPerformanceDelete | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -536,6 +559,9 @@ function PerformanceConfig({
   const activeRackWorkspaceId = rackWorkspaceId === "new"
     || performance.library.racks.some((rack) => rack.id === rackWorkspaceId)
     ? rackWorkspaceId
+    : null;
+  const activeSongPartWorkspace = kind === "song" && activeSelectedId !== null
+    ? songPartWorkspace
     : null;
   const pendingDeleteCollection = pendingDelete?.kind === "rack"
     ? performance.library.racks
@@ -560,11 +586,13 @@ function PerformanceConfig({
     ? "New Rack"
     : performance.library.racks.find((rack) => rack.id === activeRackWorkspaceId)?.name;
   useEffect(() => {
-    const workspace = workspaceRackName
-      ? { kind: "rack" as const, name: workspaceRackName }
-      : null;
+    const workspace: PerformanceGraphWorkspace | null = workspaceRackName
+      ? { kind: "rack", name: workspaceRackName }
+      : activeSongPartWorkspace
+        ? { kind: "song_part", name: activeSongPartWorkspace.name }
+        : null;
     onWorkspaceChange(workspace);
-  }, [onWorkspaceChange, workspaceRackName]);
+  }, [activeSongPartWorkspace, onWorkspaceChange, workspaceRackName]);
   useEffect(
     () => () => onWorkspaceChange(null),
     [onWorkspaceChange],
@@ -580,29 +608,48 @@ function PerformanceConfig({
   }, [editorDirty]);
   useEffect(() => {
     const closeWorkspace = () => {
+      if (activeSongPartWorkspace) {
+        proceed(() => {
+          setSongPartWorkspace(null);
+          setEditorResetEpoch((current) => current + 1);
+        });
+        return;
+      }
       proceed(() => {
         setRackWorkspaceId(null);
         setSelectedId(null);
       });
     };
-    window.addEventListener("rackforge:close-rack-workspace", closeWorkspace);
-    return () => window.removeEventListener("rackforge:close-rack-workspace", closeWorkspace);
-  }, [proceed]);
+    window.addEventListener("rackforge:close-graph-workspace", closeWorkspace);
+    return () => window.removeEventListener("rackforge:close-graph-workspace", closeWorkspace);
+  }, [activeSongPartWorkspace, proceed]);
   const selectItem = (id: string) => {
-    if (selectedId === id && kind !== "rack") return;
+    if (selectedId === id && kind === "setlist") return;
     proceed(() => {
       setSelectedId(id);
       if (kind === "rack") setRackWorkspaceId(id);
+      setSongPartWorkspace(null);
     });
   };
   const changeKind = (next: ConfigKind) => {
     if (next === kind) return;
     proceed(() => {
-    setRackWorkspaceId(null);
-    setKind(next);
-    setSelectedId(null);
+      setRackWorkspaceId(null);
+      setSongPartWorkspace(null);
+      setKind(next);
+      setSelectedId(null);
     });
   };
+  const openSongPartWorkspace = useCallback((part: SongPart) => {
+    setSongPartWorkspace({ id: part.id, name: part.name });
+  }, []);
+  const syncSongPartWorkspace = useCallback((part: Pick<SongPart, "id" | "name"> | null) => {
+    setSongPartWorkspace((current) => {
+      if (!part) return null;
+      if (current?.id === part.id && current.name === part.name) return current;
+      return { id: part.id, name: part.name };
+    });
+  }, []);
   const requestDelete = (item: { id: string; name: string }) => {
     setDeleteError(null);
     setPendingDelete({ kind, id: item.id, name: item.name });
@@ -674,7 +721,7 @@ function PerformanceConfig({
           {(["rack", "song", "setlist"] as ConfigKind[]).map((item) => (
             <button
               key={item}
-              className={kind === item ? "active" : ""}
+              className={`entity-${item}${kind === item ? " active" : ""}`}
               onClick={() => changeKind(item)}
             >
               {kindLabels[item]}
@@ -690,7 +737,7 @@ function PerformanceConfig({
             className="new-performance-button"
             onClick={() => selectItem("new")}
             disabled={
-              (kind === "song" && performance.library.racks.length === 0) ||
+              (kind === "song" && performance.library.racks.length === 0 && (session?.instances.length ?? 0) === 0) ||
               (kind === "setlist" && performance.library.songs.length === 0)
             }
           >
@@ -711,7 +758,7 @@ function PerformanceConfig({
                   ? `${"parts" in item ? item.parts.length : 0} parts`
                   : `${"entries" in item ? item.entries.length : 0} entries`;
               return (
-                <article className="target-card config-target-card" key={item.id}>
+                <article className={`target-card config-target-card entity-${kind}`} key={item.id}>
                   <span className="target-index">{String(index + 1).padStart(2, "0")}</span>
                   <div>
                     <h3>{item.name}</h3>
@@ -754,7 +801,11 @@ function PerformanceConfig({
   }
 
   return (
-    <div className={`performance-config editor-workspace${activeRackWorkspaceId ? " rack-graph-workspace" : ""}`}>
+    <div className={`performance-config editor-workspace${
+      activeRackWorkspaceId || activeSongPartWorkspace ? " graph-workspace" : ""
+    }${activeRackWorkspaceId ? " rack-graph-workspace" : ""}${
+      activeSongPartWorkspace ? " song-graph-workspace" : ""
+    }`}>
       <main className="config-editor">
         {kind === "rack" && (
           <RackEditor
@@ -783,17 +834,26 @@ function PerformanceConfig({
         )}
         {kind === "song" && (
           <SongEditor
-            key={`song:${activeSelectedId ?? "empty"}`}
+            key={`song:${activeSelectedId ?? "empty"}:${editorResetEpoch}`}
             song={
               activeSelectedId === "new"
                 ? newSong(performance)
                 : performance.library.songs.find((item) => item.id === activeSelectedId)
             }
             performance={performance}
+            instances={session?.instances ?? []}
+            session={session}
             pending={pending}
+            immersivePartId={activeSongPartWorkspace?.id ?? null}
+            renderPluginSurface={renderPluginSurface}
             onDirtyChange={setEditorDirty}
-            onSaved={(id) => setSelectedId(id)}
-            onDeleted={() => setSelectedId(null)}
+            onEditPart={openSongPartWorkspace}
+            onWorkspacePartChange={syncSongPartWorkspace}
+            onSaved={setSelectedId}
+            onDeleted={() => {
+              setSelectedId(null);
+              setSongPartWorkspace(null);
+            }}
           />
         )}
         {kind === "setlist" && (
@@ -938,15 +998,26 @@ function newRack(): RackDefinition {
   };
 }
 
-function newSong(performance: PerformanceSnapshot): SongDefinition | undefined {
+function newSongPart(performance: PerformanceSnapshot, name: string): SongPart {
   const rack = performance.library.racks[0];
-  if (!rack) return undefined;
+  return {
+    id: performanceId("part"),
+    name,
+    rack_id: rack?.id ?? "rack.song-part-placeholder",
+    content: {
+      slots: [],
+      graph: rack ? graphFromRackReference(rack.id) : graphFromSlots([]),
+    },
+  };
+}
+
+function newSong(performance: PerformanceSnapshot): SongDefinition {
   return {
     schema_version: 1,
     id: performanceId("song"),
     name: "New Song",
     enabled: true,
-    parts: [{ id: performanceId("part"), name: "Intro", rack_id: rack.id }],
+    parts: [newSongPart(performance, "Intro")],
   };
 }
 
@@ -1061,7 +1132,7 @@ function RackWorkspaceDetails({
   onName,
   onEnabled,
   onSave,
-  onCancel,
+  onExit,
   onDismiss,
   mobile = false,
 }: {
@@ -1075,7 +1146,7 @@ function RackWorkspaceDetails({
   onName: (name: string) => void;
   onEnabled: (enabled: boolean) => void;
   onSave: () => void;
-  onCancel: () => void;
+  onExit: () => void;
   onDismiss?: () => void;
   mobile?: boolean;
 }) {
@@ -1127,8 +1198,9 @@ function RackWorkspaceDetails({
               : "Preview idle"}
         </span>
         <div>
-          <button type="button" className="secondary-button" disabled={pending} onClick={onCancel}>
-            Cancel
+          <button type="button" className="workspace-exit-button" disabled={pending} onClick={onExit}>
+            <LogOut aria-hidden="true" />
+            <span>Exit</span>
           </button>
           <button
             type="button"
@@ -1136,7 +1208,10 @@ function RackWorkspaceDetails({
             disabled={(!dirty && !isNew) || pending}
             onClick={onSave}
           >
-            <AsyncActionLabel active={pending} activeLabel="Saving…">Save</AsyncActionLabel>
+            <AsyncActionLabel active={pending} activeLabel="Saving…">
+              <Save aria-hidden="true" />
+              <span>Save</span>
+            </AsyncActionLabel>
           </button>
         </div>
       </footer>
@@ -1159,15 +1234,118 @@ function dispatchEdit(
   return dispatchPerformanceEdit(expectedRevision, edit);
 }
 
-function rackPreviewVoiceCount(rack: RackDefinition | undefined) {
+function rackPreviewVoiceCount(
+  rack: RackDefinition | undefined,
+  racks: RackDefinition[] = [],
+  visited = new Set<string>(),
+): number {
   if (!rack) return 0;
+  if (visited.has(rack.id)) return 0;
+  const nextVisited = new Set(visited).add(rack.id);
   const enabledSlots = new Set(
     rack.slots.filter((slot) => slot.enabled).map((slot) => slot.id),
   );
-  return materializeRackGraph(rack).graph!.nodes.filter(
-    (node) =>
-      node.kind.kind === "plugin" && enabledSlots.has(node.kind.slot_id),
-  ).length;
+  return materializeRackGraph(rack).graph!.nodes.reduce((count, node) => {
+    if (node.kind.kind === "plugin") {
+      return count + Number(enabledSlots.has(node.kind.slot_id));
+    }
+    if (node.kind.kind !== "rack") return count;
+    const childRackId = node.kind.rack_id;
+    return count + rackPreviewVoiceCount(
+      racks.find((candidate) => candidate.id === childRackId && candidate.enabled),
+      racks,
+      nextVisited,
+    );
+  }, 0);
+}
+
+function useSongPartPreview(
+  rack: RackDefinition | undefined,
+  session: SessionSnapshot | null,
+  performance: PerformanceSnapshot,
+) {
+  const previewSupported = !isNativeHost();
+  const initialMode = session?.active_mode ?? "idle";
+  const originRef = useRef({ mode: initialMode, active: performance.live.active });
+  const sequenceRef = useRef(0);
+  const engagedRef = useRef(false);
+  const modeLiveRef = useRef(initialMode === "live");
+  const [status, setStatus] = useState<"idle" | "applying" | "ready">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const transportRack = rack ? normalizeRackGraphGeometry(rack) : undefined;
+  const payload = transportRack ? JSON.stringify(transportRack) : null;
+  const voiceCount = rackPreviewVoiceCount(transportRack, performance.library.racks);
+
+  const restoreOrigin = useCallback(() => {
+    if (!previewSupported || !engagedRef.current) return;
+    engagedRef.current = false;
+    const origin = originRef.current;
+    modeLiveRef.current = origin.mode === "live";
+    if (origin.mode === "live" && origin.active) {
+      dispatchCommand({ type: "set_active_mode", mode: "live" });
+      dispatchCommand({ type: "activate_live_target", location: origin.active });
+    } else if (origin.mode === "live") {
+      dispatchCommand({ type: "set_active_mode", mode: "idle" });
+      dispatchCommand({ type: "set_active_mode", mode: "live" });
+    } else {
+      dispatchCommand({ type: "set_active_mode", mode: origin.mode });
+    }
+  }, [previewSupported]);
+
+  useEffect(() => () => {
+    sequenceRef.current += 1;
+    restoreOrigin();
+  }, [restoreOrigin]);
+
+  useEffect(() => {
+    if (payload !== null) return;
+    sequenceRef.current += 1;
+    restoreOrigin();
+  }, [payload, restoreOrigin]);
+
+  useEffect(() => {
+    if (!previewSupported || payload === null) return;
+    const sequence = ++sequenceRef.current;
+    if (voiceCount === 0) {
+      if (!engagedRef.current || !modeLiveRef.current) return;
+      modeLiveRef.current = false;
+      void dispatchCommandAwait({ type: "set_active_mode", mode: "idle" }).catch((reason) => {
+        if (sequenceRef.current !== sequence) return;
+        setError(reason instanceof Error ? reason.message : "Could not silence the empty Part preview.");
+      });
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const previewRack = JSON.parse(payload) as RackDefinition;
+      setStatus("applying");
+      setError(null);
+      void (async () => {
+        try {
+          if (!modeLiveRef.current) {
+            engagedRef.current = true;
+            modeLiveRef.current = true;
+            await dispatchCommandAwait({ type: "set_active_mode", mode: "live" });
+            if (sequenceRef.current !== sequence) return;
+          }
+          engagedRef.current = true;
+          await dispatchCommandAwait({ type: "preview_rack", rack: previewRack });
+          if (sequenceRef.current === sequence) setStatus("ready");
+        } catch (reason) {
+          if (sequenceRef.current !== sequence) return;
+          modeLiveRef.current = false;
+          setStatus("idle");
+          setError(reason instanceof Error ? reason.message : "Could not preview this Song Part.");
+        }
+      })();
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [payload, previewSupported, voiceCount]);
+
+  return {
+    error: voiceCount === 0 ? null : error,
+    status: voiceCount === 0 ? "idle" as const : status,
+    voiceCount,
+  };
 }
 
 function RackEditor({
@@ -1220,7 +1398,10 @@ function RackEditor({
   // revision.
   const transportDraft = draft ? normalizeRackGraphGeometry(draft) : undefined;
   const previewPayload = transportDraft ? JSON.stringify(transportDraft) : null;
-  const previewVoiceCount = rackPreviewVoiceCount(transportDraft);
+  const previewVoiceCount = rackPreviewVoiceCount(
+    transportDraft,
+    performance.library.racks,
+  );
   const visiblePreviewStatus = previewVoiceCount === 0 ? "idle" : previewStatus;
   const visiblePreviewError = previewVoiceCount === 0 ? null : previewError;
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(original);
@@ -1335,11 +1516,11 @@ function RackEditor({
     if (!immersive) return;
     const saveWorkspace = () => void save();
     const openDetails = () => setDetailsOpen(true);
-    window.addEventListener("rackforge:save-rack-workspace", saveWorkspace);
-    window.addEventListener("rackforge:open-rack-details", openDetails);
+    window.addEventListener("rackforge:save-graph-workspace", saveWorkspace);
+    window.addEventListener("rackforge:open-graph-details", openDetails);
     return () => {
-      window.removeEventListener("rackforge:save-rack-workspace", saveWorkspace);
-      window.removeEventListener("rackforge:open-rack-details", openDetails);
+      window.removeEventListener("rackforge:save-graph-workspace", saveWorkspace);
+      window.removeEventListener("rackforge:open-graph-details", openDetails);
     };
   }, [immersive, save]);
 
@@ -1353,7 +1534,13 @@ function RackEditor({
   };
   const usedBy = [
     ...performance.library.songs
-      .filter((song) => song.parts.some((part) => part.rack_id === draft.id))
+      .filter((song) => song.parts.some((part) =>
+        part.content
+          ? part.content.graph.nodes.some(
+              (node) => node.kind.kind === "rack" && node.kind.rack_id === draft.id,
+            )
+          : part.rack_id === draft.id,
+      ))
       .map((song) => song.name),
   ];
   const remove = async () => {
@@ -1375,9 +1562,9 @@ function RackEditor({
       setError(reason instanceof Error ? reason.message : "Could not delete Rack.");
     }
   };
-  const cancelWorkspace = () => {
+  const exitWorkspace = () => {
     setDetailsOpen(false);
-    window.dispatchEvent(new Event("rackforge:close-rack-workspace"));
+    window.dispatchEvent(new Event("rackforge:close-graph-workspace"));
   };
   const workspaceDetails = (mobile = false) => (
     <RackWorkspaceDetails
@@ -1391,7 +1578,7 @@ function RackEditor({
       onName={(name) => setDraft({ ...draft, name })}
       onEnabled={(enabled) => setDraft({ ...draft, enabled })}
       onSave={() => void save()}
-      onCancel={cancelWorkspace}
+      onExit={exitWorkspace}
       onDismiss={mobile ? () => setDetailsOpen(false) : undefined}
       mobile={mobile}
     />
@@ -1399,7 +1586,7 @@ function RackEditor({
 
   return (
     <form
-      className={`performance-form rack-editor-form${immersive ? " immersive" : ""}`}
+      className={`performance-form rack-editor-form entity-rack${immersive ? " immersive" : ""}`}
       onSubmit={(event) => event.preventDefault()}
     >
       <EditorHeader
@@ -1512,6 +1699,7 @@ function SlotEditor({
   onChange,
   onMove,
   onRemove,
+  allowEmpty = false,
 }: {
   slot: RackSlot;
   index: number;
@@ -1520,6 +1708,7 @@ function SlotEditor({
   onChange: (slot: RackSlot) => void;
   onMove: (direction: -1 | 1) => void;
   onRemove: () => void;
+  allowEmpty?: boolean;
 }) {
   const [presets, setPresets] = useState<HostPresetSummary[]>([]);
   const [presetId, setPresetId] = useState("");
@@ -1568,14 +1757,14 @@ function SlotEditor({
       .finally(() => setPresetBusy(false));
   };
   return (
-    <article id={`rack-slot-${slot.id}`} className={`slot-editor${slot.enabled ? "" : " disabled"}`}>
+    <article id={`rack-slot-${slot.id}`} className={`slot-editor entity-instrument${slot.enabled ? "" : " disabled"}`}>
       <header>
         <span className="slot-number">{String(index + 1).padStart(2, "0")}</span>
         <strong>{slot.name || "Unnamed Slot"}</strong>
         <div className="reorder-controls">
           <button aria-label="Move Slot up" disabled={index === 0} onClick={() => onMove(-1)}>↑</button>
           <button aria-label="Move Slot down" disabled={index === total - 1} onClick={() => onMove(1)}>↓</button>
-          <button aria-label="Remove Slot" disabled={total === 1} onClick={onRemove}>×</button>
+          <button aria-label="Remove Slot" disabled={!allowEmpty && total === 1} onClick={onRemove}>×</button>
         </div>
       </header>
       <div className="form-grid slot-fields">
@@ -1624,18 +1813,116 @@ function SlotEditor({
   );
 }
 
+function SongWorkspaceDetails({
+  partName,
+  dirty,
+  isNew,
+  pending,
+  previewStatus,
+  instrumentCount,
+  onPartName,
+  onSave,
+  onExit,
+  onDismiss,
+  mobile = false,
+}: {
+  partName: string;
+  dirty: boolean;
+  isNew: boolean;
+  pending: boolean;
+  previewStatus: "idle" | "applying" | "ready";
+  instrumentCount: number;
+  onPartName: (name: string) => void;
+  onSave: () => void;
+  onExit: () => void;
+  onDismiss?: () => void;
+  mobile?: boolean;
+}) {
+  return (
+    <section
+      className={`rack-workspace-details song-workspace-details entity-song-part${mobile ? " mobile" : ""}`}
+      aria-label="Song Part details"
+    >
+      <header>
+        <div>
+          <span className="card-kicker">Song Part details</span>
+          <strong>{dirty || isNew ? "Unsaved changes" : "Saved"}</strong>
+        </div>
+        {onDismiss ? (
+          <button type="button" className="rack-details-dismiss" onClick={onDismiss} aria-label="Close Song Part details">
+            ×
+          </button>
+        ) : null}
+      </header>
+      <div className="rack-details-fields song-details-fields">
+        <label>
+          <span>Part name</span>
+          <input
+            value={partName}
+            maxLength={64}
+            autoComplete="off"
+            onChange={(event) => onPartName(event.target.value)}
+          />
+        </label>
+        <div className="song-part-details-summary">
+          <span>Graph preview</span>
+          <strong>{instrumentCount} {instrumentCount === 1 ? "active instrument" : "active instruments"}</strong>
+        </div>
+      </div>
+      <footer>
+        <span className={`rack-details-preview ${previewStatus}`}>
+          {previewStatus === "applying"
+            ? "Applying preview…"
+            : previewStatus === "ready"
+              ? `${instrumentCount} active`
+              : "Preview idle"}
+        </span>
+        <div>
+          <button type="button" className="workspace-exit-button" disabled={pending} onClick={onExit}>
+            <LogOut aria-hidden="true" />
+            <span>Exit</span>
+          </button>
+          <button
+            type="button"
+            className="save-button"
+            disabled={(!dirty && !isNew) || pending}
+            onClick={onSave}
+          >
+            <AsyncActionLabel active={pending} activeLabel="Saving…">
+              <Save aria-hidden="true" />
+              <span>Save</span>
+            </AsyncActionLabel>
+          </button>
+        </div>
+      </footer>
+    </section>
+  );
+}
+
 function SongEditor({
   song,
   performance,
+  instances,
+  session,
   pending,
+  immersivePartId,
+  renderPluginSurface,
   onDirtyChange,
+  onEditPart,
+  onWorkspacePartChange,
   onSaved,
   onDeleted,
 }: {
   song?: SongDefinition;
   performance: PerformanceSnapshot;
+  instances: PluginInstance[];
+  session: SessionSnapshot | null;
   pending: boolean;
+  immersivePartId: string | null;
+  renderPluginSurface: LivePageProps["renderPluginSurface"];
   onDirtyChange: (dirty: boolean) => void;
+  onEditPart: (part: SongPart) => void;
+  onWorkspacePartChange: (part: Pick<SongPart, "id" | "name"> | null) => void;
   onSaved: (id: string) => void;
   onDeleted: (nextId: string | null) => void;
 }) {
@@ -1643,17 +1930,66 @@ function SongEditor({
   const [draft, setDraft] = useState(() => (song ? clone(song) : undefined));
   const [baseRevision, setBaseRevision] = useState(performance.revision);
   const [error, setError] = useState<string | null>(null);
+  const [selectedPartId, setSelectedPartId] = useState(song?.parts[0]?.id);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const immersive = immersivePartId !== null;
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(original);
   const isNew = !!draft && !performance.library.songs.some((item) => item.id === draft.id);
+  const selectedPart = draft?.parts.find(
+    (part) => part.id === (immersivePartId ?? selectedPartId),
+  )
+    ?? draft?.parts[0];
+  const selectedPartIndex = selectedPart && draft
+    ? draft.parts.findIndex((part) => part.id === selectedPart.id)
+    : -1;
+  const selectedPartRack = selectedPart ? songPartAsRack(selectedPart) : undefined;
+  const partPreview = useSongPartPreview(
+    immersive ? selectedPartRack : undefined,
+    session,
+    performance,
+  );
   useEffect(() => {
     onDirtyChange(dirty || isNew);
     return () => onDirtyChange(false);
   }, [dirty, isNew, onDirtyChange]);
-  if (!draft) return <EditorEmpty>Create a Rack before adding a Song.</EditorEmpty>;
-  const save = async () => {
+  const selectedPartIdentity = selectedPart?.id;
+  const selectedPartName = selectedPart?.name;
+  useEffect(() => {
+    if (!immersive || !selectedPartIdentity || selectedPartName === undefined) return;
+    onWorkspacePartChange({ id: selectedPartIdentity, name: selectedPartName });
+  }, [immersive, onWorkspacePartChange, selectedPartIdentity, selectedPartName]);
+  const updatePart = useCallback((index: number, update: (part: SongPart) => SongPart) => {
+    setDraft((current) => {
+      if (!current || !current.parts[index]) return current;
+      const parts = [...current.parts];
+      parts[index] = update(parts[index]);
+      return { ...current, parts };
+    });
+  }, []);
+  const updatePartRack = useCallback((
+    update: RackDefinition | ((current: RackDefinition) => RackDefinition),
+  ) => {
+    if (!selectedPart || selectedPartIndex < 0) return;
+    updatePart(selectedPartIndex, (part) => {
+      const currentRack = songPartAsRack(part);
+      const nextRack = typeof update === "function" ? update(currentRack) : update;
+      return {
+        ...part,
+        content: songPartGraphFromRack(nextRack),
+      };
+    });
+  }, [selectedPart, selectedPartIndex, updatePart]);
+  const save = useCallback(async () => {
+    if (!draft) return;
     const nextError = validationName(draft.name) ??
       (draft.parts.length === 0 ? "A Song needs at least one Part." : null) ??
-      (draft.parts.find((part) => validationName(part.name)) ? "Every Part needs a valid name." : null);
+      (draft.parts.find((part) => validationName(part.name)) ? "Every Part needs a valid name." : null) ??
+      (draft.parts.find((part) => {
+        const graph = songPartAsRack(part);
+        return !graph.graph?.nodes.some(
+          (node) => node.kind.kind === "plugin" || node.kind.kind === "rack",
+        );
+      }) ? "Every Part needs at least one instrument or Rack node." : null);
     setError(nextError);
     if (nextError) return;
     try {
@@ -1668,7 +2004,25 @@ function SongEditor({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save Song.");
     }
-  };
+  }, [baseRevision, draft, onSaved]);
+  const handleGraphOverlayChange = useCallback((open: boolean) => {
+    if (open) setDetailsOpen(false);
+    window.dispatchEvent(new CustomEvent("rackforge:rack-graph-overlay", {
+      detail: { open },
+    }));
+  }, []);
+  useEffect(() => {
+    if (!immersive) return;
+    const saveWorkspace = () => void save();
+    const openDetails = () => setDetailsOpen(true);
+    window.addEventListener("rackforge:save-graph-workspace", saveWorkspace);
+    window.addEventListener("rackforge:open-graph-details", openDetails);
+    return () => {
+      window.removeEventListener("rackforge:save-graph-workspace", saveWorkspace);
+      window.removeEventListener("rackforge:open-graph-details", openDetails);
+    };
+  }, [immersive, save]);
+  if (!draft) return <EditorEmpty>Select a Song or create a new one.</EditorEmpty>;
   const usedBy = performance.library.setlists
     .filter((setlist) => setlist.entries.some((entry) => entry.song_id === draft.id))
     .map((setlist) => setlist.name);
@@ -1688,17 +2042,202 @@ function SongEditor({
       setError(reason instanceof Error ? reason.message : "Could not delete Song.");
     }
   };
+  const addPart = () => {
+    const part = newSongPart(performance, `Part ${draft.parts.length + 1}`);
+    setDraft({ ...draft, parts: [...draft.parts, part] });
+    setSelectedPartId(part.id);
+  };
+  const movePart = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= draft.parts.length) return;
+    const parts = [...draft.parts];
+    [parts[index], parts[target]] = [parts[target], parts[index]];
+    setDraft({ ...draft, parts });
+  };
+  const removePart = (index: number) => {
+    if (draft.parts.length === 1) return;
+    const removed = draft.parts[index];
+    const nextParts = draft.parts.filter((item) => item.id !== removed.id);
+    setDraft({ ...draft, parts: nextParts });
+    if (selectedPart?.id === removed.id) {
+      setSelectedPartId(nextParts[Math.min(index, nextParts.length - 1)]?.id);
+    }
+  };
+  const exitWorkspace = () => {
+    setDetailsOpen(false);
+    window.dispatchEvent(new Event("rackforge:close-graph-workspace"));
+  };
+  const workspaceDetails = (mobile = false) => (
+    <SongWorkspaceDetails
+      partName={selectedPart?.name ?? "Song Part"}
+      dirty={dirty}
+      isNew={isNew}
+      pending={pending}
+      previewStatus={partPreview.status}
+      instrumentCount={partPreview.voiceCount}
+      onPartName={(name) => {
+        if (selectedPartIndex < 0) return;
+        updatePart(selectedPartIndex, (part) => ({ ...part, name }));
+      }}
+      onSave={() => void save()}
+      onExit={exitWorkspace}
+      onDismiss={mobile ? () => setDetailsOpen(false) : undefined}
+      mobile={mobile}
+    />
+  );
   return (
-    <form className="performance-form" onSubmit={(event) => event.preventDefault()}>
+    <form
+      className={`performance-form song-editor-form entity-song${immersive ? " immersive" : ""}`}
+      onSubmit={(event) => event.preventDefault()}
+    >
       <EditorHeader eyebrow={isNew ? "New Song" : "Song configuration"} title={draft.name} dirty={dirty || isNew} pending={pending} onSave={save} onReset={() => { setDraft(original ? clone(original) : newSong(performance)); setBaseRevision(performance.revision); setError(null); }} onDelete={isNew ? undefined : remove} />
       {error && <div className="form-error">{error}</div>}
+      {partPreview.error ? <div className="form-error">Part preview: {partPreview.error}</div> : null}
+      {partPreview.status !== "idle" ? (
+        <div className={`rack-preview-status ${partPreview.status}`} role="status" aria-live="polite">
+          {partPreview.status === "applying" ? (
+            <><AsyncSpinner label="Applying Song Part preview…" /><span>Applying Song Part preview…</span></>
+          ) : (
+            <><i /><span>{partPreview.voiceCount} {partPreview.voiceCount === 1 ? "instrument" : "instruments"} active in this Part</span></>
+          )}
+        </div>
+      ) : null}
       <BasicFields name={draft.name} enabled={draft.enabled} onName={(name) => setDraft({ ...draft, name })} onEnabled={(enabled) => setDraft({ ...draft, enabled })} />
-      <EditorSection title="Parts" detail="Each Part recalls one Rack. Their order becomes the Song navigation order." action={<button disabled={draft.parts.length >= 64} onClick={() => setDraft({ ...draft, parts: [...draft.parts, { id: performanceId("part"), name: `Part ${draft.parts.length + 1}`, rack_id: performance.library.racks[0].id }] })}>＋ Add Part</button>}>
-        {draft.parts.map((part, index) => (
-          <SequenceEditorRow key={part.id} index={index} total={draft.parts.length} title={part.name} onTitle={(name) => { const parts = [...draft.parts]; parts[index] = { ...part, name }; setDraft({ ...draft, parts }); }} onMove={(direction) => { const target = index + direction; if (target < 0 || target >= draft.parts.length) return; const parts = [...draft.parts]; [parts[index], parts[target]] = [parts[target], parts[index]]; setDraft({ ...draft, parts }); }} onRemove={() => setDraft({ ...draft, parts: draft.parts.filter((item) => item.id !== part.id) })}>
-            <label><span>Rack</span><select value={part.rack_id} onChange={(event) => { const parts = [...draft.parts]; parts[index] = { ...part, rack_id: event.target.value }; setDraft({ ...draft, parts }); }}>{performance.library.racks.map((rack) => <option value={rack.id} key={rack.id}>{rack.name}</option>)}</select></label>
-          </SequenceEditorRow>
-        ))}
+      {immersive ? <aside className="song-workspace-details-panel">{workspaceDetails()}</aside> : null}
+      {immersive && detailsOpen ? (
+        <div
+          className="rack-details-sheet-backdrop"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) setDetailsOpen(false);
+          }}
+        >
+          {workspaceDetails(true)}
+        </div>
+      ) : null}
+      <EditorSection
+        title="Song Parts"
+        detail="Parts are ordered scenes. Every Part owns a graph; all connected instrument and Rack paths can sound together."
+        action={(
+          <button
+            type="button"
+            disabled={draft.parts.length >= 64}
+            onClick={addPart}
+          >
+            ＋ Add Part
+          </button>
+        )}
+      >
+        <div className="song-part-editor-layout">
+          {!immersive ? <aside className="song-part-navigator" aria-label="Song Part order">
+            {draft.parts.map((part, index) => (
+              <article
+                className={`song-part-nav-item entity-song-part${part.id === selectedPart?.id ? " active" : ""}`}
+                key={part.id}
+              >
+                <button
+                  type="button"
+                  className="song-part-select"
+                  onClick={() => setSelectedPartId(part.id)}
+                >
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <strong>{part.name}</strong>
+                  <small>{part.content ? "Graph" : "Legacy Rack"}</small>
+                </button>
+                <div className="song-part-order-actions">
+                  <button
+                    type="button"
+                    className="song-part-edit-graph"
+                    aria-label={`Edit ${part.name} graph`}
+                    onClick={() => {
+                      setSelectedPartId(part.id);
+                      onEditPart(part);
+                    }}
+                  >Edit graph</button>
+                  <button
+                    type="button"
+                    aria-label={`Move ${part.name} up`}
+                    disabled={index === 0}
+                    onClick={() => movePart(index, -1)}
+                  >↑</button>
+                  <button
+                    type="button"
+                    aria-label={`Move ${part.name} down`}
+                    disabled={index === draft.parts.length - 1}
+                    onClick={() => movePart(index, 1)}
+                  >↓</button>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${part.name}`}
+                    disabled={draft.parts.length === 1}
+                    onClick={() => removePart(index)}
+                  >×</button>
+                </div>
+              </article>
+            ))}
+          </aside> : null}
+          {immersive && selectedPart && selectedPartRack ? (
+            <section className="song-part-graph-workspace entity-song-part">
+              <header className="song-part-graph-header">
+                <label>
+                  <span>Part name</span>
+                  <input
+                    value={selectedPart.name}
+                    maxLength={64}
+                    onChange={(event) => updatePart(
+                      selectedPartIndex,
+                      (part) => ({ ...part, name: event.target.value }),
+                    )}
+                  />
+                </label>
+                <div>
+                  <span>Scene</span>
+                  <strong>{selectedPartIndex + 1} / {draft.parts.length}</strong>
+                </div>
+              </header>
+              <Suspense fallback={<div className="rack-graph-loading">Loading graph editor…</div>}>
+                <RackGraphEditor
+                  rack={selectedPartRack}
+                  racks={performance.library.racks}
+                  onChange={updatePartRack}
+                  canAddInstrument={selectedPartRack.slots.length < 32 && instances.length > 0}
+                  onAddInstrument={(position) => updatePartRack(
+                    addSlotToRack(selectedPartRack, defaultSlot(instances), position),
+                  )}
+                  instances={instances}
+                  renderPluginSurface={renderPluginSurface}
+                  onOverlayChange={handleGraphOverlayChange}
+                />
+              </Suspense>
+              {selectedPartRack.slots.length > 0 ? (
+                <div className="song-part-instrument-settings">
+                  <span className="card-kicker">Part instruments</span>
+                  {selectedPartRack.slots.map((slot, index) => (
+                    <SlotEditor
+                      key={`${slot.id}:${slot.plugin_id}`}
+                      slot={slot}
+                      index={index}
+                      total={selectedPartRack.slots.length}
+                      instances={instances}
+                      allowEmpty
+                      onChange={(next) => updatePartRack({
+                        ...selectedPartRack,
+                        slots: selectedPartRack.slots.map((item) => item.id === slot.id ? next : item),
+                      })}
+                      onMove={(direction) => {
+                        const target = index + direction;
+                        if (target < 0 || target >= selectedPartRack.slots.length) return;
+                        const slots = [...selectedPartRack.slots];
+                        [slots[index], slots[target]] = [slots[target], slots[index]];
+                        updatePartRack({ ...selectedPartRack, slots });
+                      }}
+                      onRemove={() => updatePartRack(removeSlotFromRack(selectedPartRack, slot.id))}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+        </div>
       </EditorSection>
     </form>
   );
@@ -1760,7 +2299,7 @@ function SetlistEditor({
     }
   };
   return (
-    <form className="performance-form" onSubmit={(event) => event.preventDefault()}>
+    <form className="performance-form entity-setlist" onSubmit={(event) => event.preventDefault()}>
       <EditorHeader eyebrow={isNew ? "New Setlist" : "Setlist configuration"} title={draft.name} dirty={dirty || isNew} pending={pending} onSave={save} onReset={() => { setDraft(original ? clone(original) : newSetlist(performance)); setBaseRevision(performance.revision); setError(null); }} onDelete={isNew ? undefined : remove} />
       {error && <div className="form-error">{error}</div>}
       <BasicFields name={draft.name} enabled={draft.enabled} onName={(name) => setDraft({ ...draft, name })} onEnabled={(enabled) => setDraft({ ...draft, enabled })} />

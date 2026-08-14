@@ -14,7 +14,16 @@ pub struct CompiledRackSlot {
     pub runtime_slot_id: String,
     pub rack_id: RackId,
     pub slot: RackSlot,
-    pub midi_transform: RackMidiTransform,
+    /// Ordered from the outermost graph (for example a Song Part) to the
+    /// instrument cable inside the leaf Rack. Keeping the stages separate is
+    /// important: channel filters, velocity curves and note ranges are not in
+    /// general losslessly composable into one transform.
+    pub midi_stages: Vec<CompiledMidiStage>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompiledMidiStage {
+    pub transform: RackMidiTransform,
     pub keyboard_parts: Option<RackKeyboardParts>,
 }
 
@@ -42,8 +51,20 @@ pub fn compile_instrument_rack(
     let rack = library
         .rack(rack_id)
         .ok_or_else(|| RackGraphCompileError::MissingRack(rack_id.clone()))?;
+    compile_instrument_definition(library, rack)
+}
+
+/// Compiles a playable graph that may be a persisted Rack or the synthetic
+/// root produced by a graph-backed Song Part. Child Rack references are always
+/// resolved through the authoritative library.
+pub fn compile_instrument_definition(
+    library: &PerformanceLibrary,
+    rack: &RackDefinition,
+) -> Result<Vec<CompiledRackSlot>, RackGraphCompileError> {
+    library.validate()?;
+    rack.validate()?;
     let mut slots = Vec::new();
-    compile_rack(library, rack, rack.id.as_str(), &mut slots)?;
+    compile_rack(library, rack, rack.id.as_str(), &[], &mut slots)?;
     if slots.is_empty() {
         return Err(RackGraphCompileError::NoPlayableSlots(rack.id.clone()));
     }
@@ -54,6 +75,7 @@ fn compile_rack(
     library: &PerformanceLibrary,
     rack: &RackDefinition,
     path: &str,
+    upstream_midi: &[CompiledMidiStage],
     compiled: &mut Vec<CompiledRackSlot>,
 ) -> Result<(), RackGraphCompileError> {
     let graph = rack.resolved_graph();
@@ -79,24 +101,33 @@ fn compile_rack(
                     continue;
                 }
                 let midi_edge = require_parallel_instrument_path(rack, node, &nodes, &graph.edges)?;
-                compiled.push(CompiledRackSlot {
-                    runtime_slot_id: format!("{path}/{}", slot.id),
-                    rack_id: rack.id.clone(),
-                    slot: (*slot).clone(),
-                    midi_transform: midi_edge
+                let mut midi_stages = upstream_midi.to_vec();
+                midi_stages.push(CompiledMidiStage {
+                    transform: midi_edge
                         .midi_transform
                         .clone()
                         .unwrap_or_else(|| RackMidiTransform::from_slot(slot)),
                     keyboard_parts: rack.keyboard_parts,
                 });
+                compiled.push(CompiledRackSlot {
+                    runtime_slot_id: format!("{path}/{}", slot.id),
+                    rack_id: rack.id.clone(),
+                    slot: (*slot).clone(),
+                    midi_stages,
+                });
             }
             RackGraphNodeKind::Rack { rack_id } => {
-                require_parallel_instrument_path(rack, node, &nodes, &graph.edges)?;
+                let midi_edge = require_parallel_instrument_path(rack, node, &nodes, &graph.edges)?;
                 let child = library
                     .rack(rack_id)
                     .expect("validated library references an existing child Rack");
                 let child_path = format!("{path}/{}/{}", node.id, child.id);
-                compile_rack(library, child, &child_path, compiled)?;
+                let mut child_midi = upstream_midi.to_vec();
+                child_midi.push(CompiledMidiStage {
+                    transform: midi_edge.midi_transform.clone().unwrap_or_default(),
+                    keyboard_parts: rack.keyboard_parts,
+                });
+                compile_rack(library, child, &child_path, &child_midi, compiled)?;
             }
             RackGraphNodeKind::AudioInput { .. } => {
                 return unsupported(
@@ -233,10 +264,14 @@ mod tests {
         assert_eq!(compiled.len(), 1);
         assert_eq!(compiled[0].runtime_slot_id, "rack.main/piano");
         assert_eq!(compiled[0].slot.id.as_str(), "piano");
-        assert_eq!(compiled[0].midi_transform.source_channels, vec![5]);
-        assert_eq!(compiled[0].midi_transform.note_low, 24);
-        assert_eq!(compiled[0].midi_transform.note_high, 96);
-        assert_eq!(compiled[0].midi_transform.transpose, -12);
+        assert_eq!(compiled[0].midi_stages.len(), 1);
+        assert_eq!(
+            compiled[0].midi_stages[0].transform.source_channels,
+            vec![5]
+        );
+        assert_eq!(compiled[0].midi_stages[0].transform.note_low, 24);
+        assert_eq!(compiled[0].midi_stages[0].transform.note_high, 96);
+        assert_eq!(compiled[0].midi_stages[0].transform.transpose, -12);
     }
 
     #[test]
@@ -260,7 +295,8 @@ mod tests {
             compile_instrument_rack(&library(vec![rack]), &RackId::new("rack.main").unwrap())
                 .unwrap();
 
-        assert_eq!(compiled[0].midi_transform, transform);
+        assert_eq!(compiled[0].midi_stages.len(), 1);
+        assert_eq!(compiled[0].midi_stages[0].transform, transform);
     }
 
     #[test]
@@ -341,5 +377,68 @@ mod tests {
             compiled[1].runtime_slot_id,
             "rack.parent/rack.layer/rack.child/strings"
         );
+        assert_eq!(compiled[1].midi_stages.len(), 2);
+    }
+
+    #[test]
+    fn compiles_a_song_part_root_with_direct_and_reusable_instruments() {
+        let child = rack("rack.child", "strings");
+        let mut part_root = rack("part.chorus", "lead");
+        let part_to_rack_transform = RackMidiTransform {
+            source_channels: vec![2, 7],
+            target_channel: Some(4),
+            note_low: 36,
+            note_high: 96,
+            transpose: 12,
+            ..RackMidiTransform::default()
+        };
+        let graph = part_root.graph.as_mut().unwrap();
+        graph.nodes.push(RackGraphNode {
+            id: RackGraphNodeId::new("rack.layer").unwrap(),
+            kind: RackGraphNodeKind::Rack {
+                rack_id: child.id.clone(),
+            },
+            position: RackGraphPosition { x: 540, y: 200 },
+        });
+        graph.edges.extend([
+            RackGraphEdge {
+                id: RackGraphEdgeId::new("layer.midi").unwrap(),
+                signal: RackGraphSignal::Midi,
+                source: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("input.midi").unwrap(),
+                    port_id: "out".into(),
+                },
+                target: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("rack.layer").unwrap(),
+                    port_id: "midi_in".into(),
+                },
+                midi_transform: Some(part_to_rack_transform.clone()),
+            },
+            RackGraphEdge {
+                id: RackGraphEdgeId::new("layer.audio").unwrap(),
+                signal: RackGraphSignal::Audio,
+                source: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("rack.layer").unwrap(),
+                    port_id: "audio_out".into(),
+                },
+                target: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("output.audio.00").unwrap(),
+                    port_id: "in".into(),
+                },
+                midi_transform: None,
+            },
+        ]);
+        let library = library(vec![child]);
+
+        let compiled = compile_instrument_definition(&library, &part_root).unwrap();
+
+        assert_eq!(compiled.len(), 2);
+        assert_eq!(compiled[0].runtime_slot_id, "part.chorus/lead");
+        assert_eq!(
+            compiled[1].runtime_slot_id,
+            "part.chorus/rack.layer/rack.child/strings"
+        );
+        assert_eq!(compiled[1].midi_stages.len(), 2);
+        assert_eq!(compiled[1].midi_stages[0].transform, part_to_rack_transform);
     }
 }

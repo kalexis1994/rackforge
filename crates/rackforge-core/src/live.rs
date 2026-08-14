@@ -111,6 +111,13 @@ impl From<SurfaceMode> for AudioRenderMode {
     }
 }
 
+fn resolve_render_mode(mode: SurfaceMode, rack_voice_count: usize) -> AudioRenderMode {
+    match mode {
+        SurfaceMode::Live if rack_voice_count == 0 => AudioRenderMode::Silent,
+        _ => mode.into(),
+    }
+}
+
 struct RackSlotVoice<'plugin> {
     slot_id: String,
     plugin: &'plugin LoadedPlugin,
@@ -569,7 +576,8 @@ pub fn run(config: LiveConfig) -> Result<()> {
         println!("PERFORMANCE_PLUGIN_STATES_MIGRATED count={migrated}");
     }
     let performance_library = performance_repository.library().clone();
-    let live_state = match persisted_live {
+    let initial_surface_mode = persisted_mode.unwrap_or(SurfaceMode::Live);
+    let mut live_state = match persisted_live {
         Some(live) if live.validate(&performance_library).is_ok() => live,
         Some(_) => {
             eprintln!("SESSION_CHECKPOINT_LIVE_IGNORED reason=library-mismatch");
@@ -577,6 +585,9 @@ pub fn run(config: LiveConfig) -> Result<()> {
         }
         None => performance_repository.initial_live_state(),
     };
+    if initial_surface_mode != SurfaceMode::Live {
+        live_state.deactivate();
+    }
     let mut initial_rack_specs = Vec::new();
     if let Some(rack) = live_state
         .active
@@ -687,7 +698,6 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 .any(|instance| instance.instance_id == *id)
         })
         .unwrap_or_else(|| primary_instance_id.clone());
-    let initial_surface_mode = persisted_mode.unwrap_or(SurfaceMode::Live);
     let session = SessionState {
         schema_version: SESSION_SCHEMA_VERSION,
         session_id,
@@ -763,7 +773,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         midi_port_names.len() + 1,
         initial_master_level,
         initial_master_pan,
-        initial_surface_mode.into(),
+        resolve_render_mode(initial_surface_mode, initial_rack_specs.len()),
         audio_state,
     )
 }
@@ -1046,7 +1056,27 @@ fn audio_loop(
                     let _ = reply.send(Ok(()));
                 }
                 AudioControlCommand::SetRenderMode { mode, reply } => {
-                    let requested_mode = mode.into();
+                    if mode != SurfaceMode::Live && !rack_voices.is_empty() {
+                        let released = rack_voices.len();
+                        events.clear();
+                        for voice in &mut rack_voices {
+                            voice.events.clear();
+                            if let Err(error) = voice.instance.reset() {
+                                eprintln!(
+                                    "LIVE_RACK_RELEASE_RESET_FAILED slot={} error={error:#}",
+                                    voice.slot_id
+                                );
+                            }
+                        }
+                        rack_voices.clear();
+                        println!("LIVE_RACK_RELEASED reason=surface-mode-change voices={released}");
+                    }
+                    let requested_mode = resolve_render_mode(mode, rack_voices.len());
+                    if mode == SurfaceMode::Live && requested_mode == AudioRenderMode::Silent {
+                        println!(
+                            "AUDIO_RENDER_MODE_RECONCILED requested=Live actual=Silent reason=no-rack-voices"
+                        );
+                    }
                     if requested_mode == AudioRenderMode::Silent {
                         render_mode = AudioRenderMode::Silent;
                         events.clear();
@@ -2091,6 +2121,26 @@ mod tests {
             length,
             data,
         }
+    }
+
+    #[test]
+    fn live_without_an_active_rack_resolves_to_explicit_silence() {
+        assert_eq!(
+            resolve_render_mode(SurfaceMode::Live, 0),
+            AudioRenderMode::Silent
+        );
+        assert_eq!(
+            resolve_render_mode(SurfaceMode::Live, 1),
+            AudioRenderMode::Rack
+        );
+        assert_eq!(
+            resolve_render_mode(SurfaceMode::Play, 0),
+            AudioRenderMode::Plugin
+        );
+        assert_eq!(
+            resolve_render_mode(SurfaceMode::Idle, 3),
+            AudioRenderMode::Silent
+        );
     }
 
     #[test]

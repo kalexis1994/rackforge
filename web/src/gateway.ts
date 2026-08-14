@@ -10,6 +10,7 @@ import {
 import { openSessionChannel, type SessionChannel } from "./host";
 import { randomIdToken } from "./ids";
 import type {
+  CoreCommandAppliedMessage,
   CoreErrorMessage,
   CoreSnapshotMessage,
   HostPreset,
@@ -30,6 +31,7 @@ const CLIENT_ID = createClientId();
 const SESSION_SCHEMA_VERSION = 14;
 const RECONNECT_DELAY_MS = 1200;
 const PERFORMANCE_REFRESH_MS = 2000;
+const COMMAND_TIMEOUT_MS = 8_000;
 
 let socket: SessionChannel | null = null;
 let sessionConnected = false;
@@ -64,6 +66,19 @@ const presetRequestQueue: Array<{
   resolve: (message: Record<string, unknown>) => void;
   reject: (error: Error) => void;
 }> = [];
+const pendingCommands = new Map<number, {
+  resolve: (message: CoreCommandAppliedMessage) => void;
+  reject: (error: Error) => void;
+  timeout: number;
+}>();
+
+function rejectPendingCommands(error: Error) {
+  for (const pending of pendingCommands.values()) {
+    window.clearTimeout(pending.timeout);
+    pending.reject(error);
+  }
+  pendingCommands.clear();
+}
 
 function pumpPresetRequests() {
   if (pendingPresetRequest || !socket || !sessionConnected) return;
@@ -131,7 +146,18 @@ export function connectGateway() {
       if (generation !== gatewayGeneration) return;
       try {
         const message = JSON.parse(payload) as Record<string, unknown>;
-        if (message.status === "snapshot" && "snapshot" in message) {
+        if (
+          message.status === "command_applied" &&
+          message.client_id === CLIENT_ID &&
+          typeof message.command_id === "number"
+        ) {
+          const pending = pendingCommands.get(message.command_id);
+          if (pending) {
+            pendingCommands.delete(message.command_id);
+            window.clearTimeout(pending.timeout);
+            pending.resolve(message as unknown as CoreCommandAppliedMessage);
+          }
+        } else if (message.status === "snapshot" && "snapshot" in message) {
           coreReady = true;
           const snapshotMessage = message as unknown as CoreSnapshotMessage;
           store.dispatch(snapshotReceived(snapshotMessage.snapshot));
@@ -177,6 +203,7 @@ export function connectGateway() {
         ) {
           const errorMessage = message as unknown as CoreErrorMessage;
           store.dispatch(errorReceived(errorMessage.message));
+          rejectPendingCommands(new Error(errorMessage.message));
           pendingPerformanceEdit?.reject(new Error(errorMessage.message));
           pendingPerformanceEdit = null;
           performanceSnapshotInFlight = false;
@@ -206,6 +233,9 @@ export function connectGateway() {
         new Error("The RackForge Core connection was interrupted."),
       );
       pendingPresetRequest = null;
+      rejectPendingCommands(
+        new Error("The RackForge Core connection was interrupted."),
+      );
       for (const queued of presetRequestQueue.splice(0)) {
         queued.reject(new Error("The RackForge Core connection was interrupted."));
       }
@@ -358,6 +388,7 @@ export function stopGateway() {
   pendingPresetRequest?.reject(interruption);
   pendingPresetRequest = null;
   for (const queued of presetRequestQueue.splice(0)) queued.reject(interruption);
+  rejectPendingCommands(interruption);
   closingSocket?.close();
 }
 
@@ -424,15 +455,47 @@ export function dispatchCommand(command: SessionCommand) {
     return;
   }
   commandId += 1;
-  socket.send(
-    JSON.stringify({
-      op: "dispatch",
-      envelope: {
-        schema_version: SESSION_SCHEMA_VERSION,
-        client_id: CLIENT_ID,
-        command_id: commandId,
-        command,
-      },
-    }),
-  );
+  try {
+    socket.send(commandPayload(commandId, command));
+  } catch (reason) {
+    store.dispatch(errorReceived(
+      reason instanceof Error ? reason.message : "Could not send the RackForge command.",
+    ));
+  }
+}
+
+function commandPayload(id: number, command: SessionCommand) {
+  return JSON.stringify({
+    op: "dispatch",
+    envelope: {
+      schema_version: SESSION_SCHEMA_VERSION,
+      client_id: CLIENT_ID,
+      command_id: id,
+      command,
+    },
+  });
+}
+
+export function dispatchCommandAwait(
+  command: SessionCommand,
+): Promise<CoreCommandAppliedMessage> {
+  if (!socket || !sessionConnected) {
+    return Promise.reject(new Error("RackForge Core is not connected."));
+  }
+  commandId += 1;
+  const id = commandId;
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      pendingCommands.delete(id);
+      reject(new Error("RackForge Core did not confirm the command in time."));
+    }, COMMAND_TIMEOUT_MS);
+    pendingCommands.set(id, { resolve, reject, timeout });
+    try {
+      socket!.send(commandPayload(id, command));
+    } catch (reason) {
+      window.clearTimeout(timeout);
+      pendingCommands.delete(id);
+      reject(reason instanceof Error ? reason : new Error(String(reason)));
+    }
+  });
 }

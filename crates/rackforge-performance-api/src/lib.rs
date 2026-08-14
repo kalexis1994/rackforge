@@ -1,5 +1,5 @@
 use rackforge_plugin_api::PluginStateReference;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use thiserror::Error;
@@ -238,8 +238,23 @@ impl RackKeyboardParts {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RackGraphPosition {
+    #[serde(deserialize_with = "deserialize_graph_coordinate")]
     pub x: i32,
+    #[serde(deserialize_with = "deserialize_graph_coordinate")]
     pub y: i32,
+}
+
+fn deserialize_graph_coordinate<'de, D>(deserializer: D) -> Result<i32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = f64::deserialize(deserializer)?;
+    if !value.is_finite() || value < i32::MIN as f64 || value > i32::MAX as f64 {
+        return Err(D::Error::custom(
+            "Rack graph coordinate is outside the i32 range",
+        ));
+    }
+    Ok(value.round() as i32)
 }
 
 impl RackGraphPosition {
@@ -1047,6 +1062,14 @@ impl LivePerformanceState {
         self.active_rack_id = Some(rack_id);
     }
 
+    /// Stops the current LIVE target without losing the user's browsing
+    /// position. Returning to LIVE can therefore reopen the same Rack, Song or
+    /// Setlist while every surface correctly reports that nothing is playing.
+    pub fn deactivate(&mut self) {
+        self.active = None;
+        self.active_rack_id = None;
+    }
+
     /// Removes navigation targets invalidated by a library edit while keeping
     /// the Rack that is already sounding as the safest possible fallback.
     pub fn reconcile(&mut self, library: &PerformanceLibrary) {
@@ -1084,8 +1107,9 @@ impl LivePerformanceState {
             self.rack = Some(location.clone());
             self.active = Some(location);
             self.active_rack_id = Some(rack_id);
-        } else if self.active_rack_id.is_none() {
+        } else {
             self.active = None;
+            self.active_rack_id = None;
         }
     }
 }
@@ -1551,6 +1575,56 @@ mod tests {
         assert_eq!(state.active, Some(rack));
         assert_eq!(state.active_rack_id, Some(rack_id));
         state.validate(&library).unwrap();
+    }
+
+    #[test]
+    fn live_state_clears_a_deleted_active_rack() {
+        let mut library = library();
+        let rack_id = RackId::new("rack.stage-piano").unwrap();
+        let location = LiveLocation::Rack {
+            rack_id: rack_id.clone(),
+        };
+        let mut state = LivePerformanceState::default();
+        state.activate(location, rack_id);
+
+        library.setlists.clear();
+        library.songs.clear();
+        library.racks.clear();
+        state.reconcile(&library);
+
+        assert_eq!(state.rack, None);
+        assert_eq!(state.active, None);
+        assert_eq!(state.active_rack_id, None);
+        state.validate(&library).unwrap();
+    }
+
+    #[test]
+    fn live_state_deactivation_preserves_the_browsed_location() {
+        let library = library();
+        let rack_id = RackId::new("rack.stage-piano").unwrap();
+        let location = LiveLocation::Rack {
+            rack_id: rack_id.clone(),
+        };
+        let mut state = LivePerformanceState::default();
+        state.activate(location.clone(), rack_id);
+
+        state.deactivate();
+
+        assert_eq!(state.rack, Some(location));
+        assert_eq!(state.active, None);
+        assert_eq!(state.active_rack_id, None);
+        state.validate(&library).unwrap();
+    }
+
+    #[test]
+    fn graph_positions_accept_and_normalize_browser_fractions() {
+        let position: RackGraphPosition =
+            serde_json::from_str(r#"{"x":387.0652173913044,"y":-20.5}"#).unwrap();
+        assert_eq!(position, RackGraphPosition { x: 387, y: -21 });
+        assert_eq!(
+            serde_json::to_string(&position).unwrap(),
+            r#"{"x":387,"y":-21}"#
+        );
     }
 
     #[test]

@@ -992,8 +992,13 @@ fn edit_performance(
             current_revision(context),
         );
     }
-    let (session_revision, mut live) = match context.store.lock() {
-        Ok(store) => (store.state().revision, store.state().live.clone()),
+    let (session_revision, mut live, program_draft, audition) = match context.store.lock() {
+        Ok(store) => (
+            store.state().revision,
+            store.state().live.clone(),
+            store.state().program_draft.clone(),
+            store.state().audition.clone(),
+        ),
         Err(_) => return internal_error("session store lock is poisoned", None),
     };
     let current = match context.performance_repository.lock() {
@@ -1053,13 +1058,51 @@ fn edit_performance(
     let library = repository.library().clone();
     drop(repository);
 
+    let active_rack_deleted =
+        previous_live.active_rack_id.is_some() && live.active_rack_id.is_none();
+    if active_rack_deleted {
+        let (reply_sender, reply_receiver) = sync_channel(1);
+        let silence_result = send_audio(
+            context,
+            AudioControlCommand::EmergencyStop {
+                reply: reply_sender,
+            },
+        )
+        .and_then(|()| receive_audio(reply_receiver, "stop deleted LIVE Rack"));
+        match silence_result {
+            Ok(()) => println!("LIVE_RACK_DEACTIVATED reason=deleted mode=Empty"),
+            Err(failure) => eprintln!(
+                "LIVE_RACK_DEACTIVATION_FAILED reason=deleted error={}",
+                failure.message
+            ),
+        }
+        set_lease_deadline(context, None);
+    }
+
     if live != previous_live {
         let checkpoint_state = match context.store.lock() {
             Ok(mut store) => {
-                if let Err(error) = store.record(
-                    None,
-                    SessionEvent::LiveStateReconciled { live: live.clone() },
-                ) {
+                let mut events = vec![SessionEvent::LiveStateReconciled { live: live.clone() }];
+                if active_rack_deleted {
+                    if let Some(draft) = program_draft.as_ref() {
+                        events.push(SessionEvent::ProgramEditCancelled {
+                            draft_id: draft.draft_id,
+                            instance_id: draft.instance_id.clone(),
+                        });
+                    }
+                    if let Some(audition) = audition.as_ref() {
+                        events.push(SessionEvent::AuditionEnded {
+                            lease_id: audition.lease_id,
+                            instance_id: audition.instance_id.clone(),
+                            restored_sound_id: None,
+                            reason: AuditionEndReason::Cancelled,
+                        });
+                    }
+                    events.push(SessionEvent::ActiveModeChanged {
+                        mode: rackforge_session_api::SurfaceMode::Idle,
+                    });
+                }
+                if let Err(error) = store.record_many(None, events) {
                     return internal_error(error.to_string(), Some(store.state().revision));
                 }
                 Some(store.snapshot())
@@ -1742,11 +1785,17 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 return failure.into_response();
             }
             match receive_audio(reply_receiver, "change render mode") {
-                Ok(()) => record_command_event(
-                    context,
-                    command_ref,
-                    SessionEvent::ActiveModeChanged { mode },
-                ),
+                Ok(()) => {
+                    let mut events = vec![SessionEvent::ActiveModeChanged { mode }];
+                    if mode == rackforge_session_api::SurfaceMode::Play
+                        && snapshot.live.active.is_some()
+                    {
+                        let mut live = snapshot.live.clone();
+                        live.deactivate();
+                        events.push(SessionEvent::LiveStateReconciled { live });
+                    }
+                    record_command_events(context, command_ref, events)
+                }
                 Err(failure) => failure.into_response(),
             }
         }
@@ -1912,6 +1961,17 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 graph_plugins,
                 graph_children
             );
+            if rack.slots.is_empty() && graph_children == 0 {
+                eprintln!(
+                    "LIVE_RACK_PREVIEW_REJECTED rack={} error=no-playable-voices",
+                    rack.id
+                );
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    "a Rack preview needs at least one playable instrument or child Rack",
+                    Some(snapshot.revision),
+                );
+            }
             let mut library = match context.performance_repository.lock() {
                 Ok(repository) => repository.library().clone(),
                 Err(_) => {
@@ -1930,20 +1990,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             } else {
                 library.racks.push(rack.clone());
             }
-            let runtime = if rack.slots.is_empty() && graph_children == 0 {
-                snapshot
-                    .active_instance()
-                    .map(|instance| (instance.instance_id.clone(), Vec::new()))
-                    .ok_or_else(|| {
-                        control_failure(
-                            ControlErrorCode::Unavailable,
-                            "the LIVE session has no active plugin instance",
-                            Some(snapshot.revision),
-                        )
-                    })
-            } else {
-                prepare_rack_runtime(&snapshot, &library, &rack.id, &context.state_store)
-            };
+            let runtime = prepare_rack_runtime(&snapshot, &library, &rack.id, &context.state_store);
             let (instance_id, slots) = match runtime {
                 Ok(runtime) => runtime,
                 Err(failure) => {
@@ -3404,6 +3451,121 @@ mod tests {
     }
 
     #[test]
+    fn rejects_empty_rack_previews_without_silencing_audio() {
+        let (context, receiver) = context();
+        let response = dispatch_command(
+            &context,
+            CommandEnvelope::new(
+                ClientId::new("test.empty-preview").unwrap(),
+                2,
+                SessionCommand::PreviewRack {
+                    rack: RackDefinition {
+                        schema_version: PERFORMANCE_SCHEMA_VERSION,
+                        id: RackId::new("rack.empty-preview").unwrap(),
+                        name: "Empty Preview".into(),
+                        enabled: true,
+                        keyboard_parts: None,
+                        graph: None,
+                        slots: Vec::new(),
+                    },
+                },
+            ),
+        );
+        assert!(matches!(
+            response,
+            ControlResponse::Error {
+                code: ControlErrorCode::Rejected,
+                ..
+            }
+        ));
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn confirms_rack_preview_only_after_one_voice_reaches_audio() {
+        let (context, receiver) = context();
+        let rack = context
+            .performance_repository
+            .lock()
+            .unwrap()
+            .library()
+            .racks[0]
+            .clone();
+        let audio = thread::spawn(move || match receiver.recv().unwrap() {
+            AudioControlCommand::ActivateRack { slots, reply, .. } => {
+                assert_eq!(slots.len(), 1);
+                assert_eq!(slots[0].plugin_id, "org.rackforge.rf-dls");
+                reply.send(Ok(())).unwrap();
+            }
+            _ => panic!("unexpected audio command"),
+        });
+        let response = dispatch_command(
+            &context,
+            CommandEnvelope::new(
+                ClientId::new("test.one-voice-preview").unwrap(),
+                3,
+                SessionCommand::PreviewRack { rack },
+            ),
+        );
+        assert!(matches!(
+            response,
+            ControlResponse::CommandApplied {
+                command_id: 3,
+                ref events,
+                ..
+            } if events.is_empty()
+        ));
+        audio.join().unwrap();
+    }
+
+    #[test]
+    fn deleting_the_active_rack_clears_live_and_silences_audio() {
+        let (context, receiver) = context();
+        let rack_id = RackId::new("rack.test").unwrap();
+        let mut live = rackforge_session_api::LivePerformanceState::default();
+        live.activate(
+            LiveLocation::Rack {
+                rack_id: rack_id.clone(),
+            },
+            rack_id.clone(),
+        );
+        context
+            .store
+            .lock()
+            .unwrap()
+            .record(None, SessionEvent::LiveStateReconciled { live })
+            .unwrap();
+        let expected_revision = context.performance_repository.lock().unwrap().revision();
+        let audio = thread::spawn(move || match receiver.recv().unwrap() {
+            AudioControlCommand::EmergencyStop { reply } => {
+                reply.send(Ok(())).unwrap();
+            }
+            _ => panic!("expected deleted Rack to silence LIVE audio"),
+        });
+
+        let response = edit_performance(
+            &context,
+            expected_revision,
+            PerformanceEdit::DeleteRack {
+                rack_id: rack_id.clone(),
+            },
+        );
+        audio.join().unwrap();
+
+        let ControlResponse::PerformanceEdited { snapshot } = response else {
+            panic!("expected the active Rack deletion to succeed");
+        };
+        assert!(snapshot.library.racks.is_empty());
+        assert_eq!(snapshot.live.active, None);
+        assert_eq!(snapshot.live.active_rack_id, None);
+        assert_eq!(context.store.lock().unwrap().state().live.active, None);
+        assert_eq!(
+            context.store.lock().unwrap().state().active_mode,
+            rackforge_session_api::SurfaceMode::Idle
+        );
+    }
+
+    #[test]
     fn virtual_midi_release_is_scoped_to_its_client() {
         let (context, receiver) = context();
         let first = ClientId::new("web.touch.first").unwrap();
@@ -3536,6 +3698,65 @@ mod tests {
             context.store.lock().unwrap().state().active_mode,
             rackforge_session_api::SurfaceMode::Play
         );
+    }
+
+    #[test]
+    fn switching_to_play_deactivates_the_live_target_but_keeps_its_browse_position() {
+        let (context, receiver) = context();
+        let rack_id = RackId::new("rack.test").unwrap();
+        let location = LiveLocation::Rack {
+            rack_id: rack_id.clone(),
+        };
+        let mut live = rackforge_session_api::LivePerformanceState::default();
+        live.activate(location.clone(), rack_id);
+        context
+            .store
+            .lock()
+            .unwrap()
+            .record(None, SessionEvent::LiveStateReconciled { live })
+            .unwrap();
+        let worker = thread::spawn(move || match receiver.recv().unwrap() {
+            AudioControlCommand::SetRenderMode { mode, reply } => {
+                assert_eq!(mode, rackforge_session_api::SurfaceMode::Play);
+                reply.send(Ok(())).unwrap();
+            }
+            _ => panic!("expected render-mode change"),
+        });
+
+        let response = dispatch_command(
+            &context,
+            CommandEnvelope::new(
+                ClientId::new("test.play-clears-live").unwrap(),
+                3,
+                SessionCommand::SetActiveMode {
+                    mode: rackforge_session_api::SurfaceMode::Play,
+                },
+            ),
+        );
+        worker.join().unwrap();
+
+        let ControlResponse::CommandApplied { events, .. } = response else {
+            panic!("expected PLAY transition to be applied");
+        };
+        assert!(matches!(
+            events.as_slice(),
+            [
+                EventEnvelope {
+                    event: SessionEvent::ActiveModeChanged {
+                        mode: rackforge_session_api::SurfaceMode::Play
+                    },
+                    ..
+                },
+                EventEnvelope {
+                    event: SessionEvent::LiveStateReconciled { .. },
+                    ..
+                }
+            ]
+        ));
+        let state = context.store.lock().unwrap();
+        assert_eq!(state.state().live.active, None);
+        assert_eq!(state.state().live.active_rack_id, None);
+        assert_eq!(state.state().live.rack, Some(location));
     }
 
     #[test]

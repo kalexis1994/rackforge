@@ -29,6 +29,7 @@ import {
 } from "react";
 import {
   materializeRackGraph,
+  normalizeRackGraphPosition,
   rackGraphId,
   removeSlotFromRack,
 } from "../rackGraph";
@@ -323,10 +324,10 @@ export default function RackGraphEditor({
       const gap = 8;
       const localX = clientX - canvasBounds.left;
       const localY = clientY - canvasBounds.top;
-      const position = {
+      const position = normalizeRackGraphPosition({
         x: (localX - viewport.x) / viewport.zoom,
         y: (localY - viewport.y) / viewport.zoom,
-      };
+      });
       const x = Math.max(gap, Math.min(canvasBounds.width - width - gap, localX + gap));
       const y = Math.max(gap, Math.min(canvasBounds.height - height - gap, localY + gap));
       return {
@@ -482,14 +483,15 @@ export default function RackGraphEditor({
 
   const persistNodePosition = useCallback(
     (nodeId: string, position: RackGraphPosition) => {
+      const normalized = normalizeRackGraphPosition(position);
       updateGraph((graph) => ({
         ...graph,
         nodes: graph.nodes.map((node) =>
-          node.id === nodeId ? { ...node, position } : node,
+          node.id === nodeId ? { ...node, position: normalized } : node,
         ),
         labels: (graph.labels ?? []).map((label) =>
           `label:${label.id}` === nodeId
-            ? { ...label, position }
+            ? { ...label, position: normalized }
             : label,
         ),
       }));

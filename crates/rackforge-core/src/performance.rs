@@ -16,6 +16,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 const PERFORMANCE_DIRECTORY: &str = "performance";
+const INITIALIZED_MARKER: &str = ".initialized";
 const MAX_DOCUMENT_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Debug)]
@@ -49,15 +50,21 @@ impl PerformanceRepository {
             root,
             library: PerformanceLibrary::empty(),
         };
+        let initialized = repository
+            .root
+            .as_ref()
+            .is_some_and(|root| root.join(INITIALIZED_MARKER).is_file());
         repository.load()?;
         if repository.library.racks.is_empty()
             && repository.library.songs.is_empty()
             && repository.library.setlists.is_empty()
+            && !initialized
         {
             repository.library = bootstrap_library(bootstrap)?;
             repository.persist_bootstrap()?;
             println!("PERFORMANCE_LIBRARY_BOOTSTRAPPED");
         }
+        repository.persist_initialized_marker()?;
         repository
             .library
             .validate()
@@ -75,6 +82,7 @@ impl PerformanceRepository {
             library: PerformanceLibrary::empty(),
         };
         repository.load()?;
+        repository.persist_initialized_marker()?;
         repository
             .library
             .validate()
@@ -187,6 +195,34 @@ impl PerformanceRepository {
             write_new_document(&root.join("setlists"), setlist.id.as_str(), setlist)?;
         }
         Ok(())
+    }
+
+    fn persist_initialized_marker(&self) -> Result<()> {
+        let Some(root) = &self.root else {
+            return Ok(());
+        };
+        fs::create_dir_all(root).with_context(|| format!("creating {}", root.display()))?;
+        let marker = root.join(INITIALIZED_MARKER);
+        if marker.is_file() {
+            return Ok(());
+        }
+        let temporary = root.join(format!(".initialized.tmp.{}", std::process::id()));
+        if temporary.exists() {
+            fs::remove_file(&temporary)
+                .with_context(|| format!("removing stale {}", temporary.display()))?;
+        }
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options
+            .open(&temporary)
+            .with_context(|| format!("creating {}", temporary.display()))?;
+        file.write_all(b"RackForge performance library initialized\n")?;
+        file.sync_all()?;
+        drop(file);
+        replace_file(&temporary, &marker)?;
+        sync_directory(root)
     }
 
     fn persist_edit(&self, edit: &PerformanceEdit) -> Result<()> {
@@ -465,6 +501,34 @@ mod tests {
             root.join("performance/racks/rack.imported.current.json")
                 .is_file()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_intentionally_emptied_library_is_not_bootstrapped_again() {
+        let root = temporary_root("persistent-empty");
+        let mut repository =
+            PerformanceRepository::load_or_bootstrap(Some(&root), bootstrap()).unwrap();
+        let mut live = repository.initial_live_state();
+        let setlist_id = repository.library().setlists[0].id.clone();
+        let song_id = repository.library().songs[0].id.clone();
+        let rack_id = repository.library().racks[0].id.clone();
+
+        for edit in [
+            PerformanceEdit::DeleteSetlist { setlist_id },
+            PerformanceEdit::DeleteSong { song_id },
+            PerformanceEdit::DeleteRack { rack_id },
+        ] {
+            let revision = repository.revision();
+            repository.apply_edit(&revision, edit, &mut live).unwrap();
+        }
+        assert!(root.join("performance/.initialized").is_file());
+        drop(repository);
+
+        let reloaded = PerformanceRepository::load_or_bootstrap(Some(&root), bootstrap()).unwrap();
+        assert!(reloaded.library().racks.is_empty());
+        assert!(reloaded.library().songs.is_empty());
+        assert!(reloaded.library().setlists.is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 

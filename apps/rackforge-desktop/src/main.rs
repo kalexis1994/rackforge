@@ -2809,9 +2809,18 @@ impl DesktopApp {
                 self.menu.sync_active_mode(mode);
                 let mut session = self.session.write().expect("session lock poisoned");
                 session.active_mode = surface_mode;
+                let live_target_deactivated =
+                    surface_mode == SurfaceMode::Play && session.live.active.is_some();
+                if live_target_deactivated {
+                    session.live.deactivate();
+                }
                 session.revision = Revision::new(session.revision.get().saturating_add(1));
                 self.status = format!("Active mode: {mode:?}");
                 drop(session);
+                if live_target_deactivated {
+                    let snapshot = self.performance_snapshot();
+                    self.menu.sync_performance_snapshot(snapshot);
+                }
                 #[cfg(windows)]
                 if let Some(audio) = &self.audio
                     && let Err(error) = audio.set_running(mode != ActiveMode::Idle)

@@ -354,6 +354,14 @@ export interface CoreErrorMessage {
   code?: string;
 }
 
+export interface CoreCommandAppliedMessage {
+  status: "command_applied";
+  client_id: string;
+  command_id: number;
+  revision: number;
+  events: unknown[];
+}
+
 export interface WebPublicConfig {
   enabled: boolean;
   access: "local" | "lan";

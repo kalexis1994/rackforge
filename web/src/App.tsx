@@ -39,6 +39,7 @@ import {
   connectGateway,
   deletePluginPreset,
   dispatchCommand,
+  dispatchCommandAwait,
   loadPluginPreset,
   requestPluginParameters,
   requestPluginPresets,
@@ -302,6 +303,7 @@ function RackForgeApp() {
   const [playOverlay, setPlayOverlay] = useState<"plugins" | "presets" | null>(null);
   const [liveSurface, setLiveSurface] = useState<"perform" | "configure">("perform");
   const [liveWorkspace, setLiveWorkspace] = useState<{ kind: "rack"; name: string } | null>(null);
+  const [playTransitionOpen, setPlayTransitionOpen] = useState(false);
   const [settingsBootstrap, setSettingsBootstrap] = useState<HostSettingsBootstrap | null>(null);
   const [controllerDockOpen, setControllerDockOpen] = useState(false);
   const roomyController = useMediaQuery(ROOMY_CONTROLLER_QUERY);
@@ -370,6 +372,18 @@ function RackForgeApp() {
   }, [location.pathname, navigate, roomyController]);
 
   const showControllerDock = roomyController && controllerDockOpen;
+  const requestPlayNavigation = useCallback(() => {
+    setMobileMenuOpen(false);
+    if (location.pathname === "/play") return;
+    const liveOutputActive = snapshot?.active_mode === "live" && (
+      snapshot.live.active !== undefined || liveWorkspace !== null
+    );
+    if (liveOutputActive) {
+      setPlayTransitionOpen(true);
+      return;
+    }
+    navigate("/play");
+  }, [liveWorkspace, location.pathname, navigate, snapshot]);
 
   return (
     <div className={`app-shell${isPluginSurface ? " plugin-surface-active" : ""}${
@@ -385,6 +399,7 @@ function RackForgeApp() {
           <span className="brand-name">RACKFORGE</span>
         </div>
         <NavigationLinks
+          onPlayRequest={requestPlayNavigation}
           controllerDockOpen={showControllerDock}
           onControllerToggle={roomyController
             ? () => setControllerDockOpen((open) => !open)
@@ -426,6 +441,7 @@ function RackForgeApp() {
           <FloatingPerformanceMenuButton
             menuOpen={mobileMenuOpen}
             onOpen={() => setMobileMenuOpen(true)}
+            showRackDetails={liveWorkspace !== null}
           />
         ) : null}
         {error && <div className="error-banner">{error}</div>}
@@ -439,7 +455,10 @@ function RackForgeApp() {
           }`}
         >
           <Routes>
-            <Route path="/" element={<HomePage snapshot={snapshot} />} />
+            <Route
+              path="/"
+              element={<HomePage snapshot={snapshot} onOpenPlay={requestPlayNavigation} />}
+            />
             <Route
               path="/live"
               element={
@@ -471,7 +490,7 @@ function RackForgeApp() {
                   snapshot={snapshot}
                   connection={connection}
                   onOpenNavigation={() => setMobileMenuOpen(true)}
-                  onExit={() => navigate("/play")}
+                  onExit={requestPlayNavigation}
                 />
               }
             />
@@ -533,6 +552,7 @@ function RackForgeApp() {
                 : undefined
           }
           liveWorkspaceActive={liveWorkspace !== null}
+          onPlayRequest={requestPlayNavigation}
           onPerformanceAction={(action) => {
             setMobileMenuOpen(false);
             if (action === "select-plugin") setPlayOverlay("plugins");
@@ -550,6 +570,15 @@ function RackForgeApp() {
       ) : null}
       {installPluginOpen ? (
         <InstallPluginDialog onClose={() => setInstallPluginOpen(false)} />
+      ) : null}
+      {playTransitionOpen ? (
+        <PlayModeTransitionDialog
+          onCancel={() => setPlayTransitionOpen(false)}
+          onConfirm={() => {
+            setPlayTransitionOpen(false);
+            navigate("/play");
+          }}
+        />
       ) : null}
     </div>
   );
@@ -575,9 +604,11 @@ function readPerformanceMenuPosition() {
 function FloatingPerformanceMenuButton({
   menuOpen,
   onOpen,
+  showRackDetails,
 }: {
   menuOpen: boolean;
   onOpen: () => void;
+  showRackDetails: boolean;
 }) {
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [position, setPosition] = useState(readPerformanceMenuPosition);
@@ -648,14 +679,15 @@ function FloatingPerformanceMenuButton({
     const shell = button.closest(".app-shell")?.getBoundingClientRect();
     if (!shell) return;
     const availableX = Math.max(1, shell.width - button.offsetWidth - 16);
-    const availableY = Math.max(1, shell.height - button.offsetHeight - 16);
+    const verticalOffset = showRackDetails ? 110 : 60;
+    const availableY = Math.max(1, shell.height - verticalOffset);
     const nextPosition = {
       x: Math.min(1, Math.max(0, (clientX - shell.left - gesture.grabX - 8) / availableX)),
       y: Math.min(1, Math.max(0, (clientY - shell.top - gesture.grabY - 8) / availableY)),
     };
     positionRef.current = nextPosition;
     setPosition(nextPosition);
-  }, []);
+  }, [showRackDetails]);
 
   const finishGesture = useCallback((pointerId?: number) => {
     const gesture = gestureRef.current;
@@ -711,13 +743,18 @@ function FloatingPerformanceMenuButton({
     };
   }, [finishGesture, stopDragCue]);
 
+  const anchorLeft = `calc(8px + ${position.x * 100}% - ${position.x * 60}px)`;
+  const anchorTopOffset = position.y * (showRackDetails ? 110 : 60);
+  const anchorTop = `calc(8px + ${position.y * 100}% - ${anchorTopOffset}px)`;
+
   return (
+    <>
     <button
       ref={buttonRef}
       className={`performance-menu-button${dragging ? " dragging" : ""}`}
       style={{
-        left: `calc(8px + ${position.x * 100}% - ${position.x * 60}px)`,
-        top: `calc(8px + ${position.y * 100}% - ${position.y * 60}px)`,
+        left: anchorLeft,
+        top: anchorTop,
       }}
       onPointerDown={(event) => {
         if (!event.isPrimary || event.button !== 0) return;
@@ -770,6 +807,21 @@ function FloatingPerformanceMenuButton({
     >
       <Menu aria-hidden="true" />
     </button>
+    {showRackDetails ? (
+      <button
+        type="button"
+        className="rack-details-floating-button"
+        style={{
+          left: anchorLeft,
+          top: `calc(60px + ${position.y * 100}% - ${anchorTopOffset}px)`,
+        }}
+        aria-label="Open Rack details"
+        onClick={() => window.dispatchEvent(new Event("rackforge:open-rack-details"))}
+      >
+        <Settings2 aria-hidden="true" strokeWidth={1.9} />
+      </button>
+    ) : null}
+    </>
   );
 }
 
@@ -811,7 +863,7 @@ function useTactileFeedback() {
       // Piano keys and pads provide their own immediate pressed state. A
       // delayed expanding ripple obscures adjacent notes and feels sluggish
       // when playing quickly or gliding across the keyboard.
-      if (candidate.closest(".touch-instrument, .performance-menu-button")) return;
+      if (candidate.closest(".touch-instrument, .performance-menu-button, .rack-details-floating-button")) return;
       clearPressed();
       gesture = {
         candidate,
@@ -887,12 +939,14 @@ function NavigationLinks({
   items = navItems,
   detailed = false,
   onNavigate,
+  onPlayRequest,
   controllerDockOpen = false,
   onControllerToggle,
 }: {
   items?: typeof navItems;
   detailed?: boolean;
   onNavigate?: () => void;
+  onPlayRequest?: () => void;
   controllerDockOpen?: boolean;
   onControllerToggle?: () => void;
 }) {
@@ -927,7 +981,15 @@ function NavigationLinks({
             key={item.path}
             to={item.path}
             end={item.path === "/"}
-            onClick={onNavigate}
+            onClick={(event) => {
+              if (item.path === "/play" && onPlayRequest) {
+                event.preventDefault();
+                onNavigate?.();
+                onPlayRequest();
+                return;
+              }
+              onNavigate?.();
+            }}
             className={({ isActive }) =>
               `nav-item${isActive ? " active" : ""}`
             }
@@ -951,12 +1013,14 @@ function MobileNavigation({
   onClose,
   performanceSurface,
   liveWorkspaceActive,
+  onPlayRequest,
   onPerformanceAction,
 }: {
   connection: string;
   onClose: () => void;
   performanceSurface?: "play" | "live";
   liveWorkspaceActive: boolean;
+  onPlayRequest: () => void;
   onPerformanceAction: (
     action: "select-plugin" | "presets" | "live-perform" | "live-configure" | "live-save-editor" | "live-close-editor",
   ) => void;
@@ -1097,6 +1161,7 @@ function MobileNavigation({
             items={[navItems[2], navItems[1], navItems[3], diagnosticsItem]}
             detailed
             onNavigate={requestClose}
+            onPlayRequest={onPlayRequest}
           />
           <span className="mobile-menu-section">System</span>
           <NavigationLinks
@@ -1111,6 +1176,56 @@ function MobileNavigation({
           />
         </div>
         <ConnectionBadge status={connection} />
+      </section>
+    </div>
+  );
+}
+
+function PlayModeTransitionDialog({
+  onCancel,
+  onConfirm,
+}: {
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const titleId = useId();
+  const descriptionId = useId();
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onCancel]);
+  return (
+    <div
+      className="preset-modal-backdrop play-mode-transition-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <section
+        className="preset-modal play-mode-transition-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+      >
+        <header className="preset-modal-header">
+          <div>
+            <span className="eyebrow">LIVE output active</span>
+            <h2 id={titleId}>Switch to PLAY?</h2>
+          </div>
+          <button className="preset-modal-close" onClick={onCancel} aria-label="Stay in LIVE">×</button>
+        </header>
+        <div className="play-mode-transition-copy" id={descriptionId}>
+          <p>The current LIVE Rack will stop sounding and RackForge will activate the selected PLAY instrument.</p>
+          <p>Continue only if you intend to leave the live performance.</p>
+        </div>
+        <footer className="play-mode-transition-actions">
+          <button className="secondary-button" onClick={onCancel}>Stay in LIVE</button>
+          <button className="primary-button" onClick={onConfirm}>Switch to PLAY</button>
+        </footer>
       </section>
     </div>
   );
@@ -1698,7 +1813,13 @@ function PageHeading({
   );
 }
 
-function HomePage({ snapshot }: { snapshot: SessionSnapshot | null }) {
+function HomePage({
+  snapshot,
+  onOpenPlay,
+}: {
+  snapshot: SessionSnapshot | null;
+  onOpenPlay: () => void;
+}) {
   const active = snapshot?.instances.find(
     (instance) => instance.instance_id === snapshot.active_instance_id,
   );
@@ -1725,7 +1846,7 @@ function HomePage({ snapshot }: { snapshot: SessionSnapshot | null }) {
             <h2>{selected?.name ?? "No program selected"}</h2>
             <p>{selected?.detail ?? active?.plugin_name ?? "Connect RackForge Core"}</p>
           </div>
-          <button className="primary-button" onClick={() => navigate("/play")}>
+          <button className="primary-button" onClick={onOpenPlay}>
             Open instrument <span>→</span>
           </button>
         </article>
@@ -1781,6 +1902,37 @@ function PlayPage({
     instances.find(
       (instance) => instance.instance_id === snapshot?.active_instance_id,
     ) ?? instances[0];
+  const playActivationStartedRef = useRef(false);
+  useEffect(() => {
+    if (
+      playActivationStartedRef.current ||
+      !snapshot ||
+      (snapshot.active_mode === "play" && snapshot.live.active === undefined)
+    ) return;
+    playActivationStartedRef.current = true;
+    const instanceId = active?.instance_id;
+    const soundId = active?.selected_sound_id;
+    void (async () => {
+      try {
+        // Rack preview cleanup is dispatched while this route mounts. Awaiting
+        // the PLAY transition here makes it the final owner of the audio path,
+        // then re-applies the already selected standalone instrument state.
+        await dispatchCommandAwait({ type: "set_active_mode", mode: "play" });
+        if (!instanceId) return;
+        await dispatchCommandAwait({ type: "select_plugin", instance_id: instanceId });
+        if (soundId) {
+          await dispatchCommandAwait({
+            type: "select_sound",
+            instance_id: instanceId,
+            sound_id: soundId,
+          });
+        }
+      } catch {
+        // The gateway publishes command failures through the shared error
+        // banner. A later explicit program selection remains a safe retry.
+      }
+    })();
+  }, [active, snapshot]);
   const pluginPickerOpen = overlay === "plugins";
   const presetsOpen = overlay === "presets";
   const [surfaceInfo, setSurfaceInfo] = useState<{

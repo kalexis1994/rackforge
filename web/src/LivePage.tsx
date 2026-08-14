@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   dispatchCommand,
+  dispatchCommandAwait,
   dispatchPerformanceEdit,
   requestPluginPreset,
   requestPluginPresets,
@@ -23,6 +24,7 @@ import {
   addSlotToRack,
   graphFromSlots,
   materializeRackGraph,
+  normalizeRackGraphGeometry,
   removeSlotFromRack,
 } from "./rackGraph";
 import type {
@@ -50,6 +52,17 @@ interface PendingPerformanceDelete {
   name: string;
 }
 
+interface RackCascadePlan {
+  dependentRacks: RackDefinition[];
+  songs: SongDefinition[];
+  setlists: Array<{
+    current: SetlistDefinition;
+    next: SetlistDefinition | null;
+    removedEntries: number;
+  }>;
+  rackDeleteOrder: string[];
+}
+
 interface LivePageProps {
   session: SessionSnapshot | null;
   performance: PerformanceSnapshot | null;
@@ -75,6 +88,72 @@ function performanceId(prefix: string) {
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+function rackCascadePlan(
+  performance: PerformanceSnapshot,
+  targetRackId: string,
+): RackCascadePlan {
+  const rackIds = new Set([targetRackId]);
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    for (const rack of performance.library.racks) {
+      if (rackIds.has(rack.id)) continue;
+      const referencesDeletedRack = materializeRackGraph(rack).graph!.nodes.some(
+        (node) => node.kind.kind === "rack" && rackIds.has(node.kind.rack_id),
+      );
+      if (referencesDeletedRack) {
+        rackIds.add(rack.id);
+        expanded = true;
+      }
+    }
+  }
+
+  const racks = performance.library.racks.filter((rack) => rackIds.has(rack.id));
+  const songs = performance.library.songs.filter((song) =>
+    song.parts.some((part) => rackIds.has(part.rack_id)),
+  );
+  const songIds = new Set(songs.map((song) => song.id));
+  const setlists = performance.library.setlists.flatMap((setlist) => {
+    const entries = setlist.entries.filter((entry) => !songIds.has(entry.song_id));
+    const removedEntries = setlist.entries.length - entries.length;
+    if (removedEntries === 0) return [];
+    return [{
+      current: setlist,
+      next: entries.length > 0 ? { ...setlist, entries } : null,
+      removedEntries,
+    }];
+  });
+
+  const remaining = new Set(racks.map((rack) => rack.id));
+  const rackDeleteOrder: string[] = [];
+  while (remaining.size > 0) {
+    const referenced = new Set<string>();
+    for (const rack of racks) {
+      if (!remaining.has(rack.id)) continue;
+      for (const node of materializeRackGraph(rack).graph!.nodes) {
+        if (node.kind.kind === "rack" && remaining.has(node.kind.rack_id)) {
+          referenced.add(node.kind.rack_id);
+        }
+      }
+    }
+    const outermost = [...remaining]
+      .filter((rackId) => !referenced.has(rackId))
+      .sort();
+    const next = outermost.length > 0 ? outermost : [...remaining].sort();
+    for (const rackId of next) {
+      remaining.delete(rackId);
+      rackDeleteOrder.push(rackId);
+    }
+  }
+
+  return {
+    dependentRacks: racks.filter((rack) => rack.id !== targetRackId),
+    songs,
+    setlists,
+    rackDeleteOrder,
+  };
 }
 
 function sameLocation(left: LiveLocation | undefined, right: LiveLocation) {
@@ -444,6 +523,7 @@ function PerformanceConfig({
   const [pendingDelete, setPendingDelete] = useState<PendingPerformanceDelete | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteBusyRef = useRef(false);
   const items =
     kind === "rack"
       ? performance.library.racks
@@ -457,6 +537,17 @@ function PerformanceConfig({
     || performance.library.racks.some((rack) => rack.id === rackWorkspaceId)
     ? rackWorkspaceId
     : null;
+  const pendingDeleteCollection = pendingDelete?.kind === "rack"
+    ? performance.library.racks
+    : pendingDelete?.kind === "song"
+      ? performance.library.songs
+      : performance.library.setlists;
+  const activePendingDelete = pendingDelete && pendingDeleteCollection.some(
+    (item) => item.id === pendingDelete.id,
+  ) ? pendingDelete : null;
+  const deleteRackPlan = activePendingDelete?.kind === "rack"
+    ? rackCascadePlan(performance, activePendingDelete.id)
+    : null;
 
   useEffect(() => {
     if (!editorDirty) return;
@@ -464,15 +555,6 @@ function PerformanceConfig({
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [editorDirty]);
-
-  useEffect(() => {
-    const closeWorkspace = () => {
-      setRackWorkspaceId(null);
-      setSelectedId(null);
-    };
-    window.addEventListener("rackforge:close-rack-workspace", closeWorkspace);
-    return () => window.removeEventListener("rackforge:close-rack-workspace", closeWorkspace);
-  }, []);
 
   const workspaceRackName = activeRackWorkspaceId === "new"
     ? "New Rack"
@@ -488,14 +570,24 @@ function PerformanceConfig({
     [onWorkspaceChange],
   );
 
-  const proceed = (action: () => void) => {
+  const proceed = useCallback((action: () => void) => {
     if (
       editorDirty &&
       !window.confirm("Discard the unsaved changes in this editor?")
     )
       return;
     action();
-  };
+  }, [editorDirty]);
+  useEffect(() => {
+    const closeWorkspace = () => {
+      proceed(() => {
+        setRackWorkspaceId(null);
+        setSelectedId(null);
+      });
+    };
+    window.addEventListener("rackforge:close-rack-workspace", closeWorkspace);
+    return () => window.removeEventListener("rackforge:close-rack-workspace", closeWorkspace);
+  }, [proceed]);
   const selectItem = (id: string) => {
     if (selectedId === id && kind !== "rack") return;
     proceed(() => {
@@ -515,23 +607,61 @@ function PerformanceConfig({
     setDeleteError(null);
     setPendingDelete({ kind, id: item.id, name: item.name });
   };
-  const confirmDelete = async () => {
-    if (!pendingDelete || deleteBusy || pending) return;
+  const confirmDelete = async (cascade: boolean) => {
+    if (!pendingDelete || deleteBusyRef.current || pending) return;
+    const hasRackDependencies = !!deleteRackPlan && (
+      deleteRackPlan.dependentRacks.length > 0 ||
+      deleteRackPlan.songs.length > 0 ||
+      deleteRackPlan.setlists.length > 0
+    );
+    if (hasRackDependencies && !cascade) {
+      setDeleteError("Confirm the dependent Rack, Song and Setlist cleanup to delete this Rack.");
+      return;
+    }
     const edit: PerformanceEdit = pendingDelete.kind === "rack"
       ? { kind: "delete_rack", rack_id: pendingDelete.id }
       : pendingDelete.kind === "song"
         ? { kind: "delete_song", song_id: pendingDelete.id }
         : { kind: "delete_setlist", setlist_id: pendingDelete.id };
+    deleteBusyRef.current = true;
     setDeleteBusy(true);
     setDeleteError(null);
     try {
-      await dispatchEdit(performance.revision, edit);
+      let revision = performance.revision;
+      if (pendingDelete.kind === "rack" && deleteRackPlan && hasRackDependencies) {
+        for (const affected of deleteRackPlan.setlists) {
+          const snapshot = await dispatchEdit(
+            revision,
+            affected.next
+              ? { kind: "put_setlist", setlist: affected.next }
+              : { kind: "delete_setlist", setlist_id: affected.current.id },
+          );
+          revision = snapshot.revision;
+        }
+        for (const song of deleteRackPlan.songs) {
+          const snapshot = await dispatchEdit(revision, {
+            kind: "delete_song",
+            song_id: song.id,
+          });
+          revision = snapshot.revision;
+        }
+        for (const rackId of deleteRackPlan.rackDeleteOrder) {
+          const snapshot = await dispatchEdit(revision, {
+            kind: "delete_rack",
+            rack_id: rackId,
+          });
+          revision = snapshot.revision;
+        }
+      } else {
+        await dispatchEdit(revision, edit);
+      }
       setPendingDelete(null);
     } catch (reason) {
       setDeleteError(
         reason instanceof Error ? reason.message : `Could not delete ${pendingDelete.name}.`,
       );
     } finally {
+      deleteBusyRef.current = false;
       setDeleteBusy(false);
     }
   };
@@ -605,9 +735,10 @@ function PerformanceConfig({
           </div>
         )}
       </div>
-      {pendingDelete ? (
+      {activePendingDelete ? (
         <PerformanceDeleteDialog
-          target={pendingDelete}
+          target={activePendingDelete}
+          rackPlan={deleteRackPlan}
           deleting={deleteBusy || pending}
           error={deleteError}
           onClose={() => {
@@ -689,20 +820,27 @@ function PerformanceConfig({
 
 function PerformanceDeleteDialog({
   target,
+  rackPlan,
   deleting,
   error,
   onClose,
   onConfirm,
 }: {
   target: PendingPerformanceDelete;
+  rackPlan: RackCascadePlan | null;
   deleting: boolean;
   error: string | null;
   onClose: () => void;
-  onConfirm: () => Promise<void>;
+  onConfirm: (cascade: boolean) => Promise<void>;
 }) {
   const titleId = useId();
   const descriptionId = useId();
+  const [cascade, setCascade] = useState(false);
   const label = kindLabels[target.kind].slice(0, -1);
+  const dependencyCount = rackPlan
+    ? rackPlan.dependentRacks.length + rackPlan.songs.length + rackPlan.setlists.length
+    : 0;
+  const hasDependencies = dependencyCount > 0;
   return (
     <div
       className="preset-modal-backdrop performance-delete-backdrop"
@@ -726,12 +864,40 @@ function PerformanceDeleteDialog({
         </header>
         <div className="performance-delete-copy" id={descriptionId}>
           <p>This permanently removes the {label} from the RackForge performance library.</p>
-          <p>Deletion will be blocked if another Song or Setlist still depends on it.</p>
+          {hasDependencies && rackPlan ? (
+            <fieldset className="performance-delete-dependencies" disabled={deleting}>
+              <legend>Dependent performance items</legend>
+              <p>
+                {rackPlan.dependentRacks.length} Racks · {rackPlan.songs.length} Songs ·{" "}
+                {rackPlan.setlists.reduce((count, item) => count + item.removedEntries, 0)} Setlist entries
+              </p>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={cascade}
+                  onChange={(event) => setCascade(event.target.checked)}
+                />
+                <span>
+                  <strong>Remove these dependencies too</strong>
+                  <small>
+                    Dependent Racks and Songs will be deleted. Setlist entries will be removed;
+                    empty Setlists will also be deleted.
+                  </small>
+                </span>
+              </label>
+            </fieldset>
+          ) : (
+            <p>No Song, Setlist or parent Rack depends on this {label}.</p>
+          )}
           {error ? <p className="form-error">{error}</p> : null}
         </div>
         <footer className="performance-delete-actions">
           <button className="secondary-button" disabled={deleting} onClick={onClose}>Cancel</button>
-          <button className="danger-button" disabled={deleting} onClick={() => void onConfirm()}>
+          <button
+            className="danger-button"
+            disabled={deleting || (hasDependencies && !cascade)}
+            onClick={() => void onConfirm(cascade)}
+          >
             <AsyncActionLabel active={deleting} activeLabel={`Deleting ${label}…`}>
               Delete {label}
             </AsyncActionLabel>
@@ -884,6 +1050,100 @@ function BasicFields({
   );
 }
 
+function RackWorkspaceDetails({
+  name,
+  enabled,
+  dirty,
+  isNew,
+  pending,
+  instrumentCount,
+  previewStatus,
+  onName,
+  onEnabled,
+  onSave,
+  onCancel,
+  onDismiss,
+  mobile = false,
+}: {
+  name: string;
+  enabled: boolean;
+  dirty: boolean;
+  isNew: boolean;
+  pending: boolean;
+  instrumentCount: number;
+  previewStatus: "idle" | "applying" | "ready";
+  onName: (name: string) => void;
+  onEnabled: (enabled: boolean) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  onDismiss?: () => void;
+  mobile?: boolean;
+}) {
+  return (
+    <section
+      className={`rack-workspace-details${mobile ? " mobile" : ""}`}
+      aria-label="Rack details"
+    >
+      <header>
+        <div>
+          <span className="card-kicker">Rack details</span>
+          <strong>{dirty || isNew ? "Unsaved changes" : "Saved"}</strong>
+        </div>
+        {onDismiss ? (
+          <button type="button" className="rack-details-dismiss" onClick={onDismiss} aria-label="Close Rack details">
+            ×
+          </button>
+        ) : null}
+      </header>
+      <div className="rack-details-fields">
+        <label>
+          <span>Name</span>
+          <input
+            value={name}
+            maxLength={64}
+            autoComplete="off"
+            onChange={(event) => onName(event.target.value)}
+          />
+        </label>
+        <label className="rack-details-toggle">
+          <span>
+            <strong>Available in LIVE</strong>
+            <small>{instrumentCount} {instrumentCount === 1 ? "instrument" : "instruments"}</small>
+          </span>
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(event) => onEnabled(event.target.checked)}
+          />
+          <i />
+        </label>
+      </div>
+      <footer>
+        <span className={`rack-details-preview ${previewStatus}`}>
+          {previewStatus === "applying"
+            ? "Applying preview…"
+            : previewStatus === "ready"
+              ? "Preview active"
+              : "Preview idle"}
+        </span>
+        <div>
+          <button type="button" className="secondary-button" disabled={pending} onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="save-button"
+            disabled={(!dirty && !isNew) || pending}
+            onClick={onSave}
+          >
+            <AsyncActionLabel active={pending} activeLabel="Saving…">Save</AsyncActionLabel>
+          </button>
+        </div>
+      </footer>
+    </section>
+  );
+}
+
 function validationName(name: string) {
   return name.trim().length === 0
     ? "Name is required."
@@ -897,6 +1157,17 @@ function dispatchEdit(
   edit: PerformanceEdit,
 ) {
   return dispatchPerformanceEdit(expectedRevision, edit);
+}
+
+function rackPreviewVoiceCount(rack: RackDefinition | undefined) {
+  if (!rack) return 0;
+  const enabledSlots = new Set(
+    rack.slots.filter((slot) => slot.enabled).map((slot) => slot.id),
+  );
+  return materializeRackGraph(rack).graph!.nodes.filter(
+    (node) =>
+      node.kind.kind === "plugin" && enabledSlots.has(node.kind.slot_id),
+  ).length;
 }
 
 function RackEditor({
@@ -928,12 +1199,18 @@ function RackEditor({
   );
   const [baseRevision, setBaseRevision] = useState(performance.revision);
   const [error, setError] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const previewSupported = !isNativeHost();
+  const initialPreviewMode = session?.active_mode ?? "idle";
   const previewOriginRef = useRef({
-    mode: session?.active_mode ?? "idle",
+    mode: initialPreviewMode,
     active: performance.live.active,
   });
-  const lastPreviewPayloadRef = useRef<string | null>(null);
+  const previewSequenceRef = useRef(0);
+  const previewEngagedRef = useRef(false);
+  const previewModeLiveRef = useRef(initialPreviewMode === "live");
+  const [previewStatus, setPreviewStatus] = useState<"idle" | "applying" | "ready">("idle");
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const previewId = draft?.id;
   // Keep an immutable payload for the debounced preview. Depending on a
   // hand-picked fingerprint and reading the latest value from a ref allowed
@@ -941,7 +1218,11 @@ function RackEditor({
   // Core. The serialized draft makes every audible graph/state change part of
   // the effect dependency and guarantees that the timer sends that exact
   // revision.
-  const previewPayload = draft ? JSON.stringify(draft) : null;
+  const transportDraft = draft ? normalizeRackGraphGeometry(draft) : undefined;
+  const previewPayload = transportDraft ? JSON.stringify(transportDraft) : null;
+  const previewVoiceCount = rackPreviewVoiceCount(transportDraft);
+  const visiblePreviewStatus = previewVoiceCount === 0 ? "idle" : previewStatus;
+  const visiblePreviewError = previewVoiceCount === 0 ? null : previewError;
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(original);
   const isNew = !!draft && !performance.library.racks.some((item) => item.id === draft.id);
   useEffect(() => {
@@ -950,35 +1231,67 @@ function RackEditor({
   }, [dirty, isNew, onDirtyChange]);
   useEffect(() => {
     if (!previewSupported || !previewId) return;
-    dispatchCommand({ type: "set_active_mode", mode: "live" });
     const origin = previewOriginRef.current;
     return () => {
-      dispatchCommand({ type: "set_active_mode", mode: origin.mode });
+      previewSequenceRef.current += 1;
+      if (!previewEngagedRef.current) return;
       if (origin.mode === "live" && origin.active) {
+        dispatchCommand({ type: "set_active_mode", mode: "live" });
         dispatchCommand({ type: "activate_live_target", location: origin.active });
+      } else if (origin.mode === "live") {
+        dispatchCommand({ type: "set_active_mode", mode: "idle" });
+        dispatchCommand({ type: "set_active_mode", mode: "live" });
+      } else {
+        dispatchCommand({ type: "set_active_mode", mode: origin.mode });
       }
     };
   }, [previewId, previewSupported]);
   useEffect(() => {
     if (!previewSupported || previewPayload === null) return;
-    if (lastPreviewPayloadRef.current === previewPayload) return;
+    const sequence = ++previewSequenceRef.current;
+    if (previewVoiceCount === 0) {
+      if (!previewEngagedRef.current || !previewModeLiveRef.current) return;
+      previewModeLiveRef.current = false;
+      void dispatchCommandAwait({ type: "set_active_mode", mode: "idle" }).catch((reason) => {
+        if (previewSequenceRef.current !== sequence) return;
+        setPreviewError(
+          reason instanceof Error ? reason.message : "Could not silence the empty Rack preview.",
+        );
+      });
+      return;
+    }
     const timer = window.setTimeout(() => {
       const previewRack = JSON.parse(previewPayload) as RackDefinition;
-      lastPreviewPayloadRef.current = previewPayload;
-      dispatchCommand({ type: "preview_rack", rack: previewRack });
+      setPreviewStatus("applying");
+      setPreviewError(null);
+      void (async () => {
+        try {
+          if (!previewModeLiveRef.current) {
+            previewEngagedRef.current = true;
+            previewModeLiveRef.current = true;
+            await dispatchCommandAwait({ type: "set_active_mode", mode: "live" });
+            if (previewSequenceRef.current !== sequence) return;
+          }
+          if (previewSequenceRef.current !== sequence) return;
+          previewEngagedRef.current = true;
+          await dispatchCommandAwait({ type: "preview_rack", rack: previewRack });
+          if (previewSequenceRef.current === sequence) setPreviewStatus("ready");
+        } catch (reason) {
+          if (previewSequenceRef.current !== sequence) return;
+          previewModeLiveRef.current = false;
+          setPreviewStatus("idle");
+          setPreviewError(
+            reason instanceof Error ? reason.message : "Could not preview this Rack.",
+          );
+        }
+      })();
     }, 120);
     return () => window.clearTimeout(timer);
-  }, [previewPayload, previewSupported]);
+  }, [previewPayload, previewSupported, previewVoiceCount]);
   const addInstrument = useCallback((position?: RackGraphPosition) => {
     if (!draft) return;
-    const next = addSlotToRack(draft, defaultSlot(instances), position);
-    setDraft(next);
-    if (previewSupported) {
-      const payload = JSON.stringify(next);
-      lastPreviewPayloadRef.current = payload;
-      dispatchCommand({ type: "preview_rack", rack: next });
-    }
-  }, [draft, instances, previewSupported]);
+    setDraft(addSlotToRack(draft, defaultSlot(instances), position));
+  }, [draft, instances]);
   const validate = useCallback(() => {
     if (!draft) return "Select a Rack or create a new one.";
     const nameError = validationName(draft.name);
@@ -999,9 +1312,10 @@ function RackEditor({
     setError(nextError);
     if (nextError) return;
     try {
+      const rackToSave = normalizeRackGraphGeometry(draft);
       const snapshot = await dispatchEdit(baseRevision, {
         kind: "put_rack",
-        rack: draft,
+        rack: rackToSave,
       });
       const saved = snapshot.library.racks.find((item) => item.id === draft.id);
       if (saved) setDraft(clone(materializeRackGraph(saved)));
@@ -1014,8 +1328,13 @@ function RackEditor({
   useEffect(() => {
     if (!immersive) return;
     const saveWorkspace = () => void save();
+    const openDetails = () => setDetailsOpen(true);
     window.addEventListener("rackforge:save-rack-workspace", saveWorkspace);
-    return () => window.removeEventListener("rackforge:save-rack-workspace", saveWorkspace);
+    window.addEventListener("rackforge:open-rack-details", openDetails);
+    return () => {
+      window.removeEventListener("rackforge:save-rack-workspace", saveWorkspace);
+      window.removeEventListener("rackforge:open-rack-details", openDetails);
+    };
   }, [immersive, save]);
 
   if (!draft)
@@ -1030,7 +1349,6 @@ function RackEditor({
     ...performance.library.songs
       .filter((song) => song.parts.some((part) => part.rack_id === draft.id))
       .map((song) => song.name),
-    ...(performance.live.active_rack_id === draft.id ? ["the active LIVE target"] : []),
   ];
   const remove = async () => {
     if (usedBy.length) {
@@ -1051,6 +1369,27 @@ function RackEditor({
       setError(reason instanceof Error ? reason.message : "Could not delete Rack.");
     }
   };
+  const cancelWorkspace = () => {
+    setDetailsOpen(false);
+    window.dispatchEvent(new Event("rackforge:close-rack-workspace"));
+  };
+  const workspaceDetails = (mobile = false) => (
+    <RackWorkspaceDetails
+      name={draft.name}
+      enabled={draft.enabled}
+      dirty={dirty}
+      isNew={isNew}
+      pending={pending}
+      instrumentCount={previewVoiceCount}
+      previewStatus={visiblePreviewStatus}
+      onName={(name) => setDraft({ ...draft, name })}
+      onEnabled={(enabled) => setDraft({ ...draft, enabled })}
+      onSave={() => void save()}
+      onCancel={cancelWorkspace}
+      onDismiss={mobile ? () => setDetailsOpen(false) : undefined}
+      mobile={mobile}
+    />
+  );
 
   return (
     <form
@@ -1071,12 +1410,33 @@ function RackEditor({
         onDelete={isNew ? undefined : remove}
       />
       {error && <div className="form-error">{error}</div>}
+      {visiblePreviewError ? <div className="form-error">Rack preview: {visiblePreviewError}</div> : null}
+      {visiblePreviewStatus !== "idle" ? (
+        <div className={`rack-preview-status ${visiblePreviewStatus}`} role="status" aria-live="polite">
+          {visiblePreviewStatus === "applying" ? (
+            <><AsyncSpinner label="Applying Rack preview…" /><span>Applying Rack preview…</span></>
+          ) : (
+            <><i /><span>{previewVoiceCount} {previewVoiceCount === 1 ? "instrument" : "instruments"} active in preview</span></>
+          )}
+        </div>
+      ) : null}
       <BasicFields
         name={draft.name}
         enabled={draft.enabled}
         onName={(name) => setDraft({ ...draft, name })}
         onEnabled={(enabled) => setDraft({ ...draft, enabled })}
       />
+      {immersive ? <aside className="rack-workspace-details-panel">{workspaceDetails()}</aside> : null}
+      {immersive && detailsOpen ? (
+        <div
+          className="rack-details-sheet-backdrop"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) setDetailsOpen(false);
+          }}
+        >
+          {workspaceDetails(true)}
+        </div>
+      ) : null}
       <EditorSection
         title="Rack graph"
         detail="Route instruments and child Racks. Positions and labels are portable; the viewport stays local to this device."

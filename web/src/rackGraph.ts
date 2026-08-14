@@ -9,6 +9,39 @@ import type {
 import { scopedId } from "./ids";
 
 export const RACK_GRAPH_SCHEMA_VERSION = 2;
+const RACK_GRAPH_COORDINATE_LIMIT = 1_000_000;
+
+export function normalizeRackGraphPosition(
+  position: RackGraphPosition,
+): RackGraphPosition {
+  const coordinate = (value: number) => Math.max(
+    -RACK_GRAPH_COORDINATE_LIMIT,
+    Math.min(RACK_GRAPH_COORDINATE_LIMIT, Math.round(value)),
+  );
+  return { x: coordinate(position.x), y: coordinate(position.y) };
+}
+
+export function normalizeRackGraphGeometry(
+  rack: RackDefinition,
+): RackDefinition {
+  const current = materializeRackGraph(rack);
+  return {
+    ...current,
+    graph: {
+      ...current.graph!,
+      nodes: current.graph!.nodes.map((node) => ({
+        ...node,
+        position: normalizeRackGraphPosition(node.position),
+      })),
+      labels: (current.graph!.labels ?? []).map((label) => ({
+        ...label,
+        position: normalizeRackGraphPosition(label.position),
+        width: Math.round(label.width),
+        height: Math.round(label.height),
+      })),
+    },
+  };
+}
 
 export function rackGraphId(prefix: string) {
   return scopedId(prefix);
@@ -115,7 +148,9 @@ export function addSlotToRack(
 ): RackDefinition {
   const current = materializeRackGraph(rack);
   const graph = current.graph!;
-  const nodePosition = position ?? { x: 360, y: current.slots.length * 180 };
+  const nodePosition = normalizeRackGraphPosition(
+    position ?? { x: 360, y: current.slots.length * 180 },
+  );
   const midiInput = graph.nodes.find((node) => node.kind.kind === "midi_input");
   const audioOutput = graph.nodes.find(
     (node) => node.kind.kind === "audio_output" && node.kind.bus_id === slot.audio_output_bus,

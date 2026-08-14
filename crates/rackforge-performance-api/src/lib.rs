@@ -349,6 +349,94 @@ pub struct RackGraphEdge {
     pub signal: RackGraphSignal,
     pub source: RackGraphEndpoint,
     pub target: RackGraphEndpoint,
+    /// MIDI filtering and transformation belongs to the cable, not the
+    /// instrument. `None` keeps v2 Rack documents compatible and falls back
+    /// to the legacy Slot MIDI fields when the graph is compiled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_transform: Option<RackMidiTransform>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RackMidiTransform {
+    /// One-based MIDI channels. An empty list means Omni.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_channels: Vec<u8>,
+    /// One-based MIDI channel, or `None` to preserve the source channel.
+    #[serde(default)]
+    pub target_channel: Option<u8>,
+    #[serde(default)]
+    pub note_low: u8,
+    #[serde(default = "default_midi_note_high")]
+    pub note_high: u8,
+    #[serde(default)]
+    pub transpose: i8,
+    #[serde(default)]
+    pub notes_only: bool,
+    #[serde(default)]
+    pub velocity_input_low: u8,
+    #[serde(default = "default_midi_note_high")]
+    pub velocity_input_high: u8,
+    #[serde(default)]
+    pub velocity_output_low: u8,
+    #[serde(default = "default_midi_note_high")]
+    pub velocity_output_high: u8,
+}
+
+impl Default for RackMidiTransform {
+    fn default() -> Self {
+        Self {
+            source_channels: Vec::new(),
+            target_channel: None,
+            note_low: 0,
+            note_high: 127,
+            transpose: 0,
+            notes_only: false,
+            velocity_input_low: 0,
+            velocity_input_high: 127,
+            velocity_output_low: 0,
+            velocity_output_high: 127,
+        }
+    }
+}
+
+impl RackMidiTransform {
+    pub fn from_slot(slot: &RackSlot) -> Self {
+        Self {
+            source_channels: slot.midi_input_channel.into_iter().collect(),
+            note_low: slot.midi_note_low,
+            note_high: slot.midi_note_high,
+            transpose: slot.midi_transpose,
+            ..Self::default()
+        }
+    }
+
+    fn validate(&self) -> Result<(), PerformanceError> {
+        if self
+            .source_channels
+            .iter()
+            .chain(self.target_channel.iter())
+            .any(|channel| !(1..=16).contains(channel))
+            || self.source_channels.iter().collect::<BTreeSet<_>>().len()
+                != self.source_channels.len()
+        {
+            return Err(PerformanceError::InvalidMidiChannel);
+        }
+        if self.note_low > self.note_high || self.note_high > 127 {
+            return Err(PerformanceError::InvalidMidiNoteRange);
+        }
+        if !(-48..=48).contains(&self.transpose) {
+            return Err(PerformanceError::InvalidMidiTranspose);
+        }
+        if self.velocity_input_low >= self.velocity_input_high
+            || self.velocity_input_high > 127
+            || self.velocity_output_low > self.velocity_output_high
+            || self.velocity_output_high > 127
+        {
+            return Err(PerformanceError::InvalidMidiVelocityCurve);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -491,6 +579,7 @@ impl RackGraph {
                     node_id: plugin_id.clone(),
                     port_id: "midi_in".into(),
                 },
+                midi_transform: Some(RackMidiTransform::from_slot(slot)),
             });
             edges.push(RackGraphEdge {
                 id: RackGraphEdgeId::new(format!("audio.{number:02}"))
@@ -504,6 +593,7 @@ impl RackGraph {
                     node_id: audio_outputs[slot.audio_output_bus.as_str()].clone(),
                     port_id: "in".into(),
                 },
+                midi_transform: None,
             });
             if let MidiOutputRoute::Bus { bus_id } = &slot.midi_output {
                 edges.push(RackGraphEdge {
@@ -518,6 +608,7 @@ impl RackGraph {
                         node_id: midi_outputs[bus_id.as_str()].clone(),
                         port_id: "in".into(),
                     },
+                    midi_transform: None,
                 });
             }
         }
@@ -578,6 +669,12 @@ impl RackGraph {
         }
         for edge in &self.edges {
             validate_id(edge.id.as_str())?;
+            if let Some(transform) = &edge.midi_transform {
+                if edge.signal != RackGraphSignal::Midi {
+                    return Err(PerformanceError::MidiTransformOnNonMidiEdge);
+                }
+                transform.validate()?;
+            }
         }
         for label in &self.labels {
             validate_id(label.id.as_str())?;
@@ -1374,6 +1471,10 @@ pub enum PerformanceError {
     InvalidMidiNoteRange,
     #[error("Rack Slot MIDI transpose must be within -48..48 semitones")]
     InvalidMidiTranspose,
+    #[error("MIDI velocity curve must be ordered within 0..127")]
+    InvalidMidiVelocityCurve,
+    #[error("MIDI transformation can only be attached to a MIDI connection")]
+    MidiTransformOnNonMidiEdge,
     #[error("keyboard split must start Part 2 on a MIDI note within 1..127")]
     InvalidKeyboardSplit,
     #[error("Rack Slot level or pan is outside its supported range")]
@@ -1790,6 +1891,7 @@ mod tests {
                     node_id: RackGraphNodeId::new("plugin.02").unwrap(),
                     port_id: "audio_in".into(),
                 },
+                midi_transform: None,
             },
             RackGraphEdge {
                 id: RackGraphEdgeId::new("cycle.back").unwrap(),
@@ -1802,6 +1904,7 @@ mod tests {
                     node_id: RackGraphNodeId::new("plugin.01").unwrap(),
                     port_id: "audio_in".into(),
                 },
+                midi_transform: None,
             },
         ]);
         assert_eq!(library.validate(), Err(PerformanceError::RackGraphCycle));
@@ -1828,6 +1931,7 @@ mod tests {
                         node_id: RackGraphNodeId::new("rack.child").unwrap(),
                         port_id: "midi_in".into(),
                     },
+                    midi_transform: None,
                 },
                 RackGraphEdge {
                     id: RackGraphEdgeId::new("child.audio").unwrap(),
@@ -1840,6 +1944,7 @@ mod tests {
                         node_id: RackGraphNodeId::new("output.audio.00").unwrap(),
                         port_id: "in".into(),
                     },
+                    midi_transform: None,
                 },
             ]);
         }

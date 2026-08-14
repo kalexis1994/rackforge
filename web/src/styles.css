@@ -5658,6 +5658,350 @@ body {
   pointer-events: auto;
 }
 
+.rack-midi-link-editor {
+  position: absolute;
+  z-index: 48;
+  width: min(486px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  color: var(--ink);
+  background: rgba(5, 16, 24, 0.985);
+  border: 1px solid rgba(98, 223, 241, 0.42);
+  border-radius: 14px;
+  box-shadow: 0 28px 84px rgba(0, 0, 0, 0.72), var(--inner-light);
+  pointer-events: auto;
+}
+
+.rack-midi-link-editor > header {
+  min-height: 52px;
+  padding: 8px 9px 8px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid rgba(98, 223, 241, 0.16);
+  background: linear-gradient(180deg, #10232d, #091720);
+}
+
+.rack-midi-link-editor > header > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.rack-midi-link-editor > header span,
+.rack-midi-link-editor legend,
+.scrub-number-field > span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.rack-midi-link-editor > header strong {
+  font-size: 13px;
+}
+
+.rack-midi-link-editor button,
+.rack-midi-link-editor input {
+  color: var(--ink);
+  border: 1px solid rgba(98, 223, 241, 0.2);
+  border-radius: 6px;
+  background: rgba(3, 12, 18, 0.86);
+  font: inherit;
+}
+
+.rack-midi-link-editor button {
+  min-height: 31px;
+  padding: 0 11px;
+  cursor: pointer;
+}
+
+.rack-midi-link-editor button:hover:not(:disabled),
+.rack-midi-link-editor button:focus-visible,
+.rack-midi-link-editor button.active {
+  color: #041016;
+  border-color: var(--acid);
+  background: var(--acid);
+}
+
+.rack-midi-link-editor button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rack-midi-close {
+  width: 34px;
+  padding: 0 !important;
+  font-size: 18px !important;
+}
+
+.rack-midi-link-scroll {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.rack-midi-section {
+  padding: 13px 14px 15px;
+  display: grid;
+  gap: 11px;
+  border-bottom: 1px solid rgba(98, 223, 241, 0.12);
+}
+
+.rack-midi-section h3 {
+  margin: 0;
+  color: var(--acid);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rack-midi-channel-picker {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rack-midi-channel-picker legend {
+  margin-bottom: 6px;
+}
+
+.rack-midi-channel-picker > div {
+  display: grid;
+  grid-template-columns: 52px repeat(8, minmax(28px, 1fr));
+  gap: 4px;
+}
+
+.rack-midi-channel-picker button {
+  min-width: 0;
+  min-height: 29px;
+  padding: 0 3px;
+  font-size: 9px;
+}
+
+.rack-midi-channel-picker button:first-child {
+  grid-row: span 2;
+}
+
+.rack-midi-field-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rack-midi-field-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.scrub-number-field {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.scrub-number-control {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 5px;
+}
+
+.scrub-number-input {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+}
+
+.scrub-number-input input {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 7px;
+}
+
+.scrub-number-input small,
+.rack-midi-check small {
+  color: var(--muted);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.scrub-number-slider {
+  position: relative;
+  width: 48px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(98, 223, 241, 0.22);
+  border-radius: 6px;
+  background:
+    linear-gradient(90deg, transparent 49%, rgba(98, 223, 241, 0.13) 50%, transparent 51%),
+    rgba(3, 12, 18, 0.86);
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.scrub-number-slider::before,
+.scrub-number-slider::after {
+  position: absolute;
+  top: 50%;
+  color: rgba(142, 167, 180, 0.54);
+  font-size: 8px;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.scrub-number-slider::before {
+  content: "‹";
+  left: 5px;
+}
+
+.scrub-number-slider::after {
+  content: "›";
+  right: 5px;
+}
+
+.scrub-number-slider > i {
+  position: relative;
+  z-index: 1;
+  width: 12px;
+  height: 18px;
+  border: 1px solid rgba(98, 223, 241, 0.64);
+  border-radius: 5px;
+  background: linear-gradient(180deg, #17323e, #0a1b24);
+  box-shadow: 0 3px 7px rgba(0, 0, 0, 0.42);
+  transition: transform 90ms ease-out, border-color 120ms ease, background 120ms ease;
+}
+
+.scrub-number-slider:hover,
+.scrub-number-slider:focus-visible,
+.scrub-number-slider.dragging {
+  border-color: rgba(98, 223, 241, 0.7);
+  outline: 0;
+  background-color: rgba(16, 42, 53, 0.94);
+}
+
+.scrub-number-slider.dragging > i {
+  border-color: var(--acid);
+  background: var(--acid);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.rack-midi-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.rack-midi-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--acid);
+}
+
+.rack-midi-check span {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.rack-midi-velocity-section {
+  grid-template-columns: minmax(0, 1fr) 116px;
+  align-items: end;
+}
+
+.rack-midi-velocity-section > div {
+  display: grid;
+  gap: 10px;
+}
+
+.rack-midi-curve {
+  width: 116px;
+  height: 116px;
+  padding: 8px;
+  border: 1px solid rgba(98, 223, 241, 0.18);
+  background: #030b10;
+}
+
+.rack-midi-curve .axis {
+  fill: none;
+  stroke: rgba(142, 167, 180, 0.32);
+  stroke-width: 1;
+}
+
+.rack-midi-curve polyline {
+  fill: none;
+  stroke: var(--acid);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.rack-midi-link-editor > footer {
+  min-height: 48px;
+  padding: 7px 9px;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 7px;
+  border-top: 1px solid rgba(98, 223, 241, 0.14);
+  background: #08151d;
+}
+
+.rack-midi-link-editor > footer .primary {
+  color: #041016;
+  border-color: var(--acid);
+  background: var(--acid);
+}
+
+@media (max-width: 700px), (max-height: 600px) {
+  .rack-midi-link-editor {
+    inset: 0 !important;
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .rack-midi-link-editor > header {
+    padding-left: 58px;
+  }
+}
+
+@media (max-width: 430px) {
+  .rack-midi-channel-picker > div {
+    grid-template-columns: 48px repeat(4, minmax(30px, 1fr));
+  }
+
+  .rack-midi-channel-picker button:first-child {
+    grid-row: span 4;
+  }
+
+  .rack-midi-field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rack-midi-velocity-section {
+    grid-template-columns: 1fr 92px;
+  }
+
+  .rack-midi-curve {
+    width: 92px;
+    height: 92px;
+  }
+}
+
 .rack-slot-popover-link {
   position: absolute;
   inset: 0;
@@ -6572,6 +6916,53 @@ body {
 .rack-graph-canvas .react-flow__node {
   backface-visibility: hidden;
   will-change: transform;
+}
+
+.rack-edge-control {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(98, 223, 241, 0.72);
+  border-radius: 50%;
+  color: var(--acid);
+  background: #07141c;
+  box-shadow:
+    0 0 0 3px rgba(5, 13, 19, 0.78),
+    0 4px 12px rgba(0, 0, 0, 0.46);
+  cursor: pointer;
+  pointer-events: all;
+  touch-action: none;
+}
+
+.rack-edge-control > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px rgba(98, 223, 241, 0.74);
+}
+
+.rack-edge-control:hover,
+.rack-edge-control:focus-visible,
+.rack-edge-control.selected {
+  color: #041016;
+  border-color: var(--acid);
+  outline: 0;
+  background: var(--acid);
+  box-shadow:
+    0 0 0 3px rgba(5, 13, 19, 0.9),
+    0 0 0 5px rgba(98, 223, 241, 0.2),
+    0 5px 16px rgba(0, 0, 0, 0.54);
+}
+
+.rack-edge-control:hover > span,
+.rack-edge-control:focus-visible > span,
+.rack-edge-control.selected > span {
+  background: #041016;
+  box-shadow: none;
 }
 
 .rack-flow-node {

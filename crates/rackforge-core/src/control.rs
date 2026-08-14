@@ -57,10 +57,16 @@ pub struct RackSlotRuntimeSpec {
     pub slot_id: String,
     pub plugin_id: String,
     pub state: RackSlotStateLoad,
-    pub midi_input_channel: Option<u8>,
+    pub midi_input_channels: Vec<u8>,
     pub midi_note_low: u8,
     pub midi_note_high: u8,
     pub midi_transpose: i8,
+    pub midi_target_channel: Option<u8>,
+    pub midi_notes_only: bool,
+    pub midi_velocity_input_low: u8,
+    pub midi_velocity_input_high: u8,
+    pub midi_velocity_output_low: u8,
+    pub midi_velocity_output_high: u8,
     pub keyboard_parts: Option<RackKeyboardParts>,
     pub level_per_mille: u16,
     pub pan_per_mille: i16,
@@ -2944,10 +2950,16 @@ fn prepare_rack_runtime(
             slot_id: compiled.runtime_slot_id,
             plugin_id: slot.plugin_id.clone(),
             state,
-            midi_input_channel: slot.midi_input_channel,
-            midi_note_low: slot.midi_note_low,
-            midi_note_high: slot.midi_note_high,
-            midi_transpose: slot.midi_transpose,
+            midi_input_channels: compiled.midi_transform.source_channels,
+            midi_note_low: compiled.midi_transform.note_low,
+            midi_note_high: compiled.midi_transform.note_high,
+            midi_transpose: compiled.midi_transform.transpose,
+            midi_target_channel: compiled.midi_transform.target_channel,
+            midi_notes_only: compiled.midi_transform.notes_only,
+            midi_velocity_input_low: compiled.midi_transform.velocity_input_low,
+            midi_velocity_input_high: compiled.midi_transform.velocity_input_high,
+            midi_velocity_output_low: compiled.midi_transform.velocity_output_low,
+            midi_velocity_output_high: compiled.midi_transform.velocity_output_high,
             keyboard_parts: compiled.keyboard_parts,
             level_per_mille: slot.level_per_mille,
             pan_per_mille: slot.pan_per_mille,
@@ -3626,7 +3638,7 @@ mod tests {
                     slots[0].state,
                     RackSlotStateLoad::LegacyPreset("piano".into())
                 );
-                assert_eq!(slots[0].midi_input_channel, None);
+                assert!(slots[0].midi_input_channels.is_empty());
                 assert_eq!(slots[0].level_per_mille, 1_000);
                 assert_eq!(slots[0].pan_per_mille, 0);
                 reply.send(Ok(())).unwrap();

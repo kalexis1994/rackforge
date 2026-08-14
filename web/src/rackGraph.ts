@@ -4,6 +4,7 @@ import type {
   RackGraphEdge,
   RackGraphNode,
   RackGraphPosition,
+  RackMidiTransform,
   RackSlot,
 } from "./types";
 import { scopedId } from "./ids";
@@ -45,6 +46,20 @@ export function normalizeRackGraphGeometry(
 
 export function rackGraphId(prefix: string) {
   return scopedId(prefix);
+}
+
+export function midiTransformFromSlot(slot: RackSlot): RackMidiTransform {
+  return {
+    source_channels: slot.midi_input_channel ? [slot.midi_input_channel] : [],
+    note_low: slot.midi_note_low,
+    note_high: slot.midi_note_high,
+    transpose: slot.midi_transpose,
+    notes_only: false,
+    velocity_input_low: 0,
+    velocity_input_high: 127,
+    velocity_output_low: 0,
+    velocity_output_high: 127,
+  };
 }
 
 export function graphFromSlots(slots: RackSlot[]): RackGraph {
@@ -101,6 +116,7 @@ export function graphFromSlots(slots: RackSlot[]): RackGraph {
         signal: "midi",
         source: { node_id: midiInput.id, port_id: "out" },
         target: { node_id: plugin.id, port_id: "midi_in" },
+        midi_transform: midiTransformFromSlot(slot),
       },
       {
         id: `audio.${number}`,
@@ -189,6 +205,7 @@ export function addSlotToRack(
           signal: "midi",
           source: { node_id: midiInput.id, port_id: "out" },
           target: { node_id: nodeId, port_id: "midi_in" },
+          midi_transform: midiTransformFromSlot(slot),
         },
         {
           id: rackGraphId("edge.audio"),

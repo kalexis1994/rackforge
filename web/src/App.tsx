@@ -303,12 +303,21 @@ function RackForgeApp() {
   const [playOverlay, setPlayOverlay] = useState<"plugins" | "presets" | null>(null);
   const [liveSurface, setLiveSurface] = useState<"perform" | "configure">("perform");
   const [liveWorkspace, setLiveWorkspace] = useState<{ kind: "rack"; name: string } | null>(null);
+  const [rackGraphOverlayOpen, setRackGraphOverlayOpen] = useState(false);
   const [playTransitionOpen, setPlayTransitionOpen] = useState(false);
   const [settingsBootstrap, setSettingsBootstrap] = useState<HostSettingsBootstrap | null>(null);
   const [controllerDockOpen, setControllerDockOpen] = useState(false);
   const roomyController = useMediaQuery(ROOMY_CONTROLLER_QUERY);
   const lastContentRoute = useRef(location.pathname === "/controller" ? "/play" : location.pathname);
   useTactileFeedback();
+  useEffect(() => {
+    const updateOverlay = (event: Event) => {
+      const detail = (event as CustomEvent<{ open?: boolean }>).detail;
+      setRackGraphOverlayOpen(detail?.open === true);
+    };
+    window.addEventListener("rackforge:rack-graph-overlay", updateOverlay);
+    return () => window.removeEventListener("rackforge:rack-graph-overlay", updateOverlay);
+  }, []);
   const isControllerSurface = location.pathname === "/controller" && !roomyController;
   const isPluginSurface =
     location.pathname === "/play" ||
@@ -442,6 +451,7 @@ function RackForgeApp() {
             menuOpen={mobileMenuOpen}
             onOpen={() => setMobileMenuOpen(true)}
             showRackDetails={liveWorkspace !== null}
+            rackDetailsButtonVisible={liveWorkspace !== null && !rackGraphOverlayOpen}
           />
         ) : null}
         {error && <div className="error-banner">{error}</div>}
@@ -605,10 +615,12 @@ function FloatingPerformanceMenuButton({
   menuOpen,
   onOpen,
   showRackDetails,
+  rackDetailsButtonVisible,
 }: {
   menuOpen: boolean;
   onOpen: () => void;
   showRackDetails: boolean;
+  rackDetailsButtonVisible: boolean;
 }) {
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [position, setPosition] = useState(readPerformanceMenuPosition);
@@ -807,7 +819,7 @@ function FloatingPerformanceMenuButton({
     >
       <Menu aria-hidden="true" />
     </button>
-    {showRackDetails ? (
+    {rackDetailsButtonVisible ? (
       <button
         type="button"
         className="rack-details-floating-button"

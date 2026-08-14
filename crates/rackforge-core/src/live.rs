@@ -122,10 +122,16 @@ struct RackSlotVoice<'plugin> {
     slot_id: String,
     plugin: &'plugin LoadedPlugin,
     instance: PluginInstance<'plugin>,
-    midi_input_channel: Option<u8>,
+    midi_input_channels: Vec<u8>,
     midi_note_low: u8,
     midi_note_high: u8,
     midi_transpose: i8,
+    midi_target_channel: Option<u8>,
+    midi_notes_only: bool,
+    midi_velocity_input_low: u8,
+    midi_velocity_input_high: u8,
+    midi_velocity_output_low: u8,
+    midi_velocity_output_high: u8,
     keyboard_parts: Option<RackKeyboardParts>,
     level: f32,
     pan: f32,
@@ -174,10 +180,16 @@ fn create_rack_voices<'plugin>(
             slot_id: spec.slot_id.clone(),
             plugin,
             instance,
-            midi_input_channel: spec.midi_input_channel,
+            midi_input_channels: spec.midi_input_channels.clone(),
             midi_note_low: spec.midi_note_low,
             midi_note_high: spec.midi_note_high,
             midi_transpose: spec.midi_transpose,
+            midi_target_channel: spec.midi_target_channel,
+            midi_notes_only: spec.midi_notes_only,
+            midi_velocity_input_low: spec.midi_velocity_input_low,
+            midi_velocity_input_high: spec.midi_velocity_input_high,
+            midi_velocity_output_low: spec.midi_velocity_output_low,
+            midi_velocity_output_high: spec.midi_velocity_output_high,
             keyboard_parts: spec.keyboard_parts,
             level: f32::from(spec.level_per_mille) / 1_000.0,
             pan: f32::from(spec.pan_per_mille) / 1_000.0,
@@ -616,10 +628,16 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 slot_id: compiled.runtime_slot_id,
                 plugin_id: slot.plugin_id.clone(),
                 state,
-                midi_input_channel: slot.midi_input_channel,
-                midi_note_low: slot.midi_note_low,
-                midi_note_high: slot.midi_note_high,
-                midi_transpose: slot.midi_transpose,
+                midi_input_channels: compiled.midi_transform.source_channels,
+                midi_note_low: compiled.midi_transform.note_low,
+                midi_note_high: compiled.midi_transform.note_high,
+                midi_transpose: compiled.midi_transform.transpose,
+                midi_target_channel: compiled.midi_transform.target_channel,
+                midi_notes_only: compiled.midi_transform.notes_only,
+                midi_velocity_input_low: compiled.midi_transform.velocity_input_low,
+                midi_velocity_input_high: compiled.midi_transform.velocity_input_high,
+                midi_velocity_output_low: compiled.midi_transform.velocity_output_low,
+                midi_velocity_output_high: compiled.midi_transform.velocity_output_high,
                 keyboard_parts: compiled.keyboard_parts,
                 level_per_mille: slot.level_per_mille,
                 pan_per_mille: slot.pan_per_mille,
@@ -1550,12 +1568,7 @@ fn audio_loop(
                 AudioRenderMode::Rack => rack_voices
                     .iter_mut()
                     .map(|voice| {
-                        controller_states.replay_routed_into(
-                            play_route,
-                            voice.midi_input_channel,
-                            &mut voice.events,
-                            MAX_EVENTS_PER_BLOCK,
-                        )
+                        replay_rack_controller_state(&controller_states, play_route, voice)
                     })
                     .sum(),
             };
@@ -1584,12 +1597,18 @@ fn audio_loop(
                 }
                 AudioRenderMode::Rack => {
                     for voice in &mut rack_voices {
-                        if let Some(routed) = route_rack_event(
+                        if let Some(routed) = route_rack_event_transformed(
                             event,
-                            voice.midi_input_channel,
+                            &voice.midi_input_channels,
                             voice.midi_note_low,
                             voice.midi_note_high,
                             voice.midi_transpose,
+                            voice.midi_target_channel,
+                            voice.midi_notes_only,
+                            voice.midi_velocity_input_low,
+                            voice.midi_velocity_input_high,
+                            voice.midi_velocity_output_low,
+                            voice.midi_velocity_output_high,
                             voice.keyboard_parts,
                             virtual_play_route,
                         ) {
@@ -1622,12 +1641,18 @@ fn audio_loop(
                 }
                 AudioRenderMode::Rack => {
                     for voice in &mut rack_voices {
-                        if let Some(routed) = route_rack_event(
+                        if let Some(routed) = route_rack_event_transformed(
                             event,
-                            voice.midi_input_channel,
+                            &voice.midi_input_channels,
                             voice.midi_note_low,
                             voice.midi_note_high,
                             voice.midi_transpose,
+                            voice.midi_target_channel,
+                            voice.midi_notes_only,
+                            voice.midi_velocity_input_low,
+                            voice.midi_velocity_input_high,
+                            voice.midi_velocity_output_low,
+                            voice.midi_velocity_output_high,
                             voice.keyboard_parts,
                             play_route,
                         ) {
@@ -2019,16 +2044,25 @@ fn reconfigure_audio_output(
     }
 }
 
-fn route_rack_event(
+fn route_rack_event_transformed(
     event: IngressMidiEvent,
-    midi_input_channel: Option<u8>,
+    midi_input_channels: &[u8],
     midi_note_low: u8,
     midi_note_high: u8,
     midi_transpose: i8,
+    midi_target_channel: Option<u8>,
+    midi_notes_only: bool,
+    midi_velocity_input_low: u8,
+    midi_velocity_input_high: u8,
+    midi_velocity_output_low: u8,
+    midi_velocity_output_high: u8,
     keyboard_parts: Option<RackKeyboardParts>,
     play_route: &CompiledMidiRoute,
 ) -> Option<MidiEventV1> {
     let status = event.packet.data[0] & 0xf0;
+    if midi_notes_only && !matches!(status, 0x80 | 0x90) {
+        return None;
+    }
     let keyed_message = matches!(status, 0x80 | 0x90 | 0xa0) && event.packet.length >= 2;
     let part_transpose = if let Some(parts) = keyboard_parts {
         let part = if keyed_message {
@@ -2037,18 +2071,20 @@ fn route_rack_event(
                 Some(split) if note >= split => parts.part_2,
                 _ => parts.part_1,
             }
-        } else if parts.split_key.is_some() && midi_input_channel == Some(parts.part_2.midi_channel)
+        } else if parts.split_key.is_some()
+            && midi_input_channels.contains(&parts.part_2.midi_channel)
         {
             parts.part_2
         } else {
             parts.part_1
         };
-        if midi_input_channel.is_some_and(|channel| channel != part.midi_channel) {
+        if !midi_input_channels.is_empty() && !midi_input_channels.contains(&part.midi_channel) {
             return None;
         }
         part.transpose
     } else {
-        if !matches_midi_input_channel(event.packet, midi_input_channel) {
+        let source_channel = (event.packet.data[0] & 0x0f) + 1;
+        if !midi_input_channels.is_empty() && !midi_input_channels.contains(&source_channel) {
             return None;
         }
         0
@@ -2068,7 +2104,108 @@ fn route_rack_event(
         }
         packet.data[1] = transposed as u8;
     }
+    if status == 0x90 && packet.length >= 3 && packet.data[2] > 0 {
+        packet.data[2] = map_midi_velocity(
+            packet.data[2],
+            midi_velocity_input_low,
+            midi_velocity_input_high,
+            midi_velocity_output_low,
+            midi_velocity_output_high,
+        );
+    }
+    if let Some(channel) = midi_target_channel {
+        if matches!(status, 0x80..=0xe0) {
+            packet.data[0] = (packet.data[0] & 0xf0) | (channel - 1);
+        }
+    }
     Some(plugin_midi_event(packet))
+}
+
+fn replay_rack_controller_state(
+    controller_states: &MidiControllerStates,
+    play_route: &CompiledMidiRoute,
+    voice: &mut RackSlotVoice<'_>,
+) -> usize {
+    if voice.midi_notes_only {
+        return 0;
+    }
+    let initial_len = voice.events.len();
+    let omitted = if voice.midi_input_channels.is_empty() {
+        controller_states.replay_routed_into(
+            play_route,
+            None,
+            &mut voice.events,
+            MAX_EVENTS_PER_BLOCK,
+        )
+    } else {
+        voice
+            .midi_input_channels
+            .iter()
+            .map(|channel| {
+                controller_states.replay_routed_into(
+                    play_route,
+                    Some(*channel),
+                    &mut voice.events,
+                    MAX_EVENTS_PER_BLOCK,
+                )
+            })
+            .sum()
+    };
+    if let Some(channel) = voice.midi_target_channel {
+        for event in &mut voice.events[initial_len..] {
+            if matches!(event.data[0] & 0xf0, 0x80..=0xe0) {
+                event.data[0] = (event.data[0] & 0xf0) | (channel - 1);
+            }
+        }
+    }
+    omitted
+}
+
+#[cfg(test)]
+fn route_rack_event(
+    event: IngressMidiEvent,
+    midi_input_channel: Option<u8>,
+    midi_note_low: u8,
+    midi_note_high: u8,
+    midi_transpose: i8,
+    keyboard_parts: Option<RackKeyboardParts>,
+    play_route: &CompiledMidiRoute,
+) -> Option<MidiEventV1> {
+    let channels = midi_input_channel.into_iter().collect::<Vec<_>>();
+    route_rack_event_transformed(
+        event,
+        &channels,
+        midi_note_low,
+        midi_note_high,
+        midi_transpose,
+        None,
+        false,
+        0,
+        127,
+        0,
+        127,
+        keyboard_parts,
+        play_route,
+    )
+}
+
+fn map_midi_velocity(
+    value: u8,
+    input_low: u8,
+    input_high: u8,
+    output_low: u8,
+    output_high: u8,
+) -> u8 {
+    if value <= input_low {
+        return output_low;
+    }
+    if value >= input_high {
+        return output_high;
+    }
+    let input_span = u16::from(input_high - input_low);
+    let output_span = u16::from(output_high - output_low);
+    let offset = u16::from(value - input_low);
+    output_low + ((offset * output_span + input_span / 2) / input_span) as u8
 }
 
 fn restore_after_audition(instance: &mut PluginInstance<'_>, lease: &AuditionLease) -> Result<()> {
@@ -2313,6 +2450,80 @@ mod tests {
         let modulation = route_rack_event(event(&[0xb1, 1, 64]), Some(2), 36, 59, 12, None, &route)
             .expect("non-note expression should follow the Part channel");
         assert_eq!(modulation.data, [0xb0, 1, 64]);
+    }
+
+    #[test]
+    fn rack_midi_connection_filters_multiple_channels_and_transforms_output() {
+        let mut sources = MidiSourceRegistry::default();
+        sources
+            .register(
+                MidiSourceKey::new(0),
+                MidiSourceDescriptor {
+                    id: MidiSourceId::new("controller.primary").unwrap(),
+                    name: "Primary".into(),
+                    primary: true,
+                },
+            )
+            .unwrap();
+        let route = compile_default_play_route(&sources, PluginChannelModel::SinglePart).unwrap();
+        let event = |message: &[u8]| IngressMidiEvent {
+            source: MidiSourceKey::new(0),
+            packet: MidiPacket::new(0, message).unwrap(),
+        };
+
+        let routed = route_rack_event_transformed(
+            event(&[0x93, 48, 60]),
+            &[2, 4, 10],
+            36,
+            84,
+            12,
+            Some(9),
+            true,
+            20,
+            100,
+            40,
+            110,
+            None,
+            &route,
+        )
+        .expect("selected source channel should reach the connection");
+        assert_eq!(routed.data, [0x98, 60, 75]);
+        assert!(
+            route_rack_event_transformed(
+                event(&[0x94, 48, 60]),
+                &[2, 4, 10],
+                36,
+                84,
+                12,
+                Some(9),
+                true,
+                20,
+                100,
+                40,
+                110,
+                None,
+                &route,
+            )
+            .is_none()
+        );
+        assert!(
+            route_rack_event_transformed(
+                event(&[0xb3, 1, 64]),
+                &[2, 4, 10],
+                36,
+                84,
+                12,
+                Some(9),
+                true,
+                20,
+                100,
+                40,
+                110,
+                None,
+                &route,
+            )
+            .is_none()
+        );
     }
 
     #[test]

@@ -183,6 +183,21 @@ export interface RackGraphEdge {
   signal: RackGraphSignal;
   source: RackGraphEndpoint;
   target: RackGraphEndpoint;
+  midi_transform?: RackMidiTransform;
+}
+
+export interface RackMidiTransform {
+  /** Empty means Omni. */
+  source_channels: number[];
+  target_channel?: number;
+  note_low: number;
+  note_high: number;
+  transpose: number;
+  notes_only: boolean;
+  velocity_input_low: number;
+  velocity_input_high: number;
+  velocity_output_low: number;
+  velocity_output_high: number;
 }
 
 export type RackGraphLabelTone =

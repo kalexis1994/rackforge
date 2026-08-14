@@ -1,15 +1,20 @@
 import {
   Background,
   BackgroundVariant,
+  BaseEdge,
   Controls,
+  EdgeLabelRenderer,
   Handle,
   MarkerType,
   MiniMap,
   Position,
   ReactFlow,
   applyNodeChanges,
+  getBezierPath,
   type Connection,
   type Edge,
+  type EdgeProps,
+  type EdgeTypes,
   type Node,
   type NodeChange,
   type NodeProps,
@@ -20,6 +25,7 @@ import "@xyflow/react/dist/style.css";
 import {
   memo,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -29,11 +35,13 @@ import {
 } from "react";
 import {
   materializeRackGraph,
+  midiTransformFromSlot,
   normalizeRackGraphPosition,
   rackGraphId,
   removeSlotFromRack,
 } from "../rackGraph";
 import { RackSlotPopover } from "./RackSlotPopover";
+import { RackMidiLinkEditor } from "./RackMidiLinkEditor";
 import type {
   PluginInstance,
   RackDefinition,
@@ -54,6 +62,15 @@ type CanvasNodeData = {
 };
 
 type CanvasNode = Node<CanvasNodeData>;
+
+type RackCanvasEdgeData = {
+  signal: RackGraphSignal;
+  editable: boolean;
+  onOpen: (edgeId: string, clientX: number, clientY: number) => void;
+  onSelect: (edgeId: string) => void;
+};
+
+type RackCanvasEdge = Edge<RackCanvasEdgeData, "rackFlow">;
 
 type GraphMenuAnchor = {
   position: RackGraphPosition;
@@ -137,6 +154,72 @@ const nodeTypes: NodeTypes = {
   labelNode: LabelCard,
 };
 
+const RackFlowEdge = memo(function RackFlowEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  style,
+  selected,
+  data,
+}: EdgeProps<RackCanvasEdge>) {
+  const [path, controlX, controlY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={path}
+        markerEnd={markerEnd}
+        style={style}
+        className={`rack-flow-edge-path ${data?.signal ?? "audio"}`}
+      />
+      {data?.editable ? (
+        <EdgeLabelRenderer>
+          <button
+            type="button"
+            className={`rack-edge-control nodrag nopan${selected ? " selected" : ""}`}
+            style={{ transform: `translate(-50%, -50%) translate(${controlX}px, ${controlY}px)` }}
+            data-edge-id={id}
+            aria-label="MIDI connection settings"
+            onClick={(event) => {
+              event.stopPropagation();
+              data.onSelect(id);
+            }}
+            onDoubleClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              data.onOpen(id, event.clientX, event.clientY);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              const bounds = event.currentTarget.getBoundingClientRect();
+              data.onOpen(id, bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+            }}
+          >
+            <span />
+          </button>
+        </EdgeLabelRenderer>
+      ) : null}
+    </>
+  );
+});
+
+const edgeTypes: EdgeTypes = {
+  rackFlow: RackFlowEdge,
+};
+
 const labelTones: RackGraphLabelTone[] = [
   "neutral",
   "cyan",
@@ -204,14 +287,31 @@ function toCanvasNodes(
   return nodes;
 }
 
-function toCanvasEdges(edges: RackGraphEdge[]): Edge[] {
+function toCanvasEdges(
+  edges: RackGraphEdge[],
+  nodes: RackGraphNode[],
+  selectedId: string | undefined,
+  onOpen: RackCanvasEdgeData["onOpen"],
+  onSelect: RackCanvasEdgeData["onSelect"],
+): RackCanvasEdge[] {
+  const nodeKinds = new Map(nodes.map((node) => [node.id, node.kind.kind]));
   return edges.map((edge) => ({
     id: edge.id,
+    type: "rackFlow",
     source: edge.source.node_id,
     target: edge.target.node_id,
     sourceHandle: `${edge.signal}:${edge.source.port_id}`,
     targetHandle: `${edge.signal}:${edge.target.port_id}`,
     className: `rack-flow-edge ${edge.signal}`,
+    selected: selectedId === edge.id,
+    data: {
+      signal: edge.signal,
+      editable: edge.signal === "midi"
+        && nodeKinds.get(edge.source.node_id) === "midi_input"
+        && nodeKinds.get(edge.target.node_id) === "plugin",
+      onOpen,
+      onSelect,
+    },
     animated: edge.signal === "midi",
     markerEnd: { type: MarkerType.ArrowClosed },
     style: {
@@ -262,6 +362,7 @@ interface RackGraphEditorProps {
     instance: PluginInstance;
     onSelectSound: (soundId: string) => Promise<unknown>;
   }) => ReactNode;
+  onOverlayChange?: (open: boolean) => void;
 }
 
 export default function RackGraphEditor({
@@ -272,6 +373,7 @@ export default function RackGraphEditor({
   onAddInstrument,
   instances,
   renderPluginSurface,
+  onOverlayChange,
 }: RackGraphEditorProps) {
   const materialized = useMemo(() => materializeRackGraph(rack), [rack]);
   const [selectedId, setSelectedId] = useState<string>();
@@ -312,12 +414,22 @@ export default function RackGraphEditor({
     y: number;
     timer: number;
     nodeId?: string;
+    edgeId?: string;
   } | null>(null);
   const [nodeMenu, setNodeMenu] = useState<{
     nodeId: string;
     anchor: GraphMenuAnchor;
   } | null>(null);
   const [paneMenu, setPaneMenu] = useState<GraphMenuAnchor | null>(null);
+  const [midiLinkEditor, setMidiLinkEditor] = useState<{
+    edgeId: string;
+    anchor: GraphMenuAnchor;
+  } | null>(null);
+  const overlayOpen = editorSlotId !== undefined || midiLinkEditor !== null;
+  useEffect(() => {
+    onOverlayChange?.(overlayOpen);
+  }, [onOverlayChange, overlayOpen]);
+  useEffect(() => () => onOverlayChange?.(false), [onOverlayChange]);
   const createMenuAnchor = useCallback(
     (clientX: number, clientY: number, width: number, height: number) => {
       if (!canvasBounds.width || !canvasBounds.height) return null;
@@ -355,6 +467,7 @@ export default function RackGraphEditor({
     if (!anchor) return;
     setSelectedId(nodeId);
     setPaneMenu(null);
+    setMidiLinkEditor(null);
     setNodeMenu({ nodeId, anchor });
   }, [createMenuAnchor]);
   const openPaneMenu = useCallback((clientX: number, clientY: number) => {
@@ -362,8 +475,30 @@ export default function RackGraphEditor({
     if (!anchor) return;
     setSelectedId(undefined);
     setNodeMenu(null);
+    setMidiLinkEditor(null);
     setPaneMenu(anchor);
   }, [createMenuAnchor]);
+  const openMidiLinkEditor = useCallback((edgeId: string, clientX: number, clientY: number) => {
+    const edge = materialized.graph!.edges.find((candidate) => candidate.id === edgeId);
+    const source = edge
+      ? materialized.graph!.nodes.find((node) => node.id === edge.source.node_id)
+      : undefined;
+    const target = edge
+      ? materialized.graph!.nodes.find((node) => node.id === edge.target.node_id)
+      : undefined;
+    if (
+      !edge
+      || edge.signal !== "midi"
+      || source?.kind.kind !== "midi_input"
+      || target?.kind.kind !== "plugin"
+    ) return;
+    const anchor = createMenuAnchor(clientX, clientY, 486, 650);
+    if (!anchor) return;
+    setSelectedId(edgeId);
+    setNodeMenu(null);
+    setPaneMenu(null);
+    setMidiLinkEditor({ edgeId, anchor });
+  }, [createMenuAnchor, materialized]);
   const finishPaneGesture = useCallback(() => {
     const gesture = paneGestureRef.current;
     if (!gesture) return;
@@ -374,11 +509,12 @@ export default function RackGraphEditor({
     (event: ReactPointerEvent<HTMLDivElement>) => {
       const origin = event.target instanceof Element ? event.target : null;
       const nodeElement = origin?.closest<HTMLElement>(".react-flow__node");
+      const edgeControl = origin?.closest<HTMLElement>(".rack-edge-control");
       const isPane = origin?.classList.contains("react-flow__pane");
       if (
         !event.isPrimary ||
         event.button !== 0 ||
-        (!isPane && !nodeElement)
+        (!isPane && !nodeElement && !edgeControl)
       ) {
         return;
       }
@@ -389,6 +525,7 @@ export default function RackGraphEditor({
         x,
         y,
         nodeId: nodeElement?.dataset.id,
+        edgeId: edgeControl?.dataset.edgeId,
         timer: window.setTimeout(() => {
           if (paneGestureRef.current?.pointerId !== pointerId) return;
           const gesture = paneGestureRef.current;
@@ -396,13 +533,15 @@ export default function RackGraphEditor({
           suppressPaneClickRef.current = true;
           if (gesture.nodeId) {
             openNodeMenu(gesture.nodeId, x, y);
+          } else if (gesture.edgeId) {
+            openMidiLinkEditor(gesture.edgeId, x, y);
           } else {
             openPaneMenu(x, y);
           }
         }, 520),
       };
     },
-    [finishPaneGesture, openNodeMenu, openPaneMenu],
+    [finishPaneGesture, openMidiLinkEditor, openNodeMenu, openPaneMenu],
   );
   const movePaneGesture = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -430,8 +569,14 @@ export default function RackGraphEditor({
     setInteractiveState({ source: mappedNodes, nodes: mappedNodes });
   }
   const edges = useMemo(
-    () => toCanvasEdges(materialized.graph!.edges),
-    [materialized.graph],
+    () => toCanvasEdges(
+      materialized.graph!.edges,
+      materialized.graph!.nodes,
+      selectedId,
+      openMidiLinkEditor,
+      setSelectedId,
+    ),
+    [materialized.graph, openMidiLinkEditor, selectedId],
   );
   const rackMap = useMemo(() => new Map(racks.map((item) => [item.id, item])), [racks]);
   const childOptions = useMemo(
@@ -539,8 +684,11 @@ export default function RackGraphEditor({
         ...graph,
         edges: graph.edges.filter((edge) => !removedIds.has(edge.id)),
       }));
+      if (midiLinkEditor && removedIds.has(midiLinkEditor.edgeId)) {
+        setMidiLinkEditor(null);
+      }
     },
-    [updateGraph],
+    [midiLinkEditor, updateGraph],
   );
 
   const addLabel = useCallback(
@@ -653,6 +801,18 @@ export default function RackGraphEditor({
   const editorInstance = editorSlot
     ? instances.find((instance) => instance.plugin_id === editorSlot.plugin_id)
     : undefined;
+  const midiEditorEdge = midiLinkEditor
+    ? materialized.graph!.edges.find((edge) => edge.id === midiLinkEditor.edgeId)
+    : undefined;
+  const midiEditorTargetNode = midiEditorEdge
+    ? materialized.graph!.nodes.find((node) => node.id === midiEditorEdge.target.node_id)
+    : undefined;
+  const midiEditorTargetSlotId = midiEditorTargetNode?.kind.kind === "plugin"
+    ? midiEditorTargetNode.kind.slot_id
+    : undefined;
+  const midiEditorTargetSlot = midiEditorTargetSlotId
+    ? materialized.slots.find((slot) => slot.id === midiEditorTargetSlotId)
+    : undefined;
 
   const updateSelectedLabel = useCallback(
     (patch: Partial<RackGraphLabel>) => {
@@ -704,10 +864,11 @@ export default function RackGraphEditor({
         onPointerUp={finishPaneGesture}
         onPointerCancel={finishPaneGesture}
       >
-        <ReactFlow<CanvasNode, Edge>
+        <ReactFlow<CanvasNode, RackCanvasEdge>
           nodes={interactiveNodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodesChange={handleNodesChange}
           onNodeDragStop={(_event, node) => persistNodePosition(node.id, node.position)}
           onConnect={connect}
@@ -739,6 +900,7 @@ export default function RackGraphEditor({
             setSelectedId(undefined);
             setNodeMenu(null);
             setPaneMenu(null);
+            setMidiLinkEditor(null);
           }}
           onPaneContextMenu={(event) => {
             event.preventDefault();
@@ -845,11 +1007,31 @@ export default function RackGraphEditor({
               renderSurface={renderPluginSurface}
             />
           ) : null}
+          {midiLinkEditor && midiEditorEdge && midiEditorTargetSlot ? (
+            <RackMidiLinkEditor
+              key={midiEditorEdge.id}
+              edge={midiEditorEdge}
+              fallback={midiTransformFromSlot(midiEditorTargetSlot)}
+              style={menuStyle(midiLinkEditor.anchor)}
+              onClose={() => setMidiLinkEditor(null)}
+              onApply={(midi_transform) => {
+                updateGraph((graph) => ({
+                  ...graph,
+                  edges: graph.edges.map((candidate) =>
+                    candidate.id === midiEditorEdge.id
+                      ? { ...candidate, midi_transform }
+                      : candidate,
+                  ),
+                }));
+                setMidiLinkEditor(null);
+              }}
+            />
+          ) : null}
         </div>
       </div>
       <p className="rack-graph-hint">
         Mouse wheel zooms · drag empty space to pan · drag ports to connect · Delete removes a
-        selected connection.
+        selected connection · double-click or hold a MIDI cable's center control to edit routing.
       </p>
     </div>
   );

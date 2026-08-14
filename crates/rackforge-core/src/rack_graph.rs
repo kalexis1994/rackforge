@@ -1,6 +1,7 @@
 use rackforge_performance_api::{
     PerformanceError, PerformanceLibrary, RackDefinition, RackGraphEdge, RackGraphNode,
-    RackGraphNodeId, RackGraphNodeKind, RackGraphSignal, RackId, RackKeyboardParts, RackSlot,
+    RackGraphNodeId, RackGraphNodeKind, RackGraphSignal, RackId, RackKeyboardParts,
+    RackMidiTransform, RackSlot,
 };
 use std::collections::BTreeMap;
 use thiserror::Error;
@@ -13,6 +14,7 @@ pub struct CompiledRackSlot {
     pub runtime_slot_id: String,
     pub rack_id: RackId,
     pub slot: RackSlot,
+    pub midi_transform: RackMidiTransform,
     pub keyboard_parts: Option<RackKeyboardParts>,
 }
 
@@ -76,11 +78,15 @@ fn compile_rack(
                 if !slot.enabled {
                     continue;
                 }
-                require_parallel_instrument_path(rack, node, &nodes, &graph.edges)?;
+                let midi_edge = require_parallel_instrument_path(rack, node, &nodes, &graph.edges)?;
                 compiled.push(CompiledRackSlot {
                     runtime_slot_id: format!("{path}/{}", slot.id),
                     rack_id: rack.id.clone(),
                     slot: (*slot).clone(),
+                    midi_transform: midi_edge
+                        .midi_transform
+                        .clone()
+                        .unwrap_or_else(|| RackMidiTransform::from_slot(slot)),
                     keyboard_parts: rack.keyboard_parts,
                 });
             }
@@ -107,12 +113,12 @@ fn compile_rack(
     Ok(())
 }
 
-fn require_parallel_instrument_path(
+fn require_parallel_instrument_path<'edge>(
     rack: &RackDefinition,
     node: &RackGraphNode,
     nodes: &BTreeMap<&str, &RackGraphNode>,
-    edges: &[RackGraphEdge],
-) -> Result<(), RackGraphCompileError> {
+    edges: &'edge [RackGraphEdge],
+) -> Result<&'edge RackGraphEdge, RackGraphCompileError> {
     let incoming = edges
         .iter()
         .filter(|edge| edge.target.node_id == node.id)
@@ -149,7 +155,7 @@ fn require_parallel_instrument_path(
             "instrument nodes need one direct connection to the main audio output",
         );
     }
-    Ok(())
+    Ok(incoming[0])
 }
 
 fn unsupported<T>(
@@ -215,12 +221,46 @@ mod tests {
 
     #[test]
     fn compiles_a_migrated_flat_rack_to_parallel_voice_slots() {
-        let library = library(vec![rack("rack.main", "piano")]);
+        let mut rack = rack("rack.main", "piano");
+        rack.slots[0].midi_input_channel = Some(5);
+        rack.slots[0].midi_note_low = 24;
+        rack.slots[0].midi_note_high = 96;
+        rack.slots[0].midi_transpose = -12;
+        rack.graph.as_mut().unwrap().edges[0].midi_transform = None;
+        let library = library(vec![rack]);
         let compiled =
             compile_instrument_rack(&library, &RackId::new("rack.main").unwrap()).unwrap();
         assert_eq!(compiled.len(), 1);
         assert_eq!(compiled[0].runtime_slot_id, "rack.main/piano");
         assert_eq!(compiled[0].slot.id.as_str(), "piano");
+        assert_eq!(compiled[0].midi_transform.source_channels, vec![5]);
+        assert_eq!(compiled[0].midi_transform.note_low, 24);
+        assert_eq!(compiled[0].midi_transform.note_high, 96);
+        assert_eq!(compiled[0].midi_transform.transpose, -12);
+    }
+
+    #[test]
+    fn compiles_midi_connection_settings_instead_of_legacy_slot_settings() {
+        let mut rack = rack("rack.main", "piano");
+        let transform = RackMidiTransform {
+            source_channels: vec![2, 4, 10],
+            target_channel: Some(3),
+            note_low: 36,
+            note_high: 84,
+            transpose: 12,
+            notes_only: true,
+            velocity_input_low: 10,
+            velocity_input_high: 120,
+            velocity_output_low: 24,
+            velocity_output_high: 112,
+        };
+        rack.graph.as_mut().unwrap().edges[0].midi_transform = Some(transform.clone());
+
+        let compiled =
+            compile_instrument_rack(&library(vec![rack]), &RackId::new("rack.main").unwrap())
+                .unwrap();
+
+        assert_eq!(compiled[0].midi_transform, transform);
     }
 
     #[test]
@@ -243,6 +283,7 @@ mod tests {
                 node_id: RackGraphNodeId::new("plugin.02").unwrap(),
                 port_id: "audio_in".into(),
             },
+            midi_transform: None,
         });
         let library = library(vec![rack]);
         assert!(matches!(
@@ -275,6 +316,7 @@ mod tests {
                     node_id: RackGraphNodeId::new("rack.layer").unwrap(),
                     port_id: "midi_in".into(),
                 },
+                midi_transform: None,
             },
             RackGraphEdge {
                 id: RackGraphEdgeId::new("layer.audio").unwrap(),
@@ -287,6 +329,7 @@ mod tests {
                     node_id: RackGraphNodeId::new("output.audio.00").unwrap(),
                     port_id: "in".into(),
                 },
+                midi_transform: None,
             },
         ]);
         let library = library(vec![parent, child]);

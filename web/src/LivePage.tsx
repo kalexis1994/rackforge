@@ -1292,6 +1292,12 @@ function RackEditor({
     if (!draft) return;
     setDraft(addSlotToRack(draft, defaultSlot(instances), position));
   }, [draft, instances]);
+  const handleGraphOverlayChange = useCallback((open: boolean) => {
+    if (open) setDetailsOpen(false);
+    window.dispatchEvent(new CustomEvent("rackforge:rack-graph-overlay", {
+      detail: { open },
+    }));
+  }, []);
   const validate = useCallback(() => {
     if (!draft) return "Select a Rack or create a new one.";
     const nameError = validationName(draft.name);
@@ -1456,12 +1462,13 @@ function RackEditor({
             onAddInstrument={addInstrument}
             instances={instances}
             renderPluginSurface={renderPluginSurface}
+            onOverlayChange={handleGraphOverlayChange}
           />
         </Suspense>
       </EditorSection>
       <EditorSection
         title="Instrument settings"
-        detail="Configure plugin state, MIDI filters and mix for each instrument node."
+        detail="Configure plugin state and mix for each instrument node. MIDI routing lives on its input connection."
         action={
           <button
             type="button"
@@ -1598,47 +1605,6 @@ function SlotEditor({
             {visiblePresetError && <small className="field-error">{visiblePresetError}</small>}
           </div>
         )}
-        <label>
-          <span>MIDI input</span>
-          <select
-            value={slot.midi_input_channel ?? "omni"}
-            onChange={(event) => onChange({ ...slot, midi_input_channel: event.target.value === "omni" ? undefined : Number(event.target.value) })}
-          >
-            <option value="omni">OMNI</option>
-            {Array.from({ length: 16 }, (_, item) => item + 1).map((channel) => <option value={channel} key={channel}>Channel {channel}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>Low key</span>
-          <input
-            type="number"
-            min="0"
-            max={slot.midi_note_high}
-            value={slot.midi_note_low}
-            onChange={(event) => onChange({ ...slot, midi_note_low: Math.min(slot.midi_note_high, Number(event.target.value)) })}
-          />
-        </label>
-        <label>
-          <span>High key</span>
-          <input
-            type="number"
-            min={slot.midi_note_low}
-            max="127"
-            value={slot.midi_note_high}
-            onChange={(event) => onChange({ ...slot, midi_note_high: Math.max(slot.midi_note_low, Number(event.target.value)) })}
-          />
-        </label>
-        <label>
-          <span>Octave</span>
-          <select
-            value={slot.midi_transpose / 12}
-            onChange={(event) => onChange({ ...slot, midi_transpose: Number(event.target.value) * 12 })}
-          >
-            {Array.from({ length: 9 }, (_, item) => item - 4).map((octave) => (
-              <option value={octave} key={octave}>{octave === 0 ? "Original" : `${octave > 0 ? "+" : ""}${octave}`}</option>
-            ))}
-          </select>
-        </label>
         <label className="range-field">
           <span>Level <output>{Math.round(slot.level_per_mille / 10)}%</output></span>
           <input type="range" min="0" max="1000" step="10" value={slot.level_per_mille} onChange={(event) => onChange({ ...slot, level_per_mille: Number(event.target.value) })} />

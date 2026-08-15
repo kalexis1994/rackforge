@@ -29,6 +29,7 @@ declare global {
   interface Window {
     RackForgeNativeHost?: NativeHostBridge;
     __RACKFORGE_NATIVE_HOST_TOKEN__?: string;
+    __RACKFORGE_HOST_SHELL__?: "desktop";
   }
 }
 
@@ -74,6 +75,14 @@ function nativeBridge() {
 
 export function isNativeHost() {
   return Boolean(nativeBridge());
+}
+
+export function isDesktopHost() {
+  return window.__RACKFORGE_HOST_SHELL__ === "desktop";
+}
+
+export function isRemoteWebClient() {
+  return !isNativeHost() && !isDesktopHost();
 }
 
 function installNativeListener() {
@@ -210,7 +219,10 @@ export async function hostJson<T>(
       body: typeof init.body === "string" ? init.body : null,
     }, timeoutMs);
   }
-  const response = await fetch(path, init);
+  const response = await fetch(path, {
+    ...init,
+    cache: init.cache ?? (path.startsWith("/api/v1/") ? "no-store" : undefined),
+  });
   if (!response.ok) throw await responseError(response);
   return (await response.json()) as T;
 }

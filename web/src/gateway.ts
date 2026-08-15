@@ -9,6 +9,7 @@ import {
 } from "./store";
 import { openSessionChannel, type SessionChannel } from "./host";
 import { randomIdToken } from "./ids";
+import { invalidatePluginCatalog } from "./pluginCatalog";
 import type {
   CoreCommandAppliedMessage,
   CoreErrorMessage,
@@ -22,6 +23,7 @@ import type {
   PluginStateParameterResult,
   PluginStateParameterSnapshot,
   PluginStateReference,
+  SessionSnapshot,
   SessionCommand,
 } from "./types";
 
@@ -74,6 +76,27 @@ const pendingCommands = new Map<number, {
   timeout: number;
   applied?: CoreCommandAppliedMessage;
 }>();
+const pendingSnapshotRefreshes = new Set<{
+  resolve: (snapshot: SessionSnapshot) => void;
+  reject: (error: Error) => void;
+  timeout: number;
+}>();
+
+function resolveSnapshotRefreshes(snapshot: SessionSnapshot) {
+  for (const pending of pendingSnapshotRefreshes) {
+    window.clearTimeout(pending.timeout);
+    pending.resolve(snapshot);
+  }
+  pendingSnapshotRefreshes.clear();
+}
+
+function rejectSnapshotRefreshes(error: Error) {
+  for (const pending of pendingSnapshotRefreshes) {
+    window.clearTimeout(pending.timeout);
+    pending.reject(error);
+  }
+  pendingSnapshotRefreshes.clear();
+}
 
 function resolvePendingCommandsThrough(revision: number) {
   for (const [id, pending] of pendingCommands) {
@@ -148,6 +171,7 @@ export function connectGateway() {
       sessionConnected = true;
       performanceSnapshotInFlight = false;
       store.dispatch(connectionChanged("online"));
+      void invalidatePluginCatalog().catch(() => undefined);
       if (performanceTimer !== null) window.clearInterval(performanceTimer);
       performanceTimer = window.setInterval(
         sendPerformanceSnapshotRequest,
@@ -178,6 +202,7 @@ export function connectGateway() {
           coreReady = true;
           const snapshotMessage = message as unknown as CoreSnapshotMessage;
           store.dispatch(snapshotReceived(snapshotMessage.snapshot));
+          resolveSnapshotRefreshes(snapshotMessage.snapshot);
           resolvePendingCommandsThrough(snapshotMessage.snapshot.revision);
           sendPerformanceSnapshotRequest();
         } else if (message.status === "host_idle") {
@@ -186,6 +211,8 @@ export function connectGateway() {
         } else if (message.status === "core_restarting") {
           coreReady = false;
           store.dispatch(connectionChanged("connecting"));
+        } else if (message.status === "plugin_catalog_changed") {
+          void invalidatePluginCatalog().catch(() => undefined);
         } else if (
           typeof message.status === "string" &&
           pendingPresetRequest?.expected === message.status
@@ -252,6 +279,9 @@ export function connectGateway() {
       );
       pendingPresetRequest = null;
       rejectPendingCommands(
+        new Error("The RackForge Core connection was interrupted."),
+      );
+      rejectSnapshotRefreshes(
         new Error("The RackForge Core connection was interrupted."),
       );
       for (const queued of presetRequestQueue.splice(0)) {
@@ -413,6 +443,30 @@ export function setPluginStateParameter(
   );
 }
 
+export function requestSessionSnapshot(): Promise<SessionSnapshot> {
+  if (!socket || !sessionConnected) {
+    return Promise.reject(new Error("RackForge Core is not connected."));
+  }
+  return new Promise((resolve, reject) => {
+    const pending = {
+      resolve,
+      reject,
+      timeout: window.setTimeout(() => {
+        pendingSnapshotRefreshes.delete(pending);
+        reject(new Error("RackForge did not refresh the session in time."));
+      }, COMMAND_TIMEOUT_MS),
+    };
+    pendingSnapshotRefreshes.add(pending);
+    try {
+      socket?.send(JSON.stringify({ op: "snapshot" }));
+    } catch (error) {
+      pendingSnapshotRefreshes.delete(pending);
+      window.clearTimeout(pending.timeout);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+}
+
 export function stopGateway() {
   intentionallyStopped = true;
   gatewayGeneration += 1;
@@ -434,6 +488,7 @@ export function stopGateway() {
   pendingPresetRequest = null;
   for (const queued of presetRequestQueue.splice(0)) queued.reject(interruption);
   rejectPendingCommands(interruption);
+  rejectSnapshotRefreshes(interruption);
   closingSocket?.close();
 }
 

@@ -890,9 +890,10 @@ impl PluginWebRegistry {
                 surfaces.push(PublicWebSurface {
                     kind: surface.kind,
                     entry_url: format!(
-                        "/plugin-assets/{}/{}",
+                        "/plugin-assets/{}/{}?v={}",
                         manifest.id,
-                        surface.entry.replace('\\', "/")
+                        surface.entry.replace('\\', "/"),
+                        manifest.version,
                     ),
                 });
             }
@@ -901,9 +902,9 @@ impl PluginWebRegistry {
             .branding
             .as_ref()
             .map(|branding| PublicPluginBranding {
-                icon_url: plugin_asset_url(&manifest.id, &branding.icon),
-                banner_url: plugin_asset_url(&manifest.id, &branding.banner),
-                splash_url: plugin_asset_url(&manifest.id, &branding.splash),
+                icon_url: plugin_asset_url(&manifest.id, &branding.icon, &manifest.version),
+                banner_url: plugin_asset_url(&manifest.id, &branding.banner, &manifest.version),
+                splash_url: plugin_asset_url(&manifest.id, &branding.splash, &manifest.version),
                 background_color: branding.background_color.clone(),
                 accent_color: branding.accent_color.clone(),
             });
@@ -930,8 +931,11 @@ impl PluginWebRegistry {
     }
 }
 
-fn plugin_asset_url(plugin_id: &str, asset: &str) -> String {
-    format!("/plugin-assets/{plugin_id}/{}", asset.replace('\\', "/"))
+fn plugin_asset_url(plugin_id: &str, asset: &str, version: &str) -> String {
+    format!(
+        "/plugin-assets/{plugin_id}/{}?v={version}",
+        asset.replace('\\', "/")
+    )
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
@@ -2014,7 +2018,7 @@ async fn plugin_web_asset(
     );
     response
         .headers_mut()
-        .insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     if mime == mime_guess::mime::TEXT_HTML {
         response.headers_mut().insert(
             CONTENT_SECURITY_POLICY,

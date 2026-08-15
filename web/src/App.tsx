@@ -46,6 +46,7 @@ import {
   requestPluginParameters,
   requestPluginStateParameters,
   requestPluginPresets,
+  requestSessionSnapshot,
   renamePluginPreset,
   savePluginPreset,
   setPluginParameter,
@@ -60,11 +61,17 @@ import {
   hostHaptic,
   hostJson,
   HostRequestError,
+  isDesktopHost,
   isNativeHost,
   selectNativePluginSound,
   selectNativeResource,
   syncNativeRoute,
 } from "./host";
+import {
+  invalidatePluginCatalog,
+  usePluginCatalog,
+  usePluginDescriptor,
+} from "./pluginCatalog";
 import { LivePage, type PerformanceGraphWorkspace } from "./LivePage";
 import { TouchControllerPage } from "./TouchControllerPage";
 import type { RootState } from "./store";
@@ -1311,6 +1318,13 @@ interface InstalledPluginResult {
 
 const PLUGIN_ACTIVATION_TIMEOUT_MS = 45_000;
 
+async function synchronizePluginEnvironment() {
+  await Promise.allSettled([
+    invalidatePluginCatalog(),
+    requestSessionSnapshot(),
+  ]);
+}
+
 async function activateInstalledPlugin(
   result: InstalledPluginResult,
 ): Promise<PluginWebDescriptor> {
@@ -1319,9 +1333,11 @@ async function activateInstalledPlugin(
     { method: "POST" },
   );
   if (activation.status === "active") {
-    return hostJson<PluginWebDescriptor>(
+    const descriptor = await hostJson<PluginWebDescriptor>(
       `/api/v1/plugins/${encodeURIComponent(result.plugin_id)}`,
     );
+    await synchronizePluginEnvironment();
+    return descriptor;
   }
   const startedAt = performance.now();
   let lastError: unknown;
@@ -1330,7 +1346,10 @@ async function activateInstalledPlugin(
       const descriptor = await hostJson<PluginWebDescriptor>(
         `/api/v1/plugins/${encodeURIComponent(result.plugin_id)}`,
       );
-      if (descriptor.active) return descriptor;
+      if (descriptor.active) {
+        await synchronizePluginEnvironment();
+        return descriptor;
+      }
     } catch (error) {
       lastError = error;
     }
@@ -1346,6 +1365,8 @@ const MAX_CLIENT_RESOURCE_BYTES = 512 * 1024 * 1024;
 function InstallPluginDialog({ onClose }: { onClose: () => void }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const native = isNativeHost();
+  const desktop = isDesktopHost();
+  const remoteWeb = !native && !desktop;
   const [browseHost, setBrowseHost] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -1378,6 +1399,8 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
 
   const finishInstall = async (result: InstalledPluginResult) => {
     setInstalled(result);
+    // Installation changes discovery even when activation subsequently fails.
+    void invalidatePluginCatalog().catch(() => undefined);
     setActivationError(null);
     setStatus(`Activating ${result.plugin_id}…`);
     try {
@@ -1490,7 +1513,7 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
           </button>
         </header>
         {!installed ? <p className="install-plugin-intro">
-          {native
+          {native || desktop
             ? "Select a portable .rfplugin package. RackForge validates it before installing anything."
             : "Choose where the .rfplugin package is located. RackForge validates it on the host before installing anything."}
         </p> : null}
@@ -1499,19 +1522,23 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
             type="button"
             className="install-source-card"
             disabled={busy}
-            onClick={() =>
-              native ? void openNativePicker() : fileInputRef.current?.click()
-            }
+            onClick={() => {
+              if (native) void openNativePicker();
+              else if (desktop) setBrowseHost(true);
+              else fileInputRef.current?.click();
+            }}
           >
-            <span className="install-source-icon"><FileUp aria-hidden="true" /></span>
+            <span className="install-source-icon">
+              {desktop ? <FolderOpen aria-hidden="true" /> : <FileUp aria-hidden="true" />}
+            </span>
             <span>
-              <strong>{native ? "Choose plugin package" : "Upload from this device"}</strong>
-              {!native ? (
+              <strong>{native || desktop ? "Choose plugin package" : "Upload from this device"}</strong>
+              {remoteWeb ? (
                 <small>Use the browser picker, then securely upload to the host</small>
               ) : null}
             </span>
           </button>
-          {!native ? (
+          {remoteWeb ? (
             <button
               type="button"
               className="install-source-card"
@@ -2011,21 +2038,7 @@ function PlayPage({
     label: string;
     value: string;
   } | null>(null);
-  const [installedPlugins, setInstalledPlugins] = useState<PluginWebDescriptor[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    hostJson<PluginWebDescriptor[]>("/api/v1/plugins")
-      .then((plugins) => {
-        if (cancelled) return;
-        setInstalledPlugins(plugins);
-      })
-      .catch(() => {
-        if (!cancelled) setInstalledPlugins([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { plugins: installedPlugins } = usePluginCatalog();
   const activeVersion = installedPlugins.find(
     (plugin) => plugin.plugin_id === active?.plugin_id,
   )?.version;
@@ -2171,6 +2184,7 @@ function PluginPickerModal({
       await hostJson(`/api/v1/plugins/${encodeURIComponent(plugin.plugin_id)}/activate`, {
         method: "POST",
       });
+      await synchronizePluginEnvironment();
       onClose();
     } catch (error) {
       setActivationError(
@@ -2564,7 +2578,7 @@ function PluginsPage({
   onInstall: () => void;
 }) {
   const location = useLocation();
-  const [installed, setInstalled] = useState<PluginWebDescriptor[]>([]);
+  const { plugins: installed } = usePluginCatalog();
   const [pendingRemoval, setPendingRemoval] = useState<PluginWebDescriptor | null>(null);
   const [removing, setRemoving] = useState(false);
   const [removalError, setRemovalError] = useState<string | null>(null);
@@ -2574,25 +2588,6 @@ function PluginsPage({
       ? state.pluginRemovalMessage
       : null;
   });
-
-  const refreshInstalled = useCallback(async () => {
-    const plugins = await hostJson<PluginWebDescriptor[]>("/api/v1/plugins");
-    setInstalled(plugins);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    hostJson<PluginWebDescriptor[]>("/api/v1/plugins")
-      .then((plugins) => {
-        if (!cancelled) setInstalled(plugins);
-      })
-      .catch(() => {
-        if (!cancelled) setInstalled([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const removePlugin = async (options: PluginRemovalOptions) => {
     if (!pendingRemoval) return;
@@ -2609,7 +2604,7 @@ function PluginsPage({
         },
       );
       setPendingRemoval(null);
-      await refreshInstalled();
+      await synchronizePluginEnvironment();
       setRemovalMessage(pluginRemovalSummary(result));
     } catch (error) {
       setRemovalError(
@@ -2722,21 +2717,7 @@ function PluginGrid({
   expanded?: boolean;
   onRemove?: (plugin: PluginWebDescriptor) => void;
 }) {
-  const [loadedCatalog, setLoadedCatalog] = useState<PluginWebDescriptor[]>([]);
-  useEffect(() => {
-    if (plugins) return;
-    let cancelled = false;
-    hostJson<PluginWebDescriptor[]>("/api/v1/plugins")
-      .then((result) => {
-        if (!cancelled) setLoadedCatalog(result);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadedCatalog([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [plugins]);
+  const { plugins: loadedCatalog } = usePluginCatalog();
   const catalog = plugins ?? loadedCatalog;
   if (instances.length === 0)
     return <EmptyState title="Waiting for installed plugins" />;
@@ -2812,26 +2793,10 @@ function PluginSurfaceState({
 
 function PluginConfigSurface({ instance }: { instance: PluginInstance }) {
   const navigate = useNavigate();
-  const [descriptor, setDescriptor] = useState<PluginWebDescriptor | null>(null);
+  const { descriptor } = usePluginDescriptor(instance.plugin_id);
   const [showRemove, setShowRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    hostJson<PluginWebDescriptor>(
-      `/api/v1/plugins/${encodeURIComponent(instance.plugin_id)}`,
-    )
-      .then((plugin) => {
-        if (!cancelled) setDescriptor(plugin);
-      })
-      .catch(() => {
-        if (!cancelled) setDescriptor(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [instance.plugin_id]);
 
   const removePlugin = async (options: PluginRemovalOptions) => {
     if (!descriptor) return;
@@ -2846,6 +2811,7 @@ function PluginConfigSurface({ instance }: { instance: PluginInstance }) {
           body: JSON.stringify(options),
         },
       );
+      await synchronizePluginEnvironment();
       navigate("/plugins", {
         replace: true,
         state: { pluginRemovalMessage: pluginRemovalSummary(result) },
@@ -2928,10 +2894,13 @@ export function PluginFrame({
   onIsolatedStateChange?: (state: PluginStateReference) => void;
   onSelectSound?: (soundId: string) => Promise<unknown>;
 }) {
-  const [descriptor, setDescriptor] = useState<PluginWebDescriptor | null>(null);
-  const [descriptorStatus, setDescriptorStatus] = useState<
-    "loading" | "ready" | "unavailable" | "error"
-  >("loading");
+  const catalogDescriptor = usePluginDescriptor(instance.plugin_id);
+  const descriptor = catalogDescriptor.descriptor;
+  const descriptorStatus = catalogDescriptor.status === "error"
+    ? "error"
+    : catalogDescriptor.status === "ready"
+      ? descriptor ? "ready" : "unavailable"
+      : "loading";
   const [frameLoaded, setFrameLoaded] = useState(false);
   const [resourceBusy, setResourceBusy] = useState<string | null>(null);
   const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
@@ -3095,35 +3064,13 @@ export function PluginFrame({
     isolatedWritesRef.current.clear();
   }, [sendPluginResponse]);
 
-  useEffect(() => {
-    let cancelled = false;
-    hostJson<PluginWebDescriptor>(
-      `/api/v1/plugins/${encodeURIComponent(instance.plugin_id)}`,
-    )
-      .then((value) => {
-        if (!cancelled) {
-          setDescriptor(value);
-          setDescriptorStatus(value ? "ready" : "unavailable");
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setDescriptor(null);
-          setDescriptorStatus(
-            error instanceof HostRequestError && error.status === 404
-              ? "unavailable"
-              : "error",
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [instance.plugin_id, instance.plugin_name]);
-
   const selectedSurface = descriptor?.surfaces.find(
     (candidate) => candidate.kind === surface,
   );
+
+  useEffect(() => {
+    setFrameLoaded(false);
+  }, [descriptor?.version, selectedSurface?.entry_url]);
 
   useEffect(() => {
     const frame = frameRef.current;

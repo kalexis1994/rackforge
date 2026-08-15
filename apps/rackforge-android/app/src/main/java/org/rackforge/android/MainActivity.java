@@ -72,6 +72,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.UUID;
 
 import org.json.JSONObject;
@@ -110,6 +112,12 @@ public final class MainActivity extends Activity {
     private double lastObservedMaximumCallbackUs = -1;
     private boolean refreshingAudioOutputs;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final ExecutorService pluginParameterExecutor =
+            Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "rackforge-plugin-parameters");
+                thread.setDaemon(true);
+                return thread;
+            });
     private final List<AudioOutputChoice> audioOutputChoices = new ArrayList<>();
     private final List<MidiDevice> openMidiDevices = new ArrayList<>();
     private final List<MidiOutputPort> openMidiPorts = new ArrayList<>();
@@ -182,6 +190,7 @@ public final class MainActivity extends Activity {
     private static native String pluginWebContext();
     private static native boolean selectPluginSound(String soundId);
     private static native String pluginProgramCommand(String method, String paramsJson);
+    private static native String pluginParameterCommand(String method, String paramsJson);
     private static native String pluginStateCommand(String method, String paramsJson);
     private static native int loadPluginResource(String resourceId, String filePath);
     private static native String importPluginResourceArchive(
@@ -348,6 +357,7 @@ public final class MainActivity extends Activity {
         stopNativeAudio();
         stopService(new Intent(this, AudioEngineService.class));
         mainHandler.removeCallbacksAndMessages(null);
+        pluginParameterExecutor.shutdownNow();
         AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         if (audioDeviceCallback != null) audioManager.unregisterAudioDeviceCallback(audioDeviceCallback);
         MidiManager midiManager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
@@ -551,8 +561,10 @@ public final class MainActivity extends Activity {
                     || !asset.isFile()) {
                 return emptyWebResponse(404, "Not Found");
             }
+            Map<String, String> headers = new LinkedHashMap<>();
+            headers.put("Cache-Control", "no-store");
             return new WebResourceResponse(mimeType(asset.getName()), null,
-                    new FileInputStream(asset));
+                    200, "OK", headers, new FileInputStream(asset));
         } catch (Exception error) {
             Log.e("RackForge", "Could not serve plugin Web asset", error);
             return emptyWebResponse(500, "Internal Server Error");
@@ -698,6 +710,28 @@ public final class MainActivity extends Activity {
                                     error.getMessage() == null ? error.toString() : error.getMessage()));
                         }
                     }, "rackforge-program-editor").start();
+                    return;
+                }
+                if ("plugin.parameters".equals(method)
+                        || "plugin.set_parameter".equals(method)) {
+                    JSONObject params = request.optJSONObject("params");
+                    if (params == null) params = new JSONObject();
+                    params.put("instance_id", "android-main");
+                    final JSONObject commandParams = params;
+                    final String command = "plugin.parameters".equals(method)
+                            ? "plugin_parameters" : "set_plugin_parameter";
+                    pluginParameterExecutor.execute(() -> {
+                        try {
+                            JSONObject result = new JSONObject(pluginParameterCommand(
+                                    command, commandParams.toString()));
+                            runOnUiThread(() -> respondToPlugin(
+                                    requestId, true, null, result));
+                        } catch (Throwable error) {
+                            Log.e("RackForge", "Plugin parameter command failed", error);
+                            runOnUiThread(() -> respondToPlugin(requestId, false,
+                                    errorMessage(error)));
+                        }
+                    });
                     return;
                 }
                 if (!"plugin.select_sound".equals(method)) {
@@ -958,20 +992,21 @@ public final class MainActivity extends Activity {
 
     private JSONObject sharedPluginDescriptor(JSONObject plugin) throws Exception {
         String pluginId = plugin.getString("plugin_id");
+        String assetVersion = "?v=" + Uri.encode(plugin.getString("version"));
         JSONArray surfaces = new JSONArray();
         String playEntry = plugin.optString("web_entry", "");
         if (!playEntry.isBlank()) {
             surfaces.put(new JSONObject()
                     .put("kind", "play")
                     .put("entry_url", "https://" + APP_HOST + "/plugin-assets/"
-                            + Uri.encode(pluginId) + "/" + playEntry));
+                            + Uri.encode(pluginId) + "/" + playEntry + assetVersion));
         }
         String configEntry = plugin.optString("config_web_entry", "");
         if (!configEntry.isBlank()) {
             surfaces.put(new JSONObject()
                     .put("kind", "config")
                     .put("entry_url", "https://" + APP_HOST + "/plugin-assets/"
-                            + Uri.encode(pluginId) + "/" + configEntry));
+                            + Uri.encode(pluginId) + "/" + configEntry + assetVersion));
         }
         JSONArray resources = plugin.optJSONArray("resources");
         JSONObject packageBranding = plugin.optJSONObject("branding");
@@ -980,9 +1015,9 @@ public final class MainActivity extends Activity {
             String assetBase = "https://" + APP_HOST + "/plugin-assets/"
                     + Uri.encode(pluginId) + "/";
             branding = new JSONObject()
-                    .put("icon_url", assetBase + Uri.encode(packageBranding.getString("icon"), "/"))
-                    .put("banner_url", assetBase + Uri.encode(packageBranding.getString("banner"), "/"))
-                    .put("splash_url", assetBase + Uri.encode(packageBranding.getString("splash"), "/"));
+                    .put("icon_url", assetBase + Uri.encode(packageBranding.getString("icon"), "/") + assetVersion)
+                    .put("banner_url", assetBase + Uri.encode(packageBranding.getString("banner"), "/") + assetVersion)
+                    .put("splash_url", assetBase + Uri.encode(packageBranding.getString("splash"), "/") + assetVersion);
             if (packageBranding.has("background_color")) {
                 branding.put("background_color", packageBranding.getString("background_color"));
             }
@@ -1284,6 +1319,10 @@ public final class MainActivity extends Activity {
         try {
             JSONObject request = new JSONObject(payload);
             String operation = request.optString("op");
+            if ("snapshot".equals(operation)) {
+                emitSessionSnapshot();
+                return;
+            }
             if ("virtual_midi".equals(operation)) {
                 acceptVirtualMidi(request);
                 return;
@@ -1339,6 +1378,11 @@ public final class MainActivity extends Activity {
                         .toString());
                 return;
             }
+            if ("plugin_parameters".equals(operation)
+                    || "set_plugin_parameter".equals(operation)) {
+                handlePluginParameterSessionRequest(operation, request);
+                return;
+            }
             if (!"dispatch".equals(operation)) return;
             JSONObject command = request.getJSONObject("envelope").getJSONObject("command");
             String type = command.optString("type");
@@ -1364,6 +1408,42 @@ public final class MainActivity extends Activity {
                 // Logging above is the final fallback when even JSON encoding fails.
             }
         }
+    }
+
+    private void handlePluginParameterSessionRequest(
+            String operation, JSONObject request) {
+        pluginParameterExecutor.execute(() -> {
+            try {
+                String response = pluginParameterCommand(operation, request.toString());
+                if (response == null || response.isBlank()) {
+                    throw new IllegalStateException(
+                            "Portable runtime returned an empty parameter response");
+                }
+                // Parsing here prevents malformed native data from being forwarded as a
+                // successful session response and leaving the Web request queue inconsistent.
+                JSONObject validated = new JSONObject(response);
+                emitNativeSessionEvent("message", validated.toString());
+            } catch (Throwable error) {
+                Log.e("RackForge", "Shared plugin parameter command failed", error);
+                emitSharedSessionError(error);
+            }
+        });
+    }
+
+    private void emitSharedSessionError(Throwable error) {
+        try {
+            emitNativeSessionEvent("message", new JSONObject()
+                    .put("status", "gateway_error")
+                    .put("message", errorMessage(error))
+                    .toString());
+        } catch (Exception responseError) {
+            Log.e("RackForge", "Could not encode shared session error", responseError);
+        }
+    }
+
+    private static String errorMessage(Throwable error) {
+        String message = error.getMessage();
+        return message == null || message.isBlank() ? error.toString() : message;
     }
 
     private void acceptVirtualMidi(JSONObject request) throws Exception {

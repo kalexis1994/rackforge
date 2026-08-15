@@ -3,9 +3,11 @@ use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
 use keylab_essential_mk3::protocol as keylab_protocol;
+use rackforge_control_api::ControlResponse;
 use rackforge_core::{
     LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore, PluginStorage,
     midi_hotplug::{PanicScope, panic_packets},
+    plugin_parameters, set_plugin_parameter,
 };
 use rackforge_plugin_api::{
     PROGRAM_EDITOR_SCHEMA_VERSION, PluginKind, PreparedProgram, PresetCatalog, ProgramDocument,
@@ -87,6 +89,7 @@ const DROPOUT_FADE_FRAMES: usize = 64;
 const HOST_CONTROL_HEADER_MS: u64 = 1_500;
 const PRIO_PROCESS: i32 = 0;
 const ANDROID_AUDIO_THREAD_NICE: i32 = -16;
+const ANDROID_INSTANCE_ID: &str = "android-main";
 
 struct AndroidControllerMenu {
     menu: SurfaceMenu,
@@ -813,6 +816,55 @@ impl AndroidEngine {
         self.instance.0.load_preset(sound_id)?;
         self.selected_sound_id = sound_id.to_owned();
         Ok(())
+    }
+
+    fn plugin_parameter_command(
+        &mut self,
+        method: &str,
+        params: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let instance_id = params
+            .get("instance_id")
+            .and_then(serde_json::Value::as_str)
+            .context("plugin parameter command is missing instance_id")?;
+        if instance_id != ANDROID_INSTANCE_ID {
+            bail!("plugin instance {instance_id:?} is not the active Android instance");
+        }
+        let instance_id = InstanceId::new(instance_id).map_err(anyhow::Error::msg)?;
+        let response = match method {
+            "plugin_parameters" => {
+                let (schema, values) = plugin_parameters(self.runtime.0, &mut self.instance.0)?;
+                ControlResponse::PluginParameters {
+                    instance_id,
+                    schema: Box::new(schema),
+                    values,
+                }
+            }
+            "set_plugin_parameter" => {
+                let parameter_index = params
+                    .get("parameter_index")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|index| u32::try_from(index).ok())
+                    .context("plugin parameter command has an invalid parameter_index")?;
+                let value = params
+                    .get("value")
+                    .and_then(serde_json::Value::as_f64)
+                    .context("plugin parameter command has an invalid value")?;
+                let value = set_plugin_parameter(
+                    self.runtime.0,
+                    &mut self.instance.0,
+                    parameter_index,
+                    value,
+                )?;
+                ControlResponse::PluginParameterSet {
+                    instance_id,
+                    parameter_index,
+                    value,
+                }
+            }
+            _ => bail!("unknown plugin parameter command {method:?}"),
+        };
+        serde_json::to_value(response).context("serializing plugin parameter response")
     }
 
     fn plugin_state_command(
@@ -2297,6 +2349,30 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginProgramComm
             .context("RackForge engine is not initialized")?;
         engine.apply_program_web_command(&method, &params)?;
         Ok(engine.web_context_json())
+    })();
+    result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginParameterCommand(
+    mut env: JNIEnv,
+    _class: JClass,
+    method: JString,
+    params_json: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let method = java_string(&mut env, method)?;
+        let params: serde_json::Value = serde_json::from_str(&java_string(&mut env, params_json)?)
+            .context("parsing plugin parameter command")?;
+        let mut guard = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+        let engine = guard
+            .as_mut()
+            .context("RackForge engine is not initialized")?;
+        Ok(engine
+            .plugin_parameter_command(&method, &params)?
+            .to_string())
     })();
     result_string(&mut env, result)
 }

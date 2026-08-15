@@ -44,6 +44,7 @@ static CLIENT_UPLOAD_SERIAL: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone)]
 struct WebState {
     session: Arc<RwLock<SessionState>>,
+    plugin_catalog_revision: Arc<AtomicU64>,
     legacy_plugins_root: PathBuf,
     plugin_store_root: Option<PathBuf>,
     data_root: PathBuf,
@@ -288,6 +289,7 @@ pub fn start(
     let shared_preferences = Arc::new(RwLock::new(preferences.clone()));
     let state = WebState {
         session,
+        plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
         legacy_plugins_root: options.plugins_root.clone(),
         plugin_store_root: options.plugin_store_root.clone(),
         data_root: options.data_root.clone(),
@@ -579,7 +581,10 @@ async fn activate_plugin(
     })
     .await
     {
-        Ok(Ok(Ok(()))) => Json(json!({"status":"active", "plugin_id":plugin_id})).into_response(),
+        Ok(Ok(Ok(()))) => {
+            state.plugin_catalog_revision.fetch_add(1, Ordering::AcqRel);
+            Json(json!({"status":"active", "plugin_id":plugin_id})).into_response()
+        }
         Ok(Ok(Err(message))) => (
             StatusCode::CONFLICT,
             Json(json!({"status":"error", "message":message})),
@@ -654,6 +659,7 @@ async fn uninstall_managed_plugin(
                     "private data was deleted, but resource grants could not be revoked: {error}"
                 ));
             }
+            state.plugin_catalog_revision.fetch_add(1, Ordering::AcqRel);
             Json(result).into_response()
         }
         Ok(Ok(Err(message))) => (
@@ -810,13 +816,16 @@ async fn install_selected_plugin(
     })
     .await
     {
-        Ok(Ok(installed)) => Json(json!({
-            "plugin_id": installed.record.plugin_id,
-            "version": installed.record.version,
-            "already_installed": installed.already_installed,
-            "activation_required": true,
-        }))
-        .into_response(),
+        Ok(Ok(installed)) => {
+            state.plugin_catalog_revision.fetch_add(1, Ordering::AcqRel);
+            Json(json!({
+                "plugin_id": installed.record.plugin_id,
+                "version": installed.record.version,
+                "already_installed": installed.already_installed,
+                "activation_required": true,
+            }))
+            .into_response()
+        }
         Ok(Err(error)) => (
             StatusCode::BAD_REQUEST,
             Json(json!({"status":"error", "message":error.to_string()})),
@@ -1099,6 +1108,7 @@ async fn plugin_asset(
                     .first_or_octet_stream()
                     .as_ref(),
             )
+            .header(header::CACHE_CONTROL, "no-store")
             .body(Body::from(bytes))
             .expect("valid plugin asset response"),
         Err(error) => internal_error(error),
@@ -1112,6 +1122,8 @@ async fn session_socket(ws: WebSocketUpgrade, State(state): State<WebState>) -> 
 async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
     let (mut sender, mut receiver) = socket.split();
     let mut virtual_midi_clients = std::collections::BTreeSet::<ClientId>::new();
+    let mut published_revision = state.session.read().expect("session lock").revision;
+    let mut published_catalog_revision = state.plugin_catalog_revision.load(Ordering::Acquire);
     if sender
         .send(Message::Text(snapshot_json(&state).into()))
         .await
@@ -1119,7 +1131,44 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
     {
         return;
     }
-    while let Some(Ok(message)) = receiver.next().await {
+    loop {
+        let message = match tokio::time::timeout(Duration::from_millis(100), receiver.next()).await
+        {
+            Ok(Some(Ok(message))) => message,
+            Ok(Some(Err(_))) | Ok(None) => break,
+            Err(_) => {
+                let revision = state.session.read().expect("session lock").revision;
+                if revision != published_revision {
+                    if sender
+                        .send(Message::Text(snapshot_json(&state).into()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                    published_revision = revision;
+                }
+                let catalog_revision = state.plugin_catalog_revision.load(Ordering::Acquire);
+                if catalog_revision != published_catalog_revision {
+                    if sender
+                        .send(Message::Text(
+                            json!({
+                                "status":"plugin_catalog_changed",
+                                "revision":catalog_revision,
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                    published_catalog_revision = catalog_revision;
+                }
+                continue;
+            }
+        };
         match message {
             Message::Text(text) => {
                 let request = serde_json::from_str::<ControlRequest>(&text);
@@ -1137,6 +1186,9 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
                 let sends_snapshot = request
                     .as_ref()
                     .is_ok_and(|request| matches!(request, ControlRequest::Dispatch { .. }));
+                let is_snapshot_request = request
+                    .as_ref()
+                    .is_ok_and(|request| matches!(request, ControlRequest::Snapshot));
                 let response = request
                     .map(|request| response_for(request, &state))
                     .unwrap_or_else(
@@ -1149,6 +1201,11 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
                 {
                     break;
                 }
+                if is_snapshot_request
+                    && response.get("status").and_then(Value::as_str) == Some("snapshot")
+                {
+                    published_revision = state.session.read().expect("session lock").revision;
+                }
                 if sends_snapshot
                     && response.get("status").and_then(Value::as_str) == Some("command_applied")
                     && sender
@@ -1157,6 +1214,11 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
                         .is_err()
                 {
                     break;
+                }
+                if sends_snapshot
+                    && response.get("status").and_then(Value::as_str) == Some("command_applied")
+                {
+                    published_revision = state.session.read().expect("session lock").revision;
                 }
             }
             Message::Ping(bytes) => {
@@ -1275,9 +1337,10 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
                 surfaces.push(PublicWebSurface {
                     kind: surface.kind,
                     entry_url: format!(
-                        "/plugin-assets/{}/{}",
+                        "/plugin-assets/{}/{}?v={}",
                         manifest.id,
-                        surface.entry.replace('\\', "/")
+                        surface.entry.replace('\\', "/"),
+                        manifest.version,
                     ),
                 });
             }
@@ -1299,9 +1362,17 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
                     .branding
                     .as_ref()
                     .map(|branding| PublicPluginBranding {
-                        icon_url: plugin_asset_url(&manifest.id, &branding.icon),
-                        banner_url: plugin_asset_url(&manifest.id, &branding.banner),
-                        splash_url: plugin_asset_url(&manifest.id, &branding.splash),
+                        icon_url: plugin_asset_url(&manifest.id, &branding.icon, &manifest.version),
+                        banner_url: plugin_asset_url(
+                            &manifest.id,
+                            &branding.banner,
+                            &manifest.version,
+                        ),
+                        splash_url: plugin_asset_url(
+                            &manifest.id,
+                            &branding.splash,
+                            &manifest.version,
+                        ),
                         background_color: branding.background_color.clone(),
                         accent_color: branding.accent_color.clone(),
                     }),
@@ -1322,8 +1393,11 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
         .collect())
 }
 
-fn plugin_asset_url(plugin_id: &str, asset: &str) -> String {
-    format!("/plugin-assets/{plugin_id}/{}", asset.replace('\\', "/"))
+fn plugin_asset_url(plugin_id: &str, asset: &str, version: &str) -> String {
+    format!(
+        "/plugin-assets/{plugin_id}/{}?v={version}",
+        asset.replace('\\', "/")
+    )
 }
 
 fn internal_error(error: impl std::fmt::Display) -> Response {
@@ -1415,6 +1489,7 @@ mod tests {
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
+            plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
             legacy_plugins_root: PathBuf::new(),
             plugin_store_root: None,
             data_root: PathBuf::new(),
@@ -1472,6 +1547,7 @@ mod tests {
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
+            plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
             legacy_plugins_root: PathBuf::new(),
             plugin_store_root: None,
             data_root: PathBuf::new(),
@@ -1529,6 +1605,7 @@ mod tests {
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
+            plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
             legacy_plugins_root: PathBuf::new(),
             plugin_store_root: None,
             data_root: PathBuf::new(),

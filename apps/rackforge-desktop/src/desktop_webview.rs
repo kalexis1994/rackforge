@@ -18,6 +18,7 @@ impl DesktopWebView {
             .with_html(
                 "<!doctype html><html><body style=\"margin:0;background:#e9e7e1\"></body></html>",
             )
+            .with_initialization_script("window.__RACKFORGE_HOST_SHELL__ = 'desktop';")
             .with_visible(false)
             .with_bounds(Rect {
                 position: LogicalPosition::new(0, 0).into(),

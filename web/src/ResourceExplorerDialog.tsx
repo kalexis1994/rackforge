@@ -8,7 +8,7 @@ import {
 import { FileUp } from "lucide-react";
 import "@svar-ui/react-filemanager/all.css";
 
-import { hostJson, isNativeHost } from "./host";
+import { hostJson, isRemoteWebClient } from "./host";
 import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
 import type {
   PluginResourceRequirement,
@@ -205,7 +205,7 @@ export function ResourceExplorerDialog(props: ResourceExplorerDialogProps) {
   };
 
   const clientUploadAvailable =
-    props.mode !== "select" && target.kind === "file" && !isNativeHost();
+    props.mode !== "select" && target.kind === "file" && isRemoteWebClient();
 
   return (
     <div className="resource-explorer-backdrop" role="presentation">

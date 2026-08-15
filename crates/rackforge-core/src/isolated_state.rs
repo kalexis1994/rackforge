@@ -50,7 +50,7 @@ impl<'a> IsolatedPluginStateEditor<'a> {
     }
 
     pub fn set_parameter(&mut self, parameter_index: u32, value: f64) -> Result<f64> {
-        let parameter = writable_parameter(self.plugin.parameters(), parameter_index, value)?;
+        let parameter = validate_parameter_write(self.plugin.parameters(), parameter_index, value)?;
         self.instance
             .set_parameter(parameter_index, value)
             .with_context(|| format!("setting plugin parameter {}", parameter.id))?;
@@ -64,6 +64,48 @@ impl<'a> IsolatedPluginStateEditor<'a> {
             .save_state()
             .context("saving isolated plugin state")
     }
+}
+
+/// Reads the complete public parameter surface from an active plugin instance.
+///
+/// Hosts use this for live instances while [`IsolatedPluginStateEditor`] uses
+/// the same representation for immutable Rack Slot state.
+pub fn plugin_parameters(
+    plugin: &LoadedPlugin,
+    instance: &mut PluginInstance<'_>,
+) -> Result<(ParameterSchema, Vec<PluginParameterValue>)> {
+    let schema = plugin.parameters().clone();
+    let values = schema
+        .parameters
+        .iter()
+        .map(|parameter| {
+            instance
+                .get_parameter(parameter.index)
+                .with_context(|| format!("reading plugin parameter {}", parameter.id))
+                .map(|value| PluginParameterValue {
+                    index: parameter.index,
+                    value,
+                })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((schema, values))
+}
+
+/// Applies one validated write to an active plugin instance and returns the
+/// canonical value reported by the plugin afterwards.
+pub fn set_plugin_parameter(
+    plugin: &LoadedPlugin,
+    instance: &mut PluginInstance<'_>,
+    parameter_index: u32,
+    value: f64,
+) -> Result<f64> {
+    let parameter = validate_parameter_write(plugin.parameters(), parameter_index, value)?;
+    instance
+        .set_parameter(parameter_index, value)
+        .with_context(|| format!("setting plugin parameter {}", parameter.id))?;
+    instance
+        .get_parameter(parameter_index)
+        .with_context(|| format!("reading canonical plugin parameter {}", parameter.id))
 }
 
 pub fn validate_state_reference(
@@ -137,7 +179,7 @@ pub fn parameter_value_is_valid(kind: &ParameterKind, value: f64) -> bool {
     }
 }
 
-fn writable_parameter(
+pub fn validate_parameter_write(
     schema: &ParameterSchema,
     parameter_index: u32,
     value: f64,
@@ -245,12 +287,29 @@ mod tests {
             },
             false,
         ));
-        assert!(writable_parameter(&float, 9, 0.75).is_ok());
-        assert!(writable_parameter(&float, 9, 1.25).is_err());
+        assert!(validate_parameter_write(&float, 9, 0.75).is_ok());
+        assert!(validate_parameter_write(&float, 9, 1.25).is_err());
+        assert!(validate_parameter_write(&float, 9, f64::NAN).is_err());
+        assert!(validate_parameter_write(&float, 9, f64::INFINITY).is_err());
+        assert!(validate_parameter_write(&float, 10, 0.0).is_err());
 
         let boolean = schema(parameter(ParameterKind::Boolean { default: false }, false));
-        assert!(writable_parameter(&boolean, 9, 1.0).is_ok());
-        assert!(writable_parameter(&boolean, 9, 0.5).is_err());
+        assert!(validate_parameter_write(&boolean, 9, 1.0).is_ok());
+        assert!(validate_parameter_write(&boolean, 9, 0.5).is_err());
+
+        let integer = schema(parameter(
+            ParameterKind::Integer {
+                minimum: 2,
+                maximum: 10,
+                default: 2,
+                step: 2,
+                unit: None,
+            },
+            false,
+        ));
+        assert!(validate_parameter_write(&integer, 9, 8.0).is_ok());
+        assert!(validate_parameter_write(&integer, 9, 7.0).is_err());
+        assert!(validate_parameter_write(&integer, 9, 8.5).is_err());
 
         let enumeration = schema(parameter(
             ParameterKind::Enum {
@@ -268,11 +327,16 @@ mod tests {
             },
             false,
         ));
-        assert!(writable_parameter(&enumeration, 9, 8.0).is_ok());
-        assert!(writable_parameter(&enumeration, 9, 4.0).is_err());
+        assert!(validate_parameter_write(&enumeration, 9, 8.0).is_ok());
+        assert!(validate_parameter_write(&enumeration, 9, 4.0).is_err());
+
+        let trigger = schema(parameter(ParameterKind::Trigger, false));
+        assert!(validate_parameter_write(&trigger, 9, 1.0).is_ok());
+        assert!(validate_parameter_write(&trigger, 9, 0.0).is_ok());
+        assert!(validate_parameter_write(&trigger, 9, 2.0).is_err());
 
         let read_only = schema(parameter(ParameterKind::Boolean { default: false }, true));
-        assert!(writable_parameter(&read_only, 9, 1.0).is_err());
+        assert!(validate_parameter_write(&read_only, 9, 1.0).is_err());
     }
 
     fn stateful_plugin_fixture() -> (PathBuf, LoadedPlugin) {
@@ -354,6 +418,34 @@ preset_catalog = "metadata/presets.json"
             .unwrap();
         instance.set_parameter(0, value).unwrap();
         instance.save_state().unwrap()
+    }
+
+    #[test]
+    fn live_parameter_helpers_read_schema_and_return_the_canonical_write() {
+        let (root, plugin) = stateful_plugin_fixture();
+        let mut instance = plugin
+            .create_instance_with_resource_overrides(&BTreeMap::new())
+            .unwrap();
+        instance.set_parameter(0, 0.25).unwrap();
+
+        let (schema, values) = plugin_parameters(&plugin, &mut instance).unwrap();
+        assert_eq!(schema.parameters.len(), 4);
+        assert_eq!(
+            values[0],
+            PluginParameterValue {
+                index: 0,
+                value: 0.25
+            }
+        );
+        assert_eq!(
+            set_plugin_parameter(&plugin, &mut instance, 0, 0.75).unwrap(),
+            0.75
+        );
+        assert_eq!(instance.get_parameter(0).unwrap(), 0.75);
+
+        drop(instance);
+        drop(plugin);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

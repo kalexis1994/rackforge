@@ -19,6 +19,8 @@ import type {
   PerformanceSnapshot,
   PerformanceSnapshotMessage,
   PluginParameterSnapshot,
+  PluginStateParameterResult,
+  PluginStateParameterSnapshot,
   PluginStateReference,
   SessionCommand,
 } from "./types";
@@ -70,7 +72,17 @@ const pendingCommands = new Map<number, {
   resolve: (message: CoreCommandAppliedMessage) => void;
   reject: (error: Error) => void;
   timeout: number;
+  applied?: CoreCommandAppliedMessage;
 }>();
+
+function resolvePendingCommandsThrough(revision: number) {
+  for (const [id, pending] of pendingCommands) {
+    if (!pending.applied || pending.applied.revision > revision) continue;
+    pendingCommands.delete(id);
+    window.clearTimeout(pending.timeout);
+    pending.resolve(pending.applied);
+  }
+}
 
 function rejectPendingCommands(error: Error) {
   for (const pending of pendingCommands.values()) {
@@ -153,14 +165,20 @@ export function connectGateway() {
         ) {
           const pending = pendingCommands.get(message.command_id);
           if (pending) {
-            pendingCommands.delete(message.command_id);
-            window.clearTimeout(pending.timeout);
-            pending.resolve(message as unknown as CoreCommandAppliedMessage);
+            pending.applied = message as unknown as CoreCommandAppliedMessage;
+            const snapshotRevision = store.getState().rackforge.snapshot?.revision;
+            if (
+              typeof snapshotRevision === "number" &&
+              snapshotRevision >= pending.applied.revision
+            ) {
+              resolvePendingCommandsThrough(snapshotRevision);
+            }
           }
         } else if (message.status === "snapshot" && "snapshot" in message) {
           coreReady = true;
           const snapshotMessage = message as unknown as CoreSnapshotMessage;
           store.dispatch(snapshotReceived(snapshotMessage.snapshot));
+          resolvePendingCommandsThrough(snapshotMessage.snapshot.revision);
           sendPerformanceSnapshotRequest();
         } else if (message.status === "host_idle") {
           coreReady = false;
@@ -365,6 +383,33 @@ export function setPluginParameter(
     },
     "plugin_parameter_set",
     (message) => Number(message.value),
+  );
+}
+
+export function requestPluginStateParameters(
+  state: PluginStateReference,
+): Promise<PluginStateParameterSnapshot> {
+  return requestPresetOperation(
+    { op: "plugin_state_parameters", state },
+    "plugin_state_parameters",
+    (message) => message as unknown as PluginStateParameterSnapshot,
+  );
+}
+
+export function setPluginStateParameter(
+  state: PluginStateReference,
+  parameterIndex: number,
+  value: number,
+): Promise<PluginStateParameterResult> {
+  return requestPresetOperation(
+    {
+      op: "set_plugin_state_parameter",
+      state,
+      parameter_index: parameterIndex,
+      value,
+    },
+    "plugin_state_parameter_set",
+    (message) => message as unknown as PluginStateParameterResult,
   );
 }
 

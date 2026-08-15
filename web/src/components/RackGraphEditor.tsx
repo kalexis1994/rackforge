@@ -44,6 +44,7 @@ import { RackSlotPopover } from "./RackSlotPopover";
 import { RackMidiLinkEditor } from "./RackMidiLinkEditor";
 import type {
   PluginInstance,
+  PluginStateReference,
   RackDefinition,
   RackGraphEdge,
   RackGraphLabel,
@@ -374,6 +375,8 @@ interface RackGraphEditorProps {
   instances: PluginInstance[];
   renderPluginSurface: (options: {
     instance: PluginInstance;
+    state?: PluginStateReference;
+    onStateChange: (state: PluginStateReference) => void;
     onSelectSound: (soundId: string) => Promise<unknown>;
   }) => ReactNode;
   onOverlayChange?: (open: boolean) => void;

@@ -9,7 +9,13 @@ import {
 } from "react";
 import { materializePluginState, requestPluginPreset, requestPluginPresets } from "../gateway";
 import { AsyncActionLabel, AsyncSpinner } from "./AsyncSpinner";
-import type { HostPresetSummary, PluginInstance, RackGraphPosition, RackSlot } from "../types";
+import type {
+  HostPresetSummary,
+  PluginInstance,
+  PluginStateReference,
+  RackGraphPosition,
+  RackSlot,
+} from "../types";
 
 type PopoverMode = "attached" | "floating";
 
@@ -22,6 +28,8 @@ interface RackSlotPopoverProps {
   onClose: () => void;
   renderSurface: (options: {
     instance: PluginInstance;
+    state?: PluginStateReference;
+    onStateChange: (state: PluginStateReference) => void;
     onSelectSound: (soundId: string) => Promise<unknown>;
   }) => ReactNode;
 }
@@ -90,7 +98,7 @@ export function RackSlotPopover({
     try {
       const state = await materializePluginState(slot.plugin_id, soundId);
       onChange({ ...slot, state, legacy_program_id: undefined });
-      return { sound_id: soundId, isolated: true };
+      return { sound_id: soundId, isolated: true, state };
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "Could not materialize this sound.";
       setError(message);
@@ -98,6 +106,10 @@ export function RackSlotPopover({
     } finally {
       setBusy(false);
     }
+  }, [onChange, slot]);
+
+  const updateState = useCallback((state: PluginStateReference) => {
+    onChange({ ...slot, state, legacy_program_id: undefined });
   }, [onChange, slot]);
 
   const loadPreset = useCallback(async () => {
@@ -258,7 +270,12 @@ export function RackSlotPopover({
       </header>
       {error ? <div className="rack-slot-popover-error">{error}</div> : null}
       <div className="rack-slot-popover-surface">
-        {renderSurface({ instance: editorInstance, onSelectSound: selectSound })}
+        {renderSurface({
+          instance: editorInstance,
+          state: slot.state,
+          onStateChange: updateState,
+          onSelectSound: selectSound,
+        })}
         {busy ? (
           <div className="rack-slot-popover-busy" role="status" aria-live="polite">
             <AsyncSpinner label="Applying instrument state…" size="medium" />

@@ -3,11 +3,15 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, FromSample, Sample, SampleFormat, SizedSample, SupportedBufferSize};
 use keylab_essential_mk3::{controller as keylab_controller, protocol as keylab_protocol};
 use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
+use rackforge_control_api::PluginParameterValue;
 use rackforge_core::{
     LoadedPlugin, PluginInstance,
+    isolated_state::parameter_value_is_valid,
     midi_hotplug::{PanicScope, panic_packets},
 };
-use rackforge_plugin_api::{PreparedProgram, PresetCatalog, abi::MidiEventV1};
+use rackforge_plugin_api::{
+    ParameterKind, ParameterSchema, PreparedProgram, PresetCatalog, abi::MidiEventV1,
+};
 use rackforge_session_api::{HostControlTarget, MasterLevel, MasterPan};
 use rackforge_surface_runtime::{Input as SurfaceInput, Screen};
 use serde::{Deserialize, Serialize};
@@ -345,6 +349,14 @@ impl AudioPreferences {
     }
 }
 
+pub(crate) fn fallback_preserving_midi(
+    mut defaults: AudioPreferences,
+    saved: &AudioPreferences,
+) -> AudioPreferences {
+    defaults.midi_inputs.clone_from(&saved.midi_inputs);
+    defaults
+}
+
 pub struct DesktopAudio {
     _stream: cpal::Stream,
     _midi_supervisor: MidiSupervisor,
@@ -602,6 +614,34 @@ impl DesktopAudio {
         receive_control_response(receiver, "restore program")
     }
 
+    pub fn plugin_parameters(
+        &self,
+        instance_id: &str,
+    ) -> Result<(ParameterSchema, Vec<PluginParameterValue>)> {
+        let (reply, receiver) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::PluginParameters {
+            instance_id: instance_id.into(),
+            reply,
+        })?;
+        receive_control_response(receiver, "read plugin parameters")
+    }
+
+    pub fn set_plugin_parameter(
+        &self,
+        instance_id: &str,
+        parameter_index: u32,
+        value: f64,
+    ) -> Result<f64> {
+        let (reply, receiver) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::SetPluginParameter {
+            instance_id: instance_id.into(),
+            parameter_index,
+            value,
+            reply,
+        })?;
+        receive_control_response(receiver, "set plugin parameter")
+    }
+
     pub fn replace_voice(&self, spec: VoiceSpec) -> Result<()> {
         let voice = prepare_audio_voice(spec, self.sample_rate)?;
         self.send_command(AudioCommand::ReplaceVoice(voice))
@@ -702,6 +742,16 @@ enum AudioCommand {
         sound_id: Option<String>,
         reply: SyncSender<Result<(), String>>,
     },
+    PluginParameters {
+        instance_id: String,
+        reply: SyncSender<Result<(ParameterSchema, Vec<PluginParameterValue>), String>>,
+    },
+    SetPluginParameter {
+        instance_id: String,
+        parameter_index: u32,
+        value: f64,
+        reply: SyncSender<Result<f64, String>>,
+    },
     InjectMidi(MidiPacket),
     InjectMidiBatch(Vec<MidiPacket>),
     SetMasterLevel(MasterLevel),
@@ -744,6 +794,7 @@ struct MidiPacket {
 
 struct AudioVoice {
     instance_id: String,
+    parameters: ParameterSchema,
     instance: SendablePluginInstance,
 }
 
@@ -1031,6 +1082,80 @@ impl AudioProcessor {
                     })();
                     let _ = reply.try_send(result);
                 }
+                AudioCommand::PluginParameters { instance_id, reply } => {
+                    let result = self
+                        .voices
+                        .iter_mut()
+                        .find(|voice| voice.instance_id == instance_id)
+                        .ok_or_else(|| format!("unknown audio plugin instance {instance_id}"))
+                        .and_then(|voice| {
+                            let schema = voice.parameters.clone();
+                            let values = schema
+                                .parameters
+                                .iter()
+                                .map(|parameter| {
+                                    voice
+                                        .instance
+                                        .0
+                                        .get_parameter(parameter.index)
+                                        .map(|value| PluginParameterValue {
+                                            index: parameter.index,
+                                            value,
+                                        })
+                                        .map_err(|error| error.to_string())
+                                })
+                                .collect::<Result<Vec<_>, _>>()?;
+                            Ok((schema, values))
+                        });
+                    let _ = reply.try_send(result);
+                }
+                AudioCommand::SetPluginParameter {
+                    instance_id,
+                    parameter_index,
+                    value,
+                    reply,
+                } => {
+                    let result = self
+                        .voices
+                        .iter_mut()
+                        .find(|voice| voice.instance_id == instance_id)
+                        .ok_or_else(|| format!("unknown audio plugin instance {instance_id}"))
+                        .and_then(|voice| {
+                            let parameter = voice
+                                .parameters
+                                .parameters
+                                .iter()
+                                .find(|parameter| parameter.index == parameter_index)
+                                .ok_or_else(|| {
+                                    format!("unknown plugin parameter {parameter_index}")
+                                })?;
+                            if parameter.flags.read_only
+                                || matches!(parameter.kind, ParameterKind::Meter { .. })
+                            {
+                                return Err(format!(
+                                    "plugin parameter {} is read-only",
+                                    parameter.id
+                                ));
+                            }
+                            if !parameter_value_is_valid(&parameter.kind, value) {
+                                return Err(format!(
+                                    "invalid value {value} for plugin parameter {}",
+                                    parameter.id
+                                ));
+                            }
+                            voice
+                                .instance
+                                .0
+                                .set_parameter(parameter_index, value)
+                                .map_err(|error| error.to_string())?;
+                            voice
+                                .instance
+                                .0
+                                .get_parameter(parameter_index)
+                                .map_err(|error| error.to_string())
+                        });
+                    let _ = reply.try_send(result);
+                }
                 AudioCommand::InjectMidi(packet) => push_midi_event(&mut self.events, packet),
                 AudioCommand::InjectMidiBatch(packets) => {
                     for packet in packets {
@@ -1080,6 +1205,7 @@ impl AudioProcessor {
 }
 
 fn prepare_audio_voice(spec: VoiceSpec, sample_rate: u32) -> Result<AudioVoice> {
+    let parameters = spec.plugin.parameters().clone();
     let mut instance = spec
         .plugin
         .create_instance_with_resource_overrides(&spec.resources)
@@ -1099,6 +1225,7 @@ fn prepare_audio_voice(spec: VoiceSpec, sample_rate: u32) -> Result<AudioVoice> 
         .with_context(|| format!("activating audio instance {}", spec.instance_id))?;
     Ok(AudioVoice {
         instance_id: spec.instance_id,
+        parameters,
         instance: SendablePluginInstance(instance),
     })
 }
@@ -1269,8 +1396,7 @@ impl MidiSupervisor {
                     &controller_sender,
                 ) {
                     Ok(names) => {
-                        if reconcile_keylab_display(&selected, &mut display, latest_screen.as_ref())
-                        {
+                        if reconcile_keylab_display(&mut display, latest_screen.as_ref()) {
                             reconnect_keylab_inputs(
                                 &selected,
                                 &mut connections,
@@ -1318,8 +1444,7 @@ impl MidiSupervisor {
                         ) {
                             eprintln!("DESKTOP_MIDI_SCAN_FAILED error={error:#}");
                         }
-                        if reconcile_keylab_display(&selected, &mut display, latest_screen.as_ref())
-                        {
+                        if reconcile_keylab_display(&mut display, latest_screen.as_ref()) {
                             reconnect_keylab_inputs(
                                 &selected,
                                 &mut connections,
@@ -1373,6 +1498,7 @@ fn reconcile_midi_inputs(
     controller_sender: &SyncSender<DesktopControllerEvent>,
 ) -> Result<Vec<String>> {
     let present = discover_midi_inputs()?.into_iter().collect::<BTreeSet<_>>();
+    let desired = desired_midi_inputs(selected, &present);
     let lost = connections
         .keys()
         .filter(|name| !present.contains(*name))
@@ -1386,7 +1512,7 @@ fn reconcile_midi_inputs(
         }
         release_held_notes(sender, telemetry);
     }
-    for name in selected {
+    for name in &desired {
         if !present.contains(name) || connections.contains_key(name) {
             continue;
         }
@@ -1409,6 +1535,20 @@ fn reconcile_midi_inputs(
         }
     }
     Ok(connections.keys().cloned().collect())
+}
+
+fn desired_midi_inputs(
+    selected: &BTreeSet<String>,
+    present: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let mut desired = selected.clone();
+    desired.extend(
+        present
+            .iter()
+            .filter(|name| keylab_controller::little_driver(name).is_some())
+            .cloned(),
+    );
+    desired
 }
 
 fn connect_midi_input(
@@ -1547,7 +1687,6 @@ impl KeyLabDisplay {
 }
 
 fn reconcile_keylab_display(
-    selected: &BTreeSet<String>,
     display: &mut Option<KeyLabDisplay>,
     latest_screen: Option<&Screen>,
 ) -> bool {
@@ -1561,9 +1700,10 @@ fn reconcile_keylab_display(
             return false;
         }
     };
-    let Some(name) = selected.iter().find(|name| {
-        keylab_controller::little_driver(name).is_some() && outputs.contains(name.as_str())
-    }) else {
+    let Some(name) = outputs
+        .iter()
+        .find(|name| keylab_controller::little_driver(name).is_some())
+    else {
         return false;
     };
     match KeyLabDisplay::open(name) {
@@ -1758,6 +1898,52 @@ midi_inputs = []
 "#;
         let preferences: AudioPreferences = toml::from_str(text).unwrap();
         assert_eq!(preferences.output_gain_db, DEFAULT_OUTPUT_GAIN_DB);
+    }
+
+    #[test]
+    fn audio_fallback_keeps_saved_midi_devices_for_hotplug() {
+        let defaults = AudioPreferences {
+            schema_version: AUDIO_SCHEMA_VERSION,
+            driver: "WASAPI".into(),
+            output_device: "System speakers".into(),
+            sample_rate_hz: 48_000,
+            buffer_frames: None,
+            output_gain_db: DEFAULT_OUTPUT_GAIN_DB,
+            midi_inputs: Vec::new(),
+        };
+        let saved = AudioPreferences {
+            schema_version: AUDIO_SCHEMA_VERSION,
+            driver: "ASIO".into(),
+            output_device: "Disconnected interface".into(),
+            sample_rate_hz: 44_100,
+            buffer_frames: Some(128),
+            output_gain_db: DEFAULT_OUTPUT_GAIN_DB,
+            midi_inputs: vec!["KL Essential 61 mk3 MIDI".into()],
+        };
+
+        let fallback = fallback_preserving_midi(defaults, &saved);
+
+        assert_eq!(fallback.driver, "WASAPI");
+        assert_eq!(fallback.output_device, "System speakers");
+        assert_eq!(fallback.midi_inputs, saved.midi_inputs);
+    }
+
+    #[test]
+    fn certified_keylab_surface_is_auto_connected_without_a_saved_selection() {
+        let selected = BTreeSet::from(["Other keyboard".to_owned()]);
+        let present = BTreeSet::from([
+            "Other keyboard".to_owned(),
+            "KL Essential 61 mk3 MIDI".to_owned(),
+            "KL Essential 61 mk3 MCU/HUI".to_owned(),
+        ]);
+
+        assert_eq!(
+            desired_midi_inputs(&selected, &present),
+            BTreeSet::from([
+                "Other keyboard".to_owned(),
+                "KL Essential 61 mk3 MIDI".to_owned(),
+            ])
+        );
     }
 
     #[test]

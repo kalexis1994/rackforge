@@ -1182,7 +1182,11 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         | ControlRequest::EditPerformance { .. }
         | ControlRequest::PluginPresets { .. }
         | ControlRequest::PluginPreset { .. }
-        | ControlRequest::MaterializePluginState { .. }) => {
+        | ControlRequest::MaterializePluginState { .. }
+        | ControlRequest::PluginParameters { .. }
+        | ControlRequest::SetPluginParameter { .. }
+        | ControlRequest::PluginStateParameters { .. }
+        | ControlRequest::SetPluginStateParameter { .. }) => {
             let (response_sender, response_receiver) = mpsc::channel();
             if state
                 .control
@@ -1361,6 +1365,7 @@ async fn static_asset(uri: axum::http::Uri) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackforge_control_api::ControlErrorCode;
     use rackforge_session_api::{
         ClientId, CommandEnvelope, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, InstanceId,
         Revision, SessionCommand, SessionId,
@@ -1515,5 +1520,62 @@ mod tests {
             response.get("status").and_then(Value::as_str),
             Some("command_applied")
         );
+    }
+
+    #[test]
+    fn dispatches_live_plugin_parameter_requests_to_the_desktop_runtime() {
+        let (control, receiver) = control_channel();
+        let state = WebState {
+            session: Arc::new(RwLock::new(SessionState::new(
+                SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
+            ))),
+            legacy_plugins_root: PathBuf::new(),
+            plugin_store_root: None,
+            data_root: PathBuf::new(),
+            public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
+            control,
+            resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
+            resource_upload_root: PathBuf::new(),
+        };
+        let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
+        let responder = std::thread::spawn(move || {
+            for expected_write in [false, true] {
+                let DesktopControlCall::Performance { request, response } =
+                    receiver.recv().unwrap()
+                else {
+                    panic!("unexpected Desktop control call");
+                };
+                assert_eq!(
+                    matches!(request, ControlRequest::SetPluginParameter { .. }),
+                    expected_write
+                );
+                response
+                    .send(ControlResponse::Error {
+                        code: ControlErrorCode::Rejected,
+                        message: "routed to Desktop performance control".into(),
+                        current_revision: None,
+                    })
+                    .unwrap();
+            }
+        });
+
+        for request in [
+            ControlRequest::PluginParameters {
+                instance_id: instance_id.clone(),
+            },
+            ControlRequest::SetPluginParameter {
+                instance_id,
+                parameter_index: 7,
+                value: 0.5,
+            },
+        ] {
+            let response = response_for(request, &state);
+            assert_eq!(
+                response.get("message").and_then(Value::as_str),
+                Some("routed to Desktop performance control")
+            );
+        }
+
+        responder.join().unwrap();
     }
 }

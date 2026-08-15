@@ -3,6 +3,7 @@ use crate::control::{
     self, AudioControlCommand, MAX_EVENTS_PER_BLOCK, RackMidiStageRuntimeSpec, RackSlotRuntimeSpec,
     RackSlotStateLoad,
 };
+use crate::isolated_state::parameter_value_is_valid;
 use crate::live_midi_state::{
     MidiControllerState, MidiControllerStates, ReservedMidiControls, matches_midi_input_channel,
     plugin_midi_event,
@@ -2179,39 +2180,6 @@ fn restart_render_target(
             }
             Ok(())
         }
-    }
-}
-
-fn parameter_value_is_valid(kind: &ParameterKind, value: f64) -> bool {
-    if !value.is_finite() {
-        return false;
-    }
-    match kind {
-        ParameterKind::Float {
-            minimum, maximum, ..
-        }
-        | ParameterKind::Meter {
-            minimum, maximum, ..
-        } => (*minimum..=*maximum).contains(&value),
-        ParameterKind::Integer {
-            minimum,
-            maximum,
-            step,
-            ..
-        } => {
-            value.fract() == 0.0
-                && value >= *minimum as f64
-                && value <= *maximum as f64
-                && ((value as i64 - *minimum) % *step == 0)
-        }
-        ParameterKind::Boolean { .. } => value == 0.0 || value == 1.0,
-        ParameterKind::Enum { choices, .. } => {
-            value.fract() == 0.0
-                && choices
-                    .iter()
-                    .any(|choice| f64::from(choice.value) == value)
-        }
-        ParameterKind::Trigger => value == 0.0 || value == 1.0,
     }
 }
 

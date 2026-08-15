@@ -13,7 +13,7 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 12;
+pub const CONTROL_SCHEMA_VERSION: u32 = 13;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 
@@ -64,6 +64,16 @@ pub enum ControlRequest {
     },
     SetPluginParameter {
         instance_id: InstanceId,
+        parameter_index: u32,
+        value: f64,
+    },
+    /// Reads parameters from one immutable plugin state without touching PLAY.
+    PluginStateParameters {
+        state: PluginStateReference,
+    },
+    /// Produces a new immutable state after changing one isolated parameter.
+    SetPluginStateParameter {
+        state: PluginStateReference,
         parameter_index: u32,
         value: f64,
     },
@@ -157,6 +167,16 @@ pub enum ControlResponse {
     },
     PluginParameterSet {
         instance_id: InstanceId,
+        parameter_index: u32,
+        value: f64,
+    },
+    PluginStateParameters {
+        state: Box<PluginStateReference>,
+        schema: Box<ParameterSchema>,
+        values: Vec<PluginParameterValue>,
+    },
+    PluginStateParameterSet {
+        state: Box<PluginStateReference>,
         parameter_index: u32,
         value: f64,
     },
@@ -476,25 +496,42 @@ mod tests {
 
     #[test]
     fn isolated_plugin_state_requests_round_trip() {
-        let request = ControlRequest::MaterializePluginState {
+        let materialize = ControlRequest::MaterializePluginState {
             plugin_id: "org.rackforge.rf-m1".into(),
             sound_id: Some("m1.piano.01".into()),
         };
         assert_eq!(
-            decode_request(&encode_line(&request).unwrap()).unwrap(),
-            request
+            decode_request(&encode_line(&materialize).unwrap()).unwrap(),
+            materialize
         );
 
-        let response = ControlResponse::PluginStateMaterialized {
-            state: Box::new(PluginStateReference {
-                schema_version: 1,
-                plugin_id: "org.rackforge.rf-m1".into(),
-                plugin_version: "0.1.3".into(),
-                state_version: 2,
-                blob_sha256: "a".repeat(64),
-                byte_length: 42,
-                selected_sound_id: Some("m1.piano.01".into()),
-            }),
+        let state = PluginStateReference {
+            schema_version: 1,
+            plugin_id: "org.rackforge.rf-m1".into(),
+            plugin_version: "0.1.3".into(),
+            state_version: 2,
+            blob_sha256: "a".repeat(64),
+            byte_length: 42,
+            selected_sound_id: Some("m1.piano.01".into()),
+        };
+        let read = ControlRequest::PluginStateParameters {
+            state: state.clone(),
+        };
+        assert_eq!(decode_request(&encode_line(&read).unwrap()).unwrap(), read);
+        let write = ControlRequest::SetPluginStateParameter {
+            state: state.clone(),
+            parameter_index: 7,
+            value: 0.75,
+        };
+        assert_eq!(
+            decode_request(&encode_line(&write).unwrap()).unwrap(),
+            write
+        );
+
+        let response = ControlResponse::PluginStateParameterSet {
+            state: Box::new(state),
+            parameter_index: 7,
+            value: 0.75,
         };
         assert_eq!(
             decode_response(&encode_line(&response).unwrap()).unwrap(),

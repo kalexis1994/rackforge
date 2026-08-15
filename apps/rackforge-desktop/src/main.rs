@@ -22,7 +22,8 @@ use rackforge_control_api::{
 use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{
-    LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore, PluginStorage,
+    IsolatedPluginStateEditor, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
+    PluginStorage, validate_state_reference,
 };
 use rackforge_performance_api::{PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot};
 use rackforge_plugin_api::{
@@ -411,7 +412,10 @@ impl DesktopApp {
                                 warnings.push(format!(
                                     "Saved audio configuration is unavailable ({error:#}); using the system default"
                                 ));
-                                defaults
+                                // Audio outputs may be disconnected independently from MIDI
+                                // controllers. Keep the user's MIDI selection so hot-plug can
+                                // reconnect those devices after the fallback stream starts.
+                                desktop_audio::fallback_preserving_midi(defaults, &saved)
                             }
                         },
                         Ok(None) => defaults,
@@ -2052,6 +2056,20 @@ impl DesktopApp {
                 plugin_id,
                 sound_id,
             } => self.materialize_plugin_state(&plugin_id, sound_id),
+            ControlRequest::PluginParameters { instance_id } => {
+                self.plugin_parameters(&instance_id)
+            }
+            ControlRequest::SetPluginParameter {
+                instance_id,
+                parameter_index,
+                value,
+            } => self.set_plugin_parameter(&instance_id, parameter_index, value),
+            ControlRequest::PluginStateParameters { state } => self.plugin_state_parameters(&state),
+            ControlRequest::SetPluginStateParameter {
+                state,
+                parameter_index,
+                value,
+            } => self.set_plugin_state_parameter(&state, parameter_index, value),
             _ => ControlResponse::Error {
                 code: ControlErrorCode::InvalidRequest,
                 message: "Unsupported Desktop performance request".into(),
@@ -2120,6 +2138,234 @@ impl DesktopApp {
                 current_revision: Some(
                     self.session.read().expect("session lock poisoned").revision,
                 ),
+            },
+        }
+    }
+
+    fn plugin_parameters(&mut self, instance_id: &InstanceId) -> ControlResponse {
+        let state = self.session.read().expect("session lock poisoned");
+        let revision = state.revision;
+        if state.active_instance_id.as_ref() != Some(instance_id) {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Rejected,
+                message: format!("Plugin instance {instance_id} is not the active Desktop plugin"),
+                current_revision: Some(revision),
+            };
+        }
+        drop(state);
+
+        #[cfg(windows)]
+        let result = self
+            .audio
+            .as_ref()
+            .ok_or_else(|| "Desktop audio is unavailable".to_owned())
+            .and_then(|audio| {
+                audio
+                    .plugin_parameters(instance_id.as_str())
+                    .map_err(|error| error.to_string())
+            });
+        #[cfg(not(windows))]
+        let result: std::result::Result<
+            (
+                rackforge_plugin_api::ParameterSchema,
+                Vec<rackforge_control_api::PluginParameterValue>,
+            ),
+            String,
+        > = Err("Desktop audio is unavailable".into());
+
+        match result {
+            Ok((schema, values)) => ControlResponse::PluginParameters {
+                instance_id: instance_id.clone(),
+                schema: Box::new(schema),
+                values,
+            },
+            Err(message) => ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message: format!("Could not read plugin parameters: {message}"),
+                current_revision: Some(revision),
+            },
+        }
+    }
+
+    fn set_plugin_parameter(
+        &mut self,
+        instance_id: &InstanceId,
+        parameter_index: u32,
+        value: f64,
+    ) -> ControlResponse {
+        let state = self.session.read().expect("session lock poisoned");
+        let revision = state.revision;
+        if state.active_instance_id.as_ref() != Some(instance_id) {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Rejected,
+                message: format!("Plugin instance {instance_id} is not the active Desktop plugin"),
+                current_revision: Some(revision),
+            };
+        }
+        drop(state);
+        if !value.is_finite() {
+            return ControlResponse::Error {
+                code: ControlErrorCode::InvalidRequest,
+                message: "Plugin parameter value must be finite".into(),
+                current_revision: Some(revision),
+            };
+        }
+
+        #[cfg(windows)]
+        let result = self
+            .audio
+            .as_ref()
+            .ok_or_else(|| "Desktop audio is unavailable".to_owned())
+            .and_then(|audio| {
+                audio
+                    .set_plugin_parameter(instance_id.as_str(), parameter_index, value)
+                    .map_err(|error| error.to_string())
+            });
+        #[cfg(not(windows))]
+        let result: std::result::Result<f64, String> = Err("Desktop audio is unavailable".into());
+
+        match result {
+            Ok(value) => ControlResponse::PluginParameterSet {
+                instance_id: instance_id.clone(),
+                parameter_index,
+                value,
+            },
+            Err(message) => ControlResponse::Error {
+                code: ControlErrorCode::Rejected,
+                message: format!("Could not set plugin parameter: {message}"),
+                current_revision: Some(revision),
+            },
+        }
+    }
+
+    fn plugin_state_parameters(
+        &mut self,
+        state: &rackforge_plugin_api::PluginStateReference,
+    ) -> ControlResponse {
+        let revision = self.session.read().expect("session lock poisoned").revision;
+        let Some(plugin) = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == state.plugin_id)
+        else {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message: format!("Plugin {} is not active on Desktop", state.plugin_id),
+                current_revision: Some(revision),
+            };
+        };
+        if let Err(error) = validate_state_reference(plugin.runtime, state) {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Rejected,
+                message: format!("Incompatible Rack Slot state: {error:#}"),
+                current_revision: Some(revision),
+            };
+        }
+        let bytes = match self.state_store.read(state) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return ControlResponse::Error {
+                    code: ControlErrorCode::NotFound,
+                    message: format!("Rack Slot state is unavailable: {error:#}"),
+                    current_revision: Some(revision),
+                };
+            }
+        };
+        let result = (|| -> Result<_> {
+            let mut editor =
+                IsolatedPluginStateEditor::open(plugin.runtime, &plugin.resources, &bytes)?;
+            editor.parameters()
+        })();
+        match result {
+            Ok((schema, values)) => ControlResponse::PluginStateParameters {
+                state: Box::new(state.clone()),
+                schema: Box::new(schema),
+                values,
+            },
+            Err(error) => ControlResponse::Error {
+                code: ControlErrorCode::Rejected,
+                message: format!("Could not read Rack Slot parameters: {error:#}"),
+                current_revision: Some(revision),
+            },
+        }
+    }
+
+    fn set_plugin_state_parameter(
+        &mut self,
+        state: &rackforge_plugin_api::PluginStateReference,
+        parameter_index: u32,
+        value: f64,
+    ) -> ControlResponse {
+        let revision = self.session.read().expect("session lock poisoned").revision;
+        if !value.is_finite() {
+            return ControlResponse::Error {
+                code: ControlErrorCode::InvalidRequest,
+                message: "Plugin parameter value must be finite".into(),
+                current_revision: Some(revision),
+            };
+        }
+        let Some(plugin) = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == state.plugin_id)
+        else {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message: format!("Plugin {} is not active on Desktop", state.plugin_id),
+                current_revision: Some(revision),
+            };
+        };
+        if let Err(error) = validate_state_reference(plugin.runtime, state) {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Rejected,
+                message: format!("Incompatible Rack Slot state: {error:#}"),
+                current_revision: Some(revision),
+            };
+        }
+        let bytes = match self.state_store.read(state) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return ControlResponse::Error {
+                    code: ControlErrorCode::NotFound,
+                    message: format!("Rack Slot state is unavailable: {error:#}"),
+                    current_revision: Some(revision),
+                };
+            }
+        };
+        let edited = (|| -> Result<_> {
+            let mut editor =
+                IsolatedPluginStateEditor::open(plugin.runtime, &plugin.resources, &bytes)?;
+            let canonical = editor.set_parameter(parameter_index, value)?;
+            let bytes = editor.save_state()?;
+            Ok((canonical, bytes))
+        })();
+        let (canonical, bytes) = match edited {
+            Ok(edited) => edited,
+            Err(error) => {
+                return ControlResponse::Error {
+                    code: ControlErrorCode::Rejected,
+                    message: format!("Could not edit Rack Slot parameter: {error:#}"),
+                    current_revision: Some(revision),
+                };
+            }
+        };
+        let manifest = plugin.runtime.manifest();
+        match self.state_store.put(
+            &manifest.id,
+            &manifest.version,
+            manifest.state_version,
+            state.selected_sound_id.clone(),
+            &bytes,
+        ) {
+            Ok(next_state) => ControlResponse::PluginStateParameterSet {
+                state: Box::new(next_state),
+                parameter_index,
+                value: canonical,
+            },
+            Err(error) => ControlResponse::Error {
+                code: ControlErrorCode::Rejected,
+                message: format!("Could not store edited Rack Slot state: {error:#}"),
+                current_revision: Some(revision),
             },
         }
     }

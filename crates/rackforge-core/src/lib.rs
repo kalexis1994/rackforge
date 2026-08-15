@@ -3,6 +3,7 @@ pub mod audio;
 #[cfg(target_os = "linux")]
 pub mod control;
 pub mod hosted;
+pub mod isolated_state;
 #[cfg(target_os = "linux")]
 pub mod live;
 #[cfg(any(target_os = "linux", test))]
@@ -19,6 +20,7 @@ pub mod state_store;
 pub mod storage;
 
 pub use hosted::{LoadedPlugin, PluginInstance};
+pub use isolated_state::{IsolatedPluginStateEditor, validate_state_reference};
 pub use package::{PluginPackage, platform_key};
 pub use state_store::{MAX_PLUGIN_STATE_BYTES, PluginStateStore};
 pub use storage::{PluginDirectory, PluginStorage, RECOMMENDED_PROGRAM_SUFFIX};

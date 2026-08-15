@@ -42,11 +42,14 @@ import {
   dispatchCommand,
   dispatchCommandAwait,
   loadPluginPreset,
+  materializePluginState,
   requestPluginParameters,
+  requestPluginStateParameters,
   requestPluginPresets,
   renamePluginPreset,
   savePluginPreset,
   setPluginParameter,
+  setPluginStateParameter,
   stopGateway,
 } from "./gateway";
 import { RfLoader } from "./components/RfLoader";
@@ -76,6 +79,7 @@ import type {
   PluginWebDescriptor,
   PluginWebSurfaceKind,
   PluginResourceRequirement,
+  PluginStateReference,
   ResourceEntry,
   ResourceGrant,
   ResourceSelection,
@@ -329,15 +333,21 @@ function RackForgeApp() {
   const renderRackSlotPluginSurface = useCallback(
     ({
       instance,
+      state,
+      onStateChange,
       onSelectSound,
     }: {
       instance: PluginInstance;
+      state?: PluginStateReference;
+      onStateChange: (state: PluginStateReference) => void;
       onSelectSound: (soundId: string) => Promise<unknown>;
     }) => (
       <PluginFrame
         instance={instance}
         surface="play"
         isolated
+        isolatedState={state}
+        onIsolatedStateChange={onStateChange}
         onSelectSound={onSelectSound}
       />
     ),
@@ -2893,17 +2903,29 @@ function PluginConfigSurface({ instance }: { instance: PluginInstance }) {
   );
 }
 
+const ISOLATED_PARAMETER_DEBOUNCE_MS = 48;
+
+interface PendingIsolatedParameterWrite {
+  value: number;
+  requestIds: string[];
+  timer: number;
+}
+
 export function PluginFrame({
   instance,
   surface,
   onSurfaceInfoChange,
   isolated = false,
+  isolatedState,
+  onIsolatedStateChange,
   onSelectSound,
 }: {
   instance: PluginInstance;
   surface: PluginWebSurfaceKind;
   onSurfaceInfoChange?: (info: { label: string; value: string } | null) => void;
   isolated?: boolean;
+  isolatedState?: PluginStateReference;
+  onIsolatedStateChange?: (state: PluginStateReference) => void;
   onSelectSound?: (soundId: string) => Promise<unknown>;
 }) {
   const [descriptor, setDescriptor] = useState<PluginWebDescriptor | null>(null);
@@ -2915,6 +2937,25 @@ export function PluginFrame({
   const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const pendingResourceRequestRef = useRef<string | null>(null);
+  const isolatedStateRef = useRef<PluginStateReference | undefined>(isolatedState);
+  const [isolatedContextState, setIsolatedContextState] = useState<
+    PluginStateReference | undefined
+  >(isolatedState);
+  const isolatedStateInputKey = isolatedState
+    ? [
+        isolatedState.plugin_id,
+        isolatedState.plugin_version,
+        isolatedState.state_version,
+        isolatedState.blob_sha256,
+        isolatedState.selected_sound_id ?? "",
+      ].join(":")
+    : "";
+  const [previousIsolatedStateInputKey, setPreviousIsolatedStateInputKey] =
+    useState(isolatedStateInputKey);
+  const onIsolatedStateChangeRef = useRef(onIsolatedStateChange);
+  const isolatedMaterializeRef = useRef<Promise<PluginStateReference> | null>(null);
+  const isolatedWriteChainRef = useRef<Promise<void>>(Promise.resolve());
+  const isolatedWritesRef = useRef<Map<number, PendingIsolatedParameterWrite>>(new Map());
   const [resourceRequest, setResourceRequest] = useState<{
     requestId: string;
     resource: PluginResourceRequirement;
@@ -2943,6 +2984,116 @@ export function PluginFrame({
     },
     [],
   );
+
+  if (previousIsolatedStateInputKey !== isolatedStateInputKey) {
+    setPreviousIsolatedStateInputKey(isolatedStateInputKey);
+    setIsolatedContextState(isolatedState);
+  }
+
+  useEffect(() => {
+    isolatedStateRef.current = isolatedContextState;
+  }, [isolatedContextState]);
+
+  useEffect(() => {
+    onIsolatedStateChangeRef.current = onIsolatedStateChange;
+  }, [onIsolatedStateChange]);
+
+  const publishIsolatedState = useCallback((state: PluginStateReference) => {
+    isolatedStateRef.current = state;
+    // Keep the iframe context authoritative even when the surrounding Rack
+    // draft has not rerendered yet. Program selection depends on this field.
+    setIsolatedContextState(state);
+    onIsolatedStateChangeRef.current?.(state);
+  }, []);
+
+  const ensureIsolatedState = useCallback((): Promise<PluginStateReference> => {
+    if (isolatedStateRef.current) return Promise.resolve(isolatedStateRef.current);
+    if (!isolatedMaterializeRef.current) {
+      const pending = materializePluginState(instance.plugin_id)
+        .then((state) => {
+          publishIsolatedState(state);
+          return state;
+        })
+        .finally(() => {
+          if (isolatedMaterializeRef.current === pending) {
+            isolatedMaterializeRef.current = null;
+          }
+        });
+      isolatedMaterializeRef.current = pending;
+    }
+    return isolatedMaterializeRef.current;
+  }, [instance.plugin_id, publishIsolatedState]);
+
+  const flushIsolatedParameterWrite = useCallback((
+    parameterIndex: number,
+    pending: PendingIsolatedParameterWrite,
+  ) => {
+    isolatedWritesRef.current.delete(parameterIndex);
+    const run = async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const base = await ensureIsolatedState();
+        const result = await setPluginStateParameter(base, parameterIndex, pending.value);
+        const current = isolatedStateRef.current;
+        if (
+          current &&
+          current.blob_sha256 !== base.blob_sha256 &&
+          current.blob_sha256 !== result.state.blob_sha256
+        ) {
+          continue;
+        }
+        publishIsolatedState(result.state);
+        return result.value;
+      }
+      throw new Error("Rack Slot state kept changing while the parameter was edited.");
+    };
+    const operation = isolatedWriteChainRef.current.then(run, run);
+    isolatedWriteChainRef.current = operation.then(() => undefined, () => undefined);
+    operation
+      .then((canonical) => {
+        for (const requestId of pending.requestIds) {
+          sendPluginResponse(requestId, true, undefined, { value: canonical });
+        }
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error
+          ? error.message
+          : "Could not set Rack Slot parameter.";
+        for (const requestId of pending.requestIds) {
+          sendPluginResponse(requestId, false, message);
+        }
+      });
+  }, [ensureIsolatedState, publishIsolatedState, sendPluginResponse]);
+
+  const queueIsolatedParameterWrite = useCallback((
+    requestId: string,
+    parameterIndex: number,
+    value: number,
+  ) => {
+    let pending = isolatedWritesRef.current.get(parameterIndex);
+    if (pending) {
+      window.clearTimeout(pending.timer);
+      pending.value = value;
+      pending.requestIds.push(requestId);
+    } else {
+      pending = { value, requestIds: [requestId], timer: 0 };
+      isolatedWritesRef.current.set(parameterIndex, pending);
+    }
+    const queued = pending;
+    queued.timer = window.setTimeout(
+      () => flushIsolatedParameterWrite(parameterIndex, queued),
+      ISOLATED_PARAMETER_DEBOUNCE_MS,
+    );
+  }, [flushIsolatedParameterWrite]);
+
+  useEffect(() => () => {
+    for (const pending of isolatedWritesRef.current.values()) {
+      window.clearTimeout(pending.timer);
+      for (const requestId of pending.requestIds) {
+        sendPluginResponse(requestId, false, "Rack Slot editor was closed.");
+      }
+    }
+    isolatedWritesRef.current.clear();
+  }, [sendPluginResponse]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2980,11 +3131,17 @@ export function PluginFrame({
 
     const send = (message: unknown) =>
       frame.contentWindow?.postMessage(message, window.location.origin);
+    const contextInstance = isolated && isolatedContextState?.selected_sound_id
+      ? {
+          ...instance,
+          selected_sound_id: isolatedContextState.selected_sound_id,
+        }
+      : instance;
     const context = {
       protocol: "rackforge.plugin.web@1",
       kind: "context",
       surface,
-      instance,
+      instance: contextInstance,
       program_draft:
         snapshot?.program_draft?.instance_id === instance.instance_id
           ? snapshot.program_draft
@@ -3040,7 +3197,17 @@ export function PluginFrame({
         (surface === "play" || surface === "config")
       ) {
         if (isolated) {
-          respond(false, "Rack Slot parameter editing needs an isolated audio edit session.");
+          ensureIsolatedState()
+            .then(requestPluginStateParameters)
+            .then((result) => respond(true, undefined, result))
+            .catch((error: unknown) =>
+              respond(
+                false,
+                error instanceof Error
+                  ? error.message
+                  : "Could not read Rack Slot parameters.",
+              ),
+            );
         } else requestPluginParameters(instance.instance_id)
           .then((result) => respond(true, undefined, result))
           .catch((error: unknown) =>
@@ -3057,7 +3224,11 @@ export function PluginFrame({
         Number.isFinite(params.value)
       ) {
         if (isolated) {
-          respond(false, "Rack Slot parameter editing needs an isolated audio edit session.");
+          queueIsolatedParameterWrite(
+            event.data.request_id,
+            Number(params.parameter_index),
+            params.value,
+          );
         } else setPluginParameter(
           instance.instance_id,
           Number(params.parameter_index),
@@ -3080,7 +3251,19 @@ export function PluginFrame({
       ) {
         if (onSelectSound) {
           onSelectSound(params.sound_id)
-            .then((result) => respond(true, undefined, result))
+            .then((result) => {
+              if (
+                isolated &&
+                result &&
+                typeof result === "object" &&
+                "state" in result
+              ) {
+                publishIsolatedState(
+                  (result as { state: PluginStateReference }).state,
+                );
+              }
+              respond(true, undefined, result);
+            })
             .catch((error: unknown) =>
               respond(
                 false,
@@ -3102,12 +3285,21 @@ export function PluginFrame({
               ),
             );
         } else {
-          dispatchCommand({
+          const soundId = params.sound_id;
+          dispatchCommandAwait({
             type: "select_sound",
             instance_id: instance.instance_id,
-            sound_id: params.sound_id,
-          });
-          respond(true);
+            sound_id: soundId,
+          })
+            .then(() => respond(true, undefined, { sound_id: soundId }))
+            .catch((error: unknown) =>
+              respond(
+                false,
+                error instanceof Error
+                  ? error.message
+                  : "Could not select this program.",
+              ),
+            );
         }
       } else if (
         event.data.method === "plugin.select_resource" &&
@@ -3350,7 +3542,20 @@ export function PluginFrame({
       window.removeEventListener("message", onMessage);
       frame.removeEventListener("load", onLoad);
     };
-  }, [descriptor, instance, isolated, onSelectSound, onSurfaceInfoChange, selectedSurface, snapshot, surface]);
+  }, [
+    descriptor,
+    ensureIsolatedState,
+    instance,
+    isolated,
+    isolatedContextState,
+    onSelectSound,
+    onSurfaceInfoChange,
+    publishIsolatedState,
+    queueIsolatedParameterWrite,
+    selectedSurface,
+    snapshot,
+    surface,
+  ]);
 
   const editLease =
     (surface === "play" || surface === "config") &&

@@ -3,7 +3,10 @@ use crate::performance::PerformanceRepository;
 use crate::rack_graph::{CompiledRackSlot, compile_instrument_definition, compile_instrument_rack};
 use crate::session::SharedSessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
-use crate::{LoadedPlugin, PluginInstance, PluginStateStore};
+use crate::{
+    IsolatedPluginStateEditor, LoadedPlugin, PluginInstance, PluginStateStore,
+    validate_state_reference,
+};
 use anyhow::{Context, Result, bail};
 use rackforge_audio_api::{AudioOutputDocument, AudioOutputProfile, AudioOutputState};
 use rackforge_control_api::{
@@ -482,6 +485,12 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             parameter_index,
             value,
         } => set_plugin_parameter(context, &instance_id, parameter_index, value),
+        ControlRequest::PluginStateParameters { state } => plugin_state_parameters(context, &state),
+        ControlRequest::SetPluginStateParameter {
+            state,
+            parameter_index,
+            value,
+        } => set_plugin_state_parameter(context, &state, parameter_index, value),
         ControlRequest::LoadPluginResource {
             plugin_id,
             instance_id,
@@ -934,6 +943,178 @@ fn set_plugin_parameter(
         },
         Err(failure) => failure.into_response(),
     }
+}
+
+fn plugin_state_parameters(
+    context: &ControlContext,
+    state: &rackforge_plugin_api::PluginStateReference,
+) -> ControlResponse {
+    let (plugin, bytes, resources, revision) = match isolated_plugin_state(context, state) {
+        Ok(parts) => parts,
+        Err(failure) => return failure.into_response(),
+    };
+    let result = (|| -> Result<_> {
+        let mut editor = IsolatedPluginStateEditor::open(plugin, &resources, &bytes)?;
+        editor.parameters()
+    })();
+    match result {
+        Ok((schema, values)) => ControlResponse::PluginStateParameters {
+            state: Box::new(state.clone()),
+            schema: Box::new(schema),
+            values,
+        },
+        Err(error) => error_response(
+            ControlErrorCode::Rejected,
+            format!("reading isolated plugin parameters: {error:#}"),
+            Some(revision),
+        ),
+    }
+}
+
+fn set_plugin_state_parameter(
+    context: &ControlContext,
+    state: &rackforge_plugin_api::PluginStateReference,
+    parameter_index: u32,
+    value: f64,
+) -> ControlResponse {
+    if !value.is_finite() {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            "plugin parameter value must be finite",
+            current_revision(context),
+        );
+    }
+    let (plugin, bytes, resources, revision) = match isolated_plugin_state(context, state) {
+        Ok(parts) => parts,
+        Err(failure) => return failure.into_response(),
+    };
+    let edited = (|| -> Result<_> {
+        let mut editor = IsolatedPluginStateEditor::open(plugin, &resources, &bytes)?;
+        let canonical = editor.set_parameter(parameter_index, value)?;
+        let bytes = editor.save_state()?;
+        Ok((canonical, bytes))
+    })();
+    let (canonical, bytes) = match edited {
+        Ok(edited) => edited,
+        Err(error) => {
+            return error_response(
+                ControlErrorCode::Rejected,
+                format!("editing isolated plugin parameter: {error:#}"),
+                Some(revision),
+            );
+        }
+    };
+    let manifest = plugin.manifest();
+    let next_state = match context.state_store.lock() {
+        Ok(mut store) => store.put(
+            &manifest.id,
+            &manifest.version,
+            manifest.state_version,
+            state.selected_sound_id.clone(),
+            &bytes,
+        ),
+        Err(_) => {
+            return internal_error("plugin state store lock is poisoned", Some(revision));
+        }
+    };
+    match next_state {
+        Ok(next_state) => ControlResponse::PluginStateParameterSet {
+            state: Box::new(next_state),
+            parameter_index,
+            value: canonical,
+        },
+        Err(error) => error_response(
+            ControlErrorCode::Rejected,
+            format!("storing edited plugin state: {error:#}"),
+            Some(revision),
+        ),
+    }
+}
+
+fn isolated_plugin_state(
+    context: &ControlContext,
+    state: &rackforge_plugin_api::PluginStateReference,
+) -> Result<
+    (
+        &'static LoadedPlugin,
+        Vec<u8>,
+        BTreeMap<String, PathBuf>,
+        Revision,
+    ),
+    ControlFailure,
+> {
+    let revision = context
+        .store
+        .lock()
+        .map_err(|_| {
+            control_failure(
+                ControlErrorCode::Internal,
+                "session store lock is poisoned",
+                None,
+            )
+        })?
+        .state()
+        .revision;
+    let plugin = context
+        .portable_plugins
+        .get(&state.plugin_id)
+        .map(|runtime| runtime.0)
+        .ok_or_else(|| {
+            control_failure(
+                ControlErrorCode::Unavailable,
+                format!(
+                    "plugin {} is not available as a portable isolated runtime",
+                    state.plugin_id
+                ),
+                Some(revision),
+            )
+        })?;
+    validate_state_reference(plugin, state).map_err(|error| {
+        control_failure(
+            ControlErrorCode::Rejected,
+            format!("incompatible plugin state: {error:#}"),
+            Some(revision),
+        )
+    })?;
+    let bytes = context
+        .state_store
+        .lock()
+        .map_err(|_| {
+            control_failure(
+                ControlErrorCode::Internal,
+                "plugin state store lock is poisoned",
+                Some(revision),
+            )
+        })?
+        .read(state)
+        .map_err(|error| {
+            control_failure(
+                ControlErrorCode::NotFound,
+                format!("plugin state is unavailable: {error:#}"),
+                Some(revision),
+            )
+        })?;
+    let instance_id = context.store.lock().ok().and_then(|store| {
+        store
+            .state()
+            .instances
+            .iter()
+            .find(|instance| instance.plugin_id == state.plugin_id)
+            .map(|instance| instance.instance_id.clone())
+    });
+    let registry = context.dynamic_resources.lock().map_err(|_| {
+        control_failure(
+            ControlErrorCode::Internal,
+            "dynamic resource registry is poisoned",
+            Some(revision),
+        )
+    })?;
+    let resources = instance_id
+        .as_ref()
+        .and_then(|instance_id| registry.get(instance_id))
+        .cloned()
+        .unwrap_or_default();
+    Ok((plugin, bytes, resources, revision))
 }
 
 fn apply_audio_output(

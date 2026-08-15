@@ -550,6 +550,18 @@ export interface PluginParameterSnapshot {
   values: Array<{ index: number; value: number }>;
 }
 
+export interface PluginStateParameterSnapshot {
+  state: PluginStateReference;
+  schema: PluginParameterSnapshot["schema"];
+  values: Array<{ index: number; value: number }>;
+}
+
+export interface PluginStateParameterResult {
+  state: PluginStateReference;
+  parameter_index: number;
+  value: number;
+}
+
 export interface SessionCommand {
   type: string;
   [key: string]: unknown;

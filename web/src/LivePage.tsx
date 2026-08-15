@@ -38,6 +38,7 @@ import type {
   PerformanceEdit,
   PerformanceSnapshot,
   PluginInstance,
+  PluginStateReference,
   RackDefinition,
   RackGraphPosition,
   RackSlot,
@@ -82,6 +83,8 @@ interface LivePageProps {
   onWorkspaceChange: (workspace: PerformanceGraphWorkspace | null) => void;
   renderPluginSurface: (options: {
     instance: PluginInstance;
+    state?: PluginStateReference;
+    onStateChange: (state: PluginStateReference) => void;
     onSelectSound: (soundId: string) => Promise<unknown>;
   }) => ReactNode;
 }

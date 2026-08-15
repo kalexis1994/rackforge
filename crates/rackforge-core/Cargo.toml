@@ -27,3 +27,6 @@ zip.workspace = true
 alsa = "0.10"
 libc = "0.2"
 midir = "0.11"
+
+[dev-dependencies]
+wat = "1.245"

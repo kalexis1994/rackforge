@@ -1089,6 +1089,17 @@ async fn activate_plugin(
     if require_authorized(&state, &headers).is_err() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
+    let registry = match PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root) {
+        Ok(registry) => registry,
+        Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+    };
+    if !registry.packages.contains_key(&plugin_id) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"status":"error", "message":"Plugin is not installed."})),
+        )
+            .into_response();
+    }
     // Installing the first plugin recreates audio.toml. The systemd path unit
     // then starts Core, which may need several seconds to validate resources
     // and open the audio interface. Activation is one operation from the UI's
@@ -1105,25 +1116,45 @@ async fn activate_plugin(
             Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
         }
     };
-    let Some(instance_id) = snapshot
-        .pointer("/snapshot/instances")
-        .and_then(Value::as_array)
-        .and_then(|instances| {
-            instances.iter().find_map(|instance| {
-                (instance.get("plugin_id").and_then(Value::as_str) == Some(plugin_id.as_str()))
-                    .then(|| instance.get("instance_id").and_then(Value::as_str))
-                    .flatten()
-            })
-        })
-    else {
-        return (
-            StatusCode::CONFLICT,
-            Json(json!({
-                "status":"error",
-                "message":"The plugin is installed, but the Raspberry Pi audio runtime must be restarted before this new package can be activated."
-            })),
-        )
-            .into_response();
+    let instance_id = match plugin_instance_id_from_snapshot(&snapshot, &plugin_id) {
+        Some(instance_id) => instance_id.to_owned(),
+        None => {
+            let root = state
+                .plugin_store_root
+                .parent()
+                .unwrap_or_else(|| Path::new("."));
+            if let Err(message) = request_audio_runtime_restart(root) {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(json!({"status":"error", "message":message})),
+                )
+                    .into_response();
+            }
+            let deadline = std::time::Instant::now() + Duration::from_secs(45);
+            let mut loaded = None;
+            while std::time::Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                if let Ok(snapshot) =
+                    core_request(&state.control_socket, &json!({"op":"snapshot"})).await
+                    && let Some(instance_id) =
+                        plugin_instance_id_from_snapshot(&snapshot, &plugin_id)
+                {
+                    loaded = Some(instance_id.to_owned());
+                    break;
+                }
+            }
+            let Some(instance_id) = loaded else {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(json!({
+                        "status":"error",
+                        "message":"The audio runtime restarted, but Core could not load this plugin. The package may be incompatible with the installed RackForge runtime."
+                    })),
+                )
+                    .into_response();
+            };
+            instance_id
+        }
     };
     for command in [
         json!({"type":"set_active_mode", "mode":"play"}),
@@ -1156,6 +1187,42 @@ async fn activate_plugin(
         }
     }
     Json(json!({"status":"active", "plugin_id":plugin_id})).into_response()
+}
+
+fn plugin_instance_id_from_snapshot<'a>(snapshot: &'a Value, plugin_id: &str) -> Option<&'a str> {
+    snapshot
+        .pointer("/snapshot/instances")?
+        .as_array()?
+        .iter()
+        .find(|instance| instance.get("plugin_id").and_then(Value::as_str) == Some(plugin_id))?
+        .get("instance_id")?
+        .as_str()
+}
+
+fn running_audio_engine_pid(root: &Path) -> Option<u32> {
+    fs::read_to_string(root.join("state/audio-engine.lock"))
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .filter(|pid| {
+            fs::read_link(format!("/proc/{pid}/exe"))
+                .ok()
+                .and_then(|path| path.file_name().map(|name| name.to_owned()))
+                .is_some_and(|name| name == "rackforge-core")
+        })
+}
+
+fn request_audio_runtime_restart(root: &Path) -> Result<(), String> {
+    let pid = running_audio_engine_pid(root).ok_or_else(|| {
+        "The plugin is installed, but the Raspberry Pi audio runtime is not running.".to_owned()
+    })?;
+    let status = std::process::Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()
+        .map_err(|error| format!("Could not restart the Raspberry Pi audio runtime: {error}"))?;
+    if !status.success() {
+        return Err("Could not restart the Raspberry Pi audio runtime.".into());
+    }
+    Ok(())
 }
 
 fn replace_startup_plugin(audio_config_path: &Path, package_root: &Path) -> Result<Vec<u8>> {
@@ -1350,15 +1417,7 @@ async fn uninstall_managed_plugin(
         None
     };
 
-    let engine_pid = fs::read_to_string(root.join("state/audio-engine.lock"))
-        .ok()
-        .and_then(|value| value.trim().parse::<u32>().ok())
-        .filter(|pid| {
-            fs::read_link(format!("/proc/{pid}/exe"))
-                .ok()
-                .and_then(|path| path.file_name().map(|name| name.to_owned()))
-                .is_some_and(|name| name == "rackforge-core")
-        });
+    let engine_was_running = running_audio_engine_pid(root).is_some();
     let store_root = state.plugin_store_root.clone();
     let legacy_plugins_root = state.plugins_root.clone();
     let uninstall_id = plugin_id.clone();
@@ -1412,12 +1471,7 @@ async fn uninstall_managed_plugin(
     )
     .await;
 
-    let restart_requested = engine_pid.is_some_and(|pid| {
-        std::process::Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .status()
-            .is_ok_and(|status| status.success())
-    });
+    let restart_requested = engine_was_running && request_audio_runtime_restart(root).is_ok();
     let cleanup_data_root = state.data_root.clone();
     let cleanup_plugin_id = plugin_id.clone();
     let user_data_cleanup = tokio::task::spawn_blocking(move || {
@@ -1964,14 +2018,38 @@ async fn plugin_web_asset(
     if mime == mime_guess::mime::TEXT_HTML {
         response.headers_mut().insert(
             CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(
-                "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
-                 img-src 'self' data:; font-src 'self'; connect-src 'none'; \
-                 media-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
-            ),
+            plugin_document_csp(&headers, &plugin_id),
         );
     }
     response
+}
+
+fn plugin_document_csp(headers: &HeaderMap, plugin_id: &str) -> HeaderValue {
+    let connect_sources = headers
+        .get(HOST)
+        .and_then(|host| host.to_str().ok())
+        .and_then(|host| host.parse::<axum::http::uri::Authority>().ok())
+        .map(|authority| {
+            let authority = authority.as_str();
+            format!(
+                "http://{authority}/plugin-assets/{plugin_id}/ \
+                 https://{authority}/plugin-assets/{plugin_id}/"
+            )
+        })
+        .unwrap_or_else(|| "'none'".to_owned());
+    let policy = format!(
+        "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; \
+         style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; \
+         connect-src {connect_sources}; media-src 'none'; frame-ancestors 'self'; \
+         base-uri 'none'; form-action 'none'"
+    );
+    HeaderValue::from_str(&policy).unwrap_or_else(|_| {
+        HeaderValue::from_static(
+            "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data:; font-src 'self'; connect-src 'none'; \
+             media-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
+        )
+    })
 }
 
 async fn session_socket(
@@ -2419,6 +2497,52 @@ mod tests {
         assert!(config.web.enabled);
         assert!(matches!(config.web.access, WebAccess::Local));
         assert_eq!(config.web.address(), "127.0.0.1:8787".parse().unwrap());
+    }
+
+    #[test]
+    fn plugin_instance_lookup_uses_the_plugin_identity() {
+        let snapshot = json!({
+            "snapshot": {
+                "instances": [
+                    {"instance_id":"live.primary", "plugin_id":"org.rackforge.first"},
+                    {"instance_id":"play.second", "plugin_id":"org.rackforge.second"}
+                ]
+            }
+        });
+        assert_eq!(
+            plugin_instance_id_from_snapshot(&snapshot, "org.rackforge.second"),
+            Some("play.second")
+        );
+        assert_eq!(
+            plugin_instance_id_from_snapshot(&snapshot, "org.rackforge.missing"),
+            None
+        );
+    }
+
+    #[test]
+    fn plugin_csp_allows_wasm_fetches_only_from_that_plugins_assets() {
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("192.168.1.17:8787"));
+
+        let header = plugin_document_csp(&headers, "org.rackforge.rf-kr106");
+        let policy = header.to_str().unwrap();
+
+        assert!(policy.contains("script-src 'self' 'wasm-unsafe-eval'"));
+        assert!(policy.contains(
+            "connect-src http://192.168.1.17:8787/plugin-assets/org.rackforge.rf-kr106/ \
+             https://192.168.1.17:8787/plugin-assets/org.rackforge.rf-kr106/"
+        ));
+        assert!(!policy.contains("connect-src 'self'"));
+        assert!(!policy.contains("'unsafe-eval'"));
+    }
+
+    #[test]
+    fn plugin_csp_stays_closed_when_the_request_has_no_valid_authority() {
+        let headers = HeaderMap::new();
+        let header = plugin_document_csp(&headers, "org.rackforge.rf-kr106");
+        let policy = header.to_str().unwrap();
+
+        assert!(policy.contains("connect-src 'none'"));
     }
 
     #[test]

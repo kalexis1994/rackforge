@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { LogOut, Save } from "lucide-react";
+import { ChevronLeft, ChevronRight, LogOut, Save } from "lucide-react";
 import {
   dispatchCommand,
   dispatchCommandAwait,
@@ -173,7 +173,19 @@ function rackCascadePlan(
 }
 
 function sameLocation(left: LiveLocation | undefined, right: LiveLocation) {
-  return left !== undefined && JSON.stringify(left) === JSON.stringify(right);
+  if (!left || left.kind !== right.kind) return false;
+  if (left.kind === "rack" && right.kind === "rack") {
+    return left.rack_id === right.rack_id;
+  }
+  if (left.kind === "song" && right.kind === "song") {
+    return left.song_id === right.song_id && left.part_id === right.part_id;
+  }
+  if (left.kind === "setlist" && right.kind === "setlist") {
+    return left.setlist_id === right.setlist_id
+      && left.entry_id === right.entry_id
+      && left.part_id === right.part_id;
+  }
+  return false;
 }
 
 function describeLocation(
@@ -310,6 +322,14 @@ function PerformanceBrowser({
   session: SessionSnapshot | null;
   performance: PerformanceSnapshot;
 }) {
+  const initializedBrowseMode = useRef(false);
+  useEffect(() => {
+    if (initializedBrowseMode.current) return;
+    initializedBrowseMode.current = true;
+    if (!performance.live.active && performance.live.mode !== "rack") {
+      dispatchCommand({ type: "set_live_browse_mode", mode: "rack" });
+    }
+  }, [performance.live.active, performance.live.mode]);
   const mode = performance.live.mode;
   const active = describeLocation(performance, performance.live.active);
   const activate = (location: LiveLocation) => {
@@ -317,6 +337,9 @@ function PerformanceBrowser({
       dispatchCommand({ type: "set_active_mode", mode: "live" });
     }
     dispatchCommand({ type: "activate_live_target", location });
+  };
+  const changeMode = (nextMode: LiveBrowseMode) => {
+    dispatchCommand({ type: "set_live_browse_mode", mode: nextMode });
   };
 
   return (
@@ -342,11 +365,11 @@ function PerformanceBrowser({
             <button
               key={item}
               className={`entity-${item}${mode === item ? " active" : ""}`}
-              onClick={() =>
-                dispatchCommand({ type: "set_live_browse_mode", mode: item })
-              }
+              onClick={() => changeMode(item)}
+              role="tab"
+              aria-selected={mode === item}
             >
-              {kindLabels[item]}
+              {item.toUpperCase()}
             </button>
           ))}
         </div>
@@ -369,20 +392,122 @@ function PerformanceBrowser({
 function ActivateButton({
   active,
   disabled,
+  label = "Load",
   onClick,
 }: {
   active: boolean;
   disabled?: boolean;
+  label?: string;
   onClick: () => void;
 }) {
   return (
     <button
-      className={`activate-button${active ? " active" : ""}`}
+      type="button"
+      className={`activate-button live-item-state${active ? " active" : ""}`}
       disabled={disabled || active}
       onClick={onClick}
     >
-      {active ? "Playing" : "Load"}
+      {active ? "PLAYING" : label.toUpperCase()}
     </button>
+  );
+}
+
+function playableSongParts(performance: PerformanceSnapshot, song: SongDefinition) {
+  return song.parts.filter((part) => {
+    if (part.content) return true;
+    return performance.library.racks.some(
+      (rack) => rack.id === part.rack_id && rack.enabled,
+    );
+  });
+}
+
+function StageNavigator({
+  kind,
+  title,
+  detail,
+  position,
+  previousLabel,
+  nextLabel,
+  onPrevious,
+  onNext,
+}: {
+  kind: "rack" | "song" | "setlist";
+  title: string;
+  detail: string;
+  position: string;
+  previousLabel: string;
+  nextLabel: string;
+  onPrevious?: () => void;
+  onNext?: () => void;
+}) {
+  return (
+    <header className={`live-stage-navigator entity-${kind}`}>
+      <button
+        type="button"
+        className="live-stage-step"
+        disabled={!onPrevious}
+        onClick={onPrevious}
+        aria-label={previousLabel}
+      >
+        <ChevronLeft aria-hidden="true" />
+      </button>
+      <div className="live-stage-heading">
+        <span className="card-kicker">{kind}</span>
+        <strong>{title}</strong>
+        <small>{detail}</small>
+      </div>
+      <span className="live-stage-position">{position}</span>
+      <button
+        type="button"
+        className="live-stage-step"
+        disabled={!onNext}
+        onClick={onNext}
+        aria-label={nextLabel}
+      >
+        <ChevronRight aria-hidden="true" />
+      </button>
+    </header>
+  );
+}
+
+function SongPartTargets({
+  performance,
+  song,
+  locationForPart,
+  activate,
+}: {
+  performance: PerformanceSnapshot;
+  song: SongDefinition;
+  locationForPart: (part: SongPart) => LiveLocation;
+  activate: (location: LiveLocation) => void;
+}) {
+  const parts = playableSongParts(performance, song);
+  if (parts.length === 0) return <LiveEmpty label="This Song has no playable Parts" />;
+  return (
+    <div className="live-part-list" aria-label={`${song.name} parts`}>
+      {parts.map((part, index) => {
+        const location = locationForPart(part);
+        const playing = sameLocation(performance.live.active, location);
+        return (
+          <button
+            type="button"
+            className={`live-part-target live-selectable-item entity-song-part${playing ? " active" : ""}`}
+            key={part.id}
+            onClick={() => activate(location)}
+            aria-pressed={playing}
+          >
+            <span className="live-part-index">{String(index + 1).padStart(2, "0")}</span>
+            <span className="live-part-copy">
+              <strong>{part.name}</strong>
+              <small>{part.content ? "Part graph" : "Rack"}</small>
+            </span>
+            <span className="live-part-state live-item-state">
+              {playing ? "PLAYING" : "LOAD"}
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -395,24 +520,51 @@ function RackTargets({
 }) {
   const racks = performance.library.racks.filter((rack) => rack.enabled);
   if (racks.length === 0) return <LiveEmpty label="No enabled Racks" />;
+  const selectedRackId = performance.live.rack?.kind === "rack"
+    ? performance.live.rack.rack_id
+    : undefined;
+  const selectedIndex = racks.findIndex((rack) => rack.id === selectedRackId);
+  const selectedRack = selectedIndex >= 0 ? racks[selectedIndex] : undefined;
   return (
-    <div className="target-grid">
-      {racks.map((rack) => {
-        const location: LiveLocation = { kind: "rack", rack_id: rack.id };
-        return (
-          <article className="target-card entity-rack" key={rack.id}>
-            <span className="target-index">{String(racks.indexOf(rack) + 1).padStart(2, "0")}</span>
-            <div>
-              <h3>{rack.name}</h3>
-              <p>{rack.slots.filter((slot) => slot.enabled).length} active slots</p>
-            </div>
-            <ActivateButton
-              active={sameLocation(performance.live.active, location)}
-              onClick={() => activate(location)}
-            />
-          </article>
-        );
-      })}
+    <div className="live-target-workspace">
+      {selectedRack ? (
+        <StageNavigator
+          kind="rack"
+          title={selectedRack.name}
+          detail={`${selectedRack.slots.filter((slot) => slot.enabled).length} active slots`}
+          position={`${selectedIndex + 1} / ${racks.length}`}
+          previousLabel="Load previous Rack"
+          nextLabel="Load next Rack"
+          onPrevious={selectedIndex > 0
+            ? () => activate({ kind: "rack", rack_id: racks[selectedIndex - 1].id })
+            : undefined}
+          onNext={selectedIndex < racks.length - 1
+            ? () => activate({ kind: "rack", rack_id: racks[selectedIndex + 1].id })
+            : undefined}
+        />
+      ) : null}
+      <div className="target-grid">
+        {racks.map((rack, index) => {
+          const location: LiveLocation = { kind: "rack", rack_id: rack.id };
+          const playing = sameLocation(performance.live.active, location);
+          return (
+            <article
+              className={`target-card live-selectable-item entity-rack${playing ? " active" : ""}`}
+              key={rack.id}
+            >
+              <span className="target-index">{String(index + 1).padStart(2, "0")}</span>
+              <div>
+                <h3>{rack.name}</h3>
+                <p>{rack.slots.filter((slot) => slot.enabled).length} active slots</p>
+              </div>
+              <ActivateButton
+                active={playing}
+                onClick={() => activate(location)}
+              />
+            </article>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -424,40 +576,70 @@ function SongTargets({
   performance: PerformanceSnapshot;
   activate: (location: LiveLocation) => void;
 }) {
-  const songs = performance.library.songs.filter((song) => song.enabled);
-  if (songs.length === 0) return <LiveEmpty label="No enabled Songs" />;
-  return (
-    <div className="sequence-list">
-      {songs.map((song) => (
-        <section className="sequence-group entity-song" key={song.id}>
-          <header>
-            <span className="card-kicker">Song</span>
-            <h3>{song.name}</h3>
-          </header>
-          {song.parts.map((part) => {
-            const location: LiveLocation = {
-              kind: "song",
-              song_id: song.id,
-              part_id: part.id,
-            };
-            const rack = performance.library.racks.find(
-              (item) => item.id === part.rack_id,
-            );
-            const graphBacked = part.content !== undefined;
-            return (
-              <div className="sequence-row entity-song-part" key={part.id}>
-                <span>{part.name}</span>
-                <small>{graphBacked ? "Part graph" : (rack?.name ?? "Missing Rack")}</small>
-                <ActivateButton
-                  active={sameLocation(performance.live.active, location)}
-                  disabled={graphBacked ? false : !rack?.enabled}
-                  onClick={() => activate(location)}
-                />
-              </div>
-            );
+  const enabledSongs = performance.library.songs.filter((song) => song.enabled);
+  if (enabledSongs.length === 0) return <LiveEmpty label="No enabled Songs" />;
+  const songs = enabledSongs.filter(
+    (song) => playableSongParts(performance, song).length > 0,
+  );
+  const selectedLocation = performance.live.song?.kind === "song"
+    ? performance.live.song
+    : undefined;
+  const selectedIndex = songs.findIndex((song) => song.id === selectedLocation?.song_id);
+  const selectedSong = selectedIndex >= 0 ? songs[selectedIndex] : undefined;
+  const activateSong = (song: SongDefinition) => {
+    const part = playableSongParts(performance, song)[0];
+    if (part) activate({ kind: "song", song_id: song.id, part_id: part.id });
+  };
+
+  if (selectedSong) {
+    return (
+      <div className="live-target-workspace">
+        <StageNavigator
+          kind="song"
+          title={selectedSong.name}
+          detail={`${playableSongParts(performance, selectedSong).length} Parts`}
+          position={`${selectedIndex + 1} / ${songs.length}`}
+          previousLabel="Load previous Song"
+          nextLabel="Load next Song"
+          onPrevious={selectedIndex > 0 ? () => activateSong(songs[selectedIndex - 1]) : undefined}
+          onNext={selectedIndex < songs.length - 1
+            ? () => activateSong(songs[selectedIndex + 1])
+            : undefined}
+        />
+        <SongPartTargets
+          performance={performance}
+          song={selectedSong}
+          locationForPart={(part) => ({
+            kind: "song",
+            song_id: selectedSong.id,
+            part_id: part.id,
           })}
-        </section>
-      ))}
+          activate={activate}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="target-grid live-song-picker">
+      {enabledSongs.map((song, index) => {
+        const parts = playableSongParts(performance, song);
+        return (
+          <article className="target-card live-selectable-item entity-song" key={song.id}>
+            <span className="target-index">{String(index + 1).padStart(2, "0")}</span>
+            <div>
+              <h3>{song.name}</h3>
+              <p>{parts.length} playable Parts</p>
+            </div>
+            <ActivateButton
+              active={false}
+              disabled={parts.length === 0}
+              label="Open"
+              onClick={() => activateSong(song)}
+            />
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -470,47 +652,112 @@ function SetlistTargets({
   activate: (location: LiveLocation) => void;
 }) {
   const setlists = performance.library.setlists.filter((setlist) => setlist.enabled);
+  const [dismissedSetlistId, setDismissedSetlistId] = useState<string | null>(null);
+  const selectedLocation = performance.live.setlist?.kind === "setlist"
+    ? performance.live.setlist
+    : undefined;
+  const selectedSetlistId = selectedLocation?.setlist_id;
+  useEffect(() => {
+    const exitSetlist = () => {
+      if (selectedSetlistId) setDismissedSetlistId(selectedSetlistId);
+    };
+    window.addEventListener("rackforge:exit-live-setlist", exitSetlist);
+    return () => window.removeEventListener("rackforge:exit-live-setlist", exitSetlist);
+  }, [selectedSetlistId]);
   if (setlists.length === 0) return <LiveEmpty label="No enabled Setlists" />;
-  return (
-    <div className="sequence-list">
-      {setlists.map((setlist) => (
-        <section className="sequence-group setlist-target-group entity-setlist" key={setlist.id}>
-          <header>
-            <span className="card-kicker">Setlist</span>
-            <h3>{setlist.name}</h3>
-          </header>
-          {setlist.entries.flatMap((entry, entryIndex) => {
-            const song = performance.library.songs.find(
-              (item) => item.id === entry.song_id,
-            );
-            return (song?.parts ?? []).map((part, partIndex) => {
-              const location: LiveLocation = {
-                kind: "setlist",
-                setlist_id: setlist.id,
-                entry_id: entry.id,
-                part_id: part.id,
-              };
-              const rack = performance.library.racks.find(
-                (item) => item.id === part.rack_id,
-              );
-              const graphBacked = part.content !== undefined;
-              return (
-                <div className="sequence-row setlist-row entity-song-part" key={`${entry.id}:${part.id}`}>
-                  <span>
-                    {entryIndex + 1}.{partIndex + 1} {song?.name ?? "Missing Song"}
-                  </span>
-                  <small>{part.name}</small>
-                  <ActivateButton
-                    active={sameLocation(performance.live.active, location)}
-                    disabled={!song?.enabled || (graphBacked ? false : !rack?.enabled)}
-                    onClick={() => activate(location)}
-                  />
-                </div>
-              );
-            });
+
+  const selectedSetlist = selectedLocation?.setlist_id !== dismissedSetlistId
+    ? setlists.find((setlist) => setlist.id === selectedLocation?.setlist_id)
+    : undefined;
+  const playableEntries = selectedSetlist?.entries.flatMap((entry) => {
+    const song = performance.library.songs.find((item) => item.id === entry.song_id);
+    return song?.enabled && playableSongParts(performance, song).length > 0
+      ? [{ entry, song }]
+      : [];
+  }) ?? [];
+  const selectedEntryIndex = playableEntries.findIndex(
+    ({ entry }) => entry.id === selectedLocation?.entry_id,
+  );
+  const selectedEntry = selectedEntryIndex >= 0
+    ? playableEntries[selectedEntryIndex]
+    : playableEntries[0];
+  const activateEntry = (index: number) => {
+    const target = playableEntries[index];
+    const part = target && playableSongParts(performance, target.song)[0];
+    if (selectedSetlist && target && part) {
+      activate({
+        kind: "setlist",
+        setlist_id: selectedSetlist.id,
+        entry_id: target.entry.id,
+        part_id: part.id,
+      });
+    }
+  };
+
+  if (selectedSetlist && selectedEntry) {
+    const currentIndex = Math.max(0, selectedEntryIndex);
+    return (
+      <div className="live-target-workspace">
+        <StageNavigator
+          kind="setlist"
+          title={selectedSetlist.name}
+          detail={selectedEntry.song.name}
+          position={`${currentIndex + 1} / ${playableEntries.length}`}
+          previousLabel="Load previous Setlist Song"
+          nextLabel="Load next Setlist Song"
+          onPrevious={currentIndex > 0 ? () => activateEntry(currentIndex - 1) : undefined}
+          onNext={currentIndex < playableEntries.length - 1
+            ? () => activateEntry(currentIndex + 1)
+            : undefined}
+        />
+        <SongPartTargets
+          performance={performance}
+          song={selectedEntry.song}
+          locationForPart={(part) => ({
+            kind: "setlist",
+            setlist_id: selectedSetlist.id,
+            entry_id: selectedEntry.entry.id,
+            part_id: part.id,
           })}
-        </section>
-      ))}
+          activate={activate}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="target-grid live-setlist-picker">
+      {setlists.map((setlist, index) => {
+        const firstPlayable = setlist.entries.flatMap((entry) => {
+          const song = performance.library.songs.find((item) => item.id === entry.song_id);
+          const part = song?.enabled ? playableSongParts(performance, song)[0] : undefined;
+          return song && part ? [{ entry, song, part }] : [];
+        })[0];
+        return (
+          <article className="target-card live-selectable-item entity-setlist" key={setlist.id}>
+            <span className="target-index">{String(index + 1).padStart(2, "0")}</span>
+            <div>
+              <h3>{setlist.name}</h3>
+              <p>{setlist.entries.length} Songs</p>
+            </div>
+            <ActivateButton
+              active={false}
+              disabled={!firstPlayable}
+              label="Open"
+              onClick={() => {
+                if (!firstPlayable) return;
+                setDismissedSetlistId(null);
+                activate({
+                  kind: "setlist",
+                  setlist_id: setlist.id,
+                  entry_id: firstPlayable.entry.id,
+                  part_id: firstPlayable.part.id,
+                });
+              }}
+            />
+          </article>
+        );
+      })}
     </div>
   );
 }

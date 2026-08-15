@@ -7,9 +7,11 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signature, VerifyingKey};
 use rackforge_plugin_api::{
-    PluginKind, PluginManifest, validate_branding_assets, validate_plugin_identifier,
+    ParameterSchema, PluginKind, PluginManifest, PresetCatalog, RuntimeDescriptor,
+    validate_branding_assets, validate_plugin_identifier,
 };
 use semver::Version;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -27,6 +29,7 @@ pub const MAX_INDEX_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_PACKAGE_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_EXPANDED_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
 pub const MAX_PACKAGE_ENTRIES: usize = 16_384;
+const MAX_PORTABLE_METADATA_BYTES: u64 = 1024 * 1024;
 
 static TEMP_SERIAL: AtomicU64 = AtomicU64::new(0);
 
@@ -1198,21 +1201,55 @@ fn validate_extracted_payload(
             ));
         }
         let component = manifest.portable_component().expect("validated above");
-        for metadata in [
-            &component.runtime_descriptor,
-            &component.parameter_schema,
-            &component.preset_catalog,
-        ] {
-            let metadata_path = fs::canonicalize(root.join(metadata))
-                .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
-            if !metadata_path.starts_with(root) || !metadata_path.is_file() {
-                return Err(RepositoryError::InvalidPackage(format!(
-                    "portable metadata is missing or escaped the package: {metadata:?}"
-                )));
-            }
-        }
+        let runtime: RuntimeDescriptor =
+            read_portable_metadata(root, &component.runtime_descriptor, "runtime descriptor")?;
+        runtime.validate_against(manifest).map_err(|error| {
+            RepositoryError::InvalidPackage(format!("invalid runtime descriptor: {error}"))
+        })?;
+        let parameters: ParameterSchema =
+            read_portable_metadata(root, &component.parameter_schema, "parameter schema")?;
+        parameters.validate().map_err(|error| {
+            RepositoryError::InvalidPackage(format!("invalid parameter schema: {error}"))
+        })?;
+        let presets: PresetCatalog =
+            read_portable_metadata(root, &component.preset_catalog, "preset catalog")?;
+        presets.validate().map_err(|error| {
+            RepositoryError::InvalidPackage(format!("invalid preset catalog: {error}"))
+        })?;
     }
     Ok(())
+}
+
+fn read_portable_metadata<T: DeserializeOwned>(
+    root: &Path,
+    relative: &str,
+    label: &str,
+) -> Result<T, RepositoryError> {
+    let path = fs::canonicalize(root.join(relative)).map_err(|error| {
+        RepositoryError::InvalidPackage(format!("{label} is unavailable: {error}"))
+    })?;
+    let metadata = fs::metadata(&path).map_err(|error| {
+        RepositoryError::InvalidPackage(format!("{label} is unavailable: {error}"))
+    })?;
+    if !path.starts_with(root) || !metadata.is_file() {
+        return Err(RepositoryError::InvalidPackage(format!(
+            "{label} is missing or escaped the package: {relative:?}"
+        )));
+    }
+    if metadata.len() == 0 || metadata.len() > MAX_PORTABLE_METADATA_BYTES {
+        return Err(RepositoryError::InvalidPackage(format!(
+            "{label} size is outside the supported limit"
+        )));
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    File::open(&path)
+        .and_then(|file| {
+            file.take(MAX_PORTABLE_METADATA_BYTES.saturating_add(1))
+                .read_to_end(&mut bytes)
+        })
+        .map_err(|error| RepositoryError::InvalidPackage(format!("reading {label}: {error}")))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| RepositoryError::InvalidPackage(format!("parsing {label}: {error}")))
 }
 
 fn read_installation_record(path: &Path) -> Result<InstallationRecord, RepositoryError> {
@@ -1375,6 +1412,18 @@ preset_catalog = "metadata/presets.json"
 "#
     }
 
+    fn portable_runtime() -> &'static [u8] {
+        br#"{"schema_version":1,"id":"org.rackforge.synth","version":"1.2.3","state_version":1}"#
+    }
+
+    fn portable_parameters() -> &'static [u8] {
+        br#"{"schema_version":1,"pages":[],"parameters":[]}"#
+    }
+
+    fn portable_presets() -> &'static [u8] {
+        br#"{"schema_version":1,"banks":[],"presets":[]}"#
+    }
+
     #[test]
     fn verifies_exact_catalog_bytes_and_rejects_tampering() {
         let bytes = serde_json::to_vec(&index()).unwrap();
@@ -1467,9 +1516,9 @@ preset_catalog = "metadata/presets.json"
         let bytes = archive(&[
             ("rackforge-plugin.toml", portable_manifest()),
             ("component.wasm", wasm),
-            ("metadata/runtime.json", b"{}"),
-            ("metadata/parameters.json", b"{}"),
-            ("metadata/presets.json", b"{}"),
+            ("metadata/runtime.json", portable_runtime()),
+            ("metadata/parameters.json", portable_parameters()),
+            ("metadata/presets.json", portable_presets()),
         ]);
         let mut selected = selected_for(&bytes);
         selected.artifact.platform = "wasm-v1".into();
@@ -1492,9 +1541,9 @@ preset_catalog = "metadata/presets.json"
         let bytes = archive(&[
             ("rackforge-plugin.toml", portable_manifest()),
             ("component.wasm", wasm),
-            ("metadata/runtime.json", b"{}"),
-            ("metadata/parameters.json", b"{}"),
-            ("metadata/presets.json", b"{}"),
+            ("metadata/runtime.json", portable_runtime()),
+            ("metadata/parameters.json", portable_parameters()),
+            ("metadata/presets.json", portable_presets()),
         ]);
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-local-{}-{}",
@@ -1519,14 +1568,51 @@ preset_catalog = "metadata/presets.json"
     }
 
     #[test]
+    fn rejects_a_portable_package_with_invalid_typed_metadata() {
+        let wasm = b"\0asm\x01\0\0\0";
+        let invalid_parameters = br#"{
+          "schema_version": 1,
+          "pages": [{"id":"main","name":"Main"}],
+          "parameters": [{
+            "index": 0,
+            "id": "cutoff",
+            "name": "Cutoff",
+            "page": "main",
+            "kind": {"type":"float","minimum":0.0,"maximum":1.0,"default":0.5,"step":0.01},
+            "suggested_control": "slider"
+          }]
+        }"#;
+        let bytes = archive(&[
+            ("rackforge-plugin.toml", portable_manifest()),
+            ("component.wasm", wasm),
+            ("metadata/runtime.json", portable_runtime()),
+            ("metadata/parameters.json", invalid_parameters),
+            ("metadata/presets.json", portable_presets()),
+        ]);
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-invalid-metadata-{}-{}",
+            std::process::id(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+
+        let error = install_local_archive(&root, &bytes).unwrap_err();
+        assert!(
+            error.to_string().contains("unknown variant `slider`"),
+            "{error}"
+        );
+        assert!(!root.join("packages/org.rackforge.synth/1.2.3").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn uninstalls_every_managed_version_but_preserves_plugin_data() {
         let wasm = b"\0asm\x01\0\0\0";
         let bytes = archive(&[
             ("rackforge-plugin.toml", portable_manifest()),
             ("component.wasm", wasm),
-            ("metadata/runtime.json", b"{}"),
-            ("metadata/parameters.json", b"{}"),
-            ("metadata/presets.json", b"{}"),
+            ("metadata/runtime.json", portable_runtime()),
+            ("metadata/parameters.json", portable_parameters()),
+            ("metadata/presets.json", portable_presets()),
         ]);
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-uninstall-{}-{}",
@@ -1669,9 +1755,9 @@ preset_catalog = "metadata/presets.json"
         let bytes = archive(&[
             ("rackforge-plugin.toml", portable_manifest()),
             ("component.wasm", b"\0asm\x01\0\0\0"),
-            ("metadata/runtime.json", b"{}"),
-            ("metadata/parameters.json", b"{}"),
-            ("metadata/presets.json", b"{}"),
+            ("metadata/runtime.json", portable_runtime()),
+            ("metadata/parameters.json", portable_parameters()),
+            ("metadata/presets.json", portable_presets()),
         ]);
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-inspect-{}-{}",

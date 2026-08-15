@@ -18,6 +18,7 @@ import {
   FolderOpen,
   House,
   Info,
+  LogOut,
   Menu,
   Piano,
   Play,
@@ -569,6 +570,11 @@ function RackForgeApp() {
           }
           liveWorkspaceActive={liveWorkspace !== null}
           liveWorkspaceKind={liveWorkspace?.kind}
+          liveSetlistSelected={
+            liveSurface === "perform" &&
+            performance?.live.mode === "setlist" &&
+            performance.live.setlist?.kind === "setlist"
+          }
           onPlayRequest={requestPlayNavigation}
           onPerformanceAction={(action) => {
             setMobileMenuOpen(false);
@@ -576,6 +582,10 @@ function RackForgeApp() {
             if (action === "presets") setPlayOverlay("presets");
             if (action === "live-perform") setLiveSurface("perform");
             if (action === "live-configure") setLiveSurface("configure");
+            if (action === "live-exit-setlist") {
+              setLiveSurface("perform");
+              window.dispatchEvent(new Event("rackforge:exit-live-setlist"));
+            }
             if (action === "live-save-editor") {
               window.dispatchEvent(new Event("rackforge:save-graph-workspace"));
             }
@@ -847,6 +857,7 @@ function FloatingPerformanceMenuButton({
 function useTactileFeedback() {
   useEffect(() => {
     const DRAG_THRESHOLD_PX = 10;
+    const rippleHosts = new Set<HTMLElement>();
     let gesture: {
       candidate: HTMLElement;
       pointerId: number;
@@ -926,14 +937,32 @@ function useTactileFeedback() {
         Math.hypot(localX, bounds.height - localY),
         Math.hypot(bounds.width - localX, bounds.height - localY),
       ) * 2;
+      // Render against the viewport rectangle instead of inside the control.
+      // Controls throughout RackForge can live below animated/scaled ancestors;
+      // viewport coordinates are not valid CSS-local coordinates in those
+      // cases and used to place the ripple away from the touched element.
+      const rippleHost = document.createElement("span");
+      rippleHost.className = "rf-touch-ripple-host";
+      rippleHost.style.left = `${bounds.left}px`;
+      rippleHost.style.top = `${bounds.top}px`;
+      rippleHost.style.width = `${bounds.width}px`;
+      rippleHost.style.height = `${bounds.height}px`;
+      rippleHost.style.borderRadius = window.getComputedStyle(candidate).borderRadius;
       const ripple = document.createElement("span");
       ripple.className = "rf-touch-ripple";
       ripple.style.width = `${diameter}px`;
       ripple.style.height = `${diameter}px`;
       ripple.style.left = `${localX - diameter / 2}px`;
       ripple.style.top = `${localY - diameter / 2}px`;
-      candidate.appendChild(ripple);
-      ripple.addEventListener("animationend", () => ripple.remove(), { once: true });
+      rippleHost.appendChild(ripple);
+      document.body.appendChild(rippleHost);
+      rippleHosts.add(rippleHost);
+      const removeRipple = () => {
+        rippleHosts.delete(rippleHost);
+        rippleHost.remove();
+      };
+      ripple.addEventListener("animationend", removeRipple, { once: true });
+      window.setTimeout(removeRipple, 700);
       hostHaptic("tap");
     };
     document.addEventListener("pointerdown", pointerDown, { capture: true, passive: true });
@@ -944,6 +973,8 @@ function useTactileFeedback() {
     window.addEventListener("blur", clearPressed);
     return () => {
       clearPressed();
+      rippleHosts.forEach((host) => host.remove());
+      rippleHosts.clear();
       document.removeEventListener("pointerdown", pointerDown, true);
       document.removeEventListener("pointermove", pointerMove, true);
       document.removeEventListener("pointerup", pointerUp, true);
@@ -1033,6 +1064,7 @@ function MobileNavigation({
   performanceSurface,
   liveWorkspaceActive,
   liveWorkspaceKind,
+  liveSetlistSelected,
   onPlayRequest,
   onPerformanceAction,
 }: {
@@ -1041,9 +1073,10 @@ function MobileNavigation({
   performanceSurface?: "play" | "live";
   liveWorkspaceActive: boolean;
   liveWorkspaceKind?: PerformanceGraphWorkspace["kind"];
+  liveSetlistSelected: boolean;
   onPlayRequest: () => void;
   onPerformanceAction: (
-    action: "select-plugin" | "presets" | "live-perform" | "live-configure" | "live-save-editor" | "live-close-editor",
+    action: "select-plugin" | "presets" | "live-perform" | "live-configure" | "live-exit-setlist" | "live-save-editor" | "live-close-editor",
   ) => void;
 }) {
   const panelRef = useRef<HTMLElement | null>(null);
@@ -1172,6 +1205,18 @@ function MobileNavigation({
                         <small>Edit racks, songs, and setlists</small>
                       </span>
                     </button>
+                    {liveSetlistSelected ? (
+                      <button
+                        className="nav-item"
+                        onClick={() => onPerformanceAction("live-exit-setlist")}
+                      >
+                        <span className="nav-mark"><LogOut aria-hidden="true" strokeWidth={1.9} /></span>
+                        <span className="nav-copy">
+                          <span>Exit current Setlist</span>
+                          <small>Return to the Setlist chooser without stopping audio</small>
+                        </span>
+                      </button>
+                    ) : null}
                   </>
                 )}
               </nav>
@@ -1186,12 +1231,7 @@ function MobileNavigation({
           />
           <span className="mobile-menu-section">System</span>
           <NavigationLinks
-            items={[audioMidiItem]}
-            detailed
-            onNavigate={requestClose}
-          />
-          <NavigationLinks
-            items={[installedPluginsItem, aboutItem]}
+            items={[audioMidiItem, installedPluginsItem, aboutItem]}
             detailed
             onNavigate={requestClose}
           />

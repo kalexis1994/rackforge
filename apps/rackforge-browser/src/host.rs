@@ -34,7 +34,10 @@ use rackforge_performance_api::{
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{Capability, HostPresetSummary, PluginKind, PresetCatalog};
-use rackforge_repository::{inspect_local_archive, install_local_archive};
+use rackforge_repository::{
+    PluginUserDataRemovalOptions, inspect_local_archive, install_local_archive,
+    remove_plugin_user_data, uninstall_plugin,
+};
 use rackforge_session_api::{
     BankSummary, ClientId, CommandEnvelope, CommandRef, EventEnvelope, InstanceId, MasterLevel,
     MasterPan, PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent,
@@ -76,6 +79,9 @@ struct HostedPlugin {
     instance: PluginInstance<'static>,
     presets: PresetCatalog,
     selected_sound_id: Option<String>,
+    /// True when the package was installed into the page's plugin store, as
+    /// opposed to shipped with the site.
+    managed: bool,
 }
 
 pub struct BrowserHost {
@@ -597,6 +603,96 @@ impl BrowserHost {
             })
     }
 
+    /// Describes every plugin the host has loaded, in the shape the interface
+    /// uses to populate PLAY and the Plugin Manager.
+    ///
+    /// A networked RackForge builds this by indexing its plugin directory. The
+    /// browser host answers from what it actually loaded, so a package that
+    /// failed to load is absent rather than offered and then unplayable.
+    pub fn plugin_catalog(&self) -> serde_json::Value {
+        let active = self.store.state().active_instance_id.clone();
+        let catalog: Vec<serde_json::Value> = self
+            .plugins
+            .iter()
+            .map(|plugin| {
+                let manifest = plugin.runtime.manifest();
+                serde_json::json!({
+                    "plugin_id": manifest.id,
+                    "plugin_name": manifest.name,
+                    "version": manifest.version,
+                    "active": active.as_ref() == Some(&plugin.instance_id),
+                    "managed": plugin.managed,
+                    "api_version": manifest.api.major,
+                    "branding": serde_json::Value::Null,
+                    // Plugin-owned web interfaces are served by a host that can
+                    // publish files over HTTP. A page has no origin to publish
+                    // them on yet, so none is advertised.
+                    "surfaces": Vec::<serde_json::Value>::new(),
+                    "resources": manifest
+                        .resources
+                        .iter()
+                        .map(|resource| {
+                            serde_json::json!({
+                                "id": resource.id,
+                                "name": resource.name,
+                                "kind": match resource.kind {
+                                    rackforge_plugin_api::ResourceKind::Directory => "directory",
+                                    _ => "file",
+                                },
+                                "required": resource.required,
+                                "data_path": resource.data_path,
+                                "package_path": resource.package_path,
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        serde_json::Value::Array(catalog)
+    }
+
+    /// Removes an installed plugin and reloads the session without it.
+    ///
+    /// The packages RackForge ships with the page are not installed and cannot
+    /// be removed: they come back with the site on the next visit, so deleting
+    /// them would be a promise the host could not keep.
+    pub fn uninstall_package(
+        &mut self,
+        plugin_id: &str,
+        options: PluginUserDataRemovalOptions,
+    ) -> Result<serde_json::Value> {
+        let bundled = self
+            .plugins
+            .iter()
+            .any(|plugin| plugin.plugin_id == plugin_id && !plugin.managed);
+        if bundled {
+            bail!("{plugin_id} is part of this RackForge and cannot be removed");
+        }
+        let removed = uninstall_plugin(store_root(), plugin_id)?;
+        // Presets the host itself saved live in its state store rather than in
+        // the package, so they are removed here rather than by the repository.
+        let mut presets_removed = 0;
+        if options.presets {
+            for preset in self.state_store.list_presets(plugin_id).unwrap_or_default() {
+                if self.state_store.delete_preset(plugin_id, &preset.id).is_ok() {
+                    presets_removed += 1;
+                }
+            }
+        }
+        let user_data =
+            remove_plugin_user_data(PathBuf::from(DATA_ROOT), plugin_id, options)?;
+        let warnings = self.reload_plugins()?;
+        Ok(serde_json::json!({
+            "plugin_id": removed.plugin_id,
+            "removed_versions": removed.removed_versions,
+            "cleanup_pending": removed.cleanup_pending,
+            "presets_deleted": options.presets
+                && (presets_removed > 0 || user_data.preset_files_removed > 0),
+            "plugin_data_deleted": options.plugin_data && user_data.data_namespaces_removed > 0,
+            "warnings": warnings,
+        }))
+    }
+
     /// Validates a `.rfplugin` without installing it, so the interface can
     /// show what is inside before anyone commits to it.
     pub fn inspect_package(&self, archive: &[u8]) -> Result<serde_json::Value> {
@@ -816,6 +912,7 @@ fn manifest_roots(directory: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn load_plugin(root: &Path, data_root: &Path, stream: StreamFormat) -> Result<HostedPlugin> {
+    let managed = root.starts_with(data_root.join(STORE_DIRECTORY));
     let package = PluginPackage::open(root)?;
     if package.manifest().kind != PluginKind::Instrument {
         bail!(
@@ -858,6 +955,7 @@ fn load_plugin(root: &Path, data_root: &Path, stream: StreamFormat) -> Result<Ho
         instance,
         presets,
         selected_sound_id,
+        managed,
     })
 }
 

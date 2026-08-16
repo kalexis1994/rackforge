@@ -430,11 +430,17 @@ export function openBrowserSessionChannel(callbacks: SessionChannelCallbacks) {
 const selections = new Map<string, { name: string; archive: Uint8Array }>();
 let nextSelectionId = 1;
 
-/** Sends one archive to the engine and returns its answer. */
+/** Sends one plugin-store operation to the engine and returns its answer. */
 function sendPackage(
-  action: "inspect" | "install",
-  archive: Uint8Array,
-): Promise<{ ok: boolean; error?: string; preview?: PackagePreview; installed?: InstalledPackage }> {
+  action: "inspect" | "install" | "catalog" | "uninstall",
+  payload: Uint8Array = new Uint8Array(),
+): Promise<{
+  ok: boolean;
+  error?: string;
+  preview?: PackagePreview;
+  installed?: InstalledPackage;
+  catalog?: PluginWebDescriptor[];
+}> {
   const node = engine;
   if (!node) {
     return Promise.reject(new Error("The RackForge engine is not running."));
@@ -445,7 +451,7 @@ function sendPackage(
       resolve: (response) => resolve(JSON.parse(response)),
       reject,
     });
-    node.port.postMessage({ kind: "package", id, action, archive });
+    node.port.postMessage({ kind: "package", id, action, payload });
   });
 }
 
@@ -506,9 +512,11 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     } satisfies WebPublicConfig as T;
   }
   if (path === "/api/v1/plugins" && method === "GET") {
-    // The demo runs the instrument RackForge ships, which has no web surface
-    // of its own to index.
-    return [] as unknown as T;
+    const answer = await sendPackage("catalog");
+    if (!answer.ok || !answer.catalog) {
+      throw new HostRequestError(answer.error ?? "The plugin catalog is unavailable.", 503);
+    }
+    return answer.catalog as T;
   }
   if (path === "/api/v1/host/audio" && method === "GET") {
     const rate = context?.sampleRate ?? 48_000;
@@ -596,19 +604,29 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     // nothing left to start.
     return { status: "active" } as T;
   }
+  if (path.startsWith("/api/v1/plugins/") && method === "DELETE") {
+    const pluginId = decodeURIComponent(
+      path.slice("/api/v1/plugins/".length).split("?")[0],
+    );
+    const options = init.body ? (JSON.parse(String(init.body)) as object) : {};
+    const answer = await sendPackage(
+      "uninstall",
+      new TextEncoder().encode(JSON.stringify({ plugin_id: pluginId, ...options })),
+    );
+    if (!answer.ok) {
+      throw new HostRequestError(answer.error ?? "This plugin could not be removed.", 400);
+    }
+    await publishSnapshot();
+    return (answer as { removed?: unknown }).removed as T;
+  }
   if (path.startsWith("/api/v1/plugins/") && method === "GET") {
     const pluginId = decodeURIComponent(path.slice("/api/v1/plugins/".length));
-    return {
-      plugin_id: pluginId,
-      plugin_name: pluginId,
-      version: "",
-      active: true,
-      managed: true,
-      api_version: 1,
-      branding: null,
-      surfaces: [],
-      resources: [],
-    } satisfies PluginWebDescriptor as T;
+    const answer = await sendPackage("catalog");
+    const descriptor = answer.catalog?.find((plugin) => plugin.plugin_id === pluginId);
+    if (!descriptor) {
+      throw new HostRequestError("This plugin is not loaded.", 404);
+    }
+    return descriptor as T;
   }
   throw new HostRequestError(
     "The browser host does not provide this; it is part of an installed RackForge.",

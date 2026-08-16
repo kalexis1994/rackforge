@@ -26,6 +26,7 @@ import {
   PACKAGED_STORAGE_PREFIX,
   type EngineCommand,
   type EngineEvent,
+  type PackageMessage,
   type SeedFile,
 } from "./protocol";
 
@@ -54,6 +55,8 @@ interface HostExports {
   rf_render: (frames: number) => number;
   rf_inspect_plugin: (pointer: number, length: number) => number;
   rf_install_plugin: (pointer: number, length: number) => number;
+  rf_uninstall_plugin: (pointer: number, length: number) => number;
+  rf_plugin_catalog: () => number;
 }
 
 /**
@@ -160,7 +163,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
         this.#post({
           kind: "response",
           id: command.id,
-          response: this.#package(command.action, command.archive),
+          response: this.#package(command.action, command.payload),
         });
         this.#publishStorage();
         break;
@@ -243,21 +246,26 @@ class RackForgeEngine extends AudioWorkletProcessor {
    * Hands one archive to the host, which validates it and — for an install —
    * unpacks it into the plugin store and reloads the session over it.
    */
-  #package(action: "inspect" | "install", archive: Uint8Array): string {
+  #package(action: PackageMessage["action"], payload: Uint8Array): string {
     const host = this.#host;
     if (!host) {
       return JSON.stringify({ ok: false, error: "the RackForge engine is not running" });
     }
-    const pointer = host.rf_alloc(archive.length);
-    new Uint8Array(host.memory.buffer, pointer, archive.length).set(archive);
+    if (action === "catalog") {
+      return this.#readResponse(host.rf_plugin_catalog());
+    }
+    const pointer = host.rf_alloc(payload.length);
+    new Uint8Array(host.memory.buffer, pointer, payload.length).set(payload);
     try {
-      const length =
+      const call =
         action === "install"
-          ? host.rf_install_plugin(pointer, archive.length)
-          : host.rf_inspect_plugin(pointer, archive.length);
-      return this.#readResponse(length);
+          ? host.rf_install_plugin
+          : action === "uninstall"
+            ? host.rf_uninstall_plugin
+            : host.rf_inspect_plugin;
+      return this.#readResponse(call(pointer, payload.length));
     } finally {
-      host.rf_free(pointer, archive.length);
+      host.rf_free(pointer, payload.length);
     }
   }
 

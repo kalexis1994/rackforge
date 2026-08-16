@@ -147,6 +147,70 @@ pub unsafe extern "C" fn rf_install_plugin(pointer: *const u8, length: usize) ->
     })
 }
 
+/// Leaves the loaded plugin catalog in the response buffer as JSON, in the
+/// shape the interface expects from a RackForge gateway. Returns its length.
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_plugin_catalog() -> i32 {
+    HOST.with(|host| match host.borrow().as_ref() {
+        Some(host) => publish(&serde_json::json!({
+            "ok": true,
+            "catalog": host.plugin_catalog(),
+        })),
+        None => publish(&serde_json::json!({
+            "ok": false,
+            "error": "the RackForge host is not open",
+        })),
+    })
+}
+
+/// Removes an installed plugin and reloads the session without it. Returns the
+/// response length.
+///
+/// # Safety
+///
+/// `pointer` must address `length` readable bytes of UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rf_uninstall_plugin(pointer: *const u8, length: usize) -> i32 {
+    // SAFETY: forwarded from this function's contract.
+    let bytes = unsafe { std::slice::from_raw_parts(pointer, length) };
+    let request = match serde_json::from_slice::<UninstallRequest>(bytes) {
+        Ok(request) => request,
+        Err(error) => {
+            return publish(&serde_json::json!({
+                "ok": false,
+                "error": format!("unreadable removal request: {error}"),
+            }));
+        }
+    };
+    let options = rackforge_repository::PluginUserDataRemovalOptions {
+        presets: request.delete_presets,
+        plugin_data: request.delete_plugin_data,
+    };
+    HOST.with(|host| match host.borrow_mut().as_mut() {
+        Some(host) => match host.uninstall_package(&request.plugin_id, options) {
+            Ok(removed) => publish(&serde_json::json!({ "ok": true, "removed": removed })),
+            Err(error) => publish(&serde_json::json!({
+                "ok": false,
+                "error": format!("{error:#}"),
+            })),
+        },
+        None => publish(&serde_json::json!({
+            "ok": false,
+            "error": "the RackForge host is not open",
+        })),
+    })
+}
+
+/// What the interface asks to be removed along with a plugin's package.
+#[derive(serde::Deserialize)]
+struct UninstallRequest {
+    plugin_id: String,
+    #[serde(default)]
+    delete_presets: bool,
+    #[serde(default)]
+    delete_plugin_data: bool,
+}
+
 /// Returns a pointer to the buffer written by the most recent [`rf_open`] or
 /// [`rf_request`] call.
 #[unsafe(no_mangle)]

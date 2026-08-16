@@ -136,10 +136,12 @@ export async function startBrowserHost(): Promise<void> {
     const booted = milestone("booted", audio, "the RackForge engine did not answer");
 
     // The processor only exists once the context is running, and a suspended
-    // context never delivers the boot message. Start it here, and start it
-    // again on the first gesture for the browsers that require one.
+    // context never delivers the boot message. Most browsers keep it suspended
+    // until someone has interacted with the page, so this waits for that
+    // rather than failing: the engine has done nothing wrong, and a person who
+    // has not touched the page yet is not waiting for sound.
     resumeOnGesture(audio);
-    await audio.resume().catch(() => undefined);
+    await running(audio);
     await ready;
 
     node.port.postMessage(
@@ -175,6 +177,20 @@ export function browserHostWarnings(): string[] {
 
 export function browserHostError(): string | null {
   return bootError;
+}
+
+/** Resolves once the browser has let the context start. */
+function running(audio: AudioContext): Promise<void> {
+  return new Promise((resolve) => {
+    const settle = () => {
+      if (audio.state !== "running") return;
+      audio.removeEventListener("statechange", settle);
+      resolve();
+    };
+    audio.addEventListener("statechange", settle);
+    void audio.resume().catch(() => undefined);
+    settle();
+  });
 }
 
 /**

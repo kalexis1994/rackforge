@@ -36,6 +36,24 @@ instrument and its YDP Grand Piano as the initial playable program.
 - Restore the active mode, instrument, program, master volume, and pan after a
   restart.
 
+## Try it in a browser
+
+A published build of RackForge runs entirely inside a web page, with no
+installation and no server behind it:
+
+<https://kalexis1994.github.io/rackforge/>
+
+It is the same host as every other platform — the same session, performance
+library and portable plugin runtime, compiled to WebAssembly — playing the
+bundled RackForge Demo Synth. Play it from the on-screen keyboard in Touch
+Controller, or from a USB MIDI controller in browsers that support Web MIDI
+(Chrome and Edge; Firefox asks for permission; Safari has none). Sound starts
+after the first click or tap, which is a rule browsers apply to every page.
+
+What a page cannot offer, it does not pretend to: there are no audio devices to
+choose between, no access PIN, and no installing a `.rfplugin` from disk. For
+those, install RackForge below.
+
 ## Choose a platform
 
 | Platform | Best for | Audio and MIDI |

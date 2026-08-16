@@ -1316,6 +1316,24 @@ interface InstalledPluginResult {
   activation_required: boolean;
 }
 
+interface PluginInstallPreview {
+  selection_id: string;
+  plugin_id: string;
+  plugin_name: string;
+  vendor: string;
+  version: string;
+  description?: string | null;
+  kind: string;
+  platform: string;
+  portable: boolean;
+  archive_bytes: number;
+  branding?: {
+    banner_data_url: string;
+    background_color?: string | null;
+    accent_color?: string | null;
+  } | null;
+}
+
 const PLUGIN_ACTIVATION_TIMEOUT_MS = 45_000;
 
 async function synchronizePluginEnvironment() {
@@ -1372,29 +1390,51 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activationError, setActivationError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PluginInstallPreview | null>(null);
   const [installed, setInstalled] = useState<InstalledPluginResult | null>(null);
   const [activated, setActivated] = useState<PluginWebDescriptor | null>(null);
   const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
   const navigate = useNavigate();
 
+  const releaseSelection = useCallback(async (selectionId: string) => {
+    await postResourceApi("/api/v1/resources/selections/release", {
+      selection_id: selectionId,
+    });
+  }, []);
+
+  const closeDialog = useCallback(() => {
+    if (preview && !installed) {
+      void releaseSelection(preview.selection_id).catch(() => undefined);
+    }
+    onClose();
+  }, [installed, onClose, preview, releaseSelection]);
+
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onClose();
+      if (event.key === "Escape" && !busy) closeDialog();
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [busy, onClose]);
+  }, [busy, closeDialog]);
 
-  const installSelection = async (selection: ResourceSelection) => {
+  const inspectSelection = async (selection: ResourceSelection) => {
     setStatus(`Validating ${selection.display_name}…`);
-    return postResourceApi<InstalledPluginResult>("/api/v1/plugins/install", {
-      selection_id: selection.selection_id,
-    });
+    try {
+      const inspection = await postResourceApi<PluginInstallPreview>(
+        "/api/v1/plugins/inspect",
+        { selection_id: selection.selection_id },
+      );
+      setPreview(inspection);
+      setStatus(null);
+    } catch (reason) {
+      await releaseSelection(selection.selection_id).catch(() => undefined);
+      throw reason;
+    }
   };
 
   const finishInstall = async (result: InstalledPluginResult) => {
@@ -1418,6 +1458,34 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const installPreview = async () => {
+    if (!preview) return;
+    setBusy(true);
+    setError(null);
+    setStatus(`Installing ${preview.plugin_name}…`);
+    try {
+      const result = await postResourceApi<InstalledPluginResult>("/api/v1/plugins/install", {
+        selection_id: preview.selection_id,
+      });
+      setPreview(null);
+      await finishInstall(result);
+    } catch (reason) {
+      setPreview(null);
+      setStatus(null);
+      setError(reason instanceof Error ? reason.message : "Could not install this plugin.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelPreview = () => {
+    if (!preview || busy) return;
+    const selectionId = preview.selection_id;
+    setPreview(null);
+    void releaseSelection(selectionId).catch(() => undefined);
+    onClose();
+  };
+
   const openNativePicker = async () => {
     setBusy(true);
     setError(null);
@@ -1427,7 +1495,7 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
         kind: "file",
         extensions: [".rfplugin"],
       });
-      await finishInstall(await installSelection(selection));
+      await inspectSelection(selection);
     } catch (reason) {
       setStatus(null);
       setError(
@@ -1456,7 +1524,7 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
           body: file,
         },
       );
-      await finishInstall(await installSelection(selection));
+      await inspectSelection(selection);
     } catch (reason) {
       setStatus(null);
       setError(
@@ -1479,7 +1547,7 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
         "/api/v1/resources/selections",
         { entry_id: entry.id },
       );
-      await finishInstall(await installSelection(selection));
+      await inspectSelection(selection);
     } catch (reason) {
       setStatus(null);
       setError(
@@ -1490,11 +1558,24 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const previewDescription = preview?.description?.trim() || (preview
+    ? `${preview.kind === "instrument" ? "Instrument" : "Plugin"} by ${preview.vendor}, packaged for RackForge.`
+    : "");
+  const previewStyle = preview?.branding ? ({
+    "--preview-accent": preview.branding.accent_color || "#55e7ff",
+    "--preview-background": preview.branding.background_color || "#07131c",
+  } as CSSProperties) : undefined;
+  const packageSize = preview
+    ? preview.archive_bytes >= 1024 * 1024
+      ? `${(preview.archive_bytes / (1024 * 1024)).toFixed(1)} MB`
+      : `${Math.max(1, Math.round(preview.archive_bytes / 1024))} KB`
+    : "";
+
   return (
     <div
       className="install-plugin-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !busy) onClose();
+        if (event.target === event.currentTarget && !busy) closeDialog();
       }}
     >
       <section
@@ -1508,23 +1589,22 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
             <span className="eyebrow">PORTABLE PACKAGE</span>
             <h2 id="install-plugin-title">Install plugin</h2>
           </div>
-          <button className="icon-button" onClick={onClose} disabled={busy}>
+          <button className="icon-button" onClick={closeDialog} disabled={busy}>
             Close
           </button>
         </header>
-        {!installed ? <p className="install-plugin-intro">
+        {!installed && !preview ? <p className="install-plugin-intro">
           {native || desktop
             ? "Select a portable .rfplugin package. RackForge validates it before installing anything."
             : "Choose where the .rfplugin package is located. RackForge validates it on the host before installing anything."}
         </p> : null}
-        {!installed ? <div className="install-plugin-sources">
+        {!installed && !preview ? <div className="install-plugin-sources">
           <button
             type="button"
             className="install-source-card"
             disabled={busy}
             onClick={() => {
-              if (native) void openNativePicker();
-              else if (desktop) setBrowseHost(true);
+              if (native || desktop) void openNativePicker();
               else fileInputRef.current?.click();
             }}
           >
@@ -1563,6 +1643,36 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
             if (file) void uploadClientFile(file);
           }}
         />
+        {preview ? (
+          <div className="plugin-install-preview" style={previewStyle}>
+            <div className={`plugin-install-preview-banner${preview.branding ? " branded" : ""}`}>
+              {preview.branding ? (
+                <img src={preview.branding.banner_data_url} alt={`${preview.plugin_name} banner`} />
+              ) : (
+                <span aria-hidden="true">RF</span>
+              )}
+            </div>
+            <div className="plugin-install-preview-copy">
+              <span className="eyebrow">READY TO INSTALL</span>
+              <h3>{preview.plugin_name} <small>v{preview.version}</small></h3>
+              <p>{previewDescription}</p>
+              <div className="plugin-install-preview-meta" aria-label="Package details">
+                <span>{preview.vendor}</span>
+                <span>{preview.kind}</span>
+                <span>{preview.portable ? "Portable" : preview.platform}</span>
+                <span>{packageSize}</span>
+              </div>
+            </div>
+            <div className="plugin-install-preview-actions">
+              <button className="secondary-button" onClick={cancelPreview} disabled={busy}>
+                Cancel
+              </button>
+              <button className="primary-button" onClick={() => void installPreview()} disabled={busy}>
+                {busy ? <AsyncActionLabel active activeLabel="Installing…">Install</AsyncActionLabel> : "Install"}
+              </button>
+            </div>
+          </div>
+        ) : null}
         {status ? (
           <p className="install-plugin-status async-status-line">
             <AsyncSpinner label={status} />
@@ -3260,11 +3370,12 @@ export function PluginFrame({
           respond(false, "Resource is not declared by this plugin.");
         } else if (pendingResourceRequestRef.current) {
           respond(false, "Another resource selection is already open.");
-        } else if (isNativeHost()) {
+        } else if (isNativeHost() || isDesktopHost()) {
           pendingResourceRequestRef.current = event.data.request_id;
           bindNativePluginResource({
             plugin_id: instance.plugin_id,
             resource_id: resource.id,
+            kind: resource.kind,
           })
             .then((grant) => respond(true, undefined, grant))
             .catch((error: unknown) =>

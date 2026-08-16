@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
@@ -15,8 +16,8 @@ use rackforge_plugin_api::{
     WebSurfaceKind, abi::MidiEventV1,
 };
 use rackforge_repository::{
-    PluginUserDataRemovalOptions, cleanup_uninstall_tombstones, install_local_archive,
-    remove_plugin_user_data, uninstall_plugin,
+    PluginUserDataRemovalOptions, cleanup_uninstall_tombstones, inspect_local_archive,
+    install_local_archive, remove_plugin_user_data, uninstall_plugin,
 };
 use rackforge_session_api::{
     HostControlTarget, InstanceId, MasterLevel, MasterPan, ProgramDraftState,
@@ -2100,6 +2101,47 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabPollLongPre
         Ok(None) => ptr::null_mut(),
         Err(error) => result_string(&mut env, Err(error)),
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_inspectPluginFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    archive_path: JString,
+    store_root: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let archive_path = PathBuf::from(java_string(&mut env, archive_path)?);
+        let store_root = PathBuf::from(java_string(&mut env, store_root)?);
+        let bytes = std::fs::read(&archive_path)
+            .with_context(|| format!("reading selected plugin {}", archive_path.display()))?;
+        let inspection =
+            inspect_local_archive(&store_root, &bytes).context("validating the portable plugin")?;
+        let branding = inspection.branding.as_ref().map(|branding| {
+            serde_json::json!({
+                "banner_data_url": format!(
+                    "data:image/png;base64,{}",
+                    STANDARD.encode(&branding.banner_png)
+                ),
+                "background_color": branding.background_color,
+                "accent_color": branding.accent_color,
+            })
+        });
+        Ok(serde_json::json!({
+            "plugin_id": inspection.plugin_id,
+            "plugin_name": inspection.plugin_name,
+            "vendor": inspection.vendor,
+            "version": inspection.version,
+            "description": inspection.description,
+            "kind": inspection.kind,
+            "platform": inspection.platform,
+            "portable": inspection.portable,
+            "archive_bytes": inspection.archive_bytes,
+            "branding": branding,
+        })
+        .to_string())
+    })();
+    result_string(&mut env, result)
 }
 
 #[unsafe(no_mangle)]

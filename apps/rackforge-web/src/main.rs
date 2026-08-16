@@ -12,12 +12,14 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures_util::{SinkExt, StreamExt};
 use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_plugin_api::{PluginManifest, WebSurfaceKind};
 use rackforge_repository::{
-    InstalledPackage, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions, RepositoryError,
-    cleanup_uninstall_tombstones, install_local_archive, remove_plugin_user_data, uninstall_plugin,
+    InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions,
+    RepositoryError, cleanup_uninstall_tombstones, inspect_local_archive, install_local_archive,
+    remove_plugin_user_data, uninstall_plugin,
 };
 use rackforge_resource_api::{
     BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, ListGrantsRequest,
@@ -559,6 +561,11 @@ async fn main() -> Result<()> {
                 .layer(DefaultBodyLimit::max(MAX_CLIENT_UPLOAD_BYTES as usize)),
         )
         .route("/api/v1/resources/selections", post(select_host_resource))
+        .route(
+            "/api/v1/resources/selections/release",
+            post(release_resource_selection),
+        )
+        .route("/api/v1/plugins/inspect", post(inspect_selected_plugin))
         .route("/api/v1/plugins/install", post(install_selected_plugin))
         .route("/ws/v1/session", get(session_socket))
         .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_web_asset))
@@ -1609,6 +1616,98 @@ async fn select_host_resource(
     match state.resource_browser.select_host_entry(&request.entry_id) {
         Ok(selection) => Json(selection).into_response(),
         Err(error) => resource_error(error),
+    }
+}
+
+async fn release_resource_selection(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<InstallSelectedPluginRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match state
+        .resource_browser
+        .release_selection(request.selection_id.trim())
+    {
+        Ok(()) | Err(ResourceError::UnknownHandle) => {
+            Json(json!({"status": "released"})).into_response()
+        }
+        Err(error) => resource_error(error),
+    }
+}
+
+fn plugin_inspection_response(selection_id: &str, inspection: &LocalPackageInspection) -> Value {
+    let branding = inspection.branding.as_ref().map(|branding| {
+        json!({
+            "banner_data_url": format!(
+                "data:image/png;base64,{}",
+                STANDARD.encode(&branding.banner_png)
+            ),
+            "background_color": branding.background_color,
+            "accent_color": branding.accent_color,
+        })
+    });
+    json!({
+        "selection_id": selection_id,
+        "plugin_id": inspection.plugin_id,
+        "plugin_name": inspection.plugin_name,
+        "vendor": inspection.vendor,
+        "version": inspection.version,
+        "description": inspection.description,
+        "kind": inspection.kind,
+        "platform": inspection.platform,
+        "portable": inspection.portable,
+        "archive_bytes": inspection.archive_bytes,
+        "branding": branding,
+    })
+}
+
+async fn inspect_selected_plugin(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<InstallSelectedPluginRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let selection_id = request.selection_id.trim().to_owned();
+    if selection_id.is_empty() {
+        return resource_error(ResourceError::InvalidRequest(
+            "selection_id is required".into(),
+        ));
+    }
+    let path = match state.resource_browser.resolve_selection_file(&selection_id) {
+        Ok(path) => path,
+        Err(error) => return resource_error(error),
+    };
+    if fs::metadata(&path).map_or(true, |metadata| metadata.len() > MAX_PACKAGE_BYTES) {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin package exceeds RackForge's 512 MB limit".into(),
+        ));
+    }
+    let store_root = state.plugin_store_root.clone();
+    match tokio::task::spawn_blocking(move || {
+        fs::read(path)
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| inspect_local_archive(store_root, &bytes).map_err(Into::into))
+    })
+    .await
+    {
+        Ok(Ok(inspection)) => {
+            Json(plugin_inspection_response(&selection_id, &inspection)).into_response()
+        }
+        Ok(Err(error)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"status": "error", "message": error.to_string()})),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": "error", "message": error.to_string()})),
+        )
+            .into_response(),
     }
 }
 

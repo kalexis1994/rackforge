@@ -28,6 +28,8 @@ Place important content inside these safe areas:
 
 Do not bake version numbers, state, buttons, or loading messages into the
 images. RackForge overlays live information and localizes host controls.
+The banner is also shown in the package preview before the user confirms an
+installation.
 
 ## Manifest contract
 

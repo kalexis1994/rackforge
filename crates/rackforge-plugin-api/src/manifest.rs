@@ -384,6 +384,8 @@ pub struct PluginManifest {
     pub name: String,
     pub vendor: String,
     pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub api: ApiRequirement,
     pub kind: PluginKind,
     pub state_version: u32,
@@ -749,6 +751,7 @@ mod tests {
             name: "Gain".into(),
             vendor: "RackForge".into(),
             version: "0.1.0".into(),
+            description: Some("A test RackForge effect.".into()),
             api: ApiRequirement { major: 1, minor: 0 },
             kind: PluginKind::Effect,
             state_version: 1,

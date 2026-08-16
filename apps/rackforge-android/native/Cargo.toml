@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
 jni = "0.21"
 rackforge-core = { path = "../../../crates/rackforge-core" }
 rackforge-control-api = { path = "../../../crates/rackforge-control-api" }

@@ -1,3 +1,5 @@
+import type { ResourceGrant, ResourceSelection } from "./types";
+
 export const HOST_PROTOCOL = "rackforge.host@1";
 
 type JsonValue =
@@ -241,39 +243,48 @@ export function syncNativeRoute(path: string) {
 }
 
 export function selectNativeResource(options: {
-  kind: "file";
+  kind: "file" | "directory";
   extensions?: string[];
-}): Promise<{
-  selection_id: string;
-  display_name: string;
-  kind: "file";
-  size: number | null;
-  source: "client_upload";
-  expires_in_seconds: number;
-}> {
-  if (!nativeBridge()) {
-    return Promise.reject(
-      new HostRequestError("The native resource picker is unavailable."),
-    );
+}): Promise<ResourceSelection> {
+  if (nativeBridge()) {
+    return requestNative("resource.pick", options, 10 * 60_000);
   }
-  return requestNative("resource.pick", options, 10 * 60_000);
+  if (isDesktopHost()) {
+    return hostJson<ResourceSelection>("/api/v1/resources/native-pick", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(options),
+    });
+  }
+  return Promise.reject(
+    new HostRequestError("The native resource picker is unavailable."),
+  );
 }
 
 export function bindNativePluginResource(options: {
   plugin_id: string;
   resource_id: string;
-}): Promise<{
-  grant_id: string;
-  resource_id: string;
-  display_name: string;
   kind: "file" | "directory";
-}> {
-  if (!nativeBridge()) {
-    return Promise.reject(
-      new HostRequestError("The native plugin resource picker is unavailable."),
+}): Promise<ResourceGrant> {
+  if (nativeBridge()) {
+    return requestNative("resource.bind", options, 10 * 60_000);
+  }
+  if (isDesktopHost()) {
+    return selectNativeResource({ kind: options.kind }).then((selection) =>
+      hostJson<ResourceGrant>("/api/v1/resources/bind-selection", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          plugin_id: options.plugin_id,
+          resource_id: options.resource_id,
+          selection_id: selection.selection_id,
+        }),
+      }),
     );
   }
-  return requestNative("resource.bind", options, 10 * 60_000);
+  return Promise.reject(
+    new HostRequestError("The native plugin resource picker is unavailable."),
+  );
 }
 
 export function selectNativePluginSound(options: {

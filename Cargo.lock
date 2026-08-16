@@ -3598,6 +3598,7 @@ name = "rackforge-android-native"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "base64",
  "jni 0.21.1",
  "rackforge-control-api",
  "rackforge-controller-arturia-keylab-essential-mk3",
@@ -3709,6 +3710,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "axum",
+ "base64",
  "cpal",
  "eframe",
  "futures-util",
@@ -3941,6 +3943,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "axum",
+ "base64",
  "futures-util",
  "getrandom 0.3.4",
  "mime_guess",

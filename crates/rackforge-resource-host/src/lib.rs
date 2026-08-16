@@ -337,6 +337,56 @@ impl NativeResourceBrowser {
         )
     }
 
+    /// Registers a path explicitly chosen through a trusted native file picker.
+    ///
+    /// This is deliberately separate from the Web browser API: arbitrary paths
+    /// must never be accepted from a remote client. The returned handle keeps
+    /// the native path private and can be consumed by the normal selection or
+    /// grant flows.
+    pub fn register_native_selection(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<ResourceSelection, ResourceError> {
+        let path = fs::canonicalize(path.as_ref()).map_err(backend)?;
+        let metadata = fs::metadata(&path).map_err(backend)?;
+        let kind = if metadata.is_file() {
+            ResourceEntryKind::File
+        } else if metadata.is_dir() {
+            ResourceEntryKind::Directory
+        } else {
+            return Err(ResourceError::InvalidRequest(
+                "the native selection is not a file or directory".into(),
+            ));
+        };
+        let display_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .ok_or(ResourceError::Unreadable)?;
+        let scope_root = match kind {
+            ResourceEntryKind::File => path
+                .parent()
+                .map(Path::to_path_buf)
+                .ok_or(ResourceError::OutsideMount)?,
+            ResourceEntryKind::Directory => path.clone(),
+        };
+        let mut state = self.state.lock().map_err(|_| poisoned())?;
+        prune_expired_selections(&mut state);
+        register_selection(
+            &mut state,
+            SelectionRecord {
+                path,
+                scope_root,
+                display_name,
+                kind,
+                size: matches!(kind, ResourceEntryKind::File).then_some(metadata.len()),
+                source: ResourceSelectionSource::HostEntry,
+                created_unix_seconds: unix_seconds(),
+                owned: false,
+            },
+        )
+    }
+
     fn register_client_upload_file_with_id(
         &self,
         display_name: String,
@@ -1153,6 +1203,40 @@ mod tests {
         );
         drop(consumed_upload);
         assert!(!uploaded_file.exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn trusted_native_selections_stay_opaque_and_preserve_user_paths() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-native-selection-test-{}-{}",
+            std::process::id(),
+            unix_seconds()
+        ));
+        let file = root.join("outside.rfplugin");
+        let directory = root.join("sound-bank");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(&file, [1, 2, 3]).unwrap();
+        let browser = NativeResourceBrowser::new([]).unwrap();
+
+        let file_selection = browser.register_native_selection(&file).unwrap();
+        assert_eq!(file_selection.kind, ResourceEntryKind::File);
+        assert_eq!(file_selection.display_name, "outside.rfplugin");
+        assert!(!file_selection.selection_id.contains("outside"));
+        let consumed = browser
+            .consume_selection_file(&file_selection.selection_id)
+            .unwrap();
+        assert_eq!(consumed.path(), fs::canonicalize(&file).unwrap());
+        drop(consumed);
+        assert!(file.is_file());
+
+        let directory_selection = browser.register_native_selection(&directory).unwrap();
+        assert_eq!(directory_selection.kind, ResourceEntryKind::Directory);
+        browser
+            .release_selection(&directory_selection.selection_id)
+            .unwrap();
+        assert!(directory.is_dir());
 
         fs::remove_dir_all(root).unwrap();
     }

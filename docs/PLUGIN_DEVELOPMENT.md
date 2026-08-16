@@ -66,6 +66,7 @@ id = "org.example.instrument"
 name = "Example Instrument"
 vendor = "Example Audio"
 version = "1.0.0"
+description = "A concise description shown before the user installs the plugin."
 kind = "instrument"
 state_version = 1
 
@@ -87,6 +88,10 @@ RackForge fully decodes them while validating the package, rejects filesystem
 escapes and excessive file sizes, and exposes only host-owned asset URLs to the
 shared UI. See [Plugin branding](PLUGIN_BRANDING.md) for composition rules and
 where each asset appears.
+
+`description` is optional for compatibility, but new plugins should provide it.
+RackForge shows it with the validated banner, name, vendor, version, type, and
+package size in a confirmation preview before installation starts.
 
 Schema 1 remains loadable so already published plugins do not break. RackForge
 uses its generic plugin identity for those packages; adding any branding field

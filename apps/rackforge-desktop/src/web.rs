@@ -7,11 +7,14 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures_util::{SinkExt, StreamExt};
 use include_dir::{Dir, include_dir};
 use rackforge_control_api::{ClientId, ControlRequest, ControlResponse};
 use rackforge_core::PluginPackage;
-use rackforge_repository::{MAX_PACKAGE_BYTES, install_local_archive};
+use rackforge_repository::{
+    LocalPackageInspection, MAX_PACKAGE_BYTES, inspect_local_archive, install_local_archive,
+};
 use rackforge_resource_api::{
     BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, ListGrantsRequest,
     LoadGrantedResourceRequest, MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser, ResourceEntryKind,
@@ -64,6 +67,14 @@ struct UploadResourceQuery {
 #[serde(deny_unknown_fields)]
 struct InstallSelectedPluginRequest {
     selection_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeResourcePickRequest {
+    kind: ResourceEntryKind,
+    #[serde(default)]
+    extensions: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
@@ -408,6 +419,12 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
                     .layer(DefaultBodyLimit::max(MAX_CLIENT_UPLOAD_BYTES as usize)),
             )
             .route("/api/v1/resources/selections", post(select_host_resource))
+            .route("/api/v1/resources/native-pick", post(pick_native_resource))
+            .route(
+                "/api/v1/resources/selections/release",
+                post(release_resource_selection),
+            )
+            .route("/api/v1/plugins/inspect", post(inspect_selected_plugin))
             .route("/api/v1/plugins/install", post(install_selected_plugin))
     } else {
         router.route("/api/v1/config", get(config))
@@ -777,6 +794,147 @@ async fn select_host_resource(
     match state.resource_browser.select_host_entry(&request.entry_id) {
         Ok(selection) => Json(selection).into_response(),
         Err(error) => resource_error(error),
+    }
+}
+
+async fn pick_native_resource(
+    State(state): State<WebState>,
+    Json(request): Json<NativeResourcePickRequest>,
+) -> Response {
+    #[cfg(target_os = "windows")]
+    {
+        let picked = match tokio::task::spawn_blocking(move || {
+            let mut dialog = rfd::FileDialog::new().set_title(match request.kind {
+                ResourceEntryKind::File => "Choose a file",
+                ResourceEntryKind::Directory => "Choose a folder",
+            });
+            if matches!(request.kind, ResourceEntryKind::File) && !request.extensions.is_empty() {
+                let extensions = request
+                    .extensions
+                    .iter()
+                    .map(|extension| extension.trim().trim_start_matches('.'))
+                    .filter(|extension| {
+                        !extension.is_empty()
+                            && extension
+                                .chars()
+                                .all(|character| character.is_ascii_alphanumeric())
+                    })
+                    .collect::<Vec<_>>();
+                if !extensions.is_empty() {
+                    dialog = dialog.add_filter("Supported files", &extensions);
+                }
+            }
+            match request.kind {
+                ResourceEntryKind::File => dialog.pick_file(),
+                ResourceEntryKind::Directory => dialog.pick_folder(),
+            }
+        })
+        .await
+        {
+            Ok(Some(path)) => path,
+            Ok(None) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"status":"cancelled", "message":"Resource selection was cancelled."})),
+                )
+                    .into_response();
+            }
+            Err(error) => return internal_error(error),
+        };
+        match state.resource_browser.register_native_selection(picked) {
+            Ok(selection) => Json(selection).into_response(),
+            Err(error) => resource_error(error),
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (state, request);
+        resource_error(ResourceError::Backend(
+            "The native resource picker is unavailable on this Desktop build".into(),
+        ))
+    }
+}
+
+async fn release_resource_selection(
+    State(state): State<WebState>,
+    Json(request): Json<InstallSelectedPluginRequest>,
+) -> Response {
+    match state
+        .resource_browser
+        .release_selection(request.selection_id.trim())
+    {
+        Ok(()) => Json(json!({"status": "released"})).into_response(),
+        Err(ResourceError::UnknownHandle) => Json(json!({"status": "released"})).into_response(),
+        Err(error) => resource_error(error),
+    }
+}
+
+fn plugin_inspection_response(selection_id: &str, inspection: &LocalPackageInspection) -> Value {
+    let branding = inspection.branding.as_ref().map(|branding| {
+        json!({
+            "banner_data_url": format!(
+                "data:image/png;base64,{}",
+                STANDARD.encode(&branding.banner_png)
+            ),
+            "background_color": branding.background_color,
+            "accent_color": branding.accent_color,
+        })
+    });
+    json!({
+        "selection_id": selection_id,
+        "plugin_id": inspection.plugin_id,
+        "plugin_name": inspection.plugin_name,
+        "vendor": inspection.vendor,
+        "version": inspection.version,
+        "description": inspection.description,
+        "kind": inspection.kind,
+        "platform": inspection.platform,
+        "portable": inspection.portable,
+        "archive_bytes": inspection.archive_bytes,
+        "branding": branding,
+    })
+}
+
+async fn inspect_selected_plugin(
+    State(state): State<WebState>,
+    Json(request): Json<InstallSelectedPluginRequest>,
+) -> Response {
+    let selection_id = request.selection_id.trim().to_owned();
+    if selection_id.is_empty() {
+        return resource_error(ResourceError::InvalidRequest(
+            "selection_id is required".into(),
+        ));
+    }
+    let Some(store_root) = state.plugin_store_root.clone() else {
+        return resource_error(ResourceError::Backend(
+            "Desktop plugin storage is unavailable".into(),
+        ));
+    };
+    let path = match state.resource_browser.resolve_selection_file(&selection_id) {
+        Ok(path) => path,
+        Err(error) => return resource_error(error),
+    };
+    if fs::metadata(&path).map_or(true, |metadata| metadata.len() > MAX_PACKAGE_BYTES) {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin package exceeds RackForge's 512 MB limit".into(),
+        ));
+    }
+    match tokio::task::spawn_blocking(move || {
+        fs::read(path)
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| inspect_local_archive(store_root, &bytes).map_err(Into::into))
+    })
+    .await
+    {
+        Ok(Ok(inspection)) => {
+            Json(plugin_inspection_response(&selection_id, &inspection)).into_response()
+        }
+        Ok(Err(error)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"status":"error", "message":error.to_string()})),
+        )
+            .into_response(),
+        Err(error) => internal_error(error),
     }
 }
 

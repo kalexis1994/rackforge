@@ -175,12 +175,24 @@ pub fn cleanup_uninstall_tombstones(
 pub struct LocalPackageInspection {
     pub plugin_id: String,
     pub plugin_name: String,
+    pub vendor: String,
     pub version: String,
+    pub description: Option<String>,
     pub kind: PluginKind,
     pub platform: String,
     pub portable: bool,
     pub artifact_sha256: String,
     pub archive_bytes: u64,
+    pub branding: Option<LocalPackageBrandingPreview>,
+}
+
+/// Branding bytes extracted from a fully validated package for a host-owned
+/// installation preview. The browser never receives an archive path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LocalPackageBrandingPreview {
+    pub banner_png: Vec<u8>,
+    pub background_color: Option<String>,
+    pub accent_color: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -871,15 +883,31 @@ pub fn inspect_local_archive(
             repository_platform_key()?
         };
         validate_extracted_payload(&stage, &manifest, platform)?;
+        let branding = manifest
+            .branding
+            .as_ref()
+            .map(|branding| {
+                fs::read(stage.join(&branding.banner)).map(|banner_png| {
+                    LocalPackageBrandingPreview {
+                        banner_png,
+                        background_color: branding.background_color.clone(),
+                        accent_color: branding.accent_color.clone(),
+                    }
+                })
+            })
+            .transpose()?;
         Ok(LocalPackageInspection {
             plugin_id: manifest.id,
             plugin_name: manifest.name,
+            vendor: manifest.vendor,
             version: manifest.version,
+            description: manifest.description,
             kind: manifest.kind,
             platform: platform.into(),
             portable,
             artifact_sha256: hex_digest(Sha256::digest(bytes).as_slice()),
             archive_bytes: bytes.len() as u64,
+            branding,
         })
     })();
     if stage.exists() {
@@ -1767,11 +1795,14 @@ preset_catalog = "metadata/presets.json"
         let inspection = inspect_local_archive(&root, &bytes).unwrap();
         assert_eq!(inspection.plugin_id, "org.rackforge.synth");
         assert_eq!(inspection.plugin_name, "Test Synth");
+        assert_eq!(inspection.vendor, "RackForge Test");
         assert_eq!(inspection.version, "1.2.3");
+        assert_eq!(inspection.description, None);
         assert_eq!(inspection.kind, PluginKind::Instrument);
         assert_eq!(inspection.platform, "wasm-v1");
         assert!(inspection.portable);
         assert_eq!(inspection.archive_bytes, bytes.len() as u64);
+        assert_eq!(inspection.branding, None);
         assert_eq!(
             inspection.artifact_sha256,
             hex_digest(Sha256::digest(&bytes).as_slice())

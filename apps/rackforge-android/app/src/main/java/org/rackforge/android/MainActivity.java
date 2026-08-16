@@ -181,6 +181,7 @@ public final class MainActivity extends Activity {
     }
 
     private static native String installPluginFile(String archivePath, String storeRoot);
+    private static native String inspectPluginFile(String archivePath, String storeRoot);
     private static native String installedPlugins(String storeRoot);
     private static native String uninstallPlugin(String pluginId, String storeRoot,
             String dataRoot, boolean deletePresets, boolean deletePluginData);
@@ -850,9 +851,18 @@ public final class MainActivity extends Activity {
                 } else if ("GET".equals(method) && "/api/v1/plugins".equals(path)) {
                     result = sharedPluginDescriptors();
                 } else if ("POST".equals(method)
+                        && "/api/v1/plugins/inspect".equals(path)) {
+                    JSONObject body = new JSONObject(params.optString("body", "{}"));
+                    result = inspectSelectedClientResource(body.getString("selection_id"));
+                } else if ("POST".equals(method)
                         && "/api/v1/plugins/install".equals(path)) {
                     JSONObject body = new JSONObject(params.optString("body", "{}"));
                     result = installSelectedClientResource(body.getString("selection_id"));
+                } else if ("POST".equals(method)
+                        && "/api/v1/resources/selections/release".equals(path)) {
+                    JSONObject body = new JSONObject(params.optString("body", "{}"));
+                    releaseSelectedClientResource(body.getString("selection_id"));
+                    result = new JSONObject().put("status", "released");
                 } else if ("POST".equals(method)
                         && "/api/v1/plugins/install-local".equals(path)) {
                     respondNativeHost(requestId, true, 202, null,
@@ -2457,6 +2467,28 @@ public final class MainActivity extends Activity {
             if (selection.file.isFile() && !selection.file.delete()) {
                 Log.w("RackForge", "Could not remove consumed resource " + selection.file);
             }
+        }
+    }
+
+    private JSONObject inspectSelectedClientResource(String selectionId) throws Exception {
+        cleanupExpiredClientResources();
+        ClientResourceSelection selection = clientResourceSelections.get(selectionId);
+        if (selection == null || !selection.file.isFile()) {
+            throw new IllegalArgumentException("The resource selection is missing or expired.");
+        }
+        if (selection.file.length() > MAX_PLUGIN_BYTES) {
+            throw new IllegalArgumentException("The plugin exceeds the 512 MB package limit.");
+        }
+        JSONObject inspection = new JSONObject(inspectPluginFile(
+                selection.file.getAbsolutePath(), pluginStoreRoot().getAbsolutePath()));
+        inspection.put("selection_id", selectionId);
+        return inspection;
+    }
+
+    private void releaseSelectedClientResource(String selectionId) {
+        ClientResourceSelection selection = clientResourceSelections.remove(selectionId);
+        if (selection != null && selection.file.isFile() && !selection.file.delete()) {
+            Log.w("RackForge", "Could not remove cancelled resource " + selection.file);
         }
     }
 

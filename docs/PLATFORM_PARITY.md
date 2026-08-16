@@ -28,7 +28,7 @@ cannot exist on that host, and `unaudited` means nobody has checked yet.
 | Install a portable .rfplugin package | yes | yes | yes | yes |
 | Remove an installed plugin and its data | yes | yes | yes | yes |
 | Give a plugin a sound library or ROM it declares | yes | yes | yes | planned |
-| Show a plugin's own PLAY and CONFIG interfaces | yes | yes | yes | planned |
+| Show a plugin's own PLAY and CONFIG interfaces | yes | yes | yes | yes |
 | Drive hardware surfaces from a .rfcontroller | unaudited | unaudited | yes | planned |
 | Choose the audio device and buffer size | yes | yes | yes | no |
 | Keep instruments and performances between runs | yes | yes | yes | yes |
@@ -47,7 +47,6 @@ cannot exist on that host, and `unaudited` means nobody has checked yet.
 - **Play a Rack, with every slot rendered** (planned): the page renders the active PLAY instrument; Rack slots are not mixed yet
 - **Edit one Rack slot without disturbing PLAY** (planned): isolated plugin state is not exposed by the browser host yet
 - **Give a plugin a sound library or ROM it declares** (planned): a page can read a file, but the host does not deliver it to a plugin yet
-- **Show a plugin's own PLAY and CONFIG interfaces** (planned): plugin-owned interfaces need an origin to serve package files from
 - **Drive hardware surfaces from a .rfcontroller** (planned): blocked on MIDI output, and unavailable in browsers without Web MIDI
 - **Choose the audio device and buffer size** (no): a page renders into the output the browser gives it and cannot enumerate or configure audio hardware
 - **Restore the previous session on the next start** (planned): the session checkpoint is not written by the browser host yet

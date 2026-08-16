@@ -21,6 +21,13 @@
 const CACHE = "rackforge-v1";
 /** Vite writes build output here, with a content hash in every filename. */
 const IMMUTABLE = "/assets/";
+/**
+ * Files that belong to an installed plugin rather than to the site. RackForge
+ * writes them here from the host's own storage, which is the only way a page
+ * can give a plugin's interface an address to load from.
+ */
+const PLUGIN_ASSETS = "/plugin-assets/";
+const PLUGIN_ASSET_CACHE = "rackforge-plugin-assets";
 
 self.addEventListener("install", (event) => {
   // The page and its manifest are the minimum an offline start needs; the rest
@@ -39,7 +46,11 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((names) =>
-        Promise.all(names.filter((name) => name !== CACHE).map((name) => caches.delete(name))),
+        Promise.all(
+          names
+            .filter((name) => name !== CACHE && name !== PLUGIN_ASSET_CACHE)
+            .map((name) => caches.delete(name)),
+        ),
       )
       .then(() => self.clients.claim()),
   );
@@ -51,6 +62,13 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
+  // Checked before navigations: a plugin's interface is loaded by an iframe,
+  // which is itself a navigation, and it must be answered from the package
+  // rather than from the site.
+  if (url.pathname.includes(PLUGIN_ASSETS)) {
+    event.respondWith(pluginAsset(request));
+    return;
+  }
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request));
     return;
@@ -75,6 +93,26 @@ async function networkFirst(request) {
     if (cached) return cached;
     throw error;
   }
+}
+
+/**
+ * Answers from what RackForge published, and from nowhere else: a package
+ * file that is not in the cache does not exist on the network either, so a
+ * miss is a 404 rather than a request that escapes to the site.
+ *
+ * The version query is ignored when matching, since it identifies the package
+ * version rather than a different file.
+ */
+async function pluginAsset(request) {
+  const cache = await caches.open(PLUGIN_ASSET_CACHE);
+  const cached = await cache.match(request, { ignoreSearch: true });
+  return (
+    cached ??
+    new Response("This plugin file is not installed.", {
+      status: 404,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    })
+  );
 }
 
 async function cacheFirst(request) {

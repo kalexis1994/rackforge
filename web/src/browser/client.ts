@@ -16,6 +16,7 @@ import {
   type EngineEvent,
   type SeedFile,
 } from "./protocol";
+import { pluginAssetUrl, publishPluginAssets, whenServing } from "./pluginAssets";
 import {
   readStoredFiles,
   requestPersistentStorage,
@@ -83,10 +84,12 @@ async function loadStorage(): Promise<SeedFile[]> {
     ),
     readStoredFiles(),
   ]);
-  return [
+  const files = [
     ...packaged,
     ...stored.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX)),
   ];
+  await publishPluginAssets(files).catch(() => undefined);
+  return files;
 }
 
 /**
@@ -100,6 +103,9 @@ let pendingStorage: SeedFile[] = [];
 
 function storeFiles(files: SeedFile[]) {
   pendingStorage = files;
+  // A plugin's own interface is served from what the host holds, so the
+  // published files follow every install and removal.
+  void publishPluginAssets(files).catch(() => undefined);
   if (storageWrite !== null) return;
   storageWrite = window.setTimeout(() => {
     storageWrite = null;
@@ -439,7 +445,7 @@ function sendPackage(
   error?: string;
   preview?: PackagePreview;
   installed?: InstalledPackage;
-  catalog?: PluginWebDescriptor[];
+  catalog?: CatalogEntry[];
 }> {
   const node = engine;
   if (!node) {
@@ -465,6 +471,47 @@ interface PackagePreview {
   platform: string;
   portable: boolean;
   archive_bytes: number;
+}
+
+/**
+ * The host reports paths inside a package, since it has no idea where the page
+ * publishes them. This turns them into the URLs the interface loads.
+ */
+function withAssetUrls(plugin: CatalogEntry, serving: boolean): PluginWebDescriptor {
+  const asset = (entry: string) => pluginAssetUrl(plugin.package_root, entry, plugin.version);
+  return {
+    ...plugin,
+    branding: serving && plugin.branding
+      ? {
+          icon_url: asset(plugin.branding.icon),
+          banner_url: asset(plugin.branding.banner),
+          splash_url: asset(plugin.branding.splash),
+          background_color: plugin.branding.background_color ?? undefined,
+          accent_color: plugin.branding.accent_color ?? undefined,
+        }
+      : null,
+    // Without a worker to serve them, a plugin's own pages have no address,
+    // and the interface says so rather than loading a broken frame.
+    surfaces: serving
+      ? plugin.surfaces.map((surface) => ({
+          kind: surface.kind,
+          entry_url: asset(surface.entry),
+        }))
+      : [],
+  };
+}
+
+/** One plugin as the host describes it, before its files have an address. */
+interface CatalogEntry extends Omit<PluginWebDescriptor, "branding" | "surfaces"> {
+  package_root: string;
+  branding: {
+    icon: string;
+    banner: string;
+    splash: string;
+    background_color?: string | null;
+    accent_color?: string | null;
+  } | null;
+  surfaces: Array<{ kind: "play" | "config"; entry: string }>;
 }
 
 interface InstalledPackage {
@@ -516,7 +563,8 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     if (!answer.ok || !answer.catalog) {
       throw new HostRequestError(answer.error ?? "The plugin catalog is unavailable.", 503);
     }
-    return answer.catalog as T;
+    const serving = await whenServing();
+    return answer.catalog.map((plugin) => withAssetUrls(plugin, serving)) as T;
   }
   if (path === "/api/v1/host/audio" && method === "GET") {
     const rate = context?.sampleRate ?? 48_000;
@@ -626,7 +674,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     if (!descriptor) {
       throw new HostRequestError("This plugin is not loaded.", 404);
     }
-    return descriptor as T;
+    return withAssetUrls(descriptor, await whenServing()) as T;
   }
   throw new HostRequestError(
     "The browser host does not provide this; it is part of an installed RackForge.",

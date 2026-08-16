@@ -82,6 +82,9 @@ struct HostedPlugin {
     /// True when the package was installed into the page's plugin store, as
     /// opposed to shipped with the site.
     managed: bool,
+    /// Where the package sits in the host's storage, so the page can publish
+    /// the files a plugin's own interface is made of.
+    package_root: String,
 }
 
 pub struct BrowserHost {
@@ -623,11 +626,37 @@ impl BrowserHost {
                     "active": active.as_ref() == Some(&plugin.instance_id),
                     "managed": plugin.managed,
                     "api_version": manifest.api.major,
-                    "branding": serde_json::Value::Null,
-                    // Plugin-owned web interfaces are served by a host that can
-                    // publish files over HTTP. A page has no origin to publish
-                    // them on yet, so none is advertised.
-                    "surfaces": Vec::<serde_json::Value>::new(),
+                    "branding": manifest.branding.as_ref().map(|branding| {
+                        serde_json::json!({
+                            "icon": branding.icon,
+                            "banner": branding.banner,
+                            "splash": branding.splash,
+                            "background_color": branding.background_color,
+                            "accent_color": branding.accent_color,
+                        })
+                    }),
+                    // Paths inside the package, not URLs: the page publishes
+                    // these files itself and knows where it put them.
+                    "package_root": plugin.package_root.strip_prefix(DATA_ROOT).unwrap_or(&plugin.package_root),
+                    "surfaces": manifest
+                        .web_ui
+                        .as_ref()
+                        .map(|web_ui| {
+                            web_ui
+                                .surfaces
+                                .iter()
+                                .map(|surface| {
+                                    serde_json::json!({
+                                        "kind": match surface.kind {
+                                            rackforge_plugin_api::WebSurfaceKind::Config => "config",
+                                            _ => "play",
+                                        },
+                                        "entry": surface.entry,
+                                    })
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default(),
                     "resources": manifest
                         .resources
                         .iter()
@@ -949,6 +978,7 @@ fn load_plugin(root: &Path, data_root: &Path, stream: StreamFormat) -> Result<Ho
     )?;
 
     Ok(HostedPlugin {
+        package_root: root.to_string_lossy().into_owned(),
         instance_id,
         plugin_id: package.manifest().id.clone(),
         runtime: loaded,

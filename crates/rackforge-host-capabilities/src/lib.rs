@@ -414,10 +414,7 @@ const BROWSER: &[(Capability, Support)] = &[
         Capability::PluginResources,
         Support::Planned("a page can read a file, but the host does not deliver it to a plugin yet"),
     ),
-    (
-        Capability::PluginWebSurfaces,
-        Support::Planned("plugin-owned interfaces need an origin to serve package files from"),
-    ),
+    (Capability::PluginWebSurfaces, Support::Yes),
     (
         Capability::ControllerPackages,
         Support::Planned("blocked on MIDI output, and unavailable in browsers without Web MIDI"),

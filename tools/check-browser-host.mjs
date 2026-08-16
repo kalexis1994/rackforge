@@ -292,6 +292,13 @@ const PROBES = {
     const library = request({ op: "performance_snapshot" });
     return library.status === "performance_snapshot" ? null : library.message;
   },
+  plugin_web_surfaces: () => {
+    // The page serves the files; the host's part is reporting which files a
+    // package declares as its interface.
+    const listed = JSON.parse(readResponse(host.rf_plugin_catalog()));
+    const declared = listed.catalog?.some((plugin) => plugin.surfaces?.length > 0);
+    return declared ? null : "no loaded plugin declares a web surface";
+  },
   plugin_install: () => {
     if (!packagePath) return "no .rfplugin was given to install";
     const archive = new Uint8Array(readFileSync(packagePath));

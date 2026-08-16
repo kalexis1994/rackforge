@@ -39,11 +39,17 @@ jobs:
       - name: Build the host and the instrument it plays
         run: ./tools/build-web-demo.sh
 
-      - name: Check the host outside a browser
+      # Every capability the host claims in crates/rackforge-host-capabilities
+      # is exercised here, so the parity table cannot promise what the host
+      # does not do.
+      - name: Check the host against what it claims
         run: |
           storage="$(mktemp -d)"
           cp -r web/public/demo/rackforge/. "$storage"
-          node tools/check-browser-host.mjs web/public/demo/rackforge-browser.wasm "$storage"
+          python3 tools/make-probe-package.py \
+            web/public/demo/rackforge/plugins/demo-synth "$RUNNER_TEMP/probe.rfplugin"
+          node tools/check-browser-host.mjs \
+            web/public/demo/rackforge-browser.wasm "$storage" "$RUNNER_TEMP/probe.rfplugin"
 
       - name: Install the interface dependencies
         run: pnpm install --frozen-lockfile

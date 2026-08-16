@@ -3629,6 +3629,7 @@ dependencies = [
  "rackforge-audio-api",
  "rackforge-control-api",
  "rackforge-core",
+ "rackforge-host-capabilities",
  "rackforge-performance-api",
  "rackforge-plugin-api",
  "rackforge-repository",
@@ -3782,6 +3783,10 @@ version = "0.1.2"
 dependencies = [
  "rackforge-plugin-sdk",
 ]
+
+[[package]]
+name = "rackforge-host-capabilities"
+version = "0.1.2"
 
 [[package]]
 name = "rackforge-midi-api"

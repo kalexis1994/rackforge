@@ -147,6 +147,31 @@ pub unsafe extern "C" fn rf_install_plugin(pointer: *const u8, length: usize) ->
     })
 }
 
+/// Leaves this host's declared capabilities in the response buffer, so a page
+/// can hide what it cannot do and CI can probe what it claims. Returns the
+/// response length.
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_capabilities() -> i32 {
+    use rackforge_host_capabilities::{Capability, Host};
+
+    let capabilities: Vec<serde_json::Value> = Capability::ALL
+        .iter()
+        .map(|capability| {
+            let support = Host::Browser
+                .support(*capability)
+                .expect("every capability is declared for every host");
+            serde_json::json!({
+                "id": capability.id(),
+                "summary": capability.summary(),
+                "supported": support.is_supported(),
+                "state": support.mark(),
+                "reason": support.reason(),
+            })
+        })
+        .collect();
+    publish(&serde_json::json!({ "ok": true, "capabilities": capabilities }))
+}
+
 /// Leaves the loaded plugin catalog in the response buffer as JSON, in the
 /// shape the interface expects from a RackForge gateway. Returns its length.
 #[unsafe(no_mangle)]

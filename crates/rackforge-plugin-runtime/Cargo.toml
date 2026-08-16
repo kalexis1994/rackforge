@@ -7,6 +7,10 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+
+# The browser backend uses the engine already present in the page, so the
+# compiler is only a dependency of the native hosts.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wasmtime.workspace = true
 
 [dev-dependencies]

@@ -1,0 +1,27 @@
+schema_version = 1
+id = "org.rackforge.concert-grand"
+name = "RackForge Concert Grand"
+vendor = "RackForge"
+version = "0.1.0"
+description = "Physically modelled grand piano: stiff strings, derived stretch tuning, hammer felt and two-stage decay, with no samples"
+kind = "instrument"
+state_version = 1
+capabilities = ["audio_output", "midi_input", "presets", "state"]
+
+[api]
+major = 1
+minor = 5
+
+[web_ui]
+api_version = 1
+
+[[web_ui.surfaces]]
+kind = "play"
+entry = "web/play.html"
+
+[component]
+abi = "wasm-v1"
+path = "component.wasm"
+runtime_descriptor = "metadata/runtime.json"
+parameter_schema = "metadata/parameters.json"
+preset_catalog = "metadata/presets.json"

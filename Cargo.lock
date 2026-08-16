@@ -3640,6 +3640,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-concert-grand"
+version = "0.1.2"
+dependencies = [
+ "rackforge-plugin-sdk",
+]
+
+[[package]]
 name = "rackforge-control-api"
 version = "0.1.2"
 dependencies = [

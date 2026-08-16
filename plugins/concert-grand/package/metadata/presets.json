@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "banks": [
+    {
+      "id": "factory",
+      "name": "Factory",
+      "order": 0
+    }
+  ],
+  "presets": [
+    {
+      "id": "concert",
+      "name": "Concert Grand",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 0,
+      "tags": [
+        "default"
+      ],
+      "description": "The instrument as voiced"
+    },
+    {
+      "id": "mellow",
+      "name": "Mellow Grand",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 1,
+      "tags": [
+        "soft"
+      ],
+      "description": "Softer felt, longer ring"
+    },
+    {
+      "id": "bright",
+      "name": "Bright Grand",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 2,
+      "tags": [
+        "hard"
+      ],
+      "description": "Hard-voiced felt, wide dynamics"
+    },
+    {
+      "id": "intimate",
+      "name": "Intimate Grand",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 3,
+      "tags": [
+        "close"
+      ],
+      "description": "Close, narrow and short: a small room"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+[package]
+name = "rackforge-concert-grand"
+description = "Physically modelled grand piano RackForge ships in every host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rackforge-plugin-sdk = { path = "../../crates/rackforge-plugin-sdk" }

@@ -75,16 +75,18 @@ jobs:
             apps/rackforge-android/**/*.gradle.kts
             apps/rackforge-android/gradle/wrapper/gradle-wrapper.properties
 
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.9.0 --activate
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Enable pnpm
-        shell: bash
-        run: corepack enable
 
       - name: Set up Rust
         shell: bash

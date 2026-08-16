@@ -551,7 +551,7 @@ pub fn install_archive(
     let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
     let stage = root.join(format!(
         ".install-{}-{}-{serial}",
-        std::process::id(),
+        writer_discriminator(),
         selected.plugin.id
     ));
     if stage.exists() {
@@ -600,7 +600,7 @@ pub fn install_local_archive(
     let packages_root = ensure_real_child(&root, "packages")?;
     let records_root = ensure_real_child(&root, "records")?;
     let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
-    let stage = root.join(format!(".install-local-{}-{serial}", std::process::id()));
+    let stage = root.join(format!(".install-local-{}-{serial}", writer_discriminator()));
     if stage.exists() {
         return Err(RepositoryError::UnsafeArchive(
             "staging path already exists".into(),
@@ -699,11 +699,11 @@ pub fn uninstall_plugin(
     let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
     let package_tombstone = trash_root.join(format!(
         "{}-{serial}-packages-{plugin_id}",
-        std::process::id()
+        writer_discriminator()
     ));
     let record_tombstone = trash_root.join(format!(
         "{}-{serial}-records-{plugin_id}",
-        std::process::id()
+        writer_discriminator()
     ));
     if package_tombstone.exists() || record_tombstone.exists() {
         return Err(RepositoryError::UnsafeArchive(
@@ -771,7 +771,7 @@ pub fn remove_plugin_user_data(
             "plugin data root is not a real directory".into(),
         ));
     }
-    let data_root = fs::canonicalize(data_root)?;
+    let data_root = resolve_existing(data_root)?;
     let mut targets = Vec::new();
     if options.presets
         && let Some(target) = inspect_owned_namespace(
@@ -818,7 +818,7 @@ fn inspect_owned_namespace(
             namespace.display()
         )));
     }
-    let canonical = fs::canonicalize(namespace)?;
+    let canonical = resolve_existing(namespace)?;
     if canonical == data_root || !canonical.starts_with(data_root) {
         return Err(RepositoryError::UnsafeArchive(
             "plugin user-data namespace escaped its root".into(),
@@ -866,7 +866,7 @@ pub fn inspect_local_archive(
     }
     let root = ensure_real_directory(store_root.as_ref())?;
     let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
-    let stage = root.join(format!(".inspect-local-{}-{serial}", std::process::id()));
+    let stage = root.join(format!(".inspect-local-{}-{serial}", writer_discriminator()));
     if stage.exists() {
         return Err(RepositoryError::UnsafeArchive(
             "inspection staging path already exists".into(),
@@ -1058,6 +1058,58 @@ fn hex_digest(bytes: &[u8]) -> String {
     output
 }
 
+/// Distinguishes the scratch paths of writers that could be working in the
+/// same store at once.
+///
+/// Off the web those are other RackForge processes, so the process id is the
+/// right answer. A browser has no process id — asking for one aborts — and no
+/// second writer either, since a page's storage is private to it, so the
+/// serial each call already carries is enough on its own.
+#[cfg(not(target_arch = "wasm32"))]
+fn writer_discriminator() -> u64 {
+    u64::from(std::process::id())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn writer_discriminator() -> u64 {
+    0
+}
+
+/// Resolves a path so the containment checks around it mean something.
+///
+/// Off the web that is `fs::canonicalize`, which resolves symlinks and `..`
+/// before a path is compared against a root. WASI has neither a working
+/// directory to resolve against nor `realpath`, but it also gives the guest no
+/// way to reach outside the directory the embedder preopened: containment is
+/// enforced by the runtime before any path is opened. The fallback therefore
+/// normalises lexically and leaves the rest to the sandbox.
+fn resolve_existing(path: &Path) -> Result<PathBuf, RepositoryError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Ok(fs::canonicalize(path)?)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        fs::symlink_metadata(path)?;
+        let mut resolved = PathBuf::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    if !resolved.pop() {
+                        return Err(RepositoryError::UnsafeArchive(format!(
+                            "{} escapes the RackForge data root",
+                            path.display()
+                        )));
+                    }
+                }
+                other => resolved.push(other.as_os_str()),
+            }
+        }
+        Ok(resolved)
+    }
+}
+
 fn ensure_real_directory(path: &Path) -> Result<PathBuf, RepositoryError> {
     fs::create_dir_all(path)?;
     let metadata = fs::symlink_metadata(path)?;
@@ -1067,7 +1119,7 @@ fn ensure_real_directory(path: &Path) -> Result<PathBuf, RepositoryError> {
             path.display()
         )));
     }
-    Ok(fs::canonicalize(path)?)
+    resolve_existing(path)
 }
 
 fn ensure_real_child(parent: &Path, name: &str) -> Result<PathBuf, RepositoryError> {
@@ -1091,7 +1143,7 @@ fn ensure_real_child(parent: &Path, name: &str) -> Result<PathBuf, RepositoryErr
             "installation path is not a real directory".into(),
         ));
     }
-    let child = fs::canonicalize(child)?;
+    let child = resolve_existing(&child)?;
     if !child.starts_with(parent) {
         return Err(RepositoryError::UnsafeArchive(
             "installation path escaped its root".into(),
@@ -1213,7 +1265,7 @@ fn validate_extracted_payload(
             })?
     };
     let payload_path = root.join(payload);
-    let canonical = fs::canonicalize(&payload_path)
+    let canonical = resolve_existing(&payload_path)
         .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
     if !canonical.starts_with(root) || !canonical.is_file() {
         return Err(RepositoryError::InvalidPackage(
@@ -1253,7 +1305,7 @@ fn read_portable_metadata<T: DeserializeOwned>(
     relative: &str,
     label: &str,
 ) -> Result<T, RepositoryError> {
-    let path = fs::canonicalize(root.join(relative)).map_err(|error| {
+    let path = resolve_existing(&root.join(relative)).map_err(|error| {
         RepositoryError::InvalidPackage(format!("{label} is unavailable: {error}"))
     })?;
     let metadata = fs::metadata(&path).map_err(|error| {
@@ -1291,7 +1343,7 @@ fn write_json_atomic(path: &Path, value: &impl Serialize) -> Result<(), Reposito
         .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
     bytes.push(b'\n');
     let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
-    let temporary = path.with_extension(format!("tmp-{}-{serial}", std::process::id()));
+    let temporary = path.with_extension(format!("tmp-{}-{serial}", writer_discriminator()));
     let mut file = OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -1527,7 +1579,7 @@ preset_catalog = "metadata/presets.json"
         let selected = selected_for(&bytes);
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-install-{}-{}",
-            std::process::id(),
+            writer_discriminator(),
             TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         let installed = install_archive(&root, &selected, &bytes).unwrap();
@@ -1552,7 +1604,7 @@ preset_catalog = "metadata/presets.json"
         selected.artifact.platform = "wasm-v1".into();
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-portable-{}-{}",
-            std::process::id(),
+            writer_discriminator(),
             TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         let installed = install_archive(&root, &selected, &bytes).unwrap();
@@ -1575,7 +1627,7 @@ preset_catalog = "metadata/presets.json"
         ]);
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-local-{}-{}",
-            std::process::id(),
+            writer_discriminator(),
             TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         let installed = install_local_archive(&root, &bytes).unwrap();
@@ -1619,7 +1671,7 @@ preset_catalog = "metadata/presets.json"
         ]);
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-invalid-metadata-{}-{}",
-            std::process::id(),
+            writer_discriminator(),
             TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
 
@@ -1644,7 +1696,7 @@ preset_catalog = "metadata/presets.json"
         ]);
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-uninstall-{}-{}",
-            std::process::id(),
+            writer_discriminator(),
             TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         install_local_archive(&root, &bytes).unwrap();
@@ -1670,7 +1722,7 @@ preset_catalog = "metadata/presets.json"
     fn plugin_user_data_cleanup_keeps_unselected_data_and_shared_state_blobs() {
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-user-data-{}-{}",
-            std::process::id(),
+            writer_discriminator(),
             TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         let plugin_id = "org.rackforge.synth";
@@ -1727,7 +1779,7 @@ preset_catalog = "metadata/presets.json"
     fn plugin_user_data_cleanup_does_nothing_without_explicit_options() {
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-user-data-preserve-{}-{}",
-            std::process::id(),
+            writer_discriminator(),
             TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         let resource = root.join("plugins/org.rackforge.synth/firmware.bin");
@@ -1751,7 +1803,7 @@ preset_catalog = "metadata/presets.json"
     fn uninstall_rejects_unsafe_plugin_identifiers() {
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-uninstall-unsafe-{}-{}",
-            std::process::id(),
+            writer_discriminator(),
             TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         assert!(uninstall_plugin(&root, "../escape").is_err());
@@ -1764,7 +1816,7 @@ preset_catalog = "metadata/presets.json"
     fn cleanup_removes_only_real_uninstall_tombstone_directories() {
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-uninstall-cleanup-{}-{}",
-            std::process::id(),
+            writer_discriminator(),
             TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         let tombstone = root.join(".uninstall/previous-host-package");
@@ -1789,7 +1841,7 @@ preset_catalog = "metadata/presets.json"
         ]);
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-inspect-{}-{}",
-            std::process::id(),
+            writer_discriminator(),
             TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         let inspection = inspect_local_archive(&root, &bytes).unwrap();
@@ -1820,7 +1872,7 @@ preset_catalog = "metadata/presets.json"
         let bytes = archive(&[("../escaped", b"bad")]);
         let root = std::env::temp_dir().join(format!(
             "rackforge-repository-traversal-{}-{}",
-            std::process::id(),
+            writer_discriminator(),
             TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         assert!(matches!(

@@ -12,10 +12,23 @@ import { HostRequestError } from "../host";
 import engineWorkletUrl from "./engine.worklet.ts?worker&url";
 import {
   ENGINE_PROCESSOR,
+  PACKAGED_STORAGE_PREFIX,
   type EngineEvent,
   type SeedFile,
 } from "./protocol";
-import type { HostAudioSettings, WebAuthStatus, WebPublicConfig } from "../types";
+import {
+  readStoredFiles,
+  requestPersistentStorage,
+  writeStoredFiles,
+} from "./storage";
+import { assetUrl } from "../assets";
+import type {
+  HostAudioSettings,
+  PluginWebDescriptor,
+  ResourceSelection,
+  WebAuthStatus,
+  WebPublicConfig,
+} from "../types";
 
 /** Frames per render. Web Audio always asks for 128. */
 const RENDER_FRAMES = 128;
@@ -43,10 +56,6 @@ let nextRequestId = 1;
 const pending = new Map<number, Pending>();
 const listeners = new Set<SessionChannelCallbacks>();
 
-function assetUrl(path: string): string {
-  return new URL(path, document.baseURI).toString();
-}
-
 async function fetchBytes(path: string): Promise<Uint8Array> {
   const response = await fetch(assetUrl(path), { cache: "no-store" });
   if (!response.ok) {
@@ -55,15 +64,51 @@ async function fetchBytes(path: string): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-/** Reads the packaged plugins and settings the host expects to find on disk. */
+/**
+ * Assembles the filesystem the host boots against.
+ *
+ * Two sources: the packages RackForge ships with the site, which are read from
+ * it every visit so they follow the deployed version, and everything the host
+ * wrote on earlier visits — installed plugins, presets, the performance
+ * library — which is read from this browser.
+ */
 async function loadStorage(): Promise<SeedFile[]> {
   const manifest = (await (await fetch(assetUrl(STORAGE_MANIFEST))).json()) as StorageManifest;
-  return Promise.all(
-    manifest.files.map(async (path) => ({
-      path,
-      bytes: await fetchBytes(`demo/rackforge/${path}`),
-    })),
-  );
+  const [packaged, stored] = await Promise.all([
+    Promise.all(
+      manifest.files.map(async (path) => ({
+        path,
+        bytes: await fetchBytes(`demo/rackforge/${path}`),
+      })),
+    ),
+    readStoredFiles(),
+  ]);
+  return [
+    ...packaged,
+    ...stored.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX)),
+  ];
+}
+
+/**
+ * Files the host's storage after it changes.
+ *
+ * Writes are coalesced: a burst of edits — dragging a fader, say — should cost
+ * one write rather than one per event.
+ */
+let storageWrite: number | null = null;
+let pendingStorage: SeedFile[] = [];
+
+function storeFiles(files: SeedFile[]) {
+  pendingStorage = files;
+  if (storageWrite !== null) return;
+  storageWrite = window.setTimeout(() => {
+    storageWrite = null;
+    const files = pendingStorage;
+    pendingStorage = [];
+    void writeStoredFiles(files).catch((error: unknown) => {
+      console.warn("RackForge could not keep its storage in this browser", error);
+    });
+  }, 400);
 }
 
 /** Boot milestones the engine announces, awaited by [`startBrowserHost`]. */
@@ -87,6 +132,9 @@ function handleEngineEvent(event: EngineEvent) {
         ? null
         : (event.error ?? "the RackForge engine did not start");
       milestones.booted?.(bootError);
+      break;
+    case "storage":
+      storeFiles(event.files);
       break;
     case "ready":
       milestones.ready?.();
@@ -159,6 +207,10 @@ export async function startBrowserHost(): Promise<void> {
 
     engine = node;
     attachWebMidi(node);
+    // Worth asking once the host is actually running: a browser is far more
+    // likely to grant this to a page someone is using than to one that just
+    // opened.
+    void requestPersistentStorage();
   })();
 
   try {
@@ -177,6 +229,21 @@ export function browserHostWarnings(): string[] {
 
 export function browserHostError(): string | null {
   return bootError;
+}
+
+/**
+ * Pushes the current session to every open channel.
+ *
+ * The engine answers questions; it does not volunteer. Whenever something
+ * changes the session behind the interface's back — installing a plugin, for
+ * one — the channel republishes it.
+ */
+async function publishSnapshot(): Promise<void> {
+  if (!engine || listeners.size === 0) return;
+  const snapshot = await send(JSON.stringify({ op: "snapshot" }));
+  for (const listener of listeners) {
+    listener.onMessage(snapshot);
+  }
 }
 
 /** Resolves once the browser has let the context start. */
@@ -354,6 +421,63 @@ export function openBrowserSessionChannel(callbacks: SessionChannelCallbacks) {
 }
 
 /**
+ * Archives the interface has handed over but not yet installed.
+ *
+ * A networked RackForge stages an upload on the host and refers to it by a
+ * selection id. The page does the same, in memory: the interface's install
+ * flow is unchanged, and nothing is written until someone confirms it.
+ */
+const selections = new Map<string, { name: string; archive: Uint8Array }>();
+let nextSelectionId = 1;
+
+/** Sends one archive to the engine and returns its answer. */
+function sendPackage(
+  action: "inspect" | "install",
+  archive: Uint8Array,
+): Promise<{ ok: boolean; error?: string; preview?: PackagePreview; installed?: InstalledPackage }> {
+  const node = engine;
+  if (!node) {
+    return Promise.reject(new Error("The RackForge engine is not running."));
+  }
+  const id = nextRequestId++;
+  return new Promise((resolve, reject) => {
+    pending.set(id, {
+      resolve: (response) => resolve(JSON.parse(response)),
+      reject,
+    });
+    node.port.postMessage({ kind: "package", id, action, archive });
+  });
+}
+
+interface PackagePreview {
+  plugin_id: string;
+  plugin_name: string;
+  vendor: string;
+  version: string;
+  description?: string | null;
+  kind: string;
+  platform: string;
+  portable: boolean;
+  archive_bytes: number;
+}
+
+interface InstalledPackage {
+  plugin_id: string;
+  version: string;
+  already_installed: boolean;
+  activation_required: boolean;
+}
+
+function selectionOf(body: RequestInit["body"]): { name: string; archive: Uint8Array } {
+  const { selection_id: id } = JSON.parse(String(body)) as { selection_id?: string };
+  const selection = id ? selections.get(id) : undefined;
+  if (!selection) {
+    throw new HostRequestError("This upload is no longer available; choose the file again.", 404);
+  }
+  return selection;
+}
+
+/**
  * Answers the host endpoints for a page.
  *
  * A browser has no PIN to enrol, no audio devices to choose between and no
@@ -417,6 +541,74 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
       },
       runtime_status: engine ? "running" : "stopped",
     } satisfies HostAudioSettings as T;
+  }
+  if (path.startsWith("/api/v1/resources/uploads") && method === "POST") {
+    const name = new URLSearchParams(path.split("?")[1] ?? "").get("name") ?? "package.rfplugin";
+    const body = init.body;
+    const archive = new Uint8Array(
+      body instanceof Blob ? await body.arrayBuffer() : new ArrayBuffer(0),
+    );
+    if (archive.length === 0) {
+      throw new HostRequestError("The package is empty.", 400);
+    }
+    const selectionId = `browser.upload.${nextSelectionId++}`;
+    selections.set(selectionId, { name, archive });
+    return {
+      selection_id: selectionId,
+      display_name: name,
+      kind: "file",
+      size: archive.length,
+      source: "client_upload",
+      // Held until the interface releases it or the page goes away, so there
+      // is no deadline to report.
+      expires_in_seconds: 0,
+    } satisfies ResourceSelection as T;
+  }
+  if (path === "/api/v1/resources/selections/release" && method === "POST") {
+    const { selection_id: id } = JSON.parse(String(init.body)) as { selection_id?: string };
+    if (id) selections.delete(id);
+    return { status: "ok" } as T;
+  }
+  if (path === "/api/v1/plugins/inspect" && method === "POST") {
+    const { selection_id: id } = JSON.parse(String(init.body)) as { selection_id?: string };
+    const selection = selectionOf(init.body);
+    const answer = await sendPackage("inspect", selection.archive);
+    if (!answer.ok || !answer.preview) {
+      throw new HostRequestError(answer.error ?? "This package could not be read.", 400);
+    }
+    return { ...answer.preview, selection_id: id, branding: null } as T;
+  }
+  if (path === "/api/v1/plugins/install" && method === "POST") {
+    const { selection_id: id } = JSON.parse(String(init.body)) as { selection_id?: string };
+    const selection = selectionOf(init.body);
+    const answer = await sendPackage("install", selection.archive);
+    if (!answer.ok || !answer.installed) {
+      throw new HostRequestError(answer.error ?? "This package could not be installed.", 400);
+    }
+    if (id) selections.delete(id);
+    // The engine reloaded its session over the new package; the interface is
+    // still showing the previous one.
+    await publishSnapshot();
+    return answer.installed as T;
+  }
+  if (path.startsWith("/api/v1/plugins/") && path.endsWith("/activate") && method === "POST") {
+    // Installing already loaded and activated the package here, so there is
+    // nothing left to start.
+    return { status: "active" } as T;
+  }
+  if (path.startsWith("/api/v1/plugins/") && method === "GET") {
+    const pluginId = decodeURIComponent(path.slice("/api/v1/plugins/".length));
+    return {
+      plugin_id: pluginId,
+      plugin_name: pluginId,
+      version: "",
+      active: true,
+      managed: true,
+      api_version: 1,
+      branding: null,
+      surfaces: [],
+      resources: [],
+    } satisfies PluginWebDescriptor as T;
   }
   throw new HostRequestError(
     "The browser host does not provide this; it is part of an installed RackForge.",

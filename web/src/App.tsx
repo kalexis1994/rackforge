@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type FormEvent,
 } from "react";
+import { assetUrl } from "./assets";
 import { useSelector } from "react-redux";
 import {
   Activity,
@@ -63,6 +64,7 @@ import {
   HostRequestError,
   isDesktopHost,
   isNativeHost,
+  isRemoteWebClient,
   selectNativePluginSound,
   selectNativeResource,
   syncNativeRoute,
@@ -104,7 +106,7 @@ const ResourceExplorerDialog = lazy(() =>
 function BrandMark() {
   return (
     <span className="brand-mark" aria-hidden="true">
-      <img src="/brand/rackforge-mark.svg" alt="" />
+      <img src={assetUrl("brand/rackforge-mark.svg")} alt="" />
     </span>
   );
 }
@@ -1384,7 +1386,9 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const native = isNativeHost();
   const desktop = isDesktopHost();
-  const remoteWeb = !native && !desktop;
+  // Browsing the host's own storage needs a host with storage to browse. A
+  // page carrying its own RackForge has none, so it offers upload only.
+  const remoteWeb = isRemoteWebClient();
   const [browseHost, setBrowseHost] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);

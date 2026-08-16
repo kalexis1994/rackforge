@@ -34,6 +34,7 @@ use rackforge_performance_api::{
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{Capability, HostPresetSummary, PluginKind, PresetCatalog};
+use rackforge_repository::{inspect_local_archive, install_local_archive};
 use rackforge_session_api::{
     BankSummary, ClientId, CommandEnvelope, CommandRef, EventEnvelope, InstanceId, MasterLevel,
     MasterPan, PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent,
@@ -47,11 +48,22 @@ use crate::audio::{AudioEngine, RenderRequest};
 
 /// Where the embedder mounts RackForge's private storage.
 pub const DATA_ROOT: &str = "/rackforge";
-/// Package roots the boot scan reads, relative to [`DATA_ROOT`].
+/// Packages RackForge ships with the page, relative to [`DATA_ROOT`].
 const PLUGIN_DIRECTORY: &str = "plugins";
+/// Packages installed from a `.rfplugin`, relative to [`DATA_ROOT`]. This is a
+/// plugin store in the same layout every other host keeps one in.
+const STORE_DIRECTORY: &str = "store";
 /// The browser cannot enumerate audio hardware, so it reports the single
 /// output the page gave it.
 const BROWSER_DEVICE_ID: &str = "browser.audio-output";
+
+/// The audio format the page renders in.
+#[derive(Clone, Copy)]
+struct StreamFormat {
+    sample_rate_hz: f64,
+    maximum_frames: u32,
+    channels: u32,
+}
 
 /// One loaded instrument and the presentation-level facts the session needs
 /// about it.
@@ -67,6 +79,9 @@ struct HostedPlugin {
 }
 
 pub struct BrowserHost {
+    /// How the page opened its output, kept so plugins loaded later can be
+    /// activated the same way the first ones were.
+    stream: StreamFormat,
     store: SessionStore,
     performance: PerformanceRepository,
     state_store: PluginStateStore,
@@ -85,11 +100,16 @@ impl BrowserHost {
     /// publish an initial session.
     pub fn open(sample_rate_hz: f64, maximum_frames: u32, output_channels: u32) -> Result<Self> {
         let data_root = PathBuf::from(DATA_ROOT);
+        let stream = StreamFormat {
+            sample_rate_hz,
+            maximum_frames,
+            channels: output_channels,
+        };
         let mut warnings = Vec::new();
         let mut plugins = Vec::new();
 
-        for root in package_roots(&data_root.join(PLUGIN_DIRECTORY))? {
-            match load_plugin(&root, &data_root, sample_rate_hz, maximum_frames, output_channels) {
+        for root in package_roots(&data_root)? {
+            match load_plugin(&root, &data_root, stream) {
                 Ok(plugin) => plugins.push(plugin),
                 Err(error) => warnings.push(format!("{}: {error:#}", root.display())),
             }
@@ -156,6 +176,7 @@ impl BrowserHost {
         let audio_state = browser_audio_state(sample_rate_hz, maximum_frames, output_channels);
 
         Ok(Self {
+            stream,
             store: SessionStore::new(session)?,
             performance,
             state_store,
@@ -576,6 +597,108 @@ impl BrowserHost {
             })
     }
 
+    /// Validates a `.rfplugin` without installing it, so the interface can
+    /// show what is inside before anyone commits to it.
+    pub fn inspect_package(&self, archive: &[u8]) -> Result<serde_json::Value> {
+        let inspection = inspect_local_archive(store_root(), archive)?;
+        Ok(serde_json::json!({
+            "plugin_id": inspection.plugin_id,
+            "plugin_name": inspection.plugin_name,
+            "vendor": inspection.vendor,
+            "version": inspection.version,
+            "description": inspection.description,
+            "kind": plugin_kind_name(inspection.kind),
+            "platform": inspection.platform,
+            "portable": inspection.portable,
+            "archive_bytes": inspection.archive_bytes,
+            "installable": inspection.portable,
+        }))
+    }
+
+    /// Installs a `.rfplugin` into the page's plugin store and loads it.
+    ///
+    /// Only portable packages are accepted: a native one would install
+    /// perfectly well and then refuse to run, which is a worse answer than
+    /// refusing it here.
+    pub fn install_package(&mut self, archive: &[u8]) -> Result<serde_json::Value> {
+        let inspection = inspect_local_archive(store_root(), archive)?;
+        if !inspection.portable {
+            bail!(
+                "{} is a native package; a browser can only run portable wasm-v1 packages",
+                inspection.plugin_name
+            );
+        }
+        let installed = install_local_archive(store_root(), archive)?;
+        let warnings = self.reload_plugins()?;
+        Ok(serde_json::json!({
+            "plugin_id": installed.record.plugin_id,
+            "version": installed.record.version,
+            "already_installed": installed.already_installed,
+            "activation_required": false,
+            "warnings": warnings,
+        }))
+    }
+
+    /// Rebuilds the session over the packages now on disk, keeping what the
+    /// performer had chosen: the active instrument and each instrument's
+    /// selected program.
+    fn reload_plugins(&mut self) -> Result<Vec<String>> {
+        let data_root = PathBuf::from(DATA_ROOT);
+        let previous = self.store.state().clone();
+        let selected: BTreeMap<InstanceId, String> = previous
+            .instances
+            .iter()
+            .filter_map(|instance| {
+                instance
+                    .selected_sound_id
+                    .clone()
+                    .map(|sound| (instance.instance_id.clone(), sound))
+            })
+            .collect();
+
+        let mut warnings = Vec::new();
+        let mut plugins = Vec::new();
+        for root in package_roots(&data_root)? {
+            match load_plugin(&root, &data_root, self.stream) {
+                Ok(mut plugin) => {
+                    if let Some(sound) = selected.get(&plugin.instance_id)
+                        && plugin.presets.presets.iter().any(|preset| preset.id == *sound)
+                        && plugin.instance.load_preset(sound).is_ok()
+                    {
+                        plugin.selected_sound_id = Some(sound.clone());
+                    }
+                    plugins.push(plugin);
+                }
+                Err(error) => warnings.push(format!("{}: {error:#}", root.display())),
+            }
+        }
+        if plugins.is_empty() {
+            bail!("no playable instrument remains after reloading the plugin store");
+        }
+
+        let instances: Vec<PluginInstanceState> =
+            plugins.iter().map(session_instance_state).collect();
+        let active_instance_id = previous
+            .active_instance_id
+            .filter(|id| instances.iter().any(|instance| instance.instance_id == *id))
+            .or_else(|| instances.first().map(|instance| instance.instance_id.clone()));
+        // Loading plugins is a discontinuity rather than an edit, so the
+        // session starts again from the revision it had reached instead of
+        // pretending a sequence of events produced this.
+        let session = SessionState {
+            revision: previous.revision.next().map_err(|message| anyhow!(message))?,
+            active_instance_id,
+            instances,
+            audition: None,
+            program_draft: None,
+            ..previous
+        };
+        self.audio.silence();
+        self.plugins = plugins;
+        self.store = SessionStore::new(session)?;
+        Ok(warnings)
+    }
+
     /// Queues one live MIDI message for the next audio block.
     pub fn push_midi(&mut self, frame: u32, data: [u8; 3], length: u8) {
         self.audio.push_midi(frame, data, length);
@@ -640,9 +763,39 @@ fn request_name(request: &ControlRequest) -> &'static str {
     }
 }
 
-/// Lists package roots below the mounted plugin directory. A root is any
-/// directory holding a plugin manifest.
-fn package_roots(directory: &Path) -> Result<Vec<PathBuf>> {
+fn store_root() -> PathBuf {
+    PathBuf::from(DATA_ROOT).join(STORE_DIRECTORY)
+}
+
+fn plugin_kind_name(kind: PluginKind) -> &'static str {
+    match kind {
+        PluginKind::Instrument => "instrument",
+        PluginKind::Effect => "effect",
+        _ => "other",
+    }
+}
+
+/// Lists every package the host should load: those RackForge ships with the
+/// page, and those installed into its plugin store.
+fn package_roots(data_root: &Path) -> Result<Vec<PathBuf>> {
+    let mut roots = manifest_roots(&data_root.join(PLUGIN_DIRECTORY))?;
+    let packages = data_root.join(STORE_DIRECTORY).join("packages");
+    if packages.is_dir() {
+        for plugin in fs::read_dir(&packages)
+            .with_context(|| format!("reading {}", packages.display()))?
+            .flatten()
+        {
+            // One directory per plugin, one directory per version inside it.
+            roots.extend(manifest_roots(&plugin.path())?);
+        }
+    }
+    roots.sort();
+    Ok(roots)
+}
+
+/// Lists the directories directly below `directory` that hold a plugin
+/// manifest.
+fn manifest_roots(directory: &Path) -> Result<Vec<PathBuf>> {
     let mut roots = Vec::new();
     for entry in fs::read_dir(directory)
         .with_context(|| format!("reading {}", directory.display()))?
@@ -662,13 +815,7 @@ fn package_roots(directory: &Path) -> Result<Vec<PathBuf>> {
     Ok(roots)
 }
 
-fn load_plugin(
-    root: &Path,
-    data_root: &Path,
-    sample_rate_hz: f64,
-    maximum_frames: u32,
-    output_channels: u32,
-) -> Result<HostedPlugin> {
+fn load_plugin(root: &Path, data_root: &Path, stream: StreamFormat) -> Result<HostedPlugin> {
     let package = PluginPackage::open(root)?;
     if package.manifest().kind != PluginKind::Instrument {
         bail!(
@@ -697,7 +844,12 @@ fn load_plugin(
             .load_preset(id)
             .with_context(|| format!("loading initial program {id:?}"))?;
     }
-    instance.activate(sample_rate_hz, maximum_frames, 0, output_channels)?;
+    instance.activate(
+        stream.sample_rate_hz,
+        stream.maximum_frames,
+        0,
+        stream.channels,
+    )?;
 
     Ok(HostedPlugin {
         instance_id,

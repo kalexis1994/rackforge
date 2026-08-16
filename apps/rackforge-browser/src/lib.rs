@@ -97,6 +97,56 @@ pub unsafe extern "C" fn rf_request(pointer: *const u8, length: usize) -> i32 {
     publish(&response)
 }
 
+/// Validates a `.rfplugin` and leaves a JSON description of it in the response
+/// buffer, without installing anything. Returns the response length.
+///
+/// # Safety
+///
+/// `pointer` must address `length` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rf_inspect_plugin(pointer: *const u8, length: usize) -> i32 {
+    // SAFETY: forwarded from this function's contract.
+    let archive = unsafe { std::slice::from_raw_parts(pointer, length) };
+    HOST.with(|host| match host.borrow().as_ref() {
+        Some(host) => match host.inspect_package(archive) {
+            Ok(preview) => publish(&serde_json::json!({ "ok": true, "preview": preview })),
+            Err(error) => publish(&serde_json::json!({
+                "ok": false,
+                "error": format!("{error:#}"),
+            })),
+        },
+        None => publish(&serde_json::json!({
+            "ok": false,
+            "error": "the RackForge host is not open",
+        })),
+    })
+}
+
+/// Installs a `.rfplugin` into the page's plugin store and reloads the
+/// session over it. Returns the response length.
+///
+/// # Safety
+///
+/// `pointer` must address `length` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rf_install_plugin(pointer: *const u8, length: usize) -> i32 {
+    // SAFETY: forwarded from this function's contract.
+    let archive = unsafe { std::slice::from_raw_parts(pointer, length) };
+    HOST.with(|host| match host.borrow_mut().as_mut() {
+        Some(host) => match host.install_package(archive) {
+            Ok(installed) => publish(&serde_json::json!({ "ok": true, "installed": installed })),
+            Err(error) => publish(&serde_json::json!({
+                "ok": false,
+                "error": format!("{error:#}"),
+            })),
+        },
+        None => publish(&serde_json::json!({
+            "ok": false,
+            "error": "the RackForge host is not open",
+        })),
+    })
+}
+
 /// Returns a pointer to the buffer written by the most recent [`rf_open`] or
 /// [`rf_request`] call.
 #[unsafe(no_mangle)]

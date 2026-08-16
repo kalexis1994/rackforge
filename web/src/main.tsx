@@ -12,6 +12,11 @@ import "./styles.css";
 // it keeps its routes in the fragment instead.
 const Router = IS_BROWSER_HOST ? HashRouter : BrowserRouter;
 
+if (IS_BROWSER_HOST) {
+  // Deferred so a networked build never loads it at all.
+  void import("./browser/pwa").then(({ registerServiceWorker }) => registerServiceWorker());
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Provider store={store}>

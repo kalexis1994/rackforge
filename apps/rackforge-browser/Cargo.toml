@@ -15,6 +15,7 @@ rackforge-control-api = { path = "../../crates/rackforge-control-api" }
 rackforge-core = { path = "../../crates/rackforge-core" }
 rackforge-performance-api = { path = "../../crates/rackforge-performance-api" }
 rackforge-plugin-api = { path = "../../crates/rackforge-plugin-api" }
+rackforge-repository = { path = "../../crates/rackforge-repository" }
 rackforge-session-api = { path = "../../crates/rackforge-session-api" }
 semver.workspace = true
 serde.workspace = true

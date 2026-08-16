@@ -29,6 +29,12 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Build the host and the instrument it plays
         run: ./tools/build-web-demo.sh
+      - name: Check the host outside a browser
+        run: |
+          storage="$(mktemp -d)"
+          cp -r web/public/demo/rackforge/. "$storage"
+          node tools/check-browser-host.mjs web/public/demo/rackforge-browser.wasm "$storage"
+
       - name: Install the interface dependencies
         run: pnpm install --frozen-lockfile
         working-directory: web

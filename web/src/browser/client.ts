@@ -113,10 +113,7 @@ export async function startBrowserHost(): Promise<void> {
   booting = (async () => {
     const audio = new AudioContext({ latencyHint: "interactive" });
     await audio.audioWorklet.addModule(engineWorkletUrl);
-    const [module, files] = await Promise.all([
-      WebAssembly.compileStreaming(fetch(assetUrl(HOST_MODULE))),
-      loadStorage(),
-    ]);
+    const [wasm, files] = await Promise.all([fetchBytes(HOST_MODULE), loadStorage()]);
 
     const node = new AudioWorkletNode(audio, ENGINE_PROCESSOR, {
       numberOfInputs: 0,
@@ -148,12 +145,12 @@ export async function startBrowserHost(): Promise<void> {
     node.port.postMessage(
       {
         kind: "boot",
-        module,
+        wasm,
         files,
         maximumFrames: RENDER_FRAMES,
         channels: OUTPUT_CHANNELS,
       },
-      files.map((file) => file.bytes.buffer),
+      [wasm.buffer, ...files.map((file) => file.bytes.buffer)],
     );
     context = audio;
     await booted;
@@ -294,9 +291,14 @@ export function openBrowserSessionChannel(callbacks: SessionChannelCallbacks) {
   let open = true;
 
   void startBrowserHost()
-    .then(() => {
+    .then(async () => {
       if (!open) return;
       callbacks.onOpen();
+      // An appliance publishes the session as soon as a surface connects,
+      // rather than waiting to be asked, and the interface is written for
+      // that. The engine answers requests, so the channel asks on its behalf.
+      const snapshot = await send(JSON.stringify({ op: "snapshot" }));
+      if (open) callbacks.onMessage(snapshot);
     })
     .catch(() => {
       if (!open) return;

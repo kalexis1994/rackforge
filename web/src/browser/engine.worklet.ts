@@ -105,7 +105,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
   #handle(command: EngineCommand) {
     switch (command.kind) {
       case "boot":
-        this.#boot(command.module, command.files, command.maximumFrames, command.channels);
+        this.#boot(command.wasm, command.files, command.maximumFrames, command.channels);
         break;
       case "request":
         this.#post({
@@ -123,7 +123,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
   }
 
   #boot(
-    module: WebAssembly.Module,
+    wasm: Uint8Array,
     files: SeedFile[],
     maximumFrames: number,
     channels: number,
@@ -138,7 +138,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
         new PreopenDirectory(`/${DATA_ROOT}`, seedDirectory(files)),
       ],
     );
-    const instance = new WebAssembly.Instance(module, {
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.slice().buffer), {
       wasi_snapshot_preview1: wasi.wasiImport,
       rackforge_plugin_host: this.#pluginHost.imports,
     });

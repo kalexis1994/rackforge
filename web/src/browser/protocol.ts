@@ -18,7 +18,15 @@ export interface SeedFile {
 
 export interface BootMessage {
   kind: "boot";
-  module: WebAssembly.Module;
+  /**
+   * The host component, as bytes.
+   *
+   * A compiled `WebAssembly.Module` cannot cross into an audio worklet: the
+   * worklet is a separate agent cluster, and the message is dropped rather
+   * than refused. The worklet compiles these itself, which it may do
+   * synchronously because it is not the main thread.
+   */
+  wasm: Uint8Array;
   files: SeedFile[];
   maximumFrames: number;
   channels: number;

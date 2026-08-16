@@ -1,16 +1,22 @@
 /**
- * Checks the browser host outside a browser.
+ * Checks the browser host outside a browser, against what it claims.
  *
  * The host is a WASI component driven through a small set of imports, so a
  * WASI runtime can boot it, ask it for a session and make it render — no page
- * required. That covers the part most likely to break silently: the host
- * reading its storage, loading a portable plugin and turning MIDI into audio.
+ * required.
  *
- * Usage: node tools/check-browser-host.mjs <host.wasm> <storage-directory>
+ * Every capability the host reports as supported is exercised here. A
+ * capability cannot be declared supported in
+ * `crates/rackforge-host-capabilities` without either a probe below or an
+ * entry in `PAGE_SIDE`, so the parity table cannot claim something the host
+ * does not do.
+ *
+ * Usage: node tools/check-browser-host.mjs <host.wasm> <storage-directory> [package.rfplugin]
  */
 
 import { WASI } from "node:wasi";
 import { readFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 
 /**
  * Plugin exports addressed by index, in the order shared with the browser
@@ -51,7 +57,7 @@ const EXPORTS = [
   "rackforge_program_apply_edit",
 ];
 
-const [, , hostPath, storagePath] = process.argv;
+const [, , hostPath, storagePath, packagePath] = process.argv;
 if (!hostPath || !storagePath) {
   console.error("usage: node tools/check-browser-host.mjs <host.wasm> <storage-directory>");
   process.exit(2);
@@ -172,6 +178,17 @@ const peak = (frames) => {
   return block.reduce((loudest, sample) => Math.max(loudest, Math.abs(sample)), 0);
 };
 
+/**
+ * Capabilities that belong to the page rather than to the host, and are
+ * checked where they live: in the browser tests, not here.
+ */
+const PAGE_SIDE = new Map([
+  ["persistent_storage", "the page files the host's storage in IndexedDB"],
+  ["offline_operation", "the service worker serves the site with the network off"],
+  ["midi_input", "Web MIDI delivers messages the page forwards as live MIDI"],
+  ["midi_hotplug", "the page re-attaches inputs when Web MIDI reports a change"],
+]);
+
 const failures = [];
 const check = (description, condition, detail) => {
   if (condition) {
@@ -217,5 +234,159 @@ check("the note sounds", loudest > 0.001, `peak ${loudest}`);
 
 const released = request({ op: "release_virtual_midi", client_id: "check.browser-host" });
 check("it releases held notes", released.status === "virtual_midi_released", released.message);
+
+const sessionInstances = snapshot.snapshot.instances;
+const instanceId = snapshot.snapshot.active_instance_id;
+
+/**
+ * One probe per capability the host claims. Each returns a message on failure
+ * and nothing on success, so a claim is only as good as what it can do here.
+ */
+const PROBES = {
+  play_instrument: () =>
+    sessionInstances.length > 0 && loudest > 0.001 ? null : "no instrument rendered any audio",
+  select_program: () => {
+    const sound = sessionInstances.find((instance) => instance.instance_id === instanceId)
+      ?.sounds?.[0];
+    if (!sound) return "the active instrument exposes no program";
+    const applied = dispatch({ type: "select_sound", instance_id: instanceId, sound_id: sound.id });
+    return applied.status === "command_applied" ? null : applied.message;
+  },
+  master_level_and_pan: () => {
+    const level = dispatch({ type: "set_master_level", level: 750 });
+    const pan = dispatch({ type: "set_master_pan", pan: -250 });
+    return level.status === "command_applied" && pan.status === "command_applied"
+      ? null
+      : (level.message ?? pan.message);
+  },
+  virtual_midi: () => (accepted.status === "virtual_midi_accepted" ? null : accepted.message),
+  plugin_parameters: () => {
+    const parameters = request({ op: "plugin_parameters", instance_id: instanceId });
+    if (parameters.status !== "plugin_parameters") return parameters.message;
+    const first = parameters.values?.[0];
+    if (!first) return null;
+    const written = request({
+      op: "set_plugin_parameter",
+      instance_id: instanceId,
+      parameter_index: first.index,
+      value: first.value,
+    });
+    return written.status === "plugin_parameter_set" ? null : written.message;
+  },
+  host_presets: () => {
+    const saved = request({ op: "save_plugin_preset", instance_id: instanceId, name: "Probe" });
+    if (saved.status !== "plugin_preset_saved") return saved.message;
+    const loaded = request({
+      op: "load_plugin_preset",
+      instance_id: instanceId,
+      preset_id: saved.preset.id,
+    });
+    if (loaded.status !== "plugin_preset_loaded") return loaded.message;
+    const deleted = request({
+      op: "delete_plugin_preset",
+      plugin_id: saved.preset.plugin_id,
+      preset_id: saved.preset.id,
+    });
+    return deleted.status === "plugin_preset_deleted" ? null : deleted.message;
+  },
+  performance_library: () => {
+    const library = request({ op: "performance_snapshot" });
+    return library.status === "performance_snapshot" ? null : library.message;
+  },
+  session_restore: () => {
+    // The checkpoint is written where the next boot reads it; a second host
+    // over the same storage is what a returning visit actually is.
+    const path = `${storagePath}/sessions/live.main.json`;
+    if (!existsSync(path)) return `no checkpoint at ${path}`;
+    const saved = JSON.parse(readFileSync(path, "utf8"));
+    const held = saved.active_instance_id ?? saved.session?.active_instance_id;
+    return held === instanceId
+      ? null
+      : `the checkpoint holds ${held ?? "nothing"} rather than the active instrument`;
+  },
+  plugin_web_surfaces: () => {
+    // The page serves the files; the host's part is reporting which files a
+    // package declares as its interface.
+    const listed = JSON.parse(readResponse(host.rf_plugin_catalog()));
+    const declared = listed.catalog?.some((plugin) => plugin.surfaces?.length > 0);
+    return declared ? null : "no loaded plugin declares a web surface";
+  },
+  plugin_install: () => {
+    if (!packagePath) return "no .rfplugin was given to install";
+    const archive = new Uint8Array(readFileSync(packagePath));
+    const inspected = JSON.parse(withArchive(archive, host.rf_inspect_plugin));
+    if (!inspected.ok) return inspected.error;
+    const installed = JSON.parse(withArchive(archive, host.rf_install_plugin));
+    if (!installed.ok) return installed.error;
+    installedPluginId = installed.installed.plugin_id;
+    const listed = JSON.parse(readResponse(host.rf_plugin_catalog()));
+    return listed.catalog?.some((plugin) => plugin.plugin_id === installedPluginId)
+      ? null
+      : "the installed plugin is not in the catalog";
+  },
+  plugin_removal: () => {
+    if (!installedPluginId) return "nothing was installed to remove";
+    const removed = JSON.parse(
+      withArchive(
+        new TextEncoder().encode(JSON.stringify({ plugin_id: installedPluginId })),
+        host.rf_uninstall_plugin,
+      ),
+    );
+    if (!removed.ok) return removed.error;
+    const listed = JSON.parse(readResponse(host.rf_plugin_catalog()));
+    return listed.catalog?.some((plugin) => plugin.plugin_id === installedPluginId)
+      ? "the removed plugin is still in the catalog"
+      : null;
+  },
+};
+
+let installedPluginId = null;
+
+function dispatch(command) {
+  return request({
+    op: "dispatch",
+    envelope: {
+      schema_version: snapshot.snapshot.schema_version,
+      client_id: "check.browser-host",
+      command_id: nextCommandId++,
+      command,
+    },
+  });
+}
+let nextCommandId = 1;
+
+function withArchive(bytes, call) {
+  const pointer = host.rf_alloc(bytes.length);
+  new Uint8Array(hostMemory.buffer, pointer, bytes.length).set(bytes);
+  try {
+    return readResponse(call(pointer, bytes.length));
+  } finally {
+    host.rf_free(pointer, bytes.length);
+  }
+}
+
+const declared = JSON.parse(readResponse(host.rf_capabilities()));
+check("it reports what it can do", declared.ok === true, declared.error);
+for (const capability of declared.capabilities ?? []) {
+  if (!capability.supported) {
+    check(
+      `${capability.id} explains why it is missing`,
+      Boolean(capability.reason) || capability.state === "unaudited",
+    );
+    continue;
+  }
+  const probe = PROBES[capability.id];
+  if (!probe) {
+    const reason = PAGE_SIDE.get(capability.id);
+    check(
+      `${capability.id} is claimed with somewhere to check it`,
+      Boolean(reason),
+      "no probe here and not listed as page-side",
+    );
+    continue;
+  }
+  const failure = probe();
+  check(`${capability.id} does what it claims`, failure === null, failure ?? undefined);
+}
 
 process.exit(failures.length === 0 ? 0 : 1);

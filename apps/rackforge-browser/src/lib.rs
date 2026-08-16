@@ -147,6 +147,175 @@ pub unsafe extern "C" fn rf_install_plugin(pointer: *const u8, length: usize) ->
     })
 }
 
+/// Leaves this host's declared capabilities in the response buffer, so a page
+/// can hide what it cannot do and CI can probe what it claims. Returns the
+/// response length.
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_capabilities() -> i32 {
+    use rackforge_host_capabilities::{Capability, Host};
+
+    let capabilities: Vec<serde_json::Value> = Capability::ALL
+        .iter()
+        .map(|capability| {
+            let support = Host::Browser
+                .support(*capability)
+                .expect("every capability is declared for every host");
+            serde_json::json!({
+                "id": capability.id(),
+                "summary": capability.summary(),
+                "supported": support.is_supported(),
+                "state": support.mark(),
+                "reason": support.reason(),
+            })
+        })
+        .collect();
+    publish(&serde_json::json!({ "ok": true, "capabilities": capabilities }))
+}
+
+/// Leaves the loaded plugin catalog in the response buffer as JSON, in the
+/// shape the interface expects from a RackForge gateway. Returns its length.
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_plugin_catalog() -> i32 {
+    HOST.with(|host| match host.borrow().as_ref() {
+        Some(host) => publish(&serde_json::json!({
+            "ok": true,
+            "catalog": host.plugin_catalog(),
+        })),
+        None => publish(&serde_json::json!({
+            "ok": false,
+            "error": "the RackForge host is not open",
+        })),
+    })
+}
+
+/// Removes an installed plugin and reloads the session without it. Returns the
+/// response length.
+///
+/// # Safety
+///
+/// `pointer` must address `length` readable bytes of UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rf_uninstall_plugin(pointer: *const u8, length: usize) -> i32 {
+    // SAFETY: forwarded from this function's contract.
+    let bytes = unsafe { std::slice::from_raw_parts(pointer, length) };
+    let request = match serde_json::from_slice::<UninstallRequest>(bytes) {
+        Ok(request) => request,
+        Err(error) => {
+            return publish(&serde_json::json!({
+                "ok": false,
+                "error": format!("unreadable removal request: {error}"),
+            }));
+        }
+    };
+    let options = rackforge_repository::PluginUserDataRemovalOptions {
+        presets: request.delete_presets,
+        plugin_data: request.delete_plugin_data,
+    };
+    HOST.with(|host| match host.borrow_mut().as_mut() {
+        Some(host) => match host.uninstall_package(&request.plugin_id, options) {
+            Ok(removed) => publish(&serde_json::json!({ "ok": true, "removed": removed })),
+            Err(error) => publish(&serde_json::json!({
+                "ok": false,
+                "error": format!("{error:#}"),
+            })),
+        },
+        None => publish(&serde_json::json!({
+            "ok": false,
+            "error": "the RackForge host is not open",
+        })),
+    })
+}
+
+/// Installs a file into a plugin's private storage. The request is a JSON
+/// header followed by a newline and then the file's bytes, so one call carries
+/// both without a second allocation. Returns the response length.
+///
+/// # Safety
+///
+/// `pointer` must address `length` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rf_import_resource(pointer: *const u8, length: usize) -> i32 {
+    // SAFETY: forwarded from this function's contract.
+    let bytes = unsafe { std::slice::from_raw_parts(pointer, length) };
+    let Some(split) = bytes.iter().position(|byte| *byte == b'\n') else {
+        return publish(&serde_json::json!({
+            "ok": false,
+            "error": "the resource request has no header",
+        }));
+    };
+    let header = match serde_json::from_slice::<ResourceImport>(&bytes[..split]) {
+        Ok(header) => header,
+        Err(error) => {
+            return publish(&serde_json::json!({
+                "ok": false,
+                "error": format!("unreadable resource request: {error}"),
+            }));
+        }
+    };
+    let payload = &bytes[split + 1..];
+    HOST.with(|host| match host.borrow_mut().as_mut() {
+        Some(host) => match host.import_resource(&header.plugin_id, &header.resource_id, payload) {
+            Ok(imported) => publish(&serde_json::json!({ "ok": true, "imported": imported })),
+            Err(error) => publish(&serde_json::json!({
+                "ok": false,
+                "error": format!("{error:#}"),
+            })),
+        },
+        None => publish(&serde_json::json!({
+            "ok": false,
+            "error": "the RackForge host is not open",
+        })),
+    })
+}
+
+/// Reports which declared resources a plugin has installed. Returns the
+/// response length.
+///
+/// # Safety
+///
+/// `pointer` must address `length` readable bytes of UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rf_resource_status(pointer: *const u8, length: usize) -> i32 {
+    // SAFETY: forwarded from this function's contract.
+    let bytes = unsafe { std::slice::from_raw_parts(pointer, length) };
+    let Ok(plugin_id) = std::str::from_utf8(bytes) else {
+        return publish(&serde_json::json!({
+            "ok": false,
+            "error": "the plugin id is not valid UTF-8",
+        }));
+    };
+    HOST.with(|host| match host.borrow().as_ref() {
+        Some(host) => match host.resource_status(plugin_id) {
+            Ok(resources) => publish(&serde_json::json!({ "ok": true, "resources": resources })),
+            Err(error) => publish(&serde_json::json!({
+                "ok": false,
+                "error": format!("{error:#}"),
+            })),
+        },
+        None => publish(&serde_json::json!({
+            "ok": false,
+            "error": "the RackForge host is not open",
+        })),
+    })
+}
+
+/// Which plugin resource an imported file belongs to.
+#[derive(serde::Deserialize)]
+struct ResourceImport {
+    plugin_id: String,
+    resource_id: String,
+}
+
+/// What the interface asks to be removed along with a plugin's package.
+#[derive(serde::Deserialize)]
+struct UninstallRequest {
+    plugin_id: String,
+    #[serde(default)]
+    delete_presets: bool,
+    #[serde(default)]
+    delete_plugin_data: bool,
+}
+
 /// Returns a pointer to the buffer written by the most recent [`rf_open`] or
 /// [`rf_request`] call.
 #[unsafe(no_mangle)]

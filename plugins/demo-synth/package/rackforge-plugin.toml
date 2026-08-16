@@ -11,6 +11,13 @@ capabilities = ["audio_output", "midi_input", "presets", "state"]
 major = 1
 minor = 5
 
+[web_ui]
+api_version = 1
+
+[[web_ui.surfaces]]
+kind = "play"
+entry = "web/play.html"
+
 [component]
 abi = "wasm-v1"
 path = "component.wasm"

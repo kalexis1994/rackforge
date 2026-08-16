@@ -10,6 +10,7 @@ members = [
     "apps/rackforge-desktop",
     "apps/rackforge-android/native",
     "crates/rackforge-dsp",
+    "crates/rackforge-host-capabilities",
     "crates/rackforge-midi-api",
     "crates/rackforge-platform-api",
     "crates/rackforge-platform-host",

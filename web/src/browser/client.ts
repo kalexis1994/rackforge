@@ -16,6 +16,7 @@ import {
   type EngineEvent,
   type SeedFile,
 } from "./protocol";
+import { pluginAssetUrl, publishPluginAssets, whenServing } from "./pluginAssets";
 import {
   readStoredFiles,
   requestPersistentStorage,
@@ -83,10 +84,12 @@ async function loadStorage(): Promise<SeedFile[]> {
     ),
     readStoredFiles(),
   ]);
-  return [
+  const files = [
     ...packaged,
     ...stored.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX)),
   ];
+  await publishPluginAssets(files).catch(() => undefined);
+  return files;
 }
 
 /**
@@ -100,6 +103,9 @@ let pendingStorage: SeedFile[] = [];
 
 function storeFiles(files: SeedFile[]) {
   pendingStorage = files;
+  // A plugin's own interface is served from what the host holds, so the
+  // published files follow every install and removal.
+  void publishPluginAssets(files).catch(() => undefined);
   if (storageWrite !== null) return;
   storageWrite = window.setTimeout(() => {
     storageWrite = null;
@@ -335,28 +341,42 @@ function send(request: string): Promise<string> {
  * controls instead.
  */
 function attachWebMidi(node: AudioWorkletNode) {
+  interface MidiInput {
+    onmidimessage: ((event: MIDIMessageEvent) => void) | null;
+  }
+  interface MidiAccess {
+    inputs: Map<string, MidiInput>;
+    onstatechange: (() => void) | null;
+  }
   const midi = (
-    navigator as Navigator & {
-      requestMIDIAccess?: () => Promise<{
-        inputs: Map<string, { onmidimessage: ((event: MIDIMessageEvent) => void) | null }>;
-      }>;
-    }
+    navigator as Navigator & { requestMIDIAccess?: () => Promise<MidiAccess> }
   ).requestMIDIAccess;
   if (!midi) return;
+
+  const listen = (access: MidiAccess) => {
+    for (const input of access.inputs.values()) {
+      // Assigned rather than added, so a controller that reappears is not
+      // wired twice and does not play every note in duplicate.
+      input.onmidimessage = (event: MIDIMessageEvent) => {
+        const data = event.data;
+        if (!data || data.length === 0 || data[0] >= 0xf0) return;
+        node.port.postMessage({
+          kind: "midi",
+          data: [data[0], data[1] ?? 0, data[2] ?? 0],
+          length: Math.min(data.length, 3),
+        });
+      };
+    }
+  };
+
   void midi
     .call(navigator)
     .then((access) => {
-      for (const input of access.inputs.values()) {
-        input.onmidimessage = (event: MIDIMessageEvent) => {
-          const data = event.data;
-          if (!data || data.length === 0 || data[0] >= 0xf0) return;
-          node.port.postMessage({
-            kind: "midi",
-            data: [data[0], data[1] ?? 0, data[2] ?? 0],
-            length: Math.min(data.length, 3),
-          });
-        };
-      }
+      listen(access);
+      // Controllers are plugged in mid-performance far more often than before
+      // one, so the page keeps listening for them rather than asking someone
+      // to reload.
+      access.onstatechange = () => listen(access);
     })
     .catch(() => undefined);
 }
@@ -428,13 +448,36 @@ export function openBrowserSessionChannel(callbacks: SessionChannelCallbacks) {
  * flow is unchanged, and nothing is written until someone confirms it.
  */
 const selections = new Map<string, { name: string; archive: Uint8Array }>();
+/**
+ * Uploads a plugin has been given permission to use, held until it asks for
+ * them to be installed. A networked host keeps the same handles; here they
+ * live for as long as the page does.
+ */
+const grants = new Map<
+  string,
+  { pluginId: string; resourceId: string; name: string; archive: Uint8Array }
+>();
 let nextSelectionId = 1;
 
-/** Sends one archive to the engine and returns its answer. */
+/** Sends one plugin-store operation to the engine and returns its answer. */
 function sendPackage(
-  action: "inspect" | "install",
-  archive: Uint8Array,
-): Promise<{ ok: boolean; error?: string; preview?: PackagePreview; installed?: InstalledPackage }> {
+  action:
+    | "inspect"
+    | "install"
+    | "catalog"
+    | "uninstall"
+    | "import_resource"
+    | "resource_status",
+  payload: Uint8Array = new Uint8Array(),
+): Promise<{
+  ok: boolean;
+  error?: string;
+  preview?: PackagePreview;
+  installed?: InstalledPackage;
+  catalog?: CatalogEntry[];
+  imported?: unknown;
+  resources?: Array<{ resource_id: string; installed: boolean }>;
+}> {
   const node = engine;
   if (!node) {
     return Promise.reject(new Error("The RackForge engine is not running."));
@@ -445,7 +488,7 @@ function sendPackage(
       resolve: (response) => resolve(JSON.parse(response)),
       reject,
     });
-    node.port.postMessage({ kind: "package", id, action, archive });
+    node.port.postMessage({ kind: "package", id, action, payload });
   });
 }
 
@@ -459,6 +502,47 @@ interface PackagePreview {
   platform: string;
   portable: boolean;
   archive_bytes: number;
+}
+
+/**
+ * The host reports paths inside a package, since it has no idea where the page
+ * publishes them. This turns them into the URLs the interface loads.
+ */
+function withAssetUrls(plugin: CatalogEntry, serving: boolean): PluginWebDescriptor {
+  const asset = (entry: string) => pluginAssetUrl(plugin.package_root, entry, plugin.version);
+  return {
+    ...plugin,
+    branding: serving && plugin.branding
+      ? {
+          icon_url: asset(plugin.branding.icon),
+          banner_url: asset(plugin.branding.banner),
+          splash_url: asset(plugin.branding.splash),
+          background_color: plugin.branding.background_color ?? undefined,
+          accent_color: plugin.branding.accent_color ?? undefined,
+        }
+      : null,
+    // Without a worker to serve them, a plugin's own pages have no address,
+    // and the interface says so rather than loading a broken frame.
+    surfaces: serving
+      ? plugin.surfaces.map((surface) => ({
+          kind: surface.kind,
+          entry_url: asset(surface.entry),
+        }))
+      : [],
+  };
+}
+
+/** One plugin as the host describes it, before its files have an address. */
+interface CatalogEntry extends Omit<PluginWebDescriptor, "branding" | "surfaces"> {
+  package_root: string;
+  branding: {
+    icon: string;
+    banner: string;
+    splash: string;
+    background_color?: string | null;
+    accent_color?: string | null;
+  } | null;
+  surfaces: Array<{ kind: "play" | "config"; entry: string }>;
 }
 
 interface InstalledPackage {
@@ -506,9 +590,12 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     } satisfies WebPublicConfig as T;
   }
   if (path === "/api/v1/plugins" && method === "GET") {
-    // The demo runs the instrument RackForge ships, which has no web surface
-    // of its own to index.
-    return [] as unknown as T;
+    const answer = await sendPackage("catalog");
+    if (!answer.ok || !answer.catalog) {
+      throw new HostRequestError(answer.error ?? "The plugin catalog is unavailable.", 503);
+    }
+    const serving = await whenServing();
+    return answer.catalog.map((plugin) => withAssetUrls(plugin, serving)) as T;
   }
   if (path === "/api/v1/host/audio" && method === "GET") {
     const rate = context?.sampleRate ?? 48_000;
@@ -596,19 +683,110 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     // nothing left to start.
     return { status: "active" } as T;
   }
+  if (path === "/api/v1/resources/mounts" && method === "GET") {
+    // There is no host storage to browse: a page can only be given a file.
+    return [] as unknown as T;
+  }
+  if (path === "/api/v1/resources/bind-selection" && method === "POST") {
+    const request = JSON.parse(String(init.body)) as {
+      selection_id?: string;
+      plugin_id?: string;
+      resource_id?: string;
+    };
+    const selection = selectionOf(init.body);
+    const grantId = `browser.grant.${nextSelectionId++}`;
+    grants.set(grantId, {
+      pluginId: request.plugin_id ?? "",
+      resourceId: request.resource_id ?? "",
+      name: selection.name,
+      archive: selection.archive,
+    });
+    if (request.selection_id) selections.delete(request.selection_id);
+    return {
+      grant_id: grantId,
+      resource_id: request.resource_id ?? "",
+      display_name: selection.name,
+      kind: "file",
+      size: selection.archive.length,
+    } as T;
+  }
+  if (path === "/api/v1/resources/grants" && method === "POST") {
+    const { plugin_id: pluginId } = JSON.parse(String(init.body)) as { plugin_id?: string };
+    return [...grants.entries()]
+      .filter(([, grant]) => grant.pluginId === pluginId)
+      .map(([grantId, grant]) => ({
+        grant_id: grantId,
+        resource_id: grant.resourceId,
+        display_name: grant.name,
+        kind: "file",
+        size: grant.archive.length,
+      })) as T;
+  }
+  if (path === "/api/v1/resources/status" && method === "POST") {
+    const { plugin_id: pluginId } = JSON.parse(String(init.body)) as { plugin_id?: string };
+    const answer = await sendPackage(
+      "resource_status",
+      new TextEncoder().encode(pluginId ?? ""),
+    );
+    if (!answer.ok) {
+      throw new HostRequestError(answer.error ?? "Resource status is unavailable.", 404);
+    }
+    return answer.resources as T;
+  }
+  if (path === "/api/v1/resources/browse" && method === "POST") {
+    // A granted upload is one file, so there is nothing inside it to list.
+    return [] as unknown as T;
+  }
+  if (path === "/api/v1/resources/load" && method === "POST") {
+    const request = JSON.parse(String(init.body)) as {
+      plugin_id?: string;
+      target_resource_id?: string;
+      grant_id?: string;
+    };
+    const grant = request.grant_id ? grants.get(request.grant_id) : undefined;
+    if (!grant) {
+      throw new HostRequestError("This file is no longer available; choose it again.", 404);
+    }
+    const header = new TextEncoder().encode(
+      `${JSON.stringify({
+        plugin_id: request.plugin_id ?? grant.pluginId,
+        resource_id: request.target_resource_id ?? grant.resourceId,
+      })}\n`,
+    );
+    const payload = new Uint8Array(header.length + grant.archive.length);
+    payload.set(header);
+    payload.set(grant.archive, header.length);
+    const answer = await sendPackage("import_resource", payload);
+    if (!answer.ok) {
+      throw new HostRequestError(answer.error ?? "This file could not be installed.", 400);
+    }
+    grants.delete(request.grant_id!);
+    await publishSnapshot();
+    return answer.imported as T;
+  }
+  if (path.startsWith("/api/v1/plugins/") && method === "DELETE") {
+    const pluginId = decodeURIComponent(
+      path.slice("/api/v1/plugins/".length).split("?")[0],
+    );
+    const options = init.body ? (JSON.parse(String(init.body)) as object) : {};
+    const answer = await sendPackage(
+      "uninstall",
+      new TextEncoder().encode(JSON.stringify({ plugin_id: pluginId, ...options })),
+    );
+    if (!answer.ok) {
+      throw new HostRequestError(answer.error ?? "This plugin could not be removed.", 400);
+    }
+    await publishSnapshot();
+    return (answer as { removed?: unknown }).removed as T;
+  }
   if (path.startsWith("/api/v1/plugins/") && method === "GET") {
     const pluginId = decodeURIComponent(path.slice("/api/v1/plugins/".length));
-    return {
-      plugin_id: pluginId,
-      plugin_name: pluginId,
-      version: "",
-      active: true,
-      managed: true,
-      api_version: 1,
-      branding: null,
-      surfaces: [],
-      resources: [],
-    } satisfies PluginWebDescriptor as T;
+    const answer = await sendPackage("catalog");
+    const descriptor = answer.catalog?.find((plugin) => plugin.plugin_id === pluginId);
+    if (!descriptor) {
+      throw new HostRequestError("This plugin is not loaded.", 404);
+    }
+    return withAssetUrls(descriptor, await whenServing()) as T;
   }
   throw new HostRequestError(
     "The browser host does not provide this; it is part of an installed RackForge.",

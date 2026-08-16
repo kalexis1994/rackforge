@@ -46,8 +46,15 @@ export interface RequestMessage {
 export interface PackageMessage {
   kind: "package";
   id: number;
-  action: "inspect" | "install";
-  archive: Uint8Array;
+  action:
+    | "inspect"
+    | "install"
+    | "catalog"
+    | "uninstall"
+    | "import_resource"
+    | "resource_status";
+  /** The archive to inspect or install, or the plugin id to remove. */
+  payload: Uint8Array;
 }
 
 export interface MidiMessage {

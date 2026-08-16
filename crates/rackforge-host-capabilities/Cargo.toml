@@ -1,0 +1,8 @@
+[package]
+name = "rackforge-host-capabilities"
+description = "What each RackForge host can do, declared once and checked"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

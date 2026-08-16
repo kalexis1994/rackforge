@@ -28,13 +28,21 @@ use rackforge_control_api::{
 };
 use rackforge_core::performance::{PerformanceBootstrap, PerformanceRepository};
 use rackforge_core::session::SessionStore;
-use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore};
+use rackforge_core::session_checkpoint::SessionCheckpointStore;
+use rackforge_core::{
+    LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore, PluginStorage,
+};
 use rackforge_performance_api::{
     LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
 };
 use rackforge_plugin_api::abi::MidiEventV1;
-use rackforge_plugin_api::{Capability, HostPresetSummary, PluginKind, PresetCatalog};
-use rackforge_repository::{inspect_local_archive, install_local_archive};
+use rackforge_plugin_api::{
+    Capability, HostPresetSummary, PluginKind, PresetCatalog, ResourceKind,
+};
+use rackforge_repository::{
+    PluginUserDataRemovalOptions, inspect_local_archive, install_local_archive,
+    remove_plugin_user_data, uninstall_plugin,
+};
 use rackforge_session_api::{
     BankSummary, ClientId, CommandEnvelope, CommandRef, EventEnvelope, InstanceId, MasterLevel,
     MasterPan, PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent,
@@ -76,6 +84,12 @@ struct HostedPlugin {
     instance: PluginInstance<'static>,
     presets: PresetCatalog,
     selected_sound_id: Option<String>,
+    /// True when the package was installed into the page's plugin store, as
+    /// opposed to shipped with the site.
+    managed: bool,
+    /// Where the package sits in the host's storage, so the page can publish
+    /// the files a plugin's own interface is made of.
+    package_root: String,
 }
 
 pub struct BrowserHost {
@@ -83,6 +97,9 @@ pub struct BrowserHost {
     /// activated the same way the first ones were.
     stream: StreamFormat,
     store: SessionStore,
+    /// Where the session is written after every change, so the next visit
+    /// opens on the instrument, program and mix that were left playing.
+    checkpoint: SessionCheckpointStore,
     performance: PerformanceRepository,
     state_store: PluginStateStore,
     plugins: Vec<HostedPlugin>,
@@ -147,23 +164,56 @@ impl BrowserHost {
         };
         let performance = PerformanceRepository::load_or_bootstrap(Some(&data_root), bootstrap)?;
 
+        let session_id = SessionId::new("browser").map_err(|message| anyhow!(message))?;
+        let checkpoint = SessionCheckpointStore::live(&data_root);
+
+        // What the previous visit left playing. Anything unreadable or no
+        // longer installed is ignored rather than refused: a performer opening
+        // RackForge should get an instrument, not an explanation.
+        for plugin in &mut plugins {
+            let Ok(Some(sound)) = checkpoint.selected_sound(&session_id, plugin.instance_id.as_str()) else {
+                continue;
+            };
+            if plugin.presets.presets.iter().any(|preset| preset.id == sound)
+                && plugin.instance.load_preset(&sound).is_ok()
+            {
+                plugin.selected_sound_id = Some(sound);
+            }
+        }
         let instances: Vec<PluginInstanceState> =
             plugins.iter().map(session_instance_state).collect();
-        let active_instance_id = instances
-            .first()
-            .map(|instance| instance.instance_id.clone());
+        let restored_instance = checkpoint
+            .active_instance_id(&session_id)
+            .ok()
+            .flatten()
+            .and_then(|id| InstanceId::new(id).ok())
+            .filter(|id| instances.iter().any(|instance| instance.instance_id == *id));
+        let active_instance_id = restored_instance
+            .or_else(|| instances.first().map(|instance| instance.instance_id.clone()));
         let session = SessionState {
             schema_version: SESSION_SCHEMA_VERSION,
-            session_id: SessionId::new("browser").map_err(|message| anyhow!(message))?,
             revision: Revision::ZERO,
-            active_mode: SurfaceMode::Play,
-            master_level: MasterLevel::UNITY,
-            master_pan: MasterPan::CENTER,
+            active_mode: checkpoint
+                .active_mode(&session_id)
+                .ok()
+                .flatten()
+                .unwrap_or(SurfaceMode::Play),
+            master_level: checkpoint
+                .master_level(&session_id)
+                .ok()
+                .flatten()
+                .unwrap_or(MasterLevel::UNITY),
+            master_pan: checkpoint
+                .master_pan(&session_id)
+                .ok()
+                .flatten()
+                .unwrap_or(MasterPan::CENTER),
             live: performance.initial_live_state(),
             active_instance_id,
             instances,
             audition: None,
             program_draft: None,
+            session_id,
         };
 
         let audio = AudioEngine::new(
@@ -175,8 +225,9 @@ impl BrowserHost {
         );
         let audio_state = browser_audio_state(sample_rate_hz, maximum_frames, output_channels);
 
-        Ok(Self {
+        let host = Self {
             stream,
+            checkpoint,
             store: SessionStore::new(session)?,
             performance,
             state_store,
@@ -185,7 +236,19 @@ impl BrowserHost {
             audio_state,
             virtual_notes: BTreeMap::new(),
             warnings,
-        })
+        };
+        host.save_checkpoint();
+        Ok(host)
+    }
+
+    /// Writes the session where the next visit will look for it.
+    ///
+    /// A failure here costs the performer the next start's convenience and
+    /// nothing else, so it is recorded rather than raised.
+    fn save_checkpoint(&self) {
+        if let Err(error) = self.checkpoint.save(self.store.state()) {
+            eprintln!("SESSION_CHECKPOINT_ERROR {error:#}");
+        }
     }
 
     /// Problems found while booting that did not stop the host from running,
@@ -579,10 +642,13 @@ impl BrowserHost {
                 ));
             }
         };
-        self.store
+        let recorded = self
+            .store
             .record(Some(command_ref.clone()), event)
             .map(|envelope| vec![envelope])
-            .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))
+            .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
+        self.save_checkpoint();
+        Ok(recorded)
     }
 
     fn plugin_mut(&mut self, instance_id: &InstanceId) -> Result<&mut HostedPlugin, Failure> {
@@ -595,6 +661,202 @@ impl BrowserHost {
                     format!("no plugin instance {instance_id}"),
                 )
             })
+    }
+
+    /// Describes every plugin the host has loaded, in the shape the interface
+    /// uses to populate PLAY and the Plugin Manager.
+    ///
+    /// A networked RackForge builds this by indexing its plugin directory. The
+    /// browser host answers from what it actually loaded, so a package that
+    /// failed to load is absent rather than offered and then unplayable.
+    pub fn plugin_catalog(&self) -> serde_json::Value {
+        let active = self.store.state().active_instance_id.clone();
+        let catalog: Vec<serde_json::Value> = self
+            .plugins
+            .iter()
+            .map(|plugin| {
+                let manifest = plugin.runtime.manifest();
+                serde_json::json!({
+                    "plugin_id": manifest.id,
+                    "plugin_name": manifest.name,
+                    "version": manifest.version,
+                    "active": active.as_ref() == Some(&plugin.instance_id),
+                    "managed": plugin.managed,
+                    "api_version": manifest.api.major,
+                    "branding": manifest.branding.as_ref().map(|branding| {
+                        serde_json::json!({
+                            "icon": branding.icon,
+                            "banner": branding.banner,
+                            "splash": branding.splash,
+                            "background_color": branding.background_color,
+                            "accent_color": branding.accent_color,
+                        })
+                    }),
+                    // Paths inside the package, not URLs: the page publishes
+                    // these files itself and knows where it put them.
+                    "package_root": plugin.package_root.strip_prefix(DATA_ROOT).unwrap_or(&plugin.package_root),
+                    "surfaces": manifest
+                        .web_ui
+                        .as_ref()
+                        .map(|web_ui| {
+                            web_ui
+                                .surfaces
+                                .iter()
+                                .map(|surface| {
+                                    serde_json::json!({
+                                        "kind": match surface.kind {
+                                            rackforge_plugin_api::WebSurfaceKind::Config => "config",
+                                            _ => "play",
+                                        },
+                                        "entry": surface.entry,
+                                    })
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default(),
+                    "resources": manifest
+                        .resources
+                        .iter()
+                        .map(|resource| {
+                            serde_json::json!({
+                                "id": resource.id,
+                                "name": resource.name,
+                                "kind": match resource.kind {
+                                    rackforge_plugin_api::ResourceKind::Directory => "directory",
+                                    _ => "file",
+                                },
+                                "required": resource.required,
+                                "data_path": resource.data_path,
+                                "package_path": resource.package_path,
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        serde_json::Value::Array(catalog)
+    }
+
+    /// Installs a file a plugin declares — a sound library, a ROM — into that
+    /// plugin's private storage, then reloads it so the resource is in place.
+    ///
+    /// A page has no filesystem to point a plugin at, so the file always
+    /// becomes part of the plugin's private data rather than a reference to
+    /// somewhere on a device. That is the same thing the appliance host does
+    /// when a resource is installed rather than merely loaded.
+    pub fn import_resource(
+        &mut self,
+        plugin_id: &str,
+        resource_id: &str,
+        bytes: &[u8],
+    ) -> Result<serde_json::Value> {
+        let plugin = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == plugin_id)
+            .with_context(|| format!("no plugin {plugin_id} is loaded"))?;
+        let requirement = plugin
+            .runtime
+            .manifest()
+            .resources
+            .iter()
+            .find(|resource| resource.id == resource_id)
+            .with_context(|| format!("plugin does not declare resource {resource_id:?}"))?;
+        if requirement.kind != ResourceKind::File {
+            bail!("resource {resource_id:?} is a directory, which a page cannot deliver");
+        }
+        let relative = requirement.data_path.clone().with_context(|| {
+            format!("resource {resource_id:?} has no private data path to install into")
+        })?;
+
+        let storage = PluginStorage::new(PathBuf::from(DATA_ROOT));
+        let path = PathBuf::from(&relative);
+        if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+            storage.ensure_directory(plugin_id, parent)?;
+        }
+        storage.write_atomic(plugin_id, &path, bytes)?;
+        let warnings = self.reload_plugins()?;
+        Ok(serde_json::json!({
+            "plugin_id": plugin_id,
+            "resource_id": resource_id,
+            "byte_length": bytes.len(),
+            "persisted": true,
+            "warnings": warnings,
+        }))
+    }
+
+    /// Reports which declared resources a plugin currently has installed, so
+    /// its own interface can show what is missing.
+    pub fn resource_status(&self, plugin_id: &str) -> Result<serde_json::Value> {
+        let plugin = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == plugin_id)
+            .with_context(|| format!("no plugin {plugin_id} is loaded"))?;
+        let storage = PluginStorage::new(PathBuf::from(DATA_ROOT));
+        let root = storage.ensure_plugin(plugin_id)?.root;
+        let resources: Vec<serde_json::Value> = plugin
+            .runtime
+            .manifest()
+            .resources
+            .iter()
+            .map(|requirement| {
+                let installed = requirement
+                    .data_path
+                    .as_ref()
+                    .map(|relative| root.join(relative).is_file())
+                    .unwrap_or(false);
+                serde_json::json!({
+                    "resource_id": requirement.id,
+                    "name": requirement.name,
+                    "required": requirement.required,
+                    "installed": installed,
+                })
+            })
+            .collect();
+        Ok(serde_json::Value::Array(resources))
+    }
+
+    /// Removes an installed plugin and reloads the session without it.
+    ///
+    /// The packages RackForge ships with the page are not installed and cannot
+    /// be removed: they come back with the site on the next visit, so deleting
+    /// them would be a promise the host could not keep.
+    pub fn uninstall_package(
+        &mut self,
+        plugin_id: &str,
+        options: PluginUserDataRemovalOptions,
+    ) -> Result<serde_json::Value> {
+        let bundled = self
+            .plugins
+            .iter()
+            .any(|plugin| plugin.plugin_id == plugin_id && !plugin.managed);
+        if bundled {
+            bail!("{plugin_id} is part of this RackForge and cannot be removed");
+        }
+        let removed = uninstall_plugin(store_root(), plugin_id)?;
+        // Presets the host itself saved live in its state store rather than in
+        // the package, so they are removed here rather than by the repository.
+        let mut presets_removed = 0;
+        if options.presets {
+            for preset in self.state_store.list_presets(plugin_id).unwrap_or_default() {
+                if self.state_store.delete_preset(plugin_id, &preset.id).is_ok() {
+                    presets_removed += 1;
+                }
+            }
+        }
+        let user_data =
+            remove_plugin_user_data(PathBuf::from(DATA_ROOT), plugin_id, options)?;
+        let warnings = self.reload_plugins()?;
+        Ok(serde_json::json!({
+            "plugin_id": removed.plugin_id,
+            "removed_versions": removed.removed_versions,
+            "cleanup_pending": removed.cleanup_pending,
+            "presets_deleted": options.presets
+                && (presets_removed > 0 || user_data.preset_files_removed > 0),
+            "plugin_data_deleted": options.plugin_data && user_data.data_namespaces_removed > 0,
+            "warnings": warnings,
+        }))
     }
 
     /// Validates a `.rfplugin` without installing it, so the interface can
@@ -696,6 +958,7 @@ impl BrowserHost {
         self.audio.silence();
         self.plugins = plugins;
         self.store = SessionStore::new(session)?;
+        self.save_checkpoint();
         Ok(warnings)
     }
 
@@ -816,6 +1079,7 @@ fn manifest_roots(directory: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn load_plugin(root: &Path, data_root: &Path, stream: StreamFormat) -> Result<HostedPlugin> {
+    let managed = root.starts_with(data_root.join(STORE_DIRECTORY));
     let package = PluginPackage::open(root)?;
     if package.manifest().kind != PluginKind::Instrument {
         bail!(
@@ -852,12 +1116,14 @@ fn load_plugin(root: &Path, data_root: &Path, stream: StreamFormat) -> Result<Ho
     )?;
 
     Ok(HostedPlugin {
+        package_root: root.to_string_lossy().into_owned(),
         instance_id,
         plugin_id: package.manifest().id.clone(),
         runtime: loaded,
         instance,
         presets,
         selected_sound_id,
+        managed,
     })
 }
 

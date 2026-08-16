@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RackForge Demo Synth</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #e8f0f7;
+        --muted: #7f93a6;
+        --line: #1c2a36;
+        --accent: #58c7f3;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px;
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: #050b11;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 17px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      p.lead { margin: 0 0 24px; color: var(--muted); }
+      .controls { display: grid; gap: 18px; max-width: 520px; }
+      .control { display: grid; gap: 6px; }
+      .row { display: flex; justify-content: space-between; align-items: baseline; }
+      .name { font-weight: 600; }
+      .value { color: var(--accent); font-variant-numeric: tabular-nums; }
+      input[type="range"] { width: 100%; accent-color: var(--accent); }
+      .state { margin-top: 22px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Demo Synth</h1>
+    <p class="lead">The instrument RackForge ships so every host has something to play.</p>
+    <div class="controls" id="controls"></div>
+    <p class="state" id="state">Connecting to RackForge…</p>
+
+    <script type="module">
+      /*
+       * A minimal RackForge plugin surface.
+       *
+       * It owns its own interface and asks the host for everything else: the
+       * parameter schema, the current values, and permission to change one.
+       * No path, no plugin id and no Core command is ever sent from here — the
+       * host derives all of that from which surface is talking to it.
+       */
+      const PROTOCOL = "rackforge.plugin.web@1";
+      const pending = new Map();
+      let nextRequest = 1;
+
+      const controls = document.getElementById("controls");
+      const state = document.getElementById("state");
+
+      function call(method, params = {}) {
+        const requestId = `demo-synth-${nextRequest++}`;
+        return new Promise((resolve, reject) => {
+          pending.set(requestId, { resolve, reject });
+          parent.postMessage(
+            { protocol: PROTOCOL, kind: "request", request_id: requestId, method, params },
+            "*",
+          );
+        });
+      }
+
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (!message || message.protocol !== PROTOCOL) return;
+        if (message.kind === "context") {
+          state.textContent = `Connected · ${message.surface ?? "play"} surface`;
+          void load();
+          return;
+        }
+        if (message.kind !== "response") return;
+        const waiting = pending.get(message.request_id);
+        if (!waiting) return;
+        pending.delete(message.request_id);
+        if (message.ok) {
+          waiting.resolve(message.result);
+        } else {
+          waiting.reject(new Error(message.error ?? "RackForge refused the request"));
+        }
+      });
+
+      /** Draws one control per parameter the plugin declares. */
+      function draw(schema, values) {
+        const current = new Map(values.map((value) => [value.index, value.value]));
+        controls.replaceChildren();
+        for (const parameter of schema.parameters) {
+          const kind = parameter.kind;
+          if (kind.type !== "float") continue;
+
+          const wrapper = document.createElement("div");
+          wrapper.className = "control";
+          const row = document.createElement("div");
+          row.className = "row";
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = parameter.name;
+          const reading = document.createElement("span");
+          reading.className = "value";
+          row.append(name, reading);
+
+          const slider = document.createElement("input");
+          slider.type = "range";
+          slider.min = String(kind.minimum);
+          slider.max = String(kind.maximum);
+          slider.step = String(kind.step ?? 0.01);
+          slider.value = String(current.get(parameter.index) ?? kind.default);
+          slider.setAttribute("aria-label", parameter.name);
+          const show = () => {
+            reading.textContent = Number(slider.value).toFixed(2);
+          };
+          show();
+          slider.addEventListener("input", () => {
+            show();
+            void call("plugin.set_parameter", {
+              parameter_index: parameter.index,
+              value: Number(slider.value),
+            }).catch((error) => {
+              state.textContent = error.message;
+            });
+          });
+
+          wrapper.append(row, slider);
+          controls.append(wrapper);
+        }
+      }
+
+      async function load() {
+        try {
+          const parameters = await call("plugin.parameters");
+          draw(parameters.schema, parameters.values ?? []);
+        } catch (error) {
+          state.textContent = error.message;
+        }
+      }
+
+      parent.postMessage({ protocol: PROTOCOL, kind: "ready" }, "*");
+    </script>
+  </body>
+</html>

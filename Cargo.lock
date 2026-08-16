@@ -3631,6 +3631,7 @@ dependencies = [
  "rackforge-core",
  "rackforge-performance-api",
  "rackforge-plugin-api",
+ "rackforge-repository",
  "rackforge-session-api",
  "semver",
  "serde",

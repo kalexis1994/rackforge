@@ -39,13 +39,28 @@ export interface RequestMessage {
   request: string;
 }
 
+/**
+ * Validates or installs a `.rfplugin`. The engine owns the plugin store, so
+ * the page hands the archive over rather than unpacking anything itself.
+ */
+export interface PackageMessage {
+  kind: "package";
+  id: number;
+  action: "inspect" | "install";
+  archive: Uint8Array;
+}
+
 export interface MidiMessage {
   kind: "midi";
   data: [number, number, number];
   length: number;
 }
 
-export type EngineCommand = BootMessage | RequestMessage | MidiMessage;
+export type EngineCommand =
+  | BootMessage
+  | RequestMessage
+  | PackageMessage
+  | MidiMessage;
 
 /**
  * Sent as soon as the processor exists. A port message posted before that is
@@ -70,6 +85,15 @@ export interface ResponseMessage {
 }
 
 /**
+ * Everything the host has written, reported after it writes. The page files it
+ * so the next visit starts where this one left off.
+ */
+export interface StorageMessage {
+  kind: "storage";
+  files: SeedFile[];
+}
+
+/**
  * The engine publishes a revision whenever it changes, so the page can refresh
  * without polling the session on a timer.
  */
@@ -82,7 +106,14 @@ export type EngineEvent =
   | ReadyMessage
   | BootedMessage
   | ResponseMessage
+  | StorageMessage
   | RevisionMessage;
+
+/**
+ * Storage the host does not own: RackForge ships these with the site, and a
+ * stored copy would go stale as soon as the site was rebuilt.
+ */
+export const PACKAGED_STORAGE_PREFIX = "plugins/";
 
 /** Name the page registers the engine processor under. */
 export const ENGINE_PROCESSOR = "rackforge-engine";

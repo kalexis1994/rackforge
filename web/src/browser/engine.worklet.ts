@@ -23,6 +23,7 @@ import {
 import { PluginHost } from "./pluginHost";
 import {
   ENGINE_PROCESSOR,
+  PACKAGED_STORAGE_PREFIX,
   type EngineCommand,
   type EngineEvent,
   type SeedFile,
@@ -51,7 +52,24 @@ interface HostExports {
     length: number,
   ) => void;
   rf_render: (frames: number) => number;
+  rf_inspect_plugin: (pointer: number, length: number) => number;
+  rf_install_plugin: (pointer: number, length: number) => number;
 }
+
+/**
+ * Control requests that only read. Everything else may have written to
+ * storage, so the page is told to file a fresh copy afterwards.
+ */
+const READ_ONLY_OPERATIONS = new Set([
+  "snapshot",
+  "performance_snapshot",
+  "events",
+  "audio_snapshot",
+  "plugin_presets",
+  "plugin_preset",
+  "plugin_parameters",
+  "plugin_state_parameters",
+]);
 
 /** Builds the directory tree the host boots against from a flat file list. */
 function seedDirectory(files: SeedFile[]): Map<string, Inode> {
@@ -76,8 +94,31 @@ function seedDirectory(files: SeedFile[]): Map<string, Inode> {
   return root;
 }
 
+/** Reads the operation name out of a control request without validating it. */
+function operationOf(request: string): string {
+  try {
+    return String((JSON.parse(request) as { op?: unknown }).op ?? "");
+  } catch {
+    return "";
+  }
+}
+
+/** Flattens a directory tree into the path/bytes pairs the page stores. */
+function collectFiles(contents: Map<string, Inode>, prefix: string, files: SeedFile[]) {
+  for (const [name, inode] of contents) {
+    const path = prefix ? `${prefix}/${name}` : name;
+    if (inode instanceof Directory) {
+      collectFiles(inode.contents, path, files);
+    } else if (inode instanceof File) {
+      files.push({ path, bytes: inode.data });
+    }
+  }
+}
+
 class RackForgeEngine extends AudioWorkletProcessor {
   #host: HostExports | null = null;
+  /** The root the host reads and writes through WASI. */
+  #storage: PreopenDirectory | null = null;
   #pluginHost = new PluginHost();
   #decoder = new TextDecoder();
   #encoder = new TextEncoder();
@@ -107,12 +148,21 @@ class RackForgeEngine extends AudioWorkletProcessor {
       case "boot":
         this.#boot(command.wasm, command.files, command.maximumFrames, command.channels);
         break;
-      case "request":
+      case "request": {
+        const response = this.#request(command.request);
+        this.#post({ kind: "response", id: command.id, response });
+        if (!READ_ONLY_OPERATIONS.has(operationOf(command.request))) {
+          this.#publishStorage();
+        }
+        break;
+      }
+      case "package":
         this.#post({
           kind: "response",
           id: command.id,
-          response: this.#request(command.request),
+          response: this.#package(command.action, command.archive),
         });
+        this.#publishStorage();
         break;
       case "midi": {
         const [status, data1, data2] = command.data;
@@ -128,6 +178,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
     maximumFrames: number,
     channels: number,
   ) {
+    const storage = new PreopenDirectory(`/${DATA_ROOT}`, seedDirectory(files));
     const wasi = new WASI(
       ["rackforge"],
       [],
@@ -135,9 +186,10 @@ class RackForgeEngine extends AudioWorkletProcessor {
         new OpenFile(new File([])),
         ConsoleStdout.lineBuffered((line) => console.log(`[rackforge] ${line}`)),
         ConsoleStdout.lineBuffered((line) => console.warn(`[rackforge] ${line}`)),
-        new PreopenDirectory(`/${DATA_ROOT}`, seedDirectory(files)),
+        storage,
       ],
     );
+    this.#storage = storage;
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.slice().buffer), {
       wasi_snapshot_preview1: wasi.wasiImport,
       rackforge_plugin_host: this.#pluginHost.imports,
@@ -185,6 +237,40 @@ class RackForgeEngine extends AudioWorkletProcessor {
     } finally {
       host.rf_free(pointer, encoded.length);
     }
+  }
+
+  /**
+   * Hands one archive to the host, which validates it and — for an install —
+   * unpacks it into the plugin store and reloads the session over it.
+   */
+  #package(action: "inspect" | "install", archive: Uint8Array): string {
+    const host = this.#host;
+    if (!host) {
+      return JSON.stringify({ ok: false, error: "the RackForge engine is not running" });
+    }
+    const pointer = host.rf_alloc(archive.length);
+    new Uint8Array(host.memory.buffer, pointer, archive.length).set(archive);
+    try {
+      const length =
+        action === "install"
+          ? host.rf_install_plugin(pointer, archive.length)
+          : host.rf_inspect_plugin(pointer, archive.length);
+      return this.#readResponse(length);
+    } finally {
+      host.rf_free(pointer, archive.length);
+    }
+  }
+
+  /** Reports what the host has written, so the page can keep it. */
+  #publishStorage() {
+    const storage = this.#storage;
+    if (!storage) return;
+    const files: SeedFile[] = [];
+    collectFiles(storage.dir.contents, "", files);
+    this.#post({
+      kind: "storage",
+      files: files.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX)),
+    });
   }
 
   #readResponse(length: number): string {

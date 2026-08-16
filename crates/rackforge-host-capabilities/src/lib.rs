@@ -412,7 +412,11 @@ const BROWSER: &[(Capability, Support)] = &[
     (Capability::PluginRemoval, Support::Yes),
     (
         Capability::PluginResources,
-        Support::Planned("a page can read a file, but the host does not deliver it to a plugin yet"),
+        Support::Planned(
+            "the host installs a chosen file into a plugin's private storage and reloads it, but \
+             no packaged plugin here asks for one, so the path a plugin's own interface takes is \
+             unproven",
+        ),
     ),
     (Capability::PluginWebSurfaces, Support::Yes),
     (

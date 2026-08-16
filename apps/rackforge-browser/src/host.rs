@@ -28,12 +28,14 @@ use rackforge_control_api::{
 };
 use rackforge_core::performance::{PerformanceBootstrap, PerformanceRepository};
 use rackforge_core::session::SessionStore;
-use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore};
+use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore, PluginStorage};
 use rackforge_performance_api::{
     LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
 };
 use rackforge_plugin_api::abi::MidiEventV1;
-use rackforge_plugin_api::{Capability, HostPresetSummary, PluginKind, PresetCatalog};
+use rackforge_plugin_api::{
+    Capability, HostPresetSummary, PluginKind, PresetCatalog, ResourceKind,
+};
 use rackforge_repository::{
     PluginUserDataRemovalOptions, inspect_local_archive, install_local_archive,
     remove_plugin_user_data, uninstall_plugin,
@@ -678,6 +680,86 @@ impl BrowserHost {
             })
             .collect();
         serde_json::Value::Array(catalog)
+    }
+
+    /// Installs a file a plugin declares — a sound library, a ROM — into that
+    /// plugin's private storage, then reloads it so the resource is in place.
+    ///
+    /// A page has no filesystem to point a plugin at, so the file always
+    /// becomes part of the plugin's private data rather than a reference to
+    /// somewhere on a device. That is the same thing the appliance host does
+    /// when a resource is installed rather than merely loaded.
+    pub fn import_resource(
+        &mut self,
+        plugin_id: &str,
+        resource_id: &str,
+        bytes: &[u8],
+    ) -> Result<serde_json::Value> {
+        let plugin = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == plugin_id)
+            .with_context(|| format!("no plugin {plugin_id} is loaded"))?;
+        let requirement = plugin
+            .runtime
+            .manifest()
+            .resources
+            .iter()
+            .find(|resource| resource.id == resource_id)
+            .with_context(|| format!("plugin does not declare resource {resource_id:?}"))?;
+        if requirement.kind != ResourceKind::File {
+            bail!("resource {resource_id:?} is a directory, which a page cannot deliver");
+        }
+        let relative = requirement.data_path.clone().with_context(|| {
+            format!("resource {resource_id:?} has no private data path to install into")
+        })?;
+
+        let storage = PluginStorage::new(PathBuf::from(DATA_ROOT));
+        let path = PathBuf::from(&relative);
+        if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+            storage.ensure_directory(plugin_id, parent)?;
+        }
+        storage.write_atomic(plugin_id, &path, bytes)?;
+        let warnings = self.reload_plugins()?;
+        Ok(serde_json::json!({
+            "plugin_id": plugin_id,
+            "resource_id": resource_id,
+            "byte_length": bytes.len(),
+            "persisted": true,
+            "warnings": warnings,
+        }))
+    }
+
+    /// Reports which declared resources a plugin currently has installed, so
+    /// its own interface can show what is missing.
+    pub fn resource_status(&self, plugin_id: &str) -> Result<serde_json::Value> {
+        let plugin = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == plugin_id)
+            .with_context(|| format!("no plugin {plugin_id} is loaded"))?;
+        let storage = PluginStorage::new(PathBuf::from(DATA_ROOT));
+        let root = storage.ensure_plugin(plugin_id)?.root;
+        let resources: Vec<serde_json::Value> = plugin
+            .runtime
+            .manifest()
+            .resources
+            .iter()
+            .map(|requirement| {
+                let installed = requirement
+                    .data_path
+                    .as_ref()
+                    .map(|relative| root.join(relative).is_file())
+                    .unwrap_or(false);
+                serde_json::json!({
+                    "resource_id": requirement.id,
+                    "name": requirement.name,
+                    "required": requirement.required,
+                    "installed": installed,
+                })
+            })
+            .collect();
+        Ok(serde_json::Value::Array(resources))
     }
 
     /// Removes an installed plugin and reloads the session without it.

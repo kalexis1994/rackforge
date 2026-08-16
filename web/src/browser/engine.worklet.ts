@@ -56,6 +56,8 @@ interface HostExports {
   rf_inspect_plugin: (pointer: number, length: number) => number;
   rf_install_plugin: (pointer: number, length: number) => number;
   rf_uninstall_plugin: (pointer: number, length: number) => number;
+  rf_import_resource: (pointer: number, length: number) => number;
+  rf_resource_status: (pointer: number, length: number) => number;
   rf_plugin_catalog: () => number;
 }
 
@@ -262,7 +264,11 @@ class RackForgeEngine extends AudioWorkletProcessor {
           ? host.rf_install_plugin
           : action === "uninstall"
             ? host.rf_uninstall_plugin
-            : host.rf_inspect_plugin;
+            : action === "import_resource"
+              ? host.rf_import_resource
+              : action === "resource_status"
+                ? host.rf_resource_status
+                : host.rf_inspect_plugin;
       return this.#readResponse(call(pointer, payload.length));
     } finally {
       host.rf_free(pointer, payload.length);

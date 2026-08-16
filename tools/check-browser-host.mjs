@@ -16,7 +16,7 @@
 
 import { WASI } from "node:wasi";
 import { readFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 /**
  * Plugin exports addressed by index, in the order shared with the browser
@@ -186,6 +186,7 @@ const PAGE_SIDE = new Map([
   ["persistent_storage", "the page files the host's storage in IndexedDB"],
   ["offline_operation", "the service worker serves the site with the network off"],
   ["midi_input", "Web MIDI delivers messages the page forwards as live MIDI"],
+  ["midi_hotplug", "the page re-attaches inputs when Web MIDI reports a change"],
 ]);
 
 const failures = [];
@@ -291,6 +292,17 @@ const PROBES = {
   performance_library: () => {
     const library = request({ op: "performance_snapshot" });
     return library.status === "performance_snapshot" ? null : library.message;
+  },
+  session_restore: () => {
+    // The checkpoint is written where the next boot reads it; a second host
+    // over the same storage is what a returning visit actually is.
+    const path = `${storagePath}/sessions/live.main.json`;
+    if (!existsSync(path)) return `no checkpoint at ${path}`;
+    const saved = JSON.parse(readFileSync(path, "utf8"));
+    const held = saved.active_instance_id ?? saved.session?.active_instance_id;
+    return held === instanceId
+      ? null
+      : `the checkpoint holds ${held ?? "nothing"} rather than the active instrument`;
   },
   plugin_web_surfaces: () => {
     // The page serves the files; the host's part is reporting which files a

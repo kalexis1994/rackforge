@@ -385,10 +385,7 @@ const BROWSER: &[(Capability, Support)] = &[
         Capability::MidiOutput,
         Support::Planned("Web MIDI outputs are not connected yet; controller surfaces need them"),
     ),
-    (
-        Capability::MidiHotplug,
-        Support::Planned("Web MIDI reports devices arriving, but the host does not listen yet"),
-    ),
+    (Capability::MidiHotplug, Support::Yes),
     (Capability::PluginParameters, Support::Yes),
     (Capability::HostPresets, Support::Yes),
     (
@@ -428,10 +425,7 @@ const BROWSER: &[(Capability, Support)] = &[
         Support::Unavailable(why::NO_WEB_AUDIO_DEVICES),
     ),
     (Capability::PersistentStorage, Support::Yes),
-    (
-        Capability::SessionRestore,
-        Support::Planned("the session checkpoint is not written by the browser host yet"),
-    ),
+    (Capability::SessionRestore, Support::Yes),
     (Capability::OfflineOperation, Support::Yes),
     (
         Capability::RuntimeMetering,

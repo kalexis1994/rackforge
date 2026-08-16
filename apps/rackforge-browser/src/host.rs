@@ -28,7 +28,10 @@ use rackforge_control_api::{
 };
 use rackforge_core::performance::{PerformanceBootstrap, PerformanceRepository};
 use rackforge_core::session::SessionStore;
-use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore, PluginStorage};
+use rackforge_core::session_checkpoint::SessionCheckpointStore;
+use rackforge_core::{
+    LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore, PluginStorage,
+};
 use rackforge_performance_api::{
     LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
 };
@@ -94,6 +97,9 @@ pub struct BrowserHost {
     /// activated the same way the first ones were.
     stream: StreamFormat,
     store: SessionStore,
+    /// Where the session is written after every change, so the next visit
+    /// opens on the instrument, program and mix that were left playing.
+    checkpoint: SessionCheckpointStore,
     performance: PerformanceRepository,
     state_store: PluginStateStore,
     plugins: Vec<HostedPlugin>,
@@ -158,23 +164,56 @@ impl BrowserHost {
         };
         let performance = PerformanceRepository::load_or_bootstrap(Some(&data_root), bootstrap)?;
 
+        let session_id = SessionId::new("browser").map_err(|message| anyhow!(message))?;
+        let checkpoint = SessionCheckpointStore::live(&data_root);
+
+        // What the previous visit left playing. Anything unreadable or no
+        // longer installed is ignored rather than refused: a performer opening
+        // RackForge should get an instrument, not an explanation.
+        for plugin in &mut plugins {
+            let Ok(Some(sound)) = checkpoint.selected_sound(&session_id, plugin.instance_id.as_str()) else {
+                continue;
+            };
+            if plugin.presets.presets.iter().any(|preset| preset.id == sound)
+                && plugin.instance.load_preset(&sound).is_ok()
+            {
+                plugin.selected_sound_id = Some(sound);
+            }
+        }
         let instances: Vec<PluginInstanceState> =
             plugins.iter().map(session_instance_state).collect();
-        let active_instance_id = instances
-            .first()
-            .map(|instance| instance.instance_id.clone());
+        let restored_instance = checkpoint
+            .active_instance_id(&session_id)
+            .ok()
+            .flatten()
+            .and_then(|id| InstanceId::new(id).ok())
+            .filter(|id| instances.iter().any(|instance| instance.instance_id == *id));
+        let active_instance_id = restored_instance
+            .or_else(|| instances.first().map(|instance| instance.instance_id.clone()));
         let session = SessionState {
             schema_version: SESSION_SCHEMA_VERSION,
-            session_id: SessionId::new("browser").map_err(|message| anyhow!(message))?,
             revision: Revision::ZERO,
-            active_mode: SurfaceMode::Play,
-            master_level: MasterLevel::UNITY,
-            master_pan: MasterPan::CENTER,
+            active_mode: checkpoint
+                .active_mode(&session_id)
+                .ok()
+                .flatten()
+                .unwrap_or(SurfaceMode::Play),
+            master_level: checkpoint
+                .master_level(&session_id)
+                .ok()
+                .flatten()
+                .unwrap_or(MasterLevel::UNITY),
+            master_pan: checkpoint
+                .master_pan(&session_id)
+                .ok()
+                .flatten()
+                .unwrap_or(MasterPan::CENTER),
             live: performance.initial_live_state(),
             active_instance_id,
             instances,
             audition: None,
             program_draft: None,
+            session_id,
         };
 
         let audio = AudioEngine::new(
@@ -186,8 +225,9 @@ impl BrowserHost {
         );
         let audio_state = browser_audio_state(sample_rate_hz, maximum_frames, output_channels);
 
-        Ok(Self {
+        let host = Self {
             stream,
+            checkpoint,
             store: SessionStore::new(session)?,
             performance,
             state_store,
@@ -196,7 +236,19 @@ impl BrowserHost {
             audio_state,
             virtual_notes: BTreeMap::new(),
             warnings,
-        })
+        };
+        host.save_checkpoint();
+        Ok(host)
+    }
+
+    /// Writes the session where the next visit will look for it.
+    ///
+    /// A failure here costs the performer the next start's convenience and
+    /// nothing else, so it is recorded rather than raised.
+    fn save_checkpoint(&self) {
+        if let Err(error) = self.checkpoint.save(self.store.state()) {
+            eprintln!("SESSION_CHECKPOINT_ERROR {error:#}");
+        }
     }
 
     /// Problems found while booting that did not stop the host from running,
@@ -590,10 +642,13 @@ impl BrowserHost {
                 ));
             }
         };
-        self.store
+        let recorded = self
+            .store
             .record(Some(command_ref.clone()), event)
             .map(|envelope| vec![envelope])
-            .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))
+            .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
+        self.save_checkpoint();
+        Ok(recorded)
     }
 
     fn plugin_mut(&mut self, instance_id: &InstanceId) -> Result<&mut HostedPlugin, Failure> {
@@ -903,6 +958,7 @@ impl BrowserHost {
         self.audio.silence();
         self.plugins = plugins;
         self.store = SessionStore::new(session)?;
+        self.save_checkpoint();
         Ok(warnings)
     }
 

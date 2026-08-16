@@ -341,28 +341,42 @@ function send(request: string): Promise<string> {
  * controls instead.
  */
 function attachWebMidi(node: AudioWorkletNode) {
+  interface MidiInput {
+    onmidimessage: ((event: MIDIMessageEvent) => void) | null;
+  }
+  interface MidiAccess {
+    inputs: Map<string, MidiInput>;
+    onstatechange: (() => void) | null;
+  }
   const midi = (
-    navigator as Navigator & {
-      requestMIDIAccess?: () => Promise<{
-        inputs: Map<string, { onmidimessage: ((event: MIDIMessageEvent) => void) | null }>;
-      }>;
-    }
+    navigator as Navigator & { requestMIDIAccess?: () => Promise<MidiAccess> }
   ).requestMIDIAccess;
   if (!midi) return;
+
+  const listen = (access: MidiAccess) => {
+    for (const input of access.inputs.values()) {
+      // Assigned rather than added, so a controller that reappears is not
+      // wired twice and does not play every note in duplicate.
+      input.onmidimessage = (event: MIDIMessageEvent) => {
+        const data = event.data;
+        if (!data || data.length === 0 || data[0] >= 0xf0) return;
+        node.port.postMessage({
+          kind: "midi",
+          data: [data[0], data[1] ?? 0, data[2] ?? 0],
+          length: Math.min(data.length, 3),
+        });
+      };
+    }
+  };
+
   void midi
     .call(navigator)
     .then((access) => {
-      for (const input of access.inputs.values()) {
-        input.onmidimessage = (event: MIDIMessageEvent) => {
-          const data = event.data;
-          if (!data || data.length === 0 || data[0] >= 0xf0) return;
-          node.port.postMessage({
-            kind: "midi",
-            data: [data[0], data[1] ?? 0, data[2] ?? 0],
-            length: Math.min(data.length, 3),
-          });
-        };
-      }
+      listen(access);
+      // Controllers are plugged in mid-performance far more often than before
+      // one, so the page keeps listening for them rather than asking someone
+      // to reload.
+      access.onstatechange = () => listen(access);
     })
     .catch(() => undefined);
 }

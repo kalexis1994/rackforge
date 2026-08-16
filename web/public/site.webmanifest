@@ -1,23 +1,42 @@
 {
+  "id": "./",
   "name": "RackForge",
   "short_name": "RackForge",
   "description": "Portable instrument and live-performance host",
-  "start_url": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
   "background_color": "#050b11",
   "theme_color": "#050b11",
+  "categories": ["music", "productivity"],
   "icons": [
     {
-      "src": "/brand/rackforge-mark-192.png",
+      "src": "./brand/rackforge-mark-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/brand/rackforge-mark-512.png",
+      "src": "./brand/rackforge-mark-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Play",
+      "short_name": "Play",
+      "description": "Choose an instrument and its programs",
+      "url": "./#/play"
+    },
+    {
+      "name": "Touch Controller",
+      "short_name": "Keys",
+      "description": "Play from the on-screen keyboard and pads",
+      "url": "./#/controller"
     }
   ]
 }

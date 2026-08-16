@@ -50,9 +50,16 @@ Controller, or from a USB MIDI controller in browsers that support Web MIDI
 (Chrome and Edge; Firefox asks for permission; Safari has none). Sound starts
 after the first click or tap, which is a rule browsers apply to every page.
 
+Install it from the browser's menu to keep it: RackForge then opens like any
+other application, starts with no network at all, and keeps what you install in
+it. Portable `.rfplugin` instruments can be installed straight into the page,
+and they, your programs and your performances stay on the device between
+visits.
+
 What a page cannot offer, it does not pretend to: there are no audio devices to
-choose between, no access PIN, and no installing a `.rfplugin` from disk. For
-those, install RackForge below.
+choose between, no access PIN, and native plugin packages are refused rather
+than installed and then found unplayable. Latency is the browser's, not the
+operating system's — for a controller on a stage, install RackForge below.
 
 ## Choose a platform
 

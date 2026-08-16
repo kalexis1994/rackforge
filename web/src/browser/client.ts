@@ -21,6 +21,7 @@ import {
   requestPersistentStorage,
   writeStoredFiles,
 } from "./storage";
+import { assetUrl } from "../assets";
 import type {
   HostAudioSettings,
   PluginWebDescriptor,
@@ -54,10 +55,6 @@ let bootWarnings: string[] = [];
 let nextRequestId = 1;
 const pending = new Map<number, Pending>();
 const listeners = new Set<SessionChannelCallbacks>();
-
-function assetUrl(path: string): string {
-  return new URL(path, document.baseURI).toString();
-}
 
 async function fetchBytes(path: string): Promise<Uint8Array> {
   const response = await fetch(assetUrl(path), { cache: "no-store" });

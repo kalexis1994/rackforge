@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type FormEvent,
 } from "react";
+import { assetUrl } from "./assets";
 import { useSelector } from "react-redux";
 import {
   Activity,
@@ -105,7 +106,7 @@ const ResourceExplorerDialog = lazy(() =>
 function BrandMark() {
   return (
     <span className="brand-mark" aria-hidden="true">
-      <img src="/brand/rackforge-mark.svg" alt="" />
+      <img src={assetUrl("brand/rackforge-mark.svg")} alt="" />
     </span>
   );
 }

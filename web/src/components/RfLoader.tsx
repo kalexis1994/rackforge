@@ -1,3 +1,5 @@
+import { assetUrl } from "../assets";
+
 export type RfLoaderSize = "compact" | "medium" | "large";
 
 interface RfLoaderProps {
@@ -31,12 +33,12 @@ export function RfLoader({
       <span className="rf-async-loader__mark" aria-hidden="true">
         <img
           className="rf-async-loader__logo rf-async-loader__logo--base"
-          src="/brand/rackforge-mark-foreground.svg"
+          src={assetUrl("brand/rackforge-mark-foreground.svg")}
           alt=""
         />
         <img
           className="rf-async-loader__logo rf-async-loader__logo--fill"
-          src="/brand/rackforge-mark-foreground.svg"
+          src={assetUrl("brand/rackforge-mark-foreground.svg")}
           alt=""
         />
         <span className="rf-async-loader__scanner" />

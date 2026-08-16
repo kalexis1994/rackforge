@@ -103,7 +103,7 @@ impl PluginPackage {
                 }
                 continue;
             };
-            let canonical = fs::canonicalize(&path)
+            let canonical = crate::storage::resolve_existing(&path)
                 .with_context(|| format!("resolving resource {}", path.display()))?;
             let confined_root = match source {
                 ResourceSource::Override => None,
@@ -111,7 +111,7 @@ impl PluginPackage {
                 ResourceSource::PrivateData => plugin_data.as_ref().map(|root| &root.root),
             };
             if let Some(root) = confined_root {
-                let canonical_root = fs::canonicalize(root)
+                let canonical_root = crate::storage::resolve_existing(root)
                     .with_context(|| format!("resolving resource root {}", root.display()))?;
                 if !canonical.starts_with(&canonical_root) {
                     bail!(

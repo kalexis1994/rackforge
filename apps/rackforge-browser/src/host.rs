@@ -95,9 +95,16 @@ impl BrowserHost {
             }
         }
         if plugins.is_empty() {
+            // The reasons matter more than the count: a package that failed to
+            // load is the usual cause, and its message is the only clue.
             bail!(
-                "no playable instrument was found in {}",
-                data_root.join(PLUGIN_DIRECTORY).display()
+                "no playable instrument was found in {}{}",
+                data_root.join(PLUGIN_DIRECTORY).display(),
+                if warnings.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", warnings.join("; "))
+                }
             );
         }
 
@@ -636,17 +643,19 @@ fn request_name(request: &ControlRequest) -> &'static str {
 /// Lists package roots below the mounted plugin directory. A root is any
 /// directory holding a plugin manifest.
 fn package_roots(directory: &Path) -> Result<Vec<PathBuf>> {
-    if !directory.is_dir() {
-        return Ok(Vec::new());
-    }
     let mut roots = Vec::new();
     for entry in fs::read_dir(directory)
         .with_context(|| format!("reading {}", directory.display()))?
-        .flatten()
     {
-        let path = entry.path();
-        if path.join(rackforge_core::package::MANIFEST_FILE).is_file() {
-            roots.push(path);
+        let path = entry
+            .with_context(|| format!("listing {}", directory.display()))?
+            .path();
+        let manifest = path.join(rackforge_core::package::MANIFEST_FILE);
+        match fs::metadata(&manifest) {
+            Ok(metadata) if metadata.is_file() => roots.push(path),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => bail!("reading {}: {error}", manifest.display()),
         }
     }
     roots.sort();

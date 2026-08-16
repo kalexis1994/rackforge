@@ -1,0 +1,54 @@
+name: Publish the browser demo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the WebAssembly targets
+        run: rustup target add wasm32-wasip1 wasm32-unknown-unknown
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Build the host and the instrument it plays
+        run: ./tools/build-web-demo.sh
+      - name: Install the interface dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: web
+      - name: Build the site
+        run: pnpm build
+        working-directory: web
+        env:
+          VITE_RACKFORGE_BROWSER_HOST: "1"
+          # Project pages are served from /<repository>/.
+          RACKFORGE_WEB_BASE: /${{ github.event.repository.name }}/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

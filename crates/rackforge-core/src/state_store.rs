@@ -371,12 +371,13 @@ fn secure_open(path: &Path) -> Result<File> {
         .with_context(|| format!("creating {}", path.display()))
 }
 
+/// Names the scratch file an atomic write goes through.
 fn temporary_path(destination: &Path) -> PathBuf {
     let name = destination
         .file_name()
         .unwrap_or_default()
         .to_string_lossy();
-    destination.with_file_name(format!(".{name}.tmp.{}", std::process::id()))
+    destination.with_file_name(format!(".{name}.tmp.{}", crate::storage::writer_discriminator()))
 }
 
 #[cfg(unix)]

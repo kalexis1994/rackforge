@@ -30,3 +30,6 @@ secrets.*
 /logs/
 /roms/
 *.dls
+
+# Built by tools/build-web-demo.sh
+web/public/demo/

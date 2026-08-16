@@ -3721,6 +3721,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-demo-synth"
+version = "0.1.2"
+dependencies = [
+ "rackforge-plugin-sdk",
+]
+
+[[package]]
 name = "rackforge-desktop"
 version = "0.1.2"
 dependencies = [

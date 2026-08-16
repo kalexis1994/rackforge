@@ -29,6 +29,7 @@ members = [
     "apps/rackforge-browser",
     "crates/rackforge-store",
     "hardware/keylab-bridge",
+    "plugins/demo-synth",
     "plugins/gain",
     "plugins/gain-portable",
     "plugins/roland-scva",

@@ -18,17 +18,27 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+
       - name: Install the WebAssembly targets
         run: rustup target add wasm32-wasip1 wasm32-unknown-unknown
-      - uses: pnpm/action-setup@v4
+
+      # The interface's package manager is pinned in web/package.json, and the
+      # repository has no manifest at its root for an action to read one from.
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.9.0 --activate
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
+
       - name: Build the host and the instrument it plays
         run: ./tools/build-web-demo.sh
+
       - name: Check the host outside a browser
         run: |
           storage="$(mktemp -d)"
@@ -38,6 +48,7 @@ jobs:
       - name: Install the interface dependencies
         run: pnpm install --frozen-lockfile
         working-directory: web
+
       - name: Build the site
         run: pnpm build
         working-directory: web
@@ -45,6 +56,7 @@ jobs:
           VITE_RACKFORGE_BROWSER_HOST: "1"
           # Project pages are served from /<repository>/.
           RACKFORGE_WEB_BASE: /${{ github.event.repository.name }}/
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist

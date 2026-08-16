@@ -1,0 +1,1054 @@
+//! Wasmtime-backed host for RackForge `wasm-v1` processors.
+//!
+//! This is the backend used by every platform that runs RackForge as a native
+//! process. The browser backend in [`crate::browser`] implements the same
+//! public surface on top of the engine already present in the page.
+
+use crate::shared::{
+    PROGRAM_EDIT_BASIC, PROGRAM_EDIT_DECLARATIVE, PROGRAM_EDIT_KNOWN_CAPABILITIES,
+    PROGRAM_EDIT_PREVIEW, byte_range, check_status, checked_samples, memory_range,
+    ranges_overlap, read_f32, validate_realtime_events, write_f32, write_midi, write_parameters,
+};
+use crate::{ABI_VERSION_V1, ABI_VERSION_V1_1, MidiEvent, ParameterEvent, RuntimeLimits};
+use anyhow::{Context, Result, bail};
+use std::fs::File;
+use std::io::{BufReader, Read};
+use std::path::Path;
+use wasmtime::{
+    Cache, CacheConfig, Config, Engine, Instance, Memory, Module, OptLevel, Store, StoreLimits,
+    StoreLimitsBuilder, TypedFunc,
+};
+
+struct HostState {
+    limits: StoreLimits,
+}
+
+pub struct PortableEngine {
+    engine: Engine,
+    limits: RuntimeLimits,
+}
+
+impl PortableEngine {
+    pub fn new(limits: RuntimeLimits) -> Result<Self> {
+        Self::configured(limits, None)
+    }
+
+    /// Creates a compiler whose derived native code is cached below a
+    /// RackForge-owned directory. The cache is disposable and never belongs in
+    /// the plugin package.
+    pub fn with_cache(limits: RuntimeLimits, directory: impl AsRef<Path>) -> Result<Self> {
+        let directory = directory.as_ref();
+        std::fs::create_dir_all(directory)
+            .with_context(|| format!("creating portable code cache {}", directory.display()))?;
+        let directory = std::fs::canonicalize(directory)
+            .with_context(|| format!("resolving portable code cache {}", directory.display()))?;
+        Self::configured(limits, Some(&directory))
+    }
+
+    fn configured(limits: RuntimeLimits, cache_directory: Option<&Path>) -> Result<Self> {
+        let mut config = Config::new();
+        config.cranelift_opt_level(OptLevel::Speed);
+        config.consume_fuel(true);
+        config.wasm_multi_memory(false);
+        config.wasm_memory64(false);
+        if let Some(directory) = cache_directory {
+            let mut cache_config = CacheConfig::new();
+            cache_config.with_directory(directory);
+            config.cache(Some(Cache::new(cache_config).map_err(|error| {
+                anyhow::anyhow!("creating RackForge portable code cache: {error}")
+            })?));
+        }
+        Ok(Self {
+            engine: Engine::new(&config).map_err(|error| {
+                anyhow::anyhow!("creating RackForge WebAssembly engine: {error}")
+            })?,
+            limits,
+        })
+    }
+
+    pub fn compile(&self, bytes: &[u8]) -> Result<PortableModule> {
+        let module = Module::from_binary(&self.engine, bytes).map_err(|error| {
+            anyhow::anyhow!("compiling RackForge WebAssembly component: {error}")
+        })?;
+        if let Some(import) = module.imports().next() {
+            bail!(
+                "wasm-v1 modules may not import host functions (found {}::{})",
+                import.module(),
+                import.name()
+            );
+        }
+        Ok(PortableModule {
+            module,
+            limits: self.limits,
+        })
+    }
+}
+
+pub struct PortableModule {
+    module: Module,
+    limits: RuntimeLimits,
+}
+
+impl PortableModule {
+    pub fn instantiate(&self) -> Result<PortableInstance> {
+        let store_limits = StoreLimitsBuilder::new()
+            .memory_size(self.limits.maximum_memory_bytes)
+            .memories(1)
+            .instances(1)
+            .build();
+        let mut store = Store::new(
+            self.module.engine(),
+            HostState {
+                limits: store_limits,
+            },
+        );
+        store.limiter(|state| &mut state.limits);
+        store.set_fuel(self.limits.control_fuel_per_call)?;
+        let instance = Instance::new(&mut store, &self.module, &[]).map_err(|error| {
+            anyhow::anyhow!("instantiating RackForge WebAssembly plugin: {error}")
+        })?;
+        let memory = instance
+            .get_memory(&mut store, "memory")
+            .context("wasm-v1 plugin does not export memory")?;
+        let abi_version = typed::<(), i32>(&instance, &mut store, "rackforge_abi_version")?;
+        let version = abi_version.call(&mut store, ())?;
+        if !(ABI_VERSION_V1_1..=ABI_VERSION_V1).contains(&version) {
+            bail!("unsupported wasm-v1 ABI version {version:#010x}");
+        }
+        let input_ptr = typed::<(), i32>(&instance, &mut store, "rackforge_input_ptr")?;
+        let output_ptr = typed::<(), i32>(&instance, &mut store, "rackforge_output_ptr")?;
+        let midi_ptr = typed::<(), i32>(&instance, &mut store, "rackforge_midi_ptr")?;
+        let parameter_ptr = typed::<(), i32>(&instance, &mut store, "rackforge_parameter_ptr")?;
+        let transfer_ptr = typed::<(), i32>(&instance, &mut store, "rackforge_transfer_ptr")?;
+        let input_capacity =
+            typed::<(), i32>(&instance, &mut store, "rackforge_capacity_input_samples")?
+                .call(&mut store, ())?;
+        let output_capacity =
+            typed::<(), i32>(&instance, &mut store, "rackforge_capacity_output_samples")?
+                .call(&mut store, ())?;
+        if input_capacity < 0 || output_capacity < 0 {
+            bail!("wasm-v1 plugin reported an invalid audio buffer capacity");
+        }
+        let midi_capacity =
+            typed::<(), i32>(&instance, &mut store, "rackforge_capacity_midi_events")?
+                .call(&mut store, ())?;
+        if midi_capacity <= 0 {
+            bail!("wasm-v1 plugin reported an invalid MIDI event capacity");
+        }
+        let parameter_capacity =
+            typed::<(), i32>(&instance, &mut store, "rackforge_capacity_parameter_events")?
+                .call(&mut store, ())?;
+        if parameter_capacity <= 0 {
+            bail!("wasm-v1 plugin reported an invalid parameter event capacity");
+        }
+        let transfer_capacity =
+            typed::<(), i32>(&instance, &mut store, "rackforge_capacity_transfer_bytes")?
+                .call(&mut store, ())?;
+        if transfer_capacity <= 0 {
+            bail!("wasm-v1 plugin reported an invalid transfer capacity");
+        }
+        let input_offset = input_ptr.call(&mut store, ())?;
+        let output_offset = output_ptr.call(&mut store, ())?;
+        let midi_offset = midi_ptr.call(&mut store, ())?;
+        let parameter_offset = parameter_ptr.call(&mut store, ())?;
+        let transfer_offset = transfer_ptr.call(&mut store, ())?;
+        let initialize = typed::<(), i32>(&instance, &mut store, "rackforge_initialize")?;
+        check_status(initialize.call(&mut store, ())?, "initialize")?;
+        let program_api = match optional_typed::<(), i32>(
+            &instance,
+            &mut store,
+            "rackforge_program_editing_capabilities",
+        )? {
+            None => None,
+            Some(capabilities) => {
+                store.set_fuel(self.limits.control_fuel_per_call)?;
+                let capabilities = capabilities.call(&mut store, ())?;
+                if capabilities < 0 {
+                    bail!("portable plugin returned invalid program-editing capabilities");
+                }
+                let capabilities = capabilities as u32;
+                if capabilities & !PROGRAM_EDIT_KNOWN_CAPABILITIES != 0
+                    || capabilities != 0 && capabilities & PROGRAM_EDIT_BASIC == 0
+                {
+                    bail!(
+                        "portable plugin returned unsupported program-editing capabilities {capabilities:#x}"
+                    );
+                }
+                if capabilities == 0 {
+                    None
+                } else {
+                    let exchange_input_ptr =
+                        typed::<(), i32>(&instance, &mut store, "rackforge_exchange_input_ptr")?;
+                    let exchange_input_offset = exchange_input_ptr.call(&mut store, ())?;
+                    let memory_size = memory.data_size(&store);
+                    let transfer_range = byte_range(
+                        transfer_offset,
+                        transfer_capacity as usize,
+                        1,
+                        1,
+                        memory_size,
+                    )?;
+                    let exchange_input_range = byte_range(
+                        exchange_input_offset,
+                        transfer_capacity as usize,
+                        1,
+                        1,
+                        memory_size,
+                    )?;
+                    if ranges_overlap(&transfer_range, &exchange_input_range) {
+                        bail!("portable plugin program input and output buffers must not overlap");
+                    }
+                    Some(PortableProgramApi {
+                        capabilities,
+                        exchange_input_offset,
+                        begin_edit: typed(&instance, &mut store, "rackforge_program_begin_edit")?,
+                        prepare_save: typed(
+                            &instance,
+                            &mut store,
+                            "rackforge_program_prepare_save",
+                        )?,
+                        install: typed(&instance, &mut store, "rackforge_program_install")?,
+                        preview: if capabilities & PROGRAM_EDIT_PREVIEW != 0 {
+                            Some(typed(&instance, &mut store, "rackforge_program_preview")?)
+                        } else {
+                            None
+                        },
+                        editor_view: if capabilities & PROGRAM_EDIT_DECLARATIVE != 0 {
+                            Some(typed(
+                                &instance,
+                                &mut store,
+                                "rackforge_program_editor_view",
+                            )?)
+                        } else {
+                            None
+                        },
+                        apply_edit: if capabilities & PROGRAM_EDIT_DECLARATIVE != 0 {
+                            Some(typed(
+                                &instance,
+                                &mut store,
+                                "rackforge_program_apply_edit",
+                            )?)
+                        } else {
+                            None
+                        },
+                    })
+                }
+            }
+        };
+        let prepare = typed(&instance, &mut store, "rackforge_prepare")?;
+        let set_parameter = typed(&instance, &mut store, "rackforge_set_parameter")?;
+        let get_parameter = typed(&instance, &mut store, "rackforge_get_parameter")?;
+        let reset = typed(&instance, &mut store, "rackforge_reset")?;
+        let resource_begin = typed(&instance, &mut store, "rackforge_resource_begin")?;
+        let resource_write = typed(&instance, &mut store, "rackforge_resource_write")?;
+        let resource_end = typed(&instance, &mut store, "rackforge_resource_end")?;
+        let preset_catalog = optional_typed(&instance, &mut store, "rackforge_preset_catalog")?;
+        let load_preset = typed(&instance, &mut store, "rackforge_load_preset")?;
+        let save_state = typed(&instance, &mut store, "rackforge_save_state")?;
+        let load_state = typed(&instance, &mut store, "rackforge_load_state")?;
+        let process = typed(&instance, &mut store, "rackforge_process")?;
+        Ok(PortableInstance {
+            store,
+            memory,
+            input_offset,
+            output_offset,
+            midi_offset,
+            parameter_offset,
+            transfer_offset,
+            capacity_input_samples: input_capacity as usize,
+            capacity_output_samples: output_capacity as usize,
+            capacity_midi_events: midi_capacity as usize,
+            capacity_parameter_events: parameter_capacity as usize,
+            capacity_transfer_bytes: transfer_capacity as usize,
+            prepare,
+            set_parameter,
+            get_parameter,
+            reset,
+            resource_begin,
+            resource_write,
+            resource_end,
+            preset_catalog,
+            load_preset,
+            save_state,
+            load_state,
+            program_api,
+            process,
+            fuel_per_call: self.limits.fuel_per_call,
+            control_fuel_per_call: self.limits.control_fuel_per_call,
+            last_realtime_fuel_consumed: 0,
+            prepared_input_channels: 0,
+            prepared_output_channels: 0,
+            maximum_frames: 0,
+        })
+    }
+}
+
+struct PortableProgramApi {
+    capabilities: u32,
+    exchange_input_offset: i32,
+    begin_edit: TypedFunc<i32, i32>,
+    prepare_save: TypedFunc<i32, i32>,
+    install: TypedFunc<i32, i32>,
+    preview: Option<TypedFunc<i32, i32>>,
+    editor_view: Option<TypedFunc<i32, i32>>,
+    apply_edit: Option<TypedFunc<i32, i32>>,
+}
+
+pub struct PortableInstance {
+    store: Store<HostState>,
+    memory: Memory,
+    input_offset: i32,
+    output_offset: i32,
+    midi_offset: i32,
+    parameter_offset: i32,
+    transfer_offset: i32,
+    capacity_input_samples: usize,
+    capacity_output_samples: usize,
+    capacity_midi_events: usize,
+    capacity_parameter_events: usize,
+    capacity_transfer_bytes: usize,
+    prepare: TypedFunc<(f64, i32, i32, i32), i32>,
+    set_parameter: TypedFunc<(i32, f64), i32>,
+    get_parameter: TypedFunc<i32, f64>,
+    reset: TypedFunc<(), i32>,
+    resource_begin: TypedFunc<(i32, i64), i32>,
+    resource_write: TypedFunc<(i64, i32), i32>,
+    resource_end: TypedFunc<(), i32>,
+    preset_catalog: Option<TypedFunc<(), i32>>,
+    load_preset: TypedFunc<i32, i32>,
+    save_state: TypedFunc<(), i32>,
+    load_state: TypedFunc<i32, i32>,
+    program_api: Option<PortableProgramApi>,
+    process: TypedFunc<(i32, i32, i32, i32, i32), i32>,
+    fuel_per_call: u64,
+    control_fuel_per_call: u64,
+    last_realtime_fuel_consumed: u64,
+    prepared_input_channels: u32,
+    prepared_output_channels: u32,
+    maximum_frames: u32,
+}
+
+impl PortableInstance {
+    pub fn load_resource_file(&mut self, id: &str, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        let file = File::open(path)
+            .with_context(|| format!("opening portable resource {}", path.display()))?;
+        let total_bytes = file
+            .metadata()
+            .with_context(|| format!("reading portable resource metadata {}", path.display()))?
+            .len();
+        self.begin_resource(id, total_bytes)?;
+        let mut reader = BufReader::new(file);
+        let mut chunk = vec![0_u8; self.capacity_transfer_bytes.min(64 * 1024)];
+        let mut offset = 0_u64;
+        loop {
+            let read = reader
+                .read(&mut chunk)
+                .with_context(|| format!("reading portable resource {}", path.display()))?;
+            if read == 0 {
+                break;
+            }
+            self.write_resource(offset, &chunk[..read])?;
+            offset += read as u64;
+        }
+        if offset != total_bytes {
+            bail!("portable resource changed while it was being delivered");
+        }
+        self.end_resource()
+    }
+
+    pub fn prepare(
+        &mut self,
+        sample_rate: f64,
+        maximum_frames: u32,
+        input_channels: u32,
+        output_channels: u32,
+    ) -> Result<()> {
+        let input_samples = checked_samples(maximum_frames, input_channels)?;
+        let output_samples = checked_samples(maximum_frames, output_channels)?;
+        if input_samples > self.capacity_input_samples {
+            bail!(
+                "plugin input capacity {} samples is smaller than requested {input_samples}",
+                self.capacity_input_samples
+            );
+        }
+        if output_samples > self.capacity_output_samples {
+            bail!(
+                "plugin output capacity {} samples is smaller than requested {output_samples}",
+                self.capacity_output_samples
+            );
+        }
+        self.reset_control_fuel()?;
+        check_status(
+            self.prepare.call(
+                &mut self.store,
+                (
+                    sample_rate,
+                    maximum_frames as i32,
+                    input_channels as i32,
+                    output_channels as i32,
+                ),
+            )?,
+            "prepare",
+        )?;
+        self.prepared_input_channels = input_channels;
+        self.prepared_output_channels = output_channels;
+        self.maximum_frames = maximum_frames;
+        Ok(())
+    }
+
+    pub fn set_parameter(&mut self, index: u32, value: f64) -> Result<()> {
+        self.reset_control_fuel()?;
+        check_status(
+            self.set_parameter
+                .call(&mut self.store, (index as i32, value))?,
+            "set_parameter",
+        )
+    }
+
+    pub fn get_parameter(&mut self, index: u32) -> Result<f64> {
+        self.reset_control_fuel()?;
+        let value = self.get_parameter.call(&mut self.store, index as i32)?;
+        if !value.is_finite() {
+            bail!("portable plugin does not expose parameter {index}");
+        }
+        Ok(value)
+    }
+
+    pub fn reset(&mut self) -> Result<()> {
+        self.reset_control_fuel()?;
+        check_status(self.reset.call(&mut self.store, ())?, "reset")
+    }
+
+    /// Delivers one already-authorized package resource without exposing the
+    /// filesystem to the guest. This method belongs on the control thread.
+    pub fn load_resource(&mut self, id: &str, bytes: &[u8]) -> Result<()> {
+        self.begin_resource(id, bytes.len() as u64)?;
+        for (chunk_index, chunk) in bytes.chunks(self.capacity_transfer_bytes).enumerate() {
+            let offset = chunk_index
+                .checked_mul(self.capacity_transfer_bytes)
+                .context("resource offset overflow")? as u64;
+            self.write_resource(offset, chunk)?;
+        }
+        self.end_resource()
+    }
+
+    fn begin_resource(&mut self, id: &str, total_bytes: u64) -> Result<()> {
+        if id.is_empty() || id.len() > self.capacity_transfer_bytes {
+            bail!("resource id does not fit the portable transfer buffer");
+        }
+        let total_bytes = i64::try_from(total_bytes).context("resource is too large")?;
+        self.write_transfer(id.as_bytes())?;
+        self.reset_control_fuel()?;
+        check_status(
+            self.resource_begin
+                .call(&mut self.store, (id.len() as i32, total_bytes))?,
+            "resource_begin",
+        )
+    }
+
+    fn write_resource(&mut self, offset: u64, bytes: &[u8]) -> Result<()> {
+        if bytes.len() > self.capacity_transfer_bytes {
+            bail!("resource chunk does not fit the portable transfer buffer");
+        }
+        let offset = i64::try_from(offset).context("resource offset is too large")?;
+        self.write_transfer(bytes)?;
+        self.reset_control_fuel()?;
+        check_status(
+            self.resource_write
+                .call(&mut self.store, (offset, bytes.len() as i32))?,
+            "resource_write",
+        )
+    }
+
+    fn end_resource(&mut self) -> Result<()> {
+        self.reset_control_fuel()?;
+        check_status(self.resource_end.call(&mut self.store, ())?, "resource_end")
+    }
+
+    /// Returns an optional instance-specific preset catalog produced after
+    /// resource delivery. Components built with an older SDK simply fall back
+    /// to their package metadata.
+    pub fn preset_catalog(&mut self) -> Result<Option<Vec<u8>>> {
+        let Some(function) = self.preset_catalog.clone() else {
+            return Ok(None);
+        };
+        self.reset_control_fuel()?;
+        let length = function.call(&mut self.store, ())?;
+        if length == 0 {
+            return Ok(None);
+        }
+        if length < 0 || length as usize > self.capacity_transfer_bytes {
+            bail!("portable plugin returned an invalid preset catalog length {length}");
+        }
+        Ok(Some(self.read_transfer(length as usize)?.to_vec()))
+    }
+
+    pub fn load_preset(&mut self, id: &str) -> Result<()> {
+        if id.is_empty() {
+            bail!("preset id must not be empty");
+        }
+        self.write_transfer(id.as_bytes())?;
+        self.reset_control_fuel()?;
+        check_status(
+            self.load_preset.call(&mut self.store, id.len() as i32)?,
+            "load_preset",
+        )
+    }
+
+    pub fn save_state(&mut self) -> Result<Vec<u8>> {
+        self.reset_control_fuel()?;
+        let length = self.save_state.call(&mut self.store, ())?;
+        if length < 0 || length as usize > self.capacity_transfer_bytes {
+            bail!("portable plugin returned an invalid state length {length}");
+        }
+        Ok(self.read_transfer(length as usize)?.to_vec())
+    }
+
+    pub fn load_state(&mut self, state: &[u8]) -> Result<()> {
+        self.write_transfer(state)?;
+        self.reset_control_fuel()?;
+        check_status(
+            self.load_state.call(&mut self.store, state.len() as i32)?,
+            "load_state",
+        )
+    }
+
+    pub fn supports_program_editing(&self) -> bool {
+        self.program_editing_capabilities() != 0
+    }
+
+    pub fn program_editing_capabilities(&self) -> u32 {
+        self.program_api.as_ref().map_or(0, |api| api.capabilities)
+    }
+
+    pub fn begin_program_edit(&mut self, request: &[u8]) -> Result<Vec<u8>> {
+        let function = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .begin_edit
+            .clone();
+        self.exchange_program_bytes(function, request, "begin_program_edit")
+    }
+
+    pub fn prepare_program_save(&mut self, document: &[u8]) -> Result<Vec<u8>> {
+        let function = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .prepare_save
+            .clone();
+        self.exchange_program_bytes(function, document, "prepare_program_save")
+    }
+
+    pub fn install_program(&mut self, prepared: &[u8]) -> Result<()> {
+        let function = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .install
+            .clone();
+        self.call_program_install(function, prepared, "install_program")
+    }
+
+    pub fn preview_program(&mut self, prepared: &[u8]) -> Result<bool> {
+        let Some(function) = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .preview
+            .clone()
+        else {
+            return Ok(false);
+        };
+        self.call_program_install(function, prepared, "preview_program")?;
+        Ok(true)
+    }
+
+    pub fn program_editor_view(&mut self, document: &[u8]) -> Result<Vec<u8>> {
+        let function = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .editor_view
+            .clone()
+            .context("portable plugin does not expose a declarative program editor")?;
+        self.exchange_program_bytes(function, document, "program_editor_view")
+    }
+
+    pub fn apply_program_edit(&mut self, request: &[u8]) -> Result<Vec<u8>> {
+        let function = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .apply_edit
+            .clone()
+            .context("portable plugin does not expose declarative program edits")?;
+        self.exchange_program_bytes(function, request, "apply_program_edit")
+    }
+
+    fn exchange_program_bytes(
+        &mut self,
+        function: TypedFunc<i32, i32>,
+        source: &[u8],
+        operation: &str,
+    ) -> Result<Vec<u8>> {
+        self.write_program_input(source)?;
+        self.reset_control_fuel()?;
+        let source_length = i32::try_from(source.len()).context("program payload is too large")?;
+        let length = function.call(&mut self.store, source_length)?;
+        if length < 0 || length as usize > self.capacity_transfer_bytes {
+            bail!("portable plugin {operation} returned invalid length {length}");
+        }
+        Ok(self.read_transfer(length as usize)?.to_vec())
+    }
+
+    fn call_program_install(
+        &mut self,
+        function: TypedFunc<i32, i32>,
+        source: &[u8],
+        operation: &str,
+    ) -> Result<()> {
+        self.write_program_input(source)?;
+        self.reset_control_fuel()?;
+        let source_length = i32::try_from(source.len()).context("program payload is too large")?;
+        check_status(function.call(&mut self.store, source_length)?, operation)
+    }
+
+    fn write_program_input(&mut self, bytes: &[u8]) -> Result<()> {
+        if bytes.len() > self.capacity_transfer_bytes {
+            bail!("program payload exceeds plugin transfer capacity");
+        }
+        let offset = self
+            .program_api
+            .as_ref()
+            .context("portable plugin does not expose program editing")?
+            .exchange_input_offset;
+        let range = byte_range(
+            offset,
+            bytes.len(),
+            1,
+            1,
+            self.memory.data_size(&self.store),
+        )?;
+        self.memory.data_mut(&mut self.store)[range].copy_from_slice(bytes);
+        Ok(())
+    }
+
+    pub fn process_interleaved(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        frames: u32,
+    ) -> Result<()> {
+        self.process_interleaved_with_events(input, output, frames, &[], &[])
+    }
+
+    pub fn process_interleaved_with_midi(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        frames: u32,
+        midi: &[MidiEvent],
+    ) -> Result<()> {
+        self.process_interleaved_with_events(input, output, frames, midi, &[])
+    }
+
+    pub fn process_interleaved_with_events(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        frames: u32,
+        midi: &[MidiEvent],
+        parameters: &[ParameterEvent],
+    ) -> Result<()> {
+        if frames == 0 || frames > self.maximum_frames {
+            bail!("portable plugin is not prepared for this audio block");
+        }
+        let input_samples = checked_samples(frames, self.prepared_input_channels)?;
+        let output_samples = checked_samples(frames, self.prepared_output_channels)?;
+        if input.len() != input_samples || output.len() != output_samples {
+            bail!("audio buffer length does not match prepared input/output channels");
+        }
+        validate_realtime_events(
+            frames,
+            midi,
+            parameters,
+            self.capacity_midi_events,
+            self.capacity_parameter_events,
+        )?;
+        let input_range = memory_range(
+            self.input_offset,
+            input_samples,
+            self.memory.data_size(&self.store),
+        )?;
+        let output_range = memory_range(
+            self.output_offset,
+            output_samples,
+            self.memory.data_size(&self.store),
+        )?;
+        let midi_range = byte_range(
+            self.midi_offset,
+            midi.len(),
+            size_of::<u64>(),
+            align_of::<u64>(),
+            self.memory.data_size(&self.store),
+        )?;
+        let parameter_range = byte_range(
+            self.parameter_offset,
+            parameters.len(),
+            16,
+            align_of::<u64>(),
+            self.memory.data_size(&self.store),
+        )?;
+        write_f32(self.memory.data_mut(&mut self.store), input_range, input);
+        write_midi(self.memory.data_mut(&mut self.store), midi_range, midi);
+        write_parameters(
+            self.memory.data_mut(&mut self.store),
+            parameter_range,
+            parameters,
+        );
+        self.reset_realtime_fuel()?;
+        let result = self.process.call(
+            &mut self.store,
+            (
+                frames as i32,
+                self.prepared_input_channels as i32,
+                self.prepared_output_channels as i32,
+                midi.len() as i32,
+                parameters.len() as i32,
+            ),
+        );
+        self.last_realtime_fuel_consumed = self
+            .fuel_per_call
+            .saturating_sub(self.store.get_fuel().unwrap_or(0));
+        check_status(result?, "process")?;
+        read_f32(self.memory.data(&self.store), output_range, output);
+        Ok(())
+    }
+
+    /// Returns the Wasmtime fuel consumed by the most recent real-time call.
+    /// This is diagnostic telemetry and does not alter the next call's budget.
+    pub const fn last_realtime_fuel_consumed(&self) -> u64 {
+        self.last_realtime_fuel_consumed
+    }
+
+    fn reset_realtime_fuel(&mut self) -> Result<()> {
+        self.store.set_fuel(self.fuel_per_call)?;
+        Ok(())
+    }
+
+    fn reset_control_fuel(&mut self) -> Result<()> {
+        self.store.set_fuel(self.control_fuel_per_call)?;
+        Ok(())
+    }
+
+    fn write_transfer(&mut self, bytes: &[u8]) -> Result<()> {
+        if bytes.len() > self.capacity_transfer_bytes {
+            bail!("control payload exceeds plugin transfer capacity");
+        }
+        let range = byte_range(
+            self.transfer_offset,
+            bytes.len(),
+            1,
+            1,
+            self.memory.data_size(&self.store),
+        )?;
+        self.memory.data_mut(&mut self.store)[range].copy_from_slice(bytes);
+        Ok(())
+    }
+
+    fn read_transfer(&self, length: usize) -> Result<&[u8]> {
+        let range = byte_range(
+            self.transfer_offset,
+            length,
+            1,
+            1,
+            self.memory.data_size(&self.store),
+        )?;
+        Ok(&self.memory.data(&self.store)[range])
+    }
+}
+
+fn typed<Params, Results>(
+    instance: &Instance,
+    store: &mut Store<HostState>,
+    name: &str,
+) -> Result<TypedFunc<Params, Results>>
+where
+    Params: wasmtime::WasmParams,
+    Results: wasmtime::WasmResults,
+{
+    instance
+        .get_typed_func(store, name)
+        .map_err(|error| anyhow::anyhow!("wasm-v1 plugin is missing export {name}: {error}"))
+}
+
+fn optional_typed<Params, Results>(
+    instance: &Instance,
+    store: &mut Store<HostState>,
+    name: &str,
+) -> Result<Option<TypedFunc<Params, Results>>>
+where
+    Params: wasmtime::WasmParams,
+    Results: wasmtime::WasmResults,
+{
+    let Some(function) = instance.get_func(&mut *store, name) else {
+        return Ok(None);
+    };
+    function.typed(&mut *store).map(Some).map_err(|error| {
+        anyhow::anyhow!("wasm-v1 plugin export {name} has the wrong type: {error}")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GAIN: &str = r#"
+        (module
+          (memory (export "memory") 1)
+          (global $gain (mut f32) (f32.const 1))
+          (func (export "rackforge_abi_version") (result i32) i32.const 65537)
+          (func (export "rackforge_input_ptr") (result i32) i32.const 0)
+          (func (export "rackforge_output_ptr") (result i32) i32.const 1024)
+          (func (export "rackforge_capacity_input_samples") (result i32) i32.const 256)
+          (func (export "rackforge_capacity_output_samples") (result i32) i32.const 256)
+          (func (export "rackforge_midi_ptr") (result i32) i32.const 4096)
+          (func (export "rackforge_capacity_midi_events") (result i32) i32.const 64)
+          (func (export "rackforge_parameter_ptr") (result i32) i32.const 5120)
+          (func (export "rackforge_capacity_parameter_events") (result i32) i32.const 64)
+          (func (export "rackforge_transfer_ptr") (result i32) i32.const 8192)
+          (func (export "rackforge_capacity_transfer_bytes") (result i32) i32.const 1024)
+          (func (export "rackforge_initialize") (result i32) i32.const 0)
+          (func (export "rackforge_prepare") (param f64 i32 i32 i32) (result i32) i32.const 0)
+          (func (export "rackforge_set_parameter") (param $index i32) (param $value f64) (result i32)
+            local.get $value f32.demote_f64 global.set $gain i32.const 0)
+          (func (export "rackforge_get_parameter") (param $index i32) (result f64)
+            global.get $gain f64.promote_f32)
+          (func (export "rackforge_reset") (result i32) i32.const 0)
+          (func (export "rackforge_resource_begin") (param i32 i64) (result i32) i32.const -3)
+          (func (export "rackforge_resource_write") (param i64 i32) (result i32) i32.const -3)
+          (func (export "rackforge_resource_end") (result i32) i32.const -3)
+          (func (export "rackforge_load_preset") (param i32) (result i32) i32.const -3)
+          (func (export "rackforge_save_state") (result i32) i32.const -3)
+          (func (export "rackforge_load_state") (param i32) (result i32) i32.const -3)
+          (func (export "rackforge_process") (param $frames i32) (param $input_channels i32) (param $output_channels i32) (param $midi i32) (param $parameters i32) (result i32)
+            (local $i i32) (local $count i32)
+            local.get $parameters i32.const 0 i32.gt_s
+            if
+              i32.const 5128 f64.load f32.demote_f64 global.set $gain
+            end
+            local.get $frames local.get $output_channels i32.mul local.set $count
+            (block $done
+              (loop $copy
+                local.get $i local.get $count i32.ge_u br_if $done
+                local.get $i i32.const 4 i32.mul i32.const 1024 i32.add
+                local.get $i i32.const 4 i32.mul f32.load global.get $gain f32.mul f32.store
+                local.get $i i32.const 1 i32.add local.set $i
+                br $copy))
+            local.get $midi i32.const 0 i32.gt_s
+            if
+              i32.const 1024
+              i32.const 4100 i32.load8_u f32.convert_i32_u f32.store
+            end
+            i32.const 0))
+    "#;
+
+    fn editable_gain() -> String {
+        GAIN.replace(
+            "          (func (export \"rackforge_abi_version\") (result i32) i32.const 65537)",
+            "          (func (export \"rackforge_abi_version\") (result i32) i32.const 65538)",
+        )
+        .replace(
+            "          (func (export \"rackforge_load_preset\")",
+            r#"          (func (export "rackforge_exchange_input_ptr") (result i32) i32.const 12288)
+          (func (export "rackforge_program_editing_capabilities") (result i32) i32.const 7)
+          (func $exchange (param $length i32) (result i32)
+            i32.const 8192 i32.const 12288 local.get $length memory.copy local.get $length)
+          (func (export "rackforge_program_begin_edit") (param i32) (result i32)
+            local.get 0 call $exchange)
+          (func (export "rackforge_program_prepare_save") (param i32) (result i32)
+            local.get 0 call $exchange)
+          (func (export "rackforge_program_install") (param i32) (result i32) i32.const 0)
+          (func (export "rackforge_program_preview") (param i32) (result i32) i32.const 0)
+          (func (export "rackforge_program_editor_view") (param i32) (result i32)
+            local.get 0 call $exchange)
+          (func (export "rackforge_program_apply_edit") (param i32) (result i32)
+            local.get 0 call $exchange)
+          (func (export "rackforge_load_preset")"#,
+        )
+    }
+
+    #[test]
+    fn runs_one_portable_gain_module() {
+        let bytes = wat::parse_str(GAIN).unwrap();
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let module = engine.compile(&bytes).unwrap();
+        let mut instance = module.instantiate().unwrap();
+        instance.prepare(48_000.0, 64, 2, 2).unwrap();
+        instance.set_parameter(0, 0.5).unwrap();
+        let input = [1.0, -1.0, 0.25, -0.25];
+        let mut output = [0.0; 4];
+        instance
+            .process_interleaved(&input, &mut output, 2)
+            .unwrap();
+        assert_eq!(output, [0.5, -0.5, 0.125, -0.125]);
+    }
+
+    #[test]
+    fn dynamic_preset_catalog_is_optional_and_uses_the_transfer_buffer() {
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let legacy = engine.compile(&wat::parse_str(GAIN).unwrap()).unwrap();
+        assert_eq!(
+            legacy.instantiate().unwrap().preset_catalog().unwrap(),
+            None
+        );
+
+        let source = GAIN.replace(
+            "          (func (export \"rackforge_load_preset\")",
+            "          (data (i32.const 8192) \"catalog\")\n          (func (export \"rackforge_preset_catalog\") (result i32) i32.const 7)\n          (func (export \"rackforge_load_preset\")",
+        );
+        let module = engine.compile(&wat::parse_str(source).unwrap()).unwrap();
+        let mut instance = module.instantiate().unwrap();
+        assert_eq!(
+            instance.preset_catalog().unwrap(),
+            Some(b"catalog".to_vec())
+        );
+    }
+
+    #[test]
+    fn portable_program_editing_uses_separate_bounded_exchange_buffers() {
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let module = engine
+            .compile(&wat::parse_str(editable_gain()).unwrap())
+            .unwrap();
+        let mut instance = module.instantiate().unwrap();
+        assert!(instance.supports_program_editing());
+        assert_eq!(instance.program_editing_capabilities(), 7);
+        assert_eq!(instance.begin_program_edit(b"begin").unwrap(), b"begin");
+        assert_eq!(
+            instance.prepare_program_save(b"prepare").unwrap(),
+            b"prepare"
+        );
+        instance.install_program(b"install").unwrap();
+        assert!(instance.preview_program(b"preview").unwrap());
+        assert_eq!(instance.program_editor_view(b"editor").unwrap(), b"editor");
+        assert_eq!(instance.apply_program_edit(b"edit").unwrap(), b"edit");
+
+        let oversized = vec![0_u8; 1_025];
+        assert!(
+            instance
+                .begin_program_edit(&oversized)
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds")
+        );
+    }
+
+    #[test]
+    fn declared_program_editing_requires_the_complete_basic_contract() {
+        let source = GAIN
+            .replace("i32.const 65537", "i32.const 65538")
+            .replace(
+                "          (func (export \"rackforge_load_preset\")",
+                "          (func (export \"rackforge_program_editing_capabilities\") (result i32) i32.const 1)\n          (func (export \"rackforge_load_preset\")",
+            );
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let module = engine.compile(&wat::parse_str(source).unwrap()).unwrap();
+        let error = match module.instantiate() {
+            Ok(_) => panic!("incomplete program-editing ABI was accepted"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("rackforge_exchange_input_ptr"));
+    }
+
+    #[test]
+    fn rejects_overlapping_program_exchange_buffers() {
+        let source = editable_gain().replace(
+            "(func (export \"rackforge_exchange_input_ptr\") (result i32) i32.const 12288)",
+            "(func (export \"rackforge_exchange_input_ptr\") (result i32) i32.const 8192)",
+        );
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let module = engine.compile(&wat::parse_str(source).unwrap()).unwrap();
+        let error = match module.instantiate() {
+            Ok(_) => panic!("overlapping program exchange buffers were accepted"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("must not overlap"));
+    }
+
+    #[test]
+    fn rejects_ambient_host_imports() {
+        let bytes =
+            wat::parse_str(r#"(module (import "wasi_snapshot_preview1" "fd_write" (func)))"#)
+                .unwrap();
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let error = match engine.compile(&bytes) {
+            Ok(_) => panic!("ambient import was accepted"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("may not import"));
+    }
+
+    #[test]
+    fn delivers_sample_positioned_midi_without_host_imports() {
+        let bytes = wat::parse_str(GAIN).unwrap();
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let module = engine.compile(&bytes).unwrap();
+        let mut instance = module.instantiate().unwrap();
+        instance.prepare(48_000.0, 64, 2, 2).unwrap();
+        let input = [0.0; 4];
+        let mut output = [0.0; 4];
+        let note_on = MidiEvent::new(1, &[0x90, 60, 100]).unwrap();
+        instance
+            .process_interleaved_with_midi(&input, &mut output, 2, &[note_on])
+            .unwrap();
+        assert_eq!(output[0], 0x90 as f32);
+    }
+
+    #[test]
+    fn delivers_parameter_events_without_host_imports() {
+        let bytes = wat::parse_str(GAIN).unwrap();
+        let engine = PortableEngine::new(RuntimeLimits::default()).unwrap();
+        let module = engine.compile(&bytes).unwrap();
+        let mut instance = module.instantiate().unwrap();
+        instance.prepare(48_000.0, 64, 2, 2).unwrap();
+        let input = [1.0; 4];
+        let mut output = [0.0; 4];
+        let event = ParameterEvent {
+            frame: 0,
+            index: 0,
+            value: 0.25,
+        };
+        instance
+            .process_interleaved_with_events(&input, &mut output, 2, &[], &[event])
+            .unwrap();
+        assert_eq!(output, [0.25; 4]);
+    }
+
+    #[test]
+    fn fuel_trap_is_measured_and_control_calls_remain_recoverable() {
+        let source = GAIN.replace(
+            "            local.get $parameters i32.const 0 i32.gt_s",
+            "            (loop $spin br $spin)\n            local.get $parameters i32.const 0 i32.gt_s",
+        );
+        let limits = RuntimeLimits {
+            fuel_per_call: 10_000,
+            ..RuntimeLimits::default()
+        };
+        let engine = PortableEngine::new(limits).unwrap();
+        let module = engine.compile(&wat::parse_str(source).unwrap()).unwrap();
+        let mut instance = module.instantiate().unwrap();
+        instance.prepare(48_000.0, 64, 2, 2).unwrap();
+        let input = [0.0; 4];
+        let mut output = [0.0; 4];
+        let error = instance
+            .process_interleaved(&input, &mut output, 2)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("fuel"));
+        assert_eq!(instance.last_realtime_fuel_consumed(), 10_000);
+        instance.reset().unwrap();
+    }
+}

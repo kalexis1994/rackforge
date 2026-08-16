@@ -1,0 +1,21 @@
+[package]
+name = "rackforge-browser"
+description = "RackForge host that runs inside a web page"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow.workspace = true
+rackforge-audio-api = { path = "../../crates/rackforge-audio-api" }
+rackforge-control-api = { path = "../../crates/rackforge-control-api" }
+rackforge-core = { path = "../../crates/rackforge-core" }
+rackforge-performance-api = { path = "../../crates/rackforge-performance-api" }
+rackforge-plugin-api = { path = "../../crates/rackforge-plugin-api" }
+rackforge-session-api = { path = "../../crates/rackforge-session-api" }
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true

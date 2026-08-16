@@ -8,6 +8,12 @@ pub mod isolated_state;
 pub mod live;
 #[cfg(any(target_os = "linux", test))]
 mod live_midi_state;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod loader;
+/// Browsers cannot load native plugin binaries, so the wasm host compiles a
+/// refusing stand-in with the same shape instead.
+#[cfg(target_arch = "wasm32")]
+#[path = "loader_unavailable.rs"]
 pub mod loader;
 pub mod midi_hotplug;
 pub mod package;

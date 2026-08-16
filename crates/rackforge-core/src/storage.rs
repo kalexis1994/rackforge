@@ -224,6 +224,58 @@ fn collect_program_paths(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(
     Ok(())
 }
 
+/// Distinguishes the scratch files of writers that could be working in the
+/// same directory at once.
+///
+/// Off the web those are other RackForge processes, so the process id is the
+/// right answer. A browser has no process id — asking for one aborts — and no
+/// second writer either, since a page's storage is private to it, so a counter
+/// within this host is enough.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn writer_discriminator() -> u64 {
+    u64::from(std::process::id())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn writer_discriminator() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Resolves a path the way the containment checks below need it.
+///
+/// Off the web this is `fs::canonicalize`, which is what makes
+/// `starts_with` meaningful in the presence of symlinks and `..`. WASI has no
+/// working directory to resolve against and no `realpath`, but it also gives
+/// the guest no way to reach outside the directory the embedder preopened:
+/// containment is enforced by the runtime before a path is ever opened. The
+/// fallback therefore normalises lexically and lets the sandbox do the rest.
+pub(crate) fn resolve_existing(path: &Path) -> Result<PathBuf> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        fs::canonicalize(path).with_context(|| format!("resolving {}", path.display()))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        fs::symlink_metadata(path).with_context(|| format!("resolving {}", path.display()))?;
+        let mut resolved = PathBuf::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    if !resolved.pop() {
+                        bail!("path escapes the RackForge data root: {}", path.display());
+                    }
+                }
+                other => resolved.push(other.as_os_str()),
+            }
+        }
+        Ok(resolved)
+    }
+}
+
 fn ensure_root(path: &Path) -> Result<PathBuf> {
     if path.as_os_str().is_empty() {
         bail!("RackForge data root cannot be empty");
@@ -234,7 +286,7 @@ fn ensure_root(path: &Path) -> Result<PathBuf> {
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         bail!("RackForge data root must be a real directory");
     }
-    fs::canonicalize(path).with_context(|| format!("resolving {}", path.display()))
+    resolve_existing(path)
 }
 
 fn ensure_plugins_directory(root: &Path) -> Result<PathBuf> {
@@ -383,8 +435,7 @@ fn ensure_child_directory(parent: &Path, name: &OsStr) -> Result<PathBuf> {
         }
         Err(error) => return Err(error).with_context(|| format!("inspecting {}", child.display())),
     }
-    let canonical =
-        fs::canonicalize(&child).with_context(|| format!("resolving {}", child.display()))?;
+    let canonical = resolve_existing(&child)?;
     if !canonical.starts_with(parent) {
         bail!("storage directory escaped its plugin namespace");
     }
@@ -420,8 +471,7 @@ fn resolve_existing_file(root: &Path, relative: &Path) -> Result<PathBuf> {
             current.display()
         );
     }
-    let canonical =
-        fs::canonicalize(&current).with_context(|| format!("resolving {}", current.display()))?;
+    let canonical = resolve_existing(&current)?;
     if !canonical.starts_with(root) {
         bail!("plugin storage file escaped its plugin namespace");
     }

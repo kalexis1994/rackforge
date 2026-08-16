@@ -3622,6 +3622,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-browser"
+version = "0.1.2"
+dependencies = [
+ "anyhow",
+ "rackforge-audio-api",
+ "rackforge-control-api",
+ "rackforge-core",
+ "rackforge-performance-api",
+ "rackforge-plugin-api",
+ "rackforge-session-api",
+ "semver",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rackforge-control-api"
 version = "0.1.2"
 dependencies = [
@@ -3702,6 +3718,13 @@ dependencies = [
  "toml 0.9.12+spec-1.1.0",
  "wat",
  "zip",
+]
+
+[[package]]
+name = "rackforge-demo-synth"
+version = "0.1.2"
+dependencies = [
+ "rackforge-plugin-sdk",
 ]
 
 [[package]]

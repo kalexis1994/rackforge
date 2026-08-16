@@ -1,0 +1,19 @@
+schema_version = 1
+id = "org.rackforge.demo-synth"
+name = "RackForge Demo Synth"
+vendor = "RackForge"
+version = "0.1.0"
+kind = "instrument"
+state_version = 1
+capabilities = ["audio_output", "midi_input", "presets", "state"]
+
+[api]
+major = 1
+minor = 5
+
+[component]
+abi = "wasm-v1"
+path = "component.wasm"
+runtime_descriptor = "metadata/runtime.json"
+parameter_schema = "metadata/parameters.json"
+preset_catalog = "metadata/presets.json"

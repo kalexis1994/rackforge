@@ -2,6 +2,13 @@ import type { ResourceGrant, ResourceSelection } from "./types";
 
 export const HOST_PROTOCOL = "rackforge.host@1";
 
+/**
+ * True when this build carries its own RackForge inside the page rather than
+ * talking to one over the network. The published demo is built this way; a
+ * RackForge that serves its own interface is not.
+ */
+export const IS_BROWSER_HOST = import.meta.env.VITE_RACKFORGE_BROWSER_HOST === "1";
+
 type JsonValue =
   | null
   | boolean
@@ -84,7 +91,7 @@ export function isDesktopHost() {
 }
 
 export function isRemoteWebClient() {
-  return !isNativeHost() && !isDesktopHost();
+  return !isNativeHost() && !isDesktopHost() && !IS_BROWSER_HOST;
 }
 
 function installNativeListener() {
@@ -207,6 +214,10 @@ export async function hostJson<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  if (IS_BROWSER_HOST) {
+    const { browserHostJson } = await import("./browser/client");
+    return browserHostJson<T>(path, init);
+  }
   const bridge = nativeBridge();
   if (bridge) {
     const headers = Object.fromEntries(new Headers(init.headers).entries());
@@ -307,6 +318,25 @@ function browserSessionUrl() {
 export function openSessionChannel(
   callbacks: SessionChannelCallbacks,
 ): SessionChannel {
+  if (IS_BROWSER_HOST) {
+    // Deferred so a networked build never loads the engine, and the page can
+    // start rendering before the audio worklet is ready.
+    let channel: SessionChannel | null = null;
+    let closed = false;
+    const queued: string[] = [];
+    void import("./browser/client").then(({ openBrowserSessionChannel }) => {
+      if (closed) return;
+      channel = openBrowserSessionChannel(callbacks);
+      for (const payload of queued.splice(0)) channel.send(payload);
+    });
+    return {
+      send: (payload) => (channel ? channel.send(payload) : queued.push(payload)),
+      close: () => {
+        closed = true;
+        channel?.close();
+      },
+    };
+  }
   if (!nativeBridge()) {
     const socket = new WebSocket(browserSessionUrl());
     socket.addEventListener("open", callbacks.onOpen);

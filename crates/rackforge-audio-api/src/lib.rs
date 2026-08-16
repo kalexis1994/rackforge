@@ -43,6 +43,10 @@ impl fmt::Display for AudioDeviceId {
 #[serde(rename_all = "snake_case")]
 pub enum AudioBackend {
     Alsa,
+    /// The output a web page renders into. Its settings belong to the browser,
+    /// so a host on this backend reports the stream it was given rather than
+    /// offering a choice of devices.
+    WebAudio,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

@@ -26,6 +26,7 @@ members = [
     "crates/rackforge-surface-runtime",
     "crates/rackforge-ui",
     "apps/rackforge-web",
+    "apps/rackforge-browser",
     "crates/rackforge-store",
     "hardware/keylab-bridge",
     "plugins/gain",

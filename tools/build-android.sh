@@ -64,7 +64,7 @@ if [[ -n "${RACKFORGE_BUNDLED_PLUGIN:-}" ]]; then
   }
   install -d "$bundled_output/bundled"
   install -m 0644 "$RACKFORGE_BUNDLED_PLUGIN" \
-    "$bundled_output/bundled/RF-Soundfonts.rfplugin"
+    "$bundled_output/bundled/RackForge-Concert-Grand.rfplugin"
 fi
 
 web_output="$android_project/app/build/generated/web-ui/rackforge"

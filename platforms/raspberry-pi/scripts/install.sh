@@ -36,7 +36,7 @@ do
   mv "$root/bin/$binary.new" "$root/bin/$binary"
 done
 
-bundled_plugin="$source_root/bundled-plugins/RF-Soundfonts.rfplugin"
+bundled_plugin="$source_root/bundled-plugins/RackForge-Concert-Grand.rfplugin"
 bundled_default_marker="$root/state/bundled-default-initialized"
 shopt -s nullglob
 installed_plugins=("$root/plugin-store/packages"/*)
@@ -47,7 +47,7 @@ if [[ ! -f "$bundled_default_marker" ]]; then
     "$root/bin/rackforge-store" install-local \
       "$bundled_plugin" \
       "$root/plugin-store"
-    bundled_plugins=org.rackforge.rf-soundfonts
+    bundled_plugins=org.rackforge.concert-grand
   fi
   if [[ -f "$bundled_plugin" || ${#installed_plugins[@]} -gt 0 ]]; then
     printf '1\n' > "$bundled_default_marker"

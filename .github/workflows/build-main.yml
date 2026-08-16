@@ -38,11 +38,20 @@ jobs:
           pnpm --dir web install --frozen-lockfile
           pnpm --dir web build
 
-      - name: Fetch verified default instrument
+      # The bundled instrument is developed in this repository, so it is
+      # packaged from the same commit that builds the host: no fetch, no
+      # version skew, no checksum ceremony for code the tree already controls.
+      - name: Package the bundled Concert Grand
         shell: pwsh
         run: |
-          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Soundfonts.rfplugin'
-          ./tools/fetch-default-plugin.ps1 -Output $plugin
+          rustup target add wasm32-unknown-unknown
+          cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
+          New-Item -ItemType Directory -Force dist/bundled-plugins | Out-Null
+          cargo run --release -p rackforge-store -- pack-wasm `
+            plugins/concert-grand/package `
+            target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
+            dist/bundled-plugins/RackForge-Concert-Grand.rfplugin
+          $plugin = Join-Path $PWD 'dist/bundled-plugins/RackForge-Concert-Grand.rfplugin'
           "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
 
       - name: Build RackForge Desktop
@@ -118,11 +127,20 @@ jobs:
             "ndk;27.0.12077973"
           test -x "$sdk_root/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
 
-      - name: Fetch verified default instrument
+      # The bundled instrument is developed in this repository, so it is
+      # packaged from the same commit that builds the host: no fetch, no
+      # version skew, no checksum ceremony for code the tree already controls.
+      - name: Package the bundled Concert Grand
         shell: pwsh
         run: |
-          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Soundfonts.rfplugin'
-          ./tools/fetch-default-plugin.ps1 -Output $plugin
+          rustup target add wasm32-unknown-unknown
+          cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
+          New-Item -ItemType Directory -Force dist/bundled-plugins | Out-Null
+          cargo run --release -p rackforge-store -- pack-wasm `
+            plugins/concert-grand/package `
+            target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
+            dist/bundled-plugins/RackForge-Concert-Grand.rfplugin
+          $plugin = Join-Path $PWD 'dist/bundled-plugins/RackForge-Concert-Grand.rfplugin'
           "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
 
       - name: Build Android APK
@@ -178,11 +196,20 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.9.0 --activate
 
-      - name: Fetch verified default instrument
+      # The bundled instrument is developed in this repository, so it is
+      # packaged from the same commit that builds the host: no fetch, no
+      # version skew, no checksum ceremony for code the tree already controls.
+      - name: Package the bundled Concert Grand
         shell: pwsh
         run: |
-          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Soundfonts.rfplugin'
-          ./tools/fetch-default-plugin.ps1 -Output $plugin
+          rustup target add wasm32-unknown-unknown
+          cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
+          New-Item -ItemType Directory -Force dist/bundled-plugins | Out-Null
+          cargo run --release -p rackforge-store -- pack-wasm `
+            plugins/concert-grand/package `
+            target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
+            dist/bundled-plugins/RackForge-Concert-Grand.rfplugin
+          $plugin = Join-Path $PWD 'dist/bundled-plugins/RackForge-Concert-Grand.rfplugin'
           "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
 
       - name: Build Raspberry Pi release bundle

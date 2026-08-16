@@ -131,6 +131,7 @@ impl BrowserHost {
                 Err(error) => warnings.push(format!("{}: {error:#}", root.display())),
             }
         }
+        prefer_installed(&mut plugins);
         if plugins.is_empty() {
             // The reasons matter more than the count: a package that failed to
             // load is the usual cause, and its message is the only clue.
@@ -934,6 +935,7 @@ impl BrowserHost {
                 Err(error) => warnings.push(format!("{}: {error:#}", root.display())),
             }
         }
+        prefer_installed(&mut plugins);
         if plugins.is_empty() {
             bail!("no playable instrument remains after reloading the plugin store");
         }
@@ -1023,6 +1025,27 @@ fn request_name(request: &ControlRequest) -> &'static str {
         ControlRequest::SetPluginStateParameter { .. } => "isolated parameter edits",
         ControlRequest::LoadPluginResource { .. } => "loading plugin resources",
         _ => "this request",
+    }
+}
+
+
+/// Keeps one plugin per identity when a package is both shipped with the site
+/// and installed into the store: the installed copy wins, because installing
+/// is the only way a person can upgrade a bundled instrument, and two
+/// instances of one plugin id would collide in the session.
+fn prefer_installed(plugins: &mut Vec<HostedPlugin>) {
+    let mut index = 0;
+    while index < plugins.len() {
+        let duplicate = plugins.iter().enumerate().any(|(other, plugin)| {
+            other != index
+                && plugin.plugin_id == plugins[index].plugin_id
+                && (plugin.managed && !plugins[index].managed)
+        });
+        if duplicate {
+            plugins.remove(index);
+        } else {
+            index += 1;
+        }
     }
 }
 

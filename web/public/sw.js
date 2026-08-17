@@ -18,7 +18,31 @@
  *   background, so a visit is instant and the next one is current.
  */
 
-const CACHE = "rackforge-v1";
+const CACHE = "rackforge-v2";
+
+/**
+ * A development server is the one place these rules are exactly wrong.
+ *
+ * Answering the host component and the packaged plugins from the cache and
+ * refreshing them behind the page is what makes a second visit instant; while
+ * the thing being served is being rebuilt, it means every reload plays the
+ * *previous* build. On a phone there is no cache-bypassing reload to escape
+ * with, and the symptom is silent — the instrument simply stays one version
+ * behind. So on a local origin everything goes to the network first.
+ *
+ * The plugin asset cache is exempt and stays cache-only: those files have no
+ * server to fall back to, on a dev server least of all.
+ */
+const DEVELOPMENT =
+  ["localhost", "127.0.0.1", "[::1]"].includes(self.location.hostname) ||
+  self.location.hostname.endsWith(".local") ||
+  // A dev server reached from another device on the same network is still a
+  // dev server. It needs a secure context to run at all — a tunnel that makes
+  // it localhost, or an origin allow-listed in the browser — and once it has
+  // one, the stale-cache trap is exactly the same as on loopback.
+  /^10\./.test(self.location.hostname) ||
+  /^192\.168\./.test(self.location.hostname) ||
+  /^172\.(1[6-9]|2\d|3[01])\./.test(self.location.hostname);
 /** Vite writes build output here, with a content hash in every filename. */
 const IMMUTABLE = "/assets/";
 /**
@@ -71,6 +95,13 @@ self.addEventListener("fetch", (event) => {
   }
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request));
+    return;
+  }
+  if (DEVELOPMENT) {
+    // Straight to the network and nothing kept: networkFirst files every
+    // response under the scope root, which is right for navigations and
+    // would overwrite the cached page with a wasm binary here.
+    event.respondWith(fetch(request));
     return;
   }
   if (url.pathname.includes(IMMUTABLE)) {

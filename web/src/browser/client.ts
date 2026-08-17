@@ -99,7 +99,11 @@ async function loadStorage(): Promise<SeedFile[]> {
     ...packaged,
     ...stored.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX)),
   ];
-  packagedFiles = packaged;
+  // Copies, because booting the engine transfers every file's buffer to the
+  // worklet and leaves these detached. Republishing then threw on the first
+  // storage write, and a plugin's interface quietly stopped following its
+  // package for the rest of the session.
+  packagedFiles = packaged.map((file) => ({ path: file.path, bytes: file.bytes.slice() }));
   await publishPluginAssets(files).catch((error: unknown) => {
     console.warn("RackForge could not publish a plugin's files", error);
   });

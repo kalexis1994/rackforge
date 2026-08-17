@@ -2123,7 +2123,6 @@ function PlayPage({
     ) return;
     playActivationStartedRef.current = true;
     const instanceId = active?.instance_id;
-    const soundId = active?.selected_sound_id;
     void (async () => {
       try {
         // Rack preview cleanup is dispatched while this route mounts. Awaiting
@@ -2132,13 +2131,13 @@ function PlayPage({
         await dispatchCommandAwait({ type: "set_active_mode", mode: "play" });
         if (!instanceId) return;
         await dispatchCommandAwait({ type: "select_plugin", instance_id: instanceId });
-        if (soundId) {
-          await dispatchCommandAwait({
-            type: "select_sound",
-            instance_id: instanceId,
-            sound_id: soundId,
-          });
-        }
+        // Deliberately not re-selecting the program. `soundId` was read from
+        // the session, so re-applying it can only ever restate what the host
+        // already holds — and selecting a program loads its preset, which
+        // overwrites every parameter the player has touched since. Editing a
+        // control, going to the on-screen keyboard and coming back reset the
+        // instrument to the preset. Neither `set_active_mode` nor
+        // `select_plugin` disturbs the selection, so nothing here needs it.
       } catch {
         // The gateway publishes command failures through the shared error
         // banner. A later explicit program selection remains a safe retry.

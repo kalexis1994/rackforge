@@ -193,6 +193,9 @@ class RackForgeEngine extends AudioWorkletProcessor {
         ConsoleStdout.lineBuffered((line) => console.warn(`[rackforge] ${line}`)),
         storage,
       ],
+      // The shim reads `options.debug` as "undefined means on", so leaving
+      // options off entirely traced every path it opened to the console.
+      { debug: false },
     );
     this.#storage = storage;
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.slice().buffer), {

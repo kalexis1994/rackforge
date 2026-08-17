@@ -73,6 +73,17 @@ async function fetchBytes(path: string): Promise<Uint8Array> {
  * wrote on earlier visits — installed plugins, presets, the performance
  * library — which is read from this browser.
  */
+/**
+ * The packages the site ships, kept for as long as the page lives.
+ *
+ * The host writes back only what it owns — sessions, presets, the performance
+ * library — so a storage snapshot never mentions a packaged plugin. Publishing
+ * from that snapshot alone therefore looked like every package had been
+ * uninstalled, and took the published files with it: the instrument kept
+ * sounding, since audio needs no URLs, while its interface answered 404.
+ */
+let packagedFiles: SeedFile[] = [];
+
 async function loadStorage(): Promise<SeedFile[]> {
   const manifest = (await (await fetch(assetUrl(STORAGE_MANIFEST))).json()) as StorageManifest;
   const [packaged, stored] = await Promise.all([
@@ -88,7 +99,10 @@ async function loadStorage(): Promise<SeedFile[]> {
     ...packaged,
     ...stored.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX)),
   ];
-  await publishPluginAssets(files).catch(() => undefined);
+  packagedFiles = packaged;
+  await publishPluginAssets(files).catch((error: unknown) => {
+    console.warn("RackForge could not publish a plugin's files", error);
+  });
   return files;
 }
 
@@ -104,8 +118,16 @@ let pendingStorage: SeedFile[] = [];
 function storeFiles(files: SeedFile[]) {
   pendingStorage = files;
   // A plugin's own interface is served from what the host holds, so the
-  // published files follow every install and removal.
-  void publishPluginAssets(files).catch(() => undefined);
+  // published files follow every install and removal — but the packages the
+  // site ships are not in this snapshot and must not be dropped with it.
+  void publishPluginAssets([
+    ...packagedFiles.filter(
+      (packaged) => !files.some((file) => file.path === packaged.path),
+    ),
+    ...files,
+  ]).catch((error: unknown) => {
+    console.warn("RackForge could not publish a plugin's files", error);
+  });
   if (storageWrite !== null) return;
   storageWrite = window.setTimeout(() => {
     storageWrite = null;

@@ -40,6 +40,8 @@
     <h1>Concert Grand</h1>
     <p class="lead">A physically modelled grand: stiff strings, felt, dampers — and no samples. The model is documented in docs/PIANO_MODEL.md.</p>
     <div class="controls" id="controls"></div>
+    <button id="copy" style="margin-top:18px;padding:8px 14px;border:1px solid var(--line);border-radius:6px;background:#0c1824;color:var(--ink);cursor:pointer">Copiar JSON de parámetros</button>
+    <textarea id="dump" readonly style="display:none;width:100%;max-width:520px;height:110px;margin-top:10px;background:#0c1824;color:var(--ink);border:1px solid var(--line);border-radius:6px;font:12px/1.4 monospace"></textarea>
     <p class="state" id="state">Connecting to RackForge…</p>
 
     <script type="module">
@@ -141,6 +143,24 @@
           state.textContent = error.message;
         }
       }
+
+      document.getElementById("copy").addEventListener("click", async () => {
+        try {
+          const parameters = await call("plugin.parameters");
+          const values = new Map((parameters.values ?? []).map((v) => [v.index, v.value]));
+          const out = {};
+          for (const p of parameters.schema.parameters) {
+            out[p.id ?? p.name] = Number((values.get(p.index) ?? p.kind.default).toFixed(3));
+          }
+          const text = JSON.stringify(out, null, 1);
+          const dump = document.getElementById("dump");
+          dump.style.display = "block";
+          dump.value = text;
+          dump.select();
+          try { await navigator.clipboard.writeText(text); state.textContent = "Copiado al portapapeles ✓"; }
+          catch { document.execCommand("copy"); state.textContent = "Seleccionado — Ctrl+C para copiar"; }
+        } catch (error) { state.textContent = error.message; }
+      });
 
       parent.postMessage({ protocol: PROTOCOL, kind: "ready" }, "*");
     </script>

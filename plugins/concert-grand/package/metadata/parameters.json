@@ -15,6 +15,11 @@
       "id": "output",
       "name": "Output",
       "order": 2
+    },
+    {
+      "id": "lab",
+      "name": "Lab",
+      "order": 3
     }
   ],
   "parameters": [
@@ -143,6 +148,230 @@
         "advanced": false
       },
       "suggested_control": "knob"
+    },
+    {
+      "index": 6,
+      "id": "lab_felt_corner",
+      "name": "Felt Corner",
+      "page": "lab",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 7,
+      "id": "lab_treble_life",
+      "name": "Treble Life",
+      "page": "lab",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 8,
+      "id": "lab_thump",
+      "name": "Thump",
+      "page": "lab",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 9,
+      "id": "lab_chiff",
+      "name": "Chiff",
+      "page": "lab",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 10,
+      "id": "lab_clang",
+      "name": "Clang",
+      "page": "lab",
+      "order": 4,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 11,
+      "id": "lab_phantoms",
+      "name": "Phantoms",
+      "page": "lab",
+      "order": 5,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 12,
+      "id": "lab_hf_floor",
+      "name": "HF Floor",
+      "page": "lab",
+      "order": 6,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 13,
+      "id": "lab_hammer_hard",
+      "name": "Hammer Hard",
+      "page": "lab",
+      "order": 7,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 14,
+      "id": "lab_hammer_mass",
+      "name": "Hammer Mass",
+      "page": "lab",
+      "order": 8,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 15,
+      "id": "lab_bloom",
+      "name": "Bloom",
+      "page": "lab",
+      "order": 9,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 16,
+      "id": "lab_glide",
+      "name": "Glide",
+      "page": "lab",
+      "order": 10,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 17,
+      "id": "lab_prompt_decay",
+      "name": "Prompt Decay",
+      "page": "lab",
+      "order": 11,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 18,
+      "id": "lab_tail",
+      "name": "Tail",
+      "page": "lab",
+      "order": 12,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 19,
+      "id": "lab_detune",
+      "name": "Detune",
+      "page": "lab",
+      "order": 13,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 20,
+      "id": "lab_board_serial",
+      "name": "Board Serial",
+      "page": "lab",
+      "order": 14,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 21,
+      "id": "lab_board_colour",
+      "name": "Board Colour",
+      "page": "lab",
+      "order": 15,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
     }
   ]
 }

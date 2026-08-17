@@ -2,10 +2,7 @@ name: Publish the browser demo
 
 on:
   push:
-    # The development branch deploys too while the browser host is being
-    # built out, so changes can be tried on the published page before they
-    # merge. Remove the branch here once it lands.
-    branches: [main, claude/browser-version-github-pages-1jb6gz]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

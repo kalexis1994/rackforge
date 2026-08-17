@@ -229,20 +229,63 @@ Two further products of the same nonlinearity:
   within a millisecond, nearly absent below forte. The hammer noise supplies
   the breath of the attack; the clang supplies its bark.
 
-### A small synthetic soundboard (tested)
+### The soundboard, from the measured plate (tested)
 
-The string sum radiates through a bank of twelve fixed two-pole resonators —
-mode frequencies spread irregularly from 62 Hz to 3.1 kHz (sparse and stronger below 818 Hz, dense, short and quieter through the mids) the way a ribbed
-wooden plate's are, decays from ~140 ms at the bottom to ~55 ms at the top —
-short, because a piano board is heavily loaded by the bridge and ribs, and
-sparse modes that ring for hundreds of milliseconds read as a guitar box —
-each mode panned slightly differently so the body has width. This is the
-"small synthetic modal body" the previous revision of this document named as
-the honest next step: it colours the sustained tone, gives the hammer knock a
-wooden resonance, and leaves a brief tail when the strings are damped. It is
-synthetic and stated as such — a measured soundboard response (commuted
-synthesis: J. O. Smith & S. A. Van Duyne, ICMC 1995) would be a sample by
-another name.
+Everything the strings produce radiates through one bank of 136 two-pole
+resonators. Neither its spacing nor its damping is chosen by ear; both come
+from published measurements of real piano soundboards, and the bank is
+generated from those laws rather than written out.
+
+**Damping.** Every mode carries the loss factor of spruce, η = 2.3% — the mean
+Ege, Boutillon and Rébillat measured resolving a soundboard's modes from
+50 Hz to 3 kHz, where loss factors run 1–3% up to about 1.2 kHz, essentially
+the material values ("Vibroacoustics of the piano soundboard: (non)linearity
+and modal properties in the low- and mid-frequency ranges", *JSV* 332, 2013).
+A mode's decay follows `T60 = ln(10³)/(π·f·η)`.
+
+**Density.** Modal spacing is 16.7 Hz — 0.06 modes/Hz — flat to 1.1 kHz, the
+constant density a piano soundboard tends to below that frequency, where the
+ribbed board behaves as a homogeneous plate and a thin plate's modal density
+does not depend on frequency (Boutillon & Ege, "Global and local synthetic
+descriptions of the piano soundboard"). Above 1.1 kHz the spacing tapers to
+the ~115 Hz that the measured 60% modal overlap implies at 3 kHz, and past
+3 kHz it holds that overlap rather than extrapolating the exponent beyond the
+data. The resulting overlap tracks the measurement across the compass: 0.21
+against 0.30 at 150 Hz, 0.76 against 0.70 at 550 Hz, 1.38 against 1.00 at
+1 kHz, 0.61 against 0.60 at 3 kHz.
+
+This replaced a pair of banks — a sparse parallel "body" and a serial through
+path — holding 45 resonators between them, against the 200–500 a modelled
+board needs. Two things were wrong with them, and the second was the one that
+mattered.
+
+The first was the sparse bank's reach. It ran to 3.1 kHz with spacing over
+bandwidth of 5.8 at 1 kHz and 9.9 at 2.5 kHz, so between 500 Hz and 4 kHz it
+imposed a *fixed* comb of 15–22 dB peak-to-dip ripple, the same resonances on
+every note regardless of pitch. That is the definition of a formant filter and
+it read as a nasal tint; above its last mode the response fell at 12 dB per
+octave, taking the top two octaves of every bass and tenor note with it. A0
+measured a spectral centroid of 344 Hz against the YDP's 1112 Hz.
+
+The second was damping, and it was the reason the instrument read as an
+electric piano rather than a grand. The old decays were set by hand — `14/f`
+for the through path, 140 ms at 62 Hz for the parallel modes. The *form* was
+right, since a constant loss factor gives exactly T60 ∝ 1/f, but those decays
+imply loss factors of **15.7% and 25.3%**. Spruce is 1–3%. The board was made
+of something with roughly the loss factor of rubber, which is to say the model
+had a struck string and no resonating plate behind it — a clavinet. A knock
+test on a finished soundboard gives a broadband T60 near 0.6 s; this one was
+gone in 140 ms at the bottom of the compass and 25 ms at 550 Hz.
+
+Together the two changes move the mean spectral centroid error against the
+YDP from 0.80 octaves to 0.21, the bass and tenor from 1.18 to 0.15, and the
+per-band decay profile — how far each band falls from the attack window to the
+sustain, against how far the reference's falls — from 7.8 dB out to 3.6 dB.
+
+The bank is synthetic and stated as such: its mode frequencies are drawn from
+a density law, not from any particular instrument. A measured soundboard
+response (commuted synthesis: J. O. Smith & S. A. Van Duyne, ICMC 1995) would
+be a sample by another name.
 
 ### Blooming (tested)
 
@@ -362,9 +405,22 @@ code and is far beyond audibility at control rate).
 
 Stated so nobody mistakes silence for coverage:
 
-* **A measured soundboard.** The synthetic twelve-mode body colours the tone
-  but is not any particular instrument's response, and it stops at 818 Hz —
-  the dense high-frequency modal region is unrepresented.
+* **A measured soundboard.** The bank follows measured density and damping
+  laws, but its mode frequencies come from those laws rather than from any
+  particular instrument's response.
+* **The broadband knock.** The impacts of the action and the keys — everything
+  in a piano's sound that does not come from the strings — are not modelled.
+  It is most exposed in the extreme treble, where the tonal fundamental sits
+  above 4 kHz and stops masking it, and that is exactly where the model
+  measures 10–20 dB short of the reference between 30 and 1200 Hz. The fit
+  can be watched asking for it: `chiff` sits pinned to its ceiling at the top
+  three calibration anchors, because no multiplier can scale a source that
+  is not there.
+* **Ambience and sympathetic resonance.** The undamped top octave, the
+  open-register shimmer, the lid and rim reflections and the room are all
+  written and all mixed at zero, and a test holds them there. A dry
+  direct-injected tone is what an electric piano is; a real grand's note
+  carries an aura of the whole instrument.
 * **The longitudinal mixing itself.** Phantom partials are placed at the
   frequencies the mixing produces, but the mixing is not integrated, so their
   level tracks velocity by a stated rule rather than emerging.

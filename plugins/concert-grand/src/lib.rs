@@ -65,9 +65,15 @@ const PARAM_UNISON: u32 = 2;
 const PARAM_DECAY: u32 = 3;
 const PARAM_WIDTH: u32 = 4;
 const PARAM_LEVEL: u32 = 5;
-/// Lab parameters 6..=21: raw multipliers the player sweeps by ear while we
+/// Lab parameters 6..=22: raw multipliers the player sweeps by ear while we
 /// hunt the piano. Each 0..1 value maps to a x0.25..x4 multiplier.
-const LAB_COUNT: usize = 16;
+///
+/// 15 and 16 are the staging pair. Everything a piano radiates that is not
+/// the struck string itself used to be written and then multiplied by zero:
+/// the undamped top octave, the shimmer under it, the lid reflections and the
+/// room. A note with none of that is a note with no aura of the instrument
+/// around it, which is what a direct-injected electric keyboard sounds like.
+const LAB_COUNT: usize = 17;
 const PARAM_COUNT: usize = 6 + LAB_COUNT;
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
@@ -223,37 +229,97 @@ impl BodyMode {
     }
 }
 
-/// The synthetic soundboard: mode frequencies spread irregularly the way a
-/// ribbed wooden plate's are. Decays are short — a piano board is heavily
-/// loaded by the bridge and ribs; sparse modes that ring for hundreds of
-/// milliseconds read as a guitar box, not a piano.
-/// (Frequency Hz, T60 s, pan 0..1.)
-const BODY_MODES: [(f32, f32, f32); 18] = [
-    (62.0, 0.14, 0.44),
-    (88.0, 0.13, 0.58),
-    (109.0, 0.12, 0.38),
-    (136.0, 0.11, 0.62),
-    (171.0, 0.10, 0.46),
-    (214.0, 0.09, 0.56),
-    (268.0, 0.08, 0.40),
-    (334.0, 0.075, 0.60),
-    (419.0, 0.07, 0.48),
-    (523.0, 0.065, 0.54),
-    (655.0, 0.06, 0.42),
-    (818.0, 0.055, 0.58),
-    // The dense mid region every ribbed board has: short, close-packed,
-    // quieter — the wooden presence under the mid and treble strings that a
-    // naked additive ladder (a guitar, a koto) does not have.
-    (1021.0, 0.05, 0.47),
-    (1276.0, 0.045, 0.55),
-    (1594.0, 0.042, 0.43),
-    (1993.0, 0.038, 0.57),
-    (2491.0, 0.035, 0.49),
-    (3114.0, 0.032, 0.53),
-];
+/// How loud the action's broadband knock is, before the per-note calibration.
+///
+/// This used to taper with pitch — `0.083 - 0.065 * position`, four and a half
+/// times quieter at C8 than at A0 — and the taper is backwards. The knock is
+/// *more* exposed toward the top, not less: a treble note's tonal fundamental
+/// sits above 4 kHz and stops masking it (Applied Acoustics, "Separation of
+/// piano keyboard vibrations into tonal and broadband components").
+///
+/// Measured against the YDP recordings as a noise floor over the attack, the
+/// model came out between 1.4x and 54x too clean, worst through the middle of
+/// the keyboard — 1.5% against 37.9% at C5. The calibration had been fighting
+/// the taper with `chiff` pinned to its 4.0 ceiling at the top three anchors
+/// and still could not reach. Flat here, with the level set by measurement;
+/// the per-note column carries the shape from there.
+const KNOCK_LEVEL: f32 = 0.083;
 
-/// Wet level of the modal body relative to the direct string sum.
-const BODY_MIX: f32 = 0.9;
+/// The soundboard's modal loss factor.
+///
+/// This one number decides whether the instrument has a body at all. Ege,
+/// Boutillon & Rébillat resolved the modes of a piano soundboard from 50 Hz to
+/// 3 kHz and measured loss factors of 1-3% up to ~1.2 kHz, mean η ≈ 2.3% —
+/// essentially the material values of spruce ("Vibroacoustics of the piano
+/// soundboard: (non)linearity and modal properties in the low- and
+/// mid-frequency ranges", *JSV* 332, 2013). A knock test on a finished board
+/// gives a broadband T60 near 0.6 s, against ~0.3 s for the raw panel.
+///
+/// The bank this replaced set its decays by hand: `T60 = 14/f` for the through
+/// path and 0.14 s at 62 Hz for the parallel modes. The *form* was right — a
+/// constant loss factor gives exactly T60 ∝ 1/f — but those decays imply loss
+/// factors of 15.7% and 25.3%. That is not wood; it is roughly the loss factor
+/// of rubber, and an instrument whose board is made of rubber is a clavinet:
+/// a struck string with no resonating plate behind it.
+const BOARD_LOSS_FACTOR: f32 = 0.023;
+
+/// Amplitude T60 of a board mode: `ln(10^3) / (π·f·η)`.
+fn board_t60(frequency: f32) -> f32 {
+    6.907_755 / (core::f32::consts::PI * frequency * BOARD_LOSS_FACTOR)
+}
+
+/// How many resonators the board bank can hold. The density law below needs
+/// 136 to reach 8.5 kHz — 64 of them under 1.1 kHz, which is the 0.06 modes/Hz
+/// the measurement calls for — and the rest is headroom, so the loop never
+/// runs out mid-compass. It did once, at 128: the bank stopped at 5 kHz and
+/// the 4-8 kHz octave came out 11 dB down.
+const BOARD_MODES: usize = 152;
+
+/// Level of the board against the string sum that drives it. There is one
+/// board, so there is one gain; it is set by measurement against the YDP
+/// reference, not by taste.
+const BOARD_MIX: f32 = 1.0;
+
+/// Where the board's modes stop. Above this a real board still radiates, but
+/// weakly and without resolvable structure.
+const BOARD_TOP_HZ: f32 = 8500.0;
+/// The lowest board mode. A grand's first soundboard mode sits near 60-70 Hz;
+/// the bank starts just below so the region around it is covered rather than
+/// bounded.
+const BOARD_BOTTOM_HZ: f32 = 50.0;
+
+/// Modal spacing, in hertz, at a given frequency — the measured density law.
+///
+/// Below ~1.1 kHz a piano soundboard's modal density tends to a constant
+/// 0.06 modes/Hz, independent of where on the board it is measured: the
+/// ribbed plate behaves as a homogeneous one, and a thin plate's modal
+/// density does not depend on frequency (Boutillon & Ege, "Global and local
+/// synthetic descriptions of the piano soundboard"). That is 16.7 Hz between
+/// modes. Above, the density falls; the measured modal overlap runs 30% at
+/// 150 Hz, 70% at 550 Hz, 100% at 1 kHz and back to 60% at 3 kHz, and 60%
+/// overlap at a 2.3% loss factor means spacing ≈ 0.038·f.
+///
+/// Both measurements are honoured directly: 16.7 Hz flat to 1.1 kHz, then a
+/// power law steep enough to reach the ~115 Hz spacing that 60% overlap
+/// implies at 3 kHz. Past 3 kHz the exponent is beyond the data, so the
+/// spacing is capped at constant 60% overlap rather than extrapolated — an
+/// unbounded power law would leave the top octave with a handful of modes.
+///
+/// Getting this wrong is audible. A first attempt used constant 60% overlap
+/// from 440 Hz up, which put the 1 kHz spacing at 38 Hz against a 23 Hz
+/// bandwidth — overlap 0.6 where the measurement says 1.0 — and the bank came
+/// out with 11 dB of ripple through 500-1000 Hz where the over-damped bank it
+/// replaced had 1.3 dB.
+fn board_spacing(frequency: f32) -> f32 {
+    const KNEE_HZ: f32 = 1100.0;
+    const FLAT: f32 = 1.0 / 0.06;
+    if frequency < KNEE_HZ {
+        return FLAT;
+    }
+    let taper = FLAT * powf(frequency / KNEE_HZ, 1.92);
+    let floor_overlap = 0.038 * frequency;
+    if taper < floor_overlap { taper } else { floor_overlap }
+}
 
 /// The open top octave: from ~F6 to C8 a piano's strings have no dampers.
 /// They ring sympathetically with everything, and they are why every note
@@ -269,7 +335,7 @@ const OPEN_STRINGS: [(f32, f32, f32); 14] = [
     (5920.0, 1.1, 0.54), (6645.0, 1.0, 0.48),
 ];
 /// Wet level of the open-string halo.
-const OPEN_MIX: f32 = 0.0;
+const OPEN_MIX: f32 = 0.012;
 
 /// The open register as a statistic: twenty undamped strings with their
 /// partial ladders behave collectively like a short, dense, undamped
@@ -280,16 +346,16 @@ const HALO_DELAYS_S: [f32; 4] = [0.0071, 0.0097, 0.0127, 0.0163];
 const HALO_RT60_S: f32 = 2.2;
 const HALO_HP_HZ: f32 = 1800.0;
 const HALO_BUFFER: usize = 2048;
-const HALO_MIX: f32 = 0.0;
+const HALO_MIX: f32 = 0.05;
 
 /// Near-field reflections off the lid and rim: a handful of sparse early
 /// taps, different per side so the image widens, no tail — this is the air
 /// around an open grand, not a hall. A dry direct-injected tone is precisely
 /// what an electric piano is. (Delay in seconds, gain.)
 const LID_TAPS_LEFT: [(f32, f32); 4] =
-    [(0.0113, 0.0), (0.0191, 0.0), (0.0257, 0.0), (0.0331, 0.0)];
+    [(0.0113, 0.17), (0.0191, 0.12), (0.0257, 0.09), (0.0331, 0.06)];
 const LID_TAPS_RIGHT: [(f32, f32); 4] =
-    [(0.0097, 0.0), (0.0179, 0.0), (0.0243, 0.0), (0.0311, 0.0)];
+    [(0.0097, 0.15), (0.0179, 0.11), (0.0243, 0.08), (0.0311, 0.05)];
 /// Delay line length: covers the longest tap at rates up to 74 kHz
 /// (higher rates shorten the taps via the clamp in tune_lid).
 const LID_BUFFER: usize = 4096;
@@ -306,7 +372,7 @@ const ROOM_RT60_S: f32 = 1.4;
 const ROOM_DAMP_HZ: f32 = 4200.0;
 const ROOM_BUFFER: usize = 4096;
 /// Wet level of the chamber against the direct sound.
-const ROOM_MIX: f32 = 0.0;
+const ROOM_MIX: f32 = 0.09;
 
 #[derive(Clone, Copy)]
 struct Voice {
@@ -540,7 +606,7 @@ impl Controls {
             PARAM_DECAY => self.decay,
             PARAM_WIDTH => self.width,
             PARAM_LEVEL => self.level,
-            6..=21 => self.lab[index as usize - 6],
+            6..=22 => self.lab[index as usize - 6],
             _ => return None,
         };
         Some(value as f64)
@@ -558,7 +624,7 @@ impl Controls {
             PARAM_DECAY => self.decay = value,
             PARAM_WIDTH => self.width = value,
             PARAM_LEVEL => self.level = value,
-            6..=21 => self.lab[index as usize - 6] = value,
+            6..=22 => self.lab[index as usize - 6] = value,
             _ => return false,
         }
         true
@@ -569,8 +635,8 @@ impl Controls {
 /// fitting harness optimises `cal` against tools/piano-targets.json; 1.0
 /// everywhere means the hand-calibrated base model.
 const CAL_ANCHORS: [u8; 10] = [21, 30, 39, 48, 57, 66, 75, 84, 96, 108];
-const CAL_PARAMS: usize = 10;
-// felt, floor, thump, chiff, decay, clang, phantoms, level, treble life, serial
+const CAL_PARAMS: usize = 9;
+// felt, floor, thump, chiff, decay, clang, phantoms, level, treble life
 
 pub struct ConcertGrand {
     controls: Controls,
@@ -587,8 +653,6 @@ pub struct ConcertGrand {
     soft: bool,
     /// Live count of active partials, the budget the callback answers to.
     active_partials: usize,
-    /// The synthetic soundboard the string sum radiates through.
-    body: [BodyMode; BODY_MODES.len()],
     /// Delay line feeding the lid/rim early reflections.
     lid: [f32; LID_BUFFER],
     lid_write: usize,
@@ -602,15 +666,19 @@ pub struct ConcertGrand {
     /// recipe, which is what the model sounded like before the simulation
     /// existed. Losing a little attack detail beats losing the stream.
     strike_budget: u32,
-    /// Serial-board mix from the most recent strike's note calibration.
-    serial_cal: f32,
     /// Per-note calibration table: [anchor][param] multipliers.
     cal: [[f32; CAL_PARAMS]; 10],
-    /// The serial board: a dense constant-Q modal bank the ENTIRE string
-    /// sum radiates through — no partial reaches the air unfiltered. Modes
-    /// overlap (spacing ~ bandwidth) so coverage is continuous but ragged,
-    /// like a ribbed plate's driving-point mobility.
-    serial: [BodyMode; 36],
+    /// The soundboard: one dense modal bank the ENTIRE string sum radiates
+    /// through — no partial reaches the air unfiltered. Mode spacing and
+    /// damping both follow the measured plate, so the bank is continuous
+    /// where a real board is continuous and rings as long as spruce rings.
+    ///
+    /// It replaced a pair of banks — a sparse parallel "body" and a serial
+    /// through path — which between them held 45 resonators against the
+    /// 200-500 a modelled board needs, and damped them like rubber.
+    board: [BodyMode; BOARD_MODES],
+    /// How many slots the generator actually filled at this sample rate.
+    board_count: usize,
     /// The undamped top-octave strings, always listening to the bridge.
     open_strings: [BodyMode; OPEN_STRINGS.len()],
     /// The open-register shimmer: short undamped HF feedback delay network.
@@ -641,31 +709,47 @@ impl Default for ConcertGrand {
             pedal: false,
             soft: false,
             active_partials: 0,
-            body: [BodyMode::default(); BODY_MODES.len()],
-            // Per-note calibration fitted against the YDP samples (cost
-            // 6821 -> 5770): ten anchors from A0 to C8, eight multipliers
-            // each (felt, HF floor, thump, chiff, decay, clang, phantoms,
-            // level). Level is pinned to 1.0: the fitting cost normalises
-            // every window, so it is blind to absolute level and the tilt it
+            // Per-note calibration fitted against the YDP samples: ten
+            // anchors from A0 to C8, nine multipliers each (felt, HF floor,
+            // thump, chiff, decay, clang, phantoms, level, treble life).
+            // Level is pinned to 1.0: the fitting cost normalises every
+            // window, so it is blind to absolute level and the tilt it
             // "found" there was drift, audible as a loud bass and a muffled
-            // treble. The rest are physical — decay runs
-            // x1.5 in the bass and x0.65 in the treble, which a single
-            // global number can only average into being wrong everywhere.
+            // treble. The rest are physical — decay runs x2.0 in the bass and
+            // x0.38 in the treble, which a single global number can only
+            // average into being wrong everywhere.
+            //
+            // Refitted twice, once after the radiation path was corrected
+            // and again after the board was rebuilt from the measured plate.
+            // A calibration is only ever a fit to the model underneath it, so
+            // changing the model obsoletes the table by construction. Against
+            // the measured board: mean centroid error 0.80 -> 0.21 octaves,
+            // the bass 1.18 -> 0.15, and the per-band decay profile — how far
+            // each band falls from the attack to the sustain, against how far
+            // the YDP's does — from 7.8 dB out to 3.6 dB.
+            //
+            // `felt` sits on its 4.0 ceiling at anchor 75 and `chiff` on its
+            // ceiling at the top three anchors. A parameter against its bound
+            // is the fit asking for something the model cannot produce, and
+            // here it is asking for attack energy under the treble: those are
+            // the notes measured 10-20 dB short of the reference in 30-1200
+            // Hz, where a real piano carries the broadband knock of its
+            // action. No multiplier can scale a source that is not there.
             strike_budget: 0,
-            serial_cal: 1.0,
             cal: [
-                [0.3239, 0.8114, 0.3539, 0.3392, 1.3207, 0.5434, 1.1626, 1.0000, 0.3686, 0.2500],
-                [0.2745, 0.9575, 0.5429, 0.3392, 1.1193, 0.5434, 0.4940, 1.0000, 0.3686, 0.2500],
-                [0.3239, 0.9575, 0.7058, 0.3392, 1.3207, 0.4180, 0.4940, 1.0000, 0.3686, 0.2500],
-                [0.3239, 0.9575, 0.5429, 0.4002, 1.3207, 0.5434, 0.4940, 1.0000, 0.3686, 0.2500],
-                [0.8079, 0.8533, 0.6137, 0.3934, 1.0098, 0.4733, 1.3111, 1.0000, 0.6211, 0.5500],
-                [1.2315, 1.3899, 1.3269, 1.0852, 0.6292, 0.8858, 0.6124, 1.0000, 0.8421, 0.8125],
-                [1.5340, 1.0000, 1.1017, 0.7692, 0.6519, 0.6519, 0.6519, 1.0000, 1.0000, 1.0000],
-                [1.0000, 1.5340, 1.5340, 1.5340, 0.6519, 1.0000, 1.3000, 1.0000, 1.0000, 1.0000],
-                [1.0000, 1.1800, 0.6519, 1.5340, 0.6519, 1.0000, 0.8475, 1.0000, 1.0000, 1.0000],
-                [1.1017, 1.5340, 0.6519, 1.5340, 0.6519, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000],
+                [0.8445, 2.3440, 0.5097, 0.3392, 1.3207, 0.9236, 1.6842, 1.0000, 0.3686],
+                [0.7931, 2.7660, 0.4900, 0.3392, 1.1193, 0.4180, 0.4024, 1.0000, 0.6902],
+                [0.2500, 2.4965, 0.7820, 0.3392, 1.1920, 0.5434, 0.8348, 1.0000, 0.6229],
+                [0.3239, 1.9095, 1.5685, 0.2891, 0.9485, 0.4932, 0.2500, 1.0000, 0.7351],
+                [2.3340, 2.4650, 1.7729, 0.3334, 0.6545, 0.3269, 1.3111, 1.0000, 1.7943],
+                [3.5576, 2.3624, 2.0355, 2.6568, 0.4078, 0.4731, 0.2952, 1.0000, 0.6440],
+                [3.9996, 0.8523, 3.1826, 1.0000, 0.4986, 0.7958, 0.2500, 1.0000, 0.8474],
+                [0.5556, 0.8146, 4.0000, 3.9996, 0.3813, 1.0000, 1.9942, 1.0000, 0.3461],
+                [0.7394, 0.6903, 1.6997, 4.0000, 0.2950, 1.1800, 0.3836, 1.0000, 0.3835],
+                [1.5869, 1.0000, 1.8832, 4.0000, 0.3835, 1.0000, 1.0000, 1.0000, 0.6556],
             ],
-            serial: [BodyMode::default(); 36],
+            board: [BodyMode::default(); BOARD_MODES],
+            board_count: 0,
             open_strings: [BodyMode::default(); OPEN_STRINGS.len()],
             halo: [[0.0; HALO_BUFFER]; 4],
             halo_len: [1; 4],
@@ -685,8 +769,7 @@ impl Default for ConcertGrand {
             room_write: 0,
         };
         piano.tune();
-        piano.tune_body();
-        piano.tune_serial();
+        piano.tune_board();
         piano.tune_open_strings();
         piano.tune_halo();
         piano.tune_lid();
@@ -842,13 +925,6 @@ impl ConcertGrand {
         }
     }
 
-    /// Retunes the soundboard modes to the current sample rate.
-    fn tune_body(&mut self) {
-        for (mode, (frequency, t60, pan)) in self.body.iter_mut().zip(BODY_MODES) {
-            *mode = BodyMode::tune(frequency, t60, pan, self.sample_rate);
-        }
-    }
-
     /// Converts the lid tap times to sample offsets at the current rate.
     fn tune_lid(&mut self) {
         let convert = |taps: [(f32, f32); 4]| {
@@ -865,24 +941,36 @@ impl ConcertGrand {
         self.lid_right = convert(LID_TAPS_RIGHT);
     }
 
-    /// Tunes the serial board: log-spaced 60 Hz..8.5 kHz, T60 = 8/f
-    /// (constant Q), per-mode jittered frequency and pan.
-    fn tune_serial(&mut self) {
-        for index in 0..36 {
-            let ratio = index as f32 / 35.0;
-            let jitter = 1.0 + 0.06 * (hash01(0xB0A2D ^ (index as u32) << 3) - 0.5);
-            let frequency = 60.0 * powf(8500.0 / 60.0, ratio) * jitter;
-            let t60 = (14.0 / frequency).clamp(0.0016, 0.22);
-            let pan = 0.35 + 0.30 * hash01(0x5EA1 ^ (index as u32) << 5);
-            self.serial[index] = if frequency < 0.45 * self.sample_rate {
-                let mut mode = BodyMode::tune(frequency, t60, pan, self.sample_rate);
-                // A real plate's mobility is ragged: per-mode strength swings
-                // ~±8 dB — a bank of equal modes is only a volume knob.
-                mode.drive *= 0.65 + 0.8 * hash01(0xF00D ^ (index as u32) << 7);
-                mode
-            } else {
-                BodyMode::default()
-            };
+    /// Lays out the soundboard: walk up from 50 Hz taking the measured modal
+    /// spacing at each step, give every mode the loss factor of spruce, and
+    /// jitter frequency, strength and pan so the bank is ragged rather than
+    /// regular.
+    fn tune_board(&mut self) {
+        let ceiling = if BOARD_TOP_HZ < 0.45 * self.sample_rate {
+            BOARD_TOP_HZ
+        } else {
+            0.45 * self.sample_rate
+        };
+        let mut frequency = BOARD_BOTTOM_HZ;
+        let mut index = 0;
+        while index < BOARD_MODES && frequency < ceiling {
+            let seed = index as u32;
+            // ±3% of the local spacing, so neighbouring modes crowd and part
+            // the way a real plate's do instead of marching in step.
+            let jitter = 1.0 + 0.06 * (hash01(0xB0A2D ^ seed << 3) - 0.5);
+            let placed = frequency * jitter;
+            let pan = 0.35 + 0.30 * hash01(0x5EA1 ^ seed << 5);
+            let mut mode = BodyMode::tune(placed, board_t60(placed), pan, self.sample_rate);
+            // A real plate's mobility is ragged: per-mode strength swings
+            // ~±8 dB — a bank of equal modes is only a volume knob.
+            mode.drive *= 0.65 + 0.8 * hash01(0xF00D ^ seed << 7);
+            self.board[index] = mode;
+            frequency += board_spacing(frequency);
+            index += 1;
+        }
+        self.board_count = index;
+        for slot in self.board.iter_mut().skip(index) {
+            *slot = BodyMode::default();
         }
     }
 
@@ -1553,7 +1641,7 @@ impl ConcertGrand {
         voice.cull_in = CULL_INTERVAL;
         voice.energy = 1.0;
         // The hammer/soundboard thump: heavier and darker in the bass.
-        voice.noise_amp = velocity * velocity * (0.083 - 0.065 * position) * chiff_mult;
+        voice.noise_amp = velocity * velocity * KNOCK_LEVEL * chiff_mult;
         voice.noise_decay = noise_decay;
         voice.noise_coefficient = noise_coefficient;
         voice.noise_shrink = noise_shrink;
@@ -1563,7 +1651,6 @@ impl ConcertGrand {
         voice.pan_right = pan_right;
         voice.glide_rate = -(glide_cents / 28.0) * core::f32::consts::LN_2 / 1200.0;
         voice.glide_steps = if glide_cents > 0.05 { 28 } else { 0 };
-        self.serial_cal = self.cal(note, 9);
         self.active_partials += placed;
 
         // Sympathetic resonance, the pedal's halo: with the dampers up, the
@@ -1727,8 +1814,7 @@ impl Processor for ConcertGrand {
             return false;
         }
         self.sample_rate = sample_rate as f32;
-        self.tune_body();
-        self.tune_serial();
+        self.tune_board();
         self.tune_open_strings();
         self.tune_halo();
         self.tune_lid();
@@ -1741,15 +1827,11 @@ impl Processor for ConcertGrand {
         self.voices = [Voice::default(); MAX_VOICES];
         self.pedal = false;
         self.active_partials = 0;
-        for mode in &mut self.body {
-            mode.y1 = 0.0;
-            mode.y2 = 0.0;
-        }
         for string in &mut self.open_strings {
             string.y1 = 0.0;
             string.y2 = 0.0;
         }
-        for mode in &mut self.serial {
+        for mode in &mut self.board {
             mode.y1 = 0.0;
             mode.y2 = 0.0;
         }
@@ -1906,15 +1988,14 @@ impl Processor for ConcertGrand {
                 }
             }
 
-            // Radiate the string sum through the modal body: dry plus a wet
-            // sum the twelve resonators colour, panned mode by mode.
+            // Everything the strings produce radiates through the board.
             let excitation = left + right;
-            let mut body_left = 0.0;
-            let mut body_right = 0.0;
-            for mode in &mut self.body {
+            let mut board_left = 0.0;
+            let mut board_right = 0.0;
+            for mode in self.board.iter_mut().take(self.board_count) {
                 let y = mode.tick(excitation);
-                body_left += y * mode.pan_left;
-                body_right += y * mode.pan_right;
+                board_left += y * mode.pan_left;
+                board_right += y * mode.pan_right;
             }
             // The open top octave listens to the bridge and rings on.
             let mut open_left = 0.0;
@@ -1941,14 +2022,15 @@ impl Processor for ConcertGrand {
                     bright * 0.5 + feedback;
             }
             self.halo_write = self.halo_write.wrapping_add(1);
-            let halo_left = (halo_outs[0] - halo_outs[1]) * HALO_MIX;
-            let halo_right = (halo_outs[2] - halo_outs[3]) * HALO_MIX;
+            let sympathy = self.controls.lab(15);
+            let halo_left = (halo_outs[0] - halo_outs[1]) * HALO_MIX * sympathy;
+            let halo_right = (halo_outs[2] - halo_outs[3]) * HALO_MIX * sympathy;
 
             // The lid and rim reflect the near field back a few dozen
             // milliseconds late, differently per side.
             let staged = excitation
-                + (body_left + body_right) * BODY_MIX
-                + (open_left + open_right) * OPEN_MIX
+                + (board_left + board_right) * BOARD_MIX
+                + (open_left + open_right) * OPEN_MIX * sympathy
                 + halo_left
                 + halo_right;
             self.lid[self.lid_write] = staged;
@@ -1980,34 +2062,27 @@ impl Processor for ConcertGrand {
                     staged * 0.25 + self.room_lp[line] * self.room_gain[line];
             }
             self.room_write = self.room_write.wrapping_add(1);
-            let room_left = (outs[0] - outs[1] + outs[2]) * ROOM_MIX;
-            let room_right = (outs[3] - outs[4] + outs[5]) * ROOM_MIX;
+            let air = self.controls.lab(16);
+            let room_left = (outs[0] - outs[1] + outs[2]) * ROOM_MIX * air;
+            let room_right = (outs[3] - outs[4] + outs[5]) * ROOM_MIX * air;
 
-            // Everything radiates through the board: the direct string sum
-            // is replaced by the serial bank's output.
-            let mut serial_left = 0.0;
-            let mut serial_right = 0.0;
-            for mode in &mut self.serial {
-                let y = mode.tick(excitation);
-                serial_left += y * mode.pan_left;
-                serial_right += y * mode.pan_right;
-            }
-            let serial_mix = 0.084 * self.controls.lab(14) * self.serial_cal;
-            let body_colour = BODY_MIX * 1.74 * self.controls.lab(15);
+            // There is one board and it is the through path, so there is one
+            // gain. The pair it replaced was mixed 25 dB apart in the wrong
+            // direction, which let a sparse parallel comb own 78-87% of the
+            // output below 3 kHz.
+            let board_gain = BOARD_MIX * self.controls.lab(14);
             let left = Self::soften(
-                serial_left * serial_mix
-                    + body_left * body_colour
-                    + open_left * OPEN_MIX
+                board_left * board_gain
+                    + open_left * OPEN_MIX * sympathy
                     + halo_left
-                    + lid_left
+                    + lid_left * air
                     + room_left,
             ) * level;
             let right = Self::soften(
-                serial_right * serial_mix
-                    + body_right * body_colour
-                    + open_right * OPEN_MIX
+                board_right * board_gain
+                    + open_right * OPEN_MIX * sympathy
                     + halo_right
-                    + lid_right
+                    + lid_right * air
                     + room_right,
             ) * level;
             match channels {
@@ -2374,18 +2449,52 @@ mod tests {
     }
 
     #[test]
-    fn the_dry_instrument_leaves_no_room_tail() {
-        // Staging is disabled until the naked instrument convinces: after a
-        // damped chord and the body's short ring, the output must be silent.
+    fn the_staging_leaves_a_tail_that_dies() {
+        // Staging used to be pinned at zero and this test held it there, on
+        // the reasoning that the naked instrument should convince first. It
+        // never could: a piano with no undamped strings, no lid and no room
+        // is a direct-injected tone, which is what an electric keyboard is.
+        // What the test has to hold now is the other failure — that the tail
+        // is a tail and not a drone.
         let mut piano = prepared();
         let chord: Vec<MidiEvent> =
             [48u8, 55, 64].iter().map(|n| note_on(*n, 120)).collect();
         render(&mut piano, (FS * 0.3) as usize, &chord);
         let offs: Vec<MidiEvent> = [48u8, 55, 64].iter().map(|n| note_off(*n)).collect();
         render(&mut piano, 64, &offs);
-        render(&mut piano, (FS * 1.5) as usize, &[]);
+        // Just after the dampers land the room is still speaking.
+        render(&mut piano, (FS * 0.15) as usize, &[]);
+        let early = energy(&render(&mut piano, 1600, &[]));
+        assert!(early > 0.0, "the dampers took the room with them");
+        // Two seconds on it has to be gone, or the instrument never stops.
+        render(&mut piano, (FS * 2.0) as usize, &[]);
         let late = energy(&render(&mut piano, 1600, &[]));
-        assert!(late < 1e-7, "staging bleed after damping: {late}");
+        assert!(
+            late < early * 1e-3,
+            "staging drones after damping: {early} -> {late}"
+        );
+    }
+
+    #[test]
+    fn sympathy_and_air_can_be_turned_off() {
+        // Both staging knobs have to reach silence, so the dry instrument is
+        // still available to measure against.
+        let mut piano = prepared();
+        for index in [15u32, 16] {
+            assert!(piano.set_parameter(6 + index, 0.0));
+        }
+        let wet = {
+            let mut on = prepared();
+            render(&mut on, (FS * 0.3) as usize, &[note_on(60, 110)]);
+            render(&mut on, 64, &[note_off(60)]);
+            render(&mut on, (FS * 0.2) as usize, &[]);
+            energy(&render(&mut on, 1600, &[]))
+        };
+        render(&mut piano, (FS * 0.3) as usize, &[note_on(60, 110)]);
+        render(&mut piano, 64, &[note_off(60)]);
+        render(&mut piano, (FS * 0.2) as usize, &[]);
+        let dry = energy(&render(&mut piano, 1600, &[]));
+        assert!(dry < wet, "staging at zero is not drier: {dry} vs {wet}");
     }
     #[test]
     fn the_pedal_wraps_a_note_in_a_sympathetic_halo() {
@@ -2710,8 +2819,9 @@ mod tests {
         // (1-r) alone once left the 62 Hz mode ~60× hotter than the 818 Hz
         // one — an accidental bass boost, not a soundboard.
         let sample_rate = FS as f32;
-        for (frequency, t60, _) in [BODY_MODES[0], BODY_MODES[BODY_MODES.len() - 1]] {
-            let mut mode = BodyMode::tune(frequency, t60, 0.5, sample_rate);
+        for frequency in [BOARD_BOTTOM_HZ, 1000.0, BOARD_TOP_HZ] {
+            let mut mode =
+                BodyMode::tune(frequency, board_t60(frequency), 0.5, sample_rate);
             let omega = core::f32::consts::TAU * frequency / sample_rate;
             let mut peak = 0.0_f32;
             for n in 0..(sample_rate as usize) {

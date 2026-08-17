@@ -347,8 +347,8 @@
     },
     {
       "index": 20,
-      "id": "lab_board_serial",
-      "name": "Board Serial",
+      "id": "lab_board",
+      "name": "Board",
       "page": "lab",
       "order": 14,
       "kind": {
@@ -361,10 +361,24 @@
     },
     {
       "index": 21,
-      "id": "lab_board_colour",
-      "name": "Board Colour",
+      "id": "lab_sympathy",
+      "name": "Sympathy",
       "page": "lab",
       "order": 15,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 22,
+      "id": "lab_air",
+      "name": "Air",
+      "page": "lab",
+      "order": 16,
       "kind": {
         "type": "float",
         "minimum": 0.0,

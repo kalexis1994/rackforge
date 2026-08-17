@@ -47,7 +47,7 @@ jobs:
           storage="$(mktemp -d)"
           cp -r web/public/demo/rackforge/. "$storage"
           python3 tools/make-probe-package.py \
-            web/public/demo/rackforge/plugins/demo-synth "$RUNNER_TEMP/probe.rfplugin"
+            web/public/demo/rackforge/plugins/concert-grand "$RUNNER_TEMP/probe.rfplugin"
           node tools/check-browser-host.mjs \
             web/public/demo/rackforge-browser.wasm "$storage" "$RUNNER_TEMP/probe.rfplugin"
 
@@ -60,8 +60,16 @@ jobs:
         working-directory: web
         env:
           VITE_RACKFORGE_BROWSER_HOST: "1"
+
           # Project pages are served from /<repository>/.
           RACKFORGE_WEB_BASE: /${{ github.event.repository.name }}/
+
+      # tools/build-live-page.py has existed since the page was written, but
+      # nothing ran it, so the self-contained piano was never published and
+      # its URL 404'd. It embeds the host, the worklet and the package, so it
+      # has to run after both the demo assets and the site build.
+      - name: Build the self-contained Concert Grand page
+        run: python3 tools/build-live-page.py web/dist/concert-grand-live.html
 
       - uses: actions/upload-pages-artifact@v3
         with:

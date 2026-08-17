@@ -30,6 +30,7 @@ members = [
     "apps/rackforge-browser",
     "crates/rackforge-store",
     "hardware/keylab-bridge",
+    "plugins/concert-grand",
     "plugins/demo-synth",
     "plugins/gain",
     "plugins/gain-portable",

@@ -70,7 +70,7 @@ if [[ -n "${RACKFORGE_BUNDLED_PLUGIN:-}" ]]; then
   }
   install -d "$release/bundled-plugins"
   install -m 0644 "$RACKFORGE_BUNDLED_PLUGIN" \
-    "$release/bundled-plugins/RF-Soundfonts.rfplugin"
+    "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin"
 fi
 install -d "$release/platforms/raspberry-pi" "$release/hardware"
 for entry in appliance audio config etc provision sbin scripts systemd README.md install-release.sh
@@ -83,8 +83,8 @@ cp "$repository/THIRD_PARTY_NOTICES.md" "$release/THIRD_PARTY_NOTICES.md"
 
 revision="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || printf 'unknown')}"
 default_plugin=none
-if [[ -f "$release/bundled-plugins/RF-Soundfonts.rfplugin" ]]; then
-  default_plugin=org.rackforge.rf-soundfonts
+if [[ -f "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
+  default_plugin=org.rackforge.concert-grand
 fi
 printf 'revision=%s\narchitecture=linux-aarch64\ndefault_plugin=%s\n' \
   "$revision" "$default_plugin" >"$release/build-info.txt"
@@ -93,7 +93,8 @@ cat >"$release/INSTALL.md" <<'EOF'
 # RackForge for Raspberry Pi ARM64
 
 This artifact contains the RackForge hosts, Raspberry Pi integration, and the
-verified RF-Soundfonts default instrument. Other instruments are versioned and
+bundled RackForge Concert Grand — the physically modelled piano built from
+this repository. Instruments such as RF-Soundfonts are versioned and
 distributed by their own pipelines.
 
 Extract it for the user who will run RackForge. The installer derives the

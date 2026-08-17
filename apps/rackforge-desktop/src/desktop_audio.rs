@@ -1413,6 +1413,7 @@ impl MidiSupervisor {
                     }
                 }
                 let mut next_reconcile = Instant::now() + MIDI_RECONNECT_INTERVAL;
+                let mut next_render = Instant::now();
                 loop {
                     match stop_receiver.recv_timeout(MIDI_SUPERVISOR_TICK) {
                         Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
@@ -1422,15 +1423,23 @@ impl MidiSupervisor {
                         latest_screen = Some(screen);
                         display_dirty = true;
                     }
-                    if display_dirty
-                        && let (Some(display), Some(screen)) =
+                    // Chords burst several screen updates in a few
+                    // milliseconds; flooding the display with SysEx is what
+                    // knocked it over and triggered a full input reopen (the
+                    // "LITTLE mode reset"). Coalesce to one render per
+                    // 150 ms — the latest screen always wins.
+                    if display_dirty && Instant::now() >= next_render {
+                        if let (Some(display), Some(screen)) =
                             (display.as_mut(), latest_screen.as_ref())
-                        && let Err(error) = display.render(screen)
-                    {
-                        eprintln!("DESKTOP_KEYLAB_DISPLAY_FAILED error={error:#}");
-                        display.restore_best_effort();
+                        {
+                            if let Err(error) = display.render(screen) {
+                                eprintln!("DESKTOP_KEYLAB_DISPLAY_FAILED error={error:#}");
+                                display.restore_best_effort();
+                            }
+                            next_render = Instant::now() + Duration::from_millis(150);
+                        }
+                        display_dirty = false;
                     }
-                    display_dirty = false;
                     if display.as_ref().is_some_and(|display| display.failed) {
                         display = None;
                     }

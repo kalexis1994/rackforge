@@ -13,8 +13,9 @@ storage="$public/rackforge"
 echo "Building the browser host"
 cargo build --release --target wasm32-wasip1 -p rackforge-browser --manifest-path "$root/Cargo.toml"
 
-echo "Building the demo instrument"
-cargo build --release --target wasm32-unknown-unknown -p rackforge-demo-synth --manifest-path "$root/Cargo.toml"
+echo "Building the bundled instruments"
+cargo build --release --target wasm32-unknown-unknown \
+  -p rackforge-demo-synth -p rackforge-concert-grand --manifest-path "$root/Cargo.toml"
 
 rm -rf "$public"
 mkdir -p "$storage/plugins"
@@ -24,6 +25,11 @@ cp "$root/target/wasm32-wasip1/release/rackforge_browser.wasm" "$public/rackforg
 plugin="$storage/plugins/demo-synth"
 cp -r "$root/plugins/demo-synth/package" "$plugin"
 cp "$root/target/wasm32-unknown-unknown/release/rackforge_demo_synth.wasm" "$plugin/component.wasm"
+
+# Sorts ahead of demo-synth, which makes the piano the default instrument.
+piano="$storage/plugins/concert-grand"
+cp -r "$root/plugins/concert-grand/package" "$piano"
+cp "$root/target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm" "$piano/component.wasm"
 
 # The host reads its storage through WASI, which has no way to list what the
 # page has not fetched yet. The manifest is that list.

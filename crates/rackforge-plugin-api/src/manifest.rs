@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 #[cfg(feature = "package-validation")]
 use std::io::Cursor;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -293,19 +293,30 @@ pub fn validate_branding_assets(
     let Some(branding) = &manifest.branding else {
         return Ok(());
     };
-    let root = fs::canonicalize(package_root).map_err(|error| BrandingAssetsError::Read {
-        kind: None,
-        path: package_root.display().to_string(),
-        message: error.to_string(),
-    })?;
+    // `rackforge-repository::resolve_existing` documents the same problem:
+    // WASI has no `realpath`, so canonicalising is how containment is checked
+    // off the web, while on the web the embedder's preopened directory is the
+    // boundary and paths are normalised lexically instead. Before this, every
+    // schema 2 package failed in the browser host on the first line, with
+    // `Not supported (os error 58)`, without reading a byte.
+    let (root, resolves) = resolve_package_root(package_root)?;
     for (kind, relative) in branding.assets() {
+        if !is_safe_relative_path(relative) {
+            return Err(BrandingAssetsError::MissingOrEscaped {
+                kind,
+                path: relative.to_owned(),
+            });
+        }
         let requested = root.join(relative);
-        let path =
+        let path = if resolves {
             fs::canonicalize(&requested).map_err(|_| BrandingAssetsError::MissingOrEscaped {
                 kind,
                 path: relative.to_owned(),
-            })?;
-        if !path.starts_with(&root) || !path.is_file() {
+            })?
+        } else {
+            requested
+        };
+        if (resolves && !path.starts_with(&root)) || !path.is_file() {
             return Err(BrandingAssetsError::MissingOrEscaped {
                 kind,
                 path: relative.to_owned(),
@@ -647,6 +658,26 @@ fn validate_identifier(value: &str, require_dot: bool) -> Result<(), SchemaError
         return Err(SchemaError::InvalidIdentifier(value.to_owned()));
     }
     Ok(())
+}
+
+/// The package root the branding paths are resolved against, and whether the
+/// platform resolved it for real. See `validate_branding_assets`.
+#[cfg(feature = "package-validation")]
+fn resolve_package_root(package_root: &Path) -> Result<(PathBuf, bool), BrandingAssetsError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        fs::canonicalize(package_root)
+            .map(|root| (root, true))
+            .map_err(|error| BrandingAssetsError::Read {
+                kind: None,
+                path: package_root.display().to_string(),
+                message: error.to_string(),
+            })
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        Ok((package_root.to_path_buf(), false))
+    }
 }
 
 fn is_safe_relative_path(value: &str) -> bool {

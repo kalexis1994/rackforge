@@ -1,12 +1,21 @@
-schema_version = 1
+schema_version = 2
 id = "org.rackforge.concert-grand"
 name = "RackForge Concert Grand"
 vendor = "RackForge"
-version = "0.28.1"
+version = "0.31.1"
 description = "Physically modelled grand piano: stiff strings, derived stretch tuning, hammer felt and two-stage decay, with no samples"
 kind = "instrument"
 state_version = 1
 capabilities = ["audio_output", "midi_input", "presets", "state"]
+
+# The instrument as photographed: black lacquer, the harp's gold, and the
+# warm house lights of the hall it was shot in.
+[branding]
+icon = "branding/icon.png"
+banner = "branding/banner.png"
+splash = "branding/splash.png"
+background_color = "#000506"
+accent_color = "#F3BC7C"
 
 [api]
 major = 1

@@ -513,6 +513,8 @@ impl DesktopApp {
         };
 
         let web_url = web_servers.local_url().to_owned();
+        // Point surface notes at the engine that just started.
+        web_servers.set_injected_midi(audio.as_ref().map(|audio| audio.injected_midi_sender()));
         #[cfg(windows)]
         let audio_recovery_at =
             if audio.is_none() && audio_preferences.is_some() && !plugins.is_empty() {
@@ -668,6 +670,7 @@ impl DesktopApp {
     fn poll_audio_error(&mut self) {
         let stream_error = self.audio.as_ref().and_then(|audio| audio.take_error());
         if let Some(error) = stream_error {
+            self.web_servers.set_injected_midi(None);
             self.audio = None;
             self.audio_recovery_attempts = 0;
             self.audio_recovery_at = Some(Instant::now() + Duration::from_millis(250));
@@ -699,6 +702,8 @@ impl DesktopApp {
                         format!("Audio reconnected, but controller sync failed: {error:#}");
                 }
                 let summary = audio.summary().to_owned();
+                self.web_servers
+                    .set_injected_midi(Some(audio.injected_midi_sender()));
                 self.audio = Some(audio);
                 self.audio_recovery_attempts = 0;
                 self.status = format!("Audio reconnected · {summary}");

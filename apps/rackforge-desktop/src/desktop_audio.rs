@@ -32,7 +32,13 @@ const MIDI_QUEUE_CAPACITY: usize = 4_096;
 const COMMAND_QUEUE_CAPACITY: usize = 64;
 const CONTROLLER_QUEUE_CAPACITY: usize = 256;
 const DISPLAY_QUEUE_CAPACITY: usize = 8;
-const MAX_MIDI_EVENTS_PER_BLOCK: usize = 4_096;
+/// Never hand a plugin more MIDI in one block than the ABI guarantees it can
+/// take. Every RackForge plugin declares 256 events, and a block that carries
+/// more is rejected whole — which killed the audio stream, and killed it again
+/// on every retry while the queue kept filling. The surplus stays in the
+/// channel and arrives in the next block instead of being dropped: losing a
+/// note-off would hang a note forever.
+const MAX_MIDI_EVENTS_PER_BLOCK: usize = 256;
 const COMMON_SAMPLE_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
 const COMMON_BUFFER_FRAMES: [u32; 8] = [32, 64, 128, 256, 512, 1_024, 2_048, 4_096];
 const DEFAULT_OUTPUT_GAIN_DB: i8 = 6;
@@ -361,6 +367,8 @@ pub struct DesktopAudio {
     _stream: cpal::Stream,
     _midi_supervisor: MidiSupervisor,
     command_sender: SyncSender<AudioCommand>,
+    /// Notes played on a surface, sharing the hardware MIDI queue.
+    injected_midi: SyncSender<MidiPacket>,
     controller_receiver: Receiver<DesktopControllerEvent>,
     display_sender: SyncSender<Screen>,
     errors: Arc<Mutex<Option<String>>>,
@@ -440,6 +448,10 @@ impl DesktopAudio {
 
         let telemetry = Arc::new(AudioTelemetry::default());
         let (midi_sender, midi_receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
+        // Notes played on a surface deserve the same queue as notes played on
+        // a keyboard: 4096 deep, and anything that does not fit in this block
+        // waits for the next one.
+        let injected_midi = midi_sender.clone();
         let (controller_sender, controller_receiver) =
             mpsc::sync_channel(CONTROLLER_QUEUE_CAPACITY);
         let (display_sender, display_receiver) = mpsc::sync_channel(DISPLAY_QUEUE_CAPACITY);
@@ -486,7 +498,10 @@ impl DesktopAudio {
                     let frames = data.len() / callback_channels;
                     if let Err(error) = render_output(&mut processor, data, sample_format) {
                         silence_output(data, sample_format);
-                        publish_error(&callback_errors, error);
+                        // `{:#}` keeps the cause chain: without it every audio
+                        // failure reads as the outermost context and the real
+                        // reason never reaches the log.
+                        publish_error(&callback_errors, format!("{error:#}"));
                     }
                     callback_telemetry.record_callback(
                         frames,
@@ -527,6 +542,7 @@ impl DesktopAudio {
             _stream: stream,
             _midi_supervisor: midi_supervisor,
             command_sender,
+            injected_midi,
             controller_receiver,
             display_sender,
             errors,
@@ -697,16 +713,27 @@ impl DesktopAudio {
         Ok(())
     }
 
+    /// The queue notes are injected into, so a surface can reach the audio
+    /// thread directly instead of waiting for a GUI frame.
+    pub fn injected_midi_sender(&self) -> SyncSender<MidiPacket> {
+        self.injected_midi.clone()
+    }
+
     pub fn inject_midi_messages(&self, messages: Vec<[u8; 3]>) -> Result<()> {
         if messages.is_empty() {
             return Ok(());
         }
-        self.send_command(AudioCommand::InjectMidiBatch(
-            messages
-                .into_iter()
-                .map(|data| MidiPacket { length: 3, data })
-                .collect(),
-        ))
+        // The command queue holds 64 entries and rejects what does not fit,
+        // so a fast glissando on a touch surface overflowed it and the
+        // rejected messages were simply lost. Losing a note-on is a missing
+        // note; losing a note-off is a note that hangs until something else
+        // damps it — which is what "the last notes keep ringing" was.
+        for data in messages {
+            self.injected_midi
+                .try_send(MidiPacket { length: 3, data })
+                .map_err(|error| anyhow::anyhow!("MIDI queue rejected an injected note: {error}"))?;
+        }
+        Ok(())
     }
 
     pub fn take_error(&self) -> Option<String> {
@@ -753,7 +780,6 @@ enum AudioCommand {
         reply: SyncSender<Result<f64, String>>,
     },
     InjectMidi(MidiPacket),
-    InjectMidiBatch(Vec<MidiPacket>),
     SetMasterLevel(MasterLevel),
     SetMasterPan(MasterPan),
     SetRunning(bool),
@@ -787,9 +813,9 @@ pub enum DesktopControllerEvent {
 }
 
 #[derive(Clone, Copy)]
-struct MidiPacket {
-    length: u8,
-    data: [u8; 3],
+pub(crate) struct MidiPacket {
+    pub(crate) length: u8,
+    pub(crate) data: [u8; 3],
 }
 
 struct AudioVoice {
@@ -1157,11 +1183,6 @@ impl AudioProcessor {
                     let _ = reply.try_send(result);
                 }
                 AudioCommand::InjectMidi(packet) => push_midi_event(&mut self.events, packet),
-                AudioCommand::InjectMidiBatch(packets) => {
-                    for packet in packets {
-                        push_midi_event(&mut self.events, packet);
-                    }
-                }
                 AudioCommand::SetMasterLevel(level) => self.master_gain.set_level(level),
                 AudioCommand::SetMasterPan(pan) => self.master_balance.set_pan(pan),
                 AudioCommand::SetRunning(running) => self.stopped = !running,

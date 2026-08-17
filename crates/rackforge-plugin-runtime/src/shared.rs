@@ -32,7 +32,14 @@ impl Default for RuntimeLimits {
     fn default() -> Self {
         Self {
             maximum_memory_bytes: 64 * 1024 * 1024,
-            fuel_per_call: 50_000_000,
+            // Sized against a measured instrument, not a guess. The Concert
+            // Grand's worst realistic block — twenty notes under the pedal,
+            // its partial budget saturated — bills about 70M fuel while
+            // taking ~2.6 ms of a 10.7 ms callback, so the old 50M ceiling
+            // aborted blocks that were nowhere near the deadline and took
+            // the audio stream down with them. This keeps a real ceiling on
+            // a runaway plugin with room for an instrument that works.
+            fuel_per_call: 200_000_000,
             control_fuel_per_call: 5_000_000_000,
         }
     }

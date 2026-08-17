@@ -5,44 +5,208 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RackForge Concert Grand</title>
     <style>
+      /*
+       * The instrument's own identity, taken from the photograph in
+       * branding/: black lacquer, the harp's gold, and the thin deco rules of
+       * the RF-GP mark. Nothing here is a host colour — RackForge keeps its
+       * own chrome, and this surface stays inside its frame.
+       */
       :root {
         color-scheme: dark;
-        --ink: #e8f0f7;
-        --muted: #7f93a6;
-        --line: #1c2a36;
-        --accent: #58c7f3;
+        --lacquer: #000506;
+        --case: #0b0d0f;
+        --rule: #2a2118;
+        --gold: #f3bc7c;
+        --gold-dim: #8a6a44;
+        --ink: #f2e7d8;
+        --muted: #8c8073;
       }
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        padding: 24px;
-        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        padding: 0 0 32px;
+        font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
         color: var(--ink);
-        background: #050b11;
+        background: var(--lacquer);
       }
-      h1 {
-        margin: 0 0 4px;
-        font-size: 17px;
-        letter-spacing: 0.08em;
+      .plate {
+        position: relative;
+        aspect-ratio: 4 / 1;
+        background: #000 center/cover no-repeat;
+        border-bottom: 1px solid var(--rule);
+      }
+      .plate::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, var(--lacquer) 2%, transparent 42%),
+          linear-gradient(0deg, rgba(0, 5, 6, 0.85), transparent 55%);
+      }
+      .plate h1 {
+        position: absolute;
+        left: 22px;
+        bottom: 14px;
+        z-index: 1;
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.24em;
         text-transform: uppercase;
+        color: var(--gold);
       }
-      p.lead { margin: 0 0 24px; color: var(--muted); }
-      .controls { display: grid; gap: 18px; max-width: 520px; }
-      .control { display: grid; gap: 6px; }
+      .plate p {
+        position: absolute;
+        left: 22px;
+        bottom: -2px;
+        z-index: 1;
+        margin: 0;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+      main { max-width: 560px; padding: 24px 22px 0; }
+      .voicing {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 26px;
+      }
+      .voicing button {
+        flex: 1 1 auto;
+        padding: 7px 0;
+        font: inherit;
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--gold-dim);
+        background: var(--case);
+        border: 1px solid var(--rule);
+        border-radius: 2px;
+        cursor: pointer;
+      }
+      .voicing button:hover { color: var(--gold); border-color: var(--gold-dim); }
+      .voicing button[aria-pressed="true"] {
+        color: var(--lacquer);
+        background: var(--gold);
+        border-color: var(--gold);
+      }
+      section { margin-bottom: 26px; }
+      section > h2 {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 0 0 14px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: var(--gold-dim);
+      }
+      section > h2::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: linear-gradient(90deg, var(--rule), transparent);
+      }
+      .control { display: grid; gap: 5px; margin-bottom: 15px; }
       .row { display: flex; justify-content: space-between; align-items: baseline; }
-      .name { font-weight: 600; }
-      .value { color: var(--accent); font-variant-numeric: tabular-nums; }
-      input[type="range"] { width: 100%; accent-color: var(--accent); }
-      .state { margin-top: 22px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
+      .name { font-size: 13px; letter-spacing: 0.02em; }
+      .value {
+        font-variant-numeric: tabular-nums;
+        font-size: 12px;
+        color: var(--gold);
+      }
+      /* The fader: a hairline track that fills with gold behind the handle. */
+      input[type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 18px;
+        background: transparent;
+        cursor: pointer;
+      }
+      input[type="range"]::-webkit-slider-runnable-track {
+        height: 3px;
+        border-radius: 2px;
+        background: linear-gradient(
+          90deg,
+          var(--gold) 0 var(--fill, 50%),
+          #1a1512 var(--fill, 50%) 100%
+        );
+      }
+      input[type="range"]::-moz-range-track { height: 3px; border-radius: 2px; background: #1a1512; }
+      input[type="range"]::-moz-range-progress { height: 3px; border-radius: 2px; background: var(--gold); }
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 13px;
+        height: 13px;
+        margin-top: -5px;
+        border-radius: 50%;
+        background: var(--gold);
+        border: 2px solid var(--lacquer);
+        box-shadow: 0 0 0 1px var(--gold-dim);
+      }
+      input[type="range"]::-moz-range-thumb {
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        background: var(--gold);
+        border: 2px solid var(--lacquer);
+        box-shadow: 0 0 0 1px var(--gold-dim);
+      }
+      details { border-top: 1px solid var(--rule); padding-top: 14px; }
+      summary {
+        font-size: 11px;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: var(--gold-dim);
+        cursor: pointer;
+      }
+      summary:hover { color: var(--gold); }
+      details > div { padding-top: 16px; }
+      .tools { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+      .tools button {
+        padding: 8px 14px;
+        font: inherit;
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--gold);
+        background: transparent;
+        border: 1px solid var(--gold-dim);
+        border-radius: 2px;
+        cursor: pointer;
+      }
+      .tools button:hover { background: rgba(243, 188, 124, 0.08); }
+      textarea {
+        display: none;
+        width: 100%;
+        height: 120px;
+        margin-top: 12px;
+        padding: 10px;
+        color: var(--ink);
+        background: var(--case);
+        border: 1px solid var(--rule);
+        border-radius: 2px;
+        font: 12px/1.45 ui-monospace, Consolas, monospace;
+      }
+      .state {
+        margin: 16px 0 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
     </style>
   </head>
   <body>
-    <h1>Concert Grand</h1>
-    <p class="lead">A physically modelled grand: stiff strings, felt, dampers — and no samples. The model is documented in docs/PIANO_MODEL.md.</p>
-    <div class="controls" id="controls"></div>
-    <button id="copy" style="margin-top:18px;padding:8px 14px;border:1px solid var(--line);border-radius:6px;background:#0c1824;color:var(--ink);cursor:pointer">Copiar JSON de parámetros</button>
-    <textarea id="dump" readonly style="display:none;width:100%;max-width:520px;height:110px;margin-top:10px;background:#0c1824;color:var(--ink);border:1px solid var(--line);border-radius:6px;font:12px/1.4 monospace"></textarea>
-    <p class="state" id="state">Connecting to RackForge…</p>
+    <div class="plate" id="plate">
+      <h1>Concert Grand</h1>
+      <p>Physically modelled · no samples</p>
+    </div>
+    <main>
+      <div class="voicing" id="voicing"></div>
+      <div id="controls"></div>
+      <p class="state" id="state">Connecting to RackForge…</p>
+    </main>
 
     <script type="module">
       /*
@@ -58,7 +222,13 @@
       let nextRequest = 1;
 
       const controls = document.getElementById("controls");
+      const voicing = document.getElementById("voicing");
       const state = document.getElementById("state");
+
+      // The banner ships in the package beside this surface, so the plate is
+      // the instrument itself rather than a painted rectangle.
+      document.getElementById("plate").style.backgroundImage =
+        "url(../branding/banner.png)";
 
       function call(method, params = {}) {
         const requestId = `concert-grand-${nextRequest++}`;
@@ -90,61 +260,150 @@
         }
       });
 
-      /** Draws one control per parameter the plugin declares. */
+      /** One fader, wired to the host and painted to its own fill. */
+      function fader(parameter, value) {
+        const kind = parameter.kind;
+        const wrapper = document.createElement("div");
+        wrapper.className = "control";
+        const row = document.createElement("div");
+        row.className = "row";
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = parameter.name;
+        const reading = document.createElement("span");
+        reading.className = "value";
+        row.append(name, reading);
+
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = String(kind.minimum);
+        slider.max = String(kind.maximum);
+        slider.step = String(kind.step ?? 0.01);
+        slider.value = String(value ?? kind.default);
+        slider.setAttribute("aria-label", parameter.name);
+
+        const show = () => {
+          const span = kind.maximum - kind.minimum || 1;
+          const fill = ((Number(slider.value) - kind.minimum) / span) * 100;
+          slider.style.setProperty("--fill", `${fill}%`);
+          reading.textContent = Number(slider.value).toFixed(2);
+        };
+        show();
+        slider.addEventListener("input", () => {
+          show();
+          void call("plugin.set_parameter", {
+            parameter_index: parameter.index,
+            value: Number(slider.value),
+          }).catch((error) => {
+            state.textContent = error.message;
+          });
+        });
+
+        wrapper.append(row, slider);
+        return wrapper;
+      }
+
+      /** Groups the faders the way the plugin declares its pages. */
       function draw(schema, values) {
         const current = new Map(values.map((value) => [value.index, value.value]));
+        const pages = [...(schema.pages ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        const floats = schema.parameters.filter((p) => p.kind.type === "float");
         controls.replaceChildren();
-        for (const parameter of schema.parameters) {
-          const kind = parameter.kind;
-          if (kind.type !== "float") continue;
 
-          const wrapper = document.createElement("div");
-          wrapper.className = "control";
-          const row = document.createElement("div");
-          row.className = "row";
-          const name = document.createElement("span");
-          name.className = "name";
-          name.textContent = parameter.name;
-          const reading = document.createElement("span");
-          reading.className = "value";
-          row.append(name, reading);
-
-          const slider = document.createElement("input");
-          slider.type = "range";
-          slider.min = String(kind.minimum);
-          slider.max = String(kind.maximum);
-          slider.step = String(kind.step ?? 0.01);
-          slider.value = String(current.get(parameter.index) ?? kind.default);
-          slider.setAttribute("aria-label", parameter.name);
-          const show = () => {
-            reading.textContent = Number(slider.value).toFixed(2);
-          };
-          show();
-          slider.addEventListener("input", () => {
-            show();
-            void call("plugin.set_parameter", {
-              parameter_index: parameter.index,
-              value: Number(slider.value),
-            }).catch((error) => {
-              state.textContent = error.message;
-            });
-          });
-
-          wrapper.append(row, slider);
-          controls.append(wrapper);
+        for (const page of pages.length ? pages : [{ id: null, name: "Voice" }]) {
+          const mine = floats.filter((p) => (p.page ?? null) === page.id);
+          if (!mine.length) continue;
+          mine.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+          const body = document.createElement("div");
+          for (const parameter of mine) {
+            body.append(fader(parameter, current.get(parameter.index)));
+          }
+          // The lab page is a workbench, not part of the instrument's face:
+          // it stays folded until someone goes looking for it.
+          if (page.id === "lab") {
+            const details = document.createElement("details");
+            const summary = document.createElement("summary");
+            summary.textContent = `${page.name} · ${mine.length} controls`;
+            // Exporting the settings is a development tool: it lives with the
+            // workbench controls, not on the instrument's face.
+            body.append(exportRow());
+            details.append(summary, body);
+            controls.append(details);
+          } else {
+            const section = document.createElement("section");
+            const heading = document.createElement("h2");
+            heading.textContent = page.name;
+            section.append(heading, body);
+            controls.append(section);
+          }
         }
       }
 
-      async function load() {
+      /**
+       * The packaged voicings, as buttons rather than a hidden menu. The
+       * catalog comes from the plugin's own package — the host serves it
+       * beside this surface — and switching one goes through
+       * `plugin.select_sound`, the only route the host offers for it.
+       */
+      async function drawPresets() {
+        let presets = [];
+        try {
+          const response = await fetch("../metadata/presets.json");
+          presets = (await response.json()).presets ?? [];
+        } catch {
+          return;
+        }
+        presets.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        voicing.replaceChildren();
+        for (const preset of presets) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = preset.name ?? preset.id;
+          button.title = preset.description ?? "";
+          button.setAttribute("aria-pressed", "false");
+          button.addEventListener("click", async () => {
+            try {
+              await call("plugin.select_sound", { sound_id: preset.id });
+              for (const other of voicing.children) {
+                other.setAttribute("aria-pressed", String(other === button));
+              }
+              state.textContent = `Voicing · ${button.textContent}`;
+              await load(false);
+            } catch (error) {
+              state.textContent = error.message;
+            }
+          });
+          voicing.append(button);
+        }
+      }
+
+      async function load(withPresets = true) {
         try {
           const parameters = await call("plugin.parameters");
           draw(parameters.schema, parameters.values ?? []);
+          if (withPresets) await drawPresets();
         } catch (error) {
           state.textContent = error.message;
         }
       }
 
-      document.getElementById("copy").addEventListener("click", async () => {
+      /** The workbench export: every value as JSON, for tuning by ear. */
+      function exportRow() {
+        const tools = document.createElement("div");
+        tools.className = "tools";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Copiar JSON";
+        const dump = document.createElement("textarea");
+        dump.readOnly = true;
+        tools.append(button);
+        const wrapper = document.createElement("div");
+        wrapper.append(tools, dump);
+        button.addEventListener("click", () => void copySettings(dump));
+        return wrapper;
+      }
+
+      async function copySettings(dump) {
         try {
           const parameters = await call("plugin.parameters");
           const values = new Map((parameters.values ?? []).map((v) => [v.index, v.value]));
@@ -153,14 +412,20 @@
             out[p.id ?? p.name] = Number((values.get(p.index) ?? p.kind.default).toFixed(3));
           }
           const text = JSON.stringify(out, null, 1);
-          const dump = document.getElementById("dump");
           dump.style.display = "block";
           dump.value = text;
           dump.select();
-          try { await navigator.clipboard.writeText(text); state.textContent = "Copiado al portapapeles ✓"; }
-          catch { document.execCommand("copy"); state.textContent = "Seleccionado — Ctrl+C para copiar"; }
-        } catch (error) { state.textContent = error.message; }
-      });
+          try {
+            await navigator.clipboard.writeText(text);
+            state.textContent = "Copiado al portapapeles ✓";
+          } catch {
+            document.execCommand("copy");
+            state.textContent = "Seleccionado — Ctrl+C para copiar";
+          }
+        } catch (error) {
+          state.textContent = error.message;
+        }
+      }
 
       parent.postMessage({ protocol: PROTOCOL, kind: "ready" }, "*");
     </script>

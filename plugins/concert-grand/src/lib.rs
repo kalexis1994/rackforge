@@ -38,7 +38,14 @@ const MAX_VOICES: usize = 20;
 const MAX_PARTIALS: usize = 144;
 /// Ceiling on simultaneously active partials across all voices, so a pedalled
 /// fortissimo run degrades new notes' partial counts instead of the callback.
-const PARTIAL_BUDGET: usize = 2000;
+///
+/// This is a fuel budget, not a taste one. The host gives a real-time call
+/// 50M units of wasmtime fuel; a partial now carries four components, so
+/// 2000 of them cost about 4M oscillator ticks per 512-frame block and land
+/// exactly on that ceiling — which is why dense playing was tripping
+/// `all fuel consumed` and taking the audio stream down with it. Half that
+/// leaves the headroom the strike simulation and the boards also need.
+const PARTIAL_BUDGET: usize = 900;
 
 /// Below the soundboard's first mode the board radiates almost nothing.
 /// Calibrated against the YDP Grand samples: A0's fundamental measures
@@ -77,6 +84,9 @@ struct Component {
 
 impl Component {
     fn start(amp: f32, frequency: f32, decay_per_sample: f32, sample_rate: f32) -> Self {
+        if amp == 0.0 {
+            return Self::default();
+        }
         let omega = core::f32::consts::TAU * frequency / sample_rate;
         let (sin, cos) = sincosf(omega);
         // Starting at (0, amp) means the output — the `s` channel — rises from
@@ -92,6 +102,9 @@ impl Component {
     /// Starts from an arbitrary (position, velocity/omega) state — the
     /// state a hammer simulation leaves the mode in at contact end.
     fn start_state(s0: f32, c0: f32, frequency: f32, decay_per_sample: f32, sample_rate: f32) -> Self {
+        if s0 == 0.0 && c0 == 0.0 {
+            return Self::default();
+        }
         let omega = core::f32::consts::TAU * frequency / sample_rate;
         let (sin, cos) = sincosf(omega);
         Self { s: s0, c: c0, rc: decay_per_sample * cos, rs: decay_per_sample * sin }
@@ -99,11 +112,25 @@ impl Component {
 
     #[inline(always)]
     fn tick(&mut self) -> f32 {
+        // Retired components keep their slot but stop costing a rotation:
+        // the bloom is gone within tens of milliseconds and the third string
+        // does not exist below the tenor, so this is most of the bank.
+        if self.rc == 0.0 && self.rs == 0.0 {
+            return 0.0;
+        }
         let s = self.s * self.rc + self.c * self.rs;
         let c = self.c * self.rc - self.s * self.rs;
         self.s = s;
         self.c = c;
         s
+    }
+
+    /// Silences one component for good, so `tick` can skip it.
+    fn retire(&mut self) {
+        self.s = 0.0;
+        self.c = 0.0;
+        self.rc = 0.0;
+        self.rs = 0.0;
     }
 
     fn magnitude_squared(&self) -> f32 {
@@ -415,7 +442,17 @@ impl Voice {
         let mut energy = 0.0;
         let mut index = 0;
         while index < self.partial_count {
-            let partial = &self.partials[index];
+            let partial = &mut self.partials[index];
+            for component in [
+                &mut partial.prompt,
+                &mut partial.aftersound,
+                &mut partial.bloom,
+                &mut partial.third,
+            ] {
+                if component.magnitude_squared() < DEAD_MAGNITUDE_SQUARED {
+                    component.retire();
+                }
+            }
             let magnitude = partial.prompt.magnitude_squared()
                 + partial.aftersound.magnitude_squared()
                 + partial.third.magnitude_squared();
@@ -558,6 +595,13 @@ pub struct ConcertGrand {
     /// Tap offsets in samples and gains, per side.
     lid_left: [(usize, f32); LID_TAPS_LEFT.len()],
     lid_right: [(usize, f32); LID_TAPS_RIGHT.len()],
+    /// Full hammer simulations left in this callback. The strike ODE is the
+    /// most expensive thing the model does and it runs on the audio thread,
+    /// so a dense chord or a fast run cannot be allowed to spend the whole
+    /// buffer on it: past the budget a strike falls back to the calibrated
+    /// recipe, which is what the model sounded like before the simulation
+    /// existed. Losing a little attack detail beats losing the stream.
+    strike_budget: u32,
     /// Serial-board mix from the most recent strike's note calibration.
     serial_cal: f32,
     /// Per-note calibration table: [anchor][param] multipliers.
@@ -607,6 +651,7 @@ impl Default for ConcertGrand {
             // treble. The rest are physical — decay runs
             // x1.5 in the bass and x0.65 in the treble, which a single
             // global number can only average into being wrong everywhere.
+            strike_budget: 0,
             serial_cal: 1.0,
             cal: [
                 [0.3239, 0.8114, 0.3539, 0.3392, 1.3207, 0.5434, 1.1626, 1.0000, 0.3686, 0.2500],
@@ -991,6 +1036,11 @@ impl ConcertGrand {
         let x0 = Self::strike_point(note);
         let width = Self::hammer_width(note);
         let nyquist = 0.47 * self.sample_rate;
+        // A piano's ladder is spent long before nyquist: past ~11 kHz the
+        // felt cliff has every partial on the noise floor, inaudible but
+        // still billing four oscillators a sample. Carrying it that far was
+        // most of why one note ate a quarter of the audio call's fuel.
+        let audible_top = nyquist.min(11_000.0);
 
         // Felt low-pass. The cutoff scales with the reciprocal of the contact
         // time; the constant is empirical — a strict 1/(2·t) reading of the
@@ -1054,7 +1104,7 @@ impl ConcertGrand {
                     * (nf / 40.0)
                     * (hash01((note as u32) << 11 | (n as u32) << 4 | 9) - 0.5);
             let frequency = nf * f0 * sqrtf(1.0 + b * nf * nf) * winding;
-            if frequency >= nyquist {
+            if frequency >= audible_top {
                 break;
             }
             let (comb, _) = sincosf(core::f32::consts::PI * nf * x0);
@@ -1121,12 +1171,16 @@ impl ConcertGrand {
         // emergent in it; radiation and board colour still apply.
         {
             let mut sim_modes = 0;
+            // Above ~8 kHz a mode contributes almost nothing to the contact
+            // shape, and the strike runs on the audio thread: modes past it
+            // keep the calibrated recipe's amplitude instead.
             while sim_modes < SIM_MODES.min(count)
-                && frequencies[sim_modes] < 16_000.0_f32.min(nyquist)
+                && frequencies[sim_modes] < 8_000.0_f32.min(nyquist)
             {
                 sim_modes += 1;
             }
-            if sim_modes >= 4 {
+            if sim_modes >= 4 && self.strike_budget > 0 {
+                self.strike_budget -= 1;
                 let mass = (0.06 + 0.85 * powf(position, 1.3)) * self.controls.lab(8);
                 // F0 compensates the hereditary softening (Stulov measures
                 // the felt modulus under load): quasi-static stiffness is
@@ -1241,9 +1295,15 @@ impl ConcertGrand {
             // coupling below, not scripted here.
             let three = ((index as f32 - 18.0) / 8.0).clamp(0.0, 1.0)
                 * if self.soft { 0.25 } else { 1.0 };
-            let w3 = 0.22 * three;
+            let w3 = if n < 12 { 0.22 * three } else { 0.0 };
             let remainder = 1.0 - w3;
-            let (w1, w2) = (remainder * 0.56, remainder * 0.44);
+            // Above the low partials the beat between the strings is beyond
+            // hearing, so they collapse into one oscillator instead of three.
+            let (w1, w2) = if n < 32 {
+                (remainder * 0.56, remainder * 0.44)
+            } else {
+                (remainder, 0.0)
+            };
             let half_ratio = powf(2.0, cents / 2400.0);
             let third_ratio = powf(
                 2.0,
@@ -1566,8 +1626,20 @@ impl ConcertGrand {
 
     /// Per-sample decay multiplier a falling damper applies: the note dies in
     /// tens of milliseconds instead of seconds.
-    fn damper_factor(&self) -> f32 {
-        expf(-1.0 / (0.06 * self.sample_rate))
+    fn damper_factor(&self, note: u8) -> f32 {
+        Self::damper_for(note, self.sample_rate)
+    }
+
+    /// Dampers are not equally effective across the compass: a treble damper
+    /// stops its short light string almost at once, while a wound bass string
+    /// carries far too much energy to be stopped that fast. A single 60 ms
+    /// constant for the whole keyboard left every release ringing ~230 ms
+    /// down to −34 dB, which smears into a wash as soon as playing gets fast.
+    fn damper_for(note: u8, sample_rate: f32) -> f32 {
+        let position = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as f32
+            / (NOTE_COUNT - 1) as f32;
+        let seconds = 0.075 - 0.055 * position;
+        expf(-1.0 / (seconds * sample_rate))
     }
 
     /// The damper thud's colour and length: dark and short.
@@ -1579,7 +1651,7 @@ impl ConcertGrand {
     }
 
     fn release(&mut self, channel: u8, note: u8) {
-        let damper = self.damper_factor();
+        let damper = self.damper_factor(note);
         let (thud_coefficient, thud_decay) = self.damper_thud();
         for voice in &mut self.voices {
             if voice.active && voice.note == note && voice.channel == channel && voice.held {
@@ -1596,10 +1668,11 @@ impl ConcertGrand {
     fn set_pedal(&mut self, down: bool) {
         self.pedal = down;
         if !down {
-            let damper = self.damper_factor();
             let (thud_coefficient, thud_decay) = self.damper_thud();
+            let rate = self.sample_rate;
             for voice in &mut self.voices {
                 if voice.active && voice.sustained {
+                    let damper = Self::damper_for(voice.note, rate);
                     voice.damp(damper, thud_coefficient, thud_decay);
                 }
             }
@@ -1607,10 +1680,11 @@ impl ConcertGrand {
     }
 
     fn all_notes_off(&mut self) {
-        let damper = self.damper_factor();
         let (thud_coefficient, thud_decay) = self.damper_thud();
+        let rate = self.sample_rate;
         for voice in &mut self.voices {
             if voice.active {
+                let damper = Self::damper_for(voice.note, rate);
                 voice.damp(damper, thud_coefficient, thud_decay);
             }
         }
@@ -1791,6 +1865,9 @@ impl Processor for ConcertGrand {
         output_channels: u32,
     ) {
         let channels = output_channels as usize;
+        // Three full strikes per buffer: measured at ~0.5 ms each natively,
+        // which leaves the rest of the callback to the voices already ringing.
+        self.strike_budget = 3;
         let level = self.controls.level * self.controls.level;
         let mut midi_index = 0;
         let mut parameter_index = 0;
@@ -2374,6 +2451,151 @@ mod tests {
         let plain = strike(false);
         let soft = strike(true);
         assert!(soft < plain * 0.8, "una corda {soft} vs plain {plain}");
+    }
+
+    /// Not a test: measures what a strike costs the audio callback.
+    #[test]
+    #[ignore]
+    fn measure_strike_cost() {
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, 512, 0, 2));
+        let mut output = vec![0.0f32; 512 * 2];
+        // One buffer at 48 kHz / 512 frames is 10.67 ms of budget.
+        for (label, notes) in [("single", 1usize), ("five-note chord", 5), ("ten-note chord", 10)] {
+            let events: Vec<MidiEvent> = (0..notes)
+                .map(|i| MidiEvent { frame: 0, data: [0x90, 40 + 4 * i as u8, 110], length: 3 })
+                .collect();
+            let start = std::time::Instant::now();
+            const ROUNDS: u32 = 50;
+            for _ in 0..ROUNDS {
+                piano.reset();
+                piano.process(&[], &mut output, &events, &[], 512, 0, 2);
+            }
+            let per = start.elapsed().as_secs_f64() * 1000.0 / ROUNDS as f64;
+            std::println!("{label}: {per:.2} ms per buffer ({:.0}% of budget)", per / 10.67 * 100.0);
+        }
+        // Steady state: what a held chord costs once the strikes are over.
+        // This is what fast playing accumulates, and what the callback pays
+        // on every buffer until the voices die.
+        for held in [5usize, 10, 20] {
+            piano.reset();
+            let events: Vec<MidiEvent> = (0..held)
+                .map(|i| MidiEvent { frame: 0, data: [0x90, 33 + 3 * i as u8, 115], length: 3 })
+                .collect();
+            let pedal = MidiEvent { frame: 0, data: [0xb0, 64, 127], length: 3 };
+            piano.process(&[], &mut output, &[pedal], &[], 512, 0, 2);
+            for chunk in events.chunks(3) {
+                piano.process(&[], &mut output, chunk, &[], 512, 0, 2);
+            }
+            let start = std::time::Instant::now();
+            const ROUNDS: u32 = 100;
+            for _ in 0..ROUNDS {
+                piano.process(&[], &mut output, &[], &[], 512, 0, 2);
+            }
+            let per = start.elapsed().as_secs_f64() * 1000.0 / ROUNDS as f64;
+            let live: usize = piano.voices.iter().filter(|v| v.active).count();
+            std::println!(
+                "{held} pedalled notes ({live} voices, {} partials): {per:.2} ms ({:.0}% of budget)",
+                piano.active_partials, per / 10.67 * 100.0
+            );
+        }
+    }
+
+    /// Hammers the model the way a fast player does: dense chords, repeats,
+    /// pedal, the whole compass, every velocity. A panic here is a trap in
+    /// the packaged wasm, which takes the audio stream down with it.
+    /// Not a test: how long sound persists after the key is released, which
+    /// is what "the notes hang behind" would show up as.
+    #[test]
+    #[ignore]
+    fn measure_release_tail() {
+        for (label, note, pedal) in [
+            ("bass C2", 36u8, false),
+            ("mid C4", 60, false),
+            ("treble C6", 84, false),
+            ("treble C6 + pedal", 84, true),
+            ("glissando 24 treble notes", 0, false),
+        ] {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(48_000.0, 512, 0, 2));
+            let mut out = vec![0.0f32; 512 * 2];
+            if pedal {
+                let cc = [MidiEvent { frame: 0, data: [0xb0, 64, 127], length: 3 }];
+                piano.process(&[], &mut out, &cc, &[], 512, 0, 2);
+            }
+            if note == 0 {
+                for n in 0..24u8 {
+                    let on = [MidiEvent { frame: 0, data: [0x90, 72 + n % 24, 110], length: 3 }];
+                    piano.process(&[], &mut out, &on, &[], 512, 0, 2);
+                }
+                for n in 0..24u8 {
+                    let off = [MidiEvent { frame: 0, data: [0x80, 72 + n % 24, 0], length: 3 }];
+                    piano.process(&[], &mut out, &off, &[], 512, 0, 2);
+                }
+            } else {
+                let on = [MidiEvent { frame: 0, data: [0x90, note, 110], length: 3 }];
+                piano.process(&[], &mut out, &on, &[], 512, 0, 2);
+                for _ in 0..40 {
+                    piano.process(&[], &mut out, &[], &[], 512, 0, 2);
+                }
+                let off = [MidiEvent { frame: 0, data: [0x80, note, 0], length: 3 }];
+                piano.process(&[], &mut out, &off, &[], 512, 0, 2);
+            }
+            let loud = |o: &[f32]| o.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+            let mut peak_at_release = 0.0f32;
+            let mut ms_to_silence = None;
+            for block in 0..280 {
+                piano.process(&[], &mut out, &[], &[], 512, 0, 2);
+                let level = loud(&out);
+                if block == 0 {
+                    peak_at_release = level.max(1e-9);
+                }
+                if ms_to_silence.is_none() && level < peak_at_release * 0.02 {
+                    ms_to_silence = Some(block as f32 * 512.0 / 48.0);
+                }
+            }
+            let voices = piano.voices.iter().filter(|v| v.active).count();
+            std::println!(
+                "{label}: -34 dB after {:?} ms, {voices} voices still live",
+                ms_to_silence.map(|v| v as u32)
+            );
+        }
+    }
+
+    #[test]
+    fn survives_dense_fast_playing() {
+        // At the host's rate, not the tests' 16 kHz: a bass note has far more
+        // partials under nyquist there, which is what fills the arrays.
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, 512, 0, 2));
+        let mut seed = 0x1234_5678u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 16) as usize
+        };
+        let mut output = vec![0.0f32; 512 * 2];
+        for round in 0..4000 {
+            let mut events = Vec::new();
+            if round % 37 == 0 {
+                events.push(MidiEvent { frame: 0, data: [0xb0, 64, 127], length: 3 });
+            }
+            if round % 53 == 0 {
+                events.push(MidiEvent { frame: 0, data: [0xb0, 64, 0], length: 3 });
+            }
+            for _ in 0..(next() % 12) {
+                let note = (21 + next() % 88) as u8;
+                let velocity = (1 + next() % 127) as u8;
+                let on = next() % 4 != 0;
+                events.push(MidiEvent {
+                    frame: (next() % 128) as u32,
+                    data: [if on { 0x90 } else { 0x80 }, note, velocity],
+                    length: 3,
+                });
+            }
+            events.sort_by_key(|e| e.frame);
+            piano.process(&[], &mut output, &events, &[], 128, 0, 2);
+            assert!(output.iter().all(|s| s.is_finite()), "non-finite output at round {round}");
+        }
     }
 
     #[test]

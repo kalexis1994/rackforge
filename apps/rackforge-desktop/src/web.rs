@@ -31,8 +31,8 @@ use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, RwLock};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -55,6 +55,11 @@ struct WebState {
     control: Sender<DesktopControlCall>,
     resource_browser: Arc<NativeResourceBrowser>,
     resource_upload_root: PathBuf,
+    /// Notes from a surface go straight to the audio thread through this.
+    /// Routing them through the GUI thread capped them at one frame each —
+    /// about sixty a second — so fast playing on a touch surface queued up
+    /// and arrived late. It is refreshed whenever the audio engine restarts.
+    injected_midi: Arc<Mutex<Option<SyncSender<crate::desktop_audio::MidiPacket>>>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -228,6 +233,18 @@ pub struct DesktopWebServers {
 }
 
 impl DesktopWebServers {
+    /// Points surface notes at the running audio engine. Called when the
+    /// engine starts and again after every recovery, since a restarted
+    /// engine owns a new queue.
+    pub fn set_injected_midi(
+        &self,
+        sender: Option<SyncSender<crate::desktop_audio::MidiPacket>>,
+    ) {
+        if let Ok(mut slot) = self.state.injected_midi.lock() {
+            *slot = sender;
+        }
+    }
+
     pub fn local_url(&self) -> &str {
         &self.local_url
     }
@@ -298,7 +315,9 @@ pub fn start(
 ) -> anyhow::Result<DesktopWebServers> {
     preferences.validate()?;
     let shared_preferences = Arc::new(RwLock::new(preferences.clone()));
+    let injected_midi = Arc::new(Mutex::new(None));
     let state = WebState {
+        injected_midi: Arc::clone(&injected_midi),
         session,
         plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
         legacy_plugins_root: options.plugins_root.clone(),
@@ -1436,6 +1455,31 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         request @ (ControlRequest::Dispatch { .. }
         | ControlRequest::VirtualMidi { .. }
         | ControlRequest::ReleaseVirtualMidi { .. }) => {
+            // A note is not a session command: it must reach the audio thread
+            // now, not on the next GUI frame. Everything else in this arm
+            // still takes the ordinary route.
+            if let ControlRequest::VirtualMidi { message, .. } = &request
+                && let Err(error) = message.validate()
+            {
+                return json!({"status":"error", "code":"invalid_request", "message": error});
+            }
+            if let ControlRequest::VirtualMidi { message, .. } = &request
+                && let Ok(slot) = state.injected_midi.lock()
+                && let Some(sender) = slot.as_ref()
+            {
+                let bytes = message.bytes();
+                return match sender.try_send(crate::desktop_audio::MidiPacket {
+                    length: 3,
+                    data: bytes,
+                }) {
+                    Ok(()) => json!({"status":"ok"}),
+                    Err(error) => json!({
+                        "status":"error",
+                        "code":"unavailable",
+                        "message": format!("the audio queue rejected a note: {error}"),
+                    }),
+                };
+            }
             let (response_sender, response_receiver) = mpsc::channel();
             if state
                 .control

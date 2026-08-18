@@ -137,13 +137,30 @@ async function networkFirst(request) {
 async function pluginAsset(request) {
   const cache = await caches.open(PLUGIN_ASSET_CACHE);
   const cached = await cache.match(request, { ignoreSearch: true });
-  return (
-    cached ??
-    new Response("This plugin file is not installed.", {
-      status: 404,
-      headers: { "content-type": "text/plain; charset=utf-8" },
-    })
-  );
+  if (cached) return cached;
+  // On a dev server the packaged files are on disk, under the demo the site
+  // ships, so a cache that is empty or was cleared does not have to cost a
+  // debugging session: the instrument's own pages resolve from the files
+  // being edited. Off a dev server there is no such source, and a miss stays
+  // a miss.
+  if (DEVELOPMENT) {
+    const url = new URL(request.url);
+    const path = url.pathname.slice(
+      url.pathname.indexOf(PLUGIN_ASSETS) + PLUGIN_ASSETS.length,
+    );
+    const source = new URL(`demo/rackforge/${path}`, self.registration.scope);
+    const response = await fetch(source).catch(() => null);
+    // A dev server answers an unknown path with the application shell, which
+    // would load the whole interface inside the plugin's frame. Better a 404.
+    if (response?.ok) {
+      const body = await response.clone().text().catch(() => "");
+      if (!body.includes("/@vite/client")) return response;
+    }
+  }
+  return new Response("This plugin file is not installed.", {
+    status: 404,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+  });
 }
 
 async function cacheFirst(request) {

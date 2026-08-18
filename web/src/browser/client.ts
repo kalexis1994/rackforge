@@ -302,18 +302,25 @@ function milestone(
   timedOut: string,
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      milestones[name] = null;
-      reject(
-        new Error(
-          audio.state === "running"
-            ? timedOut
-            : "the browser has not allowed audio to start yet",
-        ),
-      );
-    }, 15_000);
+    // The clock only runs while the browser is allowing sound. A page nobody
+    // has touched yet is not a page that is failing: its worklet cannot run,
+    // so it cannot reach a milestone, and timing it out killed the host for
+    // the rest of the visit — after which the gesture that would have started
+    // it arrived to nothing.
+    let timeout: number | null = null;
+    const arm = () => {
+      if (timeout !== null || audio.state !== "running") return;
+      timeout = window.setTimeout(() => {
+        milestones[name] = null;
+        audio.removeEventListener("statechange", arm);
+        reject(new Error(timedOut));
+      }, 15_000);
+    };
+    audio.addEventListener("statechange", arm);
+    arm();
     const settle = (error?: string | null) => {
-      window.clearTimeout(timeout);
+      if (timeout !== null) window.clearTimeout(timeout);
+      audio.removeEventListener("statechange", arm);
       milestones[name] = null;
       if (error) {
         reject(new Error(error));

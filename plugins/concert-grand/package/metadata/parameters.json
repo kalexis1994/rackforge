@@ -20,6 +20,11 @@
       "id": "lab",
       "name": "Lab",
       "order": 3
+    },
+    {
+      "id": "tilt",
+      "name": "Lab in the bass (treble stays put)",
+      "order": 4
     }
   ],
   "parameters": [
@@ -379,6 +384,202 @@
       "name": "Air",
       "page": "lab",
       "order": 16,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 23,
+      "id": "lab_felt_corner_tilt",
+      "name": "Felt Corner in bass",
+      "page": "tilt",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 24,
+      "id": "lab_treble_life_tilt",
+      "name": "Treble Life in bass",
+      "page": "tilt",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 25,
+      "id": "lab_thump_tilt",
+      "name": "Thump in bass",
+      "page": "tilt",
+      "order": 2,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 26,
+      "id": "lab_chiff_tilt",
+      "name": "Chiff in bass",
+      "page": "tilt",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 27,
+      "id": "lab_clang_tilt",
+      "name": "Clang in bass",
+      "page": "tilt",
+      "order": 4,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 28,
+      "id": "lab_phantoms_tilt",
+      "name": "Phantoms in bass",
+      "page": "tilt",
+      "order": 5,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 29,
+      "id": "lab_hf_floor_tilt",
+      "name": "HF Floor in bass",
+      "page": "tilt",
+      "order": 6,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 30,
+      "id": "lab_hammer_hard_tilt",
+      "name": "Hammer Hard in bass",
+      "page": "tilt",
+      "order": 7,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 31,
+      "id": "lab_hammer_mass_tilt",
+      "name": "Hammer Mass in bass",
+      "page": "tilt",
+      "order": 8,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 32,
+      "id": "lab_bloom_tilt",
+      "name": "Bloom in bass",
+      "page": "tilt",
+      "order": 9,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 33,
+      "id": "lab_glide_tilt",
+      "name": "Glide in bass",
+      "page": "tilt",
+      "order": 10,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 34,
+      "id": "lab_prompt_decay_tilt",
+      "name": "Prompt Decay in bass",
+      "page": "tilt",
+      "order": 11,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 35,
+      "id": "lab_tail_tilt",
+      "name": "Tail in bass",
+      "page": "tilt",
+      "order": 12,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 36,
+      "id": "lab_detune_tilt",
+      "name": "Detune in bass",
+      "page": "tilt",
+      "order": 13,
       "kind": {
         "type": "float",
         "minimum": 0.0,

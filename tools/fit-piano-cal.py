@@ -1,4 +1,12 @@
 """Fits the Concert Grand per-note calibration table against the YDP targets.
+
+WARNING before you trust a number out of this file: the cost is blind to
+spectral DENSITY. It scores band levels inside time windows, so a band holding
+the right energy in 24 components scores the same as one holding it in 82 --
+and the instrument has 82 where the model has 24 (PIANO_MODEL.md). It also
+reads unison beating as decay error, so it actively walks the unison detune
+back toward zero, which is what made the bass sound like a plucked string for
+forty versions. Never let it touch the unison width.
 Coordinate descent over 10 anchors x 9 params; anchors far enough apart to
 share no interpolation region are perturbed together. Writes
 tools/piano-cal.txt.

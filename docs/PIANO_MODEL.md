@@ -401,6 +401,382 @@ rate, using small float implementations of `sin`, `exp`, `ln`, `sqrt` and
 `pow` (the component is `no_std`; the accuracy of each is stated beside its
 code and is far beyond audibility at control rate).
 
+## Known defects
+
+* **C2's body is missing because its strongest partial lands in a synthetic
+  notch.** Found by putting the user in front of three level-matched renders
+  of the same note -- the YDP sample, a reference renderer, and this model --
+  and asking where it stops sounding like a piano. A0 passed. C2 did not:
+  "mucha cuerda, le falta esa oscuridad". Partial by partial, in the body of
+  the note, in dB below each take's own strongest:
+
+  | n | Hz | real | model (v0.47) | model (v0.48) |
+  |---|---|---|---|---|
+  | 2 | 131 | **0.0** | -9.5 | -5.9 |
+  | 3 | 196 | -7.6 | 0.0 | 0.0 |
+  | 9 | 590 | -11.9 | **-50.8** | -43.3 |
+  | 10 | 656 | -11.5 | -28.8 | -26.1 |
+
+  The second partial is the STRONGEST in both references and was ninth-loudest
+  here. That is the missing darkness, and it is not a tuning of levels: the
+  partial was sitting in a notch of `board_response`, a curve of three
+  synthetic sines whose dips land wherever they happen to land.
+
+  **Two artefacts repaired in v0.48.0.** The scatter now fades out below
+  ~320 Hz, because a soundboard is not ragged down there -- raggedness comes
+  from high modal density and heavy modal overlap, and at 130 Hz a board has
+  a handful of modes and a smooth response. Applying +/-6 dB of synthetic
+  scatter that low is a lottery, and C2 lost it. And `COMB_FLOOR` went 0.12 ->
+  0.26, so the strike-point comb caps at about 12 dB, which is where the real
+  instrument has C2's ninth partial (the ideal comb's zero for this note falls
+  at n = 8.86, right on it).
+
+  The fit score went 19.66 -> 19.31, the best measured on this model, with the
+  shape term 6.06 -> 5.83 and the centroid 3.93 -> 3.72 semitones.
+
+  **Still open, and it is the next thing to find:** partial 9 remains 31 dB
+  below the instrument even though the comb now caps at 12 dB and the felt,
+  the contact window and the audibility cull all account for less than a dB
+  at 590 Hz. A third mechanism is burying it and has not been identified.
+  Partial 2 is also still 5.9 dB short of being the note's strongest.
+
+  Why this note and not A0: A0 places 144 partials and a notch on any one of
+  them averages away. C2 places a few dozen, and a notch on the second takes
+  the body out of the note.
+
+
+* **RESOLVED (v0.47.0): the instrument lived inside its own limiter, and that
+  was the electric piano.** Measured at what reaches `soften`, which clamps
+  hard at 1.5:
+
+  | | before | after |
+  |---|---|---|
+  | single ff bass note | 1.60 | 0.29 |
+  | bass octave ff | 2.53 | 0.46 |
+  | five-note chord ff | 5.49 | 1.00 |
+  | ten-note chord ff | 6.58 | 1.20 |
+
+  Everything above mezzoforte was flat-topped. The output peak was **0.462 for
+  a single note and 0.462 for a ten-note chord** -- identical, because both
+  were pinned against the clamp.
+
+  What that does to a piano: no dynamics above mezzoforte; attacks decapitated,
+  because the attack IS the peak; chords no louder than single notes; and
+  intermodulation across 144 partials filling the gaps between them. A piano
+  with no dynamic contrast and a flattened attack is an electric piano, which
+  is what this model has been called for forty versions.
+
+  It also explains the complaint that no panel control seemed to do anything.
+  Any parameter that raised the level just pushed further into the clamp and
+  came back the same flattened shape -- so the panel really was inert, and not
+  for any of the reasons investigated before it.
+
+  Why it hid for so long: every offline measurement in this file renders ONE
+  note and normalises it. A single note at v120-125 sits at 1.07x the clamp --
+  barely into it, invisible in a normalised spectrum. The user plays chords,
+  which were four times in. The measurements and the ear were not listening to
+  the same signal.
+
+  The fix is headroom (`HEADROOM`, sized so the loudest chord the instrument
+  can be asked for lands near 1.2 and stays out of the clamp), not a gentler
+  saturator: makeup gain belongs in the host, which already runs +6 dB and
+  allows +12. Single notes are about 11 dB quieter as a result. That is the
+  dynamic range coming back, not a loss.
+
+
+* **Our partials sit in mush: 6-10 dB less relief than either reference.**
+  Measured against BOTH the YDP samples and a licensed reference renderer
+  driven through its documented command-line exporter
+  (`tools/compare-reference-render.py` -- it renders audio and measures it,
+  it does not read anything), on the peaks' height over the floor between
+  2 and 4 kHz in the sustained part:
+
+  | note | YDP | reference | ours (v0.44) |
+  |---|---|---|---|
+  | A0 | 30.3 dB | 26.8 | 23.3 |
+  | F#1 | 29.6 | 33.4 | 24.2 |
+  | C2 | 34.0 | 34.6 | 24.2 |
+
+  Density does NOT separate us -- the reference has 27 peaks in A0's band
+  where we have 36 and the instrument has 82, so it is not chasing count
+  either. Relief is the measure where we are consistently, and only, the
+  odd one out. Both references put sharp partials over a quiet floor; ours
+  are blunted into a raised one.
+
+  Undoing the unison collapse already moved this a long way: A0's relief was
+  16.5 dB before it and is 23.3 after, which is most of the gap closed in one
+  change. The remainder splits as:
+
+  * **the room and lid, worth 2-3 dB.** With `air` at zero, relief goes to
+    25.9 / 24.8 / 27.1. This is a taste call, not a defect -- the user has
+    rejected both a dry instrument and an obviously reverberant one -- but
+    the number says the staging is filling the gaps between partials, and
+    `air` is the control that trades one against the other.
+  * **the phantom partials, worth 3.3 dB, corrected in v0.45.0.** They are
+    placed BETWEEN the ladder's positions, so their level decides how deep
+    the gaps stay, and the gaps are what make a partial read as a pitch
+    rather than as mush. Isolating each ingredient: phantoms account for
+    +3.3 / +0.6 / +2.4 dB of relief, and clang, chiff and thump for exactly
+    nothing. Their scale went 0.64 -> 0.21, which lifts A0's relief from
+    23.3 to 26.2 against the reference's 26.8 -- and improves the fit cost
+    at the same time (19.91 -> 19.61), which is not the usual trade and is
+    why it was taken at face value rather than split down the middle.
+
+  Two things that are NOT it, both ruled out by measurement: the output
+  saturation (relief is identical at a quarter of the level, so the
+  intermodulation a soft clip makes across 144 partials is not filling the
+  gaps) and the HF floor (with it at zero relief gets *worse* --
+  23.2 / 21.4 / 22.7 -- because removing weak partials moves the median it
+  is measured against).
+
+  Where it stands after v0.45.0, against both references:
+
+  | note | YDP | reference | ours |
+  |---|---|---|---|
+  | A0 | 30.3 | 26.8 | 26.2 |
+  | F#1 | 29.6 | 33.4 | 24.6 |
+  | C2 | 34.0 | 34.6 | 25.9 |
+
+  A0 has essentially reached the reference. F#1 and C2 are still 5-9 dB
+  short, and the phantom correction bought them only 0.4 and 1.7 dB, so
+  whatever blunts them is something else and is the next thing to isolate --
+  the same stage-by-stage sweep with `CG_PARAMS` is the way to find it.
+
+
+* **RESOLVED (v0.44.0): the unison collapsed above partial 32, and that was
+  most of the missing bass.** The code read:
+
+  ```
+  // Above the low partials the beat between the strings is beyond
+  // hearing, so they collapse into one oscillator instead of three.
+  let (w1, w2) = if n < 32 { ... } else { (remainder, 0.0) };
+  ```
+
+  The reasoning is backwards. The detune is a constant in CENTS, so the beat
+  rate GROWS with frequency. At A0's fundamental 3 cents is 0.05 Hz, a
+  twenty-second beat. At its eightieth partial, up at 3 kHz, the same 3 cents
+  is 5 Hz -- not beyond hearing, but roughness, and roughness across a dense
+  band is what a piano bass sounds like.
+
+  Measured on the YDP A0 between 2 and 4 kHz, at 0.67 Hz resolution: the real
+  instrument shows **82 sharp peaks clustered a few Hz apart, standing 30 dB
+  above the floor**; the model showed **26, one per partial, spaced at the
+  ladder's full 57 Hz and standing 16 dB proud**. The collapse was deleting
+  two thirds of what is audible in that band.
+
+  And it deleted the most exactly where the complaint is. An A0 has 112
+  partials above the old threshold; a C6 has none. That is why the treble has
+  read as a piano for many versions while the bottom octave has not.
+
+  It cost nothing to undo: the second oscillator was allocated either way and
+  simply given zero amplitude.
+
+* **The bass unison was seven times too narrow, and the fit cost disagrees
+  about fixing it.** `detune_cents` began at 0.3 in the bass, which at the
+  default unison setting is 0.43 cents, against 2.9 measured. Widening it is
+  in direct tension with the fit:
+
+  | bass detune | fit cost | audible peaks in A0's 2-4 kHz |
+  |---|---|---|
+  | 0.3 | 19.59 | 24 |
+  | 0.9 (shipped) | 19.91 | 36 |
+  | 1.5 | 20.45 | 41 |
+  | the instrument | -- | 82 |
+
+  The cost scores band levels inside windows. It cannot see whether a band's
+  energy sits in 24 components or 82, and it reads beating as decay error, so
+  it walks away from the instrument on this axis while claiming improvement.
+  0.9 is a considered middle, not a fitted optimum. **Do not run the fitter
+  over this parameter**: it will drive it back to zero and take the bass with
+  it.
+
+
+* **RETRACTED: there is no excess fixed formant.** An earlier entry here
+  claimed the model carried nearly twice the real instrument's fixed colour
+  (8.2 dB rms against 4.7) and blamed it for the "nasal" bass. The measurement
+  was wrong: it averaged 26 real notes against 9 model renders, several of
+  them the same pitch. With too few notes the structure that belongs to each
+  note does not average away, and what survives reads as colour. Re-measured
+  over the same 29 notes on both sides:
+
+  | | real | model |
+  |---|---|---|
+  | whole compass | 4.46 dB rms | 4.66 |
+  | bass, 21-45 | 5.95 | 6.34 |
+  | treble, 60-96 | 6.23 | 5.61 |
+
+  No meaningful difference anywhere. Isolating stages agrees: turning the room
+  and lid off makes the figure worse, not better, so the staging is not
+  colouring either. Whatever "nasal" is, it is not a fixed formant.
+
+  The lesson is the measurement discipline, not the conclusion: any average
+  meant to cancel note-dependent structure needs the SAME notes on both sides
+  and enough of them. `render_reference` now takes `CG_CHROMATIC=1` for a
+  30-note sweep and `CG_PARAMS="index=value,..."` to isolate a stage.
+
+  The `board_response` change made under the wrong diagnosis (v0.42.0, finer
+  and shallower scatter) is kept on its own merit: it took the fit score from
+  20.02 to 19.05, the best measured on this model, with the shape term
+  6.49 -> 5.97 and the centroid 4.24 -> 4.00 semitones.
+
+* **The bottom octave is half as dense as it should be, in the one band that
+  matters.** Counting peaks above -45 dB of the note's own maximum in the
+  sustained part (0.1-0.6 s), per octave band:
+
+  | note | 2-4 kHz real | model |
+  |---|---|---|
+  | A0 | 66 | 19 |
+  | F#1 | 38 | 14 |
+  | C2 | 28 | 13 |
+
+  Below 1 kHz the model has MORE peaks than the real instrument (A0: +14 at
+  250-500, +20 at 500-1000). So the error is not level, it is distribution:
+  our bass is heavy underneath and thin on top, which is a bass guitar's
+  spectrum. The real A0's densest band is 2-4 kHz -- that density IS the
+  growl of a concert grand's bottom octave.
+
+  Two separate deficits sit inside that one number, and they need different
+  repairs:
+
+  1. **Our own ladder is only half audible there.** A0's stiff-string ladder
+     puts 38 transverse partials between 2 and 4 kHz (n = 61 to 98). Only 19
+     clear the threshold. The felt cliff and the per-partial `rough` factor
+     are burying partials the model has already placed and already pays for.
+  2. **The real one has 28 peaks MORE than any harmonic ladder can supply.**
+     No stiff-string series accounts for them. That is the longitudinal
+     (compressional) content and the phantom partials the tension modulation
+     makes -- which the model does place, and places at roughly -24 dB, where
+     the transverse partials mask them completely (see the clang note below).
+
+  This is the most specific measured account so far of why the lowest notes
+  do not read as a piano, and it is measured on something the fit cost cannot
+  see: the cost scores band *levels*, and a band can hold the right total
+  energy with half the right number of things in it.
+
+  **And that is exactly what happens.** Measured in the same window with each
+  spectrum normalised to its own strongest band, A0's *balance* at 2-4 kHz is
+  only 8.5 dB short. So the real instrument spreads nearly the same energy
+  across 3.5x as many components while the model concentrates it into fewer,
+  louder ones. The bass does not need more energy up there. It needs the
+  energy it already has divided among three times as many things -- texture
+  where we have grain. That is the difference between a growl and a handful
+  of mid-high tones sticking out of a bass note, which is what the user has
+  been describing all along.
+
+  **Where the density actually came from.** Between measurements the count at
+  A0's 2-4 kHz went 19 -> 25. That was NOT the undamped bank added in v0.43.0
+  (with the bank at zero the count is still 25); it was the finer, shallower
+  `board_response` of v0.42.0. Deep board notches were burying partials the
+  model had already placed, and a shallower curve lets them clear audibility.
+  The gain was credited to the wrong change at first.
+
+  **The undamped-length bank (v0.43.0) is shipped without a measured
+  benefit.** 48 scattered resonators from 1.9 to 7 kHz, driven by the bridge,
+  never damped -- every other string's segments behind the bridge and in front
+  of the agraffe. The mechanism is genuinely missing: the per-voice duplex
+  already in the model only fires above position 0.45, so the bass, which is
+  where the complaint is, had none of it at all. But no measure moved: score
+  19.05 -> 19.02, density 25 -> 25, and its control reads 1.6 dB of authority.
+  It costs 4% of the fuel budget at idle.
+
+  It is shipped anyway, at a modest default and wired to the Sympathy control
+  so it can be dialled or turned off, on the explicit understanding that the
+  only instrument that has reliably detected these differences all along is
+  the user's ear, and every metric here says nothing changed. If it does not
+  earn its place by ear, remove it -- do not let it accumulate.
+
+  Two repairs were tried and measured against this:
+
+  * **Flooring the strike-point comb** (v0.40.0, kept). In the bass the strike
+    point is almost exactly 1/8, so an ideal `sin(pi n x0)` is exactly
+    periodic and deletes every eighth partial outright. A real bridge is not
+    a rigid node -- it has finite admittance, which is why the instrument
+    sounds at all -- so the mode shapes are not exact sines and measured
+    combs are 10-20 dB dips, never nulls. Correct, and kept for that reason,
+    but honestly: it did not move the density at all (19 before and after)
+    and the score went 19.95 -> 19.97, inside the noise. Only five partials
+    in the band are exact multiples of eight.
+  * **Raising the audible content by level.** Ruled out by the balance
+    measurement above before it was attempted: the energy is nearly right.
+
+  The remaining 28 components are the actionable target, and they cannot come
+  from any harmonic ladder. They are the longitudinal (compressional) modes
+  and the phantom partials of the tension modulation -- placed today at about
+  -24 dB, where the transverse partials mask them completely.
+
+
+* **Half the lab panel had no authority.** Measured with
+  `sweep_every_parameter` (ignored test), which sweeps each control end to
+  end and reports how far the *energy-weighted* spectrum moves: a third of
+  the controls moved it by under 0.3 dB anywhere on the compass. Two causes,
+  both since addressed or recorded. The per-note weights pivoted at the
+  middle of the compass, so they were inert by construction around middle C —
+  fixed by anchoring at the treble. And the range topped out at x4, while the
+  fit had driven the ingredients several of them scale down to near nothing
+  (chiff 0.083, clang 0.059, HF floor 0.035); x4 of nearly nothing cannot
+  reach an audible level, so the top now reaches x16.
+
+  Note when reading that sweep: an unweighted per-band maximum is worthless
+  here. A band holding no energy swings tens of dB under any change at all,
+  which made several dead controls look powerful.
+
+* **Clang is masked, not broken.** It is placed and it sounds, but at roughly
+  -24 dB inside a band the bass string's own partials already fill, so it
+  moves the weighted spectrum by ~0.0 dB. Nothing is miswired; the ingredient
+  is simply too quiet to survive its own neighbourhood. Fixing it means
+  placing it where the string is not, or letting it carry the attack rather
+  than the sustain — not turning it up.
+
+
+* **The hammer's mass cancelled itself out.** Fixed in v0.39.0. The stiffness
+  was derived from the mass (`stiffness = mass * (pi/contact)^2 * ...`), and
+  the integration divides the force by the mass -- so a force proportional to
+  the mass left the hammer's trajectory identical, and the only surviving
+  effect, the force delivered to the string, was removed by the
+  renormalisation. The mass control was inert by construction and divided by
+  zero at its bottom. The stiffness now comes from the felt alone, so the
+  contact time `tau ~ pi*sqrt(m/K)` actually responds: a heavier hammer stays
+  in contact longer and speaks darker, which is why a bass note is dark.
+  At the control's centre the mass is the nominal one, so the default voice
+  is unchanged -- the score is 19.95 before and after, to the digit.
+
+* **The `max` blend is the binding constraint, and testing it needs a refit.**
+  Confirmed by measurement rather than argument: the two hammer *weights*
+  only scale their control by about +/-2x, and across that range the
+  calibrated recipe wins the `max` comparison at every partial, so they
+  measure 0.0 dB exactly. The base controls move only because their travel
+  includes the degenerate end (stiffness 0 = no strike at all).
+
+  A geometric crossfade was tried at trust 1.0 / 0.6 / 0.3 and scored
+  20.81 / 20.06 / 20.07 against 19.95 -- but that is not a fair test, because
+  the calibration table was fitted with the `max` in place. The honest
+  experiment is crossfade AND refit together, validated on absolute band
+  levels and crest factor, not on the fit cost alone.
+
+  (An earlier note here claimed `colour[n]` was the recipe's spectrum being
+  multiplied into the simulation. It is not -- it is the board response and
+  radiation, which the simulated strike's output legitimately passes through
+  too.)
+
+* **The hammer can only ever brighten.** The strike simulation's spectrum is
+  normalised to the calibrated recipe's peak and then blended into it with
+  `if candidate > amplitudes[n]` — a maximum, not a crossfade. Two things
+  follow. The renormalisation throws away the level the simulated strike
+  computed, so hardness and mass change the *shape* and little else; and the
+  maximum means a softer felt can only fail to add brightness, never remove
+  it. Measured by sweeping the panel (`sweep_every_parameter`, ignored), the
+  hammer's two per-note weights move no band by more than 1 dB anywhere on
+  the compass, while controls either side of them move bands by 10-20 dB.
+
+  This matters beyond the panel. A grand's softness *is* the hammer, and a
+  tone whose top cannot be taken off by playing into the felt is the
+  reachable-brightness-only tone of a struck electric — which is the timbre
+  this model has been chased over for thirty versions. Repairing it means
+  crossfading the simulation against the recipe by a stated felt weight and
+  letting it carry its own level, then refitting: it moves every anchor, so
+  it needs the YDP measurement loop and validation on absolute band levels
+  and crest factor, not just the fit cost.
+
 ## What is deliberately not modelled yet
 
 Stated so nobody mistakes silence for coverage:

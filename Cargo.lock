@@ -3604,6 +3604,7 @@ dependencies = [
  "rackforge-controller-arturia-keylab-essential-mk3",
  "rackforge-controller-package",
  "rackforge-core",
+ "rackforge-performance-api",
  "rackforge-plugin-api",
  "rackforge-repository",
  "rackforge-session-api",

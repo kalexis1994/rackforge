@@ -208,6 +208,7 @@ public final class MainActivity extends Activity {
     private static native String keyLabHandleMidi(int status, int data1, int data2);
     private static native String keyLabPollLongPress();
     private static native boolean keyLabSyncPlugins(String storeRoot);
+    private static native boolean ensurePerformanceLibrary(String dataRoot);
     private static native boolean keyLabSyncActivePlugin();
     private static native boolean keyLabSyncActiveMode(String mode);
     private static native String keyLabRenderPlan();
@@ -261,6 +262,11 @@ public final class MainActivity extends Activity {
             ensureBundledControllers(controllerStoreRoot());
         } catch (Throwable error) {
             Log.w("RackForge", "Bundled controller install failed", error);
+        }
+        try {
+            ensurePerformanceLibrary(pluginDataRoot().getAbsolutePath());
+        } catch (Throwable error) {
+            Log.w("RackForge", "Performance library init failed", error);
         }
         // Bundled-plugin install and the inbox run after onCreate finishes:
         // activation touches the WebView, which does not exist yet here.

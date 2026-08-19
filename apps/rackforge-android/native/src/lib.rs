@@ -8,7 +8,11 @@ use rackforge_control_api::ControlResponse;
 use rackforge_core::{
     LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore, PluginStorage,
     midi_hotplug::{PanicScope, panic_packets},
+    performance::PerformanceRepository,
     plugin_parameters, set_plugin_parameter,
+};
+use rackforge_performance_api::{
+    LivePerformanceState, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot,
 };
 use rackforge_plugin_api::{
     PROGRAM_EDITOR_SCHEMA_VERSION, PluginKind, PreparedProgram, PresetCatalog, ProgramDocument,
@@ -24,6 +28,7 @@ use rackforge_session_api::{
 };
 use rackforge_surface_runtime::{
     ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayPlugin, PlaySound,
+    ProgramExitDecision, ProgramExitDestination,
 };
 use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, VecDeque};
@@ -50,6 +55,7 @@ static ENGINE: OnceLock<Mutex<Option<AndroidEngine>>> = OnceLock::new();
 static AUDIO: OnceLock<Mutex<Option<NativeAudioOutput>>> = OnceLock::new();
 static MIDI_QUEUE: OnceLock<Mutex<VecDeque<MidiEventV1>>> = OnceLock::new();
 static CONTROLLER_MENU: OnceLock<Mutex<AndroidControllerMenu>> = OnceLock::new();
+static PERFORMANCE: OnceLock<Mutex<Option<AndroidPerformance>>> = OnceLock::new();
 static OUTPUT_GAIN_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
 static MASTER_LEVEL_TARGET_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
 static MASTER_LEVEL_CURRENT_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
@@ -154,9 +160,182 @@ impl AndroidControllerMenu {
             self.menu
                 .set_play_plugins(self.installed_plugins.clone(), None);
         }
-        let command = command.and_then(|command| self.command_json(command));
+        let command = command.and_then(|command| self.dispatch(command));
         while self.menu.take_command().is_some() {}
         command
+    }
+
+    /// Commands the in-process host satisfies natively, without a round trip
+    /// through Java: the performance library (the SAME file-backed repository
+    /// the Pi core uses) and the plugin program editor (the machinery the web
+    /// panel already drives). Everything else keeps the JSON contract with
+    /// MainActivity.
+    fn dispatch(&mut self, command: MenuCommand) -> Option<serde_json::Value> {
+        match command {
+            MenuCommand::EditPerformance {
+                expected_revision,
+                edit,
+            } => {
+                let result = (|| -> Result<PerformanceSnapshot> {
+                    let mut guard = performance()
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+                    let state = guard
+                        .as_mut()
+                        .context("the performance library is not ready yet")?;
+                    let mut live = state.live.clone();
+                    state
+                        .repository
+                        .apply_edit(&expected_revision, edit, &mut live)?;
+                    state.live = live;
+                    Ok(performance_snapshot(state))
+                })();
+                self.menu
+                    .complete_performance_edit(result.map_err(|error| format!("{error:#}")));
+                None
+            }
+            MenuCommand::SetLiveBrowseMode { mode } => {
+                if let Ok(mut guard) = performance().lock()
+                    && let Some(state) = guard.as_mut()
+                {
+                    state.live.mode = mode;
+                    let snapshot = performance_snapshot(state);
+                    drop(guard);
+                    self.menu.sync_performance_snapshot(snapshot);
+                }
+                None
+            }
+            MenuCommand::ActivateLiveTarget { location } => {
+                let outcome = (|| -> Result<(PerformanceSnapshot, Option<String>)> {
+                    let mut guard = performance()
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+                    let state = guard
+                        .as_mut()
+                        .context("the performance library is not ready yet")?;
+                    let rack = state
+                        .repository
+                        .library()
+                        .resolve_playable(&location)
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
+                    state.live.activate(location, rack.id.clone());
+                    let plugin_id = rack
+                        .slots
+                        .iter()
+                        .find(|slot| slot.enabled)
+                        .map(|slot| slot.plugin_id.clone());
+                    Ok((performance_snapshot(state), plugin_id))
+                })();
+                match outcome {
+                    Ok((snapshot, plugin_id)) => {
+                        self.menu.sync_performance_snapshot(snapshot);
+                        // Android hosts ONE plugin instance, so LIVE plays the
+                        // Rack's first enabled slot; the switch itself rides
+                        // the existing select_plugin path through Java.
+                        plugin_id
+                            .filter(|id| self.plugins.contains_key(id))
+                            .and_then(|id| {
+                                self.command_json(MenuCommand::SelectPlugin { instance_id: id })
+                            })
+                    }
+                    Err(error) => {
+                        eprintln!("LIVE_TARGET_FAILED {error:#}");
+                        None
+                    }
+                }
+            }
+            // Previewing a DRAFT Rack needs a rack engine Android does not
+            // have yet; saving and activating are the honest paths.
+            MenuCommand::PreviewRack { .. } => None,
+            MenuCommand::BeginProgramEdit { program_id } => {
+                let result = engine_call(|engine| engine.begin_program_edit(program_id))
+                    .and_then(|()| sync_menu_program_state(&mut self.menu));
+                if let Err(error) = result {
+                    eprintln!("PROGRAM_EDIT_START_FAILED {error:#}");
+                    self.menu.sync_program_edit(None, None);
+                }
+                None
+            }
+            MenuCommand::EditProgramDraftField {
+                draft_id,
+                field_id,
+                value,
+                preview,
+            } => {
+                let result =
+                    engine_call(|engine| engine.edit_program_field(draft_id, field_id, value, preview))
+                        .and_then(|()| {
+                            if preview {
+                                Ok(())
+                            } else {
+                                sync_menu_program_state(&mut self.menu)
+                            }
+                        });
+                if let Err(error) = result {
+                    eprintln!("PROGRAM_DRAFT_FIELD_FAILED {error:#}");
+                }
+                None
+            }
+            MenuCommand::RestoreProgramDraftPreview { draft_id } => {
+                if let Err(error) = engine_call(|engine| engine.restore_program_preview(draft_id)) {
+                    eprintln!("PROGRAM_DRAFT_RESTORE_FAILED {error:#}");
+                }
+                None
+            }
+            MenuCommand::SetProgramDraftName { draft_id, name } => {
+                let result = engine_call(|engine| engine.set_program_name(draft_id, name))
+                    .and_then(|()| sync_menu_program_state(&mut self.menu));
+                if let Err(error) = result {
+                    eprintln!("PROGRAM_DRAFT_NAME_FAILED {error:#}");
+                }
+                None
+            }
+            MenuCommand::SaveProgramDraft { draft_id } => {
+                let result = engine_call(|engine| engine.save_program(draft_id))
+                    .and_then(|()| sync_menu_program_state(&mut self.menu));
+                if let Err(error) = result {
+                    eprintln!("PROGRAM_SAVE_FAILED {error:#}");
+                }
+                None
+            }
+            MenuCommand::CancelProgramEdit { draft_id } => {
+                let result = engine_call(|engine| engine.cancel_program_edit(draft_id))
+                    .and_then(|()| sync_menu_program_state(&mut self.menu));
+                if let Err(error) = result {
+                    eprintln!("PROGRAM_CANCEL_FAILED {error:#}");
+                }
+                None
+            }
+            MenuCommand::ResolveProgramExit {
+                draft_id,
+                decision,
+                destination,
+            } => {
+                let result = engine_call(|engine| match decision {
+                    ProgramExitDecision::Save => engine.save_program(draft_id),
+                    ProgramExitDecision::Discard => engine.cancel_program_edit(draft_id),
+                })
+                .and_then(|()| sync_menu_program_state(&mut self.menu));
+                if let Err(error) = result {
+                    eprintln!("PROGRAM_EXIT_FAILED {error:#}");
+                }
+                if let ProgramExitDestination::ActiveMode {
+                    mode,
+                    selected_sound_id,
+                } = destination
+                {
+                    self.menu
+                        .complete_return_to_active_mode(mode, selected_sound_id.as_deref());
+                    return Some(serde_json::json!({
+                        "type": "return_mode",
+                        "mode": active_mode_name(mode),
+                        "sound_id": selected_sound_id,
+                    }));
+                }
+                None
+            }
+            other => self.command_json(other),
+        }
     }
 
     fn command_json(&self, command: MenuCommand) -> Option<serde_json::Value> {
@@ -1810,6 +1989,95 @@ fn controller_play_sounds(catalog: &PresetCatalog) -> Vec<PlaySound> {
         .collect()
 }
 
+/// The performance library (Racks, Songs, Setlists) on Android: the same
+/// repository format every platform persists, under the plugin data root.
+/// Android has no live rack engine yet, so the definitions are what this
+/// carries; activation maps to the single hosted instance.
+struct AndroidPerformance {
+    repository: PerformanceRepository,
+    live: LivePerformanceState,
+}
+
+fn performance() -> &'static Mutex<Option<AndroidPerformance>> {
+    PERFORMANCE.get_or_init(|| Mutex::new(None))
+}
+
+fn performance_snapshot(state: &AndroidPerformance) -> PerformanceSnapshot {
+    PerformanceSnapshot {
+        schema_version: PERFORMANCE_SNAPSHOT_SCHEMA_VERSION,
+        revision: state.repository.revision(),
+        library: state.repository.library().clone(),
+        live: state.live.clone(),
+    }
+}
+
+/// Loads (or keeps) the repository and hands the KeyLab menu the snapshot.
+/// Idempotent: every caller that knows the data root may invoke it.
+fn ensure_performance_menu(data_root: &Path) -> Result<()> {
+    let snapshot = {
+        let mut guard = performance()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("performance library lock poisoned"))?;
+        if guard.is_none() {
+            let repository = PerformanceRepository::load_or_empty(Some(data_root))?;
+            let live = repository.initial_live_state();
+            *guard = Some(AndroidPerformance { repository, live });
+        }
+        guard
+            .as_ref()
+            .map(performance_snapshot)
+            .expect("the performance library was just initialized")
+    };
+    controller_menu()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?
+        .menu
+        .sync_performance_snapshot(snapshot);
+    Ok(())
+}
+
+/// Runs one engine call under the lock and releases it before any menu work,
+/// keeping the menu -> engine lock order the only nesting that exists.
+fn engine_call(act: impl FnOnce(&mut AndroidEngine) -> Result<()>) -> Result<()> {
+    let mut guard = engine()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+    act(guard
+        .as_mut()
+        .context("RackForge engine is not initialized")?)
+}
+
+/// After a program command the menu re-reads the engine: catalog, selection
+/// and the draft -- the exact refresh the process-driver bridge performs.
+fn sync_menu_program_state(menu: &mut SurfaceMenu) -> Result<()> {
+    let (plugin_id, name, sounds, selected_sound_id, draft) = {
+        let guard = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+        let engine = guard
+            .as_ref()
+            .context("RackForge engine is not initialized")?;
+        (
+            engine.plugin_id.clone(),
+            engine.plugin_name.clone(),
+            controller_play_sounds(&engine.catalog),
+            engine.selected_sound_id.clone(),
+            engine.program_draft.clone(),
+        )
+    };
+    let lease = draft.as_ref().map(|draft| draft.draft_id);
+    if menu.sync_active_plugin(
+        plugin_id.clone(),
+        plugin_id,
+        name,
+        sounds,
+        Some(&selected_sound_id),
+    ) {
+        menu.sync_program_edit(draft, lease);
+    }
+    Ok(())
+}
+
 fn sync_controller_plugins(store_root: &Path) -> Result<()> {
     let catalog: serde_json::Value = serde_json::from_str(&installed_plugins_json(store_root)?)?;
     let active = engine()
@@ -1823,6 +2091,7 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
                 engine.plugin_name.clone(),
                 engine.catalog.clone(),
                 engine.selected_sound_id.clone(),
+                engine.instance.0.supports_program_editing(),
             )
         });
     let mut plugins = Vec::new();
@@ -1843,7 +2112,10 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
             continue;
         };
         let version = descriptor["version"].as_str().unwrap_or_default();
-        plugins.push(PlayPlugin::new(plugin_id, plugin_id, name).config_available(false));
+        let config_available = active
+            .as_ref()
+            .is_some_and(|active| active.1 == plugin_id && active.5);
+        plugins.push(PlayPlugin::new(plugin_id, plugin_id, name).config_available(config_available));
         metadata.insert(
             plugin_id.to_owned(),
             ControllerPluginInfo {
@@ -1862,7 +2134,7 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
     controller
         .menu
         .set_play_plugins(plugins, active_instance_id);
-    if let Some((_root, plugin_id, name, catalog, selected_sound_id)) = active {
+    if let Some((_root, plugin_id, name, catalog, selected_sound_id, _supports)) = active {
         controller.menu.sync_active_plugin(
             plugin_id.clone(),
             plugin_id,
@@ -1875,30 +2147,10 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
 }
 
 fn sync_controller_active_plugin() -> Result<()> {
-    let (plugin_id, name, catalog, selected_sound_id) = engine()
-        .lock()
-        .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
-        .as_ref()
-        .map(|engine| {
-            (
-                engine.plugin_id.clone(),
-                engine.plugin_name.clone(),
-                engine.catalog.clone(),
-                engine.selected_sound_id.clone(),
-            )
-        })
-        .context("RackForge engine is not initialized")?;
     let mut controller = controller_menu()
         .lock()
         .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?;
-    controller.menu.sync_active_plugin(
-        plugin_id.clone(),
-        plugin_id,
-        name,
-        controller_play_sounds(&catalog),
-        Some(&selected_sound_id),
-    );
-    Ok(())
+    sync_menu_program_state(&mut controller.menu)
 }
 
 #[unsafe(no_mangle)]
@@ -2225,6 +2477,25 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabMatchesEndp
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_ensurePerformanceLibrary(
+    mut env: JNIEnv,
+    _class: JClass,
+    data_root: JString,
+) -> jboolean {
+    let result = (|| -> Result<()> {
+        let data_root = PathBuf::from(java_string(&mut env, data_root)?);
+        ensure_performance_menu(&data_root)
+    })();
+    match result {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabSyncPlugins(
     mut env: JNIEnv,
     _class: JClass,
@@ -2512,7 +2783,10 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_activateInstalled
             bail!("selected plugin is outside the RackForge package store");
         }
         let data_root = PathBuf::from(java_string(&mut env, data_root)?);
-        let candidate = AndroidEngine::open_package(&package_root, data_root)?;
+        if let Err(error) = ensure_performance_menu(&data_root) {
+            eprintln!("PERFORMANCE_LIBRARY_UNAVAILABLE {error:#}");
+        }
+        let candidate = AndroidEngine::open_package(&package_root, data_root.clone())?;
         midi_queue()
             .lock()
             .map_err(|_| anyhow::anyhow!("MIDI queue lock poisoned"))?

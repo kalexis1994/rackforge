@@ -2,11 +2,15 @@ schema_version = 2
 id = "org.rackforge.concert-grand"
 name = "RackForge Concert Grand"
 vendor = "RackForge"
-version = "0.87.0"
+version = "0.87.1"
 description = "Physically modelled grand piano: stiff strings, derived stretch tuning, hammer felt and two-stage decay, with no samples"
 kind = "instrument"
 state_version = 1
 capabilities = ["audio_output", "midi_input", "presets", "state"]
+# The controller's two-line OLED can browse this instrument: the little
+# layout is host-rendered (name + preset navigation), and the voicings are
+# the presets it pages through.
+ui_layouts = ["little@1"]
 
 # The instrument as photographed: black lacquer, the harp's gold, and the
 # warm house lights of the hall it was shot in.

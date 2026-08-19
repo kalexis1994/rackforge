@@ -319,6 +319,8 @@ struct DesktopApp {
     /// the cached scan.
     #[cfg(windows)]
     audio_inventory_cache: Option<(Instant, desktop_audio::AudioInventory)>,
+    /// Raised on exit so the controller supervisor reaps its drivers.
+    controller_shutdown: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl DesktopApp {
@@ -445,7 +447,13 @@ impl DesktopApp {
                             defaults
                         }
                     };
-                    match start_desktop_audio(&plugins, &preferences, active_instance_id, &options.data_root.join("states/live")) {
+                    match start_desktop_audio(
+                        &plugins,
+                        &preferences,
+                        active_instance_id,
+                        &options.data_root.join("states/live"),
+                        external_controller_enabled(&options.rackforge_root),
+                    ) {
                         Ok(audio) => (Some(preferences), Some(audio)),
                         Err(error) => {
                             let message = format!("Audio/MIDI unavailable: {error:#}");
@@ -588,6 +596,7 @@ impl DesktopApp {
             audio_last_stall: None,
             #[cfg(windows)]
             audio_inventory_cache: None,
+            controller_shutdown: None,
         })
     }
 
@@ -636,7 +645,13 @@ impl DesktopApp {
         {
             self.audio = None;
             if let Some(preferences) = self.audio_preferences.as_ref() {
-                match start_desktop_audio(&plugins, preferences, active_instance_id, &self.live_state_dir()) {
+                match start_desktop_audio(
+                    &plugins,
+                    preferences,
+                    active_instance_id,
+                    &self.live_state_dir(),
+                    external_controller_enabled(&self.options.rackforge_root),
+                ) {
                     Ok(audio) => {
                         self.audio = Some(audio);
                         self.audio_recovery_at = None;
@@ -772,7 +787,13 @@ impl DesktopApp {
             .as_ref()
             .map(|id| id.as_str().to_owned());
         self.audio_recovery_at = None;
-        match start_desktop_audio(&self.plugins, &preferences, active.as_deref(), &self.live_state_dir()) {
+        match start_desktop_audio(
+            &self.plugins,
+            &preferences,
+            active.as_deref(),
+            &self.live_state_dir(),
+            external_controller_enabled(&self.options.rackforge_root),
+        ) {
             Ok(audio) => {
                 if let Err(error) = sync_desktop_audio(&audio, &self.session, &self.menu) {
                     self.status =
@@ -939,7 +960,13 @@ impl DesktopApp {
                 )),
             };
         }
-        let candidate = match start_desktop_audio(&self.plugins, &preferences, active.as_deref(), &self.live_state_dir()) {
+        let candidate = match start_desktop_audio(
+            &self.plugins,
+            &preferences,
+            active.as_deref(),
+            &self.live_state_dir(),
+            external_controller_enabled(&self.options.rackforge_root),
+        ) {
             Ok(audio) => audio,
             Err(error) => {
                 return match self.restore_audio(previous.as_ref(), active.as_deref()) {
@@ -986,6 +1013,7 @@ impl DesktopApp {
                     preferences,
                     active_instance_id,
                     &self.options.data_root.join("states/live"),
+                    external_controller_enabled(&self.options.rackforge_root),
                 )
                 .context("reopening the previous audio stream")
             })
@@ -3905,12 +3933,27 @@ fn start_desktop_audio(
     preferences: &desktop_audio::AudioPreferences,
     active_instance_id: Option<&str>,
     live_state_dir: &Path,
+    external_controller: bool,
 ) -> Result<desktop_audio::DesktopAudio> {
     desktop_audio::DesktopAudio::start(
         desktop_audio_specs(plugins, live_state_dir),
         preferences,
         active_instance_id,
+        external_controller,
     )
+}
+
+/// True when an installed, enabled controller package should own the
+/// hardware surface: the built-in KeyLab handling stands down for it.
+fn external_controller_enabled(rackforge_root: &Path) -> bool {
+    let root = rackforge_root.join("controllers");
+    if !root.join("packages").exists() {
+        return false;
+    }
+    rackforge_controller_package::PackageStore::new(root)
+        .list()
+        .map(|installed| installed.iter().any(|controller| controller.record.enabled))
+        .unwrap_or(false)
 }
 
 #[cfg(windows)]
@@ -4110,7 +4153,35 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
         options.web_preferences.clone(),
         web_control_sender,
     )?;
-    let app = DesktopApp::new(Arc::clone(&session), &options, web_servers, web_control)?;
+    // The controller supervisor: every enabled .rfcontroller package runs
+    // its driver, pointed back at this host through the TCP control bridge.
+    // The loop exits on its own when the store holds nothing runnable.
+    let controller_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let root = options.rackforge_root.join("controllers");
+        let address = web_servers.control_bridge_addr().to_string();
+        let shutdown = Arc::clone(&controller_shutdown);
+        std::thread::Builder::new()
+            .name("rackforge-controller-supervisor".into())
+            .spawn(move || {
+                if !root.join("packages").exists() {
+                    return;
+                }
+                let options = rackforge_controller_package::supervise::SuperviseOptions {
+                    allow_community: false,
+                    extra_env: vec![("RACKFORGE_CONTROL_ADDR".into(), address)],
+                    shutdown,
+                };
+                match rackforge_controller_package::supervise::supervise(&root, &options) {
+                    Ok(0) => println!("DESKTOP_CONTROLLERS_NONE"),
+                    Ok(count) => println!("DESKTOP_CONTROLLERS_STOPPED count={count}"),
+                    Err(error) => eprintln!("DESKTOP_CONTROLLERS_ERROR {error}"),
+                }
+            })
+            .context("starting the controller supervisor")?;
+    }
+    let mut app = DesktopApp::new(Arc::clone(&session), &options, web_servers, web_control)?;
+    app.controller_shutdown = Some(controller_shutdown);
     Ok(app)
 }
 
@@ -4192,10 +4263,13 @@ impl RackForgeApp {
 impl eframe::App for RackForgeApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         // The player's last touches survive the window closing.
-        if let AppMode::Desktop(app) = &mut self.mode
-            && app.live_state_dirty.is_some()
-        {
-            app.flush_live_state();
+        if let AppMode::Desktop(app) = &mut self.mode {
+            if app.live_state_dirty.is_some() {
+                app.flush_live_state();
+            }
+            if let Some(shutdown) = &app.controller_shutdown {
+                shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
         }
     }
 

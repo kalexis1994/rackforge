@@ -31,12 +31,27 @@ on Windows (`RFCONTROLLER_INSTALLED`), and the Plugin Manager shows a
 Controllers section: every card carries a kind tag — Instrument or
 Controller — with version, trust and device-profile count.
 
-Still next, in order: the desktop serves the framed control protocol on
-TCP loopback (bridging to its session dispatch, which already exists
-over HTTP); the desktop runs the shared supervision loop and hands
-drivers `RACKFORGE_CONTROL_ADDR`; the desktop's MIDI capture yields
-matched endpoints to active drivers (Windows MIDI ports are
-exclusive-open); then the hardcoded KeyLab library leaves the desktop.
+Landed same day, verified against the real hardware: the desktop serves
+the framed control protocol on TCP loopback (`control_bridge` in
+web.rs, reusing the same `response_for` dispatch every client uses) and
+runs the shared supervision loop, handing drivers
+`RACKFORGE_CONTROL_ADDR`; the driver's control layer went
+cross-platform through the shared transport (its Unix-socket plumbing
+stays as the unix fallback; platform-socket menus -- audio/wifi/web
+settings -- stay Linux-only no-ops elsewhere); and the desktop's MIDI
+capture yields the KeyLab surface port when an enabled controller
+package exists (`external_controller_enabled`), keeping the note
+endpoints (ALV et al.) for itself. Boot log of record: the supervisor
+starts the packaged driver, the desktop captures only the note ports,
+and the driver takes the OLED ("OLED bajo control de RackForge") and
+registers its host bindings through the bridge.
+
+Still next: the hardcoded KeyLab library leaves the desktop entirely
+(the yield flag and the built-in display path become dead code once the
+package is the only route); Android runs the same supervision loop with
+the same TCP transport (its KeyLab library link retires the same way);
+device matching generalizes from the KeyLab-specific name check to the
+manifest's `DeviceMatcher`s. Then Phase 2: the `[[settings]]` schema.
 
 The goal: a controller is a plugin. The Arturia KeyLab is not "the
 controller RackForge supports" — it is one `.rfcontroller` package among

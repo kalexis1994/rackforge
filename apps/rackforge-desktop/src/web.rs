@@ -244,6 +244,15 @@ pub struct DesktopWebServers {
     state: WebState,
     preferences: Arc<RwLock<WebServerPreferences>>,
     local_url: String,
+    control_bridge_addr: SocketAddr,
+}
+
+impl DesktopWebServers {
+    /// Where the framed control protocol listens; handed to controller
+    /// drivers as `RACKFORGE_CONTROL_ADDR`.
+    pub fn control_bridge_addr(&self) -> SocketAddr {
+        self.control_bridge_addr
+    }
 }
 
 impl DesktopWebServers {
@@ -361,13 +370,61 @@ pub fn start(
         .enabled
         .then(|| bind_public_server(state.clone(), preferences.port))
         .transpose()?;
+    // The control bridge: the framed control protocol (one JSON line in,
+    // one out per connection) on TCP loopback, so controller drivers on
+    // hosts without a Unix control socket -- this one -- reach the same
+    // session dispatch every other client uses. The supervisor hands
+    // drivers the address through RACKFORGE_CONTROL_ADDR.
+    let bridge_listener =
+        std::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))?;
+    let control_bridge_addr = bridge_listener.local_addr()?;
+    {
+        let bridge_state = state.clone();
+        std::thread::Builder::new()
+            .name("rackforge-control-bridge".into())
+            .spawn(move || control_bridge(bridge_listener, bridge_state))
+            .context("starting the control bridge")?;
+    }
     Ok(DesktopWebServers {
         _local: local,
         public,
         state,
         preferences: shared_preferences,
         local_url: format!("http://127.0.0.1:{local_port}"),
+        control_bridge_addr,
     })
+}
+
+fn control_bridge(listener: std::net::TcpListener, state: WebState) {
+    use std::io::{BufRead, BufReader, Write};
+    const MAX_REQUEST_BYTES: u64 = 1024 * 1024;
+    for connection in listener.incoming() {
+        let Ok(mut stream) = connection else {
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+        let mut bytes = Vec::new();
+        if std::io::Read::take(BufReader::new(&stream), MAX_REQUEST_BYTES)
+            .read_until(b'\n', &mut bytes)
+            .is_err()
+            || bytes.is_empty()
+        {
+            continue;
+        }
+        let response = match serde_json::from_slice::<ControlRequest>(&bytes) {
+            Ok(request) => response_for(request, &state),
+            Err(error) => json!({
+                "status": "error",
+                "code": "invalid_request",
+                "message": error.to_string(),
+            }),
+        };
+        let mut line = response.to_string().into_bytes();
+        line.push(b'\n');
+        let _ = stream.write_all(&line);
+    }
 }
 
 fn bind_public_server(state: WebState, port: u16) -> anyhow::Result<RunningServer> {

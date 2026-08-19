@@ -399,6 +399,7 @@ impl DesktopAudio {
         specs: Vec<VoiceSpec>,
         preferences: &AudioPreferences,
         active_instance_id: Option<&str>,
+        external_controller: bool,
     ) -> Result<Self> {
         if specs.is_empty() {
             bail!("no instrument plugin is available for the audio engine");
@@ -477,6 +478,7 @@ impl DesktopAudio {
             Arc::clone(&telemetry),
             controller_sender,
             display_receiver,
+            external_controller,
         )?;
         let (command_sender, command_receiver) = mpsc::sync_channel(COMMAND_QUEUE_CAPACITY);
         let (retired_voice_sender, retired_voice_receiver) = mpsc::sync_channel(voice_capacity);
@@ -1468,8 +1470,16 @@ impl MidiSupervisor {
         telemetry: Arc<AudioTelemetry>,
         controller_sender: SyncSender<DesktopControllerEvent>,
         display_receiver: Receiver<Screen>,
+        yield_keylab: bool,
     ) -> Result<(Self, Vec<String>)> {
-        let selected = selected.into_iter().collect::<BTreeSet<_>>();
+        // When an installed controller package is enabled, ITS driver owns
+        // the surface: the built-in KeyLab handling stands down and the
+        // surface endpoint (Windows MIDI ports are exclusive-open) is left
+        // for the driver. Note endpoints (ALV and friends) stay captured.
+        let selected = selected
+            .into_iter()
+            .filter(|name| !(yield_keylab && keylab_controller::little_driver(name).is_some()))
+            .collect::<BTreeSet<_>>();
         let (stop_sender, stop_receiver) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -1485,9 +1495,12 @@ impl MidiSupervisor {
                     &sender,
                     &telemetry,
                     &controller_sender,
+                    yield_keylab,
                 ) {
                     Ok(names) => {
-                        if reconcile_keylab_display(&mut display, latest_screen.as_ref()) {
+                        if !yield_keylab
+                            && reconcile_keylab_display(&mut display, latest_screen.as_ref())
+                        {
                             reconnect_keylab_inputs(
                                 &selected,
                                 &mut connections,
@@ -1541,10 +1554,13 @@ impl MidiSupervisor {
                             &sender,
                             &telemetry,
                             &controller_sender,
+                            yield_keylab,
                         ) {
                             eprintln!("DESKTOP_MIDI_SCAN_FAILED error={error:#}");
                         }
-                        if reconcile_keylab_display(&mut display, latest_screen.as_ref()) {
+                        if !yield_keylab
+                            && reconcile_keylab_display(&mut display, latest_screen.as_ref())
+                        {
                             reconnect_keylab_inputs(
                                 &selected,
                                 &mut connections,
@@ -1596,9 +1612,10 @@ fn reconcile_midi_inputs(
     sender: &SyncSender<MidiPacket>,
     telemetry: &Arc<AudioTelemetry>,
     controller_sender: &SyncSender<DesktopControllerEvent>,
+    yield_keylab: bool,
 ) -> Result<Vec<String>> {
     let present = discover_midi_inputs()?.into_iter().collect::<BTreeSet<_>>();
-    let desired = desired_midi_inputs(selected, &present);
+    let desired = desired_midi_inputs(selected, &present, yield_keylab);
     let lost = connections
         .keys()
         .filter(|name| !present.contains(*name))
@@ -1640,14 +1657,20 @@ fn reconcile_midi_inputs(
 fn desired_midi_inputs(
     selected: &BTreeSet<String>,
     present: &BTreeSet<String>,
+    yield_keylab: bool,
 ) -> BTreeSet<String> {
     let mut desired = selected.clone();
-    desired.extend(
-        present
-            .iter()
-            .filter(|name| keylab_controller::little_driver(name).is_some())
-            .cloned(),
-    );
+    // The built-in surface handling force-captures the KeyLab's surface
+    // port -- unless an installed controller package owns the hardware,
+    // in which case that port belongs to ITS driver.
+    if !yield_keylab {
+        desired.extend(
+            present
+                .iter()
+                .filter(|name| keylab_controller::little_driver(name).is_some())
+                .cloned(),
+        );
+    }
     desired
 }
 
@@ -1842,7 +1865,7 @@ fn reconnect_keylab_inputs(
     }
     thread::sleep(Duration::from_millis(100));
     if let Err(error) =
-        reconcile_midi_inputs(selected, connections, sender, telemetry, controller_sender)
+        reconcile_midi_inputs(selected, connections, sender, telemetry, controller_sender, false)
     {
         eprintln!("DESKTOP_KEYLAB_INPUT_REOPEN_FAILED error={error:#}");
     } else {

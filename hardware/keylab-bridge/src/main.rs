@@ -8,12 +8,9 @@ use midir::{
     Ignore, MidiInput, MidiInputConnection, MidiInputPort, MidiOutput, MidiOutputConnection,
     MidiOutputPort,
 };
+use rackforge_control_api::{ControlRequest, ControlResponse};
 #[cfg(target_os = "linux")]
-use rackforge_control_api::{
-    CONTROL_SOCKET_NAME, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES,
-    decode_response, encode_line,
-};
-#[cfg(target_os = "linux")]
+use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_controller_api::LITTLE_V1;
 use rackforge_controller_api::{ButtonPhase, HostActionBinding, HostActionTarget};
 use rackforge_controller_arturia_keylab_essential_mk3::protocol as keylab_protocol;
@@ -25,11 +22,13 @@ use rackforge_platform_api::{
     PLATFORM_CONTROL_SCHEMA_VERSION, PlatformControlPayload, PlatformControlRequest,
     PlatformControlResponse, PlatformOperation, WifiConnectionId, WifiPassphrase, WifiSsid,
 };
-#[cfg(target_os = "linux")]
 use rackforge_session_api::{
     ClientId, CommandEnvelope, EventEnvelope, InstanceId, MasterLevel, PluginInstanceState,
-    SessionCommand, SessionEvent, SessionState, SurfaceActivationRequest, SurfaceMode,
+    SessionCommand, SessionState,
 };
+#[cfg(target_os = "linux")]
+use rackforge_session_api::{SessionEvent, SurfaceActivationRequest};
+use rackforge_session_api::SurfaceMode;
 use rackforge_session_api::{HostControlBinding, HostControlTarget, MasterPan};
 use rackforge_surface_runtime as menu;
 use serde_json::Value;
@@ -46,9 +45,7 @@ use std::net::{Ipv4Addr, Shutdown};
 use std::os::unix::fs::MetadataExt;
 #[cfg(target_os = "linux")]
 use std::os::unix::net::UnixStream;
-#[cfg(target_os = "linux")]
 use std::path::PathBuf;
-#[cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
@@ -75,7 +72,6 @@ const SPINNER_FRAME_INTERVAL: Duration = Duration::from_millis(125);
 const WEB_CONTROL_SOCKET_NAME: &str = "web-control.sock";
 #[cfg(target_os = "linux")]
 const PLATFORM_CONTROL_SOCKET: &str = "/run/rackforge/platform-control.sock";
-#[cfg(target_os = "linux")]
 static NEXT_CONTROL_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
 
 #[cfg(target_os = "linux")]
@@ -1304,44 +1300,33 @@ fn control_socket_generation() -> Option<(u64, u64, i64, i64)> {
     None
 }
 
-#[cfg(target_os = "linux")]
 fn control_request(request: &ControlRequest) -> Result<ControlResponse, String> {
     control_request_with_timeout(request, Duration::from_secs(1))
 }
 
-#[cfg(target_os = "linux")]
+/// One control exchange through the shared transport: RACKFORGE_CONTROL_ADDR
+/// (TCP loopback -- how a desktop or Android supervisor points this driver at
+/// its core) wins over the platform's control socket.
 fn control_request_with_timeout(
     request: &ControlRequest,
-    timeout: Duration,
+    _timeout: Duration,
 ) -> Result<ControlResponse, String> {
-    let path = control_socket_path();
-    let mut stream =
-        UnixStream::connect(&path).map_err(|error| format!("{}: {error}", path.display()))?;
-    stream
-        .set_read_timeout(Some(timeout))
+    let endpoint = rackforge_control_api::transport::endpoint_from_env(default_control_socket)
         .map_err(|error| error.to_string())?;
-    stream
-        .set_write_timeout(Some(Duration::from_secs(1)))
-        .map_err(|error| error.to_string())?;
-    let bytes = encode_line(request).map_err(|error| error.to_string())?;
-    stream
-        .write_all(&bytes)
-        .map_err(|error| error.to_string())?;
-    stream
-        .shutdown(Shutdown::Write)
-        .map_err(|error| error.to_string())?;
-    let mut response = Vec::new();
-    stream
-        .take((MAX_CONTROL_MESSAGE_BYTES + 1) as u64)
-        .read_to_end(&mut response)
-        .map_err(|error| error.to_string())?;
-    if response.is_empty() || response.len() > MAX_CONTROL_MESSAGE_BYTES {
-        return Err("respuesta de control vacía o demasiado grande".into());
-    }
-    decode_response(&response).map_err(|error| error.to_string())
+    rackforge_control_api::transport::exchange(&endpoint, request)
+        .map_err(|error| error.to_string())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
+fn default_control_socket() -> PathBuf {
+    control_socket_path()
+}
+
+#[cfg(not(unix))]
+fn default_control_socket() -> PathBuf {
+    PathBuf::new()
+}
+
 fn live_snapshot() -> Result<SessionState, String> {
     match control_request(&ControlRequest::Snapshot)? {
         ControlResponse::Snapshot { snapshot } => Ok(*snapshot),
@@ -1350,7 +1335,6 @@ fn live_snapshot() -> Result<SessionState, String> {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn active_plugin_instance(snapshot: &SessionState) -> Result<&PluginInstanceState, String> {
     let instance = snapshot
         .active_instance()
@@ -1364,13 +1348,11 @@ fn active_plugin_instance(snapshot: &SessionState) -> Result<&PluginInstanceStat
     Ok(instance)
 }
 
-#[cfg(target_os = "linux")]
 fn active_plugin_instance_id() -> Result<InstanceId, String> {
     let snapshot = live_snapshot()?;
     Ok(active_plugin_instance(&snapshot)?.instance_id.clone())
 }
 
-#[cfg(target_os = "linux")]
 fn dispatch_session_command(command: SessionCommand) -> Result<Vec<EventEnvelope>, String> {
     let command_id = NEXT_CONTROL_COMMAND_ID
         .fetch_add(1, Ordering::Relaxed)
@@ -1393,7 +1375,6 @@ fn dispatch_session_command(command: SessionCommand) -> Result<Vec<EventEnvelope
     }
 }
 
-#[cfg(target_os = "linux")]
 fn register_host_controls() -> Result<(), String> {
     let profile = controller::package_profile();
     dispatch_session_command(SessionCommand::RegisterHostBindings {
@@ -1410,35 +1391,20 @@ fn register_host_controls() -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
-fn register_host_controls() -> Result<(), String> {
-    Ok(())
-}
 
-#[cfg(target_os = "linux")]
 fn apply_master_pan(pan: MasterPan) -> Result<(), String> {
     dispatch_session_command(SessionCommand::SetMasterPan { pan })?;
     println!("MASTER_PAN normalized={}/{}", pan.get(), MasterPan::MAX);
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
-fn apply_master_pan(_pan: MasterPan) -> Result<(), String> {
-    Ok(())
-}
 
 /// Where the host's pan stands right now.
-#[cfg(target_os = "linux")]
 fn current_pan() -> Option<i16> {
     Some(live_snapshot().ok()?.master_pan.get())
 }
 
-#[cfg(not(target_os = "linux"))]
-fn current_pan() -> Option<i16> {
-    None
-}
 
-#[cfg(target_os = "linux")]
 fn apply_host_control(event: HostControlEvent) -> Result<(), String> {
     match event.target {
         HostControlTarget::MasterLevel => {
@@ -1466,12 +1432,7 @@ fn apply_host_control(event: HostControlEvent) -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-fn apply_host_control(_event: HostControlEvent) -> Result<(), String> {
-    Ok(())
-}
 
-#[cfg(target_os = "linux")]
 fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
     if let Err(error) = refresh_performance_snapshot(menu) {
         eprintln!("Could not refresh LIVE performance library: {error}");
@@ -1549,7 +1510,6 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
 fn refresh_performance_snapshot(menu: &mut menu::Menu) -> Result<(), String> {
     match control_request(&ControlRequest::PerformanceSnapshot)? {
         ControlResponse::PerformanceSnapshot { snapshot } => {
@@ -1559,6 +1519,11 @@ fn refresh_performance_snapshot(menu: &mut menu::Menu) -> Result<(), String> {
         ControlResponse::Error { message, .. } => Err(message),
         _ => Err("unexpected response while reading LIVE performance state".into()),
     }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn refresh_audio_settings(_menu: &mut menu::Menu) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -1571,6 +1536,11 @@ fn refresh_audio_settings(menu: &mut menu::Menu) -> Result<(), String> {
         ControlResponse::Error { message, .. } => Err(message),
         _ => Err("unexpected response while reading audio state".into()),
     }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn refresh_wifi_settings(_menu: &mut menu::Menu) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -1668,6 +1638,11 @@ fn platform_control_request(
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+fn refresh_web_settings(_menu: &mut menu::Menu) -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 fn refresh_web_settings(menu: &mut menu::Menu) -> Result<(), String> {
     let response = web_control_request(&serde_json::json!({"op": "status"}))?;
@@ -1750,20 +1725,11 @@ fn web_control_request(request: &Value) -> Result<Value, String> {
     Ok(response)
 }
 
-#[cfg(not(target_os = "linux"))]
-fn refresh_live_catalog(_menu: &mut menu::Menu) -> Result<(), String> {
-    Ok(())
-}
 
-#[cfg(target_os = "linux")]
 fn keep_audition_alive(lease_id: u64) -> Result<(), String> {
     dispatch_session_command(SessionCommand::KeepAuditionAlive { lease_id }).map(|_| ())
 }
 
-#[cfg(not(target_os = "linux"))]
-fn keep_audition_alive(_lease_id: u64) -> Result<(), String> {
-    Ok(())
-}
 
 #[cfg(target_os = "linux")]
 fn apply_pending_menu_command(

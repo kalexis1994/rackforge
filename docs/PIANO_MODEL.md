@@ -190,7 +190,7 @@ time from one smooth curve fitted to the published order of magnitude — tens
 of seconds for the lowest fundamentals, under a second at the top of the
 compass:
 
-    T60(f) ≈ 21 / (1 + (f/20)^0.56) + 0.6   seconds
+    T60(f) ≈ 6 / (1 + (f/20)^0.14) + 0.6   seconds
 
 **This is the only decay-against-frequency curve in the model, and it took
 three tries to make it the only one.** It used to be one of three. The curve
@@ -225,6 +225,25 @@ below where the instrument puts it. That is why it was too steep for any
 single note to sit on, and why both corrections were needed to drag the ends
 back.
 
+Refitted against the render rather than against the formula — sweeping the
+curve and reading each partial's T60 back out of the audio, because what
+`t60_seconds` returns is not what is heard until the two-stage `tail` has
+multiplied it — the curve came out **nearly flat**: 3.4 s at 50 Hz against
+2.5 s at 3.2 kHz, a factor of 1.4 across seven octaves where the old one
+spanned a factor of 41. That is a claim about the instrument worth stating
+plainly: **the string's own losses are close to frequency-independent, and
+what actually shapes a piano's decay against frequency is radiation.** The
+model already had radiation as a separate parallel channel with a measured
+coincidence corner, and with the string curve no longer duplicating its job
+the two together land every band between 0.98x and 1.39x of the instrument:
+
+    band          three curves   one curve
+    0–120 Hz         1.47×         1.03×
+    120–300 Hz       1.24×         1.39×
+    300–700 Hz       1.06×         1.09×
+    700–1600 Hz      0.51×         0.98×
+    1600–8000 Hz     0.47×         1.05×
+
 The curve is read at the partial's frequency scaled by the string's weight,
 `(f0/220)^0.55`, and that scaling is not decoration: refitting without it is
 measurably worse (0.414 against 0.357 in log-decay), because the same 2 kHz is
@@ -241,6 +260,43 @@ rates, the way measured piano partials do.
 Each partial reads the curve at its own frequency, so a bass note's high
 partials fade like the treble notes they overlap — which is what makes the
 model's bass notes darken as they ring, the way real ones do.
+
+### The bridge is passive, and the unison is the real string count (tested)
+
+Weinreich's coupling is simulated rather than scripted: each string loses a
+slice of the sum the three of them push the bridge with, so a coherent
+configuration radiates and dies while a dephased one nearly cancels at the
+termination and lives on. Two things about that were wrong.
+
+**The drive and the reaction used different weights.** The horizontal
+polarisation took back 0.12 of the bridge's motion but contributed its full
+amplitude to it, making the update `I - k w 1ᵀ` — not symmetric, and a
+non-symmetric contraction is not a contraction. Its largest singular value is
+1.0035 at the coupling this model uses: there are string configurations it
+feeds energy *into*. Weighting the sum the way the reaction is weighted makes
+it `I - k w wᵀ`, symmetric and positive semidefinite, largest singular value
+exactly 1. That is Maxwell–Betti reciprocity, and it is what makes a
+termination passive. Measured on three components with no intrinsic loss, so
+every joule that leaves is the bridge's doing, the energy left after two
+seconds against the unison's detune:
+
+    cents     before    after
+      0.0     0.345     0.256
+      2.9     0.145     0.285
+     12.0     0.066     0.274
+
+Before, the detune the model uses cost it well over half the stored energy and
+the dependence was not even monotone; after, it costs nothing.
+
+**The string count was wrong by about eleven semitones.** A grand is
+single-strung only across the very bottom — A0 to roughly E1 — doubles through
+the rest of the wound bass, and is fully triple-strung from about C2 upward.
+The ramp used to start at E♭2 and not finish until B2, which gave **C2 exactly
+one string** and C3 barely two. That is not bookkeeping: with no second string
+there is nothing for the unison detune to act on, so it was being applied
+between the two *polarisations* of a single string instead. The third string
+was also cut off above the twelfth partial — the same mistake the model had
+already made once at partial 32, eleven partials lower.
 
 ### Phantom partials in the bass (tested)
 
@@ -444,49 +500,51 @@ code and is far beyond audibility at control rate).
 
 ## Known defects
 
-* **C2's partials 8 to 11 are BORN right and DIE 10-17 dB too fast, and the
-  unison detune is spending them.** Separating birth from death -- comparing
-  each partial's band energy at 0.02-0.15 s against 0.3-1.2 s, in the model
-  and in the instrument:
+* **RETRACTED: "C2's partials 8 to 11 die 10-17 dB too fast".** They do the
+  opposite. Measured without the flawed normalisation, every one of C2's
+  partials from the sixth to the twelfth rings LONGER than the instrument's,
+  by factors of 1.2 to 5:
 
-  | n | born | dies |
-  |---|---|---|
-  | 8 | +3.5 dB | **-10.4** |
-  | 9 | **-15.0** | **-17.0** |
-  | 10 | -3.5 | **-12.1** |
-  | 11 | +5.3 | **-12.3** |
+  | n | Hz | instrument | model |
+  |---|---|---|---|
+  | 6 | 393 | 14.7 s | 24.6 (1.67x) |
+  | 8 | 526 | 8.8 | 16.3 (1.86x) |
+  | 9 | 592 | 6.3 | 26.1 (4.17x) |
+  | 10 | 659 | 10.3 | 21.7 (2.10x) |
+  | 11 | 726 | 10.3 | 19.6 (1.91x) |
+  | 12 | 793 | 11.1 | 21.0 (1.89x) |
 
-  Only the ninth is also born weak; the rest arrive at the right level and
-  then leak away. Setting the unison detune to zero recovers all but 3 to 6 dB
-  of it, so the detune is what spends them.
+  The old finding came from a measurement that took each partial's band energy
+  in two time windows and normalised each window by ITS OWN LOUDEST PARTIAL.
+  The loudest is the second in the instrument and the third in the model, so
+  the two signals were anchored to different partials and every reading
+  carried the difference between them. The measure is differential in a way
+  that was never checked; when it is replaced by each partial's own T60, read
+  off its own envelope and normalised against nothing, the sign of the whole
+  result flips.
 
-  Band energy, not peak: with a detuned unison a partial splits and beats, and
-  at 1.5 cents on C2's ninth the beat period is two seconds -- a peak reading
-  over a 0.9 s window measures which part of the beat it landed in. The effect
-  survives the better measurement, so it is real and not that artefact.
+  Days went into the retracted version. It sent three physically sound changes
+  the wrong way -- a passive bridge, the real string count, and per-sample
+  coupling -- none of which moved it, which is what finally made the metric
+  itself the suspect. The lesson is narrow and worth keeping: **a measurement
+  that normalises two signals by different references is not a comparison.**
 
-  **One cause found and fixed (v0.57.0), and it is not the whole cause.** The
-  bridge drain runs in the cull, one step per 256 samples, about 172 Hz. A
-  partial well above that advances several whole turns between applications,
-  so the sum it is drained against is sampled at essentially random phase, and
-  subtracting a fraction of a random-phase sum removes energy whether or not
-  the strings are pushing the bridge together. It is a leak, and detuning
-  makes it worse because the relative phase then drifts too. Fading it out
-  above 300 Hz takes the ninth partial's excess loss from 17.0 dB to 14.8 and
-  the fit cost from 32.5 to 30.9.
+  The corrected reading also agrees with the user's ear, which had been saying
+  so for weeks in different words -- "mucha cuerda", "se escucha muy clavinet",
+  "le falta esa oscuridad que tiene el piano en bajas". A bass note whose
+  400-800 Hz partials ring twice as long as they should is a string, not a
+  piano.
 
-  **What remains is the open question**, and it is sharp: the instrument has
-  about 2.9 cents of unison spread AND full mid partials. This model cannot
-  yet have both -- the detune that produces the measured cluster density is
-  the same detune that drains partials 8 to 11. Somewhere the coupling is
-  still spending energy that a real bridge redistributes.
+* **The whole-note duration and the per-partial decay disagree, and the
+  balance between them is a choice.** With the decay curve refitted, the two
+  measures cannot both be satisfied: shortening the second stage until every
+  partial's own T60 matches (`tail` floor 1.8, depth 1.8) takes the whole-note
+  duration to 0.82x the instrument, and lengthening it until the durations
+  match (depth 3.5) leaves the partials 1.1 to 1.5x long. The model ships at
+  depth 2.6, between them -- durations 0.91x, partial bands 0.98 to 1.39x.
+  A0, C2 and C3 sit within 4% of the instrument; F#1 and A4 are the ones the
+  compromise costs, at 0.62x and 0.51x.
 
-  This matters beyond those four partials: C2's first longitudinal mode is
-  driven by the pairs y_8*y_9, so the metallic character of the bass cannot
-  appear until they do.
-
-
-* **RULED OUT: the strike's initial condition is not what makes it sound
   plucked.** The user's description was precise -- "la nuestra parece una
   guitarra tocada con los dedos" -- and it has an exact physical counterpart:
   a finger releases a string from a static displacement, a hammer hands it

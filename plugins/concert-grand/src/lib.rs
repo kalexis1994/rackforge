@@ -93,12 +93,23 @@ const TAIL_KNEE_HZ: f32 = 420.0;
 /// 180 Hz, nearly three octaves too low, which is why the curve was so steep
 /// that no single note could sit on it and both corrections were needed to
 /// drag the ends back.
-const STRING_T60_S: f32 = 21.0;
+const STRING_T60_S: f32 = 6.0;
 const STRING_KNEE_HZ: f32 = 20.0;
-const STRING_TILT: f32 = 0.56;
+const STRING_TILT: f32 = 0.14;
 /// Below this the soundboard has too few modes to be ragged, so the synthetic
 /// scatter is faded out rather than gambling on where its notches land.
 const SCATTER_KNEE_HZ: f32 = 320.0;
+/// How strongly the horizontal polarisation couples to the bridge, against
+/// the vertical one.
+///
+/// It appears TWICE, and that is the whole point. A string's horizontal
+/// motion drives the bridge sideways, along its stiff axis, so it moves the
+/// termination about an order of magnitude less than the vertical motion
+/// does -- and by reciprocity it also FEELS the bridge's motion an order of
+/// magnitude less. Drive and reaction are the same coefficient. That is not
+/// a modelling convenience; it is Maxwell-Betti, and it is what makes the
+/// coupling passive.
+const HORIZONTAL_BRIDGE: f32 = 0.12;
 /// How often a voice retires inaudible components, in samples.
 const CULL_INTERVAL: u32 = 256;
 /// Where the bridge stops taking energy from a partial, in hertz. Above it
@@ -810,10 +821,10 @@ impl Voice {
             }
         }
         // The bridge: each string loses a slice of the coherent sum, in
-        // proportion to how hard the three are pushing the termination
-        // together. In phase they drive it and die fast; dephased they nearly
-        // cancel there and live on. That is Weinreich, and the two-stage decay
-        // and the churn of the sustain come from it.
+        // proportion to how hard they are pushing the termination together.
+        // In phase they drive it and die fast; dephased they nearly cancel
+        // there and live on. That is Weinreich, and the two-stage decay and
+        // the churn of the sustain come from it.
         //
         // This was moved into the per-sample loop to see whether running it at
         // the cull rate was aliasing away energy. It was not: the measured
@@ -821,18 +832,52 @@ impl Voice {
         // went from 45% of the budget to 64%. Twenty points for nothing is not
         // a trade, so it is back here, and the frequency dependence below is
         // what actually earns its place.
+        //
+        // What WAS wrong was that the drive and the reaction used different
+        // weights. Each component took back `HORIZONTAL_BRIDGE` times the
+        // bridge's motion but contributed its FULL amplitude to it, so the
+        // matrix `I - k w 1^T` was not symmetric -- and a non-symmetric
+        // contraction is not a contraction. Its largest singular value is
+        // 1.0035 at the coupling this model uses: there are string
+        // configurations it feeds energy INTO, and others it drains far
+        // harder than the coherent one, which is not something a passive
+        // termination can do.
+        //
+        // Weighting the sum the same way the reaction is weighted makes it
+        // `I - k w w^T`: symmetric, positive semidefinite, largest singular
+        // value exactly 1. The coherent configuration decays and everything
+        // orthogonal to it is left untouched, which is precisely the
+        // statement that a dephased unison stops radiating.
+        //
+        // Measured on three components at 500 Hz with no intrinsic loss, so
+        // every joule that leaves is the bridge's doing -- energy left after
+        // two seconds, against the unison's detune:
+        //
+        //     cents     before    after
+        //       0.0     0.345     0.256
+        //       1.0     0.647     0.283
+        //       2.9     0.145     0.285
+        //       6.0     0.077     0.276
+        //      12.0     0.066     0.274
+        //
+        // Before, the detune the model actually uses cost it well over half
+        // the stored energy, and the dependence was not even monotone. After,
+        // it costs nothing: dephasing traps energy instead of spending it,
+        // which is what the real instrument does and what "the bass dies too
+        // fast when the unison is spread" was pointing at all along.
         for partial in &mut self.partials[..self.partial_count] {
             let k = partial.coupling;
             if k > 0.0 {
-                let sum_s = partial.prompt.s + partial.aftersound.s + partial.third.s;
-                let sum_c = partial.prompt.c + partial.aftersound.c + partial.third.c;
+                let sum_s = partial.prompt.s
+                    + HORIZONTAL_BRIDGE * partial.aftersound.s
+                    + partial.third.s;
+                let sum_c = partial.prompt.c
+                    + HORIZONTAL_BRIDGE * partial.aftersound.c
+                    + partial.third.c;
                 partial.prompt.s -= k * sum_s;
                 partial.prompt.c -= k * sum_c;
-                // The second component is the horizontal polarisation: it
-                // drives the bridge sideways and couples an order of
-                // magnitude more weakly -- it IS the long tail (Weinreich).
-                partial.aftersound.s -= 0.12 * k * sum_s;
-                partial.aftersound.c -= 0.12 * k * sum_c;
+                partial.aftersound.s -= HORIZONTAL_BRIDGE * k * sum_s;
+                partial.aftersound.c -= HORIZONTAL_BRIDGE * k * sum_c;
                 partial.third.s -= k * sum_s;
                 partial.third.c -= k * sum_c;
             }
@@ -2173,9 +2218,42 @@ impl ConcertGrand {
             // subsequent life -- fast coherent decay, dephasing, the long
             // trapped tail, the churn -- is simulated through the bridge
             // coupling below, not scripted here.
-            let three = ((index as f32 - 18.0) / 8.0).clamp(0.0, 1.0)
+            // How many strings this note actually has, and it was wrong by
+            // about eleven semitones.
+            //
+            // A grand is single-strung only across the very bottom -- A0 to
+            // roughly E1 -- then doubles through the rest of the wound bass,
+            // and is fully triple-strung from about C2 upward. This ramp used
+            // to start at index 18 (E flat 2) and not finish until index 26
+            // (B2), which gave C2 exactly ONE string and C3 barely two.
+            //
+            // That is not a small bookkeeping error, because the model has no
+            // other place to put a unison. With `three` at zero the only two
+            // oscillators left are `prompt` and `aftersound` -- the vertical
+            // and horizontal polarisations of a single string -- and the
+            // unison detune was being applied BETWEEN THEM. It had to be:
+            // there was nothing else to detune. So the control that is
+            // supposed to spread three strings was instead pulling one
+            // string's two polarisations apart, and since the bridge drains
+            // only the coherent direction, detuning kept rotating the trapped
+            // configuration back into the draining one. That is the whole of
+            // "raising the unison spends the bass": measured on C2's eighth
+            // partial the excess loss ran -1.5 dB at zero detune and -8.4 dB
+            // at the default, smoothly and monotonically in between.
+            //
+            // It is also, in plain terms, the complaint the user made by ear
+            // long before any of this was measured: "se escucha como si fuese
+            // una cuerda mas fina". C2 was one string.
+            let three = ((index as f32 - 7.0) / 8.0).clamp(0.0, 1.0)
                 * if self.soft { 0.25 } else { 1.0 };
-            let w3 = if n < 12 { 0.22 * three } else { 0.0 };
+            // ...and the third string exists all the way up the ladder, not
+            // only below the twelfth partial. The model already made this
+            // mistake once, collapsing the unison into one oscillator above
+            // partial 32, and fixing it was one of the larger audible wins;
+            // this was the same cut eleven partials lower. C2's partials 8 to
+            // 11 -- the ones that have been the open thread for days -- sit
+            // directly against that edge.
+            let w3 = 0.22 * three;
             let remainder = 1.0 - w3;
             // The strings of the unison stay separate all the way up.
             //
@@ -2240,7 +2318,7 @@ impl ConcertGrand {
             // the instrument. With the curve refitted it has nothing left to
             // correct, and keeping it would take a bass note's 500 Hz partial
             // down to two fifths of its proper life for the second time.
-            let tail = 1.8 + 3.5 / (1.0 + powf(frequency / TAIL_KNEE_HZ, 1.2));
+            let tail = 1.8 + 2.6 / (1.0 + powf(frequency / TAIL_KNEE_HZ, 1.2));
             let intrinsic =
                 self.decay_per_sample(t60 * tail * self.controls.lab_at(12, position));
             let prompt_t60 = t60 * 1.94 * self.controls.lab_at(11, position) / (1.4 + 1.1 * position);
@@ -2259,7 +2337,16 @@ impl ConcertGrand {
             // away as the partial's frequency rises. A high partial barely
             // moves the bridge.
             let follow = (COUPLING_TOP_HZ / frequency.max(1.0)).clamp(0.0, 1.0);
-            let coupling = (1.0 - step) / (2.0 + three) * follow;
+            // Normalised by the weights' own square sum, because that is the
+            // eigenvalue the coherent configuration decays at: with
+            // `I - k w w^T` the coherent mode loses `k * (w.w)` per step, so
+            // dividing by `w.w` makes it lose exactly `1 - step`, and
+            // `prompt_t60` above finally means what it says. The old
+            // denominator counted the horizontal polarisation as a whole
+            // string, which under-drained the coherent mode by 30%.
+            let weights =
+                1.0 + HORIZONTAL_BRIDGE * HORIZONTAL_BRIDGE + three;
+            let coupling = (1.0 - step) / weights * follow;
             // The partial swells in over many of its own periods, and slowly
             // enough to matter: a bass note does not arrive, it gathers.
             //

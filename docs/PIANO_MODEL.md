@@ -537,6 +537,14 @@ Hardness**, **Mic Distance**, **Mic Pattern** — and the ambience falls out:
   on a ribbon up close (rendered as a 120 Hz shelf whose gain follows b/r).
 * Distance divides the direct sound by r_ref/r while the reverberant field
   stays put; the calibration reference (gain 1) sits at 2.5 m.
+* **The pair is spaced in time, not just level.** Width sets the spacing
+  (0 = coincident, up to 0.9 m AB), and each string's mono output reaches
+  each microphone through its own arrival tap: Δt = S·x/(c·√(x²+D²)) from
+  the note's lateral place on the bridge and the pair's distance. The bass
+  reaches the left microphone first, the treble the right, and a coincident
+  pair hears no time differences at all — which is what coincident means.
+  One write and two reads per voice per sample; the delay is geometry fixed
+  at note-on, so nothing interpolates and nothing zippers.
 
 Rendered check — the same chord in four described spaces: the galpón comes
 out distant and bright (hard walls hold the top), the auditorium darker and

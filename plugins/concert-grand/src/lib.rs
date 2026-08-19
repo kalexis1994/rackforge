@@ -638,6 +638,18 @@ const AIR_ABSORB_4K_PER_M: f32 = 0.0022;
 /// Where the proximity rise sits: the pressure-gradient term crosses the
 /// pressure term at f = c/(2*pi*r); this scales its audible strength.
 const PROXIMITY_STRENGTH: f32 = 0.35;
+/// The spaced pair's maximum spacing in metres (Width at full), and how far
+/// the piano's strings spread laterally as the pair sees them. A coincident
+/// pair (Width at zero) hears no time differences at all -- that is what
+/// coincident MEANS -- and a spaced AB pair hears each note earlier in the
+/// nearer microphone by S*x / (c*sqrt(x^2 + D^2)). That per-note arrival
+/// difference, not the level pan, is the air and width of real AB
+/// recordings.
+const PAIR_SPACING_MAX_M: f32 = 0.9;
+const PIANO_LATERAL_SPREAD_M: f32 = 1.3;
+/// Per-voice delay line length: covers the worst-case interchannel delay
+/// (0.9 m spacing, source on axis end, close pair) at up to 96 kHz.
+const VOICE_DELAY: usize = 256;
 /// One-pole coefficient for the high-pass on everything entering the lid and
 /// the chamber, at 44.1 kHz. The corner is the board's own radiation corner:
 /// the air is driven by what the board radiates, not by what the strings do.
@@ -680,6 +692,12 @@ struct Voice {
     noise_seed: u32,
     pan_left: f32,
     pan_right: f32,
+    /// The spaced pair's per-channel arrival: this voice's mono output is
+    /// written here once and each microphone reads its own tap.
+    pair: [f32; VOICE_DELAY],
+    pair_write: usize,
+    pair_left: usize,
+    pair_right: usize,
     /// Duplex-scale components: the string segments behind the bridge have
     /// no dampers, so these ring on after damp() silences the partials.
     duplex: [Component; 2],
@@ -729,6 +747,10 @@ impl Default for Voice {
             noise_seed: 1,
             pan_left: 0.0,
             pan_right: 0.0,
+            pair: [0.0; VOICE_DELAY],
+            pair_write: 0,
+            pair_left: 0,
+            pair_right: 0,
             duplex: [Component::default(); 2],
             cull_in: CULL_INTERVAL,
             energy: 0.0,
@@ -2949,6 +2971,12 @@ impl ConcertGrand {
         let longitudinal_gain = LONGITUDINAL_MIX * self.controls.lab(5);
         let longitudinal_upper = self.controls.lab(4);
         let action_gain = Controls::noise_gain(self.controls.action_noise);
+        let pair_spacing = self.controls.width * PAIR_SPACING_MAX_M;
+        let pair_depth = MIC_DISTANCE_MIN_M
+            * powf(
+                MIC_DISTANCE_MAX_M / MIC_DISTANCE_MIN_M,
+                self.controls.mic_distance,
+            );
         if let Some(slot) = restrike_target {
             // The hammer lands on the wire it finds. Ladder partials merge
             // by harmonic number (each carries it in its slope weight);
@@ -3104,6 +3132,27 @@ impl ConcertGrand {
         voice.noise_seed = 0x9E37_79B9 ^ (note as u32).wrapping_mul(2_654_435_761);
         voice.pan_left = pan_left;
         voice.pan_right = pan_right;
+        // The pair's time-of-arrival difference for THIS string. Width is
+        // the spacing; the note's place on the bridge is its lateral
+        // position; the mic distance stretches the geometry. Zero spacing is
+        // exactly coincident: both taps read the present.
+        {
+            let spacing = pair_spacing;
+            let lateral = (position - 0.5) * PIANO_LATERAL_SPREAD_M;
+            let depth = pair_depth;
+            let arrival = spacing * lateral
+                / (SOUND_SPEED * sqrtf(lateral * lateral + depth * depth));
+            let samples = ((arrival.abs() * sample_rate) as usize).min(VOICE_DELAY - 1);
+            // Bass (lateral negative) reaches the LEFT microphone first, so
+            // the right one lags, and mirrored for the treble.
+            if arrival < 0.0 {
+                voice.pair_left = 0;
+                voice.pair_right = samples;
+            } else {
+                voice.pair_left = samples;
+                voice.pair_right = 0;
+            }
+        }
         // The glide is no longer scripted. It used to be a 28-step ramp of a
         // hand-set size; it now falls out of the tension law above, which
         // sharpens the string while it is displaced and lets it settle as the
@@ -3654,8 +3703,17 @@ impl Processor for ConcertGrand {
                     continue;
                 }
                 let sample = voice.tick();
-                left += sample * voice.pan_left;
-                right += sample * voice.pan_right;
+                // The spaced pair: one write, two reads. The nearer
+                // microphone hears this string first; the delay is geometry
+                // fixed at note-on, so there is nothing to interpolate.
+                voice.pair[voice.pair_write] = sample;
+                let left_tap = voice.pair
+                    [(voice.pair_write + VOICE_DELAY - voice.pair_left) % VOICE_DELAY];
+                let right_tap = voice.pair
+                    [(voice.pair_write + VOICE_DELAY - voice.pair_right) % VOICE_DELAY];
+                voice.pair_write = (voice.pair_write + 1) % VOICE_DELAY;
+                left += left_tap * voice.pan_left;
+                right += right_tap * voice.pan_right;
 
                 voice.tension_in -= 1;
                 if voice.tension_in == 0 {
@@ -4658,6 +4716,46 @@ mod tests {
             println!("vel {velocity}: centroide {cent:.0} Hz, {} parciales", voice.partial_count);
             println!("  {rows}");
         }
+    }
+
+    #[test]
+    fn the_spaced_pair_hears_the_bass_on_the_left_first() {
+        // A spaced pair: the bass string is nearer the left microphone, so
+        // the right one lags; mirrored in the treble; and a coincident pair
+        // (Width at zero) hears no time difference at all.
+        let mut piano = prepared();
+        piano.set_parameter(PARAM_WIDTH, 0.8);
+        render(&mut piano, 64, &[note_on(24, 100)]);
+        let bass = piano
+            .voices
+            .iter()
+            .find(|v| v.active && !v.halo && v.note == 24)
+            .expect("bass voice");
+        assert_eq!(bass.pair_left, 0, "the bass reaches the left mic first");
+        assert!(bass.pair_right > 0, "the right mic must lag on a bass note");
+
+        render(&mut piano, 64, &[note_on(96, 100)]);
+        let treble = piano
+            .voices
+            .iter()
+            .find(|v| v.active && !v.halo && v.note == 96)
+            .expect("treble voice");
+        assert_eq!(treble.pair_right, 0, "the treble reaches the right mic first");
+        assert!(treble.pair_left > 0, "the left mic must lag on a treble note");
+
+        let mut coincident = prepared();
+        coincident.set_parameter(PARAM_WIDTH, 0.0);
+        render(&mut coincident, 64, &[note_on(24, 100)]);
+        let voice = coincident
+            .voices
+            .iter()
+            .find(|v| v.active && !v.halo && v.note == 24)
+            .expect("voice");
+        assert_eq!(
+            (voice.pair_left, voice.pair_right),
+            (0, 0),
+            "a coincident pair hears no time differences"
+        );
     }
 
     #[test]

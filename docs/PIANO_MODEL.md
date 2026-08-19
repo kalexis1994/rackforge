@@ -803,6 +803,27 @@ code and is far beyond audibility at control rate).
   dynamics, because less of the felt relaxes under the slow blow too. The
   emergent contact-time tests still pass untouched.
 
+* **FIXED (v0.83.0): the bass attack surplus was x16 of what the reference
+  holds -- the exaggerated hammer blow, measured at last like-for-like.**
+  The user, still: "esta muy exagerado el golpe del martillo en notas
+  bajas, le falta algo ahi." What was missing was the real bass attack's
+  RESTRAINT: measured with the exact code, windows, bands and
+  normalization the YDP targets use (both sides the same experiment,
+  finally), the real bass attack sits 6-13 dB BELOW its own sustain in
+  0.5-4 kHz -- the note swells, it does not knock -- while ours ran up to
+  +11 over, and C2's 30 Hz attack thump ran +16 dB hot. Ablation isolated
+  one culprit: the x16 attack surplus into the upper compressional modes
+  (0.77's calibration, made against a normalization that was never
+  comparable). Clang off snapped every hot band to the reference; Impact
+  and the action noise measured innocent. Swept 2/4/6: x2 lands C2's
+  2 kHz band and the thump on the reference and moves every A0 band
+  8-19 dB toward it. Residuals recorded, non-clang in origin: C2's
+  500 Hz attack still ~10 dB over, A0's 1 kHz ~4 dB over with the
+  surplus fully off. Metric lesson, third in the family: the x16 was fit
+  against "attack rel. attack-low-bands vs the real sample" -- a
+  normalization in which a sustain deficit masquerades as an attack
+  deficit. Only the identical-measurement comparison caught it.
+
 
 
 * **FIXED (v0.62.0): a fixed low drone under every note, audible only in

@@ -3094,8 +3094,20 @@ impl ConcertGrand {
         let tension_gain = TENSION_GAIN * bass_gate / (1.0 + 40.0 * position)
             * self.controls.lab(10);
         let longitudinal_gain = LONGITUDINAL_MIX * self.controls.lab(5);
+        // The attack surplus into the upper compressional modes. This was
+        // x16, calibrated against a normalization that turned out not to be
+        // comparable; measured the same way the YDP targets are measured
+        // (same windows, bands and normalization on both sides), x16 put
+        // the bass attack 10-25 dB HOT in 0.5-4 kHz relative to its own
+        // sustain -- and, through the y^2 drive's low-frequency content
+        // passing the resonators' stiffness response, +16 dB of 30 Hz thump
+        // -- where the real bass attack sits BELOW its sustain there: the
+        // note swells, it does not knock. The user heard the difference as
+        // "el golpe del martillo exagerado en notas bajas". Swept 2/4/6
+        // against the targets on C2 and A0: x2 lands the 2 kHz band and
+        // the thump on the reference; anything higher re-grows the knock.
         let longitudinal_upper =
-            self.controls.lab(4) * 16.0 * powf(1.0 - position, 1.5);
+            self.controls.lab(4) * 2.0 * powf(1.0 - position, 1.5);
         let action_gain = Controls::noise_gain(self.controls.action_noise);
         let impact_gain = Controls::noise_gain(self.controls.impact);
         let pair_spacing = self.controls.width * PAIR_SPACING_MAX_M;

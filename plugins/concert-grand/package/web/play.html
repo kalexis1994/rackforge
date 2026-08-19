@@ -7,19 +7,42 @@
     <style>
       /*
        * The instrument's own identity, taken from the photograph in
-       * branding/: black lacquer, the harp's gold, and the thin deco rules of
-       * the RF-GP mark. Nothing here is a host colour — RackForge keeps its
-       * own chrome, and this surface stays inside its frame.
+       * branding/: black lacquer, the harp's gold, and walnut — the three
+       * materials a grand is actually made of. Nothing here is a host
+       * colour; RackForge keeps its own chrome and this surface stays
+       * inside its frame.
        */
       :root {
         color-scheme: dark;
         --lacquer: #000506;
         --case: #0b0d0f;
+        --panel: #0d0f11;
         --rule: #2a2118;
         --gold: #f3bc7c;
+        --gold-bright: #ffd9a0;
         --gold-dim: #8a6a44;
         --ink: #f2e7d8;
         --muted: #8c8073;
+        /* Walnut, drawn rather than photographed: grain as thin repeating
+           bands with a lacquer sheen over them. */
+        --wood: repeating-linear-gradient(
+            92deg,
+            #2e1b0e 0px,
+            #3a2412 5px,
+            #271507 9px,
+            #35200f 14px,
+            #2b1a0c 21px
+          );
+        /* The grain itself: one SVG feTurbulence, anisotropic (slow along
+           the plank, fast across it), rasterised ONCE by the browser and
+           tiled -- the cheapest wood noise there is: zero runtime cost. */
+        --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='72'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.011 0.32' numOctaves='4' seed='11' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.9 0.4 0 0 -0.28'/%3E%3C/filter%3E%3Crect width='260' height='72' filter='url(%23g)'/%3E%3C/svg%3E");
+        --wood-sheen: linear-gradient(
+          180deg,
+          rgba(255, 220, 170, 0.16),
+          rgba(255, 220, 170, 0.02) 35%,
+          rgba(0, 0, 0, 0.35) 100%
+        );
       }
       * { box-sizing: border-box; }
       body {
@@ -27,7 +50,9 @@
         padding: 0 0 32px;
         font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
         color: var(--ink);
-        background: var(--lacquer);
+        background:
+          radial-gradient(120% 90% at 50% -10%, #101315 0%, var(--lacquer) 55%);
+        min-height: 100vh;
       }
       .plate {
         position: relative;
@@ -64,13 +89,9 @@
         letter-spacing: 0.08em;
         color: var(--muted);
       }
-      main { max-width: 560px; padding: 24px 22px 0; }
-      .voicing {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        margin-bottom: 26px;
-      }
+      main { max-width: 680px; margin: 0 auto; padding: 20px 22px 0; }
+
+      .voicing { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
       .voicing button {
         flex: 1 1 auto;
         padding: 7px 0;
@@ -87,28 +108,100 @@
       .voicing button:hover { color: var(--gold); border-color: var(--gold-dim); }
       .voicing button[aria-pressed="true"] {
         color: var(--lacquer);
-        background: var(--gold);
+        background: linear-gradient(180deg, var(--gold-bright), var(--gold));
         border-color: var(--gold);
       }
-      section { margin-bottom: 26px; }
-      section > h2 {
+
+      /*
+       * The tab rail: a strip of walnut set into the lacquer, the way a
+       * fallboard meets the case. The active tab is a gold-lit key.
+       */
+      .rail {
+        position: relative;
+        margin-bottom: 22px;
+        border-radius: 4px 4px 0 0;
+        background: var(--grain), var(--wood);
+        box-shadow: inset 0 1px 0 rgba(255, 220, 170, 0.18),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+          0 6px 18px rgba(0, 0, 0, 0.55);
+        overflow: hidden;
+      }
+      .rail::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: var(--wood-sheen);
+        pointer-events: none;
+      }
+      .tabs {
+        position: relative;
+        display: flex;
+        gap: 2px;
+        padding: 8px 8px 0;
+      }
+      .tabs button {
+        flex: 1 1 auto;
+        padding: 9px 6px 8px;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        color: rgba(242, 231, 216, 0.62);
+        background: rgba(0, 5, 6, 0.55);
+        border: 1px solid rgba(0, 0, 0, 0.55);
+        border-bottom: none;
+        border-radius: 3px 3px 0 0;
+        cursor: pointer;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+      }
+      .tabs button:hover { color: var(--gold-bright); }
+      .tabs button[aria-selected="true"] {
+        color: var(--gold);
+        background: linear-gradient(180deg, #14161a, var(--panel));
+        border-color: rgba(243, 188, 124, 0.35);
+        box-shadow: inset 0 2px 0 var(--gold);
+      }
+
+      /* The open panel: lacquer with a hairline gold frame. */
+      .panelbox {
+        border: 1px solid rgba(243, 188, 124, 0.22);
+        border-top: none;
+        border-radius: 0 0 4px 4px;
+        background: linear-gradient(180deg, var(--panel), var(--case) 80%);
+        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+        padding: 20px 18px 8px;
+        margin-bottom: 20px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        column-gap: 26px;
+      }
+      .labgroup { margin-bottom: 8px; }
+      .labgroup > h3 {
         display: flex;
         align-items: center;
         gap: 12px;
-        margin: 0 0 14px;
-        font-size: 11px;
+        margin: 6px 0 14px;
+        font-size: 10px;
         font-weight: 600;
-        letter-spacing: 0.28em;
+        letter-spacing: 0.3em;
         text-transform: uppercase;
         color: var(--gold-dim);
       }
-      section > h2::after {
+      .labgroup > h3::after {
         content: "";
         flex: 1;
-        height: 1px;
-        background: linear-gradient(90deg, var(--rule), transparent);
+        height: 3px;
+        border-radius: 2px;
+        background: var(--wood);
+        box-shadow: inset 0 1px 0 rgba(255, 220, 170, 0.15);
+        opacity: 0.8;
       }
-      .control { display: grid; gap: 5px; margin-bottom: 15px; }
+
+      .control { display: grid; gap: 5px; margin-bottom: 16px; }
       .row { display: flex; justify-content: space-between; align-items: baseline; }
       .name { font-size: 13px; letter-spacing: 0.02em; }
       .value {
@@ -116,7 +209,7 @@
         font-size: 12px;
         color: var(--gold);
       }
-      /* The fader: a hairline track that fills with gold behind the handle. */
+      /* The fader: a hairline track that fills with gold, under a brass pin. */
       input[type="range"] {
         -webkit-appearance: none;
         appearance: none;
@@ -142,29 +235,20 @@
         height: 13px;
         margin-top: -5px;
         border-radius: 50%;
-        background: var(--gold);
+        background: radial-gradient(circle at 35% 30%, var(--gold-bright), var(--gold) 55%, #b1834e);
         border: 2px solid var(--lacquer);
-        box-shadow: 0 0 0 1px var(--gold-dim);
+        box-shadow: 0 0 0 1px var(--gold-dim), 0 1px 3px rgba(0, 0, 0, 0.7);
       }
       input[type="range"]::-moz-range-thumb {
         width: 13px;
         height: 13px;
         border-radius: 50%;
-        background: var(--gold);
+        background: radial-gradient(circle at 35% 30%, var(--gold-bright), var(--gold) 55%, #b1834e);
         border: 2px solid var(--lacquer);
-        box-shadow: 0 0 0 1px var(--gold-dim);
+        box-shadow: 0 0 0 1px var(--gold-dim), 0 1px 3px rgba(0, 0, 0, 0.7);
       }
-      details { border-top: 1px solid var(--rule); padding-top: 14px; }
-      summary {
-        font-size: 11px;
-        letter-spacing: 0.28em;
-        text-transform: uppercase;
-        color: var(--gold-dim);
-        cursor: pointer;
-      }
-      summary:hover { color: var(--gold); }
-      details > div { padding-top: 16px; }
-      .tools { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+
+      .tools { display: flex; gap: 10px; align-items: center; margin: 6px 0 14px; }
       .tools button {
         padding: 8px 14px;
         font: inherit;
@@ -190,11 +274,7 @@
         border-radius: 2px;
         font: 12px/1.45 ui-monospace, Consolas, monospace;
       }
-      .state {
-        margin: 16px 0 0;
-        font-size: 12px;
-        color: var(--muted);
-      }
+      .state { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
     </style>
   </head>
   <body>
@@ -303,42 +383,93 @@
         return wrapper;
       }
 
-      /** Groups the faders the way the plugin declares its pages. */
+      /** A grid of faders for one page. */
+      function faderGrid(parameters, current) {
+        const grid = document.createElement("div");
+        grid.className = "grid";
+        for (const parameter of parameters) {
+          grid.append(fader(parameter, current.get(parameter.index)));
+        }
+        return grid;
+      }
+
+      // The tab the player left open survives preset changes and reloads.
+      let activeTab = null;
+
+      /**
+       * The panel as tabbed pages of one instrument: the main pages each get
+       * a tab on the walnut rail, and the Lab's themed groups share one Lab
+       * tab at the end.
+       */
       function draw(schema, values) {
         const current = new Map(values.map((value) => [value.index, value.value]));
         const pages = [...(schema.pages ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
         const floats = schema.parameters.filter((p) => p.kind.type === "float");
-        controls.replaceChildren();
+        const forPage = (id) =>
+          floats
+            .filter((p) => (p.page ?? null) === id)
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
+        const tabs = [];
+        const labGroups = [];
         for (const page of pages.length ? pages : [{ id: null, name: "Voice" }]) {
-          const mine = floats.filter((p) => (p.page ?? null) === page.id);
+          const mine = forPage(page.id);
           if (!mine.length) continue;
-          mine.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-          const body = document.createElement("div");
-          for (const parameter of mine) {
-            body.append(fader(parameter, current.get(parameter.index)));
-          }
-          // The lab groups are a workbench, not part of the instrument's
-          // face: they stay folded until someone goes looking for them.
           if (page.id && page.id.startsWith("lab")) {
-            const details = document.createElement("details");
-            const summary = document.createElement("summary");
-            summary.textContent = `${page.name} · ${mine.length} controls`;
-            // Exporting the settings is a development tool: it lives with the
-            // workbench controls, not on the instrument's face.
-            if (page.id === "lab_board") {
-              body.append(exportRow());
-            }
-            details.append(summary, body);
-            controls.append(details);
+            labGroups.push({ page, mine });
           } else {
-            const section = document.createElement("section");
-            const heading = document.createElement("h2");
-            heading.textContent = page.name;
-            section.append(heading, body);
-            controls.append(section);
+            const body = document.createElement("div");
+            body.append(faderGrid(mine, current));
+            tabs.push({ id: page.id ?? "voice", name: page.name, body });
           }
         }
+        if (labGroups.length) {
+          const body = document.createElement("div");
+          for (const { page, mine } of labGroups) {
+            const group = document.createElement("div");
+            group.className = "labgroup";
+            const heading = document.createElement("h3");
+            heading.textContent = page.name.replace(/^Lab\s*·\s*/, "");
+            group.append(heading, faderGrid(mine, current));
+            body.append(group);
+          }
+          // Exporting the settings is a development tool: it lives with the
+          // workbench controls, not on the instrument's face.
+          body.append(exportRow());
+          tabs.push({ id: "lab", name: "Lab", body });
+        }
+
+        const rail = document.createElement("div");
+        rail.className = "rail";
+        const bar = document.createElement("nav");
+        bar.className = "tabs";
+        bar.setAttribute("role", "tablist");
+        rail.append(bar);
+        const panel = document.createElement("div");
+        panel.className = "panelbox";
+
+        if (!tabs.some((tab) => tab.id === activeTab)) {
+          activeTab = tabs[0]?.id ?? null;
+        }
+        const select = (id) => {
+          activeTab = id;
+          for (const tab of tabs) {
+            tab.button.setAttribute("aria-selected", String(tab.id === id));
+          }
+          const chosen = tabs.find((tab) => tab.id === id);
+          panel.replaceChildren(chosen ? chosen.body : document.createElement("div"));
+        };
+        for (const tab of tabs) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.setAttribute("role", "tab");
+          button.textContent = tab.name;
+          button.addEventListener("click", () => select(tab.id));
+          tab.button = button;
+          bar.append(button);
+        }
+        controls.replaceChildren(rail, panel);
+        select(activeTab);
       }
 
       /**

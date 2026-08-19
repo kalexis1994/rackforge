@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "rackforge-web-dev",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--dir", "web", "dev", "--host"],
-      "port": 5173
+      "name": "plugin-ui",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8123", "--directory", "plugins/concert-grand/package"],
+      "port": 8123
     }
   ]
 }

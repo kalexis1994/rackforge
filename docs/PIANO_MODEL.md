@@ -637,7 +637,24 @@ After calibration the treble attack bands sit within ~3 dB of the samples
 cost's own noise component fell from 8.24 to 6.54 dB — the metric had been
 pricing exactly this absence.
 
-### Dampers and the sustain pedal (tested)
+### Dampers, half-pedalling and sostenuto (tested)
+
+CC64 is read as the continuous control it is: a dead zone at the bottom of
+the travel, fully lifted by ~three quarters, and the span between is the
+half pedal. A damper's full fall multiplies each component's per-sample
+decay factor once; partial pressure raises that factor to the pressed
+fraction — decay continuously between free and stopped, which is what
+half-pedalling IS. The felt's light touch weighs the upper partials more
+(the harmonic number rides in each partial's slope weight), so a half
+pedal cleans the overtones and lets the fundamental sing, exactly the
+gesture pianists use it for. A moving pedal presses or relieves only the
+DIFFERENCE per voice; relieving stops the energy loss but never gives
+energy back. CC66 is the sostenuto rod: it captures exactly the dampers
+that are up at the moment it is pressed and keeps those clear until
+released, indifferent to CC64. Tests hold both: a half-pedalled release
+must sit between free and seated half a second on, and sostenuto must
+separate the captured note from a later one by 30x.
+
 
 Releasing a key drops a damper on the string: the model multiplies each
 partial's per-sample decay so the note dies in tens of milliseconds. The felt

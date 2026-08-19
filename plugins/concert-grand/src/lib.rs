@@ -654,6 +654,13 @@ struct Voice {
     /// Held by the key, or by the sustain pedal after release.
     held: bool,
     sustained: bool,
+    /// Captured by the sostenuto pedal: this voice's damper stays lifted
+    /// regardless of CC64, until CC66 releases it.
+    sostenuto: bool,
+    /// How much damper pressure has been applied to this sustained voice so
+    /// far, so a moving pedal presses or relieves only the DIFFERENCE. A
+    /// relieved damper stops removing energy; it never gives any back.
+    damper_applied: f32,
     partials: [Partial; MAX_PARTIALS],
     partial_count: usize,
     /// Hammer/soundboard thump: a decaying low-passed noise burst whose
@@ -704,6 +711,8 @@ impl Default for Voice {
             channel: 0,
             held: false,
             sustained: false,
+            sostenuto: false,
+            damper_applied: 0.0,
             partials: [Partial::default(); MAX_PARTIALS],
             partial_count: 0,
             noise_amp: 0.0,
@@ -997,6 +1006,32 @@ impl Voice {
     /// Drops the damper: the partials die fast, and the felt landing on the
     /// moving string thuds — the release noise every sampled library ships,
     /// scaled by how hard the string was still vibrating.
+    /// A partial damper press: the felt touches the string with
+    /// `delta` of its full weight (negative to relieve a lift), and the
+    /// decay rate scales by the full damper factor raised to that
+    /// fraction -- continuous between free and stopped, which is what a
+    /// half pedal IS.
+    ///
+    /// The weight is not flat across the ladder: a light touch cleans the
+    /// upper partials first and lets the fundamental sing on, which is why
+    /// half-pedalling exists at all. The harmonic number rides in the
+    /// slope weight every ladder partial already carries.
+    fn press_damper(&mut self, full_factor: f32, delta: f32) {
+        if delta.abs() < 1e-4 {
+            return;
+        }
+        for partial in &mut self.partials[..self.partial_count] {
+            let harmonic = (partial.slope.abs() * 16.0).max(1.0);
+            let weight = 0.6 + 0.4 * (harmonic / 6.0).min(1.0);
+            let factor = powf(full_factor, delta * weight).min(1.02);
+            for vertical in &mut partial.verticals {
+                vertical.damp(factor);
+            }
+            partial.horizontal.damp(factor);
+            partial.bloom.damp(factor);
+        }
+    }
+
     fn damp(
         &mut self,
         factor: f32,
@@ -1234,6 +1269,10 @@ pub struct ConcertGrand {
     /// low-passed burst, softer on the way down, heavier on release when
     /// the whole damper rail lands back on the strings.
     pedal_noise_amp: f32,
+    /// The sustain rail's current damper pressure (1 = seated, 0 = clear),
+    /// and whether the sostenuto rod is engaged.
+    pedal_pressure: f32,
+    sostenuto: bool,
     pedal_noise_lp: f32,
     pedal_noise_seed: u32,
     room_gain: [f32; ROOM_LINES],
@@ -1329,6 +1368,8 @@ impl Default for ConcertGrand {
             air_dc: [0.0; 2],
             strike_serial: 0,
             pedal_noise_amp: 0.0,
+            pedal_pressure: 1.0,
+            sostenuto: false,
             pedal_noise_lp: 0.0,
             pedal_noise_seed: 0x5EED_C0DE,
             room_gain: [0.0; ROOM_LINES],
@@ -3068,11 +3109,22 @@ impl ConcertGrand {
         let damper = self.damper_factor(note);
         let (thud_coefficient, thud_decay) = self.damper_thud();
         let release_gain = Controls::noise_gain(self.controls.release_noise);
+        let pressure = self.pedal_pressure;
         for voice in &mut self.voices {
             if voice.active && voice.note == note && voice.channel == channel && voice.held {
-                if self.pedal {
+                if self.sostenuto && voice.sostenuto {
+                    // The sostenuto rod holds THIS damper clear, whatever
+                    // the sustain pedal does.
                     voice.held = false;
                     voice.sustained = true;
+                    voice.damper_applied = 0.0;
+                } else if self.pedal {
+                    // Released into a partially lifted rail: the felt takes
+                    // the string with whatever weight the pedal leaves it.
+                    voice.held = false;
+                    voice.sustained = true;
+                    voice.damper_applied = pressure;
+                    voice.press_damper(damper, pressure);
                 } else {
                     voice.damp(damper, thud_coefficient, thud_decay, release_gain);
                 }
@@ -3080,27 +3132,88 @@ impl ConcertGrand {
         }
     }
 
-    fn set_pedal(&mut self, down: bool) {
+    /// CC64 as the continuous control it is. The bottom of the travel is
+    /// a dead zone (the rail has slack), the top is fully lifted, and the
+    /// span between is the half pedal: dampers riding the strings with
+    /// partial weight, decay continuously between free and stopped.
+    fn set_pedal_level(&mut self, level: f32) {
+        let lift = ((level - 0.08) / 0.62).clamp(0.0, 1.0);
+        let pressure = 1.0 - lift;
+        let down = lift > 0.0;
         if down != self.pedal {
-            // The pedal is a mechanism too: the rail lifts twenty dampers
-            // off the strings going down, and drops them all back at once
-            // coming up -- which is why the release is the louder of the
-            // two on every recording of pedalled playing.
+            // The rail lifts twenty dampers going down and drops them all
+            // back at once coming up -- which is why the release is the
+            // louder of the two on every recording of pedalled playing.
             let knock = (if down { 0.006 } else { 0.011 })
                 * Controls::noise_gain(self.controls.pedal_noise);
             self.pedal_noise_amp = self.pedal_noise_amp.max(knock);
         }
         self.pedal = down;
-        if !down {
-            let (thud_coefficient, thud_decay) = self.damper_thud();
+        self.pedal_pressure = pressure;
+        let (thud_coefficient, thud_decay) = self.damper_thud();
         let release_gain = Controls::noise_gain(self.controls.release_noise);
-            let release_gain = Controls::noise_gain(self.controls.release_noise);
-            let rate = self.sample_rate;
+        let rate = self.sample_rate;
+        for voice in &mut self.voices {
+            if !(voice.active && voice.sustained) {
+                continue;
+            }
+            if self.sostenuto && voice.sostenuto {
+                continue;
+            }
+            if pressure >= 0.98 {
+                // Seated: the legacy full damp, note over.
+                let damper = Self::damper_for(voice.note, rate);
+                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
+                voice.damper_applied = 0.0;
+            } else {
+                let delta = pressure - voice.damper_applied;
+                let damper = Self::damper_for(voice.note, rate);
+                voice.press_damper(damper, delta);
+                voice.damper_applied = pressure;
+            }
+        }
+    }
+
+    /// CC66: the sostenuto rod catches exactly the dampers that are up at
+    /// the moment it is pressed -- the notes currently held -- and keeps
+    /// those clear until it is released, indifferent to CC64.
+    fn set_sostenuto(&mut self, down: bool) {
+        if down == self.sostenuto {
+            return;
+        }
+        self.sostenuto = down;
+        let knock = 0.004 * Controls::noise_gain(self.controls.pedal_noise);
+        self.pedal_noise_amp = self.pedal_noise_amp.max(knock);
+        if down {
             for voice in &mut self.voices {
-                if voice.active && voice.sustained {
-                    let damper = Self::damper_for(voice.note, rate);
-                    voice.damp(damper, thud_coefficient, thud_decay, release_gain);
+                if voice.active && voice.held {
+                    voice.sostenuto = true;
                 }
+            }
+            return;
+        }
+        // Released: every captured note falls into whatever the sustain
+        // pedal is doing right now.
+        let (thud_coefficient, thud_decay) = self.damper_thud();
+        let release_gain = Controls::noise_gain(self.controls.release_noise);
+        let rate = self.sample_rate;
+        let pressure = self.pedal_pressure;
+        for voice in &mut self.voices {
+            if !(voice.active && voice.sostenuto) {
+                continue;
+            }
+            voice.sostenuto = false;
+            if voice.held || !voice.sustained {
+                continue;
+            }
+            if self.pedal && pressure < 0.98 {
+                let damper = Self::damper_for(voice.note, rate);
+                voice.press_damper(damper, pressure - voice.damper_applied);
+                voice.damper_applied = pressure;
+            } else {
+                let damper = Self::damper_for(voice.note, rate);
+                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
+                voice.damper_applied = 0.0;
             }
         }
     }
@@ -3125,7 +3238,8 @@ impl ConcertGrand {
             0x90 if data[2] > 0 => self.start_voice(channel, data[1] & 0x7f, data[2] & 0x7f),
             0x80 | 0x90 => self.release(channel, data[1] & 0x7f),
             0xb0 => match data[1] {
-                64 => self.set_pedal(data[2] >= 64),
+                64 => self.set_pedal_level(data[2] as f32 / 127.0),
+                66 => self.set_sostenuto(data[2] >= 64),
                 67 => self.soft = data[2] >= 64,
                 120 | 123 => self.all_notes_off(),
                 _ => {}
@@ -4447,6 +4561,65 @@ mod tests {
             println!("vel {velocity}: centroide {cent:.0} Hz, {} parciales", voice.partial_count);
             println!("  {rows}");
         }
+    }
+
+    #[test]
+    fn half_pedal_decays_between_free_and_stopped() {
+        // Three copies of the same note, released into three rail
+        // positions: fully lifted, half, seated. Half a second later the
+        // half-pedalled note must sit between the other two.
+        let mut energies = [0.0f32; 3];
+        for (slot, cc) in energies.iter_mut().zip([127u8, 55, 0]) {
+            let mut piano = prepared();
+            let pedal = MidiEvent { frame: 0, data: [0xb0, 64, cc], length: 3 };
+            render(&mut piano, 64, &[pedal, note_on(48, 110)]);
+            render(&mut piano, (FS * 0.3) as usize, &[]);
+            render(&mut piano, 64, &[note_off(48)]);
+            render(&mut piano, (FS * 0.5) as usize, &[]);
+            *slot = energy(&render(&mut piano, 1600, &[]));
+        }
+        let [lifted, half, seated] = energies;
+        assert!(
+            lifted > half * 3.0,
+            "half pedal is not quieter than the open rail: {lifted} vs {half}"
+        );
+        assert!(
+            half > seated * 3.0,
+            "half pedal is not louder than the seated damper: {half} vs {seated}"
+        );
+    }
+
+    #[test]
+    fn sostenuto_holds_only_what_was_down_when_it_was_pressed() {
+        let mut piano = prepared();
+        // C3 is held when the rod is pressed; E3 comes later.
+        render(&mut piano, 64, &[note_on(48, 110)]);
+        let sostenuto_on = MidiEvent { frame: 0, data: [0xb0, 66, 127], length: 3 };
+        render(&mut piano, 64, &[sostenuto_on]);
+        render(&mut piano, 64, &[note_on(52, 110)]);
+        render(&mut piano, (FS * 0.2) as usize, &[]);
+        render(&mut piano, 64, &[note_off(48), note_off(52)]);
+        render(&mut piano, (FS * 0.4) as usize, &[]);
+        let mut held = 0.0f32;
+        let mut dropped = 0.0f32;
+        for voice in piano.voices.iter().filter(|v| v.active) {
+            let mut total = 0.0;
+            for partial in &voice.partials[..voice.partial_count] {
+                total += partial.verticals[0].magnitude_squared()
+                    + partial.verticals[1].magnitude_squared()
+                    + partial.verticals[2].magnitude_squared();
+            }
+            if voice.note == 48 {
+                held = held.max(total);
+            }
+            if voice.note == 52 {
+                dropped = dropped.max(total);
+            }
+        }
+        assert!(
+            held > dropped * 30.0,
+            "sostenuto did not separate the captured note: held {held} vs dropped {dropped}"
+        );
     }
 
     #[test]

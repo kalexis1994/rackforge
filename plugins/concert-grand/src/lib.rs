@@ -3251,61 +3251,44 @@ impl Processor for ConcertGrand {
     }
 
     fn load_preset(&mut self, id: &str) -> bool {
+        // Every voicing BUILDS ON the factory default -- the lab
+        // refinements, the noise levels and the calibration the user's ear
+        // chose are the house sound, and a preset only moves what makes it
+        // itself. These used to hard-code lab: [0.5; ..], so selecting any
+        // of them (or the session restoring one at boot) silently erased
+        // the baked voicing, which read as "my values were not applied".
         self.controls = match id {
             "concert" => Controls::default(),
-            // A mellow piano is also a mellow ROOM: softer surfaces, the
-            // pair a step further back, a ribbon-ward pattern.
+            // Mellow: darker hammer, longer room, the pair a step back,
+            // ribbon-ward pattern.
             "mellow" => Controls {
                 brightness: 0.28,
                 dynamics: 0.5,
                 unison: 0.55,
                 decay: 0.55,
                 width: 0.6,
-                level: 0.7,
-                lab: [0.5; LAB_COUNT],
                 room_size: 0.55,
                 room_hardness: 0.3,
                 mic_distance: 0.45,
                 mic_pattern: 0.8,
-                action_noise: 0.5,
-                release_noise: 0.5,
-                pedal_noise: 0.5,
+                ..Controls::default()
             },
-            // Bright: a harder, livelier hall, closer cardioids.
+            // Bright: harder felt, a livelier hall, closer cardioids.
             "bright" => Controls {
                 brightness: 0.8,
                 dynamics: 0.75,
                 unison: 0.45,
                 decay: 0.45,
                 width: 0.75,
-                level: 0.68,
-                lab: [0.5; LAB_COUNT],
                 room_size: 0.55,
                 room_hardness: 0.7,
                 mic_distance: 0.3,
                 mic_pattern: 0.5,
-                action_noise: 0.5,
-                release_noise: 0.5,
-                pedal_noise: 0.5,
+                ..Controls::default()
             },
-            // Intimate: a small damped room, the pair right at the rim,
-            // enough gradient in the pattern for the proximity warmth.
-            "intimate" => Controls {
-                brightness: 0.4,
-                dynamics: 0.45,
-                unison: 0.65,
-                decay: 0.35,
-                width: 0.35,
-                level: 0.72,
-                lab: [0.5; LAB_COUNT],
-                room_size: 0.22,
-                room_hardness: 0.35,
-                mic_distance: 0.08,
-                mic_pattern: 0.6,
-                action_noise: 0.5,
-                release_noise: 0.5,
-                pedal_noise: 0.5,
-            },
+            // Intimate: the default IS the intimate voicing now; this keeps
+            // its own name for the day the default moves elsewhere.
+            "intimate" => Controls::default(),
             _ => return false,
         };
         self.room_dirty = true;

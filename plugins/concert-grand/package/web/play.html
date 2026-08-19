@@ -528,12 +528,16 @@
         }
         presets.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
         voicing.replaceChildren();
+        // The factory voicing shows as chosen from the start: an untouched
+        // instrument IS the Concert Grand, and a panel where nothing looks
+        // selected reads as broken.
+        const initial = presets[0]?.id;
         for (const preset of presets) {
           const button = document.createElement("button");
           button.type = "button";
           button.textContent = preset.name ?? preset.id;
           button.title = preset.description ?? "";
-          button.setAttribute("aria-pressed", "false");
+          button.setAttribute("aria-pressed", String(preset.id === initial));
           button.addEventListener("click", async () => {
             try {
               await call("plugin.select_sound", { sound_id: preset.id });

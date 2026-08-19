@@ -59,4 +59,16 @@ fn the_packaged_instrument_can_start() {
     instance
         .process_interleaved_with_midi(&[], &mut output, 512, &[])
         .expect("the instrument must render a block");
+
+    // The factory defaults must arrive THROUGH the wasm, not only in the
+    // native build the other guard checks. A panel showing 0.50 where the
+    // source says 0.52 means a stale artifact somewhere in the pipeline,
+    // and this is the first place that can see it.
+    let felt_corner = instance
+        .get_parameter(6)
+        .expect("the instrument must answer for parameter 6");
+    assert!(
+        (felt_corner - 0.52).abs() < 1e-6,
+        "wasm default for felt corner is {felt_corner}, expected 0.52"
+    );
 }

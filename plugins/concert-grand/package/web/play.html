@@ -326,6 +326,20 @@
       let nextRequest = 1;
 
       const controls = document.getElementById("controls");
+      // The workbench tools are for development, not the instrument's face:
+      // they exist only with ?dev=1 in the URL, or after Ctrl+Shift+D
+      // (remembered by the panel until toggled off the same way).
+      let devMode =
+        new URLSearchParams(location.search).has("dev") ||
+        localStorage.getItem("cg-dev") === "1";
+      window.addEventListener("keydown", (event) => {
+        if (event.ctrlKey && event.shiftKey && event.code === "KeyD") {
+          devMode = !devMode;
+          localStorage.setItem("cg-dev", devMode ? "1" : "0");
+          state.textContent = devMode ? "Dev tools ON" : "Dev tools OFF";
+          void load(false);
+        }
+      });
       const voicing = document.getElementById("voicing");
       const state = document.getElementById("state");
 
@@ -457,9 +471,11 @@
             group.append(heading, faderGrid(mine, current));
             body.append(group);
           }
-          // Exporting the settings is a development tool: it lives with the
-          // workbench controls, not on the instrument's face.
-          body.append(exportRow());
+          // Exporting the settings is a development tool: it lives with
+          // the workbench controls, and only in dev mode.
+          if (devMode) {
+            body.append(exportRow());
+          }
           tabs.push({ id: "lab", name: "Lab", body });
         }
 
@@ -565,8 +581,21 @@
           const parameters = await call("plugin.parameters");
           const values = new Map((parameters.values ?? []).map((v) => [v.index, v.value]));
           const out = {};
+          // Which build these numbers mean: the host stamps the package
+          // version onto this page's URL.
+          const stamp = new URLSearchParams(location.search).get("v");
+          if (stamp) out._version = stamp;
+          // The union of everything: every declared parameter, and any live
+          // value the schema does not know (so nothing can be missing).
+          const seen = new Set();
           for (const p of parameters.schema.parameters) {
             out[p.id ?? p.name] = Number((values.get(p.index) ?? p.kind.default).toFixed(3));
+            seen.add(p.index);
+          }
+          for (const [index, value] of values) {
+            if (!seen.has(index)) {
+              out[`param_${index}`] = Number(value.toFixed(3));
+            }
           }
           const text = JSON.stringify(out, null, 1);
           dump.style.display = "block";

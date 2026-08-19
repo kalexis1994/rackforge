@@ -1205,9 +1205,17 @@ Stated so nobody mistakes silence for coverage:
   the flutter of fast repetition, emergent. Only a voice already under a
   damper (its decay rates scaled) takes the legacy ease-out-and-strike-fresh
   path, because a scaled rate cannot be honestly un-scaled.
-* **String-to-string energy flow.** The sympathetic halo shadows new strikes
-  under the pedal; energy does not move between strings that are already
-  sounding, and catching the pedal late adds nothing.
+* ~~String-to-string energy flow~~ — DONE for sounding strings: every free
+  string receives the previous sample's total bridge signal (everyone but
+  itself), weighted by its own drain coupling — reciprocity — and scaled by
+  the Sympathy control. A rotating phasor fed a broadband signal IS a driven
+  resonator: coinciding partials accumulate, everything else averages out.
+  The damper gates it continuously (a half-pressed damper takes a string
+  halfway out of the conversation). Tested: a pianissimo C4 two seconds in
+  carries measurably more energy when a fortissimo C3 rings under it with
+  the pedal down. Still not modelled: strings with NO sounding voice (a
+  silent key or a late pedal wakes nothing discrete — the open-register
+  statistics still cover that wash).
 
 A broad survey of these techniques and their trade-offs: B. Bank, F. Avanzini,
 G. Borin, G. De Poli, F. Fontana, D. Rocchesso, "Physically informed signal

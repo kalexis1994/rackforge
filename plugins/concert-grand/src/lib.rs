@@ -650,6 +650,20 @@ const PIANO_LATERAL_SPREAD_M: f32 = 1.3;
 /// Per-voice delay line length: covers the worst-case interchannel delay
 /// (0.9 m spacing, source on axis end, close pair) at up to 96 kHz.
 const VOICE_DELAY: usize = 256;
+/// How strongly the bridge's motion drives every OTHER free string, per
+/// sample, on top of each partial's own coupling weight.
+///
+/// This is the reciprocal half of the drain: the bridge takes energy from
+/// the coherent configuration, and the same motion pushes every string
+/// whose damper is clear. Each partial is a rotating phasor, so feeding it
+/// a small fraction of the global bridge signal IS a driven resonator --
+/// content at its own frequency accumulates, everything else averages out.
+/// Resonant transfer between sounding strings falls out of phase alone:
+/// the octave under a pedalled bass blooms, coinciding partials fuse and
+/// beat. A voice never receives its own output (no self-excitation), and
+/// cross-voice loop gain goes as the square of this small number, well
+/// under the drain.
+const SYMPATHY_RATE: f32 = 0.004;
 /// One-pole coefficient for the high-pass on everything entering the lid and
 /// the chamber, at 44.1 kHz. The corner is the board's own radiation corner:
 /// the air is driven by what the board radiates, not by what the strings do.
@@ -696,6 +710,9 @@ struct Voice {
     /// written here once and each microphone reads its own tap.
     pair: [f32; VOICE_DELAY],
     pair_write: usize,
+    /// This voice's previous output sample, so the sympathetic feed can be
+    /// everyone-but-me without a second pass.
+    last_out: f32,
     pair_left: usize,
     pair_right: usize,
     /// Duplex-scale components: the string segments behind the bridge have
@@ -749,6 +766,7 @@ impl Default for Voice {
             pan_right: 0.0,
             pair: [0.0; VOICE_DELAY],
             pair_write: 0,
+            last_out: 0.0,
             pair_left: 0,
             pair_right: 0,
             duplex: [Component::default(); 2],
@@ -770,7 +788,7 @@ impl Default for Voice {
 impl Voice {
     /// Renders one mono sample and advances every live component.
     #[inline(always)]
-    fn tick(&mut self) -> f32 {
+    fn tick(&mut self, sympathy: f32) -> f32 {
         let mut sum = 0.0;
         // The tension the string is under RIGHT NOW, taken from the partials
         // that carry the energy.
@@ -785,6 +803,13 @@ impl Voice {
         // bank has little gain.
         let mut slope = 0.0f32;
         for partial in self.partials[..self.partial_count].iter_mut() {
+            // The bridge pushes back: every free string is a driven
+            // resonator riding the rest of the instrument, weighted by the
+            // same coupling its drain uses -- reciprocity again.
+            if sympathy != 0.0 {
+                let push = sympathy * partial.coupling;
+                partial.verticals[0].s += push;
+            }
             let voice = partial.verticals[0].tick()
                 + partial.verticals[1].tick()
                 + partial.verticals[2].tick()
@@ -1299,6 +1324,9 @@ pub struct ConcertGrand {
     /// and whether the sostenuto rod is engaged.
     pedal_pressure: f32,
     sostenuto: bool,
+    /// Last sample's total string signal, carried across block boundaries
+    /// for the sympathetic feed.
+    bridge_feed: f32,
     pedal_noise_lp: f32,
     pedal_noise_seed: u32,
     room_gain: [f32; ROOM_LINES],
@@ -1396,6 +1424,7 @@ impl Default for ConcertGrand {
             pedal_noise_amp: 0.0,
             pedal_pressure: 1.0,
             sostenuto: false,
+            bridge_feed: 0.0,
             pedal_noise_lp: 0.0,
             pedal_noise_seed: 0x5EED_C0DE,
             room_gain: [0.0; ROOM_LINES],
@@ -3677,6 +3706,12 @@ impl Processor for ConcertGrand {
             self.tune_room();
         }
         let level = self.controls.level * self.controls.level;
+        // The sympathetic feed: the bridge's total string signal from the
+        // PREVIOUS sample, handed to every free string this sample. One
+        // sample of latency around the loop keeps the order of voices
+        // meaningless and the feedback explicit.
+        let sympathy_rate = SYMPATHY_RATE * self.controls.lab(15).min(4.0);
+        let mut bridge_feed = self.bridge_feed;
         let mut midi_index = 0;
         let mut parameter_index = 0;
 
@@ -3698,11 +3733,26 @@ impl Processor for ConcertGrand {
 
             let mut left = 0.0;
             let mut right = 0.0;
+            let mut strings_total = 0.0f32;
             for voice in &mut self.voices {
                 if !voice.active {
                     continue;
                 }
-                let sample = voice.tick();
+                // Everyone but me, gated by the damper: a seated or
+                // pressed damper takes a string out of the conversation
+                // exactly as far as it is pressed.
+                let free = if voice.held {
+                    1.0
+                } else if voice.sustained {
+                    1.0 - voice.damper_applied
+                } else {
+                    0.0
+                };
+                let sympathy =
+                    (bridge_feed - voice.last_out) * sympathy_rate * free;
+                let sample = voice.tick(sympathy);
+                voice.last_out = sample;
+                strings_total += sample;
                 // The spaced pair: one write, two reads. The nearer
                 // microphone hears this string first; the delay is geometry
                 // fixed at note-on, so there is nothing to interpolate.
@@ -3728,6 +3778,7 @@ impl Processor for ConcertGrand {
                 }
             }
 
+            bridge_feed = strings_total;
             // Everything the strings produce radiates through the board.
             let excitation = left + right;
             let mut board_left = 0.0;
@@ -3957,6 +4008,7 @@ impl Processor for ConcertGrand {
                 }
             }
         }
+        self.bridge_feed = bridge_feed;
     }
 }
 
@@ -4716,6 +4768,45 @@ mod tests {
             println!("vel {velocity}: centroide {cent:.0} Hz, {} parciales", voice.partial_count);
             println!("  {rows}");
         }
+    }
+
+    #[test]
+    fn a_loud_bass_feeds_a_quiet_octave_through_the_bridge() {
+        // C3 fortissimo under a pianissimo C4, pedal down: the bass's
+        // second partial sits on the treble note's fundamental and must
+        // FEED it through the bridge. Against the same C4 alone, its voice
+        // must carry more energy two seconds in.
+        let late_energy = |with_bass: bool| -> f32 {
+            let mut piano = prepared();
+            let pedal = MidiEvent { frame: 0, data: [0xb0, 64, 127], length: 3 };
+            let mut opening = vec![pedal, note_on(60, 30)];
+            if with_bass {
+                opening.push(note_on(48, 120));
+            }
+            render(&mut piano, 64, &opening);
+            render(&mut piano, (FS * 2.0) as usize, &[]);
+            piano
+                .voices
+                .iter()
+                .filter(|v| v.active && !v.halo && v.note == 60)
+                .map(|v| {
+                    v.partials[..v.partial_count]
+                        .iter()
+                        .map(|p| {
+                            p.verticals[0].magnitude_squared()
+                                + p.verticals[1].magnitude_squared()
+                                + p.verticals[2].magnitude_squared()
+                        })
+                        .sum::<f32>()
+                })
+                .sum()
+        };
+        let alone = late_energy(false);
+        let fed = late_energy(true);
+        assert!(
+            fed > alone * 1.15,
+            "the bridge fed nothing: alone {alone} vs under the bass {fed}"
+        );
     }
 
     #[test]

@@ -2,33 +2,33 @@
   "schema_version": 1,
   "pages": [
     {
-      "id": "hammer",
-      "name": "Hammer",
+      "id": "sound",
+      "name": "Sound",
       "order": 0
-    },
-    {
-      "id": "strings",
-      "name": "Strings",
-      "order": 1
-    },
-    {
-      "id": "output",
-      "name": "Output",
-      "order": 2
-    },
-    {
-      "id": "lab",
-      "name": "Lab",
-      "order": 3
     },
     {
       "id": "room",
       "name": "Room & Microphones",
+      "order": 1
+    },
+    {
+      "id": "noises",
+      "name": "Action & Noises",
+      "order": 2
+    },
+    {
+      "id": "lab_strike",
+      "name": "Lab · Strike",
+      "order": 3
+    },
+    {
+      "id": "lab_strings",
+      "name": "Lab · Strings",
       "order": 4
     },
     {
-      "id": "action",
-      "name": "Action",
+      "id": "lab_board",
+      "name": "Lab · Board & Air",
       "order": 5
     }
   ],
@@ -37,7 +37,7 @@
       "index": 0,
       "id": "brightness",
       "name": "Brightness",
-      "page": "hammer",
+      "page": "sound",
       "order": 0,
       "kind": {
         "type": "float",
@@ -58,7 +58,7 @@
       "index": 1,
       "id": "dynamics",
       "name": "Dynamics",
-      "page": "hammer",
+      "page": "sound",
       "order": 1,
       "kind": {
         "type": "float",
@@ -79,7 +79,7 @@
       "index": 2,
       "id": "unison",
       "name": "Unison",
-      "page": "strings",
+      "page": "sound",
       "order": 2,
       "kind": {
         "type": "float",
@@ -100,7 +100,7 @@
       "index": 3,
       "id": "decay",
       "name": "Decay",
-      "page": "strings",
+      "page": "sound",
       "order": 3,
       "kind": {
         "type": "float",
@@ -120,8 +120,8 @@
     {
       "index": 4,
       "id": "width",
-      "name": "Width",
-      "page": "output",
+      "name": "Stereo Width",
+      "page": "room",
       "order": 4,
       "kind": {
         "type": "float",
@@ -142,8 +142,8 @@
       "index": 5,
       "id": "level",
       "name": "Level",
-      "page": "output",
-      "order": 5,
+      "page": "sound",
+      "order": 4,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -163,7 +163,7 @@
       "index": 6,
       "id": "lab_felt_corner",
       "name": "Felt Corner",
-      "page": "lab",
+      "page": "lab_strike",
       "order": 0,
       "kind": {
         "type": "float",
@@ -177,8 +177,8 @@
       "index": 7,
       "id": "lab_treble_life",
       "name": "Treble Life",
-      "page": "lab",
-      "order": 1,
+      "page": "lab_board",
+      "order": 0,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -190,9 +190,9 @@
     {
       "index": 8,
       "id": "lab_thump",
-      "name": "Thump",
-      "page": "lab",
-      "order": 2,
+      "name": "Thud Colour (low)",
+      "page": "noises",
+      "order": 3,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -204,9 +204,9 @@
     {
       "index": 9,
       "id": "lab_chiff",
-      "name": "Chiff",
-      "page": "lab",
-      "order": 3,
+      "name": "Click Colour (bright)",
+      "page": "noises",
+      "order": 4,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -219,8 +219,8 @@
       "index": 10,
       "id": "lab_clang",
       "name": "Clang",
-      "page": "lab",
-      "order": 4,
+      "page": "lab_strings",
+      "order": 0,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -233,8 +233,8 @@
       "index": 11,
       "id": "lab_phantoms",
       "name": "Phantoms",
-      "page": "lab",
-      "order": 5,
+      "page": "lab_strings",
+      "order": 1,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -247,8 +247,8 @@
       "index": 12,
       "id": "lab_hf_floor",
       "name": "HF Floor",
-      "page": "lab",
-      "order": 6,
+      "page": "lab_strike",
+      "order": 1,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -261,8 +261,8 @@
       "index": 13,
       "id": "lab_hammer_hard",
       "name": "Hammer Hard",
-      "page": "lab",
-      "order": 7,
+      "page": "lab_strike",
+      "order": 2,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -275,8 +275,8 @@
       "index": 14,
       "id": "lab_hammer_mass",
       "name": "Hammer Mass",
-      "page": "lab",
-      "order": 8,
+      "page": "lab_strike",
+      "order": 3,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -289,8 +289,8 @@
       "index": 15,
       "id": "lab_bloom",
       "name": "Bloom",
-      "page": "lab",
-      "order": 9,
+      "page": "lab_strike",
+      "order": 4,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -303,8 +303,8 @@
       "index": 16,
       "id": "lab_glide",
       "name": "Glide",
-      "page": "lab",
-      "order": 10,
+      "page": "lab_strings",
+      "order": 2,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -317,8 +317,8 @@
       "index": 17,
       "id": "lab_prompt_decay",
       "name": "Prompt Decay",
-      "page": "lab",
-      "order": 11,
+      "page": "lab_strings",
+      "order": 3,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -331,8 +331,8 @@
       "index": 18,
       "id": "lab_tail",
       "name": "Tail",
-      "page": "lab",
-      "order": 12,
+      "page": "lab_strings",
+      "order": 4,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -345,8 +345,8 @@
       "index": 19,
       "id": "lab_detune",
       "name": "Detune",
-      "page": "lab",
-      "order": 13,
+      "page": "lab_strings",
+      "order": 5,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -359,8 +359,8 @@
       "index": 20,
       "id": "lab_board",
       "name": "Board",
-      "page": "lab",
-      "order": 14,
+      "page": "lab_board",
+      "order": 1,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -373,8 +373,8 @@
       "index": 21,
       "id": "lab_sympathy",
       "name": "Sympathy",
-      "page": "lab",
-      "order": 15,
+      "page": "lab_board",
+      "order": 2,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -386,9 +386,9 @@
     {
       "index": 22,
       "id": "lab_air",
-      "name": "Air",
-      "page": "lab",
-      "order": 16,
+      "name": "Ambience Level",
+      "page": "room",
+      "order": 5,
       "kind": {
         "type": "float",
         "minimum": 0.0,
@@ -457,7 +457,7 @@
       "index": 27,
       "id": "action_noise",
       "name": "Action Noise",
-      "page": "action",
+      "page": "noises",
       "order": 0,
       "kind": {
         "type": "float",
@@ -471,7 +471,7 @@
       "index": 28,
       "id": "release_noise",
       "name": "Release Noise",
-      "page": "action",
+      "page": "noises",
       "order": 1,
       "kind": {
         "type": "float",
@@ -485,7 +485,7 @@
       "index": 29,
       "id": "pedal_noise",
       "name": "Pedal Noise",
-      "page": "action",
+      "page": "noises",
       "order": 2,
       "kind": {
         "type": "float",

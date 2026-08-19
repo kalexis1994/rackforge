@@ -318,15 +318,17 @@
           for (const parameter of mine) {
             body.append(fader(parameter, current.get(parameter.index)));
           }
-          // The lab is a workbench, not part of the instrument's face: it
-          // stays folded until someone goes looking for it.
-          if (page.id === "lab") {
+          // The lab groups are a workbench, not part of the instrument's
+          // face: they stay folded until someone goes looking for them.
+          if (page.id && page.id.startsWith("lab")) {
             const details = document.createElement("details");
             const summary = document.createElement("summary");
             summary.textContent = `${page.name} · ${mine.length} controls`;
             // Exporting the settings is a development tool: it lives with the
             // workbench controls, not on the instrument's face.
-            body.append(exportRow());
+            if (page.id === "lab_board") {
+              body.append(exportRow());
+            }
             details.append(summary, body);
             controls.append(details);
           } else {

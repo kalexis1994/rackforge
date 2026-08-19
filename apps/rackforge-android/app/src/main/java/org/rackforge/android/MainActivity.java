@@ -277,12 +277,19 @@ public final class MainActivity extends Activity {
             }
         });
         setNativeOutputGain(outputGainDb);
+        if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
         webView = new WebView(this);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
-        settings.setDomStorageEnabled(false);
+        // Plugin panels persist user presets in localStorage; with DOM
+        // storage disabled the mere ACCESS throws SecurityError and a
+        // panel's module dies before it can even say hello -- the eternal
+        // "Connecting to RackForge".
+        settings.setDomStorageEnabled(true);
         webView.setBackgroundColor(0xFF050F16);
         // Chromium emits its own long-press vibration for selection/context
         // gestures. RackForge owns those gestures, so keep native automatic

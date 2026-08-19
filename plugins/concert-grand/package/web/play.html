@@ -502,13 +502,22 @@
       // The workbench tools are for development, not the instrument's face:
       // they exist only with ?dev=1 in the URL, or after Ctrl+Shift+D
       // (remembered by the panel until toggled off the same way).
+      // A host may deny storage entirely; the panel must still play.
+      const storage = {
+        get(key) {
+          try { return localStorage.getItem(key); } catch { return null; }
+        },
+        set(key, value) {
+          try { localStorage.setItem(key, value); } catch { /* volatile */ }
+        },
+      };
       let devMode =
         new URLSearchParams(location.search).has("dev") ||
-        localStorage.getItem("cg-dev") === "1";
+        storage.get("cg-dev") === "1";
       window.addEventListener("keydown", (event) => {
         if (event.ctrlKey && event.shiftKey && event.code === "KeyD") {
           devMode = !devMode;
-          localStorage.setItem("cg-dev", devMode ? "1" : "0");
+          storage.set("cg-dev", devMode ? "1" : "0");
           state.textContent = devMode ? "Dev tools ON" : "Dev tools OFF";
           void load(false);
         }
@@ -697,13 +706,13 @@
 
       function userPresets() {
         try {
-          return JSON.parse(localStorage.getItem(STORE_KEY) ?? "[]");
+          return JSON.parse(storage.get(STORE_KEY) ?? "[]");
         } catch {
           return [];
         }
       }
       function saveUserPresets(list) {
-        localStorage.setItem(STORE_KEY, JSON.stringify(list));
+        storage.set(STORE_KEY, JSON.stringify(list));
       }
 
       async function currentValues() {

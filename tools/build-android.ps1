@@ -36,6 +36,16 @@ if (-not (Test-Path -LiteralPath $ndkRoot)) {
     throw "Android NDK 27.0.12077973 not found below $sdkRoot."
 }
 
+# The Concert Grand ships inside the APK, exactly like the desktop bundle.
+$bundledPlugin = Join-Path $repository "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+$assetDirectory = Join-Path $androidProject "app/src/main/assets/bundled-plugins"
+if (Test-Path -LiteralPath $bundledPlugin) {
+    New-Item -ItemType Directory -Force $assetDirectory | Out-Null
+    Copy-Item $bundledPlugin (Join-Path $assetDirectory "RackForge-Concert-Grand.rfplugin") -Force
+} else {
+    Write-Warning "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin not found; the APK ships without the bundled piano."
+}
+
 $env:JAVA_HOME = $jdkRoot
 $env:ANDROID_HOME = $sdkRoot
 $env:ANDROID_SDK_ROOT = $sdkRoot

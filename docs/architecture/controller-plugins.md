@@ -87,9 +87,18 @@ does everywhere else: the plugin manager, a card with the CONTROLLER
 tag, opening a panel derived from the settings schema (color kind →
 preview plus RGB bars, 200 ms debounce). Only the runtime differs --
 the catalog reports `InProcess`, and applying a setting maps it onto
-the shared protocol crate directly instead of a watched file. Process
-drivers arrive with `wasm-v1`, which is also what community controllers
-need on Android.
+the shared protocol crate directly instead of a watched file. Android also has command-line install parity: the **install inbox**.
+`adb push` a package into
+`Android/data/org.rackforge.android/files/install/` -- an `.rfplugin`
+file, or an `.rfcontroller` directory carrying its manifest -- and
+restart the app; entries install and are consumed. It is the same job
+`--install-plugin` / `--install-controller` do on the desktop. And the
+Concert Grand ships inside the APK (staged by `build-android.ps1` from
+`dist/bundled-plugins/`) and installs itself at boot, auto-activating
+when nothing else is active -- a freshly provisioned device makes sound
+out of the box, which every platform owes its user. Process drivers
+arrive with `wasm-v1`, which is also what community controllers need on
+Android.
 
 Still next: the hardcoded KeyLab library leaves the desktop entirely
 (the yield flag and the built-in display path become dead code once the

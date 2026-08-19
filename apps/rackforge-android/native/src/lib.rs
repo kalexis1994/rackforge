@@ -2008,6 +2008,54 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_ensureBundledCont
     result_string(&mut env, result)
 }
 
+/// Installs a controller package directory into the store: the same job
+/// `--install-controller` performs on the desktop, reachable from adb via
+/// the app's install inbox. Local packages carry official trust.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerInstallDirectory(
+    mut env: JNIEnv,
+    _class: JClass,
+    store_root: JString,
+    package_dir: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let store_root: String = env
+            .get_string(&store_root)
+            .context("reading controller store root")?
+            .into();
+        let package_dir: String = env
+            .get_string(&package_dir)
+            .context("reading controller package path")?
+            .into();
+        let store = rackforge_controller_package::PackageStore::new(PathBuf::from(store_root));
+        match store.install_directory(
+            PathBuf::from(&package_dir),
+            rackforge_controller_package::PackageTrust::Official,
+        ) {
+            Ok(installed) => Ok(serde_json::json!({
+                "status": "ok",
+                "id": installed.record.id,
+                "version": installed.record.version,
+                "already_installed": false,
+            })
+            .to_string()),
+            Err(error) => {
+                let text = error.to_string();
+                if text.contains("already installed") {
+                    Ok(serde_json::json!({
+                        "status": "ok",
+                        "already_installed": true,
+                    })
+                    .to_string())
+                } else {
+                    Err(anyhow::anyhow!("installing controller package: {text}"))
+                }
+            }
+        }
+    })();
+    result_string(&mut env, result)
+}
+
 /// The installed controllers with their settings schema and current values:
 /// the same JSON shape `GET /api/v1/controllers` serves on the desktop.
 #[unsafe(no_mangle)]

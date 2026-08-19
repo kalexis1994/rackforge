@@ -214,6 +214,7 @@ public final class MainActivity extends Activity {
     private static native String ensureBundledControllers(String storeRoot);
     private static native String controllerCatalog(String storeRoot);
     private static native String controllerApplySettings(String storeRoot, String controllerId, String valuesJson);
+    private static native String controllerInstallDirectory(String storeRoot, String packageDir);
     private static native boolean startNativeAudio(int deviceId, int latencyMode);
     private static native void setNativeOutputGain(int gainDb);
     static native void stopNativeAudio();
@@ -261,6 +262,20 @@ public final class MainActivity extends Activity {
         } catch (Throwable error) {
             Log.w("RackForge", "Bundled controller install failed", error);
         }
+        // Bundled-plugin install and the inbox run after onCreate finishes:
+        // activation touches the WebView, which does not exist yet here.
+        mainHandler.post(() -> {
+            try {
+                processInstallInbox();
+            } catch (Throwable error) {
+                Log.w("RackForge", "Install inbox failed", error);
+            }
+            try {
+                ensureBundledPlugin();
+            } catch (Throwable error) {
+                Log.w("RackForge", "Bundled plugin install failed", error);
+            }
+        });
         setNativeOutputGain(outputGainDb);
         webView = new WebView(this);
         WebSettings settings = webView.getSettings();
@@ -2640,6 +2655,98 @@ public final class MainActivity extends Activity {
         String safeResource = resourceId.replaceAll("[^A-Za-z0-9._-]", "_");
         return new File(pluginDataRoot(),
                 "resources/" + safePlugin + "/" + safeResource + ".resource");
+    }
+
+    // The Concert Grand ships inside the APK and installs itself on first
+    // boot, exactly like the desktop's bundled default plugin. The install
+    // descriptor's already_installed flag makes this idempotent.
+    private void ensureBundledPlugin() throws Exception {
+        java.io.File temporary = new java.io.File(getCacheDir(), "bundled-concert-grand.rfplugin");
+        try (java.io.InputStream in = getAssets().open("bundled-plugins/RackForge-Concert-Grand.rfplugin");
+             java.io.OutputStream out = new java.io.FileOutputStream(temporary)) {
+            byte[] buffer = new byte[65536];
+            int read;
+            while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
+        } catch (java.io.FileNotFoundException missing) {
+            Log.i("RackForge", "No bundled plugin in this build");
+            return;
+        }
+        try {
+            JSONObject descriptor = new JSONObject(installPluginFile(
+                    temporary.getAbsolutePath(), pluginStoreRoot().getAbsolutePath()));
+            boolean already = descriptor.optBoolean("already_installed");
+            Log.i("RackForge", "Bundled Concert Grand "
+                    + (already ? "already installed" : "installed"));
+            if (!already) {
+                keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
+            }
+            activateBundledPluginIfIdle();
+        } finally {
+            temporary.delete();
+        }
+    }
+
+    // A freshly provisioned device should make sound out of the box: if no
+    // plugin is active, the bundled piano steps up.
+    private void activateBundledPluginIfIdle() {
+        try {
+            JSONObject catalog = new JSONObject(installedPlugins(pluginStoreRoot().getAbsolutePath()));
+            JSONArray plugins = catalog.getJSONArray("plugins");
+            JSONObject candidate = null;
+            for (int index = 0; index < plugins.length(); index++) {
+                JSONObject plugin = plugins.getJSONObject(index);
+                if (plugin.optBoolean("active")) return;
+                if (plugin.optBoolean("compatible") && candidate == null) candidate = plugin;
+            }
+            if (candidate == null) return;
+            activatePlugin(candidate.getString("package_root"),
+                    candidate.getString("plugin_name"), candidate.getString("version"));
+        } catch (Throwable error) {
+            Log.w("RackForge", "Could not auto-activate the bundled plugin", error);
+        }
+    }
+
+    // The install inbox: `adb push` a package into
+    // Android/data/org.rackforge.android/files/install/ and restart the app
+    // -- the same job --install-plugin / --install-controller do on the
+    // desktop. Files ending in .rfplugin install as instruments; directories
+    // carrying rackforge-controller.toml install as controllers. Installed
+    // entries are consumed (deleted) so the inbox stays a queue.
+    private void processInstallInbox() {
+        java.io.File inbox = new java.io.File(getExternalFilesDir(null), "install");
+        java.io.File[] entries = inbox.listFiles();
+        if (entries == null) return;
+        for (java.io.File entry : entries) {
+            try {
+                if (entry.isFile() && entry.getName().endsWith(".rfplugin")) {
+                    JSONObject descriptor = new JSONObject(installPluginFile(
+                            entry.getAbsolutePath(), pluginStoreRoot().getAbsolutePath()));
+                    Log.i("RackForge", "Inbox plugin installed: "
+                            + descriptor.optString("plugin_name") + " "
+                            + descriptor.optString("version"));
+                    entry.delete();
+                    keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
+                } else if (entry.isDirectory()
+                        && new java.io.File(entry, "rackforge-controller.toml").isFile()) {
+                    JSONObject result = new JSONObject(controllerInstallDirectory(
+                            controllerStoreRoot(), entry.getAbsolutePath()));
+                    Log.i("RackForge", "Inbox controller installed: "
+                            + result.optString("id", entry.getName()) + " "
+                            + result.optString("version", ""));
+                    deleteRecursively(entry);
+                }
+            } catch (Throwable error) {
+                Log.e("RackForge", "Inbox install failed for " + entry.getName(), error);
+            }
+        }
+    }
+
+    private void deleteRecursively(java.io.File file) {
+        java.io.File[] children = file.listFiles();
+        if (children != null) {
+            for (java.io.File child : children) deleteRecursively(child);
+        }
+        file.delete();
     }
 
     private String controllerStoreRoot() {

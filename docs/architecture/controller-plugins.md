@@ -230,6 +230,30 @@ The plugins tab lists controllers in their own section ("Controllers")
 with connection status; opening one shows the schema panel (Phase 2)
 or the package's own surface (Phase 3) when it ships one.
 
+## Raspberry Pi validation (2026-08-19)
+
+The updated stack was deployed to the Pi (source tree shipped by
+`git archive` over SSH, built natively in ~3 min against the previous
+snapshot's target cache) and validated live against the connected
+KeyLab:
+
+* The new `rackforge-controller-host` (supervision as the shared
+  library) served the store unchanged: `CONTROLLER_HOST_READY`,
+  `CONTROLLER_STARTED`, `HOST_BINDINGS_RESERVED` over the Pi's Unix
+  control socket -- the cross-platform transport's unix fallback
+  working exactly as designed.
+* The 0.2.35 multi-platform manifest (a `windows-x86-64` entrypoint the
+  Pi does not carry) verified and installed cleanly -- the per-target
+  artifact rule proven from the Linux side too.
+* The settings pipeline end to end: writing
+  `state/<id>/settings.toml` repainted the hardware within two seconds
+  (`SETTINGS_APPLIED key-light-color=#ff4000`).
+
+Remaining Pi gap: `rackforge-web` does not yet serve
+`GET/PUT /api/v1/controllers*`, so the shared UI's Controllers section
+does not render there yet -- the same one-endpoint bridge Android
+needed, on the Pi's web service.
+
 ## UI placement
 
 Plugins tab, new "Controllers" section: install, version, trust badge,

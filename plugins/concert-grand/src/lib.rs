@@ -661,6 +661,9 @@ struct Voice {
     /// far, so a moving pedal presses or relieves only the DIFFERENCE. A
     /// relieved damper stops removing energy; it never gives any back.
     damper_applied: f32,
+    /// A sympathetic halo shadow, not a struck note: never a re-strike
+    /// target.
+    halo: bool,
     partials: [Partial; MAX_PARTIALS],
     partial_count: usize,
     /// Hammer/soundboard thump: a decaying low-passed noise burst whose
@@ -713,6 +716,7 @@ impl Default for Voice {
             sustained: false,
             sostenuto: false,
             damper_applied: 0.0,
+            halo: false,
             partials: [Partial::default(); MAX_PARTIALS],
             partial_count: 0,
             noise_amp: 0.0,
@@ -2181,15 +2185,38 @@ impl ConcertGrand {
             velocity *= 0.78;
         }
 
-        // A re-struck string keeps ringing: the old voice is eased out over
-        // ~250 ms underneath the new strike instead of being damped like a
-        // released key.
-        let restrike = expf(-1.0 / (0.25 * self.sample_rate));
-        let (thud_coefficient, thud_decay) = self.damper_thud();
-        let release_gain = Controls::noise_gain(self.controls.release_noise);
-        for voice in &mut self.voices {
-            if voice.active && voice.note == note && voice.channel == channel {
-                voice.damp(restrike, thud_coefficient, thud_decay, release_gain);
+        // A RE-STRUCK STRING IS THE SAME STRING. If this note is still
+        // ringing free -- held, or sustained with its damper clear -- the
+        // hammer meets a wire already in motion, and the new blow ADDS to
+        // the modal state it finds: partials in phase with the strike grow,
+        // partials against it cancel, which is the flutter of a fast
+        // repetition and the shimmer of a tremolo. The old build damped the
+        // living voice over 250 ms and started a stranger next to it.
+        //
+        // A voice already under a damper (released, or half-pedalled) has
+        // had its decay rates scaled and cannot be honestly re-lifted, so
+        // those still take the legacy path: ease the dying voice out and
+        // strike fresh.
+        let mut restrike_target: Option<usize> = None;
+        for (slot, voice) in self.voices.iter().enumerate() {
+            if voice.active
+                && !voice.halo
+                && voice.note == note
+                && voice.channel == channel
+                && (voice.held || (voice.sustained && voice.damper_applied == 0.0))
+            {
+                restrike_target = Some(slot);
+                break;
+            }
+        }
+        if restrike_target.is_none() {
+            let restrike = expf(-1.0 / (0.25 * self.sample_rate));
+            let (thud_coefficient, thud_decay) = self.damper_thud();
+            let release_gain = Controls::noise_gain(self.controls.release_noise);
+            for voice in &mut self.voices {
+                if voice.active && voice.note == note && voice.channel == channel {
+                    voice.damp(restrike, thud_coefficient, thud_decay, release_gain);
+                }
             }
         }
 
@@ -2922,12 +2949,81 @@ impl ConcertGrand {
         let longitudinal_gain = LONGITUDINAL_MIX * self.controls.lab(5);
         let longitudinal_upper = self.controls.lab(4);
         let action_gain = Controls::noise_gain(self.controls.action_noise);
+        if let Some(slot) = restrike_target {
+            // The hammer lands on the wire it finds. Ladder partials merge
+            // by harmonic number (each carries it in its slope weight);
+            // everything else -- noise, clack, phantoms of the NEW blow, or
+            // ladder partials the old voice has already culled -- appends
+            // into free slots.
+            let voice = &mut self.voices[slot];
+            let mut by_harmonic = [usize::MAX; MAX_PARTIALS];
+            for (index, partial) in voice.partials[..voice.partial_count].iter().enumerate() {
+                if partial.slope != 0.0 {
+                    let h = (partial.slope.abs() * 16.0).round() as usize;
+                    if h < MAX_PARTIALS {
+                        by_harmonic[h] = index;
+                    }
+                }
+            }
+            let mut appended = 0usize;
+            for fresh in partials[..placed].iter() {
+                let target = if fresh.slope != 0.0 {
+                    let h = (fresh.slope.abs() * 16.0).round() as usize;
+                    if h < MAX_PARTIALS { by_harmonic[h] } else { usize::MAX }
+                } else {
+                    usize::MAX
+                };
+                if target != usize::MAX {
+                    let existing = &mut voice.partials[target];
+                    for (mine, theirs) in
+                        existing.verticals.iter_mut().zip(fresh.verticals.iter())
+                    {
+                        mine.s += theirs.s;
+                        mine.c += theirs.c;
+                    }
+                    existing.horizontal.s += fresh.horizontal.s;
+                    existing.horizontal.c += fresh.horizontal.c;
+                    existing.bloom.s += fresh.bloom.s;
+                    existing.bloom.c += fresh.bloom.c;
+                    existing.coupling = fresh.coupling;
+                } else if voice.partial_count < MAX_PARTIALS {
+                    voice.partials[voice.partial_count] = *fresh;
+                    voice.partial_count += 1;
+                    appended += 1;
+                }
+            }
+            self.active_partials += appended;
+            for (mine, theirs) in voice.duplex.iter_mut().zip(duplex.iter()) {
+                mine.s += theirs.s;
+                mine.c += theirs.c;
+            }
+            voice.held = true;
+            voice.sustained = false;
+            voice.damper_applied = 0.0;
+            voice.energy = 1.0;
+            // The mechanism knocks again in full.
+            voice.noise_amp = voice.noise_amp.max(
+                velocity * velocity
+                    * KNOCK_LEVEL
+                    * action
+                    * chiff_mult
+                    * Controls::noise_gain(self.controls.action_noise),
+            );
+            voice.noise_decay = noise_decay;
+            voice.noise_coefficient = noise_coefficient;
+            voice.noise_body_coefficient = noise_body_coefficient;
+            voice.noise_shrink = noise_shrink;
+            return;
+        }
         let Some(voice) = self.allocate_voice() else { return };
         voice.active = true;
         voice.note = note;
         voice.channel = channel;
         voice.held = true;
         voice.sustained = false;
+        voice.halo = false;
+        voice.sostenuto = false;
+        voice.damper_applied = 0.0;
         voice.partials = partials;
         voice.partial_count = placed;
         voice.duplex = duplex;
@@ -3048,6 +3144,7 @@ impl ConcertGrand {
             if let Some(shadow) = self.allocate_voice() {
                 *shadow = Voice::default();
                 shadow.active = true;
+                shadow.halo = true;
                 shadow.note = note;
                 shadow.channel = channel;
                 shadow.held = false;
@@ -4561,6 +4658,57 @@ mod tests {
             println!("vel {velocity}: centroide {cent:.0} Hz, {} parciales", voice.partial_count);
             println!("  {rows}");
         }
+    }
+
+    #[test]
+    fn a_restrike_lands_on_the_same_string() {
+        // Striking a held note again must reinforce the RINGING voice, not
+        // stand a second voice next to it: one non-halo voice for the note,
+        // and more energy in it than the moment before the second blow.
+        let mut piano = prepared();
+        render(&mut piano, 64, &[note_on(48, 100)]);
+        render(&mut piano, (FS * 0.15) as usize, &[]);
+        let before: f32 = piano
+            .voices
+            .iter()
+            .filter(|v| v.active && !v.halo && v.note == 48)
+            .map(|v| {
+                v.partials[..v.partial_count]
+                    .iter()
+                    .map(|p| {
+                        p.verticals[0].magnitude_squared()
+                            + p.verticals[1].magnitude_squared()
+                            + p.verticals[2].magnitude_squared()
+                    })
+                    .sum::<f32>()
+            })
+            .sum();
+        render(&mut piano, 64, &[note_on(48, 100)]);
+        let voices = piano
+            .voices
+            .iter()
+            .filter(|v| v.active && !v.halo && v.note == 48)
+            .count();
+        assert_eq!(voices, 1, "a re-strike must not mint a second voice");
+        let after: f32 = piano
+            .voices
+            .iter()
+            .filter(|v| v.active && !v.halo && v.note == 48)
+            .map(|v| {
+                v.partials[..v.partial_count]
+                    .iter()
+                    .map(|p| {
+                        p.verticals[0].magnitude_squared()
+                            + p.verticals[1].magnitude_squared()
+                            + p.verticals[2].magnitude_squared()
+                    })
+                    .sum::<f32>()
+            })
+            .sum();
+        assert!(
+            after > before * 1.2,
+            "the second blow must add energy on balance: {before} -> {after}"
+        );
     }
 
     #[test]

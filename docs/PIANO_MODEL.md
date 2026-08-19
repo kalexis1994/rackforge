@@ -1191,9 +1191,12 @@ Stated so nobody mistakes silence for coverage:
 * **The longitudinal mixing itself.** Phantom partials are placed at the
   frequencies the mixing produces, but the mixing is not integrated, so their
   level tracks velocity by a stated rule rather than emerging.
-* **Re-strike interaction** — striking a sounding string adds energy to the
-  existing vibration; the model instead damps the old voice quickly and starts
-  a new one.
+* ~~Re-strike interaction~~ — DONE: striking a note that still rings free
+  merges the new blow into the living voice, partial by partial by harmonic
+  number: phasors in phase with the strike grow, phasors against it cancel —
+  the flutter of fast repetition, emergent. Only a voice already under a
+  damper (its decay rates scaled) takes the legacy ease-out-and-strike-fresh
+  path, because a scaled rate cannot be honestly un-scaled.
 * **String-to-string energy flow.** The sympathetic halo shadows new strikes
   under the pedal; energy does not move between strings that are already
   sounding, and catching the pedal late adds nothing.

@@ -64,6 +64,25 @@ driver must never outlive its supervisor** -- the supervisor pipes the
 child's stdin and the driver exits on EOF, because orphaned drivers
 from force-killed hosts were holding MIDI ports hostage.
 
+## Android's topology
+
+Android is the same story with one hard platform constraint: **no
+process drivers**. Executing binaries from writable storage is denied
+from Android 10 (W^X), and the MIDI transport is Android's Java API,
+which the driver binary could not reach anyway (`midir` is excluded on
+Android). So on Android the controller logic runs **in-process**: the
+Kotlin/Java layer owns MIDI and asks the native library for message
+*plans* (JSON arrays of SysEx bytes plus settle delays) rendered by the
+same shared `keylab_protocol` crate the process driver uses. That
+sharing is the payoff: the ambient-color atomic added for the desktop's
+`key-light-color` setting was ALREADY inside Android's renderer.
+Android exposes `keyLabSetKeyLightColor(hex)` over JNI (parse, set the
+shared atomic, return the repaint plan), persists the value in
+SharedPreferences, applies it before every acquire, and offers an RGB
+picker card in the settings dialog with the same 200 ms debounce the
+desktop uses. Process-driver parity arrives with the `wasm-v1` runtime,
+which is also what community controllers need on Android.
+
 Still next: the hardcoded KeyLab library leaves the desktop entirely
 (the yield flag and the built-in display path become dead code once the
 package is the only route); Android runs the same supervision loop with

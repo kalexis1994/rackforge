@@ -1920,6 +1920,36 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabAcquirePlan
     result_string(&mut env, result)
 }
 
+/// Applies the key-light color (the controller package's `key-light-color`
+/// setting on the other platforms) and returns the repaint plan: every RGB
+/// LED in the new ambient. The 8-bit picker values halve into the SysEx
+/// 7-bit range, exactly as the process driver does.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabSetKeyLightColor(
+    mut env: JNIEnv,
+    _class: JClass,
+    hex: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let hex: String = env
+            .get_string(&hex)
+            .context("reading key light color")?
+            .into();
+        let digits = hex
+            .strip_prefix('#')
+            .filter(|digits| digits.len() == 6)
+            .context("key light color must be #rrggbb")?;
+        let parsed = u32::from_str_radix(digits, 16).context("invalid key light color")?;
+        keylab_protocol::set_ambient_led_rgb([
+            (((parsed >> 16) & 0xFF) as u8) >> 1,
+            (((parsed >> 8) & 0xFF) as u8) >> 1,
+            ((parsed & 0xFF) as u8) >> 1,
+        ]);
+        controller_plan_json(keylab_protocol::ambient_repaint_messages())
+    })();
+    result_string(&mut env, result)
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabMatchesUsbDevice(
     _env: JNIEnv,

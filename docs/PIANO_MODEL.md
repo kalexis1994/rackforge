@@ -803,6 +803,36 @@ code and is far beyond audibility at control rate).
   dynamics, because less of the felt relaxes under the slow blow too. The
   emergent contact-time tests still pass untouched.
 
+* **PERFORMANCE (v0.84.0): a third off the worst block, output verified.**
+  Target: a Raspberry Pi with room to spare. Native baseline (512 frames,
+  44.1 kHz, deadline 11.6 ms): worst case (twenty notes under the pedal)
+  2.52 ms mean / 4.41 ms worst -- a Pi 4 at ~5x per-core is AT the
+  deadline. Three changes, each measured:
+  (1) The per-partial hot loop went branchless: a retired component is all
+  zeros and rotates to zero, so the five data-dependent tests per partial
+  per sample were an optimization that cost more than it saved and stood
+  between the loop and vectorization (-27%).
+  (2) The chamber and the shimmer indexed their delay lines with an
+  integer division per line per sample (`write % len`, lengths not powers
+  of two); per-line compare-and-wrap counters access the same elements in
+  the same order (-12%, bit-identical output).
+  (3) wasm builds now carry +simd128 (workspace .cargo/config.toml):
+  wasmtime lowers it to SSE/NEON, browsers have shipped it since 2021.
+  After: chord 2.10 -> 1.39 ms, pedal 2.52 -> 1.72 ms, worst block
+  4.41 -> 2.98 ms; fuel 76.4M -> 70.6M. Output: bit-identical on C2/C4;
+  A0 differs at -31 dB rms with attack deltas of exactly zero and
+  sustain bands within 0.4 dB -- the branchless path also stopped
+  sympathy pushes from accumulating, unrotated and unheard, inside
+  retired components and leaking into the cull's bridge-drain sums,
+  which is a cleanup, not a loss. `bench_blocks` (ignored test) is the
+  harness; run it before and after any engine change.
+  NEXT LEVER, not taken yet: the partial bank is AoS (five interleaved
+  components), which blocks real SIMD. A SoA restructure of Partial
+  would let the five rotations vectorize four-wide with no shuffles --
+  the projected additional ~2x that makes a Pi 4 comfortable. It touches
+  every identity-sensitive site (cull, glide, merge, sympathy, duplex)
+  and deserves its own session with the full render-diff guard.
+
 * **FIXED (v0.83.0): the bass attack surplus was x16 of what the reference
   holds -- the exaggerated hammer blow, measured at last like-for-like.**
   The user, still: "esta muy exagerado el golpe del martillo en notas

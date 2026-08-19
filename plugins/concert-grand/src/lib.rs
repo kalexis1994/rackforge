@@ -310,6 +310,17 @@ impl Component {
         if self.rc == 0.0 && self.rs == 0.0 {
             return 0.0;
         }
+        self.tick_free()
+    }
+
+    /// The rotation with no retired-check: a retired component is all zeros
+    /// and rotates to zero, so the guard is an optimization, not a
+    /// correctness need. The per-partial hot loop calls this so its five
+    /// rotations are straight-line independent arithmetic the compiler can
+    /// vectorize; the branch was five data-dependent tests per partial per
+    /// sample standing between the loop and SIMD.
+    #[inline(always)]
+    fn tick_free(&mut self) -> f32 {
         let s = self.s * self.rc + self.c * self.rs;
         let c = self.c * self.rc - self.s * self.rs;
         self.s = s;
@@ -857,11 +868,11 @@ impl Voice {
                 let push = sympathy * partial.coupling;
                 partial.verticals[0].s += push;
             }
-            let voice = partial.verticals[0].tick()
-                + partial.verticals[1].tick()
-                + partial.verticals[2].tick()
-                + partial.horizontal.tick()
-                + partial.bloom.tick();
+            let voice = partial.verticals[0].tick_free()
+                + partial.verticals[1].tick_free()
+                + partial.verticals[2].tick_free()
+                + partial.horizontal.tick_free()
+                + partial.bloom.tick_free();
             slope += voice * partial.slope;
             sum += voice;
         }
@@ -1370,7 +1381,10 @@ pub struct ConcertGrand {
     halo_gain: [f32; 4],
     halo_lp: f32,
     halo_hp_k: f32,
-    halo_write: usize,
+    /// Per-line ring positions, advanced with a compare-and-wrap: the
+    /// shared write cursor cost one integer DIVISION per line per sample
+    /// (the lengths are not powers of two), and so did the chamber's.
+    halo_index: [usize; 4],
     /// The chamber's delay lines, write head, per-line feedback gain and
     /// damping state.
     room: [[f32; ROOM_BUFFER]; ROOM_LINES],
@@ -1414,7 +1428,7 @@ pub struct ConcertGrand {
     proximity_coeff: f32,
     proximity: [f32; 2],
     room_dirty: bool,
-    room_write: usize,
+    room_index: [usize; ROOM_LINES],
 }
 
 impl Default for ConcertGrand {
@@ -1476,7 +1490,7 @@ impl Default for ConcertGrand {
             halo_gain: [0.0; 4],
             halo_lp: 0.0,
             halo_hp_k: 0.2,
-            halo_write: 0,
+            halo_index: [0; 4],
             lid: [0.0; LID_BUFFER],
             lid_write: 0,
             lid_left: [(0, 0.0); LID_TAPS_LEFT.len()],
@@ -1507,7 +1521,7 @@ impl Default for ConcertGrand {
             proximity_coeff: 0.0,
             proximity: [0.0; 2],
             room_dirty: false,
-            room_write: 0,
+            room_index: [0; ROOM_LINES],
         };
         piano.tune();
         piano.tune_board();
@@ -1951,6 +1965,7 @@ impl ConcertGrand {
         for line in 0..4 {
             self.halo_len[line] =
                 ((HALO_DELAYS_S[line] * self.sample_rate) as usize).clamp(1, HALO_BUFFER - 1);
+            self.halo_index[line] %= self.halo_len[line];
             self.halo_gain[line] = powf(10.0, -3.0 * HALO_DELAYS_S[line] / HALO_RT60_S);
         }
         self.halo_hp_k = 1.0 - expf(-core::f32::consts::TAU * HALO_HP_HZ / self.sample_rate);
@@ -1987,6 +2002,7 @@ impl ConcertGrand {
             let samples =
                 ((seconds * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
             self.room_len[line] = samples;
+            self.room_index[line] %= samples;
             // Per-line gain so every path decays at the mid-band RT60.
             self.room_gain[line] = powf(10.0, -3.0 * seconds / rt_mid);
             // The in-loop lowpass takes the highs down to their own faster
@@ -3669,12 +3685,12 @@ impl Processor for ConcertGrand {
         }
         self.halo = [[0.0; HALO_BUFFER]; 4];
         self.halo_lp = 0.0;
-        self.halo_write = 0;
+        self.halo_index = [0; 4];
         self.lid = [0.0; LID_BUFFER];
         self.lid_write = 0;
         self.room = [[0.0; ROOM_BUFFER]; ROOM_LINES];
         self.room_lp = [0.0; ROOM_LINES];
-        self.room_write = 0;
+        self.room_index = [0; ROOM_LINES];
     }
 
     fn set_parameter(&mut self, index: u32, value: f64) -> bool {
@@ -3969,16 +3985,17 @@ impl Processor for ConcertGrand {
             let mut halo_outs = [0.0f32; 4];
             let mut halo_sum = 0.0;
             for line in 0..4 {
-                halo_outs[line] = self.halo[line][self.halo_write % self.halo_len[line]];
+                halo_outs[line] = self.halo[line][self.halo_index[line]];
                 halo_sum += halo_outs[line];
             }
             let halo_householder = halo_sum * 0.5;
             for line in 0..4 {
                 let feedback = (halo_outs[line] - halo_householder) * self.halo_gain[line];
-                self.halo[line][self.halo_write % self.halo_len[line]] =
-                    bright * 0.5 + feedback;
+                let index = self.halo_index[line];
+                self.halo[line][index] = bright * 0.5 + feedback;
+                let next = index + 1;
+                self.halo_index[line] = if next == self.halo_len[line] { 0 } else { next };
             }
-            self.halo_write = self.halo_write.wrapping_add(1);
             let sympathy = self.controls.lab(15);
             let halo_left = (halo_outs[0] - halo_outs[1]) * HALO_MIX * sympathy;
             let halo_right = (halo_outs[2] - halo_outs[3]) * HALO_MIX * sympathy;
@@ -4060,7 +4077,7 @@ impl Processor for ConcertGrand {
             let mut outs = [0.0f32; ROOM_LINES];
             let mut outs_sum = 0.0;
             for line in 0..ROOM_LINES {
-                outs[line] = self.room[line][self.room_write % self.room_len[line]];
+                outs[line] = self.room[line][self.room_index[line]];
                 outs_sum += outs[line];
             }
             let householder = outs_sum * (2.0 / ROOM_LINES as f32);
@@ -4073,10 +4090,12 @@ impl Processor for ConcertGrand {
                     self.room_low_coeff * (self.room_lp[line] - self.room_low[line]);
                 let shaped =
                     self.room_lp[line] + self.room_low_gain * self.room_low[line];
-                self.room[line][self.room_write % self.room_len[line]] =
+                let index = self.room_index[line];
+                self.room[line][index] =
                     staged * 0.25 + shaped * self.room_gain[line];
+                let next = index + 1;
+                self.room_index[line] = if next == self.room_len[line] { 0 } else { next };
             }
-            self.room_write = self.room_write.wrapping_add(1);
             let air = self.controls.lab(16);
             let wet = ROOM_MIX * air * self.reverb_gain;
             let room_left = (outs[0] - outs[1] + outs[2]) * wet
@@ -5641,3 +5660,59 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+
+    fn note_on(note: u8, velocity: u8) -> MidiEvent {
+        MidiEvent { frame: 0, data: [0x90, note, velocity], length: 3 }
+    }
+
+    /// Not a test: wall-time per 512-frame block at 44.1 kHz, per scenario.
+    /// Run release, single-threaded:
+    /// `cargo test -p rackforge-concert-grand --release bench_blocks -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_blocks() {
+        const FRAMES: usize = 512;
+        const RATE: f64 = 44_100.0;
+        const BLOCKS: usize = 400;
+        let deadline_us = FRAMES as f64 / RATE * 1e6;
+        let chord: Vec<u8> = vec![24, 31, 36, 43, 48, 55, 60, 64, 67, 72];
+        let twenty: Vec<u8> = (0..20).map(|i| 24 + 3 * i as u8).collect();
+        let scenarios: [(&str, Vec<MidiEvent>, bool); 4] = [
+            ("idle", vec![], false),
+            ("single C2", vec![note_on(36, 120)], false),
+            ("ten-note chord", chord.iter().map(|&n| note_on(n, 120)).collect(), false),
+            ("twenty, pedal", twenty.iter().map(|&n| note_on(n, 120)).collect(), true),
+        ];
+        for (label, midi, pedal) in scenarios {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(RATE, FRAMES as u32, 0, 2));
+            let mut output = vec![0.0f32; FRAMES * 2];
+            if pedal {
+                let cc = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+                piano.process(&[], &mut output, &[cc], &[], FRAMES as u32, 0, 2);
+            }
+            piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
+            // Warm the caches, then time the worst and the mean block.
+            for _ in 0..8 {
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+            }
+            let mut worst = 0.0f64;
+            let started = std::time::Instant::now();
+            for _ in 0..BLOCKS {
+                let t0 = std::time::Instant::now();
+                piano.process(&[], &mut output, &[], &[], FRAMES as u32, 0, 2);
+                worst = worst.max(t0.elapsed().as_secs_f64() * 1e6);
+            }
+            let mean = started.elapsed().as_secs_f64() * 1e6 / BLOCKS as f64;
+            std::println!(
+                "{label}: mean {mean:.0} us | worst {worst:.0} us | {:.1}% of the {deadline_us:.0} us deadline",
+                mean / deadline_us * 100.0
+            );
+        }
+    }
+}
+

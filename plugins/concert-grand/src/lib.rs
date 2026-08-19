@@ -2726,6 +2726,20 @@ impl ConcertGrand {
         // is the same keybed.
         let noise_body_coefficient = 1.0
             - expf(-core::f32::consts::TAU * (40.0 + 120.0 * position * position) / sample_rate);
+        // Measured against every sampled note's own attack (inter-partial
+        // floor, 300-3200 Hz, first 60 ms): the flat-ish law was right on
+        // average -- the mechanism IS the same size everywhere, and the
+        // knock's prominence up top is masking, not louder hardware -- but
+        // it carried a real bump around A5-F6, +4 dB against the samples,
+        // while the very top ran a few dB shy. One measured notch and a
+        // lift at the extreme.
+        let bump = {
+            let d = (position - 0.72) / 0.14;
+            expf(-d * d)
+        };
+        let action = (1.0 - 0.25 * ((position - 0.5) / 0.5).max(0.0))
+            * (1.0 - 0.38 * bump)
+            * (1.0 + 0.9 * ((position - 0.88) / 0.12).max(0.0));
         // The clack: the let-off and the hammer shank are WOOD, and wood
         // knocked rings briefly at its own modes rather than hissing. Three
         // short damped components in the knock's 0.7-3 kHz body -- the "toc"
@@ -2734,7 +2748,7 @@ impl ConcertGrand {
         // milliseconds; frequencies jittered per note so the rack of keys
         // does not ring as one bell.
         let clack_level = velocity * velocity * KNOCK_LEVEL * 8.0
-            * (1.0 - 0.25 * ((position - 0.5) / 0.5).max(0.0))
+            * action
             * self.controls.lab(3)
             * Controls::noise_gain(self.controls.action_noise);
         if clack_level > 1e-5 {
@@ -2916,7 +2930,6 @@ impl ConcertGrand {
         // recording, and this model had it 25 to 31 dB short between 300 Hz
         // and 3 kHz. The key, the jack and the shank are the same size up
         // there; only the string got small.
-        let action = 1.0 - 0.25 * ((position - 0.5) / 0.5).max(0.0);
         voice.noise_amp =
             velocity * velocity * KNOCK_LEVEL * action * chiff_mult * action_gain;
         voice.noise_decay = noise_decay;

@@ -403,6 +403,48 @@ code and is far beyond audibility at control rate).
 
 ## Known defects
 
+* **C2's partials 8 to 11 are BORN right and DIE 10-17 dB too fast, and the
+  unison detune is spending them.** Separating birth from death -- comparing
+  each partial's band energy at 0.02-0.15 s against 0.3-1.2 s, in the model
+  and in the instrument:
+
+  | n | born | dies |
+  |---|---|---|
+  | 8 | +3.5 dB | **-10.4** |
+  | 9 | **-15.0** | **-17.0** |
+  | 10 | -3.5 | **-12.1** |
+  | 11 | +5.3 | **-12.3** |
+
+  Only the ninth is also born weak; the rest arrive at the right level and
+  then leak away. Setting the unison detune to zero recovers all but 3 to 6 dB
+  of it, so the detune is what spends them.
+
+  Band energy, not peak: with a detuned unison a partial splits and beats, and
+  at 1.5 cents on C2's ninth the beat period is two seconds -- a peak reading
+  over a 0.9 s window measures which part of the beat it landed in. The effect
+  survives the better measurement, so it is real and not that artefact.
+
+  **One cause found and fixed (v0.57.0), and it is not the whole cause.** The
+  bridge drain runs in the cull, one step per 256 samples, about 172 Hz. A
+  partial well above that advances several whole turns between applications,
+  so the sum it is drained against is sampled at essentially random phase, and
+  subtracting a fraction of a random-phase sum removes energy whether or not
+  the strings are pushing the bridge together. It is a leak, and detuning
+  makes it worse because the relative phase then drifts too. Fading it out
+  above 300 Hz takes the ninth partial's excess loss from 17.0 dB to 14.8 and
+  the fit cost from 32.5 to 30.9.
+
+  **What remains is the open question**, and it is sharp: the instrument has
+  about 2.9 cents of unison spread AND full mid partials. This model cannot
+  yet have both -- the detune that produces the measured cluster density is
+  the same detune that drains partials 8 to 11. Somewhere the coupling is
+  still spending energy that a real bridge redistributes.
+
+  This matters beyond those four partials: C2's first longitudinal mode is
+  driven by the pairs y_8*y_9, so the metallic character of the bass cannot
+  appear until they do.
+
+
 * **RULED OUT: the strike's initial condition is not what makes it sound
   plucked.** The user's description was precise -- "la nuestra parece una
   guitarra tocada con los dedos" -- and it has an exact physical counterpart:

@@ -69,6 +69,9 @@ const TAIL_MEASURED: f32 = 4.05;
 const SCATTER_KNEE_HZ: f32 = 320.0;
 /// How often a voice retires inaudible components, in samples.
 const CULL_INTERVAL: u32 = 256;
+/// Above this the bridge coupling is faded out, because the cull rate cannot
+/// follow the partial's phase and the drain becomes a leak.
+const COUPLING_TOP_HZ: f32 = 300.0;
 /// How often the string's tension is recomputed from its own motion, in
 /// samples. Faster than the cull, because this carries the tension's
 /// oscillating part and not just its envelope: it needs to resolve twice the
@@ -102,21 +105,15 @@ const TENSION_INTERVAL: u32 = 32;
 /// at those modal frequencies, driven by the tension the transverse motion
 /// makes. This model already computes that tension for the Kirchhoff glide,
 /// so the expensive half is paid for.
+const LONGITUDINAL_RATIO: f32 = 17.5;
 const LONGITUDINAL_MODES: usize = 4;
 /// How many transverse partials feed the longitudinal excitation. They hold
 /// nearly all the energy, and summing all 144 per sample would cost more than
 /// the whole rest of the voice.
 const LONGITUDINAL_SOURCES: usize = 32;
-/// Where the first longitudinal mode of C2 sits, in hertz, and the speaking
-/// length it belongs to.
-///
-/// Bare steel would put it near 2.4 kHz -- the compressional speed is
-/// sqrt(E/rho), about 5100 m/s, and it does not depend on the tension. A bass
-/// string is not bare steel: the copper winding adds mass without adding
-/// stiffness, which halves the speed. Bank and Sujbert measure ~1.15 kHz for
-/// C2, so that is what is used, scaled by length for every other note.
-const LONGITUDINAL_C2_HZ: f32 = 1_150.0;
-const LONGITUDINAL_C2_LENGTH_M: f32 = 1.06;
+/// Where the first longitudinal mode sits, as a multiple of the note's own
+/// pitch. Bank: "around 16 to 20 times higher than that of the transverse
+/// vibration".
 /// Wet level of the longitudinal bank.
 ///
 /// The bank barely sounds, and the reason is not the level.
@@ -131,7 +128,7 @@ const LONGITUDINAL_C2_LENGTH_M: f32 = 1.06;
 /// appear while the partials that feed it are missing, which means the hole
 /// in partials 6-10 and the absent metallic character are one problem and not
 /// two. Raising this constant cannot substitute for the partials.
-const LONGITUDINAL_MIX: f32 = 60.0;
+const LONGITUDINAL_MIX: f32 = 6.0;
 /// How hard the string's own stretch pulls it sharp. Sized so a fortissimo
 /// bass strike sharpens a few cents and settles as it decays, which is what
 /// measured piano glides do.
@@ -1647,13 +1644,6 @@ impl ConcertGrand {
         expf(-LN_1000 / (t60 * self.sample_rate))
     }
 
-    /// The speaking length in metres, from the scale the model already
-    /// assumes elsewhere: an A0 string runs about two metres and a top treble
-    /// string about five centimetres, geometrically between.
-    fn string_length(position: f32) -> f32 {
-        2.0 * powf(0.025, position)
-    }
-
     /// Where the hammer strikes, as a fraction of string length: ~1/8 in the
     /// bass narrowing toward ~1/13 in the treble.
     fn strike_point(note: u8) -> f32 {
@@ -2233,7 +2223,30 @@ impl ConcertGrand {
             let step = expf(
                 -6.907_755 * (CULL_INTERVAL as f32 / sample_rate) / prompt_t60,
             );
-            let coupling = (1.0 - step) / (2.0 + three);
+            // The bridge drain runs at the cull rate, one step per 256
+            // samples -- about 172 Hz. A partial whose frequency is far above
+            // that advances several whole turns between applications, so the
+            // sum it is drained against is sampled at essentially random
+            // phase, and subtracting a fraction of a random-phase sum removes
+            // energy whether or not the strings are actually pushing the
+            // bridge together. It is a leak, not a coupling, and it gets
+            // worse the more the unison is detuned, because the relative
+            // phase then drifts as well.
+            //
+            // Measured on C2 with band energy, which is immune to the beating
+            // that makes a peak reading unreliable here: the partials from the
+            // eighth up lose 10 to 17 dB of their sustained energy, and
+            // turning the detune off recovers all but 3 to 6 of that.
+            //
+            // Fading the drain above the frequency the cull rate can follow
+            // recovers part of it -- the ninth partial's excess loss goes from
+            // 17.0 dB to 14.8 -- and the fit cost falls from 32.5 to 30.9. Not
+            // all of it, so the aliasing is a cause and not the cause. What
+            // remains is still spent by the detune, through a path not yet
+            // found: the instrument has 2.9 cents of unison spread AND full
+            // mid partials, and this model cannot yet have both.
+            let follow = (COUPLING_TOP_HZ / frequency.max(1.0)).clamp(0.0, 1.0);
+            let coupling = (1.0 - step) / (2.0 + three) * follow;
             // The partial swells in over many of its own periods, and slowly
             // enough to matter: a bass note does not arrive, it gathers.
             //
@@ -2514,9 +2527,17 @@ impl ConcertGrand {
         // c = 2*L*f0. So f_L,k = k * f0 * c_L / c, and the ratio c_L/c is what
         // makes them land in the low kilohertz for a bass string and above
         // hearing for a treble one -- which is why this is a bass phenomenon.
-        let length = Self::string_length(position);
-        let longitudinal_first =
-            LONGITUDINAL_C2_HZ * LONGITUDINAL_C2_LENGTH_M / length.max(0.03);
+        // A fixed ratio to the note's own pitch, not a frequency derived from
+        // a guessed string length.
+        //
+        // Deriving it from length gave a ratio that slid across the compass --
+        // 22x the fundamental at A0 but only 10x at C4 -- and ten against
+        // twenty is an octave, which is exactly what the user heard: "es como
+        // que la octava de eso que agregaste no esta bien". Bank states the
+        // figure directly: the longitudinal fundamental sits "around 16 to 20
+        // times higher than that of the transverse vibration", and it holds
+        // across the instrument because scale design keeps it there.
+        let longitudinal_first = LONGITUDINAL_RATIO * f0;
         for (k, mode) in voice.longitudinal.iter_mut().enumerate() {
             let hz = longitudinal_first * (k + 1) as f32;
             if hz < nyquist * 0.9 {

@@ -303,6 +303,22 @@ struct DesktopApp {
     audio_recovery_at: Option<Instant>,
     #[cfg(windows)]
     audio_recovery_attempts: u32,
+    /// Stall watchdog: the last callback count seen and when it last moved.
+    /// A frozen counter is the only witness to an ASIO driver that stopped
+    /// calling back (another client grabbed the hardware) -- that death
+    /// reports no stream error at all.
+    #[cfg(windows)]
+    audio_watchdog: Option<(u64, Instant)>,
+    /// When the last stall fired, so a device that dies over and over gets
+    /// exponential patience instead of a tight reopen loop.
+    #[cfg(windows)]
+    audio_last_stall: Option<Instant>,
+    /// Device inventory cache: enumerating instantiates every ASIO driver,
+    /// and instantiating the driver that is currently streaming is asking a
+    /// single-client driver for trouble. Settings reads within the TTL see
+    /// the cached scan.
+    #[cfg(windows)]
+    audio_inventory_cache: Option<(Instant, desktop_audio::AudioInventory)>,
 }
 
 impl DesktopApp {
@@ -566,6 +582,12 @@ impl DesktopApp {
             audio_recovery_at,
             #[cfg(windows)]
             audio_recovery_attempts: 0,
+            #[cfg(windows)]
+            audio_watchdog: None,
+            #[cfg(windows)]
+            audio_last_stall: None,
+            #[cfg(windows)]
+            audio_inventory_cache: None,
         })
     }
 
@@ -672,6 +694,57 @@ impl DesktopApp {
 
     #[cfg(windows)]
     fn poll_audio_error(&mut self) {
+        // The stall watchdog. An ASIO driver whose hardware another client
+        // grabbed (the Focusrite when a WASAPI session opens the same
+        // interface, a control-panel reset, a sample-rate change) stops
+        // calling back WITHOUT reporting anything: the stream object stays
+        // alive, the error callback stays silent, and the app used to keep
+        // showing a healthy summary over a dead engine while every played
+        // note landed in a closed channel. A healthy stream renders blocks
+        // continuously -- silence included -- so a counter that has not
+        // moved in two seconds IS the failure, and it feeds the same
+        // recovery path a reported error does.
+        if let Some(audio) = &self.audio {
+            let blocks = audio.callback_blocks();
+            match self.audio_watchdog {
+                Some((last, since)) if blocks == last => {
+                    if since.elapsed() >= Duration::from_secs(2) {
+                        self.web_servers.set_injected_midi(None);
+                        self.audio = None;
+                        self.audio_watchdog = None;
+                        // A device that keeps dying earns exponential
+                        // patience; one that stays up half a minute earns a
+                        // fresh start.
+                        let repeated = self
+                            .audio_last_stall
+                            .is_some_and(|at| at.elapsed() < Duration::from_secs(30));
+                        if repeated {
+                            self.audio_recovery_attempts =
+                                self.audio_recovery_attempts.saturating_add(1);
+                        } else {
+                            self.audio_recovery_attempts = 0;
+                        }
+                        self.audio_last_stall = Some(Instant::now());
+                        let exponent = self.audio_recovery_attempts.min(5);
+                        let delay = Duration::from_millis(250_u64.saturating_mul(1 << exponent));
+                        self.audio_recovery_at = Some(Instant::now() + delay);
+                        self.status =
+                            "Audio stream stalled (the driver stopped calling back) · reconnecting audio…"
+                                .into();
+                        eprintln!("DESKTOP_AUDIO_STALL_DETECTED blocks={blocks}");
+                    }
+                }
+                Some((last, _)) if blocks != last => {
+                    self.audio_watchdog = Some((blocks, Instant::now()));
+                }
+                None => {
+                    self.audio_watchdog = Some((blocks, Instant::now()));
+                }
+                _ => {}
+            }
+        } else {
+            self.audio_watchdog = None;
+        }
         let stream_error = self.audio.as_ref().and_then(|audio| audio.take_error());
         if let Some(error) = stream_error {
             self.web_servers.set_injected_midi(None);
@@ -741,8 +814,63 @@ impl DesktopApp {
     }
 
     #[cfg(windows)]
-    fn audio_settings_json(&self) -> Result<serde_json::Value> {
-        let inventory = desktop_audio::AudioInventory::scan()?;
+    /// The device inventory, without ever re-instantiating the ASIO driver
+    /// that is streaming right now: enumerating instantiates every ASIO
+    /// driver, and doing that to the live one stops the stream dead
+    /// (measured on the Focusrite -- the callback froze the moment a scan
+    /// ran). While ASIO is active, other backends are scanned fresh and the
+    /// live driver's rows come from the cache; a short TTL keeps repeated
+    /// settings reads from hammering the drivers either way.
+    fn scan_inventory(&mut self) -> Result<desktop_audio::AudioInventory> {
+        const INVENTORY_TTL: Duration = Duration::from_secs(10);
+        if let Some((at, cached)) = &self.audio_inventory_cache
+            && at.elapsed() < INVENTORY_TTL
+        {
+            return Ok(cached.clone());
+        }
+        let streaming_driver = if self.audio.is_some() {
+            self.audio_preferences
+                .as_ref()
+                .map(|preferences| preferences.driver.clone())
+                .filter(|driver| driver == "ASIO")
+        } else {
+            None
+        };
+        let inventory = match streaming_driver.as_deref() {
+            Some(live) => {
+                let mut fresh = desktop_audio::AudioInventory::scan_skipping(Some(live))?;
+                match &self.audio_inventory_cache {
+                    Some((_, cached)) => {
+                        fresh
+                            .drivers
+                            .extend(cached.drivers.iter().filter(|d| d.name == live).cloned());
+                        fresh
+                            .outputs
+                            .extend(cached.outputs.iter().filter(|o| o.driver == live).cloned());
+                    }
+                    None => fresh.drivers.push(desktop_audio::AudioDriverInfo {
+                        name: live.to_owned(),
+                        available: true,
+                        detail: "In use by the current stream".into(),
+                    }),
+                }
+                fresh.outputs.sort_by(|left, right| {
+                    left.driver
+                        .cmp(&right.driver)
+                        .then_with(|| right.is_default.cmp(&left.is_default))
+                        .then_with(|| left.name.cmp(&right.name))
+                });
+                fresh
+            }
+            None => desktop_audio::AudioInventory::scan()?,
+        };
+        self.audio_inventory_cache = Some((Instant::now(), inventory.clone()));
+        Ok(inventory)
+    }
+
+    #[cfg(windows)]
+    fn audio_settings_json(&mut self) -> Result<serde_json::Value> {
+        let inventory = self.scan_inventory()?;
         let preferences = self
             .audio_preferences
             .clone()
@@ -787,8 +915,6 @@ impl DesktopApp {
         &mut self,
         preferences: desktop_audio::AudioPreferences,
     ) -> Result<String> {
-        let inventory = desktop_audio::AudioInventory::scan()?;
-        inventory.validate(&preferences)?;
         let previous = self.audio_preferences.clone();
         let active = self
             .session
@@ -797,7 +923,22 @@ impl DesktopApp {
             .active_instance_id
             .as_ref()
             .map(|id| id.as_str().to_owned());
+        // The stream comes down BEFORE the scan: enumerating instantiates
+        // every ASIO driver, and instantiating the live one kills its
+        // stream anyway (measured). Validation failures restore the
+        // previous stream on the way out.
         self.audio = None;
+        self.audio_watchdog = None;
+        let inventory = desktop_audio::AudioInventory::scan()?;
+        self.audio_inventory_cache = Some((Instant::now(), inventory.clone()));
+        if let Err(error) = inventory.validate(&preferences) {
+            return match self.restore_audio(previous.as_ref(), active.as_deref()) {
+                Ok(()) => Err(anyhow::anyhow!("{error:#}. The previous settings were kept")),
+                Err(rollback) => Err(anyhow::anyhow!(
+                    "{error:#}. Reopening the previous audio settings also failed: {rollback:#}"
+                )),
+            };
+        }
         let candidate = match start_desktop_audio(&self.plugins, &preferences, active.as_deref(), &self.live_state_dir()) {
             Ok(audio) => audio,
             Err(error) => {

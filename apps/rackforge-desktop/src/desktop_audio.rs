@@ -178,9 +178,21 @@ pub struct AudioInventory {
 
 impl AudioInventory {
     pub fn scan() -> Result<Self> {
+        Self::scan_skipping(None)
+    }
+
+    /// Scans every backend except `skip_driver`. Enumerating instantiates
+    /// each ASIO driver, and instantiating the driver that is currently
+    /// streaming makes single-client hardware (the Focusrite, measured) stop
+    /// the running stream dead. The caller splices the skipped driver's rows
+    /// back in from its cache.
+    pub fn scan_skipping(skip_driver: Option<&str>) -> Result<Self> {
         let mut drivers = Vec::new();
         let mut outputs = Vec::new();
         for host_id in cpal::available_hosts() {
+            if skip_driver == Some(host_id.name()) {
+                continue;
+            }
             let driver = host_id.name().to_owned();
             let host = match cpal::host_from_id(host_id) {
                 Ok(host) => host,
@@ -565,6 +577,15 @@ impl DesktopAudio {
         self.telemetry.snapshot(self.sample_rate)
     }
 
+    /// Raw callback count, for the stall watchdog: a healthy stream renders
+    /// blocks continuously (silence included), so a counter that stops
+    /// advancing means the driver stopped calling back -- which is exactly
+    /// how an ASIO device dies when another client grabs the hardware. No
+    /// error is ever reported on that path; the count is the only witness.
+    pub fn callback_blocks(&self) -> u64 {
+        self.telemetry.callback_count.load(Ordering::Relaxed)
+    }
+
     pub fn diagnostics(&self) -> String {
         let status = self.runtime_status();
         format!(
@@ -751,9 +772,27 @@ impl DesktopAudio {
     }
 
     fn send_command(&self, command: AudioCommand) -> Result<()> {
-        self.command_sender
-            .try_send(command)
-            .map_err(|error| anyhow::anyhow!("audio command queue rejected command: {error}"))
+        match self.command_sender.try_send(command) {
+            Ok(()) => Ok(()),
+            Err(mpsc::TrySendError::Full(_)) => Err(anyhow::anyhow!(
+                "audio command queue rejected command: queue full"
+            )),
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                // A closed channel is proof the engine died without reporting
+                // (the silent ASIO stall): raise the flag the recovery loop
+                // already watches, so the restart begins on the next frame
+                // instead of waiting out the watchdog, and tell the caller
+                // something a person can act on.
+                if let Ok(mut slot) = self.errors.lock()
+                    && slot.is_none()
+                {
+                    *slot = Some("the audio engine stopped responding".into());
+                }
+                Err(anyhow::anyhow!(
+                    "the audio engine stopped and is being restarted — try again in a moment"
+                ))
+            }
+        }
     }
 }
 

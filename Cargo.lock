@@ -3751,6 +3751,7 @@ dependencies = [
  "mime_guess",
  "rackforge-control-api",
  "rackforge-controller-arturia-keylab-essential-mk3",
+ "rackforge-controller-package",
  "rackforge-core",
  "rackforge-performance-api",
  "rackforge-plugin-api",

@@ -67,6 +67,8 @@ struct WebState {
     /// meant the first splash after every activation paid the full package
     /// walk again.
     package_scan_revision: Arc<AtomicU64>,
+    /// Root of the controller package store (`<root>/controllers`).
+    controllers_root: PathBuf,
     /// Notes from a surface go straight to the audio thread through this.
     /// Routing them through the GUI thread capped them at one frame each —
     /// about sixty a second — so fast playing on a touch surface queued up
@@ -335,6 +337,7 @@ pub fn start(
         plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
         web_packages_cache: Arc::new(Mutex::new(None)),
         package_scan_revision: Arc::new(AtomicU64::new(0)),
+        controllers_root: options.rackforge_root.join("controllers"),
         legacy_plugins_root: options.plugins_root.clone(),
         plugin_store_root: options.plugin_store_root.clone(),
         data_root: options.data_root.clone(),
@@ -435,7 +438,8 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
             post(activate_plugin),
         )
         .route("/ws/v1/session", get(session_socket))
-        .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_asset));
+        .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_asset))
+        .route("/api/v1/controllers", get(controller_catalog));
     let router = if allow_native_resources {
         router
             .route("/api/v1/config", get(local_config).put(apply_web_settings))
@@ -1301,6 +1305,33 @@ fn resource_error(error: ResourceError) -> Response {
         .into_response()
 }
 
+/// The installed controller packages: the plugins tab lists these beside
+/// the instruments. Read-only for now; enable/disable and configuration
+/// arrive with the settings schema (see docs/architecture/controller-plugins.md).
+async fn controller_catalog(State(state): State<WebState>) -> Response {
+    let store = rackforge_controller_package::PackageStore::new(&state.controllers_root);
+    let installed = match store.list() {
+        Ok(installed) => installed,
+        Err(error) => return internal_error(error),
+    };
+    let controllers: Vec<serde_json::Value> = installed
+        .iter()
+        .map(|controller| {
+            let manifest = controller.package.manifest();
+            json!({
+                "id": controller.record.id,
+                "name": manifest.name,
+                "version": controller.record.version,
+                "enabled": controller.record.enabled,
+                "trust": format!("{:?}", controller.record.trust).to_ascii_lowercase(),
+                "runtime": format!("{:?}", manifest.runtime.kind),
+                "devices": manifest.devices.len(),
+            })
+        })
+        .collect();
+    Json(json!({"status": "ok", "controllers": controllers})).into_response()
+}
+
 async fn plugin_asset(
     AxumPath((plugin_id, asset)): AxumPath<(String, String)>,
     headers: axum::http::HeaderMap,
@@ -1791,6 +1822,7 @@ mod tests {
             resource_upload_root: PathBuf::new(),
             web_packages_cache: Arc::new(Mutex::new(None)),
             package_scan_revision: Arc::new(AtomicU64::new(0)),
+            controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
@@ -1852,6 +1884,7 @@ mod tests {
             resource_upload_root: PathBuf::new(),
             web_packages_cache: Arc::new(Mutex::new(None)),
             package_scan_revision: Arc::new(AtomicU64::new(0)),
+            controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
         };
         let request = ControlRequest::Dispatch {
@@ -1913,6 +1946,7 @@ mod tests {
             resource_upload_root: PathBuf::new(),
             web_packages_cache: Arc::new(Mutex::new(None)),
             package_scan_revision: Arc::new(AtomicU64::new(0)),
+            controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();

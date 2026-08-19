@@ -4322,6 +4322,31 @@ fn run() -> Result<()> {
         }
         return Ok(());
     }
+    // Controllers are packages too, and their install is the same job-not-
+    // session shape as the plugins'. Local installs carry official trust:
+    // this path takes a directory the user built or unpacked themselves.
+    if let Startup::Ready(options) = &startup
+        && !options.install_controllers.is_empty()
+    {
+        let store = rackforge_controller_package::PackageStore::new(
+            options.rackforge_root.join("controllers"),
+        );
+        for package in &options.install_controllers {
+            let installed = store
+                .install_directory(
+                    package,
+                    rackforge_controller_package::PackageTrust::Official,
+                )
+                .map_err(|error| {
+                    anyhow::anyhow!("installing controller {}: {error}", package.display())
+                })?;
+            println!(
+                "RFCONTROLLER_INSTALLED id={} version={}",
+                installed.record.id, installed.record.version
+            );
+        }
+        return Ok(());
+    }
     let app_icon = eframe::icon_data::from_png_bytes(include_bytes!(
         "../../../assets/brand/rackforge-mark-256.png"
     ))

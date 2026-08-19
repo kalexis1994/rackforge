@@ -10,6 +10,8 @@ use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
 
+pub mod supervise;
+
 pub const CONTROLLER_PACKAGE_SCHEMA_VERSION: u32 = 1;
 pub const CONTROLLER_DRIVER_API_VERSION: &str = "1.1.0";
 pub const CONTROLLER_MANIFEST_FILE: &str = "rackforge-controller.toml";

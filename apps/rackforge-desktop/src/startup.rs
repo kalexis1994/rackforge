@@ -10,6 +10,7 @@ pub(crate) struct Options {
     pub(crate) plugin_store_root: Option<PathBuf>,
     pub(crate) data_root: PathBuf,
     pub(crate) install_archives: Vec<PathBuf>,
+    pub(crate) install_controllers: Vec<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -20,6 +21,7 @@ struct CliOptions {
     plugins_root: Option<PathBuf>,
     data_root: Option<PathBuf>,
     install_archives: Vec<PathBuf>,
+    install_controllers: Vec<PathBuf>,
 }
 
 pub(crate) enum Startup {
@@ -44,6 +46,7 @@ fn parse_cli_options(arguments: impl IntoIterator<Item = String>) -> Result<CliO
         plugins_root: None,
         data_root: None,
         install_archives: Vec::new(),
+        install_controllers: Vec::new(),
     };
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
@@ -88,6 +91,13 @@ fn parse_cli_options(arguments: impl IntoIterator<Item = String>) -> Result<CliO
                         .context("--install-plugin requires an .rfplugin file")?,
                 ));
             }
+            "--install-controller" => {
+                options.install_controllers.push(PathBuf::from(
+                    arguments
+                        .next()
+                        .context("--install-controller requires an .rfcontroller package")?,
+                ));
+            }
             _ => bail!("unknown argument: {argument}"),
         }
     }
@@ -114,6 +124,9 @@ fn resolve_options(cli: CliOptions) -> Result<Startup> {
         if cli.lan {
             web_preferences.enabled = true;
         }
+        if !cli.install_controllers.is_empty() {
+            bail!("--install-controller needs an initialized RackForge Root; run the app once first");
+        }
         return Ok(Startup::FirstStart {
             web_preferences,
             default_root,
@@ -138,6 +151,7 @@ fn resolve_options(cli: CliOptions) -> Result<Startup> {
         plugin_store_root: (!uses_legacy_paths).then_some(layout.plugin_store_root),
         data_root: cli.data_root.unwrap_or(layout.data_root),
         install_archives: cli.install_archives,
+        install_controllers: cli.install_controllers,
     }))
 }
 
@@ -153,6 +167,7 @@ pub(crate) fn options_from_layout(
         plugin_store_root: Some(layout.plugin_store_root),
         data_root: layout.data_root,
         install_archives,
+        install_controllers: Vec::new(),
     }
 }
 

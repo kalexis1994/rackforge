@@ -1,13 +1,10 @@
 use anyhow::{Context, Result, bail};
 use rackforge_controller_package::{
-    ControllerPackage, DriverRuntimeKind, InstalledController, PackageStore, PackageTrust,
-    ProcessDriverInfo, development_target,
+    ControllerPackage, InstalledController, PackageStore, PackageTrust, ProcessDriverInfo,
 };
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::{Command, Stdio};
 
 enum HostCommand {
     Verify {
@@ -165,96 +162,24 @@ fn execute_controller(
     Ok(())
 }
 
-struct ManagedController {
-    installed: InstalledController,
-    child: Option<Child>,
-    restart_at: Instant,
-}
-
 fn serve_controllers(root: &Path, allow_community: bool) -> Result<()> {
-    let mut managed = PackageStore::new(root)
-        .list()?
-        .into_iter()
-        .filter(|installed| installed.record.enabled)
-        .filter_map(
-            |installed| match ensure_executable(&installed, allow_community) {
-                Ok(()) => Some(ManagedController {
-                    installed,
-                    child: None,
-                    restart_at: Instant::now(),
-                }),
-                Err(error) => {
-                    eprintln!(
-                        "CONTROLLER_SKIPPED id={} reason={error:#}",
-                        installed.record.id
-                    );
-                    None
-                }
-            },
-        )
-        .collect::<Vec<_>>();
-    if managed.is_empty() {
+    // The loop itself lives in the package crate now, shared with every
+    // platform host; the CLI's contract stays: zero runnable packages is an
+    // error, because the user explicitly asked to serve.
+    let options = rackforge_controller_package::supervise::SuperviseOptions {
+        allow_community,
+        extra_env: Vec::new(),
+        shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+    let count = rackforge_controller_package::supervise::supervise(root, &options)
+        .map_err(|error| anyhow::anyhow!(error))?;
+    if count == 0 {
         bail!(
             "no executable controller packages are active in {}",
             root.display()
         );
     }
-    println!(
-        "CONTROLLER_HOST_READY packages={} root={}",
-        managed.len(),
-        root.display()
-    );
-    loop {
-        let now = Instant::now();
-        for controller in &mut managed {
-            if let Some(child) = &mut controller.child {
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        eprintln!(
-                            "CONTROLLER_EXITED id={} status={status}; restarting",
-                            controller.installed.record.id
-                        );
-                        controller.child = None;
-                        controller.restart_at = now + Duration::from_secs(1);
-                    }
-                    Ok(None) => continue,
-                    Err(error) => {
-                        eprintln!(
-                            "CONTROLLER_WAIT_FAILED id={} error={error}; restarting",
-                            controller.installed.record.id
-                        );
-                        controller.child = None;
-                        controller.restart_at = now + Duration::from_secs(1);
-                    }
-                }
-            }
-            if controller.child.is_none() && now >= controller.restart_at {
-                match controller_command(
-                    &controller.installed,
-                    &["serve".into(), "--execute".into()],
-                )
-                .and_then(|mut command| command.spawn().map_err(anyhow::Error::from))
-                {
-                    Ok(child) => {
-                        println!(
-                            "CONTROLLER_STARTED id={} pid={}",
-                            controller.installed.record.id,
-                            child.id()
-                        );
-                        controller.child = Some(child);
-                    }
-                    Err(error) => {
-                        eprintln!(
-                            "CONTROLLER_START_FAILED id={} error={error:#}",
-                            controller.installed.record.id
-                        );
-                        controller.restart_at = now + Duration::from_secs(2);
-                    }
-                }
-            }
-        }
-        thread::sleep(Duration::from_millis(250));
-    }
+    Ok(())
 }
 
 fn restore_all(root: &Path, allow_community: bool) -> Result<()> {
@@ -313,57 +238,13 @@ fn verify_conformance(root: &Path, id: &str, allow_community: bool) -> Result<()
 }
 
 fn ensure_executable(installed: &InstalledController, allow_community: bool) -> Result<()> {
-    let id = &installed.record.id;
-    if !installed.record.enabled {
-        bail!("controller {id:?} is disabled");
-    }
-    if installed.record.trust == PackageTrust::Community && !allow_community {
-        bail!("controller {id:?} is community code; pass --allow-community after reviewing it");
-    }
-    if installed.package.manifest().runtime.kind != DriverRuntimeKind::ProcessV1 {
-        bail!(
-            "runtime {:?} is not available in this host build",
-            installed.package.manifest().runtime.kind
-        );
-    }
-    Ok(())
+    rackforge_controller_package::supervise::ensure_executable(installed, allow_community)
+        .map_err(|error| anyhow::anyhow!(error))
 }
 
 fn controller_command(installed: &InstalledController, arguments: &[String]) -> Result<Command> {
-    let target = development_target();
-    if target == "unsupported" {
-        bail!(
-            "unsupported controller host platform {}-{}",
-            env::consts::OS,
-            env::consts::ARCH
-        );
-    }
-    let entrypoint = installed
-        .package
-        .resolve_entrypoint(target)
-        .with_context(|| {
-            format!(
-                "resolving {target} entrypoint for {:?}",
-                installed.record.id
-            )
-        })?;
-    let mut command = Command::new(entrypoint);
-    command
-        .args(arguments)
-        .current_dir(installed.package.root())
-        .env("RACKFORGE_CONTROLLER_ID", &installed.record.id)
-        .env(
-            "RACKFORGE_CONTROLLER_PACKAGE",
-            installed.package.root().as_os_str(),
-        )
-        .env(
-            "RACKFORGE_CONTROLLER_TRUST",
-            format!("{:?}", installed.record.trust).to_ascii_lowercase(),
-        )
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    Ok(command)
+    rackforge_controller_package::supervise::controller_command(installed, arguments, &[])
+        .map_err(|error| anyhow::anyhow!(error))
 }
 
 fn parse_args(arguments: impl Iterator<Item = String>) -> Result<HostCommand> {

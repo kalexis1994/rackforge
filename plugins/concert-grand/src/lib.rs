@@ -32,7 +32,15 @@ use rackforge_plugin_sdk::{MidiEvent, ParameterEvent, Processor, export_processo
 const LOW_NOTE: u8 = 21;
 const NOTE_COUNT: usize = 88;
 
-const MAX_VOICES: usize = 20;
+/// Voices, and the number is bounded by the wasm shadow stack rather than by
+/// taste. `ConcertGrand::default()` builds the whole bank on the stack, and at
+/// twenty voices the model sat close enough to the limit that adding four
+/// small resonators per voice pushed it over: the module then trapped with
+/// "out of bounds memory access" during instantiation, and nothing in the
+/// test suite noticed, because native stacks are megabytes.
+///
+/// Sixteen leaves real headroom. `concert_grand_instantiates.rs` guards it.
+const MAX_VOICES: usize = 16;
 /// Room for the full transverse ladder of the lowest notes plus their
 /// nonlinear extras — A0 alone fills ~120 slots with real partials.
 const MAX_PARTIALS: usize = 144;
@@ -69,8 +77,9 @@ const TAIL_MEASURED: f32 = 4.05;
 const SCATTER_KNEE_HZ: f32 = 320.0;
 /// How often a voice retires inaudible components, in samples.
 const CULL_INTERVAL: u32 = 256;
-/// Above this the bridge coupling is faded out, because the cull rate cannot
-/// follow the partial's phase and the drain becomes a leak.
+/// Where the bridge stops taking energy from a partial, in hertz. Above it
+/// the string's impedance swamps the bridge's admittance and the termination
+/// is effectively rigid.
 const COUPLING_TOP_HZ: f32 = 300.0;
 /// How often the string's tension is recomputed from its own motion, in
 /// samples. Faster than the cull, because this carries the tension's
@@ -630,6 +639,7 @@ impl Voice {
                 source[n] = voice;
             }
             sum += voice;
+
         }
         // The excitation of each longitudinal mode, as Bank derives it.
         //
@@ -775,10 +785,18 @@ impl Voice {
                 }
             }
         }
-        // The bridge: each string loses the same slice of the coherent sum.
-        // In-phase configurations radiate and die; dephased ones barely
-        // couple and live on. This is where the two-stage decay, the beats
-        // and the churn of the sustain come from.
+        // The bridge: each string loses a slice of the coherent sum, in
+        // proportion to how hard the three are pushing the termination
+        // together. In phase they drive it and die fast; dephased they nearly
+        // cancel there and live on. That is Weinreich, and the two-stage decay
+        // and the churn of the sustain come from it.
+        //
+        // This was moved into the per-sample loop to see whether running it at
+        // the cull rate was aliasing away energy. It was not: the measured
+        // loss on C2's partials 8 to 11 did not move at all, while the fuel
+        // went from 45% of the budget to 64%. Twenty points for nothing is not
+        // a trade, so it is back here, and the frequency dependence below is
+        // what actually earns its place.
         for partial in &mut self.partials[..self.partial_count] {
             let k = partial.coupling;
             if k > 0.0 {
@@ -788,7 +806,7 @@ impl Voice {
                 partial.prompt.c -= k * sum_c;
                 // The second component is the horizontal polarisation: it
                 // drives the bridge sideways and couples an order of
-                // magnitude more weakly — it IS the long tail (Weinreich).
+                // magnitude more weakly -- it IS the long tail (Weinreich).
                 partial.aftersound.s -= 0.12 * k * sum_s;
                 partial.aftersound.c -= 0.12 * k * sum_c;
                 partial.third.s -= k * sum_s;
@@ -2223,28 +2241,17 @@ impl ConcertGrand {
             let step = expf(
                 -6.907_755 * (CULL_INTERVAL as f32 / sample_rate) / prompt_t60,
             );
-            // The bridge drain runs at the cull rate, one step per 256
-            // samples -- about 172 Hz. A partial whose frequency is far above
-            // that advances several whole turns between applications, so the
-            // sum it is drained against is sampled at essentially random
-            // phase, and subtracting a fraction of a random-phase sum removes
-            // energy whether or not the strings are actually pushing the
-            // bridge together. It is a leak, not a coupling, and it gets
-            // worse the more the unison is detuned, because the relative
-            // phase then drifts as well.
+            // How strongly this partial couples to the bridge, and it is not
+            // flat with frequency.
             //
-            // Measured on C2 with band energy, which is immune to the beating
-            // that makes a peak reading unreliable here: the partials from the
-            // eighth up lose 10 to 17 dB of their sustained energy, and
-            // turning the detune off recovers all but 3 to 6 of that.
-            //
-            // Fading the drain above the frequency the cull rate can follow
-            // recovers part of it -- the ninth partial's excess loss goes from
-            // 17.0 dB to 14.8 -- and the fit cost falls from 32.5 to 30.9. Not
-            // all of it, so the aliasing is a cause and not the cause. What
-            // remains is still spent by the detune, through a path not yet
-            // found: the instrument has 2.9 cents of unison spread AND full
-            // mid partials, and this model cannot yet have both.
+            // A fade was first put here to hide the aliasing of a
+            // control-rate drain. That reading was wrong -- moving the drain
+            // to per-sample changed the measured loss not at all -- but the
+            // fade itself kept earning its place, and there is a reason: what
+            // sets the coupling is the ratio of the bridge's admittance to
+            // the string's characteristic impedance, and that ratio falls
+            // away as the partial's frequency rises. A high partial barely
+            // moves the bridge.
             let follow = (COUPLING_TOP_HZ / frequency.max(1.0)).clamp(0.0, 1.0);
             let coupling = (1.0 - step) / (2.0 + three) * follow;
             // The partial swells in over many of its own periods, and slowly

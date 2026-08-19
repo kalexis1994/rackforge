@@ -119,6 +119,8 @@ struct RackForgeConfig {
 #[derive(Clone)]
 struct AppState {
     control_socket: PathBuf,
+    controllers_root: PathBuf,
+    web_root: PathBuf,
     public_config: Arc<RwLock<WebConfig>>,
     auth: Arc<AuthManager>,
     plugins_root: PathBuf,
@@ -510,6 +512,8 @@ async fn main() -> Result<()> {
     }
 
     let state = Arc::new(AppState {
+        controllers_root: root.join("controllers"),
+        web_root: web_root.clone(),
         control_socket: root.join("state").join(CONTROL_SOCKET_NAME),
         public_config: shared_config,
         auth,
@@ -521,7 +525,16 @@ async fn main() -> Result<()> {
         )?),
         resource_upload_root: root.join("state/resource-uploads"),
     });
-    let static_files = ServeDir::new(&web_root).fallback(ServeFile::new(index));
+    // The same cache contract the desktop's embedded server uses, because
+    // the drift bit for real: without a Cache-Control header, a phone
+    // browser held the SPA's index by heuristic caching for days and showed
+    // an interface other hosts had left behind. Vite's hashed assets are
+    // immutable by name; everything else -- index.html above all -- must
+    // revalidate on every load.
+    let static_files = tower::Layer::layer(
+        &axum::middleware::from_fn(spa_cache_headers),
+        ServeDir::new(&web_root).fallback(ServeFile::new(index)),
+    );
     let app = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/auth/status", get(auth_status))
@@ -529,6 +542,11 @@ async fn main() -> Result<()> {
         .route("/api/v1/auth/pin", post(set_pin))
         .route("/api/v1/config", get(public_config))
         .route("/api/v1/plugins", get(plugin_web_catalog))
+        .route("/api/v1/controllers", get(controller_catalog))
+        .route(
+            "/api/v1/controllers/{controller_id}/settings",
+            axum::routing::put(apply_controller_settings),
+        )
         .route(
             "/api/v1/plugins/{plugin_id}",
             get(plugin_web_descriptor).delete(uninstall_managed_plugin),
@@ -946,10 +964,17 @@ fn plugin_asset_url(plugin_id: &str, asset: &str, version: &str) -> String {
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
+    // Drift is measured, not discovered: the host binary's revision and the
+    // revision of the SPA it is actually serving, side by side.
+    let ui_revision = std::fs::read_to_string(state.web_root.join("ui-revision.txt"))
+        .map(|text| text.trim().to_owned())
+        .unwrap_or_else(|_| "unknown".to_owned());
     Json(json!({
         "status": "ok",
         "core_connected": state.control_socket.exists(),
-        "schema_version": 1
+        "schema_version": 1,
+        "revision": env!("RACKFORGE_REVISION"),
+        "ui_revision": ui_revision,
     }))
 }
 
@@ -1060,6 +1085,123 @@ fn install_response(installed: InstalledPackage) -> InstallPluginResponse {
         already_installed: installed.already_installed,
         activation_required: true,
     }
+}
+
+fn controller_settings_path(state: &AppState, controller_id: &str) -> PathBuf {
+    state
+        .controllers_root
+        .join("state")
+        .join(controller_id)
+        .join("settings.toml")
+}
+
+fn read_controller_settings(
+    state: &AppState,
+    controller_id: &str,
+) -> std::collections::BTreeMap<String, String> {
+    std::fs::read_to_string(controller_settings_path(state, controller_id))
+        .ok()
+        .and_then(|text| toml::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+/// The installed controller packages, in the same shape every platform's
+/// host serves: the shared UI's Plugin Manager and the /controllers/{id}
+/// panel run unchanged against it.
+async fn controller_catalog(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    require_authorized(&state, &headers)?;
+    let installed = rackforge_controller_package::PackageStore::new(&state.controllers_root)
+        .list()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let controllers: Vec<serde_json::Value> = installed
+        .iter()
+        .map(|controller| {
+            let manifest = controller.package.manifest();
+            let stored = read_controller_settings(&state, &controller.record.id);
+            let settings: Vec<serde_json::Value> = manifest
+                .settings
+                .iter()
+                .map(|setting| {
+                    serde_json::json!({
+                        "id": setting.id,
+                        "name": setting.name,
+                        "kind": format!("{:?}", setting.kind).to_ascii_lowercase(),
+                        "default": setting.default,
+                        "page": setting.page,
+                        "value": stored
+                            .get(&setting.id)
+                            .cloned()
+                            .unwrap_or_else(|| setting.default.clone()),
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "id": controller.record.id,
+                "name": manifest.name,
+                "version": controller.record.version,
+                "enabled": controller.record.enabled,
+                "trust": format!("{:?}", controller.record.trust).to_ascii_lowercase(),
+                "runtime": format!("{:?}", manifest.runtime.kind),
+                "devices": manifest.devices.len(),
+                "settings": settings,
+            })
+        })
+        .collect();
+    Ok(Json(
+        serde_json::json!({"status": "ok", "controllers": controllers}),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+struct ControllerSettingsRequest {
+    values: std::collections::BTreeMap<String, String>,
+}
+
+/// Validates against the package's settings schema and persists to the
+/// store; the running driver watches the file and applies within a second.
+async fn apply_controller_settings(
+    axum::extract::Path(controller_id): axum::extract::Path<String>,
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ControllerSettingsRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    require_authorized(&state, &headers)?;
+    let installed = rackforge_controller_package::PackageStore::new(&state.controllers_root)
+        .resolve(&controller_id)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    let manifest = installed.package.manifest();
+    let mut values = read_controller_settings(&state, &controller_id);
+    for (id, value) in &request.values {
+        let setting = manifest
+            .settings
+            .iter()
+            .find(|setting| &setting.id == id)
+            .ok_or(StatusCode::BAD_REQUEST)?;
+        setting
+            .validate_value(value)
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+        values.insert(id.clone(), value.clone());
+    }
+    let path = controller_settings_path(&state, &controller_id);
+    let write = (|| -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let body = values
+            .iter()
+            .map(|(key, value)| format!("{key} = {value:?}
+"))
+            .collect::<String>();
+        let temporary = path.with_extension("tmp");
+        std::fs::write(&temporary, body)?;
+        std::fs::rename(&temporary, &path)?;
+        Ok(())
+    })();
+    write.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(serde_json::json!({"status": "ok", "values": values})))
 }
 
 async fn plugin_web_catalog(
@@ -2124,6 +2266,23 @@ async fn plugin_web_asset(
             plugin_document_csp(&headers, &plugin_id),
         );
     }
+    response
+}
+
+async fn spa_cache_headers(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let immutable = request.uri().path().starts_with("/assets/");
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static(if immutable {
+            "public, max-age=31536000, immutable"
+        } else {
+            "no-cache"
+        }),
+    );
     response
 }
 

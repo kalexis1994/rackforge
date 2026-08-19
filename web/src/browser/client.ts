@@ -99,7 +99,11 @@ async function loadStorage(): Promise<SeedFile[]> {
     ...packaged,
     ...stored.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX)),
   ];
-  packagedFiles = packaged;
+  // Copies, because booting the engine transfers every file's buffer to the
+  // worklet and leaves these detached. Republishing then threw on the first
+  // storage write, and a plugin's interface quietly stopped following its
+  // package for the rest of the session.
+  packagedFiles = packaged.map((file) => ({ path: file.path, bytes: file.bytes.slice() }));
   await publishPluginAssets(files).catch((error: unknown) => {
     console.warn("RackForge could not publish a plugin's files", error);
   });
@@ -179,6 +183,17 @@ function handleEngineEvent(event: EngineEvent) {
  * this is called from the first gesture and is safe to call again afterwards.
  */
 export async function startBrowserHost(): Promise<void> {
+  // Inside the desktop shell the native engine IS the instrument. This
+  // module only exists there when the embedded dist was built with the
+  // browser-host flag by mistake -- which happened: the desktop shipped a
+  // demo build, its WebView asked for WebMIDI permission at startup, and
+  // granting it layered a second complete piano (its own AudioContext,
+  // worklet and wasm) over the native one. Every fader then edited only one
+  // of the two, which is unfixable from a panel. Refuse to boot, whatever
+  // the build flags say.
+  if (window.__RACKFORGE_HOST_SHELL__ === "desktop") {
+    throw new Error("the browser engine must not run inside the desktop shell");
+  }
   if (booting) {
     await booting;
     if (context?.state === "suspended") {
@@ -298,18 +313,25 @@ function milestone(
   timedOut: string,
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      milestones[name] = null;
-      reject(
-        new Error(
-          audio.state === "running"
-            ? timedOut
-            : "the browser has not allowed audio to start yet",
-        ),
-      );
-    }, 15_000);
+    // The clock only runs while the browser is allowing sound. A page nobody
+    // has touched yet is not a page that is failing: its worklet cannot run,
+    // so it cannot reach a milestone, and timing it out killed the host for
+    // the rest of the visit — after which the gesture that would have started
+    // it arrived to nothing.
+    let timeout: number | null = null;
+    const arm = () => {
+      if (timeout !== null || audio.state !== "running") return;
+      timeout = window.setTimeout(() => {
+        milestones[name] = null;
+        audio.removeEventListener("statechange", arm);
+        reject(new Error(timedOut));
+      }, 15_000);
+    };
+    audio.addEventListener("statechange", arm);
+    arm();
     const settle = (error?: string | null) => {
-      window.clearTimeout(timeout);
+      if (timeout !== null) window.clearTimeout(timeout);
+      audio.removeEventListener("statechange", arm);
       milestones[name] = null;
       if (error) {
         reject(new Error(error));

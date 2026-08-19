@@ -30,7 +30,16 @@ cp "$root/target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm" "$
 
 # The host reads its storage through WASI, which has no way to list what the
 # page has not fetched yet. The manifest is that list.
-python3 - "$storage" > "$public/storage.json" <<'PY'
+# Windows ships the interpreter as `python`; most Linux distributions ship it
+# only as `python3`. Take whichever this machine has -- and run each
+# candidate before trusting it, because Windows puts a `python3` on PATH
+# that is only a Microsoft Store advert and exits without interpreting.
+python=
+for candidate in python3 python; do
+  if "$candidate" -c "" >/dev/null 2>&1; then python=$candidate; break; fi
+done
+[ -n "$python" ] || { echo "no working python interpreter on PATH" >&2; exit 1; }
+"$python" - "$storage" > "$public/storage.json" <<'PY'
 import json
 import os
 import sys
@@ -45,3 +54,11 @@ print(json.dumps({"files": sorted(files)}, indent=2))
 PY
 
 echo "Demo assets written to $public"
+
+# The page itself is built separately, and the flag must travel WITH the
+# command -- never through web/.env.local. A stray .env.local carrying
+# VITE_RACKFORGE_BROWSER_HOST=1 once turned every plain npm build into a
+# browser-host build; the desktop app embedded one, its WebView booted a
+# complete second instrument (own AudioContext, own WebMIDI permission
+# prompt), and every note played two pianos at once.
+echo "Now build the page with:  VITE_RACKFORGE_BROWSER_HOST=1 npm run build"

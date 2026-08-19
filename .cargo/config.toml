@@ -1,0 +1,8 @@
+# SIMD128 for every wasm build in the workspace. Both hosts execute it:
+# wasmtime (desktop, Raspberry Pi) enables the SIMD proposal by default and
+# cranelift lowers it to SSE/NEON, and every browser has shipped it as
+# baseline since 2021. The Concert Grand's hot loop is thousands of
+# independent 2-D phasor rotations per sample; letting LLVM vectorize them
+# is the difference between a Pi that keeps up and one that does not.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]

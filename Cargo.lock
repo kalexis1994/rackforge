@@ -3602,6 +3602,7 @@ dependencies = [
  "jni 0.21.1",
  "rackforge-control-api",
  "rackforge-controller-arturia-keylab-essential-mk3",
+ "rackforge-controller-package",
  "rackforge-core",
  "rackforge-plugin-api",
  "rackforge-repository",
@@ -3609,6 +3610,7 @@ dependencies = [
  "rackforge-surface-runtime",
  "semver",
  "serde_json",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -3751,6 +3753,7 @@ dependencies = [
  "mime_guess",
  "rackforge-control-api",
  "rackforge-controller-arturia-keylab-essential-mk3",
+ "rackforge-controller-package",
  "rackforge-core",
  "rackforge-performance-api",
  "rackforge-plugin-api",
@@ -3984,6 +3987,7 @@ dependencies = [
  "getrandom 0.3.4",
  "mime_guess",
  "rackforge-control-api",
+ "rackforge-controller-package",
  "rackforge-plugin-api",
  "rackforge-repository",
  "rackforge-resource-api",
@@ -3994,6 +3998,7 @@ dependencies = [
  "sha2 0.10.9",
  "tokio",
  "toml 0.9.12+spec-1.1.0",
+ "tower",
  "tower-http",
 ]
 

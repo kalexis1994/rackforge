@@ -286,6 +286,100 @@ pub fn decode_response(bytes: &[u8]) -> Result<ControlResponse, serde_json::Erro
     serde_json::from_slice(bytes)
 }
 
+/// Client-side control transport, shared by every driver and tool.
+///
+/// The framed protocol (one JSON line in, one JSON line out per
+/// connection) is transport-agnostic; what differs per platform is how a
+/// process reaches the core. Linux hosts serve a Unix socket. Hosts on
+/// every platform can serve TCP on loopback, and a spawned driver finds
+/// it through `RACKFORGE_CONTROL_ADDR` (e.g. `127.0.0.1:52104`), which
+/// takes precedence so a supervisor can always point its children at the
+/// right core.
+pub mod transport {
+    use super::{ControlRequest, ControlResponse, encode_line};
+    use std::io::{self, BufRead, BufReader, Read, Write};
+    use std::net::{SocketAddr, TcpStream};
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    pub const CONTROL_ADDR_ENV: &str = "RACKFORGE_CONTROL_ADDR";
+    const MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
+    const IO_TIMEOUT: Duration = Duration::from_secs(5);
+
+    #[derive(Clone, Debug)]
+    pub enum ControlEndpoint {
+        Tcp(SocketAddr),
+        #[cfg(unix)]
+        Unix(PathBuf),
+    }
+
+    /// Resolves the endpoint: `RACKFORGE_CONTROL_ADDR` wins everywhere;
+    /// on Unix the caller's socket-path rule is the fallback. On other
+    /// platforms the address is the only route, so its absence is an
+    /// error the caller can report.
+    pub fn endpoint_from_env(
+        default_socket: impl FnOnce() -> PathBuf,
+    ) -> io::Result<ControlEndpoint> {
+        if let Some(address) = std::env::var_os(CONTROL_ADDR_ENV) {
+            let text = address.to_string_lossy();
+            let parsed: SocketAddr = text.parse().map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("{CONTROL_ADDR_ENV} {text:?} is not host:port: {error}"),
+                )
+            })?;
+            return Ok(ControlEndpoint::Tcp(parsed));
+        }
+        #[cfg(unix)]
+        {
+            return Ok(ControlEndpoint::Unix(default_socket()));
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = default_socket;
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("{CONTROL_ADDR_ENV} is not set and this platform has no control socket"),
+            ))
+        }
+    }
+
+    /// One control exchange: connect, send the request, read the response.
+    pub fn exchange(
+        endpoint: &ControlEndpoint,
+        request: &ControlRequest,
+    ) -> io::Result<ControlResponse> {
+        let line = encode_line(request)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        match endpoint {
+            ControlEndpoint::Tcp(address) => {
+                let mut stream = TcpStream::connect_timeout(address, IO_TIMEOUT)?;
+                stream.set_read_timeout(Some(IO_TIMEOUT))?;
+                stream.set_write_timeout(Some(IO_TIMEOUT))?;
+                round_trip(&mut stream, &line)
+            }
+            #[cfg(unix)]
+            ControlEndpoint::Unix(path) => {
+                let mut stream = std::os::unix::net::UnixStream::connect(path)?;
+                stream.set_read_timeout(Some(IO_TIMEOUT))?;
+                stream.set_write_timeout(Some(IO_TIMEOUT))?;
+                round_trip(&mut stream, &line)
+            }
+        }
+    }
+
+    fn round_trip<S: Read + Write>(stream: &mut S, line: &[u8]) -> io::Result<ControlResponse> {
+        stream.write_all(line)?;
+        stream.flush()?;
+        let mut bytes = Vec::new();
+        BufReader::new(stream)
+            .take(MAX_RESPONSE_BYTES)
+            .read_until(b'\n', &mut bytes)?;
+        serde_json::from_slice(&bytes)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

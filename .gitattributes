@@ -13,3 +13,4 @@
 *.conf text eol=lf
 *.ps1 text eol=crlf
 ssh_config.example text eol=lf
+REVISION export-subst

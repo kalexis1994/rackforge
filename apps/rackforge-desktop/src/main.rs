@@ -261,6 +261,9 @@ fn format_file_size(bytes: u64) -> String {
 }
 
 struct DesktopApp {
+    /// Set when a live panel edit has not been persisted yet: the state is
+    /// saved a breath after the last touch, and restored at the next start.
+    live_state_dirty: Option<Instant>,
     menu: Menu,
     session: Arc<RwLock<SessionState>>,
     session_checkpoint: SessionCheckpointStore,
@@ -300,6 +303,24 @@ struct DesktopApp {
     audio_recovery_at: Option<Instant>,
     #[cfg(windows)]
     audio_recovery_attempts: u32,
+    /// Stall watchdog: the last callback count seen and when it last moved.
+    /// A frozen counter is the only witness to an ASIO driver that stopped
+    /// calling back (another client grabbed the hardware) -- that death
+    /// reports no stream error at all.
+    #[cfg(windows)]
+    audio_watchdog: Option<(u64, Instant)>,
+    /// When the last stall fired, so a device that dies over and over gets
+    /// exponential patience instead of a tight reopen loop.
+    #[cfg(windows)]
+    audio_last_stall: Option<Instant>,
+    /// Device inventory cache: enumerating instantiates every ASIO driver,
+    /// and instantiating the driver that is currently streaming is asking a
+    /// single-client driver for trouble. Settings reads within the TTL see
+    /// the cached scan.
+    #[cfg(windows)]
+    audio_inventory_cache: Option<(Instant, desktop_audio::AudioInventory)>,
+    /// Raised on exit so the controller supervisor reaps its drivers.
+    controller_shutdown: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl DesktopApp {
@@ -426,7 +447,13 @@ impl DesktopApp {
                             defaults
                         }
                     };
-                    match start_desktop_audio(&plugins, &preferences, active_instance_id) {
+                    match start_desktop_audio(
+                        &plugins,
+                        &preferences,
+                        active_instance_id,
+                        &options.data_root.join("states/live"),
+                        external_controller_enabled(&options.rackforge_root),
+                    ) {
                         Ok(audio) => (Some(preferences), Some(audio)),
                         Err(error) => {
                             let message = format!("Audio/MIDI unavailable: {error:#}");
@@ -549,6 +576,7 @@ impl DesktopApp {
             plugin_install: None,
             performance_repository,
             state_store,
+            live_state_dirty: None,
             virtual_midi: BTreeMap::new(),
             next_program_draft_id: 1,
             next_audition_lease_id: 1,
@@ -562,6 +590,13 @@ impl DesktopApp {
             audio_recovery_at,
             #[cfg(windows)]
             audio_recovery_attempts: 0,
+            #[cfg(windows)]
+            audio_watchdog: None,
+            #[cfg(windows)]
+            audio_last_stall: None,
+            #[cfg(windows)]
+            audio_inventory_cache: None,
+            controller_shutdown: None,
         })
     }
 
@@ -610,7 +645,13 @@ impl DesktopApp {
         {
             self.audio = None;
             if let Some(preferences) = self.audio_preferences.as_ref() {
-                match start_desktop_audio(&plugins, preferences, active_instance_id) {
+                match start_desktop_audio(
+                    &plugins,
+                    preferences,
+                    active_instance_id,
+                    &self.live_state_dir(),
+                    external_controller_enabled(&self.options.rackforge_root),
+                ) {
                     Ok(audio) => {
                         self.audio = Some(audio);
                         self.audio_recovery_at = None;
@@ -668,6 +709,57 @@ impl DesktopApp {
 
     #[cfg(windows)]
     fn poll_audio_error(&mut self) {
+        // The stall watchdog. An ASIO driver whose hardware another client
+        // grabbed (the Focusrite when a WASAPI session opens the same
+        // interface, a control-panel reset, a sample-rate change) stops
+        // calling back WITHOUT reporting anything: the stream object stays
+        // alive, the error callback stays silent, and the app used to keep
+        // showing a healthy summary over a dead engine while every played
+        // note landed in a closed channel. A healthy stream renders blocks
+        // continuously -- silence included -- so a counter that has not
+        // moved in two seconds IS the failure, and it feeds the same
+        // recovery path a reported error does.
+        if let Some(audio) = &self.audio {
+            let blocks = audio.callback_blocks();
+            match self.audio_watchdog {
+                Some((last, since)) if blocks == last => {
+                    if since.elapsed() >= Duration::from_secs(2) {
+                        self.web_servers.set_injected_midi(None);
+                        self.audio = None;
+                        self.audio_watchdog = None;
+                        // A device that keeps dying earns exponential
+                        // patience; one that stays up half a minute earns a
+                        // fresh start.
+                        let repeated = self
+                            .audio_last_stall
+                            .is_some_and(|at| at.elapsed() < Duration::from_secs(30));
+                        if repeated {
+                            self.audio_recovery_attempts =
+                                self.audio_recovery_attempts.saturating_add(1);
+                        } else {
+                            self.audio_recovery_attempts = 0;
+                        }
+                        self.audio_last_stall = Some(Instant::now());
+                        let exponent = self.audio_recovery_attempts.min(5);
+                        let delay = Duration::from_millis(250_u64.saturating_mul(1 << exponent));
+                        self.audio_recovery_at = Some(Instant::now() + delay);
+                        self.status =
+                            "Audio stream stalled (the driver stopped calling back) · reconnecting audio…"
+                                .into();
+                        eprintln!("DESKTOP_AUDIO_STALL_DETECTED blocks={blocks}");
+                    }
+                }
+                Some((last, _)) if blocks != last => {
+                    self.audio_watchdog = Some((blocks, Instant::now()));
+                }
+                None => {
+                    self.audio_watchdog = Some((blocks, Instant::now()));
+                }
+                _ => {}
+            }
+        } else {
+            self.audio_watchdog = None;
+        }
         let stream_error = self.audio.as_ref().and_then(|audio| audio.take_error());
         if let Some(error) = stream_error {
             self.web_servers.set_injected_midi(None);
@@ -695,7 +787,13 @@ impl DesktopApp {
             .as_ref()
             .map(|id| id.as_str().to_owned());
         self.audio_recovery_at = None;
-        match start_desktop_audio(&self.plugins, &preferences, active.as_deref()) {
+        match start_desktop_audio(
+            &self.plugins,
+            &preferences,
+            active.as_deref(),
+            &self.live_state_dir(),
+            external_controller_enabled(&self.options.rackforge_root),
+        ) {
             Ok(audio) => {
                 if let Err(error) = sync_desktop_audio(&audio, &self.session, &self.menu) {
                     self.status =
@@ -737,8 +835,63 @@ impl DesktopApp {
     }
 
     #[cfg(windows)]
-    fn audio_settings_json(&self) -> Result<serde_json::Value> {
-        let inventory = desktop_audio::AudioInventory::scan()?;
+    /// The device inventory, without ever re-instantiating the ASIO driver
+    /// that is streaming right now: enumerating instantiates every ASIO
+    /// driver, and doing that to the live one stops the stream dead
+    /// (measured on the Focusrite -- the callback froze the moment a scan
+    /// ran). While ASIO is active, other backends are scanned fresh and the
+    /// live driver's rows come from the cache; a short TTL keeps repeated
+    /// settings reads from hammering the drivers either way.
+    fn scan_inventory(&mut self) -> Result<desktop_audio::AudioInventory> {
+        const INVENTORY_TTL: Duration = Duration::from_secs(10);
+        if let Some((at, cached)) = &self.audio_inventory_cache
+            && at.elapsed() < INVENTORY_TTL
+        {
+            return Ok(cached.clone());
+        }
+        let streaming_driver = if self.audio.is_some() {
+            self.audio_preferences
+                .as_ref()
+                .map(|preferences| preferences.driver.clone())
+                .filter(|driver| driver == "ASIO")
+        } else {
+            None
+        };
+        let inventory = match streaming_driver.as_deref() {
+            Some(live) => {
+                let mut fresh = desktop_audio::AudioInventory::scan_skipping(Some(live))?;
+                match &self.audio_inventory_cache {
+                    Some((_, cached)) => {
+                        fresh
+                            .drivers
+                            .extend(cached.drivers.iter().filter(|d| d.name == live).cloned());
+                        fresh
+                            .outputs
+                            .extend(cached.outputs.iter().filter(|o| o.driver == live).cloned());
+                    }
+                    None => fresh.drivers.push(desktop_audio::AudioDriverInfo {
+                        name: live.to_owned(),
+                        available: true,
+                        detail: "In use by the current stream".into(),
+                    }),
+                }
+                fresh.outputs.sort_by(|left, right| {
+                    left.driver
+                        .cmp(&right.driver)
+                        .then_with(|| right.is_default.cmp(&left.is_default))
+                        .then_with(|| left.name.cmp(&right.name))
+                });
+                fresh
+            }
+            None => desktop_audio::AudioInventory::scan()?,
+        };
+        self.audio_inventory_cache = Some((Instant::now(), inventory.clone()));
+        Ok(inventory)
+    }
+
+    #[cfg(windows)]
+    fn audio_settings_json(&mut self) -> Result<serde_json::Value> {
+        let inventory = self.scan_inventory()?;
         let preferences = self
             .audio_preferences
             .clone()
@@ -783,8 +936,6 @@ impl DesktopApp {
         &mut self,
         preferences: desktop_audio::AudioPreferences,
     ) -> Result<String> {
-        let inventory = desktop_audio::AudioInventory::scan()?;
-        inventory.validate(&preferences)?;
         let previous = self.audio_preferences.clone();
         let active = self
             .session
@@ -793,8 +944,29 @@ impl DesktopApp {
             .active_instance_id
             .as_ref()
             .map(|id| id.as_str().to_owned());
+        // The stream comes down BEFORE the scan: enumerating instantiates
+        // every ASIO driver, and instantiating the live one kills its
+        // stream anyway (measured). Validation failures restore the
+        // previous stream on the way out.
         self.audio = None;
-        let candidate = match start_desktop_audio(&self.plugins, &preferences, active.as_deref()) {
+        self.audio_watchdog = None;
+        let inventory = desktop_audio::AudioInventory::scan()?;
+        self.audio_inventory_cache = Some((Instant::now(), inventory.clone()));
+        if let Err(error) = inventory.validate(&preferences) {
+            return match self.restore_audio(previous.as_ref(), active.as_deref()) {
+                Ok(()) => Err(anyhow::anyhow!("{error:#}. The previous settings were kept")),
+                Err(rollback) => Err(anyhow::anyhow!(
+                    "{error:#}. Reopening the previous audio settings also failed: {rollback:#}"
+                )),
+            };
+        }
+        let candidate = match start_desktop_audio(
+            &self.plugins,
+            &preferences,
+            active.as_deref(),
+            &self.live_state_dir(),
+            external_controller_enabled(&self.options.rackforge_root),
+        ) {
             Ok(audio) => audio,
             Err(error) => {
                 return match self.restore_audio(previous.as_ref(), active.as_deref()) {
@@ -836,8 +1008,14 @@ impl DesktopApp {
     ) -> Result<()> {
         self.audio = preferences
             .map(|preferences| {
-                start_desktop_audio(&self.plugins, preferences, active_instance_id)
-                    .context("reopening the previous audio stream")
+                start_desktop_audio(
+                    &self.plugins,
+                    preferences,
+                    active_instance_id,
+                    &self.options.data_root.join("states/live"),
+                    external_controller_enabled(&self.options.rackforge_root),
+                )
+                .context("reopening the previous audio stream")
             })
             .transpose()?;
         if let Some(audio) = &self.audio {
@@ -1427,6 +1605,47 @@ impl DesktopApp {
         }
     }
 
+    fn live_state_dir(&self) -> PathBuf {
+        self.options.data_root.join("states/live")
+    }
+
+    /// Persists the active instrument's live state. Called a moment after
+    /// the last panel edit, and at shutdown; restarts then mean what the
+    /// player left, not the factory floor.
+    fn flush_live_state(&mut self) {
+        self.live_state_dirty = None;
+        #[cfg(windows)]
+        {
+            let Some(audio) = self.audio.as_ref() else { return };
+            let active = self
+                .session
+                .read()
+                .expect("session lock poisoned")
+                .active_instance_id
+                .clone();
+            let Some(active) = active else { return };
+            let Some(plugin) = self
+                .plugins
+                .iter()
+                .find(|plugin| plugin.instance_id == active.as_str())
+            else {
+                return;
+            };
+            match audio.save_active_state() {
+                Ok(bytes) => {
+                    let dir = self.live_state_dir();
+                    let path = live_state_path(&dir, &plugin.plugin_id);
+                    if let Err(error) =
+                        fs::create_dir_all(&dir).and_then(|_| fs::write(&path, &bytes))
+                    {
+                        eprintln!("DESKTOP_LIVE_STATE_WRITE_FAILED {error:#}");
+                    }
+                }
+                Err(error) => eprintln!("DESKTOP_LIVE_STATE_SAVE_FAILED {error:#}"),
+            }
+        }
+    }
+
     fn activate_plugin_id(&mut self, plugin_id: &str) -> Result<(), String> {
         if !self
             .plugins
@@ -1551,6 +1770,7 @@ impl DesktopApp {
             .iter()
             .position(|plugin| plugin.plugin_id == plugin_id)
             .ok_or_else(|| format!("Unknown Desktop plugin: {plugin_id}"))?;
+        let live_state_dir = self.live_state_dir();
         let plugin = &mut self.plugins[index];
         let import_targets = plugin
             .runtime
@@ -1647,6 +1867,7 @@ impl DesktopApp {
                         plugin: plugin.runtime,
                         preset_id: selected_sound_id.clone(),
                         resources: plugin.resources.clone(),
+                        initial_state: read_live_state(&live_state_dir, &plugin.plugin_id),
                     })?;
                 }
                 Ok((instance, catalog, selected_sound_id))
@@ -1843,6 +2064,30 @@ impl DesktopApp {
                     Ok(Vec::new())
                 } else {
                     Err("Program audition lease is missing or no longer valid".into())
+                }
+            }
+            SessionCommand::RegisterHostBindings {
+                controller_id,
+                controls,
+                actions,
+            } => {
+                // A controller driver reserving its host-control CCs. On this
+                // host the driver owns its surface endpoint exclusively (the
+                // desktop's MIDI capture yields it), so the reservation is
+                // satisfied by construction: nothing else reads those CCs.
+                // Validate and acknowledge.
+                if controls.iter().any(|binding| binding.midi_cc.validate().is_err())
+                    || actions.iter().any(|binding| binding.midi_cc.validate().is_err())
+                {
+                    Err("invalid reserved host binding registration".into())
+                } else {
+                    println!(
+                        "DESKTOP_HOST_BINDINGS_RESERVED controller={} controls={} actions={}",
+                        controller_id,
+                        controls.len(),
+                        actions.len()
+                    );
+                    Ok(Vec::new())
                 }
             }
             other => Err(format!(
@@ -2150,12 +2395,46 @@ impl DesktopApp {
     fn plugin_parameters(&mut self, instance_id: &InstanceId) -> ControlResponse {
         let state = self.session.read().expect("session lock poisoned");
         let revision = state.revision;
-        if state.active_instance_id.as_ref() != Some(instance_id) {
-            return ControlResponse::Error {
-                code: ControlErrorCode::Rejected,
-                message: format!("Plugin instance {instance_id} is not the active Desktop plugin"),
-                current_revision: Some(revision),
+        let mut instance_id = instance_id.clone();
+        if state.active_instance_id.as_ref() != Some(&instance_id) {
+            // The panel this came from may have been opened before its plugin
+            // was reinstalled or reactivated, which mints a new instance id.
+            // The panel keeps working -- and every control on it silently
+            // stops doing anything, because this guard rejected each edit
+            // with an error only a status line showed. If the ACTIVE instance
+            // is the same plugin, the edit is for it.
+            let stale_plugin = self
+                .plugins
+                .iter()
+                .find(|plugin| plugin.instance_id == instance_id.as_str())
+                .map(|plugin| plugin.plugin_id.clone());
+            let active = state.active_instance_id.clone();
+            let retarget = match (stale_plugin, &active) {
+                (Some(plugin_id), Some(active_id)) => self
+                    .plugins
+                    .iter()
+                    .any(|plugin| {
+                        plugin.instance_id == active_id.as_str()
+                            && plugin.plugin_id == plugin_id
+                    })
+                    .then(|| active_id.clone()),
+                // The stale id is gone entirely: if the active instance
+                // exists at all, route the edit there rather than nowhere.
+                (None, Some(active_id)) => Some(active_id.clone()),
+                _ => None,
             };
+            match retarget {
+                Some(target) => instance_id = target,
+                None => {
+                    return ControlResponse::Error {
+                        code: ControlErrorCode::Rejected,
+                        message: format!(
+                            "Plugin instance {instance_id} is not the active Desktop plugin"
+                        ),
+                        current_revision: Some(revision),
+                    };
+                }
+            }
         }
         drop(state);
 
@@ -2230,11 +2509,14 @@ impl DesktopApp {
         let result: std::result::Result<f64, String> = Err("Desktop audio is unavailable".into());
 
         match result {
-            Ok(value) => ControlResponse::PluginParameterSet {
-                instance_id: instance_id.clone(),
-                parameter_index,
-                value,
-            },
+            Ok(value) => {
+                self.live_state_dirty = Some(Instant::now());
+                ControlResponse::PluginParameterSet {
+                    instance_id: instance_id.clone(),
+                    parameter_index,
+                    value,
+                }
+            }
             Err(message) => ControlResponse::Error {
                 code: ControlErrorCode::Rejected,
                 message: format!("Could not set plugin parameter: {message}"),
@@ -2582,6 +2864,7 @@ impl DesktopApp {
         };
 
         self.status = format!("Loaded {sound_id}");
+        self.live_state_dirty = Some(Instant::now());
         #[cfg(windows)]
         if active
             && let Some(audio) = &self.audio
@@ -3462,6 +3745,11 @@ impl DesktopApp {
 
 impl eframe::App for DesktopApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(touched) = self.live_state_dirty
+            && touched.elapsed() >= Duration::from_millis(1500)
+        {
+            self.flush_live_state();
+        }
         #[cfg(windows)]
         self.poll_audio_error();
         #[cfg(windows)]
@@ -3638,7 +3926,10 @@ fn desktop_program_draft_state(
 }
 
 #[cfg(windows)]
-fn desktop_audio_specs(plugins: &[DesktopPlugin]) -> Vec<desktop_audio::VoiceSpec> {
+fn desktop_audio_specs(
+    plugins: &[DesktopPlugin],
+    live_state_dir: &Path,
+) -> Vec<desktop_audio::VoiceSpec> {
     plugins
         .iter()
         .map(|plugin| desktop_audio::VoiceSpec {
@@ -3646,8 +3937,18 @@ fn desktop_audio_specs(plugins: &[DesktopPlugin]) -> Vec<desktop_audio::VoiceSpe
             plugin: plugin.runtime,
             preset_id: plugin.selected_sound_id.clone(),
             resources: plugin.resources.clone(),
+            initial_state: read_live_state(live_state_dir, &plugin.plugin_id),
         })
         .collect()
+}
+
+/// Where a plugin's live panel state sleeps between sessions.
+fn live_state_path(dir: &Path, plugin_id: &str) -> PathBuf {
+    dir.join(format!("{plugin_id}.rfstate"))
+}
+
+fn read_live_state(dir: &Path, plugin_id: &str) -> Option<Vec<u8>> {
+    fs::read(live_state_path(dir, plugin_id)).ok()
 }
 
 #[cfg(windows)]
@@ -3655,12 +3956,28 @@ fn start_desktop_audio(
     plugins: &[DesktopPlugin],
     preferences: &desktop_audio::AudioPreferences,
     active_instance_id: Option<&str>,
+    live_state_dir: &Path,
+    external_controller: bool,
 ) -> Result<desktop_audio::DesktopAudio> {
     desktop_audio::DesktopAudio::start(
-        desktop_audio_specs(plugins),
+        desktop_audio_specs(plugins, live_state_dir),
         preferences,
         active_instance_id,
+        external_controller,
     )
+}
+
+/// True when an installed, enabled controller package should own the
+/// hardware surface: the built-in KeyLab handling stands down for it.
+fn external_controller_enabled(rackforge_root: &Path) -> bool {
+    let root = rackforge_root.join("controllers");
+    if !root.join("packages").exists() {
+        return false;
+    }
+    rackforge_controller_package::PackageStore::new(root)
+        .list()
+        .map(|installed| installed.iter().any(|controller| controller.record.enabled))
+        .unwrap_or(false)
 }
 
 #[cfg(windows)]
@@ -3860,7 +4177,35 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
         options.web_preferences.clone(),
         web_control_sender,
     )?;
-    let app = DesktopApp::new(Arc::clone(&session), &options, web_servers, web_control)?;
+    // The controller supervisor: every enabled .rfcontroller package runs
+    // its driver, pointed back at this host through the TCP control bridge.
+    // The loop exits on its own when the store holds nothing runnable.
+    let controller_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let root = options.rackforge_root.join("controllers");
+        let address = web_servers.control_bridge_addr().to_string();
+        let shutdown = Arc::clone(&controller_shutdown);
+        std::thread::Builder::new()
+            .name("rackforge-controller-supervisor".into())
+            .spawn(move || {
+                if !root.join("packages").exists() {
+                    return;
+                }
+                let options = rackforge_controller_package::supervise::SuperviseOptions {
+                    allow_community: false,
+                    extra_env: vec![("RACKFORGE_CONTROL_ADDR".into(), address)],
+                    shutdown,
+                };
+                match rackforge_controller_package::supervise::supervise(&root, &options) {
+                    Ok(0) => println!("DESKTOP_CONTROLLERS_NONE"),
+                    Ok(count) => println!("DESKTOP_CONTROLLERS_STOPPED count={count}"),
+                    Err(error) => eprintln!("DESKTOP_CONTROLLERS_ERROR {error}"),
+                }
+            })
+            .context("starting the controller supervisor")?;
+    }
+    let mut app = DesktopApp::new(Arc::clone(&session), &options, web_servers, web_control)?;
+    app.controller_shutdown = Some(controller_shutdown);
     Ok(app)
 }
 
@@ -3940,6 +4285,18 @@ impl RackForgeApp {
 }
 
 impl eframe::App for RackForgeApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // The player's last touches survive the window closing.
+        if let AppMode::Desktop(app) = &mut self.mode {
+            if app.live_state_dirty.is_some() {
+                app.flush_live_state();
+            }
+            if let Some(shutdown) = &app.controller_shutdown {
+                shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         let transition = match &mut self.mode {
             AppMode::Setup {
@@ -4042,6 +4399,52 @@ fn run() -> Result<()> {
         }
     };
     let startup = parse_startup()?;
+    // Installing from the command line is a job, not a session. This used to
+    // fall through into the full app boot -- audio stream, MIDI capture,
+    // window, the lot -- so every scripted `--install-plugin` left a complete
+    // instrument running. With a real session also open, whichever process
+    // held the audio kept playing a plugin nobody's panel controlled: the
+    // user heard a second piano that no fader could touch.
+    if let Startup::Ready(options) = &startup
+        && !options.install_archives.is_empty()
+    {
+        let store_root = options
+            .plugin_store_root
+            .as_deref()
+            .context("--install-plugin requires a RackForge Root with a plugin store")?;
+        for archive in &options.install_archives {
+            let bytes = read_plugin_archive_limited(archive).map_err(anyhow::Error::msg)?;
+            install_local_archive(store_root, &bytes)
+                .with_context(|| format!("installing plugin archive {}", archive.display()))?;
+            println!("RFPLUGIN_INSTALLED {}", archive.display());
+        }
+        return Ok(());
+    }
+    // Controllers are packages too, and their install is the same job-not-
+    // session shape as the plugins'. Local installs carry official trust:
+    // this path takes a directory the user built or unpacked themselves.
+    if let Startup::Ready(options) = &startup
+        && !options.install_controllers.is_empty()
+    {
+        let store = rackforge_controller_package::PackageStore::new(
+            options.rackforge_root.join("controllers"),
+        );
+        for package in &options.install_controllers {
+            let installed = store
+                .install_directory(
+                    package,
+                    rackforge_controller_package::PackageTrust::Official,
+                )
+                .map_err(|error| {
+                    anyhow::anyhow!("installing controller {}: {error}", package.display())
+                })?;
+            println!(
+                "RFCONTROLLER_INSTALLED id={} version={}",
+                installed.record.id, installed.record.version
+            );
+        }
+        return Ok(());
+    }
     let app_icon = eframe::icon_data::from_png_bytes(include_bytes!(
         "../../../assets/brand/rackforge-mark-256.png"
     ))

@@ -92,7 +92,7 @@ pub fn sqrtf(x: f32) -> f32 {
     y
 }
 
-fn roundf(x: f32) -> f32 {
+pub fn roundf(x: f32) -> f32 {
     let truncated = x as i32 as f32;
     let fraction = x - truncated;
     if fraction > 0.5 {

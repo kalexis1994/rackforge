@@ -1920,6 +1920,258 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabAcquirePlan
     result_string(&mut env, result)
 }
 
+/// The controller store: the SAME `.rfcontroller` package system every
+/// platform uses. Android cannot run process drivers (no exec from
+/// writable storage, and the MIDI transport is the Java API), so the
+/// driver's role is played in-process by the shared protocol crate -- but
+/// the package, the store layout, the settings schema and the JSON the UI
+/// sees are identical to the desktop and the Pi.
+fn controller_store_settings_path(store_root: &Path, controller_id: &str) -> PathBuf {
+    store_root
+        .join("state")
+        .join(controller_id)
+        .join("settings.toml")
+}
+
+fn read_controller_store_settings(
+    store_root: &Path,
+    controller_id: &str,
+) -> BTreeMap<String, String> {
+    fs::read_to_string(controller_store_settings_path(store_root, controller_id))
+        .ok()
+        .and_then(|text| toml::from_str::<BTreeMap<String, String>>(&text).ok())
+        .unwrap_or_default()
+}
+
+/// What a setting MEANS on this hardware, applied in-process: the exact
+/// mapping the process driver performs on the other platforms.
+fn apply_controller_settings_in_process(values: &BTreeMap<String, String>) {
+    if let Some(value) = values.get("key-light-color")
+        && let Some(digits) = value.strip_prefix('#')
+        && digits.len() == 6
+        && let Ok(parsed) = u32::from_str_radix(digits, 16)
+    {
+        keylab_protocol::set_ambient_led_rgb([
+            (((parsed >> 16) & 0xFF) as u8) >> 1,
+            (((parsed >> 8) & 0xFF) as u8) >> 1,
+            ((parsed & 0xFF) as u8) >> 1,
+        ]);
+    }
+}
+
+/// Installs the bundled KeyLab package into the store (idempotent) and
+/// applies its stored settings. Called at boot before any MIDI session.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_ensureBundledControllers(
+    mut env: JNIEnv,
+    _class: JClass,
+    store_root: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let store_root: String = env
+            .get_string(&store_root)
+            .context("reading controller store root")?
+            .into();
+        let store_root = PathBuf::from(store_root);
+        let store = rackforge_controller_package::PackageStore::new(&store_root);
+        let manifest = keylab_essential_mk3::controller::PACKAGE_MANIFEST;
+        let parsed: rackforge_controller_package::ControllerPackageManifest =
+            toml::from_str(manifest).context("parsing the bundled controller manifest")?;
+        let already = store
+            .list()
+            .map(|installed| {
+                installed.iter().any(|controller| {
+                    controller.record.id == parsed.id
+                        && controller.record.version == parsed.version
+                })
+            })
+            .unwrap_or(false);
+        if !already {
+            let staging = store_root.join("staging").join(&parsed.id);
+            fs::create_dir_all(&staging)?;
+            fs::write(
+                staging.join(rackforge_controller_package::CONTROLLER_MANIFEST_FILE),
+                manifest,
+            )?;
+            store
+                .install_directory(
+                    &staging,
+                    rackforge_controller_package::PackageTrust::Official,
+                )
+                .map_err(|error| anyhow::anyhow!("installing bundled controller: {error}"))?;
+            let _ = fs::remove_dir_all(store_root.join("staging"));
+        }
+        let values = read_controller_store_settings(&store_root, &parsed.id);
+        apply_controller_settings_in_process(&values);
+        Ok(serde_json::json!({"status": "ok", "installed": !already}).to_string())
+    })();
+    result_string(&mut env, result)
+}
+
+/// Installs a controller package directory into the store: the same job
+/// `--install-controller` performs on the desktop, reachable from adb via
+/// the app's install inbox. Local packages carry official trust.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerInstallDirectory(
+    mut env: JNIEnv,
+    _class: JClass,
+    store_root: JString,
+    package_dir: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let store_root: String = env
+            .get_string(&store_root)
+            .context("reading controller store root")?
+            .into();
+        let package_dir: String = env
+            .get_string(&package_dir)
+            .context("reading controller package path")?
+            .into();
+        let store = rackforge_controller_package::PackageStore::new(PathBuf::from(store_root));
+        match store.install_directory(
+            PathBuf::from(&package_dir),
+            rackforge_controller_package::PackageTrust::Official,
+        ) {
+            Ok(installed) => Ok(serde_json::json!({
+                "status": "ok",
+                "id": installed.record.id,
+                "version": installed.record.version,
+                "already_installed": false,
+            })
+            .to_string()),
+            Err(error) => {
+                let text = error.to_string();
+                if text.contains("already installed") {
+                    Ok(serde_json::json!({
+                        "status": "ok",
+                        "already_installed": true,
+                    })
+                    .to_string())
+                } else {
+                    Err(anyhow::anyhow!("installing controller package: {text}"))
+                }
+            }
+        }
+    })();
+    result_string(&mut env, result)
+}
+
+/// The installed controllers with their settings schema and current values:
+/// the same JSON shape `GET /api/v1/controllers` serves on the desktop.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerCatalog(
+    mut env: JNIEnv,
+    _class: JClass,
+    store_root: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let store_root: String = env
+            .get_string(&store_root)
+            .context("reading controller store root")?
+            .into();
+        let store_root = PathBuf::from(store_root);
+        let installed = rackforge_controller_package::PackageStore::new(&store_root)
+            .list()
+            .map_err(|error| anyhow::anyhow!("listing controller store: {error}"))?;
+        let controllers: Vec<serde_json::Value> = installed
+            .iter()
+            .map(|controller| {
+                let manifest = controller.package.manifest();
+                let stored =
+                    read_controller_store_settings(&store_root, &controller.record.id);
+                let settings: Vec<serde_json::Value> = manifest
+                    .settings
+                    .iter()
+                    .map(|setting| {
+                        serde_json::json!({
+                            "id": setting.id,
+                            "name": setting.name,
+                            "kind": format!("{:?}", setting.kind).to_ascii_lowercase(),
+                            "default": setting.default,
+                            "page": setting.page,
+                            "value": stored
+                                .get(&setting.id)
+                                .cloned()
+                                .unwrap_or_else(|| setting.default.clone()),
+                        })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "id": controller.record.id,
+                    "name": manifest.name,
+                    "version": controller.record.version,
+                    "enabled": controller.record.enabled,
+                    "trust": format!("{:?}", controller.record.trust).to_ascii_lowercase(),
+                    "runtime": "InProcess",
+                    "devices": manifest.devices.len(),
+                    "settings": settings,
+                })
+            })
+            .collect();
+        Ok(serde_json::json!({"status": "ok", "controllers": controllers}).to_string())
+    })();
+    result_string(&mut env, result)
+}
+
+/// Validates and persists setting values exactly as the desktop's PUT
+/// endpoint does, applies them in-process, and returns the repaint plan.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerApplySettings(
+    mut env: JNIEnv,
+    _class: JClass,
+    store_root: JString,
+    controller_id: JString,
+    values_json: JString,
+) -> jstring {
+    let result = (|| -> Result<String> {
+        let store_root: String = env
+            .get_string(&store_root)
+            .context("reading controller store root")?
+            .into();
+        let store_root = PathBuf::from(store_root);
+        let controller_id: String = env
+            .get_string(&controller_id)
+            .context("reading controller id")?
+            .into();
+        let values_json: String = env
+            .get_string(&values_json)
+            .context("reading setting values")?
+            .into();
+        let requested: BTreeMap<String, String> =
+            serde_json::from_str(&values_json).context("parsing setting values")?;
+        let installed = rackforge_controller_package::PackageStore::new(&store_root)
+            .resolve(&controller_id)
+            .map_err(|error| anyhow::anyhow!("resolving controller: {error}"))?;
+        let manifest = installed.package.manifest();
+        let mut values = read_controller_store_settings(&store_root, &controller_id);
+        for (id, value) in &requested {
+            let setting = manifest
+                .settings
+                .iter()
+                .find(|setting| &setting.id == id)
+                .with_context(|| format!("this controller declares no setting {id:?}"))?;
+            setting.validate_value(value).map_err(anyhow::Error::msg)?;
+            values.insert(id.clone(), value.clone());
+        }
+        let path = controller_store_settings_path(&store_root, &controller_id);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let body = values
+            .iter()
+            .map(|(key, value)| format!("{key} = {value:?}
+"))
+            .collect::<String>();
+        let temporary = path.with_extension("tmp");
+        fs::write(&temporary, body)?;
+        fs::rename(&temporary, &path)?;
+        apply_controller_settings_in_process(&values);
+        let plan = controller_plan_value(keylab_protocol::ambient_repaint_messages())?;
+        Ok(serde_json::json!({"status": "ok", "plan": plan}).to_string())
+    })();
+    result_string(&mut env, result)
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabMatchesUsbDevice(
     _env: JNIEnv,

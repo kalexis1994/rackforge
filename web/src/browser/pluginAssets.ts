@@ -19,6 +19,27 @@ import type { SeedFile } from "./protocol";
 const CACHE = "rackforge-plugin-assets";
 /** Path the service worker recognises, below the site's base. */
 export const PLUGIN_ASSET_PREFIX = "plugin-assets/";
+/** Where the site's own packages sit on disk, which a dev server serves. */
+const PACKAGED_SOURCE_PREFIX = "demo/rackforge/";
+
+/**
+ * A dev server has the packaged plugins on disk and serves them, so their
+ * pages do not need the worker at all. Off a dev server they exist only
+ * inside the host's storage, and the worker is the only thing that can give
+ * them an address.
+ *
+ * This is not a nicety. A stale or emptied worker cache is invisible — the
+ * instrument keeps sounding, because audio needs no URLs, while its
+ * interface quietly 404s — and clearing it by hand was becoming part of
+ * every reload.
+ */
+const DEVELOPMENT =
+  typeof location !== "undefined"
+  && (["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)
+    || location.hostname.endsWith(".local")
+    || /^10[.]/.test(location.hostname)
+    || /^192[.]168[.]/.test(location.hostname)
+    || /^172[.](1[6-9]|2[0-9]|3[01])[.]/.test(location.hostname));
 
 /** Guessed from the extension: a cache entry has no server to ask. */
 function contentType(path: string): string {
@@ -64,6 +85,9 @@ function contentType(path: string): string {
  * advertised and then broken.
  */
 export function whenServing(timeoutMs = 5_000): Promise<boolean> {
+  // On a dev server the packaged pages are served from disk, so they are
+  // addressable whether or not a worker ever takes control.
+  if (DEVELOPMENT) return Promise.resolve(true);
   if (!("serviceWorker" in navigator)) return Promise.resolve(false);
   if (navigator.serviceWorker.controller) return Promise.resolve(true);
   return new Promise((resolve) => {
@@ -84,7 +108,13 @@ export function whenServing(timeoutMs = 5_000): Promise<boolean> {
 /** The URL a file inside a package is published at. */
 export function pluginAssetUrl(packageRoot: string, entry: string, version: string): string {
   const path = `${packageRoot}/${entry}`.replace(/\\/g, "/").replace(/^\/+/, "");
-  return `${assetUrl(PLUGIN_ASSET_PREFIX)}${path}?v=${encodeURIComponent(version)}`;
+  // Only the packages the site ships live on disk; an installed one exists
+  // solely in the host's storage and still needs the worker.
+  const prefix =
+    DEVELOPMENT && path.startsWith("plugins/")
+      ? PACKAGED_SOURCE_PREFIX
+      : PLUGIN_ASSET_PREFIX;
+  return `${assetUrl(prefix)}${path}?v=${encodeURIComponent(version)}`;
 }
 
 /**

@@ -10,6 +10,8 @@ use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
 
+pub mod supervise;
+
 pub const CONTROLLER_PACKAGE_SCHEMA_VERSION: u32 = 1;
 pub const CONTROLLER_DRIVER_API_VERSION: &str = "1.1.0";
 pub const CONTROLLER_MANIFEST_FILE: &str = "rackforge-controller.toml";
@@ -197,6 +199,63 @@ pub struct ArtifactIntegrity {
     pub sha256: BTreeMap<String, String>,
 }
 
+/// One user-facing setting a controller package exposes. The host renders
+/// these generically (the panel is derived from the schema, never
+/// hardcoded), persists the values in the store, and hands them to the
+/// driver, which alone decides what a setting MEANS on its hardware.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControllerSetting {
+    pub id: String,
+    pub name: String,
+    pub kind: ControllerSettingKind,
+    pub default: String,
+    #[serde(default)]
+    pub page: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ControllerSettingKind {
+    /// An sRGB color, serialized as `#rrggbb`.
+    Color,
+}
+
+impl ControllerSetting {
+    pub fn validate(&self) -> Result<(), PackageError> {
+        if self.id.is_empty()
+            || !self
+                .id
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err(PackageError::InvalidManifest(format!(
+                "invalid setting id {:?}",
+                self.id
+            )));
+        }
+        self.validate_value(&self.default).map_err(|error| {
+            PackageError::InvalidManifest(format!("setting {:?}: {error}", self.id))
+        })
+    }
+
+    /// Whether `value` is admissible for this setting's kind.
+    pub fn validate_value(&self, value: &str) -> Result<(), String> {
+        match self.kind {
+            ControllerSettingKind::Color => {
+                let ok = value.len() == 7
+                    && value.starts_with('#')
+                    && value.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit);
+                if ok {
+                    Ok(())
+                } else {
+                    Err(format!("{value:?} is not an #rrggbb color"))
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ControllerPackageManifest {
@@ -216,6 +275,8 @@ pub struct ControllerPackageManifest {
     pub host_actions: Vec<HostActionBinding>,
     #[serde(default)]
     pub integrity: Option<ArtifactIntegrity>,
+    #[serde(default)]
+    pub settings: Vec<ControllerSetting>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -340,6 +401,18 @@ impl ControllerPackageManifest {
         for device in &self.devices {
             device.validate()?;
         }
+        for setting in &self.settings {
+            setting.validate()?;
+        }
+        let mut setting_ids = BTreeSet::new();
+        for setting in &self.settings {
+            if !setting_ids.insert(&setting.id) {
+                return Err(PackageError::InvalidManifest(format!(
+                    "duplicate setting id {:?}",
+                    setting.id
+                )));
+            }
+        }
         ControllerProfile {
             id: self.id.clone(),
             name: self.name.clone(),
@@ -442,8 +515,23 @@ impl ControllerPackage {
     }
 
     fn verify_artifacts(&self) -> Result<(), PackageError> {
+        // A multi-platform manifest may declare targets this build never
+        // produced: the Pi's package carries no Windows binary and a
+        // Windows checkout carries no Linux one, and both are legitimate
+        // installs OF THE SAME MANIFEST. What is REQUIRED is the artifact
+        // for the platform installing it -- and integrity, when declared,
+        // for every artifact that is actually present. Demanding every
+        // declared target everywhere made a shared manifest impossible.
+        let host = development_target();
         for target in self.manifest.runtime.entrypoints.keys() {
-            let path = self.resolve_entrypoint(target)?;
+            let path = match self.resolve_entrypoint(target) {
+                Ok(path) => path,
+                Err(PackageError::MissingArtifact(missing)) if target != host => {
+                    let _ = missing;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             if let Some(expected) = self
                 .manifest
                 .integrity
@@ -664,10 +752,10 @@ impl PackageStore {
 pub fn development_target() -> &'static str {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "aarch64") => "linux-aarch64",
-        ("linux", "x86_64") => "linux-x86_64",
-        ("windows", "x86_64") => "windows-x86_64",
+        ("linux", "x86_64") => "linux-x86-64",
+        ("windows", "x86_64") => "windows-x86-64",
         ("macos", "aarch64") => "macos-aarch64",
-        ("macos", "x86_64") => "macos-x86_64",
+        ("macos", "x86_64") => "macos-x86-64",
         ("android", "aarch64") => "android-aarch64",
         _ => "unsupported",
     }
@@ -757,6 +845,9 @@ fn validate_target(value: &str) -> Result<(), PackageError> {
     Ok(())
 }
 
+// Target names are lowercase kebab-case ("windows-x86-64", never
+// "windows-x86_64"): the validator above forbids underscores, and
+// `development_target` follows the same convention.
 fn validate_relative_path(value: &str) -> Result<(), PackageError> {
     let path = Path::new(value);
     if value.is_empty()
@@ -905,7 +996,7 @@ mod tests {
         unsafe_path
             .runtime
             .entrypoints
-            .insert("windows-x86_64".into(), "../outside/driver.exe".into());
+            .insert("windows-x86-64".into(), "../outside/driver.exe".into());
         assert!(matches!(
             unsafe_path.validate(),
             Err(PackageError::InvalidManifest(_))

@@ -2,7 +2,7 @@ schema_version = 1
 kind = "controller"
 id = "org.rackforge.arturia-keylab-essential-mk3"
 name = "Arturia KeyLab Essential 61 mk3"
-version = "0.2.33"
+version = "0.2.35"
 controller_api = "^1.0"
 
 [runtime]
@@ -10,6 +10,7 @@ kind = "process-v1"
 
 [runtime.entrypoints]
 linux-aarch64 = "bin/linux-aarch64/rackforge-arturia-keylab-essential-mk3-driver"
+windows-x86-64 = "bin/windows-x86-64/rackforge-arturia-keylab-essential-mk3-driver.exe"
 
 [permissions]
 midi_input = true
@@ -76,3 +77,9 @@ priority = 0
 [surfaces.gestures]
 soft_key_long_press = true
 emergency_home_chord = true
+
+[[settings]]
+id = "key-light-color"
+name = "Key light color"
+kind = "color"
+default = "#145080"

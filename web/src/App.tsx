@@ -25,6 +25,7 @@ import {
   Play,
   RadioTower,
   Settings2,
+  Sliders,
   Trash2,
   X,
 } from "lucide-react";
@@ -543,6 +544,7 @@ function RackForgeApp() {
               path="/plugins/:instanceId"
               element={<PluginPage snapshot={snapshot} />}
             />
+            <Route path="/controllers/:controllerId" element={<ControllerPage />} />
             <Route
               path="/settings"
               element={settingsBootstrap ? (
@@ -1254,10 +1256,41 @@ function MobileNavigation({
             detailed
             onNavigate={requestClose}
           />
+          <RevisionFooter />
         </div>
         <ConnectionBadge status={connection} />
       </section>
     </div>
+  );
+}
+
+// Drift made visible: the revision this interface was built from, beside
+// the revision the host binary reports. When they disagree, someone shipped
+// half a deploy, and the mismatch says so before a behavior difference does.
+function RevisionFooter() {
+  const [host, setHost] = useState<{ revision?: string; ui_revision?: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    hostJson<{ revision?: string; ui_revision?: string }>("/api/v1/health")
+      .then((health) => {
+        if (!cancelled) setHost(health);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const mismatch =
+    host?.ui_revision !== undefined &&
+    host.ui_revision !== "unknown" &&
+    host.ui_revision !== __UI_REVISION__;
+  const stale = host?.revision !== undefined && host.revision !== __UI_REVISION__;
+  return (
+    <p className={`revision-footer${mismatch || stale ? " drift" : ""}`}>
+      UI {__UI_REVISION__}
+      {host?.revision ? ` · host ${host.revision}` : ""}
+      {mismatch || stale ? " · out of sync" : ""}
+    </p>
   );
 }
 
@@ -2123,7 +2156,6 @@ function PlayPage({
     ) return;
     playActivationStartedRef.current = true;
     const instanceId = active?.instance_id;
-    const soundId = active?.selected_sound_id;
     void (async () => {
       try {
         // Rack preview cleanup is dispatched while this route mounts. Awaiting
@@ -2132,13 +2164,13 @@ function PlayPage({
         await dispatchCommandAwait({ type: "set_active_mode", mode: "play" });
         if (!instanceId) return;
         await dispatchCommandAwait({ type: "select_plugin", instance_id: instanceId });
-        if (soundId) {
-          await dispatchCommandAwait({
-            type: "select_sound",
-            instance_id: instanceId,
-            sound_id: soundId,
-          });
-        }
+        // Deliberately not re-selecting the program. `soundId` was read from
+        // the session, so re-applying it can only ever restate what the host
+        // already holds — and selecting a program loads its preset, which
+        // overwrites every parameter the player has touched since. Editing a
+        // control, going to the on-screen keyboard and coming back reset the
+        // instrument to the preset. Neither `set_active_mode` nor
+        // `select_plugin` disturbs the selection, so nothing here needs it.
       } catch {
         // The gateway publishes command failures through the shared error
         // banner. A later explicit program selection remains a safe retry.
@@ -2684,6 +2716,124 @@ function PluginRemovalDialog({
   );
 }
 
+type ControllerSettingSummary = {
+  id: string;
+  name: string;
+  kind: string;
+  default: string;
+  page: string | null;
+  value: string;
+};
+
+type ControllerSummary = {
+  id: string;
+  name: string;
+  version: string;
+  enabled: boolean;
+  trust: string;
+  runtime: string;
+  devices: number;
+  settings: ControllerSettingSummary[];
+};
+
+function ControllerPage() {
+  const { controllerId } = useParams();
+  const id = decodeURIComponent(controllerId ?? "");
+  const [controller, setController] = useState<ControllerSummary | null>(null);
+  const [status, setStatus] = useState<string>("");
+  const saveTimer = useRef<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    hostJson<{ controllers: ControllerSummary[] }>("/api/v1/controllers")
+      .then((response) => {
+        if (cancelled) return;
+        setController(
+          response.controllers.find((candidate) => candidate.id === id) ?? null,
+        );
+      })
+      .catch(() => setStatus("Could not read the controller."));
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  const applyValue = (settingId: string, value: string) => {
+    setController((current) =>
+      current
+        ? {
+            ...current,
+            settings: current.settings.map((setting) =>
+              setting.id === settingId ? { ...setting, value } : setting,
+            ),
+          }
+        : current,
+    );
+    // Color pickers stream values while dragging; the hardware repaint is
+    // ~44 SysEx messages, so settle for 200 ms of quiet before saving.
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      hostJson(`/api/v1/controllers/${encodeURIComponent(id)}/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ values: { [settingId]: value } }),
+      })
+        .then(() => setStatus("Saved · the hardware follows within a second"))
+        .catch((error) =>
+          setStatus(error instanceof Error ? error.message : "Could not save."),
+        );
+    }, 200);
+  };
+
+  if (!controller) {
+    return (
+      <section className="plugin-surface-shell direct-surface">
+        <PluginSurfaceState
+          title={status || "Loading controller…"}
+          detail={status ? "The controller may have been removed." : id}
+        />
+      </section>
+    );
+  }
+  return (
+    <section className="controller-config">
+      <PageHeading
+        eyebrow="Controller"
+        title={controller.name}
+        detail={`Version ${controller.version} · ${controller.trust} · settings apply live`}
+      />
+      <div className="controller-settings">
+        {controller.settings.length === 0 && (
+          <p className="controller-no-settings">
+            This controller does not expose settings yet.
+          </p>
+        )}
+        {controller.settings.map((setting) => (
+          <label className="controller-setting" key={setting.id}>
+            <span>
+              <strong>{setting.name}</strong>
+              {setting.page ? <small> · {setting.page}</small> : null}
+            </span>
+            {setting.kind === "color" ? (
+              <input
+                type="color"
+                value={setting.value}
+                onChange={(event) => applyValue(setting.id, event.target.value)}
+              />
+            ) : (
+              <input
+                type="text"
+                value={setting.value}
+                onChange={(event) => applyValue(setting.id, event.target.value)}
+              />
+            )}
+          </label>
+        ))}
+      </div>
+      {status ? <p className="controller-status">{status}</p> : null}
+    </section>
+  );
+}
+
 function PluginsPage({
   snapshot,
   onInstall,
@@ -2693,6 +2843,18 @@ function PluginsPage({
 }) {
   const location = useLocation();
   const { plugins: installed } = usePluginCatalog();
+  const [controllers, setControllers] = useState<ControllerSummary[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    hostJson<{ controllers: ControllerSummary[] }>("/api/v1/controllers")
+      .then((response) => {
+        if (!cancelled) setControllers(response.controllers ?? []);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [pendingRemoval, setPendingRemoval] = useState<PluginWebDescriptor | null>(null);
   const [removing, setRemoving] = useState(false);
   const [removalError, setRemovalError] = useState<string | null>(null);
@@ -2747,9 +2909,9 @@ function PluginsPage({
     <>
       <div className="plugin-manager-heading">
         <PageHeading
-          eyebrow="Instrument library"
+          eyebrow="Plugin library"
           title="Plugin Manager"
-          detail="Install, configure and remove portable RackForge instruments. Musical controls remain in Play."
+          detail="Install, configure and remove RackForge plugins: instruments and controllers. Musical controls remain in Play."
         />
         <button className="primary-button plugin-install-button" onClick={onInstall}>
           <Download aria-hidden="true" />
@@ -2781,7 +2943,8 @@ function PluginsPage({
                 </div>
                 <div>
                   <span className="card-kicker">
-                    {plugin.active ? "Active package" : "Installed package"}
+                    {plugin.active ? "Active package" : "Installed package"}{" "}
+                    <span className="plugin-kind-tag instrument">Instrument</span>
                   </span>
                   <h3>{plugin.plugin_name}</h3>
                   <p>
@@ -2802,6 +2965,40 @@ function PluginsPage({
                   <span className="plugin-installed-mark" aria-label="Installed">✓</span>
                 )}
               </article>
+            ))}
+          </div>
+        </>
+      )}
+      {controllers.length > 0 && (
+        <>
+          <div className="plugin-section-heading">
+            <span className="card-kicker">Controllers</span>
+            <small>Hardware surfaces installed as packages</small>
+          </div>
+          <div className="plugin-grid expanded">
+            {controllers.map((controller) => (
+              <NavLink
+                className="plugin-card installed-plugin-card"
+                key={controller.id}
+                to={`/controllers/${encodeURIComponent(controller.id)}`}
+              >
+                <div className="plugin-tile controller-tile">
+                  <span className="controller-tile-mark" aria-hidden="true">
+                    <Sliders aria-hidden="true" />
+                  </span>
+                </div>
+                <div>
+                  <span className="card-kicker">
+                    {controller.enabled ? "Active package" : "Disabled package"}{" "}
+                    <span className="plugin-kind-tag controller">Controller</span>
+                  </span>
+                  <h3>{controller.name}</h3>
+                  <p>
+                    Version {controller.version} · {controller.trust}
+                    {controller.devices > 0 ? ` · ${controller.devices} device profile(s)` : ""}
+                  </p>
+                </div>
+              </NavLink>
             ))}
           </div>
         </>
@@ -2853,7 +3050,9 @@ function PluginGrid({
                 {!plugin?.branding && <i />}
               </div>
               <div>
-                <span className="card-kicker">Plugin</span>
+                <span className="card-kicker">
+                  Plugin <span className="plugin-kind-tag instrument">Instrument</span>
+                </span>
                 <h3>{instance.plugin_name}</h3>
                 <p>{selected?.name ?? `${instance.sounds.length} programs`}</p>
               </div>
@@ -3016,6 +3215,14 @@ export function PluginFrame({
       ? descriptor ? "ready" : "unavailable"
       : "loading";
   const [frameLoaded, setFrameLoaded] = useState(false);
+  // The splash's own lifecycle: the icon fill reaches the top, THEN the
+  // whole overlay fades, THEN it unmounts. Removing it on iframe load was
+  // an abrupt cut.
+  const [splashDone, setSplashDone] = useState(false);
+  const [splashGone, setSplashGone] = useState(false);
+  const splashLitRef = useRef<HTMLImageElement | null>(null);
+  const frameLoadedRef = useRef(false);
+  frameLoadedRef.current = frameLoaded;
   const [resourceBusy, setResourceBusy] = useState<string | null>(null);
   const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -3184,7 +3391,51 @@ export function PluginFrame({
 
   useEffect(() => {
     setFrameLoaded(false);
+    setSplashDone(false);
+    setSplashGone(false);
   }, [descriptor?.version, selectedSurface?.entry_url]);
+
+  // The icon reveal: a dim copy of the plugin icon sits under a full-color
+  // copy clipped from the top, and the clip retreats bottom-to-top. The
+  // iframe gives no real progress, so the fill eases toward ~90% on its
+  // own clock and completes the moment the frame reports loaded. The DOM
+  // node is driven directly from the animation frame -- rendering React
+  // sixty times a second for a clip-path would be its own jank.
+  useEffect(() => {
+    if (splashGone) return;
+    let raf = 0;
+    let progress = 0;
+    const start = performance.now();
+    const step = (now: number) => {
+      const lit = splashLitRef.current;
+      if (lit) {
+        const seconds = (now - start) / 1000;
+        const target = frameLoadedRef.current
+          ? 1
+          : 0.9 * (1 - Math.exp(-seconds / 0.9));
+        progress += (Math.max(target, progress) - progress) * 0.12;
+        lit.style.clipPath = `inset(${((1 - progress) * 100).toFixed(2)}% 0 0 0)`;
+        if (frameLoadedRef.current && progress > 0.995) {
+          lit.style.clipPath = "inset(0 0 0 0)";
+          setSplashDone(true);
+          return;
+        }
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [splashGone, descriptor?.version, selectedSurface?.entry_url]);
+
+  // Insurance for the reveal: animation frames stop in a hidden window
+  // (minimized, background tab), and the splash must never outlive the
+  // interface it was covering. Once the frame is loaded, a plain timer
+  // completes the splash even if no frame ever fires.
+  useEffect(() => {
+    if (!frameLoaded || splashDone) return;
+    const timer = window.setTimeout(() => setSplashDone(true), 1800);
+    return () => window.clearTimeout(timer);
+  }, [frameLoaded, splashDone]);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -3704,10 +3955,29 @@ export function PluginFrame({
           referrerPolicy="same-origin"
           onLoad={() => setFrameLoaded(true)}
         />
-        {!frameLoaded && (
-          <div className="plugin-brand-splash" aria-label={`Loading ${instance.plugin_name}`}>
+        {!splashGone && (
+          <div
+            className={`plugin-brand-splash${splashDone ? " done" : ""}`}
+            aria-label={`Loading ${instance.plugin_name}`}
+            onTransitionEnd={(event) => {
+              if (event.target === event.currentTarget && splashDone) {
+                setSplashGone(true);
+              }
+            }}
+          >
             {descriptor?.branding ? (
-              <img src={descriptor.branding.splash_url} alt="" />
+              <>
+                <img className="splash-bg" src={descriptor.branding.splash_url} alt="" />
+                <div className="splash-icon" aria-hidden="true">
+                  <img className="splash-icon-dim" src={descriptor.branding.icon_url} alt="" />
+                  <img
+                    ref={splashLitRef}
+                    className="splash-icon-lit"
+                    src={descriptor.branding.icon_url}
+                    alt=""
+                  />
+                </div>
+              </>
             ) : (
               <RfLoader label={instance.plugin_name} detail="Loading plugin interface…" size="medium" />
             )}

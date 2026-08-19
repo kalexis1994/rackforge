@@ -55,6 +55,20 @@ struct WebState {
     control: Sender<DesktopControlCall>,
     resource_browser: Arc<NativeResourceBrowser>,
     resource_upload_root: PathBuf,
+    /// The web-package discovery walks every installed package directory and
+    /// parses every manifest -- dozens of file opens. Doing that once per
+    /// ASSET REQUEST made the splash and the icons crawl. The result only
+    /// changes when the catalog does, so it is cached against the catalog
+    /// revision; `active` flags are refreshed from the session per call.
+    web_packages_cache: Arc<Mutex<Option<(u64, BTreeMap<String, PluginWebPackage>)>>>,
+    /// Bumped only when the set of installed packages actually changes
+    /// (install, uninstall). `plugin_catalog_revision` also bumps on
+    /// ACTIVATION for the clients' sake, and keying the scan cache on it
+    /// meant the first splash after every activation paid the full package
+    /// walk again.
+    package_scan_revision: Arc<AtomicU64>,
+    /// Root of the controller package store (`<root>/controllers`).
+    controllers_root: PathBuf,
     /// Notes from a surface go straight to the audio thread through this.
     /// Routing them through the GUI thread capped them at one frame each —
     /// about sixty a second — so fast playing on a touch surface queued up
@@ -230,6 +244,15 @@ pub struct DesktopWebServers {
     state: WebState,
     preferences: Arc<RwLock<WebServerPreferences>>,
     local_url: String,
+    control_bridge_addr: SocketAddr,
+}
+
+impl DesktopWebServers {
+    /// Where the framed control protocol listens; handed to controller
+    /// drivers as `RACKFORGE_CONTROL_ADDR`.
+    pub fn control_bridge_addr(&self) -> SocketAddr {
+        self.control_bridge_addr
+    }
 }
 
 impl DesktopWebServers {
@@ -302,6 +325,7 @@ struct PublicPluginWeb {
     resources: Vec<rackforge_plugin_api::ResourceRequirement>,
 }
 
+#[derive(Clone)]
 struct PluginWebPackage {
     root: PathBuf,
     public: PublicPluginWeb,
@@ -320,6 +344,9 @@ pub fn start(
         injected_midi: Arc::clone(&injected_midi),
         session,
         plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
+        web_packages_cache: Arc::new(Mutex::new(None)),
+        package_scan_revision: Arc::new(AtomicU64::new(0)),
+        controllers_root: options.rackforge_root.join("controllers"),
         legacy_plugins_root: options.plugins_root.clone(),
         plugin_store_root: options.plugin_store_root.clone(),
         data_root: options.data_root.clone(),
@@ -343,13 +370,61 @@ pub fn start(
         .enabled
         .then(|| bind_public_server(state.clone(), preferences.port))
         .transpose()?;
+    // The control bridge: the framed control protocol (one JSON line in,
+    // one out per connection) on TCP loopback, so controller drivers on
+    // hosts without a Unix control socket -- this one -- reach the same
+    // session dispatch every other client uses. The supervisor hands
+    // drivers the address through RACKFORGE_CONTROL_ADDR.
+    let bridge_listener =
+        std::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))?;
+    let control_bridge_addr = bridge_listener.local_addr()?;
+    {
+        let bridge_state = state.clone();
+        std::thread::Builder::new()
+            .name("rackforge-control-bridge".into())
+            .spawn(move || control_bridge(bridge_listener, bridge_state))
+            .context("starting the control bridge")?;
+    }
     Ok(DesktopWebServers {
         _local: local,
         public,
         state,
         preferences: shared_preferences,
         local_url: format!("http://127.0.0.1:{local_port}"),
+        control_bridge_addr,
     })
+}
+
+fn control_bridge(listener: std::net::TcpListener, state: WebState) {
+    use std::io::{BufRead, BufReader, Write};
+    const MAX_REQUEST_BYTES: u64 = 1024 * 1024;
+    for connection in listener.incoming() {
+        let Ok(mut stream) = connection else {
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+        let mut bytes = Vec::new();
+        if std::io::Read::take(BufReader::new(&stream), MAX_REQUEST_BYTES)
+            .read_until(b'\n', &mut bytes)
+            .is_err()
+            || bytes.is_empty()
+        {
+            continue;
+        }
+        let response = match serde_json::from_slice::<ControlRequest>(&bytes) {
+            Ok(request) => response_for(request, &state),
+            Err(error) => json!({
+                "status": "error",
+                "code": "invalid_request",
+                "message": error.to_string(),
+            }),
+        };
+        let mut line = response.to_string().into_bytes();
+        line.push(b'\n');
+        let _ = stream.write_all(&line);
+    }
 }
 
 fn bind_public_server(state: WebState, port: u16) -> anyhow::Result<RunningServer> {
@@ -372,6 +447,16 @@ fn spawn_server(
         .spawn(move || {
             let runtime = tokio::runtime::Runtime::new().expect("create desktop Web runtime");
             runtime.block_on(async move {
+                // Warm the web-package cache off the request path: the first
+                // discovery walks every installed package (measured ~1.4 s
+                // cold), and paying that on the first splash request is why
+                // opening an instrument used to stall on a black panel.
+                {
+                    let warm_state = state.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let _ = discover_web_packages(&warm_state);
+                    });
+                }
                 let app = router(state, allow_native_resources);
                 let listener = tokio::net::TcpListener::from_std(listener)
                     .expect("adopt RackForge Desktop Web listener");
@@ -410,7 +495,12 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
             post(activate_plugin),
         )
         .route("/ws/v1/session", get(session_socket))
-        .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_asset));
+        .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_asset))
+        .route("/api/v1/controllers", get(controller_catalog))
+        .route(
+            "/api/v1/controllers/{controller_id}/settings",
+            axum::routing::put(apply_controller_settings),
+        );
     let router = if allow_native_resources {
         router
             .route("/api/v1/config", get(local_config).put(apply_web_settings))
@@ -452,7 +542,19 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
 }
 
 async fn health() -> Json<Value> {
-    Json(json!({"status":"ok", "core_connected":true, "schema_version":1, "host":"desktop"}))
+    let ui_revision = WEB_ASSETS
+        .get_file("ui-revision.txt")
+        .and_then(|file| file.contents_utf8())
+        .map(str::trim)
+        .unwrap_or("unknown");
+    Json(json!({
+        "status": "ok",
+        "core_connected": true,
+        "schema_version": 1,
+        "host": "desktop",
+        "revision": env!("RACKFORGE_REVISION"),
+        "ui_revision": ui_revision,
+    }))
 }
 
 async fn auth_status() -> Json<Value> {
@@ -696,6 +798,13 @@ async fn uninstall_managed_plugin(
                 ));
             }
             state.plugin_catalog_revision.fetch_add(1, Ordering::AcqRel);
+            state.package_scan_revision.fetch_add(1, Ordering::AcqRel);
+            {
+                let warm_state = state.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _ = discover_web_packages(&warm_state);
+                });
+            }
             Json(result).into_response()
         }
         Ok(Ok(Err(message))) => (
@@ -995,6 +1104,13 @@ async fn install_selected_plugin(
     {
         Ok(Ok(installed)) => {
             state.plugin_catalog_revision.fetch_add(1, Ordering::AcqRel);
+            state.package_scan_revision.fetch_add(1, Ordering::AcqRel);
+            {
+                let warm_state = state.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _ = discover_web_packages(&warm_state);
+                });
+            }
             Json(json!({
                 "plugin_id": installed.record.plugin_id,
                 "version": installed.record.version,
@@ -1262,8 +1378,136 @@ fn resource_error(error: ResourceError) -> Response {
         .into_response()
 }
 
+/// The installed controller packages: the plugins tab lists these beside
+/// the instruments. Read-only for now; enable/disable and configuration
+/// arrive with the settings schema (see docs/architecture/controller-plugins.md).
+async fn controller_catalog(State(state): State<WebState>) -> Response {
+    let store = rackforge_controller_package::PackageStore::new(&state.controllers_root);
+    let installed = match store.list() {
+        Ok(installed) => installed,
+        Err(error) => return internal_error(error),
+    };
+    let controllers: Vec<serde_json::Value> = installed
+        .iter()
+        .map(|controller| {
+            let manifest = controller.package.manifest();
+            let stored = read_controller_settings(&state, &controller.record.id);
+            let settings: Vec<serde_json::Value> = manifest
+                .settings
+                .iter()
+                .map(|setting| {
+                    json!({
+                        "id": setting.id,
+                        "name": setting.name,
+                        "kind": format!("{:?}", setting.kind).to_ascii_lowercase(),
+                        "default": setting.default,
+                        "page": setting.page,
+                        "value": stored
+                            .get(&setting.id)
+                            .cloned()
+                            .unwrap_or_else(|| setting.default.clone()),
+                    })
+                })
+                .collect();
+            json!({
+                "id": controller.record.id,
+                "name": manifest.name,
+                "version": controller.record.version,
+                "enabled": controller.record.enabled,
+                "trust": format!("{:?}", controller.record.trust).to_ascii_lowercase(),
+                "runtime": format!("{:?}", manifest.runtime.kind),
+                "devices": manifest.devices.len(),
+                "settings": settings,
+            })
+        })
+        .collect();
+    Json(json!({"status": "ok", "controllers": controllers})).into_response()
+}
+
+fn controller_settings_path(state: &WebState, controller_id: &str) -> PathBuf {
+    state
+        .controllers_root
+        .join("state")
+        .join(controller_id)
+        .join("settings.toml")
+}
+
+fn read_controller_settings(state: &WebState, controller_id: &str) -> BTreeMap<String, String> {
+    fs::read_to_string(controller_settings_path(state, controller_id))
+        .ok()
+        .and_then(|text| toml::from_str::<BTreeMap<String, String>>(&text).ok())
+        .unwrap_or_default()
+}
+
+#[derive(Deserialize)]
+struct ControllerSettingsRequest {
+    values: BTreeMap<String, String>,
+}
+
+/// Persists user values for a controller's declared settings. Every key must
+/// exist in the manifest and every value must satisfy its kind; the driver
+/// watches the file and applies the change to the hardware within a second.
+async fn apply_controller_settings(
+    AxumPath(controller_id): AxumPath<String>,
+    State(state): State<WebState>,
+    Json(request): Json<ControllerSettingsRequest>,
+) -> Response {
+    let store = rackforge_controller_package::PackageStore::new(&state.controllers_root);
+    let installed = match store.resolve(&controller_id) {
+        Ok(installed) => installed,
+        Err(error) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"status": "error", "message": error.to_string()})),
+            )
+                .into_response();
+        }
+    };
+    let manifest = installed.package.manifest();
+    let mut values = read_controller_settings(&state, &controller_id);
+    for (id, value) in &request.values {
+        let Some(setting) = manifest.settings.iter().find(|setting| &setting.id == id) else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "status": "error",
+                    "message": format!("this controller declares no setting {id:?}"),
+                })),
+            )
+                .into_response();
+        };
+        if let Err(error) = setting.validate_value(value) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"status": "error", "message": error})),
+            )
+                .into_response();
+        }
+        values.insert(id.clone(), value.clone());
+    }
+    let path = controller_settings_path(&state, &controller_id);
+    let write = (|| -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let body = values
+            .iter()
+            .map(|(key, value)| format!("{key} = {value:?}\n"))
+            .collect::<String>();
+        let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+        fs::write(&temporary, body)?;
+        fs::rename(&temporary, &path)?;
+        Ok(())
+    })();
+    match write {
+        Ok(()) => Json(json!({"status": "ok", "values": values})).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
 async fn plugin_asset(
     AxumPath((plugin_id, asset)): AxumPath<(String, String)>,
+    headers: axum::http::HeaderMap,
     State(state): State<WebState>,
 ) -> Response {
     let packages = match discover_web_packages(&state) {
@@ -1277,6 +1521,34 @@ async fn plugin_asset(
         Ok(path) if path.starts_with(&package.root) && path.is_file() => path,
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
+    // Conditional serving instead of `no-store`. The splash is megabytes and
+    // was re-downloaded on EVERY panel open; with a validator the browser
+    // keeps its copy and each open costs one 304 round trip on localhost.
+    // Not `immutable`, deliberately: development edits files in place
+    // without bumping the version, and a year-long cache would hide them.
+    let etag = match fs::metadata(&path) {
+        Ok(meta) => {
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |duration| duration.as_millis());
+            format!("\"{}-{}\"", meta.len(), modified)
+        }
+        Err(error) => return internal_error(error),
+    };
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        == Some(etag.as_str())
+    {
+        return Response::builder()
+            .status(StatusCode::NOT_MODIFIED)
+            .header(header::ETAG, etag)
+            .header(header::CACHE_CONTROL, "public, max-age=0, must-revalidate")
+            .body(Body::empty())
+            .expect("valid not-modified response");
+    }
     match fs::read(&path) {
         Ok(bytes) => Response::builder()
             .header(
@@ -1285,7 +1557,8 @@ async fn plugin_asset(
                     .first_or_octet_stream()
                     .as_ref(),
             )
-            .header(header::CACHE_CONTROL, "no-store")
+            .header(header::ETAG, etag)
+            .header(header::CACHE_CONTROL, "public, max-age=0, must-revalidate")
             .body(Body::from(bytes))
             .expect("valid plugin asset response"),
         Err(error) => internal_error(error),
@@ -1513,6 +1786,17 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
         .iter()
         .map(|instance| instance.plugin_id.clone())
         .collect::<std::collections::BTreeSet<_>>();
+    let revision = state.package_scan_revision.load(Ordering::Acquire);
+    if let Some((cached_revision, cached)) =
+        state.web_packages_cache.lock().expect("web package cache").as_ref()
+        && *cached_revision == revision
+    {
+        let mut packages = cached.clone();
+        for package in packages.values_mut() {
+            package.public.active = active.contains(&package.public.plugin_id);
+        }
+        return Ok(packages);
+    }
     let mut roots = crate::direct_package_roots(&state.legacy_plugins_root)?;
     if let Some(store_root) = state.plugin_store_root.as_deref() {
         roots.extend(crate::versioned_package_roots(store_root)?);
@@ -1589,10 +1873,13 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
             packages.insert(manifest.id.clone(), (version, candidate));
         }
     }
-    Ok(packages
+    let packages: BTreeMap<String, PluginWebPackage> = packages
         .into_iter()
         .map(|(id, (_, package))| (id, package))
-        .collect())
+        .collect();
+    *state.web_packages_cache.lock().expect("web package cache") =
+        Some((revision, packages.clone()));
+    Ok(packages)
 }
 
 fn plugin_asset_url(plugin_id: &str, asset: &str, version: &str) -> String {
@@ -1631,9 +1918,16 @@ async fn static_asset(uri: axum::http::Uri) -> Response {
         return StatusCode::NOT_FOUND.into_response();
     };
     let mime = mime_guess::from_path(asset.path()).first_or_octet_stream();
+    // Vite writes content-hashed filenames under assets/, so those can be
+    // cached forever; index.html is the one entry that must stay fresh.
+    let cache_control = if asset.path().starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
     Response::builder()
         .header(header::CONTENT_TYPE, mime.as_ref())
-        .header(header::CACHE_CONTROL, "no-cache")
+        .header(header::CACHE_CONTROL, cache_control)
         .body(Body::from(asset.contents().to_vec()))
         .expect("valid embedded asset response")
 }
@@ -1699,6 +1993,10 @@ mod tests {
             control,
             resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
             resource_upload_root: PathBuf::new(),
+            web_packages_cache: Arc::new(Mutex::new(None)),
+            package_scan_revision: Arc::new(AtomicU64::new(0)),
+            controllers_root: PathBuf::new(),
+            injected_midi: Arc::new(Mutex::new(None)),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
         let request = ControlRequest::Dispatch {
@@ -1757,6 +2055,10 @@ mod tests {
             control,
             resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
             resource_upload_root: PathBuf::new(),
+            web_packages_cache: Arc::new(Mutex::new(None)),
+            package_scan_revision: Arc::new(AtomicU64::new(0)),
+            controllers_root: PathBuf::new(),
+            injected_midi: Arc::new(Mutex::new(None)),
         };
         let request = ControlRequest::Dispatch {
             envelope: CommandEnvelope::new(
@@ -1815,6 +2117,10 @@ mod tests {
             control,
             resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
             resource_upload_root: PathBuf::new(),
+            web_packages_cache: Arc::new(Mutex::new(None)),
+            package_scan_revision: Arc::new(AtomicU64::new(0)),
+            controllers_root: PathBuf::new(),
+            injected_midi: Arc::new(Mutex::new(None)),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
         let responder = std::thread::spawn(move || {

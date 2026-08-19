@@ -132,6 +132,10 @@ pub struct VoiceSpec {
     pub plugin: &'static LoadedPlugin,
     pub preset_id: Option<String>,
     pub resources: BTreeMap<String, PathBuf>,
+    /// The player's last live state, restored so the faders mean what they
+    /// meant yesterday. Panel edits used to live only in the running
+    /// instance and every restart silently reset them.
+    pub initial_state: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -174,9 +178,21 @@ pub struct AudioInventory {
 
 impl AudioInventory {
     pub fn scan() -> Result<Self> {
+        Self::scan_skipping(None)
+    }
+
+    /// Scans every backend except `skip_driver`. Enumerating instantiates
+    /// each ASIO driver, and instantiating the driver that is currently
+    /// streaming makes single-client hardware (the Focusrite, measured) stop
+    /// the running stream dead. The caller splices the skipped driver's rows
+    /// back in from its cache.
+    pub fn scan_skipping(skip_driver: Option<&str>) -> Result<Self> {
         let mut drivers = Vec::new();
         let mut outputs = Vec::new();
         for host_id in cpal::available_hosts() {
+            if skip_driver == Some(host_id.name()) {
+                continue;
+            }
             let driver = host_id.name().to_owned();
             let host = match cpal::host_from_id(host_id) {
                 Ok(host) => host,
@@ -383,6 +399,7 @@ impl DesktopAudio {
         specs: Vec<VoiceSpec>,
         preferences: &AudioPreferences,
         active_instance_id: Option<&str>,
+        external_controller: bool,
     ) -> Result<Self> {
         if specs.is_empty() {
             bail!("no instrument plugin is available for the audio engine");
@@ -461,6 +478,7 @@ impl DesktopAudio {
             Arc::clone(&telemetry),
             controller_sender,
             display_receiver,
+            external_controller,
         )?;
         let (command_sender, command_receiver) = mpsc::sync_channel(COMMAND_QUEUE_CAPACITY);
         let (retired_voice_sender, retired_voice_receiver) = mpsc::sync_channel(voice_capacity);
@@ -561,6 +579,15 @@ impl DesktopAudio {
         self.telemetry.snapshot(self.sample_rate)
     }
 
+    /// Raw callback count, for the stall watchdog: a healthy stream renders
+    /// blocks continuously (silence included), so a counter that stops
+    /// advancing means the driver stopped calling back -- which is exactly
+    /// how an ASIO device dies when another client grabs the hardware. No
+    /// error is ever reported on that path; the count is the only witness.
+    pub fn callback_blocks(&self) -> u64 {
+        self.telemetry.callback_count.load(Ordering::Relaxed)
+    }
+
     pub fn diagnostics(&self) -> String {
         let status = self.runtime_status();
         format!(
@@ -658,6 +685,12 @@ impl DesktopAudio {
         receive_control_response(receiver, "set plugin parameter")
     }
 
+    pub fn save_active_state(&self) -> Result<Vec<u8>> {
+        let (reply, receiver) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::SaveActiveState { reply })?;
+        receive_control_response(receiver, "save plugin state")
+    }
+
     pub fn replace_voice(&self, spec: VoiceSpec) -> Result<()> {
         let voice = prepare_audio_voice(spec, self.sample_rate)?;
         self.send_command(AudioCommand::ReplaceVoice(voice))
@@ -741,14 +774,35 @@ impl DesktopAudio {
     }
 
     fn send_command(&self, command: AudioCommand) -> Result<()> {
-        self.command_sender
-            .try_send(command)
-            .map_err(|error| anyhow::anyhow!("audio command queue rejected command: {error}"))
+        match self.command_sender.try_send(command) {
+            Ok(()) => Ok(()),
+            Err(mpsc::TrySendError::Full(_)) => Err(anyhow::anyhow!(
+                "audio command queue rejected command: queue full"
+            )),
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                // A closed channel is proof the engine died without reporting
+                // (the silent ASIO stall): raise the flag the recovery loop
+                // already watches, so the restart begins on the next frame
+                // instead of waiting out the watchdog, and tell the caller
+                // something a person can act on.
+                if let Ok(mut slot) = self.errors.lock()
+                    && slot.is_none()
+                {
+                    *slot = Some("the audio engine stopped responding".into());
+                }
+                Err(anyhow::anyhow!(
+                    "the audio engine stopped and is being restarted — try again in a moment"
+                ))
+            }
+        }
     }
 }
 
 enum AudioCommand {
     SelectPlugin(String),
+    SaveActiveState {
+        reply: SyncSender<std::result::Result<Vec<u8>, String>>,
+    },
     SelectSound {
         instance_id: String,
         sound_id: String,
@@ -983,6 +1037,14 @@ impl AudioProcessor {
                         self.voices[self.active_voice].instance.0.reset()?;
                         self.active_voice = index;
                     }
+                }
+                AudioCommand::SaveActiveState { reply } => {
+                    let result = self.voices[self.active_voice]
+                        .instance
+                        .0
+                        .save_state()
+                        .map_err(|error| error.to_string());
+                    let _ = reply.try_send(result);
                 }
                 AudioCommand::SelectSound {
                     instance_id,
@@ -1236,6 +1298,16 @@ fn prepare_audio_voice(spec: VoiceSpec, sample_rate: u32) -> Result<AudioVoice> 
             .load_preset(preset_id)
             .with_context(|| format!("loading preset {preset_id:?} for the audio engine"))?;
     }
+    if let Some(state) = spec.initial_state.as_deref() {
+        // Best effort: a state from an incompatible build is simply skipped
+        // and the plugin keeps its defaults.
+        if let Err(error) = instance.load_state(state) {
+            eprintln!(
+                "DESKTOP_LIVE_STATE_SKIPPED instance={} error={error:#}",
+                spec.instance_id
+            );
+        }
+    }
     instance
         .activate(
             f64::from(sample_rate),
@@ -1398,8 +1470,16 @@ impl MidiSupervisor {
         telemetry: Arc<AudioTelemetry>,
         controller_sender: SyncSender<DesktopControllerEvent>,
         display_receiver: Receiver<Screen>,
+        yield_keylab: bool,
     ) -> Result<(Self, Vec<String>)> {
-        let selected = selected.into_iter().collect::<BTreeSet<_>>();
+        // When an installed controller package is enabled, ITS driver owns
+        // the surface: the built-in KeyLab handling stands down and the
+        // surface endpoint (Windows MIDI ports are exclusive-open) is left
+        // for the driver. Note endpoints (ALV and friends) stay captured.
+        let selected = selected
+            .into_iter()
+            .filter(|name| !(yield_keylab && keylab_controller::little_driver(name).is_some()))
+            .collect::<BTreeSet<_>>();
         let (stop_sender, stop_receiver) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -1415,9 +1495,12 @@ impl MidiSupervisor {
                     &sender,
                     &telemetry,
                     &controller_sender,
+                    yield_keylab,
                 ) {
                     Ok(names) => {
-                        if reconcile_keylab_display(&mut display, latest_screen.as_ref()) {
+                        if !yield_keylab
+                            && reconcile_keylab_display(&mut display, latest_screen.as_ref())
+                        {
                             reconnect_keylab_inputs(
                                 &selected,
                                 &mut connections,
@@ -1471,10 +1554,13 @@ impl MidiSupervisor {
                             &sender,
                             &telemetry,
                             &controller_sender,
+                            yield_keylab,
                         ) {
                             eprintln!("DESKTOP_MIDI_SCAN_FAILED error={error:#}");
                         }
-                        if reconcile_keylab_display(&mut display, latest_screen.as_ref()) {
+                        if !yield_keylab
+                            && reconcile_keylab_display(&mut display, latest_screen.as_ref())
+                        {
                             reconnect_keylab_inputs(
                                 &selected,
                                 &mut connections,
@@ -1526,9 +1612,10 @@ fn reconcile_midi_inputs(
     sender: &SyncSender<MidiPacket>,
     telemetry: &Arc<AudioTelemetry>,
     controller_sender: &SyncSender<DesktopControllerEvent>,
+    yield_keylab: bool,
 ) -> Result<Vec<String>> {
     let present = discover_midi_inputs()?.into_iter().collect::<BTreeSet<_>>();
-    let desired = desired_midi_inputs(selected, &present);
+    let desired = desired_midi_inputs(selected, &present, yield_keylab);
     let lost = connections
         .keys()
         .filter(|name| !present.contains(*name))
@@ -1570,14 +1657,20 @@ fn reconcile_midi_inputs(
 fn desired_midi_inputs(
     selected: &BTreeSet<String>,
     present: &BTreeSet<String>,
+    yield_keylab: bool,
 ) -> BTreeSet<String> {
     let mut desired = selected.clone();
-    desired.extend(
-        present
-            .iter()
-            .filter(|name| keylab_controller::little_driver(name).is_some())
-            .cloned(),
-    );
+    // The built-in surface handling force-captures the KeyLab's surface
+    // port -- unless an installed controller package owns the hardware,
+    // in which case that port belongs to ITS driver.
+    if !yield_keylab {
+        desired.extend(
+            present
+                .iter()
+                .filter(|name| keylab_controller::little_driver(name).is_some())
+                .cloned(),
+        );
+    }
     desired
 }
 
@@ -1772,7 +1865,7 @@ fn reconnect_keylab_inputs(
     }
     thread::sleep(Duration::from_millis(100));
     if let Err(error) =
-        reconcile_midi_inputs(selected, connections, sender, telemetry, controller_sender)
+        reconcile_midi_inputs(selected, connections, sender, telemetry, controller_sender, false)
     {
         eprintln!("DESKTOP_KEYLAB_INPUT_REOPEN_FAILED error={error:#}");
     } else {

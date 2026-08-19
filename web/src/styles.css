@@ -1961,13 +1961,52 @@ body {
   place-items: center;
   overflow: hidden;
   background: #050c13;
+  opacity: 1;
+  transition: opacity 420ms ease;
 }
 
-.plugin-brand-splash > img {
+.plugin-brand-splash.done {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.plugin-brand-splash .splash-bg {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: block;
   object-fit: cover;
+  /* The splash recedes so the icon reads as the subject. */
+  filter: brightness(0.55) saturate(0.85);
+}
+
+/* The loading mark: the plugin's icon, dimmed, refilling with its own
+   color from the bottom up as the interface loads. */
+.plugin-brand-splash .splash-icon {
+  position: relative;
+  z-index: 1;
+  width: clamp(96px, 18vmin, 180px);
+  aspect-ratio: 1;
+  filter: drop-shadow(0 10px 34px rgba(0, 0, 0, 0.65));
+}
+
+.plugin-brand-splash .splash-icon img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.plugin-brand-splash .splash-icon-dim {
+  filter: brightness(0.26) saturate(0.6);
+}
+
+.plugin-brand-splash .splash-icon-lit {
+  /* Driven from script: inset(top 0 0 0) retreating toward zero. */
+  clip-path: inset(100% 0 0 0);
 }
 
 .plugin-operation-overlay {
@@ -9385,4 +9424,102 @@ body {
   .live-surface-active .live-perform-surface .active-performance-card {
     padding-inline: 12px;
   }
+}
+
+/* Kind tags: every card in the manager says what it is. */
+.plugin-kind-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.plugin-kind-tag.instrument {
+  color: #0a1418;
+  background: #3ad8e0;
+}
+
+.plugin-kind-tag.controller {
+  color: #0a1418;
+  background: #f3bc7c;
+}
+
+/* Controller cards have no branding image yet; the tile is drawn. */
+.plugin-tile.controller-tile {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(145deg, #14212b, #0b131a);
+}
+
+.controller-tile-mark {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  color: #f3bc7c;
+  background: rgba(243, 188, 124, 0.12);
+  border: 1px solid rgba(243, 188, 124, 0.35);
+}
+
+.controller-tile-mark svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* Controller configuration page */
+.controller-config {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.controller-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 520px;
+}
+
+.controller-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(140, 242, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(10, 20, 26, 0.6);
+}
+
+.controller-setting input[type="color"] {
+  width: 56px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(140, 242, 255, 0.3);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.controller-status {
+  color: var(--muted, #8ca3ad);
+  font-size: 0.85rem;
+}
+
+.revision-footer {
+  margin: 14px 4px 4px;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #5a707a;
+}
+
+.revision-footer.drift {
+  color: #ffb35c;
 }

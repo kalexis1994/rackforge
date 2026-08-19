@@ -765,6 +765,15 @@ code and is far beyond audibility at control rate).
   the top of its travel the fader adds +10 dB to C2's attack 1–2 kHz (the
   first longitudinal mode's band) and +0.8 dB at 2–4 kHz.
 
+  On 0.80.0 the burst's dynamic gate steepened from v² to v⁴ — the user's
+  verdict on v²: "está bueno pero no siempre se debe escuchar fuerte eso."
+  Physically the gate SHOULD be steeper than v²: the compressional
+  excitation goes as the square of the transverse amplitude, and the
+  amplitude grows faster than the blow because the felt stiffens into it.
+  v⁴ keeps pianissimo clean and saves the bark for the hard strike; the
+  fader picks how much, the touch picks when. The house voicing ships
+  with the fader off (0.02) by the user's ear.
+
 
 
 * **FIXED (v0.62.0): a fixed low drone under every note, audible only in

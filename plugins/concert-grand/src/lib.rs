@@ -1200,11 +1200,12 @@ impl Default for Controls {
             decay: 0.35,
             width: 0.35,
             level: 0.72,
-            // The user's lab refinements, by ear on 0.71.1: felt corner a
-            // touch up, the click colour well down, both decay stages a
-            // little longer, the board eased.
+            // The user's lab refinements, by ear on 0.79.0: felt corner a
+            // touch up, the click colour well down, the hammer a shade
+            // softer and heavier, bloom up, both decay stages a little
+            // longer, the board eased.
             lab: [
-                0.52, 0.5, 0.5, 0.32, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
+                0.52, 0.5, 0.5, 0.32, 0.5, 0.5, 0.5, 0.49, 0.55, 0.56, 0.5,
                 0.57, 0.58, 0.5, 0.45, 0.5, 0.5,
             ],
             room_size: 0.28,
@@ -1214,9 +1215,9 @@ impl Default for Controls {
             action_noise: 0.39,
             release_noise: 0.6,
             pedal_noise: 0.5,
-            // Below the calibrated centre: the burst measured right against
-            // the reference bands, but the user's ear found it hot.
-            impact: 0.4,
+            // Off, by the user's ear: the burst is there for whoever wants
+            // it, and the house voicing does without.
+            impact: 0.02,
         }
     }
 }
@@ -3154,6 +3155,8 @@ impl ConcertGrand {
             let clang_kick = IMPACT_CLANG
                 * velocity
                 * velocity
+                * velocity
+                * velocity
                 * powf(1.0 - position, 1.2)
                 * impact_gain;
             self.voices[slot].clang_feed += clang_kick;
@@ -3201,8 +3204,17 @@ impl ConcertGrand {
         let longitudinal_first = LONGITUDINAL_RATIO * f0;
         // The strike's own kick into the compressional modes: a pulse the
         // length of the contact, rung at their own frequencies and dead
-        // within tens of milliseconds. Wound strings take it hardest.
+        // within tens of milliseconds. Wound strings take it hardest, and
+        // the DYNAMIC gate is steep on purpose: the compressional
+        // excitation goes as the square of the transverse amplitude, and
+        // the amplitude itself grows faster than the blow because the felt
+        // stiffens into it -- the burst belongs to fortissimo. v^2 made it
+        // sound on every note at every touch, and the user's verdict was
+        // that "no siempre se debe escuchar fuerte eso": v^4 keeps the
+        // pianissimo clean and saves the bark for the hard strike.
         let clang_kick = IMPACT_CLANG
+            * velocity
+            * velocity
             * velocity
             * velocity
             * powf(1.0 - position, 1.2)

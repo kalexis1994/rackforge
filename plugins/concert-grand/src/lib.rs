@@ -2327,8 +2327,24 @@ impl ConcertGrand {
         // energy sits in 24 components or 82; it also reads the beating as
         // decay error. Where the two disagree this far, neither should be
         // followed alone.
-        let detune_cents =
-            (0.9 + 0.9 * position) * (self.controls.unison * 2.86) * self.controls.lab(13);
+        // No two unisons on a real piano are tuned equally well, and no two
+        // strings carry equal losses: the tuner's precision, the damper's
+        // seat and the termination's grip all vary note to note. Measured on
+        // the reference, the early T60 across one bass octave swings from
+        // 9.2 s to 20.7 s -- adjacent semitones 2.25x apart -- while this
+        // model ran a uniform +/-7%. Two hashed per-note factors carry that
+        // fingerprint: the unison's tuning precision (through which the
+        // decay unevenness partly EMERGES -- a wider unison dephases sooner,
+        // traps its energy, and sings; a just one stays coherent and drains)
+        // and a modest spread in the string's own losses.
+        let unison_precision =
+            0.5 + 1.0 * hash01((note as u32).wrapping_mul(2_654_435_761) ^ 0x51);
+        let string_life =
+            0.88 + 0.24 * hash01((note as u32).wrapping_mul(2_246_822_519) ^ 0xA7);
+        let detune_cents = (0.9 + 0.9 * position)
+            * (self.controls.unison * 2.86)
+            * self.controls.lab(13)
+            * unison_precision;
 
         // First pass: partial frequencies and unnormalised amplitudes. The
         // comb keeps the sign of sin(n·π·x0): a struck string's partials
@@ -2680,8 +2696,10 @@ impl ConcertGrand {
             // A4 holds nearly level from 1 s to 2 s while a shared decay
             // curve kept falling. ×1.8 on the slow stage matches the
             // measured plateau.
-            let t60 =
-                self.t60_seconds(frequency, f0, string_scale, treble_life) * board_decay * self.cal(note, 4);
+            let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life)
+                * board_decay
+                * self.cal(note, 4)
+                * string_life;
             let jitter = 0.55 + 0.9 * hash01((note as u32) << 10 | (n as u32) << 2 | 1);
             let cents = detune_cents * jitter;
             // The strings of the unison, struck together and equal: their
@@ -2739,6 +2757,7 @@ impl ConcertGrand {
             let slow_t60 = (self.slow_t60_seconds(frequency, f0, string_scale)
                 * board_decay
                 * self.cal(note, 4)
+                * string_life
                 * self.controls.lab(12))
             .max(0.05);
             let fast_t60 = (t60 * self.controls.lab(11)).max(0.02);

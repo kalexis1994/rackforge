@@ -690,6 +690,25 @@ code and is far beyond audibility at control rate).
 
 ## Known defects
 
+* **RETRACTED: "F#1 runs ~0.55x of the real duration".** Measured across the
+  whole bass neighbourhood with the same early-window method: the REAL
+  instrument's notes swing from 9.2 s (D#2) to 20.7 s (F#1) — adjacent
+  semitones 2.25x apart, dispersion +/-24% — while this model ran a uniform
+  +/-7%. Our F#1 at ~10.5 s sits exactly in our family; the reference's F#1
+  is simply its liveliest note. The defect was never "one short note": it
+  was **the model being too even**. Third retraction, same family of lesson:
+  before chasing an outlier, measure which side of the comparison the
+  outlier is on.
+
+  What shipped instead: per-note unevenness, partly emergent. Each note now
+  draws a fixed **unison tuning precision** (x0.5–1.5 on the detune — a just
+  unison stays coherent and drains, a wide one dephases, traps its energy
+  and sings; note 39's draw measurably rings 1.7x its neighbours through
+  nothing but Weinreich) and a modest **string-loss spread** (+/-12%). The
+  envelope-level dispersion reaches ~0.10 against the reference's 0.24 —
+  the residual gap is recorded, and the seeds are a documented lever if a
+  particular draw offends the ear.
+
 * **RETRACTED: "the bass carries ~11 dB of surplus in 4–8 kHz".** Measured
   note-against-note on 0.75.0, C2's sustained 4–8 kHz sits at −22.4 dB
   against the real note's −21.0 — matched. Two things buried the old

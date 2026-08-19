@@ -105,28 +105,133 @@
       }
       main { position: relative; z-index: 1; max-width: 680px; margin: 0 auto; padding: 8px 22px 0; }
 
-      .voicing { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
-      .voicing button {
-        flex: 1 1 auto;
-        padding: 7px 0;
-        font: inherit;
-        font-size: 12px;
-        letter-spacing: 0.16em;
+      /* The console: voicings on the left, the instrument on the right;
+         stacked on a narrow screen. */
+      .console { display: flex; gap: 18px; align-items: flex-start; }
+      .shelf { flex: 0 0 200px; display: flex; flex-direction: column; gap: 8px; }
+      .work { flex: 1 1 auto; min-width: 0; }
+      @media (max-width: 720px) {
+        .console { flex-direction: column; }
+        .shelf { flex: none; width: 100%; flex-direction: row; flex-wrap: wrap; }
+        .shelf .card { flex: 1 1 45%; }
+      }
+      .shelf h2 {
+        margin: 0 0 2px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.3em;
         text-transform: uppercase;
-        color: var(--gold);
+        color: var(--gold-dim);
+      }
+      .card {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 10px;
         background: rgba(11, 13, 15, 0.62);
         backdrop-filter: blur(5px);
         border: 1px solid var(--rule);
+        border-radius: 3px;
+        cursor: pointer;
+      }
+      .card:hover { border-color: var(--gold-dim); }
+      .card[aria-pressed="true"] {
+        border-color: var(--gold);
+        box-shadow: inset 2px 0 0 var(--gold);
+      }
+      .card .title {
+        flex: 1;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--gold);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .card .tools-inline { display: flex; gap: 4px; }
+      .card .tools-inline button {
+        padding: 2px 5px;
+        font-size: 12px;
+        line-height: 1;
+        color: var(--muted);
+        background: transparent;
+        border: none;
         border-radius: 2px;
         cursor: pointer;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
       }
-      .voicing button:hover { color: var(--gold); border-color: var(--gold-dim); }
-      .voicing button[aria-pressed="true"] {
+      .card .tools-inline button:hover { color: var(--gold-bright); }
+      .addcard {
+        display: flex;
+        gap: 8px;
+        padding: 8px 10px;
+        background: transparent;
+        border: 1px dashed var(--gold-dim);
+        border-radius: 3px;
+        color: var(--gold-dim);
+        font: inherit;
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+      .addcard:hover { color: var(--gold); border-color: var(--gold); }
+      .namer { display: none; gap: 6px; }
+      .namer.open { display: flex; }
+      .namer input {
+        flex: 1;
+        min-width: 0;
+        padding: 7px 8px;
+        font: inherit;
+        font-size: 12px;
+        color: var(--ink);
+        background: var(--case);
+        border: 1px solid var(--gold-dim);
+        border-radius: 2px;
+      }
+      .namer button {
+        padding: 0 10px;
+        font: inherit;
+        font-size: 13px;
         color: var(--lacquer);
-        background: linear-gradient(180deg, var(--gold-bright), var(--gold));
-        border-color: var(--gold);
+        background: var(--gold);
+        border: none;
+        border-radius: 2px;
+        cursor: pointer;
       }
+      /* The dialog: a small lacquer sheet over everything. */
+      .veil {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 5, 6, 0.7);
+      }
+      .veil.open { display: flex; }
+      .sheet {
+        width: min(320px, 86vw);
+        padding: 18px;
+        background: var(--panel);
+        border: 1px solid var(--gold-dim);
+        border-radius: 4px;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.7);
+      }
+      .sheet p { margin: 0 0 16px; font-size: 13px; }
+      .sheet .row { display: flex; gap: 8px; justify-content: flex-end; }
+      .sheet button {
+        padding: 7px 14px;
+        font: inherit;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        border-radius: 2px;
+        cursor: pointer;
+      }
+      .sheet .ghost { color: var(--muted); background: transparent; border: 1px solid var(--rule); }
+      .sheet .solid { color: var(--lacquer); background: var(--gold); border: 1px solid var(--gold); }
 
       /*
        * The tab rail: a strip of walnut set into the lacquer, the way a
@@ -299,6 +404,23 @@
         font: 12px/1.45 ui-monospace, Consolas, monospace;
       }
       .state { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+      /* The plugin's own face: Vina Sans (OFL, shipped beside this file)
+         carries the display layer -- masthead, tabs, cards, buttons. The
+         small readouts stay in the neutral stack so numbers read at 11px. */
+      @font-face {
+        font-family: "Vina Sans";
+        src: url("VinaSans-Regular.ttf") format("truetype");
+        font-display: swap;
+      }
+      .masthead h1,
+      .masthead p,
+      .shelf h2,
+      .tabs button,
+      .card .title,
+      .addcard,
+      .veil .sheet button {
+        font-family: "Vina Sans", "Segoe UI", system-ui, sans-serif;
+      }
     </style>
   </head>
   <body>
@@ -307,10 +429,31 @@
       <p>A physical model</p>
     </header>
     <main>
-      <div class="voicing" id="voicing"></div>
-      <div id="controls"></div>
+      <div class="console">
+        <aside class="shelf">
+          <h2>Voicings</h2>
+          <div id="voicing" style="display: contents"></div>
+          <button type="button" class="addcard" id="addpreset">+ Guardar actual</button>
+          <div class="namer" id="namer">
+            <input id="presetname" maxlength="28" placeholder="Nombre…" />
+            <button type="button" id="namerok">✓</button>
+          </div>
+        </aside>
+        <div class="work">
+          <div id="controls"></div>
+        </div>
+      </div>
       <p class="state" id="state">Connecting to RackForge…</p>
     </main>
+    <div class="veil" id="veil">
+      <div class="sheet">
+        <p id="veiltext"></p>
+        <div class="row">
+          <button type="button" class="ghost" id="veilno">Cancelar</button>
+          <button type="button" class="solid" id="veilyes">Reemplazar</button>
+        </div>
+      </div>
+    </div>
 
     <script type="module">
       /*
@@ -513,45 +656,194 @@
       }
 
       /**
-       * The packaged voicings, as buttons rather than a hidden menu. The
-       * catalog comes from the plugin's own package — the host serves it
-       * beside this surface — and switching one goes through
-       * `plugin.select_sound`, the only route the host offers for it.
+       * Voicings: the packaged factory presets (loaded through
+       * `plugin.select_sound`) and the player's own, stored by the panel
+       * and applied parameter by parameter. Cards on the shelf; the user's
+       * carry a save (replace with the current values, after asking) and a
+       * delete.
        */
+      const STORE_KEY = "cg-user-presets";
+      let chosenCard = null;
+
+      function userPresets() {
+        try {
+          return JSON.parse(localStorage.getItem(STORE_KEY) ?? "[]");
+        } catch {
+          return [];
+        }
+      }
+      function saveUserPresets(list) {
+        localStorage.setItem(STORE_KEY, JSON.stringify(list));
+      }
+
+      async function currentValues() {
+        const parameters = await call("plugin.parameters");
+        const values = {};
+        for (const v of parameters.values ?? []) {
+          values[v.index] = v.value;
+        }
+        return values;
+      }
+
+      async function applyValues(values) {
+        for (const [index, value] of Object.entries(values)) {
+          await call("plugin.set_parameter", {
+            parameter_index: Number(index),
+            value: Number(value),
+          });
+        }
+      }
+
+      function veilConfirm(text, confirmLabel = "Reemplazar") {
+        return new Promise((resolve) => {
+          const veil = document.getElementById("veil");
+          document.getElementById("veiltext").textContent = text;
+          const yes = document.getElementById("veilyes");
+          yes.textContent = confirmLabel;
+          const no = document.getElementById("veilno");
+          const close = (answer) => {
+            veil.classList.remove("open");
+            yes.onclick = no.onclick = null;
+            resolve(answer);
+          };
+          yes.onclick = () => close(true);
+          no.onclick = () => close(false);
+          veil.classList.add("open");
+        });
+      }
+
+      function chooseCard(card) {
+        chosenCard = card;
+        for (const other of voicing.querySelectorAll(".card")) {
+          other.setAttribute("aria-pressed", String(other === card));
+        }
+      }
+
+      function presetCard(name, onPick, extras) {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.setAttribute("aria-pressed", "false");
+        const title = document.createElement("span");
+        title.className = "title";
+        title.textContent = name;
+        card.append(title);
+        if (extras) card.append(extras);
+        card.addEventListener("click", (event) => {
+          if (event.target.closest(".tools-inline")) return;
+          chooseCard(card);
+          onPick();
+        });
+        return card;
+      }
+
       async function drawPresets() {
-        let presets = [];
+        let factory = [];
         try {
           const response = await fetch("../metadata/presets.json");
-          presets = (await response.json()).presets ?? [];
+          factory = (await response.json()).presets ?? [];
         } catch {
-          return;
+          /* the shelf still shows the player's own */
         }
-        presets.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        factory.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
         voicing.replaceChildren();
-        // The factory voicing shows as chosen from the start: an untouched
-        // instrument IS the Concert Grand, and a panel where nothing looks
-        // selected reads as broken.
-        const initial = presets[0]?.id;
-        for (const preset of presets) {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.textContent = preset.name ?? preset.id;
-          button.title = preset.description ?? "";
-          button.setAttribute("aria-pressed", String(preset.id === initial));
-          button.addEventListener("click", async () => {
+        for (const preset of factory) {
+          const card = presetCard(preset.name ?? preset.id, async () => {
             try {
               await call("plugin.select_sound", { sound_id: preset.id });
-              for (const other of voicing.children) {
-                other.setAttribute("aria-pressed", String(other === button));
-              }
-              state.textContent = `Voicing · ${button.textContent}`;
+              state.textContent = `Voicing · ${preset.name ?? preset.id}`;
               await load(false);
             } catch (error) {
               state.textContent = error.message;
             }
           });
-          voicing.append(button);
+          card.title = preset.description ?? "";
+          voicing.append(card);
         }
+        // The factory voicing shows as chosen from the start: the packaged
+        // default IS the first card, and a fresh panel plays exactly it.
+        const first = voicing.querySelector(".card");
+        if (first) first.setAttribute("aria-pressed", "true");
+        for (const preset of userPresets()) {
+          const tools = document.createElement("span");
+          tools.className = "tools-inline";
+          const save = document.createElement("button");
+          save.type = "button";
+          save.textContent = "\u{1F4BE}";
+          save.title = "Guardar los valores actuales en este preset";
+          save.addEventListener("click", async () => {
+            if (!(await veilConfirm(`¿Reemplazar “${preset.name}” con los valores actuales?`))) {
+              return;
+            }
+            try {
+              const values = await currentValues();
+              const list = userPresets();
+              const mine = list.find((p) => p.id === preset.id);
+              if (mine) mine.values = values;
+              saveUserPresets(list);
+              state.textContent = `Guardado · ${preset.name}`;
+            } catch (error) {
+              state.textContent = error.message;
+            }
+          });
+          const trash = document.createElement("button");
+          trash.type = "button";
+          trash.textContent = "\u{1F5D1}";
+          trash.title = "Borrar este preset";
+          trash.addEventListener("click", async () => {
+            if (!(await veilConfirm(`¿Borrar “${preset.name}”?`, "Borrar"))) return;
+            saveUserPresets(userPresets().filter((p) => p.id !== preset.id));
+            await drawPresets();
+          });
+          tools.append(save, trash);
+          const card = presetCard(preset.name, async () => {
+            try {
+              await applyValues(preset.values);
+              state.textContent = `Voicing · ${preset.name}`;
+              await load(false);
+            } catch (error) {
+              state.textContent = error.message;
+            }
+          }, tools);
+          voicing.append(card);
+        }
+        // move the shelf furniture after the cards
+        const add = document.getElementById("addpreset");
+        const namer = document.getElementById("namer");
+        add.parentElement.append(add, namer);
+      }
+
+      {
+        const add = document.getElementById("addpreset");
+        const namer = document.getElementById("namer");
+        const nameField = document.getElementById("presetname");
+        add.addEventListener("click", () => {
+          namer.classList.add("open");
+          nameField.value = "";
+          nameField.focus();
+        });
+        const commit = async () => {
+          const name = nameField.value.trim();
+          if (!name) return;
+          try {
+            const values = await currentValues();
+            const list = userPresets();
+            list.push({ id: `u-${Date.now()}`, name, values });
+            saveUserPresets(list);
+            namer.classList.remove("open");
+            state.textContent = `Guardado · ${name}`;
+            await drawPresets();
+            // The values on the faders ARE this preset: it shows as chosen.
+            const cards = voicing.querySelectorAll(".card");
+            if (cards.length) chooseCard(cards[cards.length - 1]);
+          } catch (error) {
+            state.textContent = error.message;
+          }
+        };
+        document.getElementById("namerok").addEventListener("click", commit);
+        nameField.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") void commit();
+          if (event.key === "Escape") namer.classList.remove("open");
+        });
       }
 
       async function load(withPresets = true) {

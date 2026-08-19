@@ -35,6 +35,39 @@ that shape with a quadratic in log-space, minimum near A2:
 This is a fit to the published range, not a measurement of any particular
 instrument.
 
+### The hammer contact emerges, in physical units (tested by measurement)
+
+The contact time used to be IMPOSED: a drawn law (2 ms at the bottom tapering
+to 0.4, swung linearly by the Dynamics control) cut the integration loop, and
+the felt stiffness was derived from that same duration — circular, so the one
+phenomenon that carries touch into timbre was scripted. Measured, C4 grew
+1.06× brighter from pp to ff and A5 1.02×.
+
+Now the hammer, felt and string are in SI units and the contact ENDS WHEN THE
+STRING THROWS THE HAMMER OFF:
+
+* String: the scale's tension (850 N) plus the speaking length — itself
+  corrected from a pure geometric taper to measured anchors (A0 1.9 m,
+  C4 0.62 m, C8 5.2 cm), because the geometric law put C4 at 0.38 m — derive
+  the linear density: μ = T/(2Lf₀)², A0 ≈ 66 g/m, C4 ≈ 7, both published.
+* Hammer: Askenfelt's head masses in kilograms (11 g at A0, ~5.2 g at C4,
+  3.5 g at the top, curved not linear), shared between the strings struck;
+  speed in m/s (6 at full velocity, with `dynamics` setting the action's span).
+* Felt: K in N/m^p climbing 3.2 decades across the compass; exponent
+  3.2 + 1.8·position; Stulov relaxation at **0.5 ms, not 6 µs** — at 6 µs the
+  history caught the compression inside any contact and the rate-hardening
+  (felt stiffer against a fast blow, Stulov's actual point) was erased.
+
+Emergent contact times land on the measured ones: A0 3.9/2.9 ms (pp/ff),
+C2 3.1/1.7, C4 2.2/1.7 — right ranges, right pp/ff ratios. The felt pulse's
+physics identified two regimes: the pp–mf range, where felt hardening rules
+(C4's 10th partial spans **32 dB** from v40 to v125, against 4 dB before),
+and the top quarter (v100→v125), where the pulse sits on the string-spring
+floor π·√(m/k_s), k_s = T·L/(x₀(L−x₀)) — the same floor the real instrument
+sits on. The YDP still gains ~8 dB per partial up there; that share comes
+from the string's own nonlinearity and the action noise, which are the next
+mechanisms, not from the hammer.
+
 ### Stretched tuning, derived rather than drawn (tested)
 
 Pianos are not tuned to equal temperament; tuners stretch octaves so the

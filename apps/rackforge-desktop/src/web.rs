@@ -55,6 +55,18 @@ struct WebState {
     control: Sender<DesktopControlCall>,
     resource_browser: Arc<NativeResourceBrowser>,
     resource_upload_root: PathBuf,
+    /// The web-package discovery walks every installed package directory and
+    /// parses every manifest -- dozens of file opens. Doing that once per
+    /// ASSET REQUEST made the splash and the icons crawl. The result only
+    /// changes when the catalog does, so it is cached against the catalog
+    /// revision; `active` flags are refreshed from the session per call.
+    web_packages_cache: Arc<Mutex<Option<(u64, BTreeMap<String, PluginWebPackage>)>>>,
+    /// Bumped only when the set of installed packages actually changes
+    /// (install, uninstall). `plugin_catalog_revision` also bumps on
+    /// ACTIVATION for the clients' sake, and keying the scan cache on it
+    /// meant the first splash after every activation paid the full package
+    /// walk again.
+    package_scan_revision: Arc<AtomicU64>,
     /// Notes from a surface go straight to the audio thread through this.
     /// Routing them through the GUI thread capped them at one frame each —
     /// about sixty a second — so fast playing on a touch surface queued up
@@ -302,6 +314,7 @@ struct PublicPluginWeb {
     resources: Vec<rackforge_plugin_api::ResourceRequirement>,
 }
 
+#[derive(Clone)]
 struct PluginWebPackage {
     root: PathBuf,
     public: PublicPluginWeb,
@@ -320,6 +333,8 @@ pub fn start(
         injected_midi: Arc::clone(&injected_midi),
         session,
         plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
+        web_packages_cache: Arc::new(Mutex::new(None)),
+        package_scan_revision: Arc::new(AtomicU64::new(0)),
         legacy_plugins_root: options.plugins_root.clone(),
         plugin_store_root: options.plugin_store_root.clone(),
         data_root: options.data_root.clone(),
@@ -372,6 +387,16 @@ fn spawn_server(
         .spawn(move || {
             let runtime = tokio::runtime::Runtime::new().expect("create desktop Web runtime");
             runtime.block_on(async move {
+                // Warm the web-package cache off the request path: the first
+                // discovery walks every installed package (measured ~1.4 s
+                // cold), and paying that on the first splash request is why
+                // opening an instrument used to stall on a black panel.
+                {
+                    let warm_state = state.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let _ = discover_web_packages(&warm_state);
+                    });
+                }
                 let app = router(state, allow_native_resources);
                 let listener = tokio::net::TcpListener::from_std(listener)
                     .expect("adopt RackForge Desktop Web listener");
@@ -696,6 +721,13 @@ async fn uninstall_managed_plugin(
                 ));
             }
             state.plugin_catalog_revision.fetch_add(1, Ordering::AcqRel);
+            state.package_scan_revision.fetch_add(1, Ordering::AcqRel);
+            {
+                let warm_state = state.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _ = discover_web_packages(&warm_state);
+                });
+            }
             Json(result).into_response()
         }
         Ok(Ok(Err(message))) => (
@@ -995,6 +1027,13 @@ async fn install_selected_plugin(
     {
         Ok(Ok(installed)) => {
             state.plugin_catalog_revision.fetch_add(1, Ordering::AcqRel);
+            state.package_scan_revision.fetch_add(1, Ordering::AcqRel);
+            {
+                let warm_state = state.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _ = discover_web_packages(&warm_state);
+                });
+            }
             Json(json!({
                 "plugin_id": installed.record.plugin_id,
                 "version": installed.record.version,
@@ -1264,6 +1303,7 @@ fn resource_error(error: ResourceError) -> Response {
 
 async fn plugin_asset(
     AxumPath((plugin_id, asset)): AxumPath<(String, String)>,
+    headers: axum::http::HeaderMap,
     State(state): State<WebState>,
 ) -> Response {
     let packages = match discover_web_packages(&state) {
@@ -1277,6 +1317,34 @@ async fn plugin_asset(
         Ok(path) if path.starts_with(&package.root) && path.is_file() => path,
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
+    // Conditional serving instead of `no-store`. The splash is megabytes and
+    // was re-downloaded on EVERY panel open; with a validator the browser
+    // keeps its copy and each open costs one 304 round trip on localhost.
+    // Not `immutable`, deliberately: development edits files in place
+    // without bumping the version, and a year-long cache would hide them.
+    let etag = match fs::metadata(&path) {
+        Ok(meta) => {
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |duration| duration.as_millis());
+            format!("\"{}-{}\"", meta.len(), modified)
+        }
+        Err(error) => return internal_error(error),
+    };
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        == Some(etag.as_str())
+    {
+        return Response::builder()
+            .status(StatusCode::NOT_MODIFIED)
+            .header(header::ETAG, etag)
+            .header(header::CACHE_CONTROL, "public, max-age=0, must-revalidate")
+            .body(Body::empty())
+            .expect("valid not-modified response");
+    }
     match fs::read(&path) {
         Ok(bytes) => Response::builder()
             .header(
@@ -1285,7 +1353,8 @@ async fn plugin_asset(
                     .first_or_octet_stream()
                     .as_ref(),
             )
-            .header(header::CACHE_CONTROL, "no-store")
+            .header(header::ETAG, etag)
+            .header(header::CACHE_CONTROL, "public, max-age=0, must-revalidate")
             .body(Body::from(bytes))
             .expect("valid plugin asset response"),
         Err(error) => internal_error(error),
@@ -1513,6 +1582,17 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
         .iter()
         .map(|instance| instance.plugin_id.clone())
         .collect::<std::collections::BTreeSet<_>>();
+    let revision = state.package_scan_revision.load(Ordering::Acquire);
+    if let Some((cached_revision, cached)) =
+        state.web_packages_cache.lock().expect("web package cache").as_ref()
+        && *cached_revision == revision
+    {
+        let mut packages = cached.clone();
+        for package in packages.values_mut() {
+            package.public.active = active.contains(&package.public.plugin_id);
+        }
+        return Ok(packages);
+    }
     let mut roots = crate::direct_package_roots(&state.legacy_plugins_root)?;
     if let Some(store_root) = state.plugin_store_root.as_deref() {
         roots.extend(crate::versioned_package_roots(store_root)?);
@@ -1589,10 +1669,13 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
             packages.insert(manifest.id.clone(), (version, candidate));
         }
     }
-    Ok(packages
+    let packages: BTreeMap<String, PluginWebPackage> = packages
         .into_iter()
         .map(|(id, (_, package))| (id, package))
-        .collect())
+        .collect();
+    *state.web_packages_cache.lock().expect("web package cache") =
+        Some((revision, packages.clone()));
+    Ok(packages)
 }
 
 fn plugin_asset_url(plugin_id: &str, asset: &str, version: &str) -> String {
@@ -1631,9 +1714,16 @@ async fn static_asset(uri: axum::http::Uri) -> Response {
         return StatusCode::NOT_FOUND.into_response();
     };
     let mime = mime_guess::from_path(asset.path()).first_or_octet_stream();
+    // Vite writes content-hashed filenames under assets/, so those can be
+    // cached forever; index.html is the one entry that must stay fresh.
+    let cache_control = if asset.path().starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
     Response::builder()
         .header(header::CONTENT_TYPE, mime.as_ref())
-        .header(header::CACHE_CONTROL, "no-cache")
+        .header(header::CACHE_CONTROL, cache_control)
         .body(Body::from(asset.contents().to_vec()))
         .expect("valid embedded asset response")
 }
@@ -1699,6 +1789,9 @@ mod tests {
             control,
             resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
             resource_upload_root: PathBuf::new(),
+            web_packages_cache: Arc::new(Mutex::new(None)),
+            package_scan_revision: Arc::new(AtomicU64::new(0)),
+            injected_midi: Arc::new(Mutex::new(None)),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
         let request = ControlRequest::Dispatch {
@@ -1757,6 +1850,9 @@ mod tests {
             control,
             resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
             resource_upload_root: PathBuf::new(),
+            web_packages_cache: Arc::new(Mutex::new(None)),
+            package_scan_revision: Arc::new(AtomicU64::new(0)),
+            injected_midi: Arc::new(Mutex::new(None)),
         };
         let request = ControlRequest::Dispatch {
             envelope: CommandEnvelope::new(
@@ -1815,6 +1911,9 @@ mod tests {
             control,
             resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
             resource_upload_root: PathBuf::new(),
+            web_packages_cache: Arc::new(Mutex::new(None)),
+            package_scan_revision: Arc::new(AtomicU64::new(0)),
+            injected_midi: Arc::new(Mutex::new(None)),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
         let responder = std::thread::spawn(move || {

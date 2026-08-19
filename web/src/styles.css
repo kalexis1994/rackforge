@@ -1961,13 +1961,52 @@ body {
   place-items: center;
   overflow: hidden;
   background: #050c13;
+  opacity: 1;
+  transition: opacity 420ms ease;
 }
 
-.plugin-brand-splash > img {
+.plugin-brand-splash.done {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.plugin-brand-splash .splash-bg {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: block;
   object-fit: cover;
+  /* The splash recedes so the icon reads as the subject. */
+  filter: brightness(0.55) saturate(0.85);
+}
+
+/* The loading mark: the plugin's icon, dimmed, refilling with its own
+   color from the bottom up as the interface loads. */
+.plugin-brand-splash .splash-icon {
+  position: relative;
+  z-index: 1;
+  width: clamp(96px, 18vmin, 180px);
+  aspect-ratio: 1;
+  filter: drop-shadow(0 10px 34px rgba(0, 0, 0, 0.65));
+}
+
+.plugin-brand-splash .splash-icon img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.plugin-brand-splash .splash-icon-dim {
+  filter: brightness(0.26) saturate(0.6);
+}
+
+.plugin-brand-splash .splash-icon-lit {
+  /* Driven from script: inset(top 0 0 0) retreating toward zero. */
+  clip-path: inset(100% 0 0 0);
 }
 
 .plugin-operation-overlay {

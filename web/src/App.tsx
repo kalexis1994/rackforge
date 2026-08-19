@@ -3015,6 +3015,14 @@ export function PluginFrame({
       ? descriptor ? "ready" : "unavailable"
       : "loading";
   const [frameLoaded, setFrameLoaded] = useState(false);
+  // The splash's own lifecycle: the icon fill reaches the top, THEN the
+  // whole overlay fades, THEN it unmounts. Removing it on iframe load was
+  // an abrupt cut.
+  const [splashDone, setSplashDone] = useState(false);
+  const [splashGone, setSplashGone] = useState(false);
+  const splashLitRef = useRef<HTMLImageElement | null>(null);
+  const frameLoadedRef = useRef(false);
+  frameLoadedRef.current = frameLoaded;
   const [resourceBusy, setResourceBusy] = useState<string | null>(null);
   const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -3183,7 +3191,51 @@ export function PluginFrame({
 
   useEffect(() => {
     setFrameLoaded(false);
+    setSplashDone(false);
+    setSplashGone(false);
   }, [descriptor?.version, selectedSurface?.entry_url]);
+
+  // The icon reveal: a dim copy of the plugin icon sits under a full-color
+  // copy clipped from the top, and the clip retreats bottom-to-top. The
+  // iframe gives no real progress, so the fill eases toward ~90% on its
+  // own clock and completes the moment the frame reports loaded. The DOM
+  // node is driven directly from the animation frame -- rendering React
+  // sixty times a second for a clip-path would be its own jank.
+  useEffect(() => {
+    if (splashGone) return;
+    let raf = 0;
+    let progress = 0;
+    const start = performance.now();
+    const step = (now: number) => {
+      const lit = splashLitRef.current;
+      if (lit) {
+        const seconds = (now - start) / 1000;
+        const target = frameLoadedRef.current
+          ? 1
+          : 0.9 * (1 - Math.exp(-seconds / 0.9));
+        progress += (Math.max(target, progress) - progress) * 0.12;
+        lit.style.clipPath = `inset(${((1 - progress) * 100).toFixed(2)}% 0 0 0)`;
+        if (frameLoadedRef.current && progress > 0.995) {
+          lit.style.clipPath = "inset(0 0 0 0)";
+          setSplashDone(true);
+          return;
+        }
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [splashGone, descriptor?.version, selectedSurface?.entry_url]);
+
+  // Insurance for the reveal: animation frames stop in a hidden window
+  // (minimized, background tab), and the splash must never outlive the
+  // interface it was covering. Once the frame is loaded, a plain timer
+  // completes the splash even if no frame ever fires.
+  useEffect(() => {
+    if (!frameLoaded || splashDone) return;
+    const timer = window.setTimeout(() => setSplashDone(true), 1800);
+    return () => window.clearTimeout(timer);
+  }, [frameLoaded, splashDone]);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -3703,10 +3755,29 @@ export function PluginFrame({
           referrerPolicy="same-origin"
           onLoad={() => setFrameLoaded(true)}
         />
-        {!frameLoaded && (
-          <div className="plugin-brand-splash" aria-label={`Loading ${instance.plugin_name}`}>
+        {!splashGone && (
+          <div
+            className={`plugin-brand-splash${splashDone ? " done" : ""}`}
+            aria-label={`Loading ${instance.plugin_name}`}
+            onTransitionEnd={(event) => {
+              if (event.target === event.currentTarget && splashDone) {
+                setSplashGone(true);
+              }
+            }}
+          >
             {descriptor?.branding ? (
-              <img src={descriptor.branding.splash_url} alt="" />
+              <>
+                <img className="splash-bg" src={descriptor.branding.splash_url} alt="" />
+                <div className="splash-icon" aria-hidden="true">
+                  <img className="splash-icon-dim" src={descriptor.branding.icon_url} alt="" />
+                  <img
+                    ref={splashLitRef}
+                    className="splash-icon-lit"
+                    src={descriptor.branding.icon_url}
+                    alt=""
+                  />
+                </div>
+              </>
             ) : (
               <RfLoader label={instance.plugin_name} detail="Loading plugin interface…" size="medium" />
             )}

@@ -1054,19 +1054,21 @@ struct Controls {
 
 impl Default for Controls {
     fn default() -> Self {
-        // The "Concert" preset.
+        // The default voicing, chosen by the user's ear on 2026-08-19: an
+        // intimate close-miked piano -- small damped room, the pair at the
+        // rim, the pattern leaning ribbon-ward for its proximity warmth.
         Self {
-            brightness: 0.44,
-            dynamics: 0.71,
-            unison: 0.5,
-            decay: 0.8,
-            width: 0.47,
-            level: 0.68,
+            brightness: 0.4,
+            dynamics: 0.45,
+            unison: 0.65,
+            decay: 0.35,
+            width: 0.35,
+            level: 0.72,
             lab: [0.5; LAB_COUNT],
-            room_size: 0.5,
-            room_hardness: 0.45,
-            mic_distance: 0.46,
-            mic_pattern: 0.5,
+            room_size: 0.22,
+            room_hardness: 0.35,
+            mic_distance: 0.08,
+            mic_pattern: 0.6,
             action_noise: 0.5,
             release_noise: 0.5,
             pedal_noise: 0.5,

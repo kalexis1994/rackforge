@@ -1385,6 +1385,7 @@ impl ConcertGrand {
         &self,
         frequency: f32,
         f0: f32,
+        position: f32,
         string_scale: f32,
         treble_life: f32,
     ) -> f32 {
@@ -1416,7 +1417,25 @@ impl ConcertGrand {
         let rate = LN_1000 / string
             + (RADIATION_RATE * Self::radiation_efficiency(radiating) + bending)
                 / treble_life.max(0.05);
+        // Below the top of the compass the whole instrument rang too long.
+        //
+        // Measured against the YDP, note by note, on the note's own envelope:
+        // A0 lasted 26.2 s against 14.1, C2 19.3 against 12.9, C3 23.9
+        // against 7.5, C4 20.0 against 10.0 -- and A4 11.8 against 11.7,
+        // which is exact. The error is a register error, not a global one.
+        //
+        // That is why turning the Decay control down brings the bass closer
+        // and ruins everything else: it shortens a treble that was already
+        // right. The user found that by ear before this was measured.
+        //
+        // 1.6 halves the bass overshoot -- A0 goes from 1.85x the instrument
+        // to 1.21x and C2 lands on 1.02 -- and stops there. Pushing further
+        // starts cutting F#1 short (0.70x at 2.4) without fixing C3, which is
+        // still 1.9x long: the per-note errors do not share a smooth shape,
+        // so a curve in the register cannot take all of them.
+        let register = ((0.58 - position) / 0.58).clamp(0.0, 1.0);
         (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay)
+            / (1.0 + 1.6 * register)
     }
 
     /// How readily the soundboard turns a partial of this frequency into
@@ -1800,7 +1819,31 @@ impl ConcertGrand {
                     * self.controls.lab_at(7, position)
                     * (0.5 + 1.5 * self.controls.brightness);
                 let velocity0 = 0.25 + 1.75 * velocity;
-                let exponent = 1.7 + 1.7 * position;
+                // The felt's hardening, and the panel's voicing controls.
+                //
+                // Chaigne and Askenfelt use ~2.5 across the compass; the 1.7
+                // that stood here for the bass is below anything published,
+                // and it was chosen when an analytic recipe set the spectrum
+                // and this only modulated it. Now that the integration IS the
+                // spectrum, the felt's hardening is what produces the mid
+                // harmonics: C2's sixth partial rises from -12.7 to -11.4 dB
+                // against the instrument's -6.3 and the fit cost falls from
+                // 29.1 to 27.6.
+                //
+                // `brightness` and the Felt Corner control ride here too,
+                // because retiring the recipe left them with nowhere to act.
+                // They used to move the recipe's felt cutoff; they also sit in
+                // the stiffness, but the integration's length is bounded by
+                // the contact time rather than ended by the hammer, so the
+                // stiffness no longer decides anything and both controls
+                // measured 0.0 dB of authority -- Brightness among them, one
+                // of the six on the front panel. Hardness is what a voicer
+                // changes when they needle a hammer, so it is where these
+                // belong.
+                let exponent = ((2.5 + 0.9 * position)
+                    * (0.62 + 0.76 * self.controls.brightness)
+                    * self.controls.lab_at(0, position))
+                    .clamp(1.2, 5.0);
                 let (q, over_omega) = simulate_strike(
                     &frequencies,
                     sim_modes,
@@ -1977,7 +2020,7 @@ impl ConcertGrand {
             // curve kept falling. ×1.8 on the slow stage matches the
             // measured plateau.
             let t60 =
-                self.t60_seconds(frequency, f0, string_scale, treble_life) * board_decay * self.cal(note, 4);
+                self.t60_seconds(frequency, f0, position, string_scale, treble_life) * board_decay * self.cal(note, 4);
             let jitter = 0.55 + 0.9 * hash01((note as u32) << 10 | (n as u32) << 2 | 1);
             let cents = detune_cents * jitter;
             // The strings of the unison, struck together and equal: their
@@ -2159,7 +2202,7 @@ impl ConcertGrand {
                 }
                 // Longitudinal content decays faster than the transverse
                 // partial it rides above; no aftersound of its own.
-                let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life) * 0.4;
+                let t60 = self.t60_seconds(frequency, f0, position, string_scale, treble_life) * 0.4;
                 let decay = self.decay_per_sample(t60);
                 partials[placed] = Partial {
                     prompt: Component::start(amplitude, frequency, decay, sample_rate),
@@ -2186,7 +2229,7 @@ impl ConcertGrand {
                 if amplitude < floor * scale {
                     continue;
                 }
-                let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life) * 0.35;
+                let t60 = self.t60_seconds(frequency, f0, position, string_scale, treble_life) * 0.35;
                 let decay = self.decay_per_sample(t60);
                 partials[placed] = Partial {
                     prompt: Component::start(amplitude, frequency, decay, sample_rate),
@@ -2309,7 +2352,7 @@ impl ConcertGrand {
                 let frequency = f0 * ratio * jitter;
                 if frequency < nyquist {
                     // Short segments, short ring: undamped is not endless.
-                    let t60 = (self.t60_seconds(frequency, f0, 1.0, 1.0) * 0.35).min(0.9);
+                    let t60 = (self.t60_seconds(frequency, f0, position, 1.0, 1.0) * 0.35).min(0.9);
                     let decay = self.decay_per_sample(t60);
                     *slot = Component::start(level, frequency, decay, sample_rate);
                 }
@@ -2390,7 +2433,7 @@ impl ConcertGrand {
                     powf(2.0, (hash01((note as u32) << 12 | (n as u32) << 3 | 5) - 0.5) * 5.0 / 1200.0);
                 let detuned = (frequency * spread).min(nyquist);
                 let amplitude = amplitudes[n] * scale * 0.063;
-                let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life) * 1.5;
+                let t60 = self.t60_seconds(frequency, f0, position, string_scale, treble_life) * 1.5;
                 let slow = self.decay_per_sample(t60);
                 halo[n] = Partial {
                     prompt: Component::start(amplitude, detuned, slow, sample_rate),

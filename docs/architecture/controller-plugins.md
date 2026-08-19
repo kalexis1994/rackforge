@@ -254,6 +254,31 @@ Remaining Pi gap: `rackforge-web` does not yet serve
 does not render there yet -- the same one-endpoint bridge Android
 needed, on the Pi's web service.
 
+## Unification: one SPA, one behavior (open workstream)
+
+The user's observation after the Pi validation, and it is the right
+frame: the platforms drift because the SAME interface is distributed
+three ways -- embedded in the desktop binary at compile time, deployed
+to the Pi's web root, bundled into the Android APK -- and because
+Android keeps native chrome (hamburger menu, settings dialogs, plugin
+dialogs in Java) that duplicates what the shared SPA already does.
+Every drift bug of 2026-08-19 traces to one of those two roots: the
+Pi's stale SPA (no cache contract -- fixed, all hosts now serve
+no-cache index + immutable hashed assets), the Pi's stale core
+(manifest schema drift), Android's WebView storage policy, Android's
+missing API bridges.
+
+Direction, in order of value:
+1. Every host reports the UI build it serves (a git-stamped hash in
+   /api/v1/health and visible in the SPA's about) so drift is measured,
+   not discovered.
+2. One deploy step stages the same dist everywhere (desktop embed and
+   Android assets already flow from the build; the Pi web root should
+   be part of the same script instead of an ad-hoc rsync).
+3. Android's native chrome shrinks to a shell: navigation and settings
+   route through the shared SPA, keeping native only what must be
+   native (audio engine, MIDI transport, file pickers).
+
 ## UI placement
 
 Plugins tab, new "Controllers" section: install, version, trust badge,

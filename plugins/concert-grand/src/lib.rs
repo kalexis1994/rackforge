@@ -365,23 +365,77 @@ impl Component {
 /// confusion. Now the unison is the real stringing: up to three vertical
 /// polarisations, equal and fully coupled, plus one weakly-coupled
 /// horizontal that carries the long tail, plus the onset bloom.
+/// Lane layout: 0-2 the vertical polarisations, 3 the horizontal, 4 the
+/// bloom. The names live in these constants now; the storage is lane-wise.
+const LANES: usize = 5;
+const LANE_HORIZONTAL: usize = 3;
+const LANE_BLOOM: usize = 4;
+
 #[derive(Clone, Copy, Default)]
 struct Partial {
-    /// The vertical polarisations of the strings this note owns. Single-
-    /// strung notes use one, the wound doubles two, everything from ~C2 all
-    /// three; unused slots hold zero amplitude.
-    verticals: [Component; 3],
-    /// The horizontal polarisation: driven weakly by the hammer's small
-    /// sideways component, coupled to the bridge an order of magnitude
-    /// below the verticals, so it outlives them. The second stage of the
-    /// decay IS this component surviving -- structure, not a multiplier.
-    horizontal: Component,
-    bloom: Component,
+    /// Lane-wise (structure-of-arrays) storage of the five components.
+    ///
+    /// Lanes 0-2: the vertical polarisations of the strings this note owns
+    /// (single-strung notes use one, the wound doubles two, everything from
+    /// ~C2 all three; unused lanes hold zero). Lane 3: the horizontal
+    /// polarisation -- driven weakly by the hammer's small sideways
+    /// component, coupled to the bridge an order of magnitude below the
+    /// verticals, so it outlives them; the second stage of the decay IS
+    /// this lane surviving. Lane 4: the onset bloom.
+    ///
+    /// Why lanes and not five `Component`s: the per-sample rotation of the
+    /// five is the hottest arithmetic in the model, and interleaved
+    /// (s, c, rc, rs) storage kept the compiler from vectorizing it. With
+    /// each field its own array the rotation is elementwise across lanes
+    /// and autovectorizes four-wide with no shuffles -- measured, this is
+    /// what a Raspberry Pi needed.
+    s: [f32; LANES],
+    c: [f32; LANES],
+    rc: [f32; LANES],
+    rs: [f32; LANES],
     /// Bridge radiation per control step, as the fraction of the coherent
     /// sum each string loses. Zero for components that bypass the bridge.
     coupling: f32,
     /// This partial's weight in the string's slope at the bridge.
     slope: f32,
+}
+
+impl Partial {
+    /// Installs one started component into a lane.
+    fn set_lane(&mut self, lane: usize, component: Component) {
+        self.s[lane] = component.s;
+        self.c[lane] = component.c;
+        self.rc[lane] = component.rc;
+        self.rs[lane] = component.rs;
+    }
+
+    fn lane_magnitude_squared(&self, lane: usize) -> f32 {
+        self.s[lane] * self.s[lane] + self.c[lane] * self.c[lane]
+    }
+
+    /// Silences one lane for good; an all-zero lane rotates to zero.
+    fn retire_lane(&mut self, lane: usize) {
+        self.s[lane] = 0.0;
+        self.c[lane] = 0.0;
+        self.rc[lane] = 0.0;
+        self.rs[lane] = 0.0;
+    }
+
+    /// One sample: rotates all five lanes -- straight-line, branch-free,
+    /// lane-parallel -- and returns their sum in fixed lane order (the
+    /// same order the old component-by-component sum used).
+    #[inline(always)]
+    fn tick(&mut self) -> f32 {
+        let mut out = [0.0f32; LANES];
+        for lane in 0..LANES {
+            let s = self.s[lane] * self.rc[lane] + self.c[lane] * self.rs[lane];
+            let c = self.c[lane] * self.rc[lane] - self.s[lane] * self.rs[lane];
+            self.s[lane] = s;
+            self.c[lane] = c;
+            out[lane] = s;
+        }
+        out[0] + out[1] + out[2] + out[3] + out[4]
+    }
 }
 
 /// Deterministic 0..1 hash (Wang-style avalanche): the model's source of
@@ -866,13 +920,9 @@ impl Voice {
             // same coupling its drain uses -- reciprocity again.
             if sympathy != 0.0 {
                 let push = sympathy * partial.coupling;
-                partial.verticals[0].s += push;
+                partial.s[0] += push;
             }
-            let voice = partial.verticals[0].tick_free()
-                + partial.verticals[1].tick_free()
-                + partial.verticals[2].tick_free()
-                + partial.horizontal.tick_free()
-                + partial.bloom.tick_free();
+            let voice = partial.tick();
             slope += voice * partial.slope;
             sum += voice;
         }
@@ -963,10 +1013,7 @@ impl Voice {
             // sum of three strings, whose cross terms belong to no string's
             // tension at all.
             let w = partial.slope;
-            let a = partial.verticals[0].s
-                + partial.verticals[1].s
-                + partial.verticals[2].s
-                + partial.horizontal.s;
+            let a = partial.s[0] + partial.s[1] + partial.s[2] + partial.s[LANE_HORIZONTAL];
             stretch += (w * a) * (w * a);
         }
         // The offset the current tension asks for, as a fractional shift in
@@ -982,8 +1029,7 @@ impl Voice {
             return;
         }
         for partial in &mut self.partials[..self.partial_count] {
-            let [v0, v1, v2] = &mut partial.verticals;
-            for component in [v0, v1, v2, &mut partial.horizontal, &mut partial.bloom] {
+            for lane in 0..LANES {
                 // Rotate by an extra angle proportional to the component's own
                 // frequency, so the whole ladder sharpens together.
                 //
@@ -996,11 +1042,11 @@ impl Voice {
                 // A0 grew for a second and a half and then died in a burst
                 // of non-finite samples. Dividing by the determinant's root
                 // makes the nudge a pure rotation at any rate.
-                let step = rate * component.rs;
+                let step = rate * partial.rs[lane];
                 let scale = 1.0 / sqrtf(1.0 + step * step);
-                let rc = (component.rc - component.rs * step) * scale;
-                component.rs = (component.rs + component.rc * step) * scale;
-                component.rc = rc;
+                let rc = (partial.rc[lane] - partial.rs[lane] * step) * scale;
+                partial.rs[lane] = (partial.rs[lane] + partial.rc[lane] * step) * scale;
+                partial.rc[lane] = rc;
             }
         }
     }
@@ -1013,12 +1059,11 @@ impl Voice {
             self.glide_steps -= 1;
             let rate = self.glide_rate;
             for partial in &mut self.partials[..self.partial_count] {
-                let [v0, v1, v2] = &mut partial.verticals;
-                for component in [v0, v1, v2, &mut partial.horizontal, &mut partial.bloom] {
-                    let step = rate * component.rs;
-                    let rc = component.rc - component.rs * step;
-                    component.rs += component.rc * step;
-                    component.rc = rc;
+                for lane in 0..LANES {
+                    let step = rate * partial.rs[lane];
+                    let rc = partial.rc[lane] - partial.rs[lane] * step;
+                    partial.rs[lane] += partial.rc[lane] * step;
+                    partial.rc[lane] = rc;
                 }
             }
         }
@@ -1070,18 +1115,18 @@ impl Voice {
         for partial in &mut self.partials[..self.partial_count] {
             let k = partial.coupling;
             if k > 0.0 {
-                let mut sum_s = HORIZONTAL_BRIDGE * partial.horizontal.s;
-                let mut sum_c = HORIZONTAL_BRIDGE * partial.horizontal.c;
-                for vertical in &partial.verticals {
-                    sum_s += vertical.s;
-                    sum_c += vertical.c;
+                let mut sum_s = HORIZONTAL_BRIDGE * partial.s[LANE_HORIZONTAL];
+                let mut sum_c = HORIZONTAL_BRIDGE * partial.c[LANE_HORIZONTAL];
+                for lane in 0..3 {
+                    sum_s += partial.s[lane];
+                    sum_c += partial.c[lane];
                 }
-                for vertical in &mut partial.verticals {
-                    vertical.s -= k * sum_s;
-                    vertical.c -= k * sum_c;
+                for lane in 0..3 {
+                    partial.s[lane] -= k * sum_s;
+                    partial.c[lane] -= k * sum_c;
                 }
-                partial.horizontal.s -= HORIZONTAL_BRIDGE * k * sum_s;
-                partial.horizontal.c -= HORIZONTAL_BRIDGE * k * sum_c;
+                partial.s[LANE_HORIZONTAL] -= HORIZONTAL_BRIDGE * k * sum_s;
+                partial.c[LANE_HORIZONTAL] -= HORIZONTAL_BRIDGE * k * sum_c;
             }
         }
         let mut removed = 0;
@@ -1089,16 +1134,15 @@ impl Voice {
         let mut index = 0;
         while index < self.partial_count {
             let partial = &mut self.partials[index];
-            let [v0, v1, v2] = &mut partial.verticals;
-            for component in [v0, v1, v2, &mut partial.horizontal, &mut partial.bloom] {
-                if component.magnitude_squared() < DEAD_MAGNITUDE_SQUARED {
-                    component.retire();
+            for lane in 0..LANES {
+                if partial.lane_magnitude_squared(lane) < DEAD_MAGNITUDE_SQUARED {
+                    partial.retire_lane(lane);
                 }
             }
-            let magnitude = partial.verticals[0].magnitude_squared()
-                + partial.verticals[1].magnitude_squared()
-                + partial.verticals[2].magnitude_squared()
-                + partial.horizontal.magnitude_squared();
+            let magnitude = partial.lane_magnitude_squared(0)
+                + partial.lane_magnitude_squared(1)
+                + partial.lane_magnitude_squared(2)
+                + partial.lane_magnitude_squared(LANE_HORIZONTAL);
             if magnitude < DEAD_MAGNITUDE_SQUARED {
                 self.partial_count -= 1;
                 self.partials[index] = self.partials[self.partial_count];
@@ -1141,11 +1185,10 @@ impl Voice {
             let harmonic = (partial.slope.abs() * 16.0).max(1.0);
             let weight = 0.6 + 0.4 * (harmonic / 6.0).min(1.0);
             let factor = powf(full_factor, delta * weight).min(1.02);
-            for vertical in &mut partial.verticals {
-                vertical.damp(factor);
+            for lane in 0..LANES {
+                partial.rc[lane] *= factor;
+                partial.rs[lane] *= factor;
             }
-            partial.horizontal.damp(factor);
-            partial.bloom.damp(factor);
         }
     }
 
@@ -1157,11 +1200,10 @@ impl Voice {
         release_gain: f32,
     ) {
         for partial in &mut self.partials[..self.partial_count] {
-            for vertical in &mut partial.verticals {
-                vertical.damp(factor);
+            for lane in 0..LANES {
+                partial.rc[lane] *= factor;
+                partial.rs[lane] *= factor;
             }
-            partial.horizontal.damp(factor);
-            partial.bloom.damp(factor);
         }
         // The key coming back and the damper landing make a small knock of
         // their own, whether or not the string still carries energy: release
@@ -2881,9 +2923,10 @@ impl ConcertGrand {
             let horizontal_share =
                 HORIZONTAL_SHARE * (0.65 + 1.2 * powf(1.0 - position, 1.5));
             let (pq, po) = (phase_q[n], phase_o[n]);
-            let mut built = Partial {
-                verticals: [Component::default(); 3],
-                horizontal: Component::start_state(
+            let mut built = Partial::default();
+            built.set_lane(
+                LANE_HORIZONTAL,
+                Component::start_state(
                     amplitude * horizontal_share * pq,
                     amplitude * horizontal_share * po,
                     (frequency
@@ -2897,32 +2940,34 @@ impl ConcertGrand {
                     intrinsic,
                     sample_rate,
                 ),
-                bloom: Component::start_state(
+            );
+            built.set_lane(
+                LANE_BLOOM,
+                Component::start_state(
                     -amplitude * (1.0 + horizontal_share) * pq,
                     -amplitude * (1.0 + horizontal_share) * po,
                     frequency,
                     rise,
                     sample_rate,
                 ),
-                coupling,
-                slope: {
-                    let h = (n + 1) as f32;
-                    let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
-                    sign * h * (1.0 / 16.0)
-                },
+            );
+            built.coupling = coupling;
+            built.slope = {
+                let h = (n + 1) as f32;
+                let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
+                sign * h * (1.0 / 16.0)
             };
-            for (slot, (share, ratio)) in built
-                .verticals
-                .iter_mut()
-                .zip(shares.iter().zip(ratios.iter()))
-            {
+            for (lane, (share, ratio)) in shares.iter().zip(ratios.iter()).enumerate() {
                 if *share > 0.0 {
-                    *slot = Component::start_state(
-                        amplitude * share * pq,
-                        amplitude * share * po,
-                        (frequency * ratio).min(nyquist),
-                        intrinsic,
-                        sample_rate,
+                    built.set_lane(
+                        lane,
+                        Component::start_state(
+                            amplitude * share * pq,
+                            amplitude * share * po,
+                            (frequency * ratio).min(nyquist),
+                            intrinsic,
+                            sample_rate,
+                        ),
                     );
                 }
             }
@@ -3025,15 +3070,13 @@ impl ConcertGrand {
                     + 0.06 * (hash01(strike_salt ^ seed) - 0.5);
                 let amplitude = clack_level * level;
                 let decay = self.decay_per_sample(t60);
-                partials[placed] = Partial {
-                    verticals: [
-                        Component::start(amplitude, freq * jitter, decay, sample_rate),
-                        Component::default(),
-                        Component::default(),
-                    ],
-                    bloom: Component::start(-amplitude, freq * jitter, rise, sample_rate),
-                    ..Partial::default()
-                };
+                let mut built = Partial::default();
+                built.set_lane(0, Component::start(amplitude, freq * jitter, decay, sample_rate));
+                built.set_lane(
+                    LANE_BLOOM,
+                    Component::start(-amplitude, freq * jitter, rise, sample_rate),
+                );
+                partials[placed] = built;
                 placed += 1;
             }
         }
@@ -3064,15 +3107,13 @@ impl ConcertGrand {
                 let jitter = 1.0 + 0.10 * (hash01((note as u32) << 7 | seed) - 0.5);
                 let amplitude = thump_level * level;
                 let decay = self.decay_per_sample(0.30);
-                partials[placed] = Partial {
-                    verticals: [
-                        Component::start(amplitude, freq * jitter, decay, sample_rate),
-                        Component::default(),
-                        Component::default(),
-                    ],
-                    bloom: Component::start(-amplitude, freq * jitter, rise, sample_rate),
-                    ..Partial::default()
-                };
+                let mut built = Partial::default();
+                built.set_lane(0, Component::start(amplitude, freq * jitter, decay, sample_rate));
+                built.set_lane(
+                    LANE_BLOOM,
+                    Component::start(-amplitude, freq * jitter, rise, sample_rate),
+                );
+                partials[placed] = built;
                 placed += 1;
             }
         }
@@ -3158,16 +3199,10 @@ impl ConcertGrand {
                 };
                 if target != usize::MAX {
                     let existing = &mut voice.partials[target];
-                    for (mine, theirs) in
-                        existing.verticals.iter_mut().zip(fresh.verticals.iter())
-                    {
-                        mine.s += theirs.s;
-                        mine.c += theirs.c;
+                    for lane in 0..LANES {
+                        existing.s[lane] += fresh.s[lane];
+                        existing.c[lane] += fresh.c[lane];
                     }
-                    existing.horizontal.s += fresh.horizontal.s;
-                    existing.horizontal.c += fresh.horizontal.c;
-                    existing.bloom.s += fresh.bloom.s;
-                    existing.bloom.c += fresh.bloom.c;
                     existing.coupling = fresh.coupling;
                 } else if voice.partial_count < MAX_PARTIALS {
                     voice.partials[voice.partial_count] = *fresh;
@@ -3378,15 +3413,13 @@ impl ConcertGrand {
                 let amplitude = amplitudes[n] * scale * 0.063;
                 let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life) * 1.5;
                 let slow = self.decay_per_sample(t60);
-                halo[n] = Partial {
-                    verticals: [
-                        Component::start(amplitude, detuned, slow, sample_rate),
-                        Component::default(),
-                        Component::default(),
-                    ],
-                    bloom: Component::start(-amplitude, detuned, rise, sample_rate),
-                    ..Partial::default()
-                };
+                let mut built = Partial::default();
+                built.set_lane(0, Component::start(amplitude, detuned, slow, sample_rate));
+                built.set_lane(
+                    LANE_BLOOM,
+                    Component::start(-amplitude, detuned, rise, sample_rate),
+                );
+                halo[n] = built;
             }
             if let Some(shadow) = self.allocate_voice() {
                 *shadow = Voice::default();
@@ -4560,7 +4593,7 @@ mod tests {
                 let mut stretch = 0.0f32;
                 for partial in &voice.partials[..voice.partial_count] {
                     let w = partial.slope;
-                    let a = partial.verticals[0].s + partial.verticals[1].s + partial.verticals[2].s + partial.horizontal.s;
+                    let a = partial.s[0] + partial.s[1] + partial.s[2] + partial.s[3];
                     stretch += (w * a) * (w * a);
                 }
                 // The rate is applied every TENSION_INTERVAL samples and is a
@@ -4676,9 +4709,8 @@ mod tests {
                 // which is the strike's (position, velocity/omega) direction.
                 let (mut pos, mut vel) = (0.0f32, 0.0f32);
                 for partial in &voice.partials[..voice.partial_count] {
-                    let p = &partial.verticals[0];
-                    pos += p.s * p.s;
-                    vel += p.c * p.c;
+                    pos += partial.s[0] * partial.s[0];
+                    vel += partial.c[0] * partial.c[0];
                 }
                 let total = pos + vel;
                 if total <= 0.0 {
@@ -4718,7 +4750,7 @@ mod tests {
         render(&mut piano, 1, &[note_on(45, 100)]);
         let voice = piano.voices.iter().find(|v| v.active).unwrap();
         let ratio = |p: &Partial| {
-            (p.horizontal.magnitude_squared() / p.verticals[0].magnitude_squared().max(1e-20)).sqrt()
+            (p.lane_magnitude_squared(3) / p.lane_magnitude_squared(0).max(1e-20)).sqrt()
         };
         let low = ratio(&voice.partials[0]);
         let high = ratio(&voice.partials[voice.partial_count.saturating_sub(3)]);
@@ -4738,10 +4770,10 @@ mod tests {
         let f0 = piano.fundamental[60 - LOW_NOTE as usize];
         for n in 0..voice.partial_count {
             let p = &voice.partials[n];
-            let amp = (p.verticals[0].magnitude_squared()
-                + p.verticals[1].magnitude_squared()
-                + p.verticals[2].magnitude_squared()
-                + p.horizontal.magnitude_squared())
+            let amp = (p.lane_magnitude_squared(0)
+                + p.lane_magnitude_squared(1)
+                + p.lane_magnitude_squared(2)
+                + p.lane_magnitude_squared(3))
             .sqrt();
             std::println!("n={} ~f={:.0} amp={:.6}", n + 1, (n + 1) as f32 * f0, amp);
         }
@@ -4920,15 +4952,15 @@ mod tests {
             let mut den = 0.0f64;
             let mut rows = String::new();
             for p in &voice.partials[..voice.partial_count] {
-                let f = (p.verticals[0].rs.atan2(p.verticals[0].rc) as f64).abs() * FS as f64
+                let f = (p.rs[0].atan2(p.rc[0]) as f64).abs() * FS as f64
                     / core::f64::consts::TAU;
                 if f < 20.0 {
                     continue;
                 }
-                let e = (p.verticals[0].magnitude_squared()
-                    + p.verticals[1].magnitude_squared()
-                    + p.verticals[2].magnitude_squared()
-                    + p.horizontal.magnitude_squared()) as f64;
+                let e = (p.lane_magnitude_squared(0)
+                    + p.lane_magnitude_squared(1)
+                    + p.lane_magnitude_squared(2)
+                    + p.lane_magnitude_squared(3)) as f64;
                 num += f.ln() * e;
                 den += e;
             }
@@ -4937,7 +4969,7 @@ mod tests {
                 rows += &format!(
                     " n{}:{:.1}dB",
                     i + 1,
-                    10.0 * (p.verticals[0].magnitude_squared() as f64).max(1e-30).log10()
+                    10.0 * (p.lane_magnitude_squared(0) as f64).max(1e-30).log10()
                 );
             }
             println!("vel {velocity}: centroide {cent:.0} Hz, {} parciales", voice.partial_count);
@@ -4968,9 +5000,9 @@ mod tests {
                     v.partials[..v.partial_count]
                         .iter()
                         .map(|p| {
-                            p.verticals[0].magnitude_squared()
-                                + p.verticals[1].magnitude_squared()
-                                + p.verticals[2].magnitude_squared()
+                            p.lane_magnitude_squared(0)
+                                + p.lane_magnitude_squared(1)
+                                + p.lane_magnitude_squared(2)
                         })
                         .sum::<f32>()
                 })
@@ -5040,9 +5072,9 @@ mod tests {
                 v.partials[..v.partial_count]
                     .iter()
                     .map(|p| {
-                        p.verticals[0].magnitude_squared()
-                            + p.verticals[1].magnitude_squared()
-                            + p.verticals[2].magnitude_squared()
+                        p.lane_magnitude_squared(0)
+                            + p.lane_magnitude_squared(1)
+                            + p.lane_magnitude_squared(2)
                     })
                     .sum::<f32>()
             })
@@ -5062,9 +5094,9 @@ mod tests {
                 v.partials[..v.partial_count]
                     .iter()
                     .map(|p| {
-                        p.verticals[0].magnitude_squared()
-                            + p.verticals[1].magnitude_squared()
-                            + p.verticals[2].magnitude_squared()
+                        p.lane_magnitude_squared(0)
+                            + p.lane_magnitude_squared(1)
+                            + p.lane_magnitude_squared(2)
                     })
                     .sum::<f32>()
             })
@@ -5117,9 +5149,9 @@ mod tests {
         for voice in piano.voices.iter().filter(|v| v.active) {
             let mut total = 0.0;
             for partial in &voice.partials[..voice.partial_count] {
-                total += partial.verticals[0].magnitude_squared()
-                    + partial.verticals[1].magnitude_squared()
-                    + partial.verticals[2].magnitude_squared();
+                total += partial.lane_magnitude_squared(0)
+                    + partial.lane_magnitude_squared(1)
+                    + partial.lane_magnitude_squared(2);
             }
             if voice.note == 48 {
                 held = held.max(total);
@@ -5201,12 +5233,12 @@ mod tests {
             // emergent rather than scripted, C4's fourth genuinely dies
             // within the three seconds the old version idled through.
             let p = &voice.partials[1.min(voice.partial_count - 1)];
-            let sum_s = p.verticals[0].s + p.verticals[1].s + p.verticals[2].s;
-            let sum_c = p.verticals[0].c + p.verticals[1].c + p.verticals[2].c;
+            let sum_s = p.s[0] + p.s[1] + p.s[2];
+            let sum_c = p.c[0] + p.c[1] + p.c[2];
             let radiated = sum_s * sum_s + sum_c * sum_c;
-            let stored = p.verticals[0].magnitude_squared()
-                + p.verticals[1].magnitude_squared()
-                + p.verticals[2].magnitude_squared();
+            let stored = p.lane_magnitude_squared(0)
+                + p.lane_magnitude_squared(1)
+                + p.lane_magnitude_squared(2);
             (radiated / (3.0 * stored).max(1e-24), stored)
         };
         let (struck, _) = coherence(&piano);
@@ -5318,11 +5350,13 @@ mod tests {
             decay_squared(&voice.duplex[0]) > 0.0,
             "treble note grew no duplex"
         );
-        let string_before = decay_squared(&voice.partials[0].verticals[0]);
+        let string_before = (voice.partials[0].rc[0] * voice.partials[0].rc[0]
+            + voice.partials[0].rs[0] * voice.partials[0].rs[0]);
         let duplex_before = decay_squared(&voice.duplex[0]);
         render(&mut piano, 8, &[note_off(84)]);
         let voice = piano.voices.iter().find(|v| v.active).unwrap();
-        let string_after = decay_squared(&voice.partials[0].verticals[0]);
+        let string_after = (voice.partials[0].rc[0] * voice.partials[0].rc[0]
+            + voice.partials[0].rs[0] * voice.partials[0].rs[0]);
         let duplex_after = decay_squared(&voice.duplex[0]);
         assert!(
             string_after < string_before * 0.9999,
@@ -5506,8 +5540,8 @@ mod tests {
         let magnitude = |piano: &ConcertGrand| {
             let voice = piano.voices.iter().find(|v| v.active).unwrap();
             let p = &voice.partials[0];
-            let s = p.verticals[0].s + p.verticals[1].s + p.verticals[2].s + p.horizontal.s + p.bloom.s;
-            let c = p.verticals[0].c + p.verticals[1].c + p.verticals[2].c + p.horizontal.c + p.bloom.c;
+            let s = p.s[0] + p.s[1] + p.s[2] + p.s[3] + p.s[4];
+            let c = p.c[0] + p.c[1] + p.c[2] + p.c[3] + p.c[4];
             (s * s + c * c).sqrt()
         };
         let at_strike = magnitude(&piano);
@@ -5526,7 +5560,7 @@ mod tests {
         let mut piano = prepared();
         render(&mut piano, 1, &[note_on(24, 100)]);
         let voice = piano.voices.iter().find(|v| v.active).unwrap();
-        let amp = |i: usize| voice.partials[i].verticals[0].magnitude_squared();
+        let amp = |i: usize| voice.partials[i].lane_magnitude_squared(0);
         // Scan the transverse ladder only: nonlinear extras and the
         // mechanism thump are appended after it.
         let ladder = voice.partial_count.min(40);

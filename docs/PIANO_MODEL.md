@@ -803,6 +803,22 @@ code and is far beyond audibility at control rate).
   dynamics, because less of the felt relaxes under the slow blow too. The
   emergent contact-time tests still pass untouched.
 
+* **PERFORMANCE (v0.85.0): the partial bank went lane-wise (SoA) -- a
+  third off the wasm instruction count, output bit-identical.**
+  `Partial` now stores its five components as `s/c/rc/rs: [f32; 5]`
+  (lanes 0-2 verticals, 3 horizontal, 4 bloom) instead of five
+  interleaved `Component`s. The per-sample rotation became elementwise
+  across lanes and the compiler vectorizes it four-wide with no shuffles
+  -- the wasm build (with +simd128) dropped from 70.6M to 50.8M fuel on
+  the ten-note chord and 71.1M to 51.5M on twenty-under-pedal, a third
+  under the 0.83 numbers, and that instruction count is what cranelift
+  hands the Pi's NEON. Native x86: pedal mean 1.72 -> 1.53 ms, worst
+  block 2.98 -> 2.26 ms. Every touch point (cull retire, bridge drain,
+  tension nudge, glide, damp, merge, halo shadows, clack/thump seeds)
+  kept its exact arithmetic order, and the whole render set came out
+  BIT-IDENTICAL to the pre-refactor baseline -- the arithmetic moved
+  house without changing a single sample. 34 tests green.
+
 * **PERFORMANCE (v0.84.0): a third off the worst block, output verified.**
   Target: a Raspberry Pi with room to spare. Native baseline (512 frames,
   44.1 kHz, deadline 11.6 ms): worst case (twenty notes under the pedal)

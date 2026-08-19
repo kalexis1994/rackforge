@@ -774,6 +774,17 @@ code and is far beyond audibility at control rate).
   fader picks how much, the touch picks when. The house voicing ships
   with the fader off (0.02) by the user's ear.
 
+  On 0.81.0 the travel itself was recalibrated. The first base put the
+  reference-matched ff level at the fader's centre, and the level the
+  user's ear actually wanted landed at the bottom of the travel with no
+  room under it ("esos 0.02 deberían ser como un 0.5 para poder bajar
+  más"). The base dropped 28 → 3.5 (−18 dB): the subtle level now sits at
+  mid-fader, the bottom half is fine adjustment below it, and the top
+  reaches +3.4 dB in C2's 1–2 kHz attack instead of +10. The house
+  voicing ships at 0.5. General fader lesson worth keeping: the centre of
+  a travel should be the level someone WANTS, not the level a reference
+  measured — the reference is one point on the travel, not its anchor.
+
 
 
 * **FIXED (v0.62.0): a fixed low drone under every note, audible only in

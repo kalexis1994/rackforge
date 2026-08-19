@@ -684,7 +684,15 @@ const SYMPATHY_RATE: f32 = 0.004;
 /// as long as the hammer touches the string, so the kick is now a drive
 /// pulse with the contact's own timescale: same energy into the modes'
 /// bands, nothing at the discontinuity frequencies.
-const IMPACT_CLANG: f32 = 28.0;
+///
+/// The base is set so the fader's CENTRE is the subtle level the user's
+/// ear chose. The first calibration put the reference-matched ff level at
+/// centre, and the level the user actually wanted landed at the very
+/// bottom of the travel with nowhere to go below it ("esos 0.02 deberían
+/// ser como un 0.5 para poder bajar más"). 28.0 -> 3.5 moves that level
+/// to mid-travel: the whole bottom half is fine adjustment under it, and
+/// the top reaches +6 dB over the old centre instead of x16.
+const IMPACT_CLANG: f32 = 3.5;
 const IMPACT_PULSE_TAU_S: f32 = 0.0015;
 /// One-pole coefficient for the high-pass on everything entering the lid and
 /// the chamber, at 44.1 kHz. The corner is the board's own radiation corner:
@@ -1215,9 +1223,9 @@ impl Default for Controls {
             action_noise: 0.39,
             release_noise: 0.6,
             pedal_noise: 0.5,
-            // Off, by the user's ear: the burst is there for whoever wants
-            // it, and the house voicing does without.
-            impact: 0.02,
+            // Centre of the recalibrated travel: the subtle level the
+            // user's ear chose now IS mid-fader, with room below it.
+            impact: 0.5,
         }
     }
 }

@@ -332,6 +332,55 @@ Un intento parcial de (2) sin (1) ni (4) se probo y se revirtio: crossfade a
 injusta porque la tabla de calibracion habia sido ajustada con el maximo
 puesto.
 
+## 10. Vibracion longitudinal de la cuerda — [~] cableada, sin calibrar
+
+**Fuente:** B. Bank, L. Sujbert, "Generation of longitudinal vibrations in
+piano strings: From physics to sound synthesis", *JASA* 117 (2005).
+
+**Por que importa.** El usuario insistio en que faltaba algo estructural en el
+bajo, no valores. La cuerda tiene una segunda onda -- la de compresion, que
+viaja unas treinta veces mas rapido y no depende de la tension -- y el paper
+es explicito sobre su peso: la vibracion longitudinal "contribuye enormemente
+al caracter distintivo de las notas graves" y es "responsable del caracter
+metalico de las notas bajas".
+
+**Lo que teniamos:** dos componentes en 17*f0, colocadas una sola vez en el
+note-on, con nivel fijo y un cuarto de segundo de cola. El paper contradice
+las tres cosas:
+
+* "el movimiento longitudinal se excita CONTINUAMENTE por la vibracion
+  transversal a lo largo de la cuerda, y no solo durante el contacto del
+  martillo". El nuestro disparaba una vez y decaia.
+* su amplitud es "una funcion no lineal de la amplitud de la transversal...
+  mas rapida que una cuadratica simple". El nuestro tenia nivel fijo.
+* no es un formante sino "un espectro cuasi-armonico con picos tipo formante
+  en las frecuencias modales longitudinales".
+
+**La receta de sintesis del paper**, que es implementable: un banco de
+resonadores de segundo orden en esas frecuencias modales, excitado por la
+tension que produce el movimiento transversal, sumando un modo par y uno
+impar. Y notan que "la eficiencia se puede aumentar si no se computan las
+componentes de la excitacion donde la ganancia del banco es pequeña".
+
+**Estado: cableado, sin calibrar.** Cuatro resonadores por voz en
+k*c_L/(2L), con la velocidad longitudinal tomada de su medicion (~1.15 kHz
+para C2, la mitad de lo que daria acero desnudo, porque el entorchado de
+cobre agrega masa sin rigidez). La excitacion se calcula por muestra desde
+las parciales transversales que llevan la energia.
+
+Lo que falta es el nivel, y esta mal por ordenes de magnitud: el audio cambia
+pero la energia cerca de 1150 Hz no se mueve 0.1 dB entre mezcla 0 y 60. El
+coeficiente de entrada del resonador es (1-r)*2*sin(w) ~ 5.7e-5, y el
+contenido de la excitacion A esa frecuencia es una fraccion pequeña de una
+señal que ya es chica tras el escalado de headroom. Encontrar donde se pierde
+es lo que sigue; subir la constante a ciegas no.
+
+**Error a no repetir:** la primera version alimentaba el banco con el
+estiramiento calculado a tasa de control, cada 32 muestras. Eso es una
+envolvente: un resonador a 1150 Hz necesita excitacion A 1150 Hz. Los modos
+longitudinales se excitan a las frecuencias suma y diferencia de las
+transversales, que son de audio.
+
 ## Referencia permanente
 
 - Muestras de calibración: YDP Grand en

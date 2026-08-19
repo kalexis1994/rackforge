@@ -76,6 +76,58 @@ const CULL_INTERVAL: u32 = 256;
 /// a few hundred Hz. Every 32 samples reaches 690 Hz, comfortably past that,
 /// and costs a thirty-second of what doing it per sample would.
 const TENSION_INTERVAL: u32 = 32;
+/// How many longitudinal modes each voice carries.
+///
+/// The string's compressional wave, which is a different wave from the one
+/// that carries the pitch and travels some thirty times faster. Bank and
+/// Sujbert (JASA 117, 2005) measured what it does and it is not a detail:
+/// "longitudinal vibration of piano strings greatly contributes to the
+/// distinctive character of low piano notes", and it is "responsible for the
+/// metallic character of low notes".
+///
+/// This model had a stand-in for it -- two components at 17*f0, placed once
+/// at note-on with a fixed level and a quarter-second ring. Three things are
+/// wrong with that, and the paper is explicit about each:
+///
+/// * "the longitudinal motion is continuously excited by the transverse
+///   vibration along the string and NOT ONLY during the hammer-string
+///   contact". Ours fired once and decayed. The real one is driven for as
+///   long as the string moves.
+/// * its amplitude is "a nonlinear function of the amplitude of the
+///   transverse one... faster than a simple quadratic".
+/// * it is not one formant but "a quasi-harmonic spectrum with formantlike
+///   peaks at the longitudinal modal frequencies".
+///
+/// The synthesis recipe the paper gives is a bank of second-order resonators
+/// at those modal frequencies, driven by the tension the transverse motion
+/// makes. This model already computes that tension for the Kirchhoff glide,
+/// so the expensive half is paid for.
+const LONGITUDINAL_MODES: usize = 4;
+/// How many transverse partials feed the longitudinal excitation. They hold
+/// nearly all the energy, and summing all 144 per sample would cost more than
+/// the whole rest of the voice.
+const LONGITUDINAL_SOURCES: usize = 32;
+/// Where the first longitudinal mode of C2 sits, in hertz, and the speaking
+/// length it belongs to.
+///
+/// Bare steel would put it near 2.4 kHz -- the compressional speed is
+/// sqrt(E/rho), about 5100 m/s, and it does not depend on the tension. A bass
+/// string is not bare steel: the copper winding adds mass without adding
+/// stiffness, which halves the speed. Bank and Sujbert measure ~1.15 kHz for
+/// C2, so that is what is used, scaled by length for every other note.
+const LONGITUDINAL_C2_HZ: f32 = 1_150.0;
+const LONGITUDINAL_C2_LENGTH_M: f32 = 1.06;
+/// Wet level of the longitudinal bank.
+///
+/// UNCALIBRATED, and the bank is currently inaudible because of it. Measured:
+/// the rendered audio does change, but the energy near C2's first
+/// longitudinal mode does not move by 0.1 dB between a mix of 0 and one of
+/// 60. The resonator's input coefficient is (1-r)*2*sin(w), about 5.7e-5 for
+/// a 0.9 s ring at 1150 Hz, and the excitation's content AT that frequency is
+/// a small part of a signal that is itself small after the headroom scaling.
+/// The level is wrong by orders of magnitude, and finding where beats raising
+/// a constant until something happens.
+const LONGITUDINAL_MIX: f32 = 8.0;
 /// How hard the string's own stretch pulls it sharp. Sized so a fortissimo
 /// bass strike sharpens a few cents and settles as it decays, which is what
 /// measured piano glides do.
@@ -511,6 +563,10 @@ struct Voice {
     tension_rest: f32,
     tension_applied: f32,
     tension_in: u32,
+    /// The string's longitudinal modes, driven by its own tension.
+    longitudinal: [BodyMode; LONGITUDINAL_MODES],
+    longitudinal_drive: f32,
+    longitudinal_rest: f32,
 }
 
 impl Default for Voice {
@@ -542,6 +598,9 @@ impl Default for Voice {
             tension_rest: 0.0,
             tension_applied: 0.0,
             tension_in: TENSION_INTERVAL,
+            longitudinal: [BodyMode::default(); LONGITUDINAL_MODES],
+            longitudinal_drive: 0.0,
+            longitudinal_rest: 0.0,
         }
     }
 }
@@ -551,13 +610,42 @@ impl Voice {
     #[inline(always)]
     fn tick(&mut self) -> f32 {
         let mut sum = 0.0;
-        for partial in &mut self.partials[..self.partial_count] {
-            sum += partial.prompt.tick()
+        // The tension the string is under RIGHT NOW, taken from the partials
+        // that carry the energy.
+        //
+        // The longitudinal modes are excited at the sum and difference
+        // frequencies of the transverse ones, which are audio rate, so the
+        // control-rate stretch computed for the glide cannot drive them -- a
+        // resonator at 1150 Hz needs excitation at 1150 Hz, and a figure
+        // updated every 32 samples is an envelope. Only the low partials are
+        // summed here: they hold nearly all the energy, and Bank and Sujbert
+        // note that the excitation need not be computed where the resonator
+        // bank has little gain.
+        let mut squeeze = 0.0f32;
+        for (n, partial) in self.partials[..self.partial_count].iter_mut().enumerate() {
+            let voice = partial.prompt.tick()
                 + partial.aftersound.tick()
                 + partial.bloom.tick()
                 + partial.third.tick();
+            if n < LONGITUDINAL_SOURCES {
+                squeeze += voice * voice;
+            }
+            sum += voice;
         }
+        self.longitudinal_drive = squeeze - self.longitudinal_rest;
+        // A running mean, so what drives the resonators is the VARIATION in
+        // the tension and not its standing part, which would only offset them.
+        self.longitudinal_rest += 0.002 * (squeeze - self.longitudinal_rest);
         sum += self.duplex[0].tick() + self.duplex[1].tick();
+        // The compressional wave. Held at the tension read at control rate,
+        // which is a zero-order hold on the excitation -- enough, because what
+        // these resonators pick out of it is their own frequency.
+        let drive = self.longitudinal_drive * LONGITUDINAL_MIX;
+        if drive != 0.0 {
+            for mode in &mut self.longitudinal {
+                sum += mode.tick(drive);
+            }
+        }
         if self.noise_amp > 1e-7 {
             // Park–Miller-style LCG: white noise costs one multiply-add.
             self.noise_seed = self.noise_seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
@@ -1527,6 +1615,13 @@ impl ConcertGrand {
         expf(-LN_1000 / (t60 * self.sample_rate))
     }
 
+    /// The speaking length in metres, from the scale the model already
+    /// assumes elsewhere: an A0 string runs about two metres and a top treble
+    /// string about five centimetres, geometrically between.
+    fn string_length(position: f32) -> f32 {
+        2.0 * powf(0.025, position)
+    }
+
     /// Where the hammer strikes, as a fraction of string length: ~1/8 in the
     /// bass narrowing toward ~1/13 in the treble.
     fn strike_point(note: u8) -> f32 {
@@ -2382,6 +2477,28 @@ impl ConcertGrand {
         // everything above it is the note sharpening itself.
         voice.tension_rest = 0.0;
         voice.tension_applied = 0.0;
+        // The longitudinal modes sit at k*c_L/(2L), and the speaking length
+        // follows from the pitch and the transverse speed: L = c/(2*f0) with
+        // c = 2*L*f0. So f_L,k = k * f0 * c_L / c, and the ratio c_L/c is what
+        // makes them land in the low kilohertz for a bass string and above
+        // hearing for a treble one -- which is why this is a bass phenomenon.
+        let length = Self::string_length(position);
+        let longitudinal_first =
+            LONGITUDINAL_C2_HZ * LONGITUDINAL_C2_LENGTH_M / length.max(0.03);
+        for (k, mode) in voice.longitudinal.iter_mut().enumerate() {
+            let hz = longitudinal_first * (k + 1) as f32;
+            if hz < nyquist * 0.9 {
+                // Short and lightly damped: the compressional wave loses
+                // little in the wire and a lot at the terminations.
+                let t60 = (0.9 - 0.15 * k as f32).max(0.25);
+                let pan = 0.5 + 0.3 * (hash01((note as u32) << 3 | k as u32) - 0.5);
+                *mode = BodyMode::tune(hz, t60, pan, sample_rate);
+            } else {
+                *mode = BodyMode::default();
+            }
+        }
+        voice.longitudinal_drive = 0.0;
+        voice.longitudinal_rest = 0.0;
         // Scaled so a fortissimo bass strike sharpens by a few cents, which
         // is what the measured glides are, and so it fades with the note
         // rather than on a timer. The bass gate is the amplitude-to-length

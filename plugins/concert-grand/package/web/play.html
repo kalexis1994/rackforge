@@ -404,12 +404,36 @@
         font: 12px/1.45 ui-monospace, Consolas, monospace;
       }
       .state { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
-      /* The plugin's own face: Vina Sans (OFL, shipped beside this file)
-         carries the display layer -- masthead, tabs, cards, buttons. The
-         small readouts stay in the neutral stack so numbers read at 11px. */
+      /* The plugin's own face: Unna (OFL, shipped beside this file), the
+         full family, carries the display layer -- masthead, tabs, cards,
+         buttons. The small readouts stay in the neutral stack so numbers
+         read at 11px. */
       @font-face {
-        font-family: "Vina Sans";
-        src: url("VinaSans-Regular.ttf") format("truetype");
+        font-family: "Unna";
+        src: url("Unna-Regular.ttf") format("truetype");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "Unna";
+        src: url("Unna-Bold.ttf") format("truetype");
+        font-weight: 700;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "Unna";
+        src: url("Unna-Italic.ttf") format("truetype");
+        font-weight: 400;
+        font-style: italic;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "Unna";
+        src: url("Unna-BoldItalic.ttf") format("truetype");
+        font-weight: 700;
+        font-style: italic;
         font-display: swap;
       }
       .masthead h1,
@@ -419,8 +443,14 @@
       .card .title,
       .addcard,
       .veil .sheet button {
-        font-family: "Vina Sans", "Segoe UI", system-ui, sans-serif;
+        font-family: "Unna", Georgia, "Times New Roman", serif;
       }
+      .masthead h1,
+      .tabs button[aria-selected="true"] {
+        font-weight: 700;
+      }
+      /* A serif subtitle earns its italic. */
+      .masthead p { font-style: italic; }
     </style>
   </head>
   <body>

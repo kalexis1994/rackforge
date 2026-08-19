@@ -359,6 +359,40 @@ Two further products of the same nonlinearity:
   within a millisecond, nearly absent below forte. The hammer noise supplies
   the breath of the attack; the clang supplies its bark.
 
+### Longitudinal vibration, generated at the bridge (tested by measurement)
+
+The longitudinal force a string hands its termination is the transverse slope
+squared: T/2·(∂y/∂x)² at x=L, and with y = Σ q_h·sin(hπx/L) that slope is
+Σ q_h·(hπ/L)·(−1)^h. Its square contains **every pair product** q_m·q_n at
+frequency f_m±f_n with weight m·n — Bank & Sujbert's excitation table without
+the table. Each partial carries its slope weight; one accumulator per voice
+per sample computes the drive; four broad resonators at 17.5·j·f₀ (T60 tens
+of ms — the compressional wave damps fast, and Bank's measured formant is a
+hump, not a line) do the selection. Content near their poles rings (the
+formant); everything below passes at the stiffness response (the phantom
+ladder).
+
+What this replaced, and why it never worked: the pair sums were indexed by
+the RESONATOR number — mode k of the bank was driven by pairs with m±n = k,
+k=1..4, whose products lie at k·f₀: 65–260 Hz on C2, three octaves under
+resonators at 1.1 kHz+. Measured, the bank's output peaked at 1.0×f₀, which
+is why its mix sat parked at zero. The scripted phantom partials (placed at
+2·fₙ) and the scripted clang (a formant parked at 17·f₀, T60 0.25 s) are
+retired with it; the Phantoms and Clang panel controls now scale the real
+mechanism (drive level, and the upper formants' share).
+
+Calibrated against the instrument on a structural metric the band totals
+cannot see — how far the partials stand above the floor BETWEEN them:
+
+    C2, 900–1800 Hz     real  9.0 dB   before 36.2   now 14.3
+    A0, 1–2 kHz         real  0.0 dB   now 0.4
+
+A model whose inter-partial floor sits 36 dB down is a clean synthesizer; the
+real bass is nearly full between its partials. The Kirchhoff–Carrier scalar
+tension also gained its wave-number weighting (Σ h²q_h², no cross-string
+terms — the cosines are orthogonal), and the measured ff glide is +2.6 cents
+decaying over two seconds, in the published range.
+
 ### The soundboard, from the measured plate (tested)
 
 Everything the strings produce radiates through one bank of 136 two-pole

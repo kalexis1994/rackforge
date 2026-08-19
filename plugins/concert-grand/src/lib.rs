@@ -154,7 +154,6 @@ const LONGITUDINAL_MODES: usize = 4;
 /// How many transverse partials feed the longitudinal excitation. They hold
 /// nearly all the energy, and summing all 144 per sample would cost more than
 /// the whole rest of the voice.
-const LONGITUDINAL_SOURCES: usize = 32;
 /// Where the first longitudinal mode sits, as a multiple of the note's own
 /// pitch. Bank: "around 16 to 20 times higher than that of the transverse
 /// vibration".
@@ -172,7 +171,7 @@ const LONGITUDINAL_SOURCES: usize = 32;
 /// appear while the partials that feed it are missing, which means the hole
 /// in partials 6-10 and the absent metallic character are one problem and not
 /// two. Raising this constant cannot substitute for the partials.
-const LONGITUDINAL_MIX: f32 = 0.0;
+const LONGITUDINAL_MIX: f32 = 4.0;
 /// How hard the string's own stretch pulls it sharp. Sized so a fortissimo
 /// bass strike sharpens a few cents and settles as it decays, which is what
 /// measured piano glides do.
@@ -333,6 +332,12 @@ struct Partial {
     /// sum each string loses. Zero for components that bypass the bridge
     /// (phantoms, thump, halo).
     coupling: f32,
+    /// This partial's weight in the string's slope at the bridge:
+    /// (-1)^(h+1) * h / 16 for the h-th ladder partial, zero for components
+    /// that are not on the ladder (phantoms, clang). The slope at the
+    /// termination is sum(q_h * h*pi/L * cos(h*pi)), so the h and the
+    /// alternating sign are physics; the /16 keeps the squares in range.
+    slope: f32,
 }
 
 /// Deterministic 0..1 hash (Wang-style avalanche): the model's source of
@@ -614,7 +619,11 @@ struct Voice {
     tension_in: u32,
     /// The string's longitudinal modes, driven by its own tension.
     longitudinal: [BodyMode; LONGITUDINAL_MODES],
-    longitudinal_drive: [f32; LONGITUDINAL_MODES],
+    /// Drive gain into the first longitudinal mode, and the extra factor on
+    /// the upper ones. Baked at note-on from the Phantoms and Clang panel
+    /// controls, which now scale the real mechanism instead of a script.
+    longitudinal_gain: f32,
+    longitudinal_upper: f32,
 }
 
 impl Default for Voice {
@@ -647,7 +656,8 @@ impl Default for Voice {
             tension_applied: 0.0,
             tension_in: TENSION_INTERVAL,
             longitudinal: [BodyMode::default(); LONGITUDINAL_MODES],
-            longitudinal_drive: [0.0; LONGITUDINAL_MODES],
+            longitudinal_gain: 0.0,
+            longitudinal_upper: 1.0,
         }
     }
 }
@@ -668,61 +678,37 @@ impl Voice {
         // summed here: they hold nearly all the energy, and Bank and Sujbert
         // note that the excitation need not be computed where the resonator
         // bank has little gain.
-        let mut source = [0.0f32; LONGITUDINAL_SOURCES];
-        for (n, partial) in self.partials[..self.partial_count].iter_mut().enumerate() {
+        let mut slope = 0.0f32;
+        for partial in self.partials[..self.partial_count].iter_mut() {
             let voice = partial.prompt.tick()
                 + partial.aftersound.tick()
                 + partial.bloom.tick()
                 + partial.third.tick();
-            if n < LONGITUDINAL_SOURCES {
-                source[n] = voice;
-            }
+            slope += voice * partial.slope;
             sum += voice;
-
-        }
-        // The excitation of each longitudinal mode, as Bank derives it.
-        //
-        // "A longitudinal mode with mode number k is excited by such
-        // transverse mode pairs m and n only, for which either the sum m + n
-        // or the difference |m - n| of their mode numbers equal to k", and
-        // the terms are "the products of the instantaneous amplitudes of two
-        // transverse modes, y_m(t) y_n(t)".
-        //
-        // So mode 1 is driven by ADJACENT pairs, sum over n of y_n*y_(n+1);
-        // mode 2 by y_1^2 and the pairs two apart; and so on. An earlier
-        // version here fed the bank a plain sum of squares, which is only the
-        // m = n terms -- it drops every cross product, which is most of the
-        // excitation, and it excites nothing odd. That is why the bank made
-        // no sound.
-        let live = LONGITUDINAL_SOURCES.min(self.partial_count);
-        for (k, slot) in self.longitudinal_drive.iter_mut().enumerate() {
-            let gap = k + 1;
-            let mut force = 0.0f32;
-            // The difference terms: |m - n| = k.
-            let mut n = 0;
-            while n + gap < live {
-                force += source[n] * source[n + gap];
-                n += 1;
-            }
-            // The sum terms: m + n = k, with both mode numbers at least one.
-            let mut m = 0;
-            while m + 1 < gap {
-                let other = gap - m - 2;
-                if other < live && m < live {
-                    force += source[m] * source[other];
-                }
-                m += 1;
-            }
-            *slot = force;
         }
         sum += self.duplex[0].tick() + self.duplex[1].tick();
-        // The compressional wave. Held at the tension read at control rate,
-        // which is a zero-order hold on the excitation -- enough, because what
-        // these resonators pick out of it is their own frequency.
-        for (mode, force) in self.longitudinal.iter_mut().zip(self.longitudinal_drive) {
-            if force != 0.0 {
-                sum += mode.tick(force * LONGITUDINAL_MIX);
-            }
+        // The longitudinal force at the bridge is the transverse slope
+        // squared. The dynamic tension term the termination feels is
+        // T/2 * (dy/dx)^2 evaluated there, and with y = sum q_h sin(h pi x/L)
+        // the slope at x = L is sum(q_h * (h pi/L) * (-1)^h) -- every pair
+        // product q_m*q_n appears in its square, at frequency f_m +- f_n,
+        // weighted m*n, which is exactly Bank and Sujbert's excitation table
+        // without the table. The resonators then do the selection: content
+        // near their pole (the 17.5*f0 formant region) rings, everything
+        // below passes at the stiffness response, which is the phantom-
+        // partial ladder.
+        //
+        // The machinery this replaces indexed the pair sums by the RESONATOR
+        // number: mode k of the bank was driven by pairs with m +- n = k,
+        // k = 1..4, whose products lie at k*f0 -- 65 to 260 Hz on C2, three
+        // octaves under the resonators at 1.1 kHz and up. Measured, the
+        // bank's output peaked at 1.0x f0, which is why its mix has been
+        // parked at zero since.
+        let drive = slope * slope * self.longitudinal_gain;
+        for (k, mode) in self.longitudinal.iter_mut().enumerate() {
+            let gain = if k == 0 { drive } else { drive * self.longitudinal_upper };
+            sum += mode.tick(gain);
         }
         if self.noise_amp > 1e-7 {
             // Park–Miller-style LCG: white noise costs one multiply-add.
@@ -771,8 +757,17 @@ impl Voice {
     fn tension_step(&mut self) {
         let mut stretch = 0.0f32;
         for partial in &self.partials[..self.partial_count] {
+            // Kirchhoff-Carrier: the tension rise is the integral of the
+            // squared SLOPE, sum of (h*pi/L)^2 * q_h^2 -- per mode, no cross
+            // terms (the cosines are orthogonal), and weighted by the wave
+            // number squared. The unweighted sum of a coherent total that
+            // stood here let the fundamental own the tension when the real
+            // integral is dominated by the upper partials, and squared the
+            // sum of three strings, whose cross terms belong to no string's
+            // tension at all.
+            let w = partial.slope;
             let a = partial.prompt.s + partial.aftersound.s + partial.third.s;
-            stretch += a * a;
+            stretch += (w * a) * (w * a);
         }
         // The offset the current tension asks for, as a fractional shift in
         // frequency, and then only the DIFFERENCE from what is already
@@ -2467,6 +2462,11 @@ impl ConcertGrand {
                     sample_rate,
                 ),
                 coupling,
+                slope: {
+                    let h = (n + 1) as f32;
+                    let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
+                    sign * h * (1.0 / 16.0)
+                },
             };
             placed += 1;
         }
@@ -2483,122 +2483,12 @@ impl ConcertGrand {
         // Strongest in the bass but present through the mids: C4 ff carries
         // measurable 3-8 kHz forest energy the gated version lacked entirely.
         let bass_gate = powf((1.0 - 1.1 * position).clamp(0.0, 1.0), 1.5);
-        if bass_gate > 0.0 && velocity > 0.4 {
-            let phantom_cap = budget_left.max(12).min(MAX_PARTIALS);
-            // A third of what it was. Phantom partials are real -- Conklin
-            // measured them -- but they are placed BETWEEN the ladder's
-            // positions, so their level is what decides how deep the gaps
-            // between partials stay, and the gaps are what make a partial
-            // read as a pitch instead of as mush.
-            //
-            // Measured against two references at once: the YDP samples and a
-            // licensed reference renderer, on how far the peaks in 2-4 kHz
-            // stand above the floor in the sustained part. Both put A0 at
-            // 27-30 dB; this model sat at 23.3, and turning the phantoms off
-            // entirely accounted for 3.3 dB of the 4 dB gap while clang,
-            // chiff and thump accounted for nothing at all. Lowering them
-            // improves the fit cost too (19.91 -> 19.61), which is not the
-            // usual trade and is worth taking at face value: they were simply
-            // too loud.
-            let phantom_scale =
-                bass_gate * velocity * velocity * 0.21 * self.controls.lab_at(5, position)
-                    * self.cal(note, 6);
-            let sources = placed.min(6);
-            for n in 0..sources {
-                if placed >= phantom_cap {
-                    break;
-                }
-                let frequency = frequencies[n] * 2.0;
-                if frequency >= nyquist {
-                    break;
-                }
-                let amplitude = amplitudes[n] * scale * phantom_scale;
-                if amplitude.abs() < floor * scale {
-                    continue;
-                }
-                // Longitudinal content decays faster than the transverse
-                // partial it rides above; no aftersound of its own.
-                let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life) * 0.4;
-                let decay = self.decay_per_sample(t60);
-                partials[placed] = Partial {
-                    prompt: Component::start(amplitude, frequency, decay, sample_rate),
-                    ..Partial::default()
-                };
-                placed += 1;
-            }
-
-            // Sum-frequency phantoms, f_m + f_n: inharmonicity puts them
-            // slightly flat of the real partial they land near, and the slow
-            // beat between the two is the growl of a hard bass note —
-            // roughness with a rate, not noise (Conklin 1999).
-            let pairs: [(usize, usize); 6] = [(0, 1), (0, 2), (1, 2), (1, 3), (2, 3), (0, 4)];
-            for (a, b) in pairs {
-                if placed >= phantom_cap || b >= sources {
-                    break;
-                }
-                let frequency = frequencies[a] + frequencies[b];
-                if frequency >= nyquist {
-                    continue;
-                }
-                let amplitude =
-                    sqrtf((amplitudes[a] * amplitudes[b]).abs()) * scale * phantom_scale * 0.7;
-                if amplitude < floor * scale {
-                    continue;
-                }
-                let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life) * 0.35;
-                let decay = self.decay_per_sample(t60);
-                partials[placed] = Partial {
-                    prompt: Component::start(amplitude, frequency, decay, sample_rate),
-                    ..Partial::default()
-                };
-                placed += 1;
-            }
-
-            // The longitudinal clang: the fast wave along the string sounds
-            // the longitudinal modes as a formant near ~17·f0 for wound bass
-            // strings (Bank & Sujbert 2005 measure ~1.15 kHz for C2). It is
-            // tonal — a wooden-metallic knock with a pitch — short, and
-            // nearly absent below forte.
-            let clang_level =
-                bass_gate * powf(velocity, 2.5) * 0.065 * 0.32 * self.controls.lab_at(4, position)
-                    * self.cal(note, 5);
-            if clang_level > 1e-4 {
-                let formant =
-                    f0 * 17.0 * (1.0 + 0.08 * (hash01((note as u32) << 4 | 3) - 0.5));
-                for (ratio, level, seed) in [(1.0_f32, 1.0_f32, 7u32), (1.98, 0.45, 13)] {
-                    if placed >= phantom_cap {
-                        break;
-                    }
-                    let frequency = formant * ratio;
-                    if frequency >= nyquist {
-                        continue;
-                    }
-                    let jitter =
-                        1.0 + 0.02 * (hash01((note as u32) << 5 | seed) - 0.5);
-                    let t60 = 0.25;
-                    let decay = self.decay_per_sample(t60);
-                    let rise = expf(-1.0 / (0.001 * sample_rate));
-                    let amplitude = clang_level * level;
-                    partials[placed] = Partial {
-                        prompt: Component::start(
-                            amplitude,
-                            frequency * jitter,
-                            decay,
-                            sample_rate,
-                        ),
-                        bloom: Component::start(
-                            -amplitude,
-                            frequency * jitter,
-                            rise,
-                            sample_rate,
-                        ),
-                        ..Partial::default()
-                    };
-                    placed += 1;
-                }
-            }
-        }
-
+        // The phantom forest and the longitudinal clang are no longer
+        // PLACED here. Both were scripted stand-ins -- partials parked at
+        // 2*f_n and a formant parked at 17*f0, with levels drawn against
+        // velocity -- for content the longitudinal bank now GENERATES from
+        // the live bridge slope: every pair product, at its own level,
+        // following the strings for as long as they actually move.
         // The chiff sits only ~15–20 dB under the tone's peak in a real
         // instrument and lasts longer on the heavy bass hammers.
         // The action's noise is not a click: the key bed, the shank and the
@@ -2682,6 +2572,8 @@ impl ConcertGrand {
         // stretches plenty.
         let tension_gain = TENSION_GAIN * bass_gate / (1.0 + 40.0 * position)
             * self.controls.lab_at(10, position);
+        let longitudinal_gain = LONGITUDINAL_MIX * self.controls.lab_at(5, position);
+        let longitudinal_upper = self.controls.lab_at(4, position);
         let Some(voice) = self.allocate_voice() else { return };
         voice.active = true;
         voice.note = note;
@@ -2717,21 +2609,27 @@ impl ConcertGrand {
         for (k, mode) in voice.longitudinal.iter_mut().enumerate() {
             let hz = longitudinal_first * (k + 1) as f32;
             if hz < nyquist * 0.9 {
-                // Short and lightly damped: the compressional wave loses
-                // little in the wire and a lot at the terminations.
-                let t60 = (0.9 - 0.15 * k as f32).max(0.25);
+                // BROAD, not ringing: the compressional wave damps in tens
+                // of milliseconds, and the formant Bank measures is a wide
+                // hump, not a line. With 0.9 s here the bank was four narrow
+                // peaks that rang over the note instead of a formant that
+                // colours it -- and the phantom forest between the transverse
+                // partials, which rides through these resonators' skirts, was
+                // filtered out by their narrowness.
+                let t60 = (0.06 - 0.008 * k as f32).max(0.03);
                 let pan = 0.5 + 0.3 * (hash01((note as u32) << 3 | k as u32) - 0.5);
                 *mode = BodyMode::tune(hz, t60, pan, sample_rate);
             } else {
                 *mode = BodyMode::default();
             }
         }
-        voice.longitudinal_drive = [0.0; LONGITUDINAL_MODES];
         // Scaled so a fortissimo bass strike sharpens by a few cents, which
         // is what the measured glides are, and so it fades with the note
         // rather than on a timer. The bass gate is the amplitude-to-length
         // ratio in disguise: a treble string is short and stiff and barely
         // stretches, a bass string is long and slack and stretches plenty.
+        voice.longitudinal_gain = longitudinal_gain;
+        voice.longitudinal_upper = longitudinal_upper;
         voice.tension_gain = tension_gain;
         voice.energy = 1.0;
         // The hammer/soundboard thump: heavier and darker in the bass.
@@ -3752,8 +3650,9 @@ mod tests {
                 let Some(voice) = piano.voices.iter().find(|v| v.active) else { break };
                 let mut stretch = 0.0f32;
                 for partial in &voice.partials[..voice.partial_count] {
+                    let w = partial.slope;
                     let a = partial.prompt.s + partial.aftersound.s + partial.third.s;
-                    stretch += a * a;
+                    stretch += (w * a) * (w * a);
                 }
                 // The rate is applied every TENSION_INTERVAL samples and is a
                 // fractional frequency shift per step, so cents follow.

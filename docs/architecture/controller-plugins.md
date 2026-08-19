@@ -19,14 +19,24 @@ Implemented so far:
   artifacts are missing), and `GET /api/v1/controllers` listing the
   installed packages for the UI.
 
-Next, in order: the KeyLab driver compiles for `windows-x86_64` against
-the TCP transport (its control path is Unix-socket-only today); the
-desktop serves the framed control protocol on TCP loopback (bridging to
-its session dispatch, which already exists over HTTP); the desktop's
-MIDI capture yields matched endpoints to active drivers (Windows MIDI
-ports are exclusive-open); the Controllers section renders in the
-plugins tab from the new endpoint; then the hardcoded KeyLab library
-leaves the desktop.
+Landed since: the KeyLab driver already built and answered
+`driver-info` on Windows, so the package now declares a
+`windows-x86-64` entrypoint (target names are kebab-case — the manifest
+validator forbids underscores, and `development_target` was fixed to
+match); artifact verification requires the artifact for the platform
+installing it rather than every declared target (a Pi build has no
+Windows binary and vice versa — one shared manifest, per-platform
+bins, integrity checked for whatever is present). The KeyLab installs
+on Windows (`RFCONTROLLER_INSTALLED`), and the Plugin Manager shows a
+Controllers section: every card carries a kind tag — Instrument or
+Controller — with version, trust and device-profile count.
+
+Still next, in order: the desktop serves the framed control protocol on
+TCP loopback (bridging to its session dispatch, which already exists
+over HTTP); the desktop runs the shared supervision loop and hands
+drivers `RACKFORGE_CONTROL_ADDR`; the desktop's MIDI capture yields
+matched endpoints to active drivers (Windows MIDI ports are
+exclusive-open); then the hardcoded KeyLab library leaves the desktop.
 
 The goal: a controller is a plugin. The Arturia KeyLab is not "the
 controller RackForge supports" — it is one `.rfcontroller` package among

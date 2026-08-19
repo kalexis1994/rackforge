@@ -9425,3 +9425,49 @@ body {
     padding-inline: 12px;
   }
 }
+
+/* Kind tags: every card in the manager says what it is. */
+.plugin-kind-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.plugin-kind-tag.instrument {
+  color: #0a1418;
+  background: #3ad8e0;
+}
+
+.plugin-kind-tag.controller {
+  color: #0a1418;
+  background: #f3bc7c;
+}
+
+/* Controller cards have no branding image yet; the tile is drawn. */
+.plugin-tile.controller-tile {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(145deg, #14212b, #0b131a);
+}
+
+.controller-tile-mark {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  color: #f3bc7c;
+  background: rgba(243, 188, 124, 0.12);
+  border: 1px solid rgba(243, 188, 124, 0.35);
+}
+
+.controller-tile-mark svg {
+  width: 22px;
+  height: 22px;
+}

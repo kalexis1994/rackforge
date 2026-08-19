@@ -25,6 +25,7 @@ import {
   Play,
   RadioTower,
   Settings2,
+  Sliders,
   Trash2,
   X,
 } from "lucide-react";
@@ -2683,6 +2684,16 @@ function PluginRemovalDialog({
   );
 }
 
+type ControllerSummary = {
+  id: string;
+  name: string;
+  version: string;
+  enabled: boolean;
+  trust: string;
+  runtime: string;
+  devices: number;
+};
+
 function PluginsPage({
   snapshot,
   onInstall,
@@ -2692,6 +2703,18 @@ function PluginsPage({
 }) {
   const location = useLocation();
   const { plugins: installed } = usePluginCatalog();
+  const [controllers, setControllers] = useState<ControllerSummary[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    hostJson<{ controllers: ControllerSummary[] }>("/api/v1/controllers")
+      .then((response) => {
+        if (!cancelled) setControllers(response.controllers ?? []);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [pendingRemoval, setPendingRemoval] = useState<PluginWebDescriptor | null>(null);
   const [removing, setRemoving] = useState(false);
   const [removalError, setRemovalError] = useState<string | null>(null);
@@ -2746,9 +2769,9 @@ function PluginsPage({
     <>
       <div className="plugin-manager-heading">
         <PageHeading
-          eyebrow="Instrument library"
+          eyebrow="Plugin library"
           title="Plugin Manager"
-          detail="Install, configure and remove portable RackForge instruments. Musical controls remain in Play."
+          detail="Install, configure and remove RackForge plugins: instruments and controllers. Musical controls remain in Play."
         />
         <button className="primary-button plugin-install-button" onClick={onInstall}>
           <Download aria-hidden="true" />
@@ -2780,7 +2803,8 @@ function PluginsPage({
                 </div>
                 <div>
                   <span className="card-kicker">
-                    {plugin.active ? "Active package" : "Installed package"}
+                    {plugin.active ? "Active package" : "Installed package"}{" "}
+                    <span className="plugin-kind-tag instrument">Instrument</span>
                   </span>
                   <h3>{plugin.plugin_name}</h3>
                   <p>
@@ -2800,6 +2824,39 @@ function PluginsPage({
                 ) : (
                   <span className="plugin-installed-mark" aria-label="Installed">✓</span>
                 )}
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+      {controllers.length > 0 && (
+        <>
+          <div className="plugin-section-heading">
+            <span className="card-kicker">Controllers</span>
+            <small>Hardware surfaces installed as packages</small>
+          </div>
+          <div className="plugin-grid expanded">
+            {controllers.map((controller) => (
+              <article
+                className="plugin-card installed-plugin-card"
+                key={controller.id}
+              >
+                <div className="plugin-tile controller-tile">
+                  <span className="controller-tile-mark" aria-hidden="true">
+                    <Sliders aria-hidden="true" />
+                  </span>
+                </div>
+                <div>
+                  <span className="card-kicker">
+                    {controller.enabled ? "Active package" : "Disabled package"}{" "}
+                    <span className="plugin-kind-tag controller">Controller</span>
+                  </span>
+                  <h3>{controller.name}</h3>
+                  <p>
+                    Version {controller.version} · {controller.trust}
+                    {controller.devices > 0 ? ` · ${controller.devices} device profile(s)` : ""}
+                  </p>
+                </div>
               </article>
             ))}
           </div>
@@ -2852,7 +2909,9 @@ function PluginGrid({
                 {!plugin?.branding && <i />}
               </div>
               <div>
-                <span className="card-kicker">Plugin</span>
+                <span className="card-kicker">
+                  Plugin <span className="plugin-kind-tag instrument">Instrument</span>
+                </span>
                 <h3>{instance.plugin_name}</h3>
                 <p>{selected?.name ?? `${instance.sounds.length} programs`}</p>
               </div>

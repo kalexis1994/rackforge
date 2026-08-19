@@ -444,8 +444,23 @@ impl ControllerPackage {
     }
 
     fn verify_artifacts(&self) -> Result<(), PackageError> {
+        // A multi-platform manifest may declare targets this build never
+        // produced: the Pi's package carries no Windows binary and a
+        // Windows checkout carries no Linux one, and both are legitimate
+        // installs OF THE SAME MANIFEST. What is REQUIRED is the artifact
+        // for the platform installing it -- and integrity, when declared,
+        // for every artifact that is actually present. Demanding every
+        // declared target everywhere made a shared manifest impossible.
+        let host = development_target();
         for target in self.manifest.runtime.entrypoints.keys() {
-            let path = self.resolve_entrypoint(target)?;
+            let path = match self.resolve_entrypoint(target) {
+                Ok(path) => path,
+                Err(PackageError::MissingArtifact(missing)) if target != host => {
+                    let _ = missing;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             if let Some(expected) = self
                 .manifest
                 .integrity
@@ -666,10 +681,10 @@ impl PackageStore {
 pub fn development_target() -> &'static str {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "aarch64") => "linux-aarch64",
-        ("linux", "x86_64") => "linux-x86_64",
-        ("windows", "x86_64") => "windows-x86_64",
+        ("linux", "x86_64") => "linux-x86-64",
+        ("windows", "x86_64") => "windows-x86-64",
         ("macos", "aarch64") => "macos-aarch64",
-        ("macos", "x86_64") => "macos-x86_64",
+        ("macos", "x86_64") => "macos-x86-64",
         ("android", "aarch64") => "android-aarch64",
         _ => "unsupported",
     }
@@ -759,6 +774,9 @@ fn validate_target(value: &str) -> Result<(), PackageError> {
     Ok(())
 }
 
+// Target names are lowercase kebab-case ("windows-x86-64", never
+// "windows-x86_64"): the validator above forbids underscores, and
+// `development_target` follows the same convention.
 fn validate_relative_path(value: &str) -> Result<(), PackageError> {
     let path = Path::new(value);
     if value.is_empty()
@@ -907,7 +925,7 @@ mod tests {
         unsafe_path
             .runtime
             .entrypoints
-            .insert("windows-x86_64".into(), "../outside/driver.exe".into());
+            .insert("windows-x86-64".into(), "../outside/driver.exe".into());
         assert!(matches!(
             unsafe_path.validate(),
             Err(PackageError::InvalidManifest(_))

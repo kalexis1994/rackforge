@@ -403,6 +403,32 @@ code and is far beyond audibility at control rate).
 
 ## Known defects
 
+* **RULED OUT: the strike's initial condition is not what makes it sound
+  plucked.** The user's description was precise -- "la nuestra parece una
+  guitarra tocada con los dedos" -- and it has an exact physical counterpart:
+  a finger releases a string from a static displacement, a hammer hands it
+  velocity. The model stores both, so the balance can be read: measured, the
+  strike leaves 60-84% of its energy in DISPLACEMENT.
+
+  | note | position | velocity |
+  |---|---|---|
+  | A0 ff | 70% | 30% |
+  | C2 ff | 60% | 40% |
+  | C3 pp | 84% | 16% |
+
+  That looked conclusive. It was not. Forcing a pure-velocity start -- the
+  output leaving zero at maximum speed, which is exactly a hammer's condition
+  -- was rendered against the current one and the user reported no audible
+  difference, though the fit score preferred it (31.2 -> 29.1). The physical
+  phases are kept for being physical, and the hypothesis is closed.
+
+  Worth recording because the reasoning was sound and the measurement
+  confirmed the premise; only the conclusion failed. The contact duration was
+  also ruled out along the way: shortening it from 1.5x to 0.35x moves A0 only
+  from 70/30 to 63/37, so the balance is not set by how long the hammer
+  pushes.
+
+
 * **C2's body is missing because its strongest partial lands in a synthetic
   notch.** Found by putting the user in front of three level-matched renders
   of the same note -- the YDP sample, a reference renderer, and this model --

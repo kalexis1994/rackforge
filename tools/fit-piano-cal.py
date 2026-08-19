@@ -29,6 +29,7 @@ express; stop and fix the model instead. Always validate a run on measures the
 cost does not contain — absolute band levels and crest factor — before
 writing its table into lib.rs."""
 import importlib.util
+import io
 import json, os, re, struct, subprocess, sys
 import numpy as np
 
@@ -43,7 +44,8 @@ _spec = importlib.util.spec_from_file_location(
 EX = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(EX)
 
-TARGETS = json.load(open(os.path.join(ROOT, "tools", "piano-targets.json")))
+TARGETS = json.load(
+    io.open(os.path.join(ROOT, "tools", "piano-targets.json"), encoding="utf8"))
 if TARGETS.get("schema") != 2:
     raise SystemExit(
         "tools/piano-targets.json is the old five-band file. Rebuild it:\n"
@@ -62,19 +64,20 @@ WEIGHT_NOISE = 0.6     # the action's knock; the target scatters between takes
 os.makedirs(AB, exist_ok=True)
 
 def write_cal(table):
-    open(CAL, "w").write("\n".join(" ".join(f"{v:.4f}" for v in row) for row in table))
+    io.open(CAL, "w", encoding="utf8").write(
+        "\n".join(" ".join(f"{v:.4f}" for v in row) for row in table))
 
 def seed_table():
     """The table compiled into the model, so a run continues the calibration
     instead of restarting it. Falls back to tools/piano-cal.txt, then to 1.0s."""
     source = os.path.join(ROOT, "plugins", "concert-grand", "src", "lib.rs")
     rows = re.findall(r"^\s*\[((?:[\d.]+, ){%d}[\d.]+)\],\s*$" % (PARAMS - 1),
-                      open(source).read(), re.M)
+                      io.open(source, encoding="utf8").read(), re.M)
     if len(rows) == len(ANCHORS):
         return [[float(v) for v in row.split(", ")] for row in rows]
     table = [[1.0] * PARAMS for _ in ANCHORS]
     if os.path.exists(CAL):
-        for r, line in zip(table, open(CAL).read().splitlines()):
+        for r, line in zip(table, io.open(CAL, encoding="utf8").read().splitlines()):
             values = [float(v) for v in line.split()]
             r[:len(values)] = values[:PARAMS]
     return table

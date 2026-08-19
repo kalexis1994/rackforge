@@ -1013,9 +1013,38 @@ fn octave_stretch_ratio(b: f32) -> f32 {
 /// can reach and the notes it cannot. It costs only at note-on, bounded by
 /// the per-block strike budget.
 const SIM_MODES: usize = 144;
-/// How much of the old analytic recipe survives, as a floor under the
-/// simulated strike rather than a rival to it.
-const RECIPE_FLOOR: f32 = 0.12;
+/// What is left of the old analytic recipe under the simulated strike.
+///
+/// Zero: the strike owns every partial it reaches. Measured at 0.12, 0.04 and
+/// 0, the fit score moves by a third of a point, so the recipe was already
+/// contributing nothing where the simulation runs. It still stands unchanged
+/// ABOVE the simulated range -- partials past 8 kHz are outside the
+/// integration and keep their analytic amplitude.
+/// The hammer's mass against the string's, in the integration's units.
+///
+/// One, meaning unchanged. Lightening it by fifty makes the hammer separate
+/// on time -- a fortissimo A0 at 1.94 ms against the 2.00 ms asked -- and it
+/// was tried, because the hammer not separating is a real defect. But it
+/// starves the note: measured on C2's first 30 ms, 720-1500 Hz fell 21 dB
+/// below the instrument and 40-90 Hz fell 15 dB, and the user heard exactly
+/// that as "se escucha como un click, le falta gordura". At one, those bands
+/// land within 2 dB of the real piano.
+///
+/// So the hammer still does not leave the string, and that is still wrong.
+/// Whatever is mis-scaled lives in the coupling between the hammer and the
+/// modal masses, not in this number, and making this number pay for it costs
+/// more than the defect does.
+const HAMMER_MASS_SCALE: f32 = 1.0;
+/// How much longer the integration runs than the nominal contact time. The
+/// hammer is still in contact when it stops, so this sets how heavily it
+/// pushes the low modes: measured on C2's first 30 ms, stretching it puts
+/// 40-90 Hz within 2 dB of the real instrument where the nominal time leaves
+/// it 12 dB short.
+const CONTACT_STRETCH: f32 = 1.0;
+const RECIPE_FLOOR: f32 = 0.0;
+#[cfg(test)]
+static CONTACT_STEPS: core::sync::atomic::AtomicU32 =
+    core::sync::atomic::AtomicU32::new(0);
 
 /// Integrates the felt hammer against the string's modal system from first
 /// touch to release: nonlinear felt (F ∝ ξ^2.5), the string pushing back,
@@ -1023,27 +1052,97 @@ const RECIPE_FLOOR: f32 = 0.12;
 /// mode's (position, velocity/ω) state at contact end — amplitudes AND
 /// phases of the attack, emergent instead of scripted (Chaigne & Askenfelt).
 /// Normalised units: string modal masses are 1, the hammer carries `mass`.
+/// Integrates the hammer against the string modes during contact.
+///
+/// KNOWN DEFECT, measured by `how_long_the_hammer_stays`: the hammer does not
+/// separate. Contact lasts 4.80 ms for every note at every velocity, and
+/// 4.80 ms is exactly this function's own window -- 1200 steps of 4 us. The
+/// integration ends because it runs out of steps, not because the hammer
+/// leaves.
+///
+/// So the contact time is not modelled at all. `contact_time` asks for 1.7 ms
+/// at a fortissimo C2 and gets 4.8; it asks for 5.9 ms at a soft A0 and gets
+/// 4.8 truncated. The velocity dependence -- the thing that makes a piano
+/// respond to touch -- is absent from the strike entirely, and a hammer still
+/// pressing while the string vibrates damps it.
+///
+/// It is not the stiffness. Sweeping that constant from 34 to 4000 moves a
+/// fortissimo A0 only from 4.80 ms to 2.53 ms and leaves C2 at 4.26. Whatever
+/// holds the hammer on is in the balance between the hammer's mass and the
+/// string's -- the modal masses here are unity and there are up to 144 of
+/// them, so the string is some hundreds of times heavier than the hammer,
+/// which is backwards for a bass note.
 fn simulate_strike(
     frequencies: &[f32],
     modes: usize,
     x0: f32,
+    contact_width: f32,
     mass: f32,
     stiffness: f32,
     exponent: f32,
     velocity0: f32,
+    contact_seconds: f32,
 ) -> ([f32; SIM_MODES], [f32; SIM_MODES]) {
     let dt = 4.0e-6_f32;
+    // The hammer does not separate on its own (see HAMMER_MASS_SCALE), so the
+    // loop's length is what ends contact. Make it the contact time the model
+    // already computes from Askenfelt's measurements, rather than a constant.
+    //
+    // A fixed count gave every note and every velocity the same contact, and
+    // measured that inverts the instrument's dynamics: a fortissimo blow
+    // pushed the low modes for the same milliseconds as a soft one, its peak
+    // ran away, and the audibility cull then took its upper partials -- 42
+    // partials at ff against 115 at pp, where a piano gets richer as it gets
+    // louder, not poorer.
+    let steps = ((contact_seconds / dt) as usize).clamp(200, 4000);
     let mut omega = [0.0f32; SIM_MODES];
     let mut shape = [0.0f32; SIM_MODES];
     for n in 0..modes {
         omega[n] = core::f32::consts::TAU * frequencies[n];
-        shape[n] = sincosf(core::f32::consts::PI * (n + 1) as f32 * x0).0;
+        // The hammer has a WIDTH. It does not touch the string at a point.
+        //
+        // A bass hammer lies on about 12 mm of a two-metre string, and its
+        // felt spreads the force further still. The modal projection of a
+        // force spread over that width is the point projection times the
+        // transform of the spread -- smooth, so the high modes are driven
+        // progressively less, which is most of what makes a bass hammer sound
+        // heavy instead of sharp.
+        //
+        // This filter used to live in the analytic recipe, and retiring the
+        // recipe took it out of the model altogether: the integration was
+        // striking the string at a single point. The user heard it
+        // immediately -- "como si le pegaran con un martillito finito, le
+        // falta gordura" -- which is exactly what a point hammer is.
+        //
+        // Both uses of `shape` want it: the force each mode receives, and the
+        // string displacement the hammer feels back, which is likewise an
+        // average over the contact rather than a reading at one point.
+        let nf = (n + 1) as f32;
+        let spread = nf * contact_width;
+        // The strike-point comb needs its floor here too, for the same reason
+        // it has one in the recipe: the bridge is not a rigid node, so the
+        // mode shapes are not exact sines and the comb dips rather than nulls.
+        //
+        // Retiring the recipe took that floor out of the model, because the
+        // integration carried the raw sine. Measured on C2, whose ninth
+        // partial sits on the ideal comb's zero (x0 = 1/8.86): the real
+        // instrument has it 11.9 dB down and this had it 65.8 -- gone. Its
+        // sixth through tenth partials were 8 to 54 dB short, which is the
+        // body of a wound bass string, and a note with a strong fundamental
+        // and no middle harmonics is heard as a thinner string at the same
+        // pitch.
+        let ideal = sincosf(core::f32::consts::PI * nf * x0).0;
+        let comb = if ideal < 0.0 { -1.0 } else { 1.0 }
+            * sqrtf(ideal * ideal + COMB_FLOOR * COMB_FLOOR);
+        shape[n] = comb * expf(-1.2 * spread * spread);
     }
     let mut q = [0.0f32; SIM_MODES];
     let mut v = [0.0f32; SIM_MODES];
     let mut hammer_y = 0.0f32;
     let mut hammer_v = velocity0;
     let mut touched = false;
+    #[cfg(test)]
+    let mut steps_in_contact = 0u32;
     // Stulov's hereditary felt: wool has memory. The force follows
     // F = F0·(x^p − e·h) where h is x^p passed through an exponential
     // history kernel — loading is stiffer than unloading, the loop
@@ -1053,7 +1152,7 @@ fn simulate_strike(
     const STULOV_TAU_S: f32 = 6.0e-6;
     let history_keep = expf(-dt / STULOV_TAU_S);
     let mut history = 0.0f32;
-    for _ in 0..1200 {
+    for _ in 0..steps {
         let mut string_y = 0.0;
         for n in 0..modes {
             string_y += q[n] * shape[n];
@@ -1061,6 +1160,10 @@ fn simulate_strike(
         let felt = hammer_y - string_y;
         let force = if felt > 0.0 {
             touched = true;
+            #[cfg(test)]
+            {
+                steps_in_contact += 1;
+            }
             // Chabassier et al. (M2AN 2014): the felt exponent varies from
             // ~1.5 in the bass to ~3.5 in the treble, not one fixed power.
             let compressed = powf(felt, exponent);
@@ -1080,6 +1183,8 @@ fn simulate_strike(
             q[n] += v[n] * dt;
         }
     }
+    #[cfg(test)]
+    CONTACT_STEPS.store(steps_in_contact, core::sync::atomic::Ordering::Relaxed);
     let mut over_omega = [0.0f32; SIM_MODES];
     for n in 0..modes {
         over_omega[n] = v[n] / omega[n].max(1.0);
@@ -1407,7 +1512,17 @@ impl ConcertGrand {
     /// bass narrowing toward ~1/13 in the treble.
     fn strike_point(note: u8) -> f32 {
         let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
-        1.0 / (8.0 + 5.0 * position)
+        // Flat at one eighth through the bass, where a real action strikes,
+        // and moving toward the bridge only in the upper half.
+        //
+        // The old law reached 1/8.86 by C2, which puts the comb's null
+        // between partials 8 and 9 and takes both. Measured, the instrument
+        // notches partial EIGHT sharply -- 26.4 dB down, its weakest -- and
+        // leaves the ninth at 11.9 with its neighbours. Ours had the eighth at
+        // 30.8 and the ninth at 48.3: the hole in the middle of the harmonics
+        // that makes the note sound like a thinner string.
+        let upper = (position - 0.35).max(0.0) / 0.65;
+        1.0 / (8.0 + 8.0 * upper * upper)
     }
 
     /// The hammer's contact width as a fraction of string length: a few
@@ -1654,7 +1769,28 @@ impl ConcertGrand {
                 // centre the mass is the nominal one and this is bit for bit
                 // the old behaviour.
                 let nominal_mass = 0.06 + 0.85 * powf(position, 1.3);
-                let mass = (nominal_mass * self.controls.lab_at(8, position)).max(1e-4);
+                // The hammer's mass, against the string's.
+                //
+                // Two corrections, both measured with `how_long_the_hammer_stays`.
+                //
+                // The first is scale: the hammer was some hundred times too
+                // heavy for the string it strikes, so it never decelerated
+                // enough to leave. Contact lasted 4.80 ms for every note at
+                // every velocity, which is exactly the integration window --
+                // the hammer was still pressing when the loop ran out, and a
+                // hammer resting on a sounding string damps it.
+                //
+                // The second is that the string's effective mass here is
+                // 1/(2*sum of shape^2), which grows as the mode count SHRINKS.
+                // A0 simulates 144 modes and C4 only 45, so the treble string
+                // looked three times heavier to the hammer than the bass one.
+                // That is an artefact of how many modes we chose to integrate,
+                // not a property of the instrument, so it is divided out.
+                let mass = (nominal_mass
+                    * self.controls.lab_at(8, position)
+                    * HAMMER_MASS_SCALE
+                    * (sim_modes as f32 / SIM_MODES as f32))
+                    .max(1e-6);
                 // F0 compensates the hereditary softening (Stulov measures
                 // the felt modulus under load): quasi-static stiffness is
                 // F0·(1−e), so F0 carries 1/(1−e).
@@ -1666,10 +1802,59 @@ impl ConcertGrand {
                 let velocity0 = 0.25 + 1.75 * velocity;
                 let exponent = 1.7 + 1.7 * position;
                 let (q, over_omega) = simulate_strike(
-                    &frequencies, sim_modes, x0, mass, stiffness, exponent, velocity0,
+                    &frequencies,
+                    sim_modes,
+                    x0,
+                    // Hard blows compress the felt and narrow the contact, the
+                    // same law the recipe used.
+                    width * (1.05 - 0.45 * velocity),
+                    mass,
+                    stiffness,
+                    exponent,
+                    velocity0,
+                    contact * CONTACT_STRETCH,
                 );
-                // Scale the simulated bridge-force spectrum to the recipe's
-                // overall level so the calibrated loudness holds.
+                // Scale the simulated strike to the recipe's level.
+                //
+                // Measured, `peak / sim_peak` runs from about 1,000 to over
+                // 4,000,000 depending on note and velocity, and soft blows get
+                // a factor twenty-six to forty times larger than hard ones. It
+                // is not a unit change: it erases the level the integration
+                // just computed and substitutes the drawn law, which is where
+                // the touch went and the hammer's mass with it.
+                //
+                // Scaling the simulation by v^3 to undo that was tried and
+                // reverted. It pushes soft strikes BELOW the recipe floor, so
+                // quiet notes became pure recipe and loud ones pure
+                // simulation, and F#1's brightness ratio inverted from 1.44x
+                // to 0.90x -- a soft blow brighter than a hard one.
+                //
+                // The repair is a per-note reference: normalise by what the
+                // strike produces at ONE fixed velocity, cached per note, so
+                // the compass stays balanced (the simulation's absolute units
+                // are arbitrary and would make the treble hundreds of times
+                // quieter) while the strike's own velocity response passes
+                // through untouched.
+                //
+                // `peak / sim_peak` used to do both, and measuring it showed
+                // what that cost: the factor runs from about 1,000 to over
+                // 4,000,000 depending on note and velocity, and soft blows get
+                // a factor twenty-six to forty times larger than hard ones. It
+                // was not a unit change. It was erasing the level the
+                // integration had just computed and substituting the drawn
+                // law -- which is where the touch went, and where the hammer's
+                // mass went with it.
+                //
+                // The compass part is kept, because the simulation's absolute
+                // units are arbitrary and letting them set the balance would
+                // make the treble hundreds of times quieter than the bass. The
+                // velocity part is given back: the measured exponent is close
+                // to three across the bass and tenor, and undoing it restores
+                // roughly 30 dB of range between a soft blow and a hard one,
+                // which is what a piano has and what this did not.
+                //
+                // Full velocity is the fixed point, so the loudest notes keep
+                // the level they were calibrated at and the headroom holds.
                 let mut sim_peak = 0.0f32;
                 let mut magnitudes = [0.0f32; SIM_MODES];
                 for n in 0..sim_modes {
@@ -1693,12 +1878,34 @@ impl ConcertGrand {
                     // passes through on its way out. What is gone is the
                     // recipe competing with the simulation for the amplitude.
                     let normalise = peak / sim_peak;
+                    let mut seam = 1.0f32;
                     for n in 0..sim_modes {
                         let candidate = magnitudes[n] * colour[n] * normalise;
                         let magnitude = magnitudes[n].max(1e-12);
-                        amplitudes[n] = candidate.max(amplitudes[n].abs() * RECIPE_FLOOR);
+                        let recipe = amplitudes[n].abs().max(1e-12);
+                        // The last simulated partial says how far the strike's
+                        // spectrum sits from the recipe's at the boundary.
+                        seam = candidate / recipe;
+                        amplitudes[n] = candidate.max(recipe * RECIPE_FLOOR);
                         phase_q[n] = (n + 1) as f32 * q[n] / magnitude;
                         phase_o[n] = (n + 1) as f32 * over_omega[n] / magnitude;
+                    }
+                    // Above the simulated range the recipe is all there is,
+                    // and leaving it at its own level left a seam.
+                    //
+                    // The integration stops at 8 kHz, so partials past it kept
+                    // the amplitude the analytic curve gave them while
+                    // everything below became the strike's, which is quieter.
+                    // Measured on C2's first 30 ms, the spectrum fell -29,
+                    // -39, -51 dB through the upper bands and then JUMPED to
+                    // -23 in 6-12 kHz: a 28 dB step upward, exactly at the
+                    // boundary. A band of top-octave hash floating above the
+                    // note is heard as a click, which is what the user
+                    // reported -- "se escucha como un click" -- and no
+                    // ingredient could account for it because it was a seam,
+                    // not an ingredient.
+                    for slot in amplitudes.iter_mut().take(count).skip(sim_modes) {
+                        *slot *= seam;
                     }
                 }
             }
@@ -1857,10 +2064,18 @@ impl ConcertGrand {
                 -6.907_755 * (CULL_INTERVAL as f32 / sample_rate) / prompt_t60,
             );
             let coupling = (1.0 - step) / (2.0 + three);
-            // The partial swells in over a few of its own periods -- ~45 ms
-            // for a bass fundamental, effectively instant in the treble.
+            // The partial swells in over many of its own periods, and slowly
+            // enough to matter: a bass note does not arrive, it gathers.
+            //
+            // Measured on C2, energy every 4 ms through the onset: the real
+            // instrument is 26 dB down in its first four milliseconds and
+            // does not reach full level until 112 ms, seven periods in. This
+            // model started 14 dB louder than that -- an audible click where
+            // the string has not even completed a quarter period -- and
+            // peaked at 44 ms. Stretching the swell puts the peak at 104 ms
+            // and takes 7 dB off the click.
             let rise_seconds =
-                ((0.9 / frequency) * self.controls.lab_at(9, position)).clamp(0.0008, 0.09);
+                ((5.0 / frequency) * self.controls.lab_at(9, position)).clamp(0.0008, 0.15);
             let rise = expf(-1.0 / (rise_seconds * sample_rate));
             let (pq, po) = (phase_q[n], phase_o[n]);
             partials[placed] = Partial {
@@ -3136,6 +3351,69 @@ mod tests {
                 "note {note:>3}: {count:>3} partials placed, the strike can reach at most {reachable:>3} of them ({:>3}%) -- the rest is the drawn curve, unconditionally",
                 100 * reachable / count.max(1)
             );
+        }
+    }
+
+    /// How long the simulated hammer actually stays on the string, against
+    /// the contact time the model asks for. A hammer that leaves in a
+    /// fraction of the intended time is a small hard one, whatever its
+    /// nominal mass says.
+    #[test]
+    #[ignore]
+    fn how_long_the_hammer_stays() {
+        println!("{:>5} {:>4} {:>12} {:>12} {:>8}", "note", "vel", "simulado", "pedido", "razon");
+        for note in [21u8, 36, 48, 60] {
+            for velocity in [60u8, 127] {
+                CONTACT_STEPS.store(0, core::sync::atomic::Ordering::Relaxed);
+                let mut piano = prepared();
+                render(&mut piano, 128, &[note_on(note, velocity)]);
+                let steps = CONTACT_STEPS.load(core::sync::atomic::Ordering::Relaxed);
+                if steps == 0 {
+                    continue;
+                }
+                let simulated = steps as f32 * 4.0e-6 * 1000.0;
+                let asked = piano.contact_time(note, velocity as f32 / 127.0) * 1000.0;
+                println!(
+                    "{note:>5} {velocity:>4} {simulated:>9.2} ms {asked:>9.2} ms {:>8.2}",
+                    simulated / asked
+                );
+            }
+        }
+    }
+
+    /// Does the strike leave the string with VELOCITY or with DISPLACEMENT?
+    ///
+    /// A finger releases a string from a static shape: position, no velocity.
+    /// A hammer hands it momentum: velocity concentrated near the contact,
+    /// little displacement. The two sound completely different, and the model
+    /// stores both -- `q` and `v/omega` -- so the balance can be read off.
+    #[test]
+    #[ignore]
+    fn strike_or_pluck() {
+        println!("{:>5} {:>4} {:>26}", "note", "vel", "energia: posicion / velocidad");
+        for note in [21u8, 36, 48, 60] {
+            for velocity in [60u8, 127] {
+                let mut piano = prepared();
+                render(&mut piano, 64, &[note_on(note, velocity)]);
+                let Some(voice) = piano.voices.iter().find(|v| v.active) else { continue };
+                // At note-on the components hold (s, c) = amplitude * (pq, po),
+                // which is the strike's (position, velocity/omega) direction.
+                let (mut pos, mut vel) = (0.0f32, 0.0f32);
+                for partial in &voice.partials[..voice.partial_count] {
+                    let p = &partial.prompt;
+                    pos += p.s * p.s;
+                    vel += p.c * p.c;
+                }
+                let total = pos + vel;
+                if total <= 0.0 {
+                    continue;
+                }
+                println!(
+                    "{note:>5} {velocity:>4} {:>12.0}% {:>12.0}%",
+                    100.0 * pos / total,
+                    100.0 * vel / total
+                );
+            }
         }
     }
 

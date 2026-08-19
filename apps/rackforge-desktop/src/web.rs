@@ -542,7 +542,19 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
 }
 
 async fn health() -> Json<Value> {
-    Json(json!({"status":"ok", "core_connected":true, "schema_version":1, "host":"desktop"}))
+    let ui_revision = WEB_ASSETS
+        .get_file("ui-revision.txt")
+        .and_then(|file| file.contents_utf8())
+        .map(str::trim)
+        .unwrap_or("unknown");
+    Json(json!({
+        "status": "ok",
+        "core_connected": true,
+        "schema_version": 1,
+        "host": "desktop",
+        "revision": env!("RACKFORGE_REVISION"),
+        "ui_revision": ui_revision,
+    }))
 }
 
 async fn auth_status() -> Json<Value> {

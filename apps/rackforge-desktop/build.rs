@@ -1,5 +1,6 @@
 fn main() {
     println!("cargo:rerun-if-changed=../../assets/brand/rackforge.ico");
+    stamp_revision();
     generate_bundled_plugin_module();
 
     #[cfg(windows)]
@@ -82,4 +83,25 @@ fn windows_resource_compiler_directory() -> Option<std::path::PathBuf> {
         let directory = version.join(architecture);
         directory.join("rc.exe").is_file().then_some(directory)
     })
+}
+
+/// Stamps the git revision into the binary. In-repo builds ask git; trees
+/// produced by `git archive` carry the hash substituted into REVISION via
+/// export-subst (how the Raspberry Pi builds); anything else is dev.
+fn stamp_revision() {
+    let revision = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .or_else(|| {
+            std::fs::read_to_string("../../REVISION")
+                .ok()
+                .map(|text| text.trim().to_owned())
+                .filter(|text| !text.contains("Format"))
+        })
+        .unwrap_or_else(|| "dev".to_owned());
+    println!("cargo:rustc-env=RACKFORGE_REVISION={revision}");
+    println!("cargo:rerun-if-changed=../../REVISION");
 }

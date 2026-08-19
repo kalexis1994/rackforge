@@ -9511,3 +9511,15 @@ body {
   color: var(--muted, #8ca3ad);
   font-size: 0.85rem;
 }
+
+.revision-footer {
+  margin: 14px 4px 4px;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #5a707a;
+}
+
+.revision-footer.drift {
+  color: #ffb35c;
+}

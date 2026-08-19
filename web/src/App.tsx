@@ -1256,10 +1256,41 @@ function MobileNavigation({
             detailed
             onNavigate={requestClose}
           />
+          <RevisionFooter />
         </div>
         <ConnectionBadge status={connection} />
       </section>
     </div>
+  );
+}
+
+// Drift made visible: the revision this interface was built from, beside
+// the revision the host binary reports. When they disagree, someone shipped
+// half a deploy, and the mismatch says so before a behavior difference does.
+function RevisionFooter() {
+  const [host, setHost] = useState<{ revision?: string; ui_revision?: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    hostJson<{ revision?: string; ui_revision?: string }>("/api/v1/health")
+      .then((health) => {
+        if (!cancelled) setHost(health);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const mismatch =
+    host?.ui_revision !== undefined &&
+    host.ui_revision !== "unknown" &&
+    host.ui_revision !== __UI_REVISION__;
+  const stale = host?.revision !== undefined && host.revision !== __UI_REVISION__;
+  return (
+    <p className={`revision-footer${mismatch || stale ? " drift" : ""}`}>
+      UI {__UI_REVISION__}
+      {host?.revision ? ` · host ${host.revision}` : ""}
+      {mismatch || stale ? " · out of sync" : ""}
+    </p>
   );
 }
 

@@ -120,6 +120,7 @@ struct RackForgeConfig {
 struct AppState {
     control_socket: PathBuf,
     controllers_root: PathBuf,
+    web_root: PathBuf,
     public_config: Arc<RwLock<WebConfig>>,
     auth: Arc<AuthManager>,
     plugins_root: PathBuf,
@@ -512,6 +513,7 @@ async fn main() -> Result<()> {
 
     let state = Arc::new(AppState {
         controllers_root: root.join("controllers"),
+        web_root: web_root.clone(),
         control_socket: root.join("state").join(CONTROL_SOCKET_NAME),
         public_config: shared_config,
         auth,
@@ -962,10 +964,17 @@ fn plugin_asset_url(plugin_id: &str, asset: &str, version: &str) -> String {
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
+    // Drift is measured, not discovered: the host binary's revision and the
+    // revision of the SPA it is actually serving, side by side.
+    let ui_revision = std::fs::read_to_string(state.web_root.join("ui-revision.txt"))
+        .map(|text| text.trim().to_owned())
+        .unwrap_or_else(|_| "unknown".to_owned());
     Json(json!({
         "status": "ok",
         "core_connected": state.control_socket.exists(),
-        "schema_version": 1
+        "schema_version": 1,
+        "revision": env!("RACKFORGE_REVISION"),
+        "ui_revision": ui_revision,
     }))
 }
 

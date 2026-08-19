@@ -664,6 +664,19 @@ const VOICE_DELAY: usize = 256;
 /// cross-voice loop gain goes as the square of this small number, well
 /// under the drain.
 const SYMPATHY_RATE: f32 = 0.004;
+/// The impact's own longitudinal kick, seeded into the bank's state at
+/// note-on.
+///
+/// The continuous y*y drive carries the sustained phantom forest, but the
+/// hammer ALSO excites the compressional wave directly: during contact the
+/// string stretches under the head, and that tension pulse rings the
+/// longitudinal modes once, hard, at the strike -- the metallic burst of a
+/// fortissimo bass attack (Askenfelt; Bank & Sujbert's measured attack
+/// spectra). Retiring the scripted clang removed this along with the
+/// script; measured on C2, the attack's 2-4 kHz ran ~12 dB under the
+/// reference with nothing left to supply it. Scales with the blow's energy
+/// (v^2), strongest on the wound strings, owned by the Clang fader.
+const IMPACT_CLANG: f32 = 0.25;
 /// One-pole coefficient for the high-pass on everything entering the lid and
 /// the chamber, at 44.1 kHz. The corner is the board's own radiation corner:
 /// the air is driven by what the board radiates, not by what the strings do.
@@ -837,9 +850,8 @@ impl Voice {
         // bank's output peaked at 1.0x f0, which is why its mix has been
         // parked at zero since.
         let drive = slope * slope * self.longitudinal_gain;
-        for (k, mode) in self.longitudinal.iter_mut().enumerate() {
-            let gain = if k == 0 { drive } else { drive * self.longitudinal_upper };
-            sum += mode.tick(gain);
+        for mode in self.longitudinal.iter_mut() {
+            sum += mode.tick(drive);
         }
         if self.noise_amp > 1e-7 {
             // Park–Miller-style LCG: white noise costs one multiply-add.
@@ -3017,8 +3029,10 @@ impl ConcertGrand {
         let tension_gain = TENSION_GAIN * bass_gate / (1.0 + 40.0 * position)
             * self.controls.lab(10);
         let longitudinal_gain = LONGITUDINAL_MIX * self.controls.lab(5);
-        let longitudinal_upper = self.controls.lab(4);
+        let longitudinal_upper =
+            self.controls.lab(4) * 16.0 * powf(1.0 - position, 1.5);
         let action_gain = Controls::noise_gain(self.controls.action_noise);
+        let clang_gain = self.controls.lab(4);
         let pair_spacing = self.controls.width * PAIR_SPACING_MAX_M;
         let pair_depth = MIC_DISTANCE_MIN_M
             * powf(
@@ -3089,6 +3103,15 @@ impl ConcertGrand {
             voice.noise_coefficient = noise_coefficient;
             voice.noise_body_coefficient = noise_body_coefficient;
             voice.noise_shrink = noise_shrink;
+            // The impact clang fires again on the wire it finds.
+            let clang_kick = IMPACT_CLANG
+                * velocity
+                * velocity
+                * powf(1.0 - position, 1.2)
+                * self.controls.lab(4);
+            for (k, mode) in self.voices[slot].longitudinal.iter_mut().enumerate() {
+                mode.y1 += clang_kick / (k + 1) as f32;
+            }
             return;
         }
         let Some(voice) = self.allocate_voice() else { return };
@@ -3126,6 +3149,14 @@ impl ConcertGrand {
         // times higher than that of the transverse vibration", and it holds
         // across the instrument because scale design keeps it there.
         let longitudinal_first = LONGITUDINAL_RATIO * f0;
+        // The strike's own kick into the compressional modes: one impulse,
+        // rung at their own frequencies and dead within tens of
+        // milliseconds. Wound strings take it hardest.
+        let clang_kick = IMPACT_CLANG
+            * velocity
+            * velocity
+            * powf(1.0 - position, 1.2)
+            * clang_gain;
         for (k, mode) in voice.longitudinal.iter_mut().enumerate() {
             let hz = longitudinal_first * (k + 1) as f32;
             if hz < nyquist * 0.9 {
@@ -3139,6 +3170,19 @@ impl ConcertGrand {
                 let t60 = (0.06 - 0.008 * k as f32).max(0.03);
                 let pan = 0.5 + 0.3 * (hash01((note as u32) << 3 | k as u32) - 0.5);
                 *mode = BodyMode::tune(hz, t60, pan, sample_rate);
+                // The upper compressional modes carry the attack's
+                // broadband burst and the growl's 2-4 kHz body -- measured
+                // on C2, both ran 6-13 dB under the reference with a flat
+                // bank. The profile rises into modes two and three and
+                // falls away at the fourth, whose band the reference keeps
+                // 21 dB down in the sustain.
+                const MODE_PROFILE: [f32; LONGITUDINAL_MODES] = [1.0, 1.2, 1.0, 0.22];
+                mode.drive *= if k == 0 {
+                    1.0
+                } else {
+                    longitudinal_upper * MODE_PROFILE[k]
+                };
+                mode.y1 = clang_kick / (k + 1) as f32;
             } else {
                 *mode = BodyMode::default();
             }

@@ -720,14 +720,21 @@ code and is far beyond audibility at control rate).
   bass. Same lesson as the earlier retraction, one door over: a comparison
   is only a comparison when both sides are the same experiment.
 
-  What the honest measurement shows instead: the bass ATTACK's 2–4 kHz runs
-  ~12 dB under the reference sample (ours −7.8 dB rel. fundamental, the
-  YDP +4.3). Felt stiffness is not the lever (×8 in K moved it under a
-  decibel while overshooting the sustained band). The candidates are the
-  strike-moment nonlinear burst and the recording's own knock — and the
-  house default deliberately runs the action noise at 0.39, the user's
-  voicing. Logged as a gap against THAT sample, not necessarily against
-  this piano's intent.
+  ~~What the honest measurement showed instead~~ — CLOSED on 0.77.0: the
+  bass attack's 2–4 kHz deficit was the longitudinal voice's upper modes.
+  Measured, the real burst is BROADBAND (0.0 dB of partial structure in the
+  attack band — not ladder, not a fader), and the real growl keeps its
+  2–4 kHz body through the sustain. Two mechanisms closed it: the impact's
+  own kick seeded into the compressional modes at note-on (the hammer
+  stretches the string under its head — the tension pulse rings the bank
+  once, hard; scales v², wound strings take it hardest, the Clang fader
+  owns it), and a per-mode drive profile that lifts the second and third
+  longitudinal modes (2.3/3.4 kHz on C2) while keeping the fourth down,
+  register-gated because the phenomenon belongs to the wound strings.
+  After: attack 2–4 kHz +3.4 dB vs the real +4.3; sustained −4.5 vs −4.7;
+  4–8 kHz −20.4 vs −21.0. C4 and A5 untouched. The fit cost's noise term
+  dislikes the burst; the direct band comparison against the samples is
+  the ground truth, and the fit's blindness there is already on record.
 
 
 

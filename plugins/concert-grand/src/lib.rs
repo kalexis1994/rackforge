@@ -1058,19 +1058,25 @@ impl Default for Controls {
         // intimate close-miked piano -- small damped room, the pair at the
         // rim, the pattern leaning ribbon-ward for its proximity warmth.
         Self {
-            brightness: 0.4,
+            brightness: 0.44,
             dynamics: 0.45,
             unison: 0.65,
             decay: 0.35,
             width: 0.35,
             level: 0.72,
-            lab: [0.5; LAB_COUNT],
-            room_size: 0.22,
+            // The user's lab refinements, by ear on 0.71.1: felt corner a
+            // touch up, the click colour well down, both decay stages a
+            // little longer, the board eased.
+            lab: [
+                0.52, 0.5, 0.5, 0.32, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
+                0.57, 0.58, 0.5, 0.45, 0.5, 0.5,
+            ],
+            room_size: 0.28,
             room_hardness: 0.35,
             mic_distance: 0.08,
             mic_pattern: 0.6,
-            action_noise: 0.5,
-            release_noise: 0.5,
+            action_noise: 0.39,
+            release_noise: 0.6,
             pedal_noise: 0.5,
         }
     }

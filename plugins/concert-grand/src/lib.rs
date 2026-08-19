@@ -4038,6 +4038,55 @@ mod tests {
         }
     }
 
+    /// Every fader must start where the panel says it starts.
+    ///
+    /// The host learns a control's initial position from the parameter
+    /// schema, and the engine boots from its own "Concert" preset. Nothing
+    /// checked that the two agreed, and they did not: the schema declared
+    /// Decay at 0.50 while the engine ran at 0.80, and Width at 0.70 while
+    /// the engine ran at 0.47.
+    ///
+    /// The panel therefore drew every fader in the wrong place, and the first
+    /// touch of one jumped the value to wherever the fader was actually
+    /// sitting. Nudge Decay up from its apparent centre and the engine drops
+    /// from 0.80 to 0.55 -- the sound goes the opposite way to the hand. The
+    /// user asked whether the faders were inverted; for two of the six, in
+    /// effect, they were, and in opposite directions, which is also why "I
+    /// move them and almost nothing changes" was true for years: small moves
+    /// near the drawn centre map to values far from where the engine was.
+    #[test]
+    fn the_panel_and_the_engine_start_from_the_same_place() {
+        const SCHEMA: &str = include_str!("../package/metadata/parameters.json");
+        let engine = ConcertGrand::default();
+        let mut checked = 0;
+        // A light scan rather than a JSON dependency: every parameter object
+        // carries its "index" before its "default".
+        for chunk in SCHEMA.split("\"index\":").skip(1) {
+            let index: u32 = chunk
+                .trim_start()
+                .split(|c: char| !c.is_ascii_digit())
+                .next()
+                .and_then(|d| d.parse().ok())
+                .expect("an index");
+            let Some(rest) = chunk.split("\"default\":").nth(1) else {
+                continue;
+            };
+            let declared: f64 = rest
+                .trim_start()
+                .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+                .next()
+                .and_then(|d| d.parse().ok())
+                .expect("a default");
+            let actual = engine.get_parameter(index).expect("the engine knows it");
+            assert!(
+                (declared - actual).abs() < 1e-6,
+                "parameter {index}: the panel starts it at {declared}, the engine at {actual}"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, PARAM_COUNT, "every parameter must be declared");
+    }
+
     #[test]
     fn the_unison_dephases_and_traps_its_energy() {
         // Weinreich's signature, now simulated: the hammer leaves the

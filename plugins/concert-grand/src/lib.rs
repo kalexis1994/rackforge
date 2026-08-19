@@ -25,7 +25,7 @@
 
 mod math;
 
-use math::{expf, log2f, powf, sincosf, sqrtf};
+use math::{expf, log2f, powf, roundf, sincosf, sqrtf};
 use rackforge_plugin_sdk::{MidiEvent, ParameterEvent, Processor, export_processor};
 
 /// The piano compass, A0..=C8.
@@ -752,6 +752,15 @@ struct Voice {
     /// controls, which now scale the real mechanism instead of a script.
     longitudinal_gain: f32,
     longitudinal_upper: f32,
+    /// The upper modes' surplus drive is a property of the STRIKE, not of
+    /// the string: right after contact the wire is full of high transverse
+    /// partials whose pair products feed the compressional modes hard, and
+    /// as those partials die the feed collapses back to the base y^2 term.
+    /// Baking the surplus into the resonator gain kept it for the life of
+    /// the note -- a blowtorch hiss running beside the tone. This envelope
+    /// carries the surplus instead, decaying over ~80 ms.
+    upper_env: f32,
+    upper_env_decay: f32,
 }
 
 impl Default for Voice {
@@ -794,6 +803,8 @@ impl Default for Voice {
             longitudinal: [BodyMode::default(); LONGITUDINAL_MODES],
             longitudinal_gain: 0.0,
             longitudinal_upper: 1.0,
+            upper_env: 0.0,
+            upper_env_decay: 1.0,
         }
     }
 }
@@ -850,8 +861,13 @@ impl Voice {
         // bank's output peaked at 1.0x f0, which is why its mix has been
         // parked at zero since.
         let drive = slope * slope * self.longitudinal_gain;
-        for mode in self.longitudinal.iter_mut() {
-            sum += mode.tick(drive);
+        // The attack's surplus into the upper modes rides this envelope and
+        // is gone within ~80 ms; the sustain keeps only the base y^2 feed.
+        self.upper_env *= self.upper_env_decay;
+        let upper = 1.0 + (self.longitudinal_upper - 1.0) * self.upper_env;
+        sum += self.longitudinal[0].tick(drive);
+        for mode in self.longitudinal[1..].iter_mut() {
+            sum += mode.tick(drive * upper);
         }
         if self.noise_amp > 1e-7 {
             // Park–Miller-style LCG: white noise costs one multiply-add.
@@ -1852,7 +1868,11 @@ impl ConcertGrand {
         let step = powf(span, 1.0 / (UNDAMPED_COUNT - 1) as f32);
         let mut frequency = UNDAMPED_LOW_HZ;
         for (i, string) in self.undamped.iter_mut().enumerate() {
-            let scatter = 1.0 + 0.33 * (hash01(i as u32 * 2_654_435_761) - 0.5) * (step - 1.0) * 2.0;
+            let scatter = 1.0
+                + 0.33
+                    * (hash01((i as u32).wrapping_mul(2_654_435_761)) - 0.5)
+                    * (step - 1.0)
+                    * 2.0;
             let hz = (frequency * scatter).clamp(UNDAMPED_LOW_HZ, UNDAMPED_HIGH_HZ);
             // Shorter lengths ring less: the T60 falls across the bank.
             let t = i as f32 / (UNDAMPED_COUNT - 1) as f32;
@@ -3049,7 +3069,7 @@ impl ConcertGrand {
             let mut by_harmonic = [usize::MAX; MAX_PARTIALS];
             for (index, partial) in voice.partials[..voice.partial_count].iter().enumerate() {
                 if partial.slope != 0.0 {
-                    let h = (partial.slope.abs() * 16.0).round() as usize;
+                    let h = roundf(partial.slope.abs() * 16.0) as usize;
                     if h < MAX_PARTIALS {
                         by_harmonic[h] = index;
                     }
@@ -3058,7 +3078,7 @@ impl ConcertGrand {
             let mut appended = 0usize;
             for fresh in partials[..placed].iter() {
                 let target = if fresh.slope != 0.0 {
-                    let h = (fresh.slope.abs() * 16.0).round() as usize;
+                    let h = roundf(fresh.slope.abs() * 16.0) as usize;
                     if h < MAX_PARTIALS { by_harmonic[h] } else { usize::MAX }
                 } else {
                     usize::MAX
@@ -3112,6 +3132,9 @@ impl ConcertGrand {
             for (k, mode) in self.voices[slot].longitudinal.iter_mut().enumerate() {
                 mode.y1 += clang_kick / (k + 1) as f32;
             }
+            // The re-struck wire is full of fresh high partials again.
+            self.voices[slot].longitudinal_upper = longitudinal_upper;
+            self.voices[slot].upper_env = 1.0;
             return;
         }
         let Some(voice) = self.allocate_voice() else { return };
@@ -3177,11 +3200,7 @@ impl ConcertGrand {
                 // falls away at the fourth, whose band the reference keeps
                 // 21 dB down in the sustain.
                 const MODE_PROFILE: [f32; LONGITUDINAL_MODES] = [1.0, 1.2, 1.0, 0.22];
-                mode.drive *= if k == 0 {
-                    1.0
-                } else {
-                    longitudinal_upper * MODE_PROFILE[k]
-                };
+                mode.drive *= MODE_PROFILE[k];
                 mode.y1 = clang_kick / (k + 1) as f32;
             } else {
                 *mode = BodyMode::default();
@@ -3194,6 +3213,8 @@ impl ConcertGrand {
         // stretches, a bass string is long and slack and stretches plenty.
         voice.longitudinal_gain = longitudinal_gain;
         voice.longitudinal_upper = longitudinal_upper;
+        voice.upper_env = 1.0;
+        voice.upper_env_decay = expf(-1.0 / (0.08 * sample_rate));
         voice.tension_gain = tension_gain;
         voice.energy = 1.0;
         // The hammer/soundboard thump: heavier and darker in the bass.

@@ -736,6 +736,22 @@ code and is far beyond audibility at control rate).
   dislikes the burst; the direct band comparison against the samples is
   the ground truth, and the fit's blindness there is already on record.
 
+  AMENDED on 0.78.0 — the user's ear caught what the band metric missed:
+  "un soplete que suena como en paralelo luego de explotar." The per-mode
+  drive profile was calibrated in the attack window but BAKED into the
+  resonator gains, so the ×16 surplus fed the upper modes for the life of
+  the note; measured against the low bands (200 Hz–2 kHz), C2's sustained
+  2–4 kHz ran at +3.4 dB — a stationary hiss as loud as the tone under it.
+  The physics was pointing at the fix: the surplus feed exists because the
+  freshly struck wire is full of high transverse partials, and it dies as
+  they do. The surplus now rides a per-voice envelope (τ 80 ms, re-armed on
+  re-strike) and the sustain keeps only the base y² feed. After: sustained
+  2–4 kHz +0.8 dB rel. low (from +3.4), 4–8 kHz −23.8 (from −19.0), attack
+  2–4 kHz gives back 1.2 dB — the seeded kick, which is state not gain,
+  carries the burst unchanged. Metric lesson, same family as the chord
+  trap: a band level fitted in one time window and then applied outside it
+  is not the measurement it came from.
+
 
 
 * **FIXED (v0.62.0): a fixed low drone under every note, audible only in

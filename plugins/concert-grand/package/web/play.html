@@ -318,11 +318,9 @@
           for (const parameter of mine) {
             body.append(fader(parameter, current.get(parameter.index)));
           }
-          // The lab and the register tilts are a workbench, not part of the
-          // instrument's face: they stay folded until someone goes looking.
-          // The tilt page used to render open, so the first thing under the
-          // six main faders was fourteen sliders all named "... in bass".
-          if (page.id === "lab" || page.id === "tilt") {
+          // The lab is a workbench, not part of the instrument's face: it
+          // stays folded until someone goes looking for it.
+          if (page.id === "lab") {
             const details = document.createElement("details");
             const summary = document.createElement("summary");
             summary.textContent = `${page.name} · ${mine.length} controls`;

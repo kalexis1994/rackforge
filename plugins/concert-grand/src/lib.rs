@@ -230,9 +230,7 @@ const RADIATION_RATE: f32 = 0.9;
 /// partial die while its fundamental rings for half a minute.
 const KAPPA_LOSS: f32 = 2.0e-5;
 
-const LAB_TILT_COUNT: usize = 14;
-const LAB_TILT_BASE: usize = 6 + LAB_COUNT;
-const PARAM_COUNT: usize = 6 + LAB_COUNT + LAB_TILT_COUNT;
+const PARAM_COUNT: usize = 6 + LAB_COUNT;
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
 /// entries are pre-scaled by the per-sample decay factor `g`, so magnitude
@@ -952,7 +950,6 @@ struct Controls {
     width: f32,
     level: f32,
     lab: [f32; LAB_COUNT],
-    lab_tilt: [f32; LAB_TILT_COUNT],
 }
 
 impl Default for Controls {
@@ -966,29 +963,12 @@ impl Default for Controls {
             width: 0.47,
             level: 0.68,
             lab: [0.5; LAB_COUNT],
-            lab_tilt: [0.5; LAB_TILT_COUNT],
         }
     }
 }
 
 impl Controls {
     /// Lab multiplier i: 0..1 slider -> off..x16, centre = x1.
-    /// A lab control as it applies to one note. `position` is 0 at A0 and 1
-    /// at C8; a weight of 0.5 ignores it, and the extremes swing the control
-    /// by a factor of four each way, full at A0 and fading to nothing at C8.
-    fn lab_at(&self, i: usize, position: f32) -> f32 {
-        let amount = self.lab(i);
-        if amount == 0.0 {
-            return 0.0;
-        }
-        // The tail of the lab has no weight, so an unweighted control asks
-        // for none: reading past the array means flat, not a panic.
-        let slope = (self.lab_tilt.get(i).copied().unwrap_or(0.5) - 0.5) * 2.0;
-        if slope == 0.0 {
-            return amount;
-        }
-        amount * powf(4.0, slope * (1.0 - position))
-    }
 
     fn lab(&self, i: usize) -> f32 {
         // The bottom of the travel is off, not a quarter. Mapping the whole
@@ -1020,7 +1000,6 @@ impl Controls {
             PARAM_WIDTH => self.width,
             PARAM_LEVEL => self.level,
             6..=22 => self.lab[index as usize - 6],
-            23..=36 => self.lab_tilt[index as usize - LAB_TILT_BASE],
             _ => return None,
         };
         Some(value as f64)
@@ -1039,7 +1018,6 @@ impl Controls {
             PARAM_WIDTH => self.width = value,
             PARAM_LEVEL => self.level = value,
             6..=22 => self.lab[index as usize - 6] = value,
-            23..=36 => self.lab_tilt[index as usize - LAB_TILT_BASE] = value,
             _ => return false,
         }
         true
@@ -1896,20 +1874,20 @@ impl ConcertGrand {
         // bend, not a piano's live blow. Measured piano glides are a few
         // cents at most.
         let glide_cents = if velocity > 0.6 {
-            11.5 * self.controls.lab_at(10, position) * velocity * velocity * ((0.35_f32 - position) / 0.35).clamp(0.0, 1.0)
+            11.5 * self.controls.lab(10) * velocity * velocity * ((0.35_f32 - position) / 0.35).clamp(0.0, 1.0)
         } else {
             0.0
         };
         let f0 = f0 * powf(2.0, glide_cents / 1200.0);
         let string_scale = powf(f0 / 220.0, 0.55).clamp(0.35, 1.8);
-        let treble_life = self.cal(note, 8) * self.controls.lab_at(1, position);
+        let treble_life = self.cal(note, 8) * self.controls.lab(1);
         let contact = self.contact_time(note, velocity);
         // The nonlinear forest keeps the bass ladder open far above what the
         // soft bass hammer alone would give; the felt corner widens with it.
         let bass_top = 1.0 + 2.2 * ((0.35_f32 - position) / 0.35).clamp(0.0, 1.0);
         let cutoff = ((1.9 * self.cal(note, 0) / contact)
             * bass_top
-            * self.controls.lab_at(0, position)
+            * self.controls.lab(0)
             * (0.5 + 1.5 * self.controls.brightness))
             .max(1.5 * f0);
 
@@ -1929,7 +1907,7 @@ impl ConcertGrand {
         // decay error. Where the two disagree this far, neither should be
         // followed alone.
         let detune_cents =
-            (0.9 + 0.9 * position) * (self.controls.unison * 2.86) * self.controls.lab_at(13, position);
+            (0.9 + 0.9 * position) * (self.controls.unison * 2.86) * self.controls.lab(13);
 
         // First pass: partial frequencies and unnormalised amplitudes. The
         // comb keeps the sign of sin(n·π·x0): a struck string's partials
@@ -1999,7 +1977,7 @@ impl ConcertGrand {
             // does not vanish — it sits on a ragged −30…−45 dB shelf out to
             // 8 kHz, the sustained nonlinear forest, growing as the square
             // of velocity. A cliff to silence sounds hollowed out.
-            let floor = 0.0455 * velocity * velocity * self.controls.lab_at(6, position) * self.cal(note, 1);
+            let floor = 0.0455 * velocity * velocity * self.controls.lab(6) * self.cal(note, 1);
             let felt = expf(-1.2 * felt_r * felt_r).max(floor);
             // The board barely radiates below its first mode: the lowest
             // notes' fundamentals (and even second partials) come out tens of
@@ -2083,7 +2061,7 @@ impl ConcertGrand {
                 // and that is proportional to sqrt(m).
                 let head = 0.0035 + 0.0075 * powf(1.0 - position, 2.5);
                 let mass = (head / strings_struck
-                    * self.controls.lab_at(8, position)
+                    * self.controls.lab(8)
                     * HAMMER_MASS_SCALE)
                     .max(1e-4);
                 // The action's dynamic span: how much faster the hammer
@@ -2097,11 +2075,11 @@ impl ConcertGrand {
                 // needle and the lacquer act on exactly this property.
                 let stiffness = FELT_K_A0
                     * powf(10.0, FELT_K_DECADES * position)
-                    * self.controls.lab_at(7, position)
+                    * self.controls.lab(7)
                     * (0.5 + 1.5 * self.controls.brightness);
                 let exponent = ((3.2 + 1.8 * position)
                     * (0.62 + 0.76 * self.controls.brightness)
-                    * self.controls.lab_at(0, position))
+                    * self.controls.lab(0))
                     .clamp(1.2, 5.0);
                 let (q, over_omega) = simulate_strike(
                     &frequencies,
@@ -2391,8 +2369,8 @@ impl ConcertGrand {
             // down to two fifths of its proper life for the second time.
             let tail = 1.8 + 2.6 / (1.0 + powf(frequency / TAIL_KNEE_HZ, 1.2));
             let intrinsic =
-                self.decay_per_sample(t60 * tail * self.controls.lab_at(12, position));
-            let prompt_t60 = t60 * 1.94 * self.controls.lab_at(11, position) / (1.4 + 1.1 * position);
+                self.decay_per_sample(t60 * tail * self.controls.lab(12));
+            let prompt_t60 = t60 * 1.94 * self.controls.lab(11) / (1.4 + 1.1 * position);
             let step = expf(
                 -6.907_755 * (CULL_INTERVAL as f32 / sample_rate) / prompt_t60,
             );
@@ -2429,7 +2407,7 @@ impl ConcertGrand {
             // peaked at 44 ms. Stretching the swell puts the peak at 104 ms
             // and takes 7 dB off the click.
             let rise_seconds =
-                ((5.0 / frequency) * self.controls.lab_at(9, position)).clamp(0.0008, 0.15);
+                ((5.0 / frequency) * self.controls.lab(9)).clamp(0.0008, 0.15);
             let rise = expf(-1.0 / (rise_seconds * sample_rate));
             let (pq, po) = (phase_q[n], phase_o[n]);
             partials[placed] = Partial {
@@ -2519,7 +2497,7 @@ impl ConcertGrand {
         // dark components stand in for it.
         {
             let thump_level = powf(velocity, 1.9) * 0.046 * 0.32 * (1.0 - 0.35 * position)
-                * self.controls.lab_at(2, position)
+                * self.controls.lab(2)
                 * self.cal(note, 2);
             let rise = expf(-1.0 / (0.004 * sample_rate));
             for (freq, level, seed) in
@@ -2565,15 +2543,15 @@ impl ConcertGrand {
             }
         }
 
-        let chiff_mult = self.controls.lab_at(3, position) * self.cal(note, 3);
+        let chiff_mult = self.controls.lab(3) * self.cal(note, 3);
         // How hard this string's own stretch pulls it sharp. The bass gate is
         // the amplitude-to-length ratio in disguise: a treble string is short
         // and stiff and barely stretches, a bass string is long and slack and
         // stretches plenty.
         let tension_gain = TENSION_GAIN * bass_gate / (1.0 + 40.0 * position)
-            * self.controls.lab_at(10, position);
-        let longitudinal_gain = LONGITUDINAL_MIX * self.controls.lab_at(5, position);
-        let longitudinal_upper = self.controls.lab_at(4, position);
+            * self.controls.lab(10);
+        let longitudinal_gain = LONGITUDINAL_MIX * self.controls.lab(5);
+        let longitudinal_upper = self.controls.lab(4);
         let Some(voice) = self.allocate_voice() else { return };
         voice.active = true;
         voice.note = note;
@@ -2921,7 +2899,6 @@ impl Processor for ConcertGrand {
                 width: 0.6,
                 level: 0.7,
                 lab: [0.5; LAB_COUNT],
-            lab_tilt: [0.5; LAB_TILT_COUNT],
             },
             "bright" => Controls {
                 brightness: 0.8,
@@ -2931,7 +2908,6 @@ impl Processor for ConcertGrand {
                 width: 0.75,
                 level: 0.68,
                 lab: [0.5; LAB_COUNT],
-            lab_tilt: [0.5; LAB_TILT_COUNT],
             },
             "intimate" => Controls {
                 brightness: 0.4,
@@ -2941,7 +2917,6 @@ impl Processor for ConcertGrand {
                 width: 0.35,
                 level: 0.72,
                 lab: [0.5; LAB_COUNT],
-            lab_tilt: [0.5; LAB_TILT_COUNT],
             },
             _ => return false,
         };
@@ -2959,7 +2934,6 @@ impl Processor for ConcertGrand {
             self.controls.level,
         ]);
         values[6..6 + LAB_COUNT].copy_from_slice(&self.controls.lab);
-        values[6 + LAB_COUNT..].copy_from_slice(&self.controls.lab_tilt);
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.chunks_exact_mut(4).zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -2973,7 +2947,14 @@ impl Processor for ConcertGrand {
         // rest at its default, rather than rejecting the whole thing: every
         // control the user had dialled in is still in there, and throwing
         // them away to avoid guessing at three new ones is the worse trade.
-        if state.len() % 4 != 0 || state.len() > PARAM_COUNT * 4 {
+        // States from builds that still had the fourteen "in bass" tilt
+        // twins are LONGER than today's layout. The twins were calibration
+        // scaffolding, removed once the register dependence they patched
+        // over came from the physics itself; a saved state's tail of tilt
+        // values is deliberately ignored rather than the whole state -- the
+        // controls the user dialled in are all in the head.
+        const LEGACY_PARAM_COUNT: usize = 37;
+        if state.len() % 4 != 0 || state.len() > LEGACY_PARAM_COUNT * 4 {
             return false;
         }
         let mut values = [0.5_f32; PARAM_COUNT];
@@ -2989,8 +2970,6 @@ impl Processor for ConcertGrand {
         }
         let mut lab = [0.5f32; LAB_COUNT];
         lab.copy_from_slice(&values[6..6 + LAB_COUNT]);
-        let mut lab_tilt = [0.5f32; LAB_TILT_COUNT];
-        lab_tilt.copy_from_slice(&values[6 + LAB_COUNT..]);
         self.controls = Controls {
             brightness: values[0],
             dynamics: values[1],
@@ -2999,7 +2978,6 @@ impl Processor for ConcertGrand {
             width: values[4],
             level: values[5],
             lab,
-            lab_tilt,
         };
         true
     }
@@ -3443,56 +3421,6 @@ mod tests {
     }
 
     #[test]
-    fn a_weight_leans_a_control_into_the_bass_and_leaves_the_treble_alone() {
-        // The whole point: a control set once can mean something different at
-        // each end of the keyboard, so a value that suits the treble no longer
-        // has to be the value the bass gets.
-        let mut controls = Controls { lab: [0.5; LAB_COUNT], ..Default::default() };
-        let flat = controls.lab_at(0, 0.0);
-        assert!(
-            (flat - controls.lab_at(0, 1.0)).abs() < 1e-6,
-            "an unweighted control is not flat across the compass"
-        );
-
-        controls.lab_tilt[0] = 1.0;
-        assert!(
-            controls.lab_at(0, 0.0) > flat * 3.0,
-            "weighting to the bass did not lift the bass"
-        );
-        assert!(
-            (controls.lab_at(0, 1.0) - flat).abs() < 1e-5,
-            "the treble is the anchor and must not move"
-        );
-
-        // The regression this shape exists for: with the pivot in the middle
-        // of the compass every one of these controls was inert around middle
-        // C, which is where anyone dialling by ear plays first.
-        let middle = 0.45;
-        assert!(
-            controls.lab_at(0, middle) > flat * 1.8,
-            "the weight does nothing near middle C: {} vs {flat}",
-            controls.lab_at(0, middle)
-        );
-
-        // Off means off at every pitch: a weight must not resurrect a control
-        // the user has turned all the way down.
-        controls.lab[0] = 0.0;
-        assert_eq!(controls.lab_at(0, 0.0), 0.0);
-        assert_eq!(controls.lab_at(0, 1.0), 0.0);
-    }
-
-    #[test]
-    fn the_unweighted_tail_of_the_lab_is_read_as_flat() {
-        // Board, sympathy and air are applied after the voices are summed and
-        // so have no weight stored. Asking for one must answer "flat".
-        let controls = Controls { lab: [0.5; LAB_COUNT], ..Default::default() };
-        for i in LAB_TILT_COUNT..LAB_COUNT {
-            assert_eq!(controls.lab_at(i, 0.0), controls.lab_at(i, 1.0));
-            assert_eq!(controls.lab_at(i, 0.0), controls.lab(i));
-        }
-    }
-
-    #[test]
     fn a_state_from_an_older_build_keeps_the_controls_it_does_have() {
         // Controls are only ever appended, so a shorter state is an older one.
         // Rejecting it would throw away every setting the user had dialled in.
@@ -3504,10 +3432,21 @@ mod tests {
         let mut older = Box::new(ConcertGrand::default());
         assert!(older.load_state(&state[..24]));
         assert_eq!(older.get_parameter(PARAM_BRIGHTNESS), Some(0.9_f32 as f64));
-        assert_eq!(older.get_parameter(LAB_TILT_BASE as u32), Some(0.5));
 
-        // A state longer than the model has room for is not an older one.
-        assert!(!older.load_state(&[0u8; PARAM_COUNT * 4 + 4]));
+        // A state from the era of the fourteen "in bass" tilt twins is
+        // LONGER than today's layout; the head still holds every control the
+        // user dialled in, and the tail of tilt values is ignored.
+        let mut legacy = [0u8; 37 * 4];
+        legacy[..PARAM_COUNT * 4].copy_from_slice(&state);
+        for chunk in legacy[PARAM_COUNT * 4..].chunks_exact_mut(4) {
+            chunk.copy_from_slice(&0.5f32.to_le_bytes());
+        }
+        let mut migrated = Box::new(ConcertGrand::default());
+        assert!(migrated.load_state(&legacy));
+        assert_eq!(migrated.get_parameter(PARAM_BRIGHTNESS), Some(0.9_f32 as f64));
+
+        // Longer than even the legacy layout is not a state of ours.
+        assert!(!older.load_state(&[0u8; 38 * 4]));
     }
 
     /// Which parameters actually change the sound, and by how much. Not a

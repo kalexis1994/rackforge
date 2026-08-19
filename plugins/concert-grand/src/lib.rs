@@ -436,7 +436,7 @@ impl BodyMode {
 /// the taper with `chiff` pinned to its 4.0 ceiling at the top three anchors
 /// and still could not reach. Flat here, with the level set by measurement;
 /// the per-note column carries the shape from there.
-const KNOCK_LEVEL: f32 = 0.02;
+const KNOCK_LEVEL: f32 = 0.055;
 
 /// The soundboard's modal loss factor.
 ///
@@ -1002,7 +1002,11 @@ impl Voice {
             partial.horizontal.damp(factor);
             partial.bloom.damp(factor);
         }
-        let thud = (0.10 * sqrtf(self.energy)).min(0.025);
+        // The key coming back and the damper landing make a small knock of
+        // their own, whether or not the string still carries energy: release
+        // a silent key on a real action and it still says something. The
+        // string-energy term rides on top for notes damped while loud.
+        let thud = (0.004 + 0.10 * sqrtf(self.energy)).min(0.028);
         if thud > self.noise_amp {
             self.noise_amp = thud;
             self.noise_coefficient = thud_coefficient;
@@ -1181,6 +1185,12 @@ pub struct ConcertGrand {
     room_len: [usize; ROOM_LINES],
     /// Two-pole state for the high-pass feeding the lid and the chamber.
     air_dc: [f32; 2],
+    /// The pedal's own noise: the rail and the dampers moving. A one-shot
+    /// low-passed burst, softer on the way down, heavier on release when
+    /// the whole damper rail lands back on the strings.
+    pedal_noise_amp: f32,
+    pedal_noise_lp: f32,
+    pedal_noise_seed: u32,
     room_gain: [f32; ROOM_LINES],
     room_lp: [f32; ROOM_LINES],
     room_damp: f32,
@@ -1272,6 +1282,9 @@ impl Default for ConcertGrand {
             room: [[0.0; ROOM_BUFFER]; ROOM_LINES],
             room_len: [1; ROOM_LINES],
             air_dc: [0.0; 2],
+            pedal_noise_amp: 0.0,
+            pedal_noise_lp: 0.0,
+            pedal_noise_seed: 0x5EED_C0DE,
             room_gain: [0.0; ROOM_LINES],
             room_lp: [0.0; ROOM_LINES],
             room_damp: 0.5,
@@ -2672,8 +2685,52 @@ impl ConcertGrand {
                     / sample_rate,
             );
         let noise_shrink = expf(-1.0 / (0.070 * sample_rate));
+        // The knock's low body survives in every register: the old corner
+        // climbed to ~940 Hz at the top, which removed exactly the 300-1200
+        // band the measurement found missing. The keybed under a treble key
+        // is the same keybed.
         let noise_body_coefficient = 1.0
-            - expf(-core::f32::consts::TAU * (40.0 + 900.0 * position * position) / sample_rate);
+            - expf(-core::f32::consts::TAU * (40.0 + 120.0 * position * position) / sample_rate);
+        // The clack: the let-off and the hammer shank are WOOD, and wood
+        // knocked rings briefly at its own modes rather than hissing. Three
+        // short damped components in the knock's 0.7-3 kHz body -- the "toc"
+        // a treble note keeps when its tone is too small to mask anything.
+        // Level rides the same law as the burst; T60s of tens of
+        // milliseconds; frequencies jittered per note so the rack of keys
+        // does not ring as one bell.
+        let clack_level = velocity * velocity * KNOCK_LEVEL * 8.0
+            * (1.0 - 0.25 * ((position - 0.5) / 0.5).max(0.0))
+            * self.controls.lab(3);
+        if clack_level > 1e-5 {
+            let rise = expf(-1.0 / (0.0012 * sample_rate));
+            // The shank is shorter under a treble hammer, so its knock
+            // sits higher: the modes climb ~30% across the compass.
+            let shank = 1.0 + 0.3 * position;
+            for (freq, level, t60, seed) in [
+                (720.0_f32 * shank, 0.9_f32, 0.045_f32, 51u32),
+                (1560.0 * shank, 1.0, 0.035, 57),
+                (2740.0 * shank, 1.3, 0.025, 63),
+            ] {
+                if placed >= MAX_PARTIALS {
+                    break;
+                }
+                let jitter =
+                    1.0 + 0.14 * (hash01((note as u32) << 8 | seed) - 0.5);
+                let amplitude = clack_level * level;
+                let decay = self.decay_per_sample(t60);
+                partials[placed] = Partial {
+                    verticals: [
+                        Component::start(amplitude, freq * jitter, decay, sample_rate),
+                        Component::default(),
+                        Component::default(),
+                    ],
+                    bloom: Component::start(-amplitude, freq * jitter, rise, sample_rate),
+                    ..Partial::default()
+                };
+                placed += 1;
+            }
+        }
+
         // Constant-power pan by key position, narrowed by the width control.
         let spread = (position - 0.5) * self.controls.width;
         let angle = (0.5 + spread * 0.8) * core::f32::consts::FRAC_PI_2;
@@ -2686,7 +2743,7 @@ impl ConcertGrand {
         // mid and treble notes than strings alone can explain. Three short
         // dark components stand in for it.
         {
-            let thump_level = powf(velocity, 1.9) * 0.046 * 0.32 * (1.0 - 0.35 * position)
+            let thump_level = powf(velocity, 1.9) * 0.095 * 0.32 * (1.0 - 0.35 * position)
                 * self.controls.lab(2)
                 * self.cal(note, 2);
             let rise = expf(-1.0 / (0.004 * sample_rate));
@@ -2812,7 +2869,16 @@ impl ConcertGrand {
         // own tone measuring 6-22 dB under the reference in 1-4 kHz, since
         // noisiness is a share of the total — fixing that is the real repair,
         // and this taper is not a substitute for it.
-        let action = 1.0 - 0.85 * ((position - 0.5) / 0.5).max(0.0);
+        // The action does not shrink to nothing at the top of the compass.
+        // A taper here used to cut the treble knock by up to 16 dB, put in
+        // when the treble's own tone measured far too weak and everything
+        // read as noise on top of it. The tone is healthy now, and measured
+        // against the samples the truth is the opposite of the taper:
+        // A6's mechanism noise sits only ~10 dB under its fundamental in the
+        // recording, and this model had it 25 to 31 dB short between 300 Hz
+        // and 3 kHz. The key, the jack and the shank are the same size up
+        // there; only the string got small.
+        let action = 1.0 - 0.25 * ((position - 0.5) / 0.5).max(0.0);
         voice.noise_amp = velocity * velocity * KNOCK_LEVEL * action * chiff_mult;
         voice.noise_decay = noise_decay;
         voice.noise_coefficient = noise_coefficient;
@@ -2936,6 +3002,14 @@ impl ConcertGrand {
     }
 
     fn set_pedal(&mut self, down: bool) {
+        if down != self.pedal {
+            // The pedal is a mechanism too: the rail lifts twenty dampers
+            // off the strings going down, and drops them all back at once
+            // coming up -- which is why the release is the louder of the
+            // two on every recording of pedalled playing.
+            let knock = if down { 0.006 } else { 0.011 };
+            self.pedal_noise_amp = self.pedal_noise_amp.max(knock);
+        }
         self.pedal = down;
         if !down {
             let (thud_coefficient, thud_decay) = self.damper_thud();
@@ -3489,6 +3563,20 @@ impl Processor for ConcertGrand {
                 + open_right * OPEN_MIX * sympathy * HEADROOM
                 + halo_right * HEADROOM
                 + lid_right * air * HEADROOM * self.direct_gain;
+            if self.pedal_noise_amp > 1e-6 {
+                self.pedal_noise_seed = self
+                    .pedal_noise_seed
+                    .wrapping_mul(1_664_525)
+                    .wrapping_add(1_013_904_223);
+                let white =
+                    (self.pedal_noise_seed >> 9) as f32 * (1.0 / 4_194_304.0) - 1.0;
+                // Dark and woody: the rail speaks through the case.
+                self.pedal_noise_lp += 0.035 * (white - self.pedal_noise_lp);
+                let knock = self.pedal_noise_lp * self.pedal_noise_amp;
+                direct_left += knock;
+                direct_right += knock;
+                self.pedal_noise_amp *= 0.9996;
+            }
             // Proximity: the pressure-gradient microphone's low end rises
             // with 1/r. A 120 Hz shelf whose gain follows the pattern and
             // the distance -- an omni has none, a ribbon up close blooms.

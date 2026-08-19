@@ -607,6 +607,36 @@ undamped reverberator — a four-line high-passed feedback network
 statistics. Both are fed from the bridge sum and calibrated against the
 YDP's windowed high-frequency decay.
 
+### The action's noise (tested by measurement)
+
+A piano strikes wood and felt as well as strings, and in the top octaves the
+string is too small to mask any of it. Measured on the reference's own
+samples: A6's mechanism noise sits only ~10 dB under its fundamental in the
+recording, and this model had it **25–31 dB short** between 300 Hz and
+3 kHz — the missing source the fit had been pointing at for weeks with
+`chiff` pinned to its ×4 ceiling at the top calibration anchors.
+
+Three mechanisms, each calibrated against the samples per register:
+
+* **The keybed thud** (existing burst + low components, levels raised to the
+  measured ones). Its old register taper — −16 dB by the top — was
+  compensating a treble tone that measured too weak; with the tone healthy,
+  the taper inverted the truth. The key and keybed are the same size up
+  there; only the string got small.
+* **The clack**: the let-off and the hammer shank are wood, and knocked wood
+  rings briefly at its own modes. Three damped components in the 0.7–3 kHz
+  body, T60s of tens of ms, frequencies climbing ~30 % across the compass
+  (shorter shanks knock higher), jittered per note.
+* **Release and pedal**: a key released clunks even over a silent string
+  (floor added to the release thud), and the pedal is a mechanism too — a
+  one-shot dark burst on each CC64 edge, heavier on release, when the whole
+  damper rail lands back on the strings.
+
+After calibration the treble attack bands sit within ~3 dB of the samples
+(F#7: −15.3/−6.9/−8.8 dB against the real −12.9/−10.0/−6.4), and the fit
+cost's own noise component fell from 8.24 to 6.54 dB — the metric had been
+pricing exactly this absence.
+
 ### Dampers and the sustain pedal (tested)
 
 Releasing a key drops a damper on the string: the model multiplies each

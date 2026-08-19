@@ -523,7 +523,16 @@ async fn main() -> Result<()> {
         )?),
         resource_upload_root: root.join("state/resource-uploads"),
     });
-    let static_files = ServeDir::new(&web_root).fallback(ServeFile::new(index));
+    // The same cache contract the desktop's embedded server uses, because
+    // the drift bit for real: without a Cache-Control header, a phone
+    // browser held the SPA's index by heuristic caching for days and showed
+    // an interface other hosts had left behind. Vite's hashed assets are
+    // immutable by name; everything else -- index.html above all -- must
+    // revalidate on every load.
+    let static_files = tower::Layer::layer(
+        &axum::middleware::from_fn(spa_cache_headers),
+        ServeDir::new(&web_root).fallback(ServeFile::new(index)),
+    );
     let app = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/auth/status", get(auth_status))
@@ -2248,6 +2257,23 @@ async fn plugin_web_asset(
             plugin_document_csp(&headers, &plugin_id),
         );
     }
+    response
+}
+
+async fn spa_cache_headers(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let immutable = request.uri().path().starts_with("/assets/");
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static(if immutable {
+            "public, max-age=31536000, immutable"
+        } else {
+            "no-cache"
+        }),
+    );
     response
 }
 

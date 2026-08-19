@@ -122,27 +122,33 @@ contains a bitmap, image, canvas, or framebuffer upload operation.
 
 ### Pixel-control research
 
-The physical display is a monochrome 128×64 framebuffer: 1,024 bytes using
-`buffer[(y >> 3) * 128 + x]`, bit `y & 7`. Offline analysis of the exact
-1.2.1 binary located internal set/read-pixel and present routines, including a
-page-oriented 8 × 128-byte LCD transfer compatible with the ST7565 family.
+The display cannot show a host-supplied bitmap, and this is settled rather
+than assumed: firmware 1.2.1 was disassembled to answer it.
 
-Those addresses are firmware-version details, not an ABI. The runtime USB
-descriptor exposes MIDI Streaming and DFU runtime, with no HID or proprietary
-bulk graphics endpoint.
+- The panel is a monochrome 128x64 ST7565-family display, drawn from a
+  1,024-byte framebuffer in RAM and flushed eight pages at a time.
+- **Only the internal rasterizer writes that framebuffer.** The whole
+  image contains exactly one instruction referencing it: the
+  initialisation. Every other access goes through the display context, and
+  the pointer is only ever aimed at an internal buffer.
+- The only SysEx route to the display, command `04`, accumulates its body
+  one byte at a time into a buffer **capped at 100 bytes**, then reads it
+  as a widget descriptor. It cannot carry a 1,024-byte frame, and it never
+  interprets bytes as pixels.
+- Four undocumented top-level commands exist (`0A`, `0C`, `23`, `25`).
+  All of them land in that same bounded descriptor path.
+- The runtime USB descriptor exposes MIDI Streaming and DFU runtime, with
+  no HID or proprietary bulk graphics endpoint.
 
-Operational conclusion:
+So RackForge composes screens from the official widgets and glyphs, and
+`eWhiteScreen` clears content rather than lighting every pixel.
 
-- official firmware exposes structured widgets, not verified arbitrary pixels;
-- the display hardware can render a real 128×64 graph internally;
-- host pixel control would require an undiscovered bounded SysEx command or a
-  firmware extension;
-- RackForge does not probe random IDs or payloads on user hardware.
-
-Physical tests of `eWhiteScreen` with the required closing `00` cleared the
-content/returned to the DAW template; they did not fill all pixels. The removed
-`framebuffer-test` and `screen-fill` commands must not be restored unless a
-real transport primitive is proven.
+Two attempts have now been made at pixel control. The first invented a
+SysEx opcode no firmware implements; the second confirmed by disassembly
+that no such opcode exists to find. **Do not add a framebuffer transport
+here unless a real primitive is proven on hardware first.** Arbitrary
+pixels would need a modified firmware, which is out of scope for RackForge
+and lives in its own project.
 
 ### Contextual footer
 

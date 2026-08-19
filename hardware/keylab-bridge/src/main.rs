@@ -1,5 +1,4 @@
 mod controller;
-mod framebuffer;
 mod host_controls;
 
 use host_controls::{HostControlEvent, PanFollower, coalesce_host_control_events, pan_header_text};
@@ -127,11 +126,6 @@ enum Command {
         seconds: u64,
         execute: bool,
     },
-    FramebufferDemo {
-        selector: Option<String>,
-        seconds: u64,
-        execute: bool,
-    },
     Serve {
         selector: Option<String>,
         execute: bool,
@@ -203,14 +197,6 @@ fn run() -> Result<(), Box<dyn Error>> {
             let selected = select_port(&ports, selector.as_deref())?;
             run_menu_demo(midi, selected, seconds, execute)?;
         }
-        Command::FramebufferDemo {
-            selector,
-            seconds,
-            execute,
-        } => {
-            let selected = select_port(&ports, selector.as_deref())?;
-            run_framebuffer_demo(midi, selected, seconds, execute)?;
-        }
         Command::Serve { selector, execute } => {
             run_serve(selector.as_deref(), execute)?;
         }
@@ -246,7 +232,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Cli, String> {
     }
     if !matches!(
         command,
-        Some("demo" | "menu-demo" | "framebuffer-demo" | "serve" | "restore" | "led-demo")
+        Some("demo" | "menu-demo" | "serve" | "restore" | "led-demo")
     ) {
         return Err(usage("Comando desconocido"));
     }
@@ -265,7 +251,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Cli, String> {
                         .clone(),
                 );
             }
-            "--seconds" if matches!(command, Some("demo" | "menu-demo" | "framebuffer-demo")) => {
+            "--seconds" if matches!(command, Some("demo" | "menu-demo")) => {
                 index += 1;
                 seconds = args
                     .get(index)
@@ -283,11 +269,6 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Cli, String> {
     }
     let command = match command {
         Some("menu-demo") => Command::MenuDemo {
-            selector,
-            seconds,
-            execute,
-        },
-        Some("framebuffer-demo") => Command::FramebufferDemo {
             selector,
             seconds,
             execute,
@@ -313,7 +294,6 @@ fn usage(reason: &str) -> String {
            rackforge-arturia-keylab-essential-mk3-driver list\n\
            rackforge-arturia-keylab-essential-mk3-driver demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
            rackforge-arturia-keylab-essential-mk3-driver menu-demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
-           rackforge-arturia-keylab-essential-mk3-driver framebuffer-demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
            rackforge-arturia-keylab-essential-mk3-driver serve [--port ID|NOMBRE] [--execute]\n\
            rackforge-arturia-keylab-essential-mk3-driver restore [--port ID|NOMBRE] [--execute]\n\
            rackforge-arturia-keylab-essential-mk3-driver led-demo [--port ID|NOMBRE] [--execute]"
@@ -903,36 +883,6 @@ fn run_menu_demo(
     Ok(())
 }
 
-fn run_framebuffer_demo(
-    midi: MidiOutput,
-    port: &PortInfo,
-    seconds: u64,
-    execute: bool,
-) -> Result<(), Box<dyn Error>> {
-    let messages = framebuffer::solid_upload(true);
-    println!(
-        "Puerto: [{}] {}\nFrame completo: {} mensajes acotados",
-        port.index,
-        port.name,
-        messages.len()
-    );
-    if !execute {
-        println!("DRY-RUN: no se enviará el framebuffer.");
-        return Ok(());
-    }
-
-    let mut session = KeyLabSession::open(midi, port)?;
-    session.start()?;
-    for message in &messages {
-        session.send(message)?;
-        thread::sleep(Duration::from_millis(2));
-    }
-    println!("Framebuffer sólido activo durante {seconds} segundos...");
-    thread::sleep(Duration::from_secs(seconds));
-    session.restore()?;
-    println!("Prueba de framebuffer finalizada; programa Arturia restaurado.");
-    Ok(())
-}
 
 /// Where the host keeps this controller's user settings, if it told us.
 fn controller_settings_path() -> Option<std::path::PathBuf> {

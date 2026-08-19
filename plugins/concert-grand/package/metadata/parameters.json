@@ -25,6 +25,11 @@
       "id": "room",
       "name": "Room & Microphones",
       "order": 4
+    },
+    {
+      "id": "action",
+      "name": "Action",
+      "order": 5
     }
   ],
   "parameters": [
@@ -440,6 +445,48 @@
       "name": "Mic Pattern (omni to ribbon)",
       "page": "room",
       "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 27,
+      "id": "action_noise",
+      "name": "Action Noise",
+      "page": "action",
+      "order": 0,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 28,
+      "id": "release_noise",
+      "name": "Release Noise",
+      "page": "action",
+      "order": 1,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 29,
+      "id": "pedal_noise",
+      "name": "Pedal Noise",
+      "page": "action",
+      "order": 2,
       "kind": {
         "type": "float",
         "minimum": 0.0,

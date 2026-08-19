@@ -256,7 +256,10 @@ const PARAM_ROOM_SIZE: u32 = 23;
 const PARAM_ROOM_HARDNESS: u32 = 24;
 const PARAM_MIC_DISTANCE: u32 = 25;
 const PARAM_MIC_PATTERN: u32 = 26;
-const PARAM_COUNT: usize = 6 + LAB_COUNT + 4;
+const PARAM_ACTION_NOISE: u32 = 27;
+const PARAM_RELEASE_NOISE: u32 = 28;
+const PARAM_PEDAL_NOISE: u32 = 29;
+const PARAM_COUNT: usize = 6 + LAB_COUNT + 7;
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
 /// entries are pre-scaled by the per-sample decay factor `g`, so magnitude
@@ -994,7 +997,13 @@ impl Voice {
     /// Drops the damper: the partials die fast, and the felt landing on the
     /// moving string thuds — the release noise every sampled library ships,
     /// scaled by how hard the string was still vibrating.
-    fn damp(&mut self, factor: f32, thud_coefficient: f32, thud_decay: f32) {
+    fn damp(
+        &mut self,
+        factor: f32,
+        thud_coefficient: f32,
+        thud_decay: f32,
+        release_gain: f32,
+    ) {
         for partial in &mut self.partials[..self.partial_count] {
             for vertical in &mut partial.verticals {
                 vertical.damp(factor);
@@ -1006,7 +1015,8 @@ impl Voice {
         // their own, whether or not the string still carries energy: release
         // a silent key on a real action and it still says something. The
         // string-energy term rides on top for notes damped while loud.
-        let thud = (0.004 + 0.10 * sqrtf(self.energy)).min(0.028);
+        let thud =
+            ((0.004 + 0.10 * sqrtf(self.energy)) * release_gain).min(0.045);
         if thud > self.noise_amp {
             self.noise_amp = thud;
             self.noise_coefficient = thud_coefficient;
@@ -1034,6 +1044,12 @@ struct Controls {
     room_hardness: f32,
     mic_distance: f32,
     mic_pattern: f32,
+    /// The mechanism's voices, each on its own fader: the strike's knock and
+    /// clack, the key coming back, and the pedal. Same curve as the lab --
+    /// bottom is off, centre is the calibrated level, the top is x16.
+    action_noise: f32,
+    release_noise: f32,
+    pedal_noise: f32,
 }
 
 impl Default for Controls {
@@ -1051,12 +1067,24 @@ impl Default for Controls {
             room_hardness: 0.45,
             mic_distance: 0.46,
             mic_pattern: 0.5,
+            action_noise: 0.5,
+            release_noise: 0.5,
+            pedal_noise: 0.5,
         }
     }
 }
 
 impl Controls {
     /// Lab multiplier i: 0..1 slider -> off..x16, centre = x1.
+
+    /// The lab curve for a standalone control: off at the bottom, x1 at
+    /// the centre, x16 at the top.
+    fn noise_gain(value: f32) -> f32 {
+        if value <= 0.02 {
+            return 0.0;
+        }
+        powf(256.0, value - 0.5)
+    }
 
     fn lab(&self, i: usize) -> f32 {
         // The bottom of the travel is off, not a quarter. Mapping the whole
@@ -1092,6 +1120,9 @@ impl Controls {
             PARAM_ROOM_HARDNESS => self.room_hardness,
             PARAM_MIC_DISTANCE => self.mic_distance,
             PARAM_MIC_PATTERN => self.mic_pattern,
+            PARAM_ACTION_NOISE => self.action_noise,
+            PARAM_RELEASE_NOISE => self.release_noise,
+            PARAM_PEDAL_NOISE => self.pedal_noise,
             _ => return None,
         };
         Some(value as f64)
@@ -1114,7 +1145,10 @@ impl Controls {
             PARAM_ROOM_HARDNESS => self.room_hardness = value,
             PARAM_MIC_DISTANCE => self.mic_distance = value,
             PARAM_MIC_PATTERN => self.mic_pattern = value,
-            // (the engine watches these through `room_dirty` in process)
+            PARAM_ACTION_NOISE => self.action_noise = value,
+            PARAM_RELEASE_NOISE => self.release_noise = value,
+            PARAM_PEDAL_NOISE => self.pedal_noise = value,
+            // (the engine watches the room block through `room_dirty`)
             _ => return false,
         }
         true
@@ -2099,9 +2133,10 @@ impl ConcertGrand {
         // released key.
         let restrike = expf(-1.0 / (0.25 * self.sample_rate));
         let (thud_coefficient, thud_decay) = self.damper_thud();
+        let release_gain = Controls::noise_gain(self.controls.release_noise);
         for voice in &mut self.voices {
             if voice.active && voice.note == note && voice.channel == channel {
-                voice.damp(restrike, thud_coefficient, thud_decay);
+                voice.damp(restrike, thud_coefficient, thud_decay, release_gain);
             }
         }
 
@@ -2700,7 +2735,8 @@ impl ConcertGrand {
         // does not ring as one bell.
         let clack_level = velocity * velocity * KNOCK_LEVEL * 8.0
             * (1.0 - 0.25 * ((position - 0.5) / 0.5).max(0.0))
-            * self.controls.lab(3);
+            * self.controls.lab(3)
+            * Controls::noise_gain(self.controls.action_noise);
         if clack_level > 1e-5 {
             let rise = expf(-1.0 / (0.0012 * sample_rate));
             // The shank is shorter under a treble hammer, so its knock
@@ -2744,6 +2780,7 @@ impl ConcertGrand {
         // dark components stand in for it.
         {
             let thump_level = powf(velocity, 1.9) * 0.095 * 0.32 * (1.0 - 0.35 * position)
+                * Controls::noise_gain(self.controls.action_noise)
                 * self.controls.lab(2)
                 * self.cal(note, 2);
             let rise = expf(-1.0 / (0.004 * sample_rate));
@@ -2803,6 +2840,7 @@ impl ConcertGrand {
             * self.controls.lab(10);
         let longitudinal_gain = LONGITUDINAL_MIX * self.controls.lab(5);
         let longitudinal_upper = self.controls.lab(4);
+        let action_gain = Controls::noise_gain(self.controls.action_noise);
         let Some(voice) = self.allocate_voice() else { return };
         voice.active = true;
         voice.note = note;
@@ -2879,7 +2917,8 @@ impl ConcertGrand {
         // and 3 kHz. The key, the jack and the shank are the same size up
         // there; only the string got small.
         let action = 1.0 - 0.25 * ((position - 0.5) / 0.5).max(0.0);
-        voice.noise_amp = velocity * velocity * KNOCK_LEVEL * action * chiff_mult;
+        voice.noise_amp =
+            velocity * velocity * KNOCK_LEVEL * action * chiff_mult * action_gain;
         voice.noise_decay = noise_decay;
         voice.noise_coefficient = noise_coefficient;
         voice.noise_body = 0.0;
@@ -2989,13 +3028,14 @@ impl ConcertGrand {
     fn release(&mut self, channel: u8, note: u8) {
         let damper = self.damper_factor(note);
         let (thud_coefficient, thud_decay) = self.damper_thud();
+        let release_gain = Controls::noise_gain(self.controls.release_noise);
         for voice in &mut self.voices {
             if voice.active && voice.note == note && voice.channel == channel && voice.held {
                 if self.pedal {
                     voice.held = false;
                     voice.sustained = true;
                 } else {
-                    voice.damp(damper, thud_coefficient, thud_decay);
+                    voice.damp(damper, thud_coefficient, thud_decay, release_gain);
                 }
             }
         }
@@ -3007,17 +3047,20 @@ impl ConcertGrand {
             // off the strings going down, and drops them all back at once
             // coming up -- which is why the release is the louder of the
             // two on every recording of pedalled playing.
-            let knock = if down { 0.006 } else { 0.011 };
+            let knock = (if down { 0.006 } else { 0.011 })
+                * Controls::noise_gain(self.controls.pedal_noise);
             self.pedal_noise_amp = self.pedal_noise_amp.max(knock);
         }
         self.pedal = down;
         if !down {
             let (thud_coefficient, thud_decay) = self.damper_thud();
+        let release_gain = Controls::noise_gain(self.controls.release_noise);
+            let release_gain = Controls::noise_gain(self.controls.release_noise);
             let rate = self.sample_rate;
             for voice in &mut self.voices {
                 if voice.active && voice.sustained {
                     let damper = Self::damper_for(voice.note, rate);
-                    voice.damp(damper, thud_coefficient, thud_decay);
+                    voice.damp(damper, thud_coefficient, thud_decay, release_gain);
                 }
             }
         }
@@ -3025,11 +3068,12 @@ impl ConcertGrand {
 
     fn all_notes_off(&mut self) {
         let (thud_coefficient, thud_decay) = self.damper_thud();
+        let release_gain = Controls::noise_gain(self.controls.release_noise);
         let rate = self.sample_rate;
         for voice in &mut self.voices {
             if voice.active {
                 let damper = Self::damper_for(voice.note, rate);
-                voice.damp(damper, thud_coefficient, thud_decay);
+                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
             }
         }
         self.pedal = false;
@@ -3184,6 +3228,9 @@ impl Processor for ConcertGrand {
                 room_hardness: 0.3,
                 mic_distance: 0.45,
                 mic_pattern: 0.8,
+                action_noise: 0.5,
+                release_noise: 0.5,
+                pedal_noise: 0.5,
             },
             // Bright: a harder, livelier hall, closer cardioids.
             "bright" => Controls {
@@ -3198,6 +3245,9 @@ impl Processor for ConcertGrand {
                 room_hardness: 0.7,
                 mic_distance: 0.3,
                 mic_pattern: 0.5,
+                action_noise: 0.5,
+                release_noise: 0.5,
+                pedal_noise: 0.5,
             },
             // Intimate: a small damped room, the pair right at the rim,
             // enough gradient in the pattern for the proximity warmth.
@@ -3213,6 +3263,9 @@ impl Processor for ConcertGrand {
                 room_hardness: 0.35,
                 mic_distance: 0.08,
                 mic_pattern: 0.6,
+                action_noise: 0.5,
+                release_noise: 0.5,
+                pedal_noise: 0.5,
             },
             _ => return false,
         };
@@ -3235,6 +3288,9 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 1] = self.controls.room_hardness;
         values[6 + LAB_COUNT + 2] = self.controls.mic_distance;
         values[6 + LAB_COUNT + 3] = self.controls.mic_pattern;
+        values[6 + LAB_COUNT + 4] = self.controls.action_noise;
+        values[6 + LAB_COUNT + 5] = self.controls.release_noise;
+        values[6 + LAB_COUNT + 6] = self.controls.pedal_noise;
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.chunks_exact_mut(4).zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -3273,6 +3329,9 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 1] = defaults.room_hardness;
         values[6 + LAB_COUNT + 2] = defaults.mic_distance;
         values[6 + LAB_COUNT + 3] = defaults.mic_pattern;
+        values[6 + LAB_COUNT + 4] = defaults.action_noise;
+        values[6 + LAB_COUNT + 5] = defaults.release_noise;
+        values[6 + LAB_COUNT + 6] = defaults.pedal_noise;
         // A 37-float state is from the era of the "in bass" tilt twins: its
         // tail is tilt values, not room values, and reading it into the room
         // controls would set the hall from leftovers. Take its head only.
@@ -3310,6 +3369,9 @@ impl Processor for ConcertGrand {
             room_hardness: values[6 + LAB_COUNT + 1],
             mic_distance: values[6 + LAB_COUNT + 2],
             mic_pattern: values[6 + LAB_COUNT + 3],
+            action_noise: values[6 + LAB_COUNT + 4],
+            release_noise: values[6 + LAB_COUNT + 5],
+            pedal_noise: values[6 + LAB_COUNT + 6],
         };
         self.room_dirty = true;
         true

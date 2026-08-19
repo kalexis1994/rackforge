@@ -128,7 +128,7 @@ const LONGITUDINAL_SOURCES: usize = 32;
 /// appear while the partials that feed it are missing, which means the hole
 /// in partials 6-10 and the absent metallic character are one problem and not
 /// two. Raising this constant cannot substitute for the partials.
-const LONGITUDINAL_MIX: f32 = 6.0;
+const LONGITUDINAL_MIX: f32 = 0.0;
 /// How hard the string's own stretch pulls it sharp. Sized so a fortissimo
 /// bass strike sharpens a few cents and settles as it decays, which is what
 /// measured piano glides do.

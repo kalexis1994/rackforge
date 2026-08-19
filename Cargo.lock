@@ -3987,6 +3987,7 @@ dependencies = [
  "getrandom 0.3.4",
  "mime_guess",
  "rackforge-control-api",
+ "rackforge-controller-package",
  "rackforge-plugin-api",
  "rackforge-repository",
  "rackforge-resource-api",

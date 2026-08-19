@@ -132,6 +132,10 @@ pub struct VoiceSpec {
     pub plugin: &'static LoadedPlugin,
     pub preset_id: Option<String>,
     pub resources: BTreeMap<String, PathBuf>,
+    /// The player's last live state, restored so the faders mean what they
+    /// meant yesterday. Panel edits used to live only in the running
+    /// instance and every restart silently reset them.
+    pub initial_state: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -658,6 +662,12 @@ impl DesktopAudio {
         receive_control_response(receiver, "set plugin parameter")
     }
 
+    pub fn save_active_state(&self) -> Result<Vec<u8>> {
+        let (reply, receiver) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::SaveActiveState { reply })?;
+        receive_control_response(receiver, "save plugin state")
+    }
+
     pub fn replace_voice(&self, spec: VoiceSpec) -> Result<()> {
         let voice = prepare_audio_voice(spec, self.sample_rate)?;
         self.send_command(AudioCommand::ReplaceVoice(voice))
@@ -749,6 +759,9 @@ impl DesktopAudio {
 
 enum AudioCommand {
     SelectPlugin(String),
+    SaveActiveState {
+        reply: SyncSender<std::result::Result<Vec<u8>, String>>,
+    },
     SelectSound {
         instance_id: String,
         sound_id: String,
@@ -983,6 +996,14 @@ impl AudioProcessor {
                         self.voices[self.active_voice].instance.0.reset()?;
                         self.active_voice = index;
                     }
+                }
+                AudioCommand::SaveActiveState { reply } => {
+                    let result = self.voices[self.active_voice]
+                        .instance
+                        .0
+                        .save_state()
+                        .map_err(|error| error.to_string());
+                    let _ = reply.try_send(result);
                 }
                 AudioCommand::SelectSound {
                     instance_id,
@@ -1235,6 +1256,16 @@ fn prepare_audio_voice(spec: VoiceSpec, sample_rate: u32) -> Result<AudioVoice> 
         instance
             .load_preset(preset_id)
             .with_context(|| format!("loading preset {preset_id:?} for the audio engine"))?;
+    }
+    if let Some(state) = spec.initial_state.as_deref() {
+        // Best effort: a state from an incompatible build is simply skipped
+        // and the plugin keeps its defaults.
+        if let Err(error) = instance.load_state(state) {
+            eprintln!(
+                "DESKTOP_LIVE_STATE_SKIPPED instance={} error={error:#}",
+                spec.instance_id
+            );
+        }
     }
     instance
         .activate(

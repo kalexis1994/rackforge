@@ -261,6 +261,9 @@ fn format_file_size(bytes: u64) -> String {
 }
 
 struct DesktopApp {
+    /// Set when a live panel edit has not been persisted yet: the state is
+    /// saved a breath after the last touch, and restored at the next start.
+    live_state_dirty: Option<Instant>,
     menu: Menu,
     session: Arc<RwLock<SessionState>>,
     session_checkpoint: SessionCheckpointStore,
@@ -426,7 +429,7 @@ impl DesktopApp {
                             defaults
                         }
                     };
-                    match start_desktop_audio(&plugins, &preferences, active_instance_id) {
+                    match start_desktop_audio(&plugins, &preferences, active_instance_id, &options.data_root.join("states/live")) {
                         Ok(audio) => (Some(preferences), Some(audio)),
                         Err(error) => {
                             let message = format!("Audio/MIDI unavailable: {error:#}");
@@ -549,6 +552,7 @@ impl DesktopApp {
             plugin_install: None,
             performance_repository,
             state_store,
+            live_state_dirty: None,
             virtual_midi: BTreeMap::new(),
             next_program_draft_id: 1,
             next_audition_lease_id: 1,
@@ -610,7 +614,7 @@ impl DesktopApp {
         {
             self.audio = None;
             if let Some(preferences) = self.audio_preferences.as_ref() {
-                match start_desktop_audio(&plugins, preferences, active_instance_id) {
+                match start_desktop_audio(&plugins, preferences, active_instance_id, &self.live_state_dir()) {
                     Ok(audio) => {
                         self.audio = Some(audio);
                         self.audio_recovery_at = None;
@@ -695,7 +699,7 @@ impl DesktopApp {
             .as_ref()
             .map(|id| id.as_str().to_owned());
         self.audio_recovery_at = None;
-        match start_desktop_audio(&self.plugins, &preferences, active.as_deref()) {
+        match start_desktop_audio(&self.plugins, &preferences, active.as_deref(), &self.live_state_dir()) {
             Ok(audio) => {
                 if let Err(error) = sync_desktop_audio(&audio, &self.session, &self.menu) {
                     self.status =
@@ -794,7 +798,7 @@ impl DesktopApp {
             .as_ref()
             .map(|id| id.as_str().to_owned());
         self.audio = None;
-        let candidate = match start_desktop_audio(&self.plugins, &preferences, active.as_deref()) {
+        let candidate = match start_desktop_audio(&self.plugins, &preferences, active.as_deref(), &self.live_state_dir()) {
             Ok(audio) => audio,
             Err(error) => {
                 return match self.restore_audio(previous.as_ref(), active.as_deref()) {
@@ -836,8 +840,13 @@ impl DesktopApp {
     ) -> Result<()> {
         self.audio = preferences
             .map(|preferences| {
-                start_desktop_audio(&self.plugins, preferences, active_instance_id)
-                    .context("reopening the previous audio stream")
+                start_desktop_audio(
+                    &self.plugins,
+                    preferences,
+                    active_instance_id,
+                    &self.options.data_root.join("states/live"),
+                )
+                .context("reopening the previous audio stream")
             })
             .transpose()?;
         if let Some(audio) = &self.audio {
@@ -1427,6 +1436,47 @@ impl DesktopApp {
         }
     }
 
+    fn live_state_dir(&self) -> PathBuf {
+        self.options.data_root.join("states/live")
+    }
+
+    /// Persists the active instrument's live state. Called a moment after
+    /// the last panel edit, and at shutdown; restarts then mean what the
+    /// player left, not the factory floor.
+    fn flush_live_state(&mut self) {
+        self.live_state_dirty = None;
+        #[cfg(windows)]
+        {
+            let Some(audio) = self.audio.as_ref() else { return };
+            let active = self
+                .session
+                .read()
+                .expect("session lock poisoned")
+                .active_instance_id
+                .clone();
+            let Some(active) = active else { return };
+            let Some(plugin) = self
+                .plugins
+                .iter()
+                .find(|plugin| plugin.instance_id == active.as_str())
+            else {
+                return;
+            };
+            match audio.save_active_state() {
+                Ok(bytes) => {
+                    let dir = self.live_state_dir();
+                    let path = live_state_path(&dir, &plugin.plugin_id);
+                    if let Err(error) =
+                        fs::create_dir_all(&dir).and_then(|_| fs::write(&path, &bytes))
+                    {
+                        eprintln!("DESKTOP_LIVE_STATE_WRITE_FAILED {error:#}");
+                    }
+                }
+                Err(error) => eprintln!("DESKTOP_LIVE_STATE_SAVE_FAILED {error:#}"),
+            }
+        }
+    }
+
     fn activate_plugin_id(&mut self, plugin_id: &str) -> Result<(), String> {
         if !self
             .plugins
@@ -1551,6 +1601,7 @@ impl DesktopApp {
             .iter()
             .position(|plugin| plugin.plugin_id == plugin_id)
             .ok_or_else(|| format!("Unknown Desktop plugin: {plugin_id}"))?;
+        let live_state_dir = self.live_state_dir();
         let plugin = &mut self.plugins[index];
         let import_targets = plugin
             .runtime
@@ -1647,6 +1698,7 @@ impl DesktopApp {
                         plugin: plugin.runtime,
                         preset_id: selected_sound_id.clone(),
                         resources: plugin.resources.clone(),
+                        initial_state: read_live_state(&live_state_dir, &plugin.plugin_id),
                     })?;
                 }
                 Ok((instance, catalog, selected_sound_id))
@@ -2264,11 +2316,14 @@ impl DesktopApp {
         let result: std::result::Result<f64, String> = Err("Desktop audio is unavailable".into());
 
         match result {
-            Ok(value) => ControlResponse::PluginParameterSet {
-                instance_id: instance_id.clone(),
-                parameter_index,
-                value,
-            },
+            Ok(value) => {
+                self.live_state_dirty = Some(Instant::now());
+                ControlResponse::PluginParameterSet {
+                    instance_id: instance_id.clone(),
+                    parameter_index,
+                    value,
+                }
+            }
             Err(message) => ControlResponse::Error {
                 code: ControlErrorCode::Rejected,
                 message: format!("Could not set plugin parameter: {message}"),
@@ -2616,6 +2671,7 @@ impl DesktopApp {
         };
 
         self.status = format!("Loaded {sound_id}");
+        self.live_state_dirty = Some(Instant::now());
         #[cfg(windows)]
         if active
             && let Some(audio) = &self.audio
@@ -3496,6 +3552,11 @@ impl DesktopApp {
 
 impl eframe::App for DesktopApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(touched) = self.live_state_dirty
+            && touched.elapsed() >= Duration::from_millis(1500)
+        {
+            self.flush_live_state();
+        }
         #[cfg(windows)]
         self.poll_audio_error();
         #[cfg(windows)]
@@ -3672,7 +3733,10 @@ fn desktop_program_draft_state(
 }
 
 #[cfg(windows)]
-fn desktop_audio_specs(plugins: &[DesktopPlugin]) -> Vec<desktop_audio::VoiceSpec> {
+fn desktop_audio_specs(
+    plugins: &[DesktopPlugin],
+    live_state_dir: &Path,
+) -> Vec<desktop_audio::VoiceSpec> {
     plugins
         .iter()
         .map(|plugin| desktop_audio::VoiceSpec {
@@ -3680,8 +3744,18 @@ fn desktop_audio_specs(plugins: &[DesktopPlugin]) -> Vec<desktop_audio::VoiceSpe
             plugin: plugin.runtime,
             preset_id: plugin.selected_sound_id.clone(),
             resources: plugin.resources.clone(),
+            initial_state: read_live_state(live_state_dir, &plugin.plugin_id),
         })
         .collect()
+}
+
+/// Where a plugin's live panel state sleeps between sessions.
+fn live_state_path(dir: &Path, plugin_id: &str) -> PathBuf {
+    dir.join(format!("{plugin_id}.rfstate"))
+}
+
+fn read_live_state(dir: &Path, plugin_id: &str) -> Option<Vec<u8>> {
+    fs::read(live_state_path(dir, plugin_id)).ok()
 }
 
 #[cfg(windows)]
@@ -3689,9 +3763,10 @@ fn start_desktop_audio(
     plugins: &[DesktopPlugin],
     preferences: &desktop_audio::AudioPreferences,
     active_instance_id: Option<&str>,
+    live_state_dir: &Path,
 ) -> Result<desktop_audio::DesktopAudio> {
     desktop_audio::DesktopAudio::start(
-        desktop_audio_specs(plugins),
+        desktop_audio_specs(plugins, live_state_dir),
         preferences,
         active_instance_id,
     )
@@ -3974,6 +4049,15 @@ impl RackForgeApp {
 }
 
 impl eframe::App for RackForgeApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // The player's last touches survive the window closing.
+        if let AppMode::Desktop(app) = &mut self.mode
+            && app.live_state_dirty.is_some()
+        {
+            app.flush_live_state();
+        }
+    }
+
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         let transition = match &mut self.mode {
             AppMode::Setup {

@@ -2066,6 +2066,30 @@ impl DesktopApp {
                     Err("Program audition lease is missing or no longer valid".into())
                 }
             }
+            SessionCommand::RegisterHostBindings {
+                controller_id,
+                controls,
+                actions,
+            } => {
+                // A controller driver reserving its host-control CCs. On this
+                // host the driver owns its surface endpoint exclusively (the
+                // desktop's MIDI capture yields it), so the reservation is
+                // satisfied by construction: nothing else reads those CCs.
+                // Validate and acknowledge.
+                if controls.iter().any(|binding| binding.midi_cc.validate().is_err())
+                    || actions.iter().any(|binding| binding.midi_cc.validate().is_err())
+                {
+                    Err("invalid reserved host binding registration".into())
+                } else {
+                    println!(
+                        "DESKTOP_HOST_BINDINGS_RESERVED controller={} controls={} actions={}",
+                        controller_id,
+                        controls.len(),
+                        actions.len()
+                    );
+                    Ok(Vec::new())
+                }
+            }
             other => Err(format!(
                 "Desktop does not support this command yet: {other:?}"
             )),

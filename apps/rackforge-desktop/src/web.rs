@@ -496,7 +496,11 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
         )
         .route("/ws/v1/session", get(session_socket))
         .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_asset))
-        .route("/api/v1/controllers", get(controller_catalog));
+        .route("/api/v1/controllers", get(controller_catalog))
+        .route(
+            "/api/v1/controllers/{controller_id}/settings",
+            axum::routing::put(apply_controller_settings),
+        );
     let router = if allow_native_resources {
         router
             .route("/api/v1/config", get(local_config).put(apply_web_settings))
@@ -1375,6 +1379,24 @@ async fn controller_catalog(State(state): State<WebState>) -> Response {
         .iter()
         .map(|controller| {
             let manifest = controller.package.manifest();
+            let stored = read_controller_settings(&state, &controller.record.id);
+            let settings: Vec<serde_json::Value> = manifest
+                .settings
+                .iter()
+                .map(|setting| {
+                    json!({
+                        "id": setting.id,
+                        "name": setting.name,
+                        "kind": format!("{:?}", setting.kind).to_ascii_lowercase(),
+                        "default": setting.default,
+                        "page": setting.page,
+                        "value": stored
+                            .get(&setting.id)
+                            .cloned()
+                            .unwrap_or_else(|| setting.default.clone()),
+                    })
+                })
+                .collect();
             json!({
                 "id": controller.record.id,
                 "name": manifest.name,
@@ -1383,10 +1405,92 @@ async fn controller_catalog(State(state): State<WebState>) -> Response {
                 "trust": format!("{:?}", controller.record.trust).to_ascii_lowercase(),
                 "runtime": format!("{:?}", manifest.runtime.kind),
                 "devices": manifest.devices.len(),
+                "settings": settings,
             })
         })
         .collect();
     Json(json!({"status": "ok", "controllers": controllers})).into_response()
+}
+
+fn controller_settings_path(state: &WebState, controller_id: &str) -> PathBuf {
+    state
+        .controllers_root
+        .join("state")
+        .join(controller_id)
+        .join("settings.toml")
+}
+
+fn read_controller_settings(state: &WebState, controller_id: &str) -> BTreeMap<String, String> {
+    fs::read_to_string(controller_settings_path(state, controller_id))
+        .ok()
+        .and_then(|text| toml::from_str::<BTreeMap<String, String>>(&text).ok())
+        .unwrap_or_default()
+}
+
+#[derive(Deserialize)]
+struct ControllerSettingsRequest {
+    values: BTreeMap<String, String>,
+}
+
+/// Persists user values for a controller's declared settings. Every key must
+/// exist in the manifest and every value must satisfy its kind; the driver
+/// watches the file and applies the change to the hardware within a second.
+async fn apply_controller_settings(
+    AxumPath(controller_id): AxumPath<String>,
+    State(state): State<WebState>,
+    Json(request): Json<ControllerSettingsRequest>,
+) -> Response {
+    let store = rackforge_controller_package::PackageStore::new(&state.controllers_root);
+    let installed = match store.resolve(&controller_id) {
+        Ok(installed) => installed,
+        Err(error) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"status": "error", "message": error.to_string()})),
+            )
+                .into_response();
+        }
+    };
+    let manifest = installed.package.manifest();
+    let mut values = read_controller_settings(&state, &controller_id);
+    for (id, value) in &request.values {
+        let Some(setting) = manifest.settings.iter().find(|setting| &setting.id == id) else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "status": "error",
+                    "message": format!("this controller declares no setting {id:?}"),
+                })),
+            )
+                .into_response();
+        };
+        if let Err(error) = setting.validate_value(value) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"status": "error", "message": error})),
+            )
+                .into_response();
+        }
+        values.insert(id.clone(), value.clone());
+    }
+    let path = controller_settings_path(&state, &controller_id);
+    let write = (|| -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let body = values
+            .iter()
+            .map(|(key, value)| format!("{key} = {value:?}\n"))
+            .collect::<String>();
+        let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+        fs::write(&temporary, body)?;
+        fs::rename(&temporary, &path)?;
+        Ok(())
+    })();
+    match write {
+        Ok(()) => Json(json!({"status": "ok", "values": values})).into_response(),
+        Err(error) => internal_error(error),
+    }
 }
 
 async fn plugin_asset(

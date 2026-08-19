@@ -199,6 +199,63 @@ pub struct ArtifactIntegrity {
     pub sha256: BTreeMap<String, String>,
 }
 
+/// One user-facing setting a controller package exposes. The host renders
+/// these generically (the panel is derived from the schema, never
+/// hardcoded), persists the values in the store, and hands them to the
+/// driver, which alone decides what a setting MEANS on its hardware.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControllerSetting {
+    pub id: String,
+    pub name: String,
+    pub kind: ControllerSettingKind,
+    pub default: String,
+    #[serde(default)]
+    pub page: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ControllerSettingKind {
+    /// An sRGB color, serialized as `#rrggbb`.
+    Color,
+}
+
+impl ControllerSetting {
+    pub fn validate(&self) -> Result<(), PackageError> {
+        if self.id.is_empty()
+            || !self
+                .id
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err(PackageError::InvalidManifest(format!(
+                "invalid setting id {:?}",
+                self.id
+            )));
+        }
+        self.validate_value(&self.default).map_err(|error| {
+            PackageError::InvalidManifest(format!("setting {:?}: {error}", self.id))
+        })
+    }
+
+    /// Whether `value` is admissible for this setting's kind.
+    pub fn validate_value(&self, value: &str) -> Result<(), String> {
+        match self.kind {
+            ControllerSettingKind::Color => {
+                let ok = value.len() == 7
+                    && value.starts_with('#')
+                    && value.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit);
+                if ok {
+                    Ok(())
+                } else {
+                    Err(format!("{value:?} is not an #rrggbb color"))
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ControllerPackageManifest {
@@ -218,6 +275,8 @@ pub struct ControllerPackageManifest {
     pub host_actions: Vec<HostActionBinding>,
     #[serde(default)]
     pub integrity: Option<ArtifactIntegrity>,
+    #[serde(default)]
+    pub settings: Vec<ControllerSetting>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -341,6 +400,18 @@ impl ControllerPackageManifest {
         }
         for device in &self.devices {
             device.validate()?;
+        }
+        for setting in &self.settings {
+            setting.validate()?;
+        }
+        let mut setting_ids = BTreeSet::new();
+        for setting in &self.settings {
+            if !setting_ids.insert(&setting.id) {
+                return Err(PackageError::InvalidManifest(format!(
+                    "duplicate setting id {:?}",
+                    setting.id
+                )));
+            }
         }
         ControllerProfile {
             id: self.id.clone(),

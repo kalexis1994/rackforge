@@ -46,6 +46,24 @@ starts the packaged driver, the desktop captures only the note ports,
 and the driver takes the OLED ("OLED bajo control de RackForge") and
 registers its host bindings through the bridge.
 
+Phase 2 opened the same day with its first real setting, verified live:
+the manifest schema (`[[settings]]` with typed kinds, `color` first),
+store persistence (`state/<id>/settings.toml`, written atomically by
+`PUT /api/v1/controllers/{id}/settings`, values validated against the
+schema), delivery by file-watch (the supervisor hands each driver
+`RACKFORGE_CONTROLLER_SETTINGS`; the driver applies changes within a
+second -- no shared-enum protocol change needed), and the generic
+config page (`/controllers/{id}`, reached from the controller's card):
+the KeyLab's `key-light-color` drives all 44 RGB LEDs through
+`set_ambient_led_rgb` (8-bit picker values halve to the SysEx 7-bit
+range), repainting live as the picker drags. Two host fixes on the way:
+the desktop accepts `RegisterHostBindings` (the driver owns its surface
+endpoint exclusively, so the reservation is satisfied by construction),
+and drivers tolerate hosts that lack it. And one hard-won rule: **a
+driver must never outlive its supervisor** -- the supervisor pipes the
+child's stdin and the driver exits on EOF, because orphaned drivers
+from force-killed hosts were holding MIDI ports hostage.
+
 Still next: the hardcoded KeyLab library leaves the desktop entirely
 (the yield flag and the built-in display path become dead code once the
 package is the only route); Android runs the same supervision loop with

@@ -161,12 +161,31 @@ pub fn supervise(root: &Path, options: &SuperviseOptions) -> Result<usize, Strin
                 }
             }
             if controller.child.is_none() && now >= controller.restart_at {
+                // Each driver also learns where ITS settings live: the host
+                // writes `state/<id>/settings.toml` in the store, the driver
+                // watches the file and applies changes to the hardware.
+                let mut env = options.extra_env.clone();
+                // The child watches this pipe: when the supervisor (or its
+                // whole host process) dies, the pipe closes and the driver
+                // exits instead of holding MIDI ports as an orphan.
+                env.push(("RACKFORGE_SUPERVISOR_PIPE".into(), "1".into()));
+                env.push((
+                    "RACKFORGE_CONTROLLER_SETTINGS".into(),
+                    root.join("state")
+                        .join(&controller.installed.record.id)
+                        .join("settings.toml")
+                        .to_string_lossy()
+                        .into_owned(),
+                ));
                 match controller_command(
                     &controller.installed,
                     &["serve".into(), "--execute".into()],
-                    &options.extra_env,
+                    &env,
                 )
-                .and_then(|mut command| command.spawn().map_err(|error| error.to_string()))
+                .and_then(|mut command| {
+                    command.stdin(Stdio::piped());
+                    command.spawn().map_err(|error| error.to_string())
+                })
                 {
                     Ok(child) => {
                         println!(

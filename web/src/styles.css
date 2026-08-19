@@ -9471,3 +9471,43 @@ body {
   width: 22px;
   height: 22px;
 }
+
+/* Controller configuration page */
+.controller-config {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.controller-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 520px;
+}
+
+.controller-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(140, 242, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(10, 20, 26, 0.6);
+}
+
+.controller-setting input[type="color"] {
+  width: 56px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(140, 242, 255, 0.3);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.controller-status {
+  color: var(--muted, #8ca3ad);
+  font-size: 0.85rem;
+}

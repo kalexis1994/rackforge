@@ -934,6 +934,60 @@ fn run_framebuffer_demo(
     Ok(())
 }
 
+/// Where the host keeps this controller's user settings, if it told us.
+fn controller_settings_path() -> Option<std::path::PathBuf> {
+    env::var_os("RACKFORGE_CONTROLLER_SETTINGS").map(std::path::PathBuf::from)
+}
+
+/// Applies the settings file when its mtime moves. Returns true when a
+/// value changed and the hardware should repaint. The only setting today
+/// is `key-light-color` (#rrggbb, scaled to the SysEx 7-bit range).
+fn refresh_controller_settings(
+    last_modified: &mut Option<std::time::SystemTime>,
+) -> bool {
+    let Some(path) = controller_settings_path() else {
+        return false;
+    };
+    let Ok(metadata) = std::fs::metadata(&path) else {
+        return false;
+    };
+    let modified = metadata.modified().ok();
+    if modified == *last_modified {
+        return false;
+    }
+    *last_modified = modified;
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(table) = text.parse::<toml::Table>() else {
+        eprintln!("SETTINGS_INVALID path={}", path.display());
+        return false;
+    };
+    let mut changed = false;
+    if let Some(value) = table.get("key-light-color").and_then(|value| value.as_str())
+        && let Some(rgb) = parse_hex_color(value)
+    {
+        // The picker speaks 8-bit sRGB; the KeyLab's SysEx speaks 7-bit.
+        keylab_protocol::set_ambient_led_rgb([rgb[0] >> 1, rgb[1] >> 1, rgb[2] >> 1]);
+        println!("SETTINGS_APPLIED key-light-color={value}");
+        changed = true;
+    }
+    changed
+}
+
+fn parse_hex_color(value: &str) -> Option<[u8; 3]> {
+    let digits = value.strip_prefix('#')?;
+    if digits.len() != 6 {
+        return None;
+    }
+    let parsed = u32::from_str_radix(digits, 16).ok()?;
+    Some([
+        ((parsed >> 16) & 0xFF) as u8,
+        ((parsed >> 8) & 0xFF) as u8,
+        (parsed & 0xFF) as u8,
+    ])
+}
+
 fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>> {
     if !execute {
         println!("DRY-RUN: el servicio esperaría al KeyLab y mantendría HOME en la OLED.");
@@ -945,6 +999,26 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
     if let Err(error) = refresh_live_catalog(&mut menu) {
         eprintln!("Catálogo LIVE todavía no disponible: {error}");
     }
+    // A driver must never outlive its supervisor: when the host hands us a
+    // piped stdin (RACKFORGE_SUPERVISOR_PIPE=1), EOF on it means the
+    // supervisor died -- orphaned drivers were holding MIDI ports hostage.
+    if env::var_os("RACKFORGE_SUPERVISOR_PIPE").is_some() {
+        thread::spawn(|| {
+            use std::io::Read;
+            let mut byte = [0u8; 1];
+            loop {
+                match std::io::stdin().read(&mut byte) {
+                    Ok(0) | Err(_) => {
+                        eprintln!("Supervisor cerrado; el driver se retira.");
+                        std::process::exit(0);
+                    }
+                    Ok(_) => {}
+                }
+            }
+        });
+    }
+    let mut settings_modified: Option<std::time::SystemTime> = None;
+    refresh_controller_settings(&mut settings_modified);
     println!("Esperando el KeyLab Essential mk3...");
     loop {
         let midi = MidiOutput::new("rackforge KeyLab Display")?;
@@ -958,9 +1032,16 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         };
         let usb_generation = keylab_usb_generation();
         if let Err(error) = register_host_controls() {
-            eprintln!("Core todavía no acepta el perfil del controlador: {error}");
-            thread::sleep(Duration::from_millis(500));
-            continue;
+            // A host that does not know the registration yet is not a host
+            // to boycott: without the reservation the surface still works,
+            // only the master-control CCs lack a formal claim.
+            if error.contains("does not support") {
+                eprintln!("El host no reserva bindings todavía; continuando sin reserva: {error}");
+            } else {
+                eprintln!("Core todavía no acepta el perfil del controlador: {error}");
+                thread::sleep(Duration::from_millis(500));
+                continue;
+            }
         }
         let control_generation = control_socket_generation();
         if let Some(generation) = usb_generation.as_deref() {
@@ -1019,6 +1100,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let mut wifi_task: Option<WifiTask> = None;
         let mut audio_task: Option<AudioTask> = None;
         let mut next_spinner_frame = Instant::now();
+        let mut next_settings_check = Instant::now();
         let mut pan_follower = PanFollower::default();
         'surface: loop {
             if control_socket_generation() != control_generation {
@@ -1215,6 +1297,27 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 }
             }
 
+            if now >= next_settings_check {
+                next_settings_check = now + Duration::from_secs(1);
+                if refresh_controller_settings(&mut settings_modified) {
+                    if let Ok(repaint) = keylab_protocol::ambient_repaint_messages() {
+                        if let Err(error) = session.send_messages(repaint) {
+                            eprintln!("No se pudo repintar el color de teclas: {error}");
+                            break 'surface;
+                        }
+                    }
+                    // The footer buttons idle in the ambient too -- and
+                    // their LED bytes are baked at render time, so re-render
+                    // with the new ambient before sending.
+                    messages = render_menu_messages(&menu)?;
+                    for message in &messages.button_leds {
+                        if let Err(error) = session.send(message) {
+                            eprintln!("No se pudo refrescar los botones: {error}");
+                            break 'surface;
+                        }
+                    }
+                }
+            }
             if now < next_heartbeat {
                 continue;
             }

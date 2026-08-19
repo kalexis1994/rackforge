@@ -13,7 +13,43 @@ pub const CLEAR_SCREEN: &[u8] = &[
 ];
 
 const PREFIX: &[u8] = &[0xF0, 0x00, 0x20, 0x6B, 0x7F, 0x42];
-pub const AMBIENT_LED_RGB: [u8; 3] = [10, 40, 64];
+/// The factory ambient: the light blue the keys wake up in.
+pub const DEFAULT_AMBIENT_LED_RGB: [u8; 3] = [10, 40, 64];
+/// The ambient key-light color, runtime-configurable: the host exposes it
+/// as the package's `key-light-color` setting and the driver applies
+/// whatever the player picked. Packed 0x00RRGGBB in an atomic so the
+/// render paths read it without locks. Values are 7-bit (SysEx data).
+static AMBIENT_LED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(
+    ((DEFAULT_AMBIENT_LED_RGB[0] as u32) << 16)
+        | ((DEFAULT_AMBIENT_LED_RGB[1] as u32) << 8)
+        | (DEFAULT_AMBIENT_LED_RGB[2] as u32),
+);
+
+pub fn ambient_led_rgb() -> [u8; 3] {
+    let packed = AMBIENT_LED.load(core::sync::atomic::Ordering::Relaxed);
+    [
+        ((packed >> 16) & 0x7F) as u8,
+        ((packed >> 8) & 0x7F) as u8,
+        (packed & 0x7F) as u8,
+    ]
+}
+
+/// Sets the ambient; each channel is clamped to the SysEx 7-bit range.
+pub fn set_ambient_led_rgb(rgb: [u8; 3]) {
+    let packed = ((rgb[0].min(0x7F) as u32) << 16)
+        | ((rgb[1].min(0x7F) as u32) << 8)
+        | (rgb[2].min(0x7F) as u32);
+    AMBIENT_LED.store(packed, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// Every RGB LED painted in the current ambient, for a live repaint after
+/// the player changes the color.
+pub fn ambient_repaint_messages() -> Result<Vec<OutboundMessage>, String> {
+    Ok(all_rgb_led_messages(ambient_led_rgb())?
+        .into_iter()
+        .map(|bytes| OutboundMessage::new(bytes, LED_SETTLE_MS))
+        .collect())
+}
 const RGB_LED_COUNT: u8 = 0x2C;
 pub const PRESET_SETTLE_MS: u16 = 350;
 pub const CONNECT_SETTLE_MS: u16 = 150;
@@ -133,7 +169,7 @@ pub fn acquire_messages() -> Result<Vec<OutboundMessage>, String> {
         OutboundMessage::new(CONNECT.to_vec(), CONNECT_SETTLE_MS),
     ];
     messages.extend(
-        all_rgb_led_messages(AMBIENT_LED_RGB)?
+        all_rgb_led_messages(ambient_led_rgb())?
             .into_iter()
             .map(|bytes| OutboundMessage::new(bytes, LED_SETTLE_MS)),
     );
@@ -242,7 +278,7 @@ pub fn button_led_message(index: usize, rgb: [u8; 3]) -> Result<Vec<u8>, String>
 pub fn button_led_messages(buttons: &[FooterButton; 4]) -> Result<[Vec<u8>; 4], String> {
     let color = |state| match state {
         VisualState::Disabled => [0, 0, 0],
-        VisualState::Normal => AMBIENT_LED_RGB,
+        VisualState::Normal => ambient_led_rgb(),
         VisualState::Focused => [20, 80, 127],
         VisualState::Pressed => [127, 127, 127],
     };
@@ -350,11 +386,11 @@ mod tests {
 
     #[test]
     fn ambient_lighting_covers_buttons_and_all_sixteen_pads() {
-        let messages = all_rgb_led_messages(AMBIENT_LED_RGB).unwrap();
+        let messages = all_rgb_led_messages(DEFAULT_AMBIENT_LED_RGB).unwrap();
         assert_eq!(messages.len(), 0x2C);
         assert_eq!(messages.first().unwrap()[9], 0x00);
         assert_eq!(messages.last().unwrap()[9], 0x2B);
-        assert_eq!(&messages.last().unwrap()[10..13], &AMBIENT_LED_RGB);
+        assert_eq!(&messages.last().unwrap()[10..13], &DEFAULT_AMBIENT_LED_RGB);
     }
 
     #[test]

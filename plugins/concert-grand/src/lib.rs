@@ -119,15 +119,19 @@ const LONGITUDINAL_C2_HZ: f32 = 1_150.0;
 const LONGITUDINAL_C2_LENGTH_M: f32 = 1.06;
 /// Wet level of the longitudinal bank.
 ///
-/// UNCALIBRATED, and the bank is currently inaudible because of it. Measured:
-/// the rendered audio does change, but the energy near C2's first
-/// longitudinal mode does not move by 0.1 dB between a mix of 0 and one of
-/// 60. The resonator's input coefficient is (1-r)*2*sin(w), about 5.7e-5 for
-/// a 0.9 s ring at 1150 Hz, and the excitation's content AT that frequency is
-/// a small part of a signal that is itself small after the headroom scaling.
-/// The level is wrong by orders of magnitude, and finding where beats raising
-/// a constant until something happens.
-const LONGITUDINAL_MIX: f32 = 8.0;
+/// The bank barely sounds, and the reason is not the level.
+///
+/// C2's first longitudinal mode sits at 1149 Hz. Its excitation is the pairs
+/// y_n*y_(n+1), which put their content at (2n+1)*f0 -- so reaching 1149 Hz
+/// takes n around 8.3. The partials that drive it are the EIGHTH and NINTH,
+/// and those are the ones this model has at -35 and -46 dB against the
+/// instrument's -26 and -12.
+///
+/// The longitudinal content is downstream of the transverse ladder. It cannot
+/// appear while the partials that feed it are missing, which means the hole
+/// in partials 6-10 and the absent metallic character are one problem and not
+/// two. Raising this constant cannot substitute for the partials.
+const LONGITUDINAL_MIX: f32 = 60.0;
 /// How hard the string's own stretch pulls it sharp. Sized so a fortissimo
 /// bass strike sharpens a few cents and settles as it decays, which is what
 /// measured piano glides do.
@@ -565,8 +569,7 @@ struct Voice {
     tension_in: u32,
     /// The string's longitudinal modes, driven by its own tension.
     longitudinal: [BodyMode; LONGITUDINAL_MODES],
-    longitudinal_drive: f32,
-    longitudinal_rest: f32,
+    longitudinal_drive: [f32; LONGITUDINAL_MODES],
 }
 
 impl Default for Voice {
@@ -599,8 +602,7 @@ impl Default for Voice {
             tension_applied: 0.0,
             tension_in: TENSION_INTERVAL,
             longitudinal: [BodyMode::default(); LONGITUDINAL_MODES],
-            longitudinal_drive: 0.0,
-            longitudinal_rest: 0.0,
+            longitudinal_drive: [0.0; LONGITUDINAL_MODES],
         }
     }
 }
@@ -621,29 +623,59 @@ impl Voice {
         // summed here: they hold nearly all the energy, and Bank and Sujbert
         // note that the excitation need not be computed where the resonator
         // bank has little gain.
-        let mut squeeze = 0.0f32;
+        let mut source = [0.0f32; LONGITUDINAL_SOURCES];
         for (n, partial) in self.partials[..self.partial_count].iter_mut().enumerate() {
             let voice = partial.prompt.tick()
                 + partial.aftersound.tick()
                 + partial.bloom.tick()
                 + partial.third.tick();
             if n < LONGITUDINAL_SOURCES {
-                squeeze += voice * voice;
+                source[n] = voice;
             }
             sum += voice;
         }
-        self.longitudinal_drive = squeeze - self.longitudinal_rest;
-        // A running mean, so what drives the resonators is the VARIATION in
-        // the tension and not its standing part, which would only offset them.
-        self.longitudinal_rest += 0.002 * (squeeze - self.longitudinal_rest);
+        // The excitation of each longitudinal mode, as Bank derives it.
+        //
+        // "A longitudinal mode with mode number k is excited by such
+        // transverse mode pairs m and n only, for which either the sum m + n
+        // or the difference |m - n| of their mode numbers equal to k", and
+        // the terms are "the products of the instantaneous amplitudes of two
+        // transverse modes, y_m(t) y_n(t)".
+        //
+        // So mode 1 is driven by ADJACENT pairs, sum over n of y_n*y_(n+1);
+        // mode 2 by y_1^2 and the pairs two apart; and so on. An earlier
+        // version here fed the bank a plain sum of squares, which is only the
+        // m = n terms -- it drops every cross product, which is most of the
+        // excitation, and it excites nothing odd. That is why the bank made
+        // no sound.
+        let live = LONGITUDINAL_SOURCES.min(self.partial_count);
+        for (k, slot) in self.longitudinal_drive.iter_mut().enumerate() {
+            let gap = k + 1;
+            let mut force = 0.0f32;
+            // The difference terms: |m - n| = k.
+            let mut n = 0;
+            while n + gap < live {
+                force += source[n] * source[n + gap];
+                n += 1;
+            }
+            // The sum terms: m + n = k, with both mode numbers at least one.
+            let mut m = 0;
+            while m + 1 < gap {
+                let other = gap - m - 2;
+                if other < live && m < live {
+                    force += source[m] * source[other];
+                }
+                m += 1;
+            }
+            *slot = force;
+        }
         sum += self.duplex[0].tick() + self.duplex[1].tick();
         // The compressional wave. Held at the tension read at control rate,
         // which is a zero-order hold on the excitation -- enough, because what
         // these resonators pick out of it is their own frequency.
-        let drive = self.longitudinal_drive * LONGITUDINAL_MIX;
-        if drive != 0.0 {
-            for mode in &mut self.longitudinal {
-                sum += mode.tick(drive);
+        for (mode, force) in self.longitudinal.iter_mut().zip(self.longitudinal_drive) {
+            if force != 0.0 {
+                sum += mode.tick(force * LONGITUDINAL_MIX);
             }
         }
         if self.noise_amp > 1e-7 {
@@ -2497,8 +2529,7 @@ impl ConcertGrand {
                 *mode = BodyMode::default();
             }
         }
-        voice.longitudinal_drive = 0.0;
-        voice.longitudinal_rest = 0.0;
+        voice.longitudinal_drive = [0.0; LONGITUDINAL_MODES];
         // Scaled so a fortissimo bass strike sharpens by a few cents, which
         // is what the measured glides are, and so it fades with the note
         // rather than on a timer. The bass gate is the amplitude-to-length

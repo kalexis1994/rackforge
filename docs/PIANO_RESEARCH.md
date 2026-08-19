@@ -375,11 +375,31 @@ contenido de la excitacion A esa frecuencia es una fraccion pequeña de una
 señal que ya es chica tras el escalado de headroom. Encontrar donde se pierde
 es lo que sigue; subir la constante a ciegas no.
 
-**Error a no repetir:** la primera version alimentaba el banco con el
+**El hallazgo que cierra el hilo.** Corregida la excitacion, el banco sigue
+sin sonar -- y calcular por que resuelve algo mas grande. El primer modo
+longitudinal de C2 esta en 1149 Hz, y sus pares y_n*y_(n+1) ponen contenido en
+(2n+1)*f0, asi que llegar ahi pide n ~ 8.3: lo excitan las parciales OCTAVA y
+NOVENA. Que son exactamente las que este modelo tiene a -35 y -46 dB contra
+las -26 y -12 del instrumento.
+
+El contenido longitudinal esta rio abajo de la escalera transversal. No puede
+aparecer mientras falten las parciales que lo alimentan. El agujero en las
+parciales 6-10 y el caracter metalico ausente son UN problema, no dos, y
+ninguna constante de mezcla sustituye a las parciales.
+
+**Errores a no repetir:** la primera version alimentaba el banco con el
 estiramiento calculado a tasa de control, cada 32 muestras. Eso es una
 envolvente: un resonador a 1150 Hz necesita excitacion A 1150 Hz. Los modos
 longitudinales se excitan a las frecuencias suma y diferencia de las
 transversales, que son de audio.
+
+La segunda lo alimentaba con una suma de cuadrados. Bank deriva que "un modo
+longitudinal con numero k se excita solo por pares de modos transversales m y
+n para los cuales la suma m+n o la diferencia |m-n| es igual a k", y que los
+terminos son "los productos de las amplitudes instantaneas de dos modos
+transversales". Una suma de cuadrados es solo los terminos m = n: descarta
+todos los productos cruzados, que son casi toda la excitacion, y no excita
+ningun modo impar.
 
 ## Referencia permanente
 

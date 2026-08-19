@@ -15,7 +15,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=@RACKFORGE_ROOT@/config @RACKFORGE_ROOT@/state @RACKFORGE_ROOT@/plugin-store @RACKFORGE_ROOT@/plugins
+ReadWritePaths=@RACKFORGE_ROOT@/config @RACKFORGE_ROOT@/state @RACKFORGE_ROOT@/plugin-store @RACKFORGE_ROOT@/plugins @RACKFORGE_ROOT@/controllers
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]

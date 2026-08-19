@@ -136,6 +136,27 @@ impl PluginStorage {
         Ok(destination)
     }
 
+    /// Removes one installed file. A file that is already absent is success:
+    /// nothing installed at this path is exactly what the caller asked for.
+    pub fn remove_file(&self, plugin_id: &str, relative: &Path) -> Result<()> {
+        let plugin = self.ensure_plugin(plugin_id)?;
+        let destination = prepare_file_path(&plugin.root, relative)?;
+        reject_symlink(&destination)?;
+        match fs::remove_file(&destination) {
+            Ok(()) => {
+                sync_directory(
+                    destination
+                        .parent()
+                        .context("plugin storage file has no parent")?,
+                )?;
+                Ok(())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error)
+                .with_context(|| format!("removing installed file {}", destination.display())),
+        }
+    }
+
     pub fn read(&self, plugin_id: &str, relative: &Path) -> Result<Vec<u8>> {
         let plugin = self.ensure_plugin(plugin_id)?;
         let path = resolve_existing_file(&plugin.root, relative)?;

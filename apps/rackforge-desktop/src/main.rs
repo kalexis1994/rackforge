@@ -1520,6 +1520,13 @@ impl DesktopApp {
                         persist,
                     ));
                 }
+                web::DesktopControlCall::ClearResource {
+                    plugin_id,
+                    resource_id,
+                    response,
+                } => {
+                    let _ = response.send(self.clear_plugin_resource(&plugin_id, &resource_id));
+                }
                 web::DesktopControlCall::ActivatePlugin {
                     plugin_id,
                     response,
@@ -1922,6 +1929,98 @@ impl DesktopApp {
                 }
                 Err(format!("Could not load plugin resource: {error:#}"))
             }
+        }
+    }
+
+    /// Removes one installed private resource and reactivates the plugin
+    /// with the remaining set, so the package default plays again.
+    fn clear_plugin_resource(&mut self, plugin_id: &str, resource_id: &str) -> Result<(), String> {
+        let index = self
+            .plugins
+            .iter()
+            .position(|plugin| plugin.plugin_id == plugin_id)
+            .ok_or_else(|| format!("Unknown Desktop plugin: {plugin_id}"))?;
+        let live_state_dir = self.live_state_dir();
+        let plugin = &mut self.plugins[index];
+        let required = plugin
+            .runtime
+            .manifest()
+            .resources
+            .iter()
+            .any(|resource| resource.id == resource_id && resource.required);
+        if required {
+            return Err("A required resource cannot be cleared".into());
+        }
+        let data_path = plugin
+            .resource_data_paths
+            .get(resource_id)
+            .cloned()
+            .ok_or_else(|| format!("Resource {resource_id:?} has no private data_path"))?;
+        PluginStorage::new(&self.options.data_root)
+            .remove_file(plugin_id, &data_path)
+            .map_err(|error| format!("Could not clear plugin resource: {error:#}"))?;
+        plugin.resources.remove(resource_id);
+
+        let prepare =
+            (|| -> anyhow::Result<(PluginInstance<'static>, PresetCatalog, Option<String>)> {
+                let mut instance = plugin
+                    .runtime
+                    .create_instance_with_resource_overrides(&plugin.resources)?;
+                let catalog = instance.preset_catalog()?;
+                let selected_sound_id = plugin
+                    .selected_sound_id
+                    .as_ref()
+                    .filter(|id| {
+                        catalog
+                            .presets
+                            .iter()
+                            .any(|preset| preset.id == id.as_str())
+                    })
+                    .cloned()
+                    .or_else(|| catalog.presets.first().map(|preset| preset.id.clone()));
+                if let Some(preset_id) = selected_sound_id.as_deref() {
+                    instance.load_preset(preset_id)?;
+                }
+                #[cfg(windows)]
+                if let Some(audio) = &self.audio {
+                    audio.replace_voice(desktop_audio::VoiceSpec {
+                        instance_id: plugin.instance_id.clone(),
+                        plugin: plugin.runtime,
+                        preset_id: selected_sound_id.clone(),
+                        resources: plugin.resources.clone(),
+                        initial_state: read_live_state(&live_state_dir, &plugin.plugin_id),
+                    })?;
+                }
+                Ok((instance, catalog, selected_sound_id))
+            })();
+
+        match prepare {
+            Ok((instance, catalog, selected_sound_id)) => {
+                let (banks, sound_summaries, sounds) = desktop_catalog_views(&catalog);
+                plugin.instance = instance;
+                plugin.banks = banks;
+                plugin.sound_summaries = sound_summaries;
+                plugin.sounds = sounds;
+                plugin.selected_sound_id = selected_sound_id;
+                let next_session_state = plugin_session_state(plugin);
+                let mut session = self.session.write().expect("session lock poisoned");
+                if let Some(state) = session
+                    .instances
+                    .iter_mut()
+                    .find(|state| state.instance_id.as_str() == plugin.instance_id)
+                {
+                    *state = next_session_state;
+                    session.revision = Revision::new(session.revision.get().saturating_add(1));
+                }
+                self.status = format!(
+                    "{} cleared {} and restored the package default",
+                    plugin.name, resource_id
+                );
+                Ok(())
+            }
+            Err(error) => Err(format!(
+                "Could not activate after clearing the resource: {error:#}"
+            )),
         }
     }
 

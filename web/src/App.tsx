@@ -3735,6 +3735,29 @@ export function PluginFrame({
           )
           .finally(() => setResourceBusy(null));
       } else if (
+        event.data.method === "plugin.clear_resource" &&
+        surface === "config" &&
+        typeof params.target_resource_id === "string" &&
+        descriptor?.resources.some(
+          (resource) =>
+            resource.id === params.target_resource_id && resource.kind === "file",
+        )
+      ) {
+        setResourceBusy("Clearing resource…");
+        postResourceApi("/api/v1/resources/clear", {
+          plugin_id: instance.plugin_id,
+          instance_id: instance.instance_id,
+          target_resource_id: params.target_resource_id,
+        })
+          .then((result) => respond(true, undefined, result))
+          .catch((error: unknown) =>
+            respond(
+              false,
+              error instanceof Error ? error.message : "Could not clear this resource.",
+            ),
+          )
+          .finally(() => setResourceBusy(null));
+      } else if (
         event.data.method === "plugin.set_surface_info" &&
         surface === "play" &&
         (params.label === undefined ||

@@ -348,6 +348,17 @@ impl PortableLoadedPlugin {
     ) -> Result<PortablePluginInstance> {
         let mut instance = self.module.instantiate()?;
         for (id, path) in resources {
+            // An optional resource resolved earlier may have been cleared from
+            // private storage since; skipping it is the correct delivery.
+            if !path.exists()
+                && self
+                    .manifest
+                    .resources
+                    .iter()
+                    .any(|resource| resource.id == *id && !resource.required)
+            {
+                continue;
+            }
             instance
                 .load_resource_file(id, path)
                 .with_context(|| format!("delivering portable resource {id:?}"))?;

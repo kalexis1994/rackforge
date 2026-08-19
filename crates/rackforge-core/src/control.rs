@@ -505,6 +505,11 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             &path,
             persist,
         ),
+        ControlRequest::ClearPluginResource {
+            plugin_id,
+            instance_id,
+            resource_id,
+        } => clear_plugin_resource(context, &plugin_id, &instance_id, &resource_id),
         ControlRequest::EditPerformance {
             expected_revision,
             edit,
@@ -868,6 +873,145 @@ fn load_plugin_resource(
     }
     match receive_audio(reply_receiver, "replace plugin resource") {
         Ok(()) => ControlResponse::PluginResourceLoaded {
+            instance_id: instance_id.clone(),
+            resource_id: resource_id.to_owned(),
+        },
+        Err(failure) => failure.into_response(),
+    }
+}
+
+/// Removes one installed private resource and swaps in an instance built from
+/// the remaining set, so the package default is playing again.
+fn clear_plugin_resource(
+    context: &ControlContext,
+    plugin_id: &str,
+    instance_id: &InstanceId,
+    resource_id: &str,
+) -> ControlResponse {
+    let snapshot = match context.store.lock() {
+        Ok(store) => store.snapshot(),
+        Err(_) => return internal_error("session store lock is poisoned", None),
+    };
+    let Some(instance_state) = snapshot.instance(instance_id) else {
+        return error_response(
+            ControlErrorCode::NotFound,
+            format!("plugin instance {instance_id} was not found"),
+            Some(snapshot.revision),
+        );
+    };
+    if instance_state.plugin_id != plugin_id {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            "plugin instance does not belong to the resource owner",
+            Some(snapshot.revision),
+        );
+    }
+    let Some(manifest) = context.plugin_manifests.get(&instance_state.plugin_id) else {
+        return internal_error(
+            "active plugin manifest is unavailable",
+            Some(snapshot.revision),
+        );
+    };
+    let Some(requirement) = manifest
+        .resources
+        .iter()
+        .find(|resource| resource.id == resource_id && resource.kind == ResourceKind::File)
+    else {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            format!("plugin does not declare file resource {resource_id:?}"),
+            Some(snapshot.revision),
+        );
+    };
+    if requirement.required {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            "a required resource cannot be cleared",
+            Some(snapshot.revision),
+        );
+    }
+    let Some(relative) = requirement.data_path.as_deref() else {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            format!("resource {resource_id:?} has no private data_path"),
+            Some(snapshot.revision),
+        );
+    };
+    let Some(runtime) = context
+        .portable_plugins
+        .get(&instance_state.plugin_id)
+        .copied()
+    else {
+        return error_response(
+            ControlErrorCode::Unavailable,
+            "dynamic resources currently require a portable wasm-v1 plugin",
+            Some(snapshot.revision),
+        );
+    };
+    let Some(storage) = context.storage.as_ref() else {
+        return error_response(
+            ControlErrorCode::Unavailable,
+            "private plugin storage is unavailable",
+            Some(snapshot.revision),
+        );
+    };
+    if let Err(error) = storage.remove_file(plugin_id, Path::new(relative)) {
+        return internal_error(
+            format!("could not clear plugin resource: {error:#}"),
+            Some(snapshot.revision),
+        );
+    }
+    let resources = match context.dynamic_resources.lock() {
+        Ok(mut registry) => {
+            let mut resources = registry.get(instance_id).cloned().unwrap_or_default();
+            resources.remove(resource_id);
+            registry.insert(instance_id.clone(), resources.clone());
+            resources
+        }
+        Err(_) => {
+            return internal_error(
+                "dynamic resource registry is poisoned",
+                Some(snapshot.revision),
+            );
+        }
+    };
+    let mut replacement = match runtime
+        .0
+        .create_instance_with_resource_overrides(&resources)
+    {
+        Ok(instance) => instance,
+        Err(error) => return internal_error(error.to_string(), Some(snapshot.revision)),
+    };
+    // The stored selection may not exist in the restored bank. The cleared
+    // state must win either way, so a failed restore falls back to defaults.
+    if let Some(sound_id) = instance_state.selected_sound_id.as_deref() {
+        let _ = replacement.load_preset(sound_id);
+    }
+    if let Err(error) = replacement.activate(
+        context.plugin_sample_rate,
+        context.plugin_maximum_frames,
+        0,
+        context.plugin_output_channels,
+    ) {
+        return error_response(
+            ControlErrorCode::Rejected,
+            format!("plugin could not activate after clearing the resource: {error:#}"),
+            Some(snapshot.revision),
+        );
+    }
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    if let Err(failure) = send_audio(
+        context,
+        AudioControlCommand::ReplaceStandaloneVoice {
+            instance_id: instance_id.clone(),
+            instance: PreparedPluginInstance(replacement),
+            reply: reply_sender,
+        },
+    ) {
+        return failure.into_response();
+    }
+    match receive_audio(reply_receiver, "replace plugin resource") {
+        Ok(()) => ControlResponse::PluginResourceCleared {
             instance_id: instance_id.clone(),
             resource_id: resource_id.to_owned(),
         },

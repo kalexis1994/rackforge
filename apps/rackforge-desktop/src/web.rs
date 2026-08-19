@@ -16,9 +16,9 @@ use rackforge_repository::{
     LocalPackageInspection, MAX_PACKAGE_BYTES, inspect_local_archive, install_local_archive,
 };
 use rackforge_resource_api::{
-    BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, ListGrantsRequest,
-    LoadGrantedResourceRequest, MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser, ResourceEntryKind,
-    ResourceError, SelectHostEntryRequest,
+    BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, ClearInstalledResourceRequest,
+    ListGrantsRequest, LoadGrantedResourceRequest, MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser,
+    ResourceEntryKind, ResourceError, SelectHostEntryRequest,
 };
 use rackforge_resource_host::NativeResourceBrowser;
 use rackforge_session_api::SessionState;
@@ -117,6 +117,11 @@ pub enum DesktopControlCall {
         resource_id: String,
         path: PathBuf,
         persist: bool,
+        response: Sender<Result<(), String>>,
+    },
+    ClearResource {
+        plugin_id: String,
+        resource_id: String,
         response: Sender<Result<(), String>>,
     },
     ActivatePlugin {
@@ -522,6 +527,7 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
             .route("/api/v1/resources/status", post(resource_status))
             .route("/api/v1/resources/browse", post(browse_resource_grant))
             .route("/api/v1/resources/load", post(load_granted_resource))
+            .route("/api/v1/resources/clear", post(clear_installed_resource))
             .route(
                 "/api/v1/resources/uploads",
                 post(upload_client_resource)
@@ -1354,6 +1360,67 @@ async fn load_granted_resource(
         Ok(Ok(Err(message))) => resource_error(ResourceError::Backend(message)),
         _ => resource_error(ResourceError::Backend(
             "Desktop runtime did not finish loading the resource".into(),
+        )),
+    }
+}
+
+async fn clear_installed_resource(
+    State(state): State<WebState>,
+    Json(request): Json<ClearInstalledResourceRequest>,
+) -> Response {
+    let packages = match discover_web_packages(&state) {
+        Ok(packages) => packages,
+        Err(error) => return internal_error(error),
+    };
+    let Some(package) = packages.get(&request.plugin_id) else {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    };
+    let owns_instance = state.session.read().is_ok_and(|session| {
+        session.instances.iter().any(|instance| {
+            instance.instance_id.as_str() == request.instance_id
+                && instance.plugin_id == request.plugin_id
+        })
+    });
+    if !owns_instance {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin does not own this instance".into(),
+        ));
+    }
+    let valid_target = package.public.resources.iter().any(|resource| {
+        resource.id == request.target_resource_id
+            && resource.kind == rackforge_plugin_api::ResourceKind::File
+            && resource.data_path.is_some()
+    });
+    if !valid_target {
+        return resource_error(ResourceError::InvalidRequest(
+            "target is not a declared installable file resource".into(),
+        ));
+    }
+    let (response_sender, response_receiver) = mpsc::channel();
+    if state
+        .control
+        .send(DesktopControlCall::ClearResource {
+            plugin_id: request.plugin_id,
+            resource_id: request.target_resource_id,
+            response: response_sender,
+        })
+        .is_err()
+    {
+        return resource_error(ResourceError::Backend(
+            "Desktop runtime is shutting down".into(),
+        ));
+    }
+    match tokio::task::spawn_blocking(move || {
+        response_receiver.recv_timeout(Duration::from_secs(30))
+    })
+    .await
+    {
+        Ok(Ok(Ok(()))) => Json(json!({"status":"ok"})).into_response(),
+        Ok(Ok(Err(message))) => resource_error(ResourceError::Backend(message)),
+        _ => resource_error(ResourceError::Backend(
+            "Desktop runtime did not finish clearing the resource".into(),
         )),
     }
 }

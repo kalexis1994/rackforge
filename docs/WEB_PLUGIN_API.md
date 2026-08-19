@@ -157,6 +157,12 @@ from plugin JavaScript.
   authenticates its entries with the plugin, persists each recognized target
   separately, and returns `installed_resource_ids`. Repeated ZIP imports are
   cumulative; the ZIP itself is not reported as installed.
+- `plugin.clear_resource`: available to `CONFIG`; removes one installed private
+  resource. It accepts `target_resource_id`, which must be a declared file
+  resource with a `data_path`. RackForge deletes the installed file, prepares a
+  replacement instance from the remaining resource set away from the real-time
+  audio callback, and swaps it at an audio block boundary, so the package
+  default is playing again. Required resources cannot be cleared.
 - `plugin.begin_program_edit`: available to `PLAY` and `CONFIG`; starts a new
   program when `program_id` is `null`, or edits a program from that plugin's
   `custom` collection.

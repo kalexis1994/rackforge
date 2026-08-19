@@ -132,6 +132,15 @@ pub struct LoadGrantedResourceRequest {
     pub persist: bool,
 }
 
+/// Removes one installed private resource so the package default plays again.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClearInstalledResourceRequest {
+    pub plugin_id: String,
+    pub instance_id: String,
+    pub target_resource_id: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GrantedResourceEntry {

@@ -22,9 +22,9 @@ use rackforge_repository::{
     remove_plugin_user_data, uninstall_plugin,
 };
 use rackforge_resource_api::{
-    BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, ListGrantsRequest,
-    LoadGrantedResourceRequest, MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser, ResourceEntryKind,
-    ResourceError, SelectHostEntryRequest,
+    BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, ClearInstalledResourceRequest,
+    ListGrantsRequest, LoadGrantedResourceRequest, MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser,
+    ResourceEntryKind, ResourceError, SelectHostEntryRequest,
 };
 use rackforge_resource_host::NativeResourceBrowser;
 use semver::Version;
@@ -573,6 +573,7 @@ async fn main() -> Result<()> {
         .route("/api/v1/resources/status", post(resource_status))
         .route("/api/v1/resources/browse", post(browse_resource_grant))
         .route("/api/v1/resources/load", post(load_granted_resource))
+        .route("/api/v1/resources/clear", post(clear_installed_resource))
         .route(
             "/api/v1/resources/uploads",
             post(upload_client_resource)
@@ -2195,6 +2196,58 @@ async fn load_granted_resource(
                 .get("message")
                 .and_then(Value::as_str)
                 .unwrap_or("Core rejected the plugin resource")
+                .to_owned();
+            resource_error(ResourceError::Backend(message))
+        }
+        Err(error) => resource_error(ResourceError::Backend(error.to_string())),
+    }
+}
+
+async fn clear_installed_resource(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ClearInstalledResourceRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let registry = match PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root) {
+        Ok(registry) => registry,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let Some(package) = registry.packages.get(&request.plugin_id) else {
+        return resource_error(ResourceError::InvalidRequest(
+            "plugin is not installed".into(),
+        ));
+    };
+    let valid_target = package.public.resources.iter().any(|resource| {
+        resource.id == request.target_resource_id
+            && resource.kind == rackforge_plugin_api::ResourceKind::File
+            && resource.data_path.is_some()
+    });
+    if !valid_target {
+        return resource_error(ResourceError::InvalidRequest(
+            "target is not a declared installable file resource".into(),
+        ));
+    }
+    let control = json!({
+        "op": "clear_plugin_resource",
+        "plugin_id": request.plugin_id,
+        "instance_id": request.instance_id,
+        "resource_id": request.target_resource_id,
+    });
+    match core_request(&state.control_socket, &control).await {
+        Ok(response)
+            if response.get("status").and_then(Value::as_str)
+                == Some("plugin_resource_cleared") =>
+        {
+            Json(json!({"status":"ok"})).into_response()
+        }
+        Ok(response) => {
+            let message = response
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("Core rejected the resource clear")
                 .to_owned();
             resource_error(ResourceError::Backend(message))
         }

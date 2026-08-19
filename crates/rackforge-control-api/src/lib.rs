@@ -85,6 +85,13 @@ pub enum ControlRequest {
         #[serde(default)]
         persist: bool,
     },
+    /// Removes one installed private resource and reactivates the instance
+    /// with the remaining resource set, restoring package defaults.
+    ClearPluginResource {
+        plugin_id: String,
+        instance_id: InstanceId,
+        resource_id: String,
+    },
     AudioSnapshot,
     ApplyAudioOutput {
         profile: AudioOutputProfile,
@@ -181,6 +188,10 @@ pub enum ControlResponse {
         value: f64,
     },
     PluginResourceLoaded {
+        instance_id: InstanceId,
+        resource_id: String,
+    },
+    PluginResourceCleared {
         instance_id: InstanceId,
         resource_id: String,
     },

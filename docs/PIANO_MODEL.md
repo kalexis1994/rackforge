@@ -214,6 +214,44 @@ synthesizer "shimmer" a real unison does not have. The third string exists
 only where the scale has one; the deep bass couples two polarisations of a
 single string.
 
+### The honest unison, and the two-stage decay it generates (tested)
+
+Each partial now holds what a note physically has: up to **three vertical
+polarisations** — one per string of the real stringing, equal shares, equal
+full bridge coupling, spread by the unison detune — plus **one horizontal**
+at a tenth of the bridge coupling and a fraction-of-a-cent offset (bridge
+anisotropy), plus the onset bloom. For years one component (`aftersound`)
+was both "the second string" (it took the detune) and "the horizontal
+polarisation" (it coupled at 0.12), which is a contradiction, and the
+two-stage decay had to be scripted around it.
+
+The two stages now emerge from three curves and no shapes:
+
+* intrinsic (per component) = the string alone — internal/air losses,
+  bending, and the **incoherent share** of radiation (dephased strings
+  still radiate; Weinreich's second slopes are slower, not flat);
+* the bridge drain removes coherent energy at exactly the rate that turns
+  the slow curve into the measured audible one (the fast stage);
+* the knee's position, depth and register dependence fall out of the
+  difference — deleted with this change: `tail = 1.8+2.6/(1+(f/420)^1.2)`,
+  `prompt_t60 = t60*1.94/(1.4+1.1*pos)`, and the 300 Hz coupling fade.
+
+The success criterion the bridge work set — **raising the unison detune must
+stop costing energy** — now holds: C2's partials 8–11 hold the same band
+energy at full detune as at zero (52.7 vs 52.6 dB; the old model lost 7–13
+dB monotonically). Two hard lessons came out in calibration: the tension
+rotation was not norm-preserving (each nudge scaled the oscillator's decay
+factor by √(1+step²); A0 grew for 1.5 s and died in non-finite samples —
+now renormalised exactly), and the fifth component per partial re-tripped
+the wasm shadow stack, caught by `concert_grand_instantiates.rs` BEFORE
+shipping this time. Thirteen five-component voices occupy the bytes sixteen
+four-component voices did.
+
+Calibration state after refit (SLOW_STAGE_RATIO 3.5, incoherent share 0.55,
+horizontal share 0.2–0.5 falling treble-ward): per-partial bands 0.75×–1.37×
+of the instrument, whole-note durations mean 0.84×, fit cost 25.93, fuel
+54 % worst case.
+
 ### Frequency-dependent damping (tested)
 
 Higher partials die faster — losses from air drag, internal friction and

@@ -39,8 +39,12 @@ const NOTE_COUNT: usize = 88;
 /// "out of bounds memory access" during instantiation, and nothing in the
 /// test suite noticed, because native stacks are megabytes.
 ///
-/// Sixteen leaves real headroom. `concert_grand_instantiates.rs` guards it.
-const MAX_VOICES: usize = 16;
+/// Sixteen left real headroom with four components per partial; the honest
+/// unison (three verticals + horizontal + bloom) grew each partial by a
+/// fifth and the guard test tripped again -- this time BEFORE anything
+/// shipped, which is what it is for. Thirteen voices of five-component
+/// partials occupy the same bytes sixteen four-component voices did.
+const MAX_VOICES: usize = 13;
 /// Room for the full transverse ladder of the lowest notes plus their
 /// nonlinear extras — A0 alone fills ~120 slots with real partials.
 const MAX_PARTIALS: usize = 144;
@@ -65,11 +69,6 @@ const RADIATION_CORNER_HZ: f32 = 66.0;
 /// ninth partial sits right on the ideal comb's zero: the real instrument has
 /// it only 12 dB down, this model had it 39 dB down and gone.
 const COMB_FLOOR: f32 = 0.26;
-/// Where the long second stage stops being long. Fitted to the measured C2
-/// partial decays: the trapped polarisation of a high partial does not last,
-/// because what traps it is weak coupling to the bridge and what it still
-/// does is radiate.
-const TAIL_KNEE_HZ: f32 = 420.0;
 /// How long the string's own losses let a partial ring, at the bottom of the
 /// curve, and where that curve turns over.
 ///
@@ -94,6 +93,14 @@ const TAIL_KNEE_HZ: f32 = 420.0;
 /// that no single note could sit on it and both corrections were needed to
 /// drag the ends back.
 const STRING_T60_S: f32 = 6.0;
+/// How much longer the string rings alone than the audible (bridge-drained)
+/// curve at its flattest. One number, calibrated against the measured late
+/// decay; the knee, depth and register dependence of the two-stage decay
+/// come from the DIFFERENCE between the slow and fast curves, not from a
+/// drawn shape.
+const SLOW_STAGE_RATIO: f32 = 3.5;
+/// The share of the radiation channel that survives dephasing.
+const INCOHERENT_RADIATION: f32 = 0.55;
 const STRING_KNEE_HZ: f32 = 20.0;
 const STRING_TILT: f32 = 0.14;
 /// Below this the soundboard has too few modes to be ragged, so the synthetic
@@ -110,12 +117,20 @@ const SCATTER_KNEE_HZ: f32 = 320.0;
 /// a modelling convenience; it is Maxwell-Betti, and it is what makes the
 /// coupling passive.
 const HORIZONTAL_BRIDGE: f32 = 0.12;
+/// How much of a partial's amplitude the hammer puts into the horizontal
+/// polarisation. A hammer strikes vertically; the horizontal picks up only
+/// the blow's small sideways component and what the bridge's anisotropy
+/// leaks across, a modest fraction of the vertical motion.
+const HORIZONTAL_SHARE: f32 = 0.3;
+/// The horizontal polarisation is not at the vertical's exact pitch: the
+/// bridge is stiffer along the string than across it, so the two
+/// polarisations of one string differ by a fraction of a cent. That slow
+/// beat is the churn of a held note's tail.
+const POLARISATION_CENTS: f32 = 0.5;
 /// How often a voice retires inaudible components, in samples.
 const CULL_INTERVAL: u32 = 256;
 /// Where the bridge stops taking energy from a partial, in hertz. Above it
 /// the string's impedance swamps the bridge's admittance and the termination
-/// is effectively rigid.
-const COUPLING_TOP_HZ: f32 = 300.0;
 /// How often the string's tension is recomputed from its own motion, in
 /// samples. Faster than the cull, because this carries the tension's
 /// oscillating part and not just its envelope: it needs to resolve twice the
@@ -312,29 +327,34 @@ impl Component {
 /// `A·(e^(−t/τ_slow) − e^(−t/τ_rise))` — the partial swells in over its rise
 /// time instead of appearing fully formed, which is what separates a tone
 /// that blooms from a synthesizer that switches on.
-/// One partial of a coupled unison. The three components are the strings
-/// themselves (or a lone string's two polarisations), each rotating at its
-/// own detuned frequency with only its *intrinsic* (internal/air) loss.
-/// Radiation happens through `coupling`: at control rate the bridge removes
-/// a slice of the coherent sum from every string, so the in-phase
-/// configuration the hammer leaves decays fast, the dephased configurations
-/// that follow radiate poorly and linger, and the churn between those states
-/// is dynamics, not design (Weinreich 1977 — simulated now, not imitated).
+/// One partial of a coupled unison, with the components named for what
+/// they are.
+///
+/// For years this held `prompt`, `aftersound` and `third`, and `aftersound`
+/// did double duty: it took the unison detune (so it was "the second
+/// string") and it coupled to the bridge at a tenth strength (so it was
+/// "the horizontal polarisation"). One oscillator cannot be both -- a
+/// second string couples FULLY, and a polarisation is not detuned like a
+/// neighbour -- and the two-stage decay had to be scripted around the
+/// confusion. Now the unison is the real stringing: up to three vertical
+/// polarisations, equal and fully coupled, plus one weakly-coupled
+/// horizontal that carries the long tail, plus the onset bloom.
 #[derive(Clone, Copy, Default)]
 struct Partial {
-    prompt: Component,
-    aftersound: Component,
+    /// The vertical polarisations of the strings this note owns. Single-
+    /// strung notes use one, the wound doubles two, everything from ~C2 all
+    /// three; unused slots hold zero amplitude.
+    verticals: [Component; 3],
+    /// The horizontal polarisation: driven weakly by the hammer's small
+    /// sideways component, coupled to the bridge an order of magnitude
+    /// below the verticals, so it outlives them. The second stage of the
+    /// decay IS this component surviving -- structure, not a multiplier.
+    horizontal: Component,
     bloom: Component,
-    third: Component,
     /// Bridge radiation per control step, as the fraction of the coherent
-    /// sum each string loses. Zero for components that bypass the bridge
-    /// (phantoms, thump, halo).
+    /// sum each string loses. Zero for components that bypass the bridge.
     coupling: f32,
-    /// This partial's weight in the string's slope at the bridge:
-    /// (-1)^(h+1) * h / 16 for the h-th ladder partial, zero for components
-    /// that are not on the ladder (phantoms, clang). The slope at the
-    /// termination is sum(q_h * h*pi/L * cos(h*pi)), so the h and the
-    /// alternating sign are physics; the /16 keeps the squares in range.
+    /// This partial's weight in the string's slope at the bridge.
     slope: f32,
 }
 
@@ -678,10 +698,11 @@ impl Voice {
         // bank has little gain.
         let mut slope = 0.0f32;
         for partial in self.partials[..self.partial_count].iter_mut() {
-            let voice = partial.prompt.tick()
-                + partial.aftersound.tick()
-                + partial.bloom.tick()
-                + partial.third.tick();
+            let voice = partial.verticals[0].tick()
+                + partial.verticals[1].tick()
+                + partial.verticals[2].tick()
+                + partial.horizontal.tick()
+                + partial.bloom.tick();
             slope += voice * partial.slope;
             sum += voice;
         }
@@ -764,7 +785,10 @@ impl Voice {
             // sum of three strings, whose cross terms belong to no string's
             // tension at all.
             let w = partial.slope;
-            let a = partial.prompt.s + partial.aftersound.s + partial.third.s;
+            let a = partial.verticals[0].s
+                + partial.verticals[1].s
+                + partial.verticals[2].s
+                + partial.horizontal.s;
             stretch += (w * a) * (w * a);
         }
         // The offset the current tension asks for, as a fractional shift in
@@ -780,17 +804,24 @@ impl Voice {
             return;
         }
         for partial in &mut self.partials[..self.partial_count] {
-            for component in [
-                &mut partial.prompt,
-                &mut partial.aftersound,
-                &mut partial.bloom,
-                &mut partial.third,
-            ] {
+            let [v0, v1, v2] = &mut partial.verticals;
+            for component in [v0, v1, v2, &mut partial.horizontal, &mut partial.bloom] {
                 // Rotate by an extra angle proportional to the component's own
                 // frequency, so the whole ladder sharpens together.
+                //
+                // And RENORMALISE. The nudge multiplies the rotation by
+                // [[1, step], [-step, 1]], whose determinant is 1 + step^2:
+                // every application scales |r| -- the per-sample decay -- by
+                // sqrt(1 + step^2). With the wave-number-weighted tension of
+                // a 144-partial bass note, `rate` spikes at the unison's
+                // beat and the oscillator's decay factor climbed PAST one:
+                // A0 grew for a second and a half and then died in a burst
+                // of non-finite samples. Dividing by the determinant's root
+                // makes the nudge a pure rotation at any rate.
                 let step = rate * component.rs;
-                let rc = component.rc - component.rs * step;
-                component.rs += component.rc * step;
+                let scale = 1.0 / sqrtf(1.0 + step * step);
+                let rc = (component.rc - component.rs * step) * scale;
+                component.rs = (component.rs + component.rc * step) * scale;
                 component.rc = rc;
             }
         }
@@ -804,12 +835,8 @@ impl Voice {
             self.glide_steps -= 1;
             let rate = self.glide_rate;
             for partial in &mut self.partials[..self.partial_count] {
-                for component in [
-                    &mut partial.prompt,
-                    &mut partial.aftersound,
-                    &mut partial.bloom,
-                    &mut partial.third,
-                ] {
+                let [v0, v1, v2] = &mut partial.verticals;
+                for component in [v0, v1, v2, &mut partial.horizontal, &mut partial.bloom] {
                     let step = rate * component.rs;
                     let rc = component.rc - component.rs * step;
                     component.rs += component.rc * step;
@@ -865,18 +892,18 @@ impl Voice {
         for partial in &mut self.partials[..self.partial_count] {
             let k = partial.coupling;
             if k > 0.0 {
-                let sum_s = partial.prompt.s
-                    + HORIZONTAL_BRIDGE * partial.aftersound.s
-                    + partial.third.s;
-                let sum_c = partial.prompt.c
-                    + HORIZONTAL_BRIDGE * partial.aftersound.c
-                    + partial.third.c;
-                partial.prompt.s -= k * sum_s;
-                partial.prompt.c -= k * sum_c;
-                partial.aftersound.s -= HORIZONTAL_BRIDGE * k * sum_s;
-                partial.aftersound.c -= HORIZONTAL_BRIDGE * k * sum_c;
-                partial.third.s -= k * sum_s;
-                partial.third.c -= k * sum_c;
+                let mut sum_s = HORIZONTAL_BRIDGE * partial.horizontal.s;
+                let mut sum_c = HORIZONTAL_BRIDGE * partial.horizontal.c;
+                for vertical in &partial.verticals {
+                    sum_s += vertical.s;
+                    sum_c += vertical.c;
+                }
+                for vertical in &mut partial.verticals {
+                    vertical.s -= k * sum_s;
+                    vertical.c -= k * sum_c;
+                }
+                partial.horizontal.s -= HORIZONTAL_BRIDGE * k * sum_s;
+                partial.horizontal.c -= HORIZONTAL_BRIDGE * k * sum_c;
             }
         }
         let mut removed = 0;
@@ -884,19 +911,16 @@ impl Voice {
         let mut index = 0;
         while index < self.partial_count {
             let partial = &mut self.partials[index];
-            for component in [
-                &mut partial.prompt,
-                &mut partial.aftersound,
-                &mut partial.bloom,
-                &mut partial.third,
-            ] {
+            let [v0, v1, v2] = &mut partial.verticals;
+            for component in [v0, v1, v2, &mut partial.horizontal, &mut partial.bloom] {
                 if component.magnitude_squared() < DEAD_MAGNITUDE_SQUARED {
                     component.retire();
                 }
             }
-            let magnitude = partial.prompt.magnitude_squared()
-                + partial.aftersound.magnitude_squared()
-                + partial.third.magnitude_squared();
+            let magnitude = partial.verticals[0].magnitude_squared()
+                + partial.verticals[1].magnitude_squared()
+                + partial.verticals[2].magnitude_squared()
+                + partial.horizontal.magnitude_squared();
             if magnitude < DEAD_MAGNITUDE_SQUARED {
                 self.partial_count -= 1;
                 self.partials[index] = self.partials[self.partial_count];
@@ -923,10 +947,11 @@ impl Voice {
     /// scaled by how hard the string was still vibrating.
     fn damp(&mut self, factor: f32, thud_coefficient: f32, thud_decay: f32) {
         for partial in &mut self.partials[..self.partial_count] {
-            partial.prompt.damp(factor);
-            partial.aftersound.damp(factor);
+            for vertical in &mut partial.verticals {
+                vertical.damp(factor);
+            }
+            partial.horizontal.damp(factor);
             partial.bloom.damp(factor);
-            partial.third.damp(factor);
         }
         let thud = (0.10 * sqrtf(self.energy)).min(0.025);
         if thud > self.noise_amp {
@@ -1621,6 +1646,29 @@ impl ConcertGrand {
     /// 2 kHz as a short treble string's fundamental dies at once. Measured
     /// on the YDP: A0's 1.2-8 kHz band decays ~11 dB/s, which a
     /// frequency-only curve misses by 30+ dB.
+    /// How long this partial would ring if the bridge took NOTHING: the
+    /// string's internal and air losses plus bending, without the radiation
+    /// channel. This is the second stage of the decay -- what survives once
+    /// the unison has dephased and only the horizontal is left pushing a
+    /// bridge that barely feels it.
+    fn slow_t60_seconds(&self, frequency: f32, f0: f32, string_scale: f32) -> f32 {
+        let partial_number: f32 = (frequency / f0.max(1.0)).max(1.0);
+        let radiating = frequency;
+        let frequency = frequency * string_scale;
+        let string =
+            STRING_T60_S / (1.0 + powf(frequency / STRING_KNEE_HZ, STRING_TILT)) + 0.6;
+        let bending = KAPPA_LOSS * partial_number * partial_number;
+        // Dephased strings still radiate. The antisymmetric configurations
+        // drive the bridge far less than the coherent one, but not zero --
+        // Weinreich's measured second slopes are slower, not flat -- so the
+        // slow stage keeps a share of the radiation channel. Without it the
+        // top of the compass rang 2.3x too long once it dephased.
+        let rate = LN_1000 / (SLOW_STAGE_RATIO * string)
+            + bending
+            + INCOHERENT_RADIATION * RADIATION_RATE * Self::radiation_efficiency(radiating);
+        (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay)
+    }
+
     fn t60_seconds(
         &self,
         frequency: f32,
@@ -2267,176 +2315,108 @@ impl ConcertGrand {
             // subsequent life -- fast coherent decay, dephasing, the long
             // trapped tail, the churn -- is simulated through the bridge
             // coupling below, not scripted here.
-            // How many strings this note actually has, and it was wrong by
-            // about eleven semitones.
-            //
-            // A grand is single-strung only across the very bottom -- A0 to
-            // roughly E1 -- then doubles through the rest of the wound bass,
-            // and is fully triple-strung from about C2 upward. This ramp used
-            // to start at index 18 (E flat 2) and not finish until index 26
-            // (B2), which gave C2 exactly ONE string and C3 barely two.
-            //
-            // That is not a small bookkeeping error, because the model has no
-            // other place to put a unison. With `three` at zero the only two
-            // oscillators left are `prompt` and `aftersound` -- the vertical
-            // and horizontal polarisations of a single string -- and the
-            // unison detune was being applied BETWEEN THEM. It had to be:
-            // there was nothing else to detune. So the control that is
-            // supposed to spread three strings was instead pulling one
-            // string's two polarisations apart, and since the bridge drains
-            // only the coherent direction, detuning kept rotating the trapped
-            // configuration back into the draining one. That is the whole of
-            // "raising the unison spends the bass": measured on C2's eighth
-            // partial the excess loss ran -1.5 dB at zero detune and -8.4 dB
-            // at the default, smoothly and monotonically in between.
-            //
-            // It is also, in plain terms, the complaint the user made by ear
-            // long before any of this was measured: "se escucha como si fuese
-            // una cuerda mas fina". C2 was one string.
-            let three = ((index as f32 - 7.0) / 8.0).clamp(0.0, 1.0)
+            // How many strings this note actually has: single to ~E1,
+            // doubled through the wound bass, three from ~C2 upward -- the
+            // same stringing the hammer divides its mass over.
+            let second = ((index as f32 - 5.0) / 5.0).clamp(0.0, 1.0)
+                * if self.soft { 0.6 } else { 1.0 };
+            let third_string = ((index as f32 - 9.0) / 6.0).clamp(0.0, 1.0)
                 * if self.soft { 0.25 } else { 1.0 };
-            // ...and the third string exists all the way up the ladder, not
-            // only below the twelfth partial. The model already made this
-            // mistake once, collapsing the unison into one oscillator above
-            // partial 32, and fixing it was one of the larger audible wins;
-            // this was the same cut eleven partials lower. C2's partials 8 to
-            // 11 -- the ones that have been the open thread for days -- sit
-            // directly against that edge.
-            let w3 = 0.22 * three;
-            let remainder = 1.0 - w3;
-            // The strings of the unison stay separate all the way up.
+            // Equal strings, equal shares. The old split gave the "second
+            // string" 0.44 and the third 0.22 of the note, which is not how
+            // a unison is strung.
+            let split = 1.0 / (1.0 + second + third_string);
+            let shares = [split, split * second, split * third_string];
+            let ratios = [
+                powf(2.0, -cents / 2400.0),
+                powf(2.0, cents / 2400.0),
+                powf(
+                    2.0,
+                    cents * (0.9
+                        + 0.4 * hash01((note as u32) << 9 | (n as u32) << 2 | 3))
+                        / 1200.0,
+                ),
+            ];
+            // THE TWO-STAGE DECAY, WITHOUT A SCRIPT.
             //
-            // They used to collapse into one oscillator above partial 32, on
-            // the reasoning that "the beat between the strings is beyond
-            // hearing" up there. The reasoning is backwards: the detune is a
-            // constant in CENTS, so the beat rate grows with frequency. At
-            // A0's fundamental 3 cents is 0.05 Hz -- a twenty-second beat --
-            // but at its eightieth partial, up at 3 kHz, the same 3 cents is
-            // 5 Hz, which is not beyond hearing at all. It is roughness, and
-            // roughness across a dense band is what a piano's bass sounds
-            // like.
+            // Each component's own rotation carries only the string's
+            // internal and air losses -- the SLOW stage, what a string does
+            // when the bridge takes nothing from it. The bridge drain then
+            // removes energy from the coherent configuration at exactly the
+            // rate that turns slow into the measured audible decay -- the
+            // FAST stage. A fresh note is coherent and dies at the fast
+            // rate; as the detuned strings dephase and the horizontal
+            // outlives them, what remains escapes the drain and rings at
+            // the slow rate. The knee between the stages, its depth, and
+            // its register dependence all fall out of the same three
+            // numbers instead of being drawn.
             //
-            // Measured on the YDP A0 between 2 and 4 kHz: the real instrument
-            // shows 82 sharp peaks clustered a few Hz apart, standing 30 dB
-            // above the floor. The model showed 26, one per partial, spaced
-            // at the full 57 Hz of the ladder and standing 16 dB proud. The
-            // collapse was deleting two thirds of what is audible in that
-            // band, and it deleted the most in the bass -- an A0 has 112
-            // partials above the old threshold and a C6 has none, which is
-            // exactly why the treble already reads as a piano and the bottom
-            // octave does not.
-            //
-            // It costs nothing: the second oscillator was allocated either
-            // way and simply given zero amplitude.
-            let (w1, w2) = (remainder * 0.56, remainder * 0.44);
-            let half_ratio = powf(2.0, cents / 2400.0);
-            let third_ratio = powf(
-                2.0,
-                cents * (0.9 + 0.4 * hash01((note as u32) << 9 | (n as u32) << 2 | 3)) / 1200.0,
-            );
-            // Strings carry only their intrinsic (internal/air) losses in
-            // their own rotations; radiation is the bridge's business.
-            // The long second stage, and it must NOT be flat across the
-            // ladder.
-            //
-            // A dephased string escapes the bridge drain and then rings at
-            // its own intrinsic loss, which this multiplied by a flat 5.3.
-            // High partials dephase soonest -- their detune is the same in
-            // cents and so far larger in Hz -- so they escaped first and then
-            // rang for the longest.
-            //
-            // Measured on C2, T60 per partial: the real instrument's low
-            // partials last 11.4 s and its high ones 9.5 s, a ratio of 1.20
-            // with the lows lasting longer, and the reference renderer agrees
-            // at 1.07. This model had 25.0 s low against 50.4 s high -- a
-            // ratio of 0.50, INVERTED, with the upper partials outlasting the
-            // body by two to one and one of them not decaying at all.
-            //
-            // A wire whose upper harmonics are still sounding after the body
-            // has died is not a piano, and "mucha cuerda" is exactly what it
-            // sounds like.
-            // How much longer the second stage lasts than the first, and
-            // nothing else. This is the two-stage decay itself -- the
-            // horizontal polarisation outliving the vertical one -- and it is
-            // structure, not a correction against a measurement.
-            //
-            // A `4.05 * f^-0.357` factor used to be multiplied in here,
-            // gated to the bass. It was fitted honestly, against C2's
-            // partials, but it was fitted on top of a decay curve that was
-            // already wrong, so it was measuring that curve's error and not
-            // the instrument. With the curve refitted it has nothing left to
-            // correct, and keeping it would take a bass note's 500 Hz partial
-            // down to two fifths of its proper life for the second time.
-            let tail = 1.8 + 2.6 / (1.0 + powf(frequency / TAIL_KNEE_HZ, 1.2));
-            let intrinsic =
-                self.decay_per_sample(t60 * tail * self.controls.lab(12));
-            let prompt_t60 = t60 * 1.94 * self.controls.lab(11) / (1.4 + 1.1 * position);
-            let step = expf(
-                -6.907_755 * (CULL_INTERVAL as f32 / sample_rate) / prompt_t60,
-            );
-            // How strongly this partial couples to the bridge, and it is not
-            // flat with frequency.
-            //
-            // A fade was first put here to hide the aliasing of a
-            // control-rate drain. That reading was wrong -- moving the drain
-            // to per-sample changed the measured loss not at all -- but the
-            // fade itself kept earning its place, and there is a reason: what
-            // sets the coupling is the ratio of the bridge's admittance to
-            // the string's characteristic impedance, and that ratio falls
-            // away as the partial's frequency rises. A high partial barely
-            // moves the bridge.
-            let follow = (COUPLING_TOP_HZ / frequency.max(1.0)).clamp(0.0, 1.0);
-            // Normalised by the weights' own square sum, because that is the
-            // eigenvalue the coherent configuration decays at: with
-            // `I - k w w^T` the coherent mode loses `k * (w.w)` per step, so
-            // dividing by `w.w` makes it lose exactly `1 - step`, and
-            // `prompt_t60` above finally means what it says. The old
-            // denominator counted the horizontal polarisation as a whole
-            // string, which under-drained the coherent mode by 30%.
-            let weights =
-                1.0 + HORIZONTAL_BRIDGE * HORIZONTAL_BRIDGE + three;
-            let coupling = (1.0 - step) / weights * follow;
+            // What this deletes: `tail = 1.8 + 2.6/(1+(f/420)^1.2)` (the
+            // scripted stage ratio), `prompt_t60 = t60*1.94/(1.4+1.1*pos)`
+            // (the scripted fast stage), and the 300 Hz coupling fade (the
+            // fast/slow difference now carries the frequency dependence,
+            // and it comes from the measured radiation curve rather than a
+            // drawn rolloff).
+            // The per-note calibration and the board's per-partial pull
+            // apply to BOTH stages: they express where this note's energy
+            // goes, not which configuration it is in. Without them the slow
+            // stage ignored the calibration that the audible curve was
+            // fitted through, and the top of the compass rang 2.7x long
+            // once it dephased.
+            let slow_t60 = (self.slow_t60_seconds(frequency, f0, string_scale)
+                * board_decay
+                * self.cal(note, 4)
+                * self.controls.lab(12))
+            .max(0.05);
+            let fast_t60 = (t60 * self.controls.lab(11)).max(0.02);
+            let intrinsic = self.decay_per_sample(slow_t60);
+            let bridge_rate =
+                (6.907_755 * (1.0 / fast_t60 - 1.0 / slow_t60)).max(0.0);
+            let drained =
+                1.0 - expf(-bridge_rate * CULL_INTERVAL as f32 / sample_rate);
+            // Normalised by the weight vector's square sum: with I - k*w*w^T
+            // the coherent mode loses k*(w.w) per step, so dividing makes it
+            // lose exactly `drained`, and the fast stage means what the
+            // curve says.
+            let weights = shares[0] * 0.0 + 1.0
+                + second * second
+                + third_string * third_string
+                + HORIZONTAL_BRIDGE * HORIZONTAL_BRIDGE;
+            let coupling = drained / weights;
             // The partial swells in over many of its own periods, and slowly
             // enough to matter: a bass note does not arrive, it gathers.
-            //
-            // Measured on C2, energy every 4 ms through the onset: the real
-            // instrument is 26 dB down in its first four milliseconds and
-            // does not reach full level until 112 ms, seven periods in. This
-            // model started 14 dB louder than that -- an audible click where
-            // the string has not even completed a quarter period -- and
-            // peaked at 44 ms. Stretching the swell puts the peak at 104 ms
-            // and takes 7 dB off the click.
             let rise_seconds =
                 ((5.0 / frequency) * self.controls.lab(9)).clamp(0.0008, 0.15);
             let rise = expf(-1.0 / (rise_seconds * sample_rate));
+            // The horizontal picks up more of the blow in the bass: a wound
+            // string's mass sits far off its bending axis and the bridge's
+            // cross-coupling hands a larger share of the vertical motion
+            // sideways. This is also where the second decay stage is most
+            // prominent in measured pianos.
+            let horizontal_share =
+                HORIZONTAL_SHARE * (0.65 + 1.2 * powf(1.0 - position, 1.5));
             let (pq, po) = (phase_q[n], phase_o[n]);
-            partials[placed] = Partial {
-                prompt: Component::start_state(
-                    amplitude * w1 * pq,
-                    amplitude * w1 * po,
-                    (frequency * half_ratio).min(nyquist),
-                    intrinsic,
-                    sample_rate,
-                ),
-                aftersound: Component::start_state(
-                    amplitude * w2 * pq,
-                    amplitude * w2 * po,
-                    frequency / half_ratio,
+            let mut built = Partial {
+                verticals: [Component::default(); 3],
+                horizontal: Component::start_state(
+                    amplitude * horizontal_share * pq,
+                    amplitude * horizontal_share * po,
+                    (frequency
+                        * powf(
+                            2.0,
+                            POLARISATION_CENTS
+                                * (0.6 + 0.8 * hash01((note as u32) << 7 | (n as u32) << 2 | 5))
+                                / 1200.0,
+                        ))
+                    .min(nyquist),
                     intrinsic,
                     sample_rate,
                 ),
                 bloom: Component::start_state(
-                    -amplitude * pq,
-                    -amplitude * po,
+                    -amplitude * (1.0 + horizontal_share) * pq,
+                    -amplitude * (1.0 + horizontal_share) * po,
                     frequency,
                     rise,
-                    sample_rate,
-                ),
-                third: Component::start_state(
-                    amplitude * w3 * pq,
-                    amplitude * w3 * po,
-                    (frequency * third_ratio).min(nyquist),
-                    intrinsic,
                     sample_rate,
                 ),
                 coupling,
@@ -2446,6 +2426,22 @@ impl ConcertGrand {
                     sign * h * (1.0 / 16.0)
                 },
             };
+            for (slot, (share, ratio)) in built
+                .verticals
+                .iter_mut()
+                .zip(shares.iter().zip(ratios.iter()))
+            {
+                if *share > 0.0 {
+                    *slot = Component::start_state(
+                        amplitude * share * pq,
+                        amplitude * share * po,
+                        (frequency * ratio).min(nyquist),
+                        intrinsic,
+                        sample_rate,
+                    );
+                }
+            }
+            partials[placed] = built;
             placed += 1;
         }
         if placed == 0 {
@@ -2510,7 +2506,11 @@ impl ConcertGrand {
                 let amplitude = thump_level * level;
                 let decay = self.decay_per_sample(0.30);
                 partials[placed] = Partial {
-                    prompt: Component::start(amplitude, freq * jitter, decay, sample_rate),
+                    verticals: [
+                        Component::start(amplitude, freq * jitter, decay, sample_rate),
+                        Component::default(),
+                        Component::default(),
+                    ],
                     bloom: Component::start(-amplitude, freq * jitter, rise, sample_rate),
                     ..Partial::default()
                 };
@@ -2657,7 +2657,11 @@ impl ConcertGrand {
                 let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life) * 1.5;
                 let slow = self.decay_per_sample(t60);
                 halo[n] = Partial {
-                    prompt: Component::start(amplitude, detuned, slow, sample_rate),
+                    verticals: [
+                        Component::start(amplitude, detuned, slow, sample_rate),
+                        Component::default(),
+                        Component::default(),
+                    ],
                     bloom: Component::start(-amplitude, detuned, rise, sample_rate),
                     ..Partial::default()
                 };
@@ -3590,7 +3594,7 @@ mod tests {
                 let mut stretch = 0.0f32;
                 for partial in &voice.partials[..voice.partial_count] {
                     let w = partial.slope;
-                    let a = partial.prompt.s + partial.aftersound.s + partial.third.s;
+                    let a = partial.verticals[0].s + partial.verticals[1].s + partial.verticals[2].s + partial.horizontal.s;
                     stretch += (w * a) * (w * a);
                 }
                 // The rate is applied every TENSION_INTERVAL samples and is a
@@ -3706,7 +3710,7 @@ mod tests {
                 // which is the strike's (position, velocity/omega) direction.
                 let (mut pos, mut vel) = (0.0f32, 0.0f32);
                 for partial in &voice.partials[..voice.partial_count] {
-                    let p = &partial.prompt;
+                    let p = &partial.verticals[0];
                     pos += p.s * p.s;
                     vel += p.c * p.c;
                 }
@@ -3748,7 +3752,7 @@ mod tests {
         render(&mut piano, 1, &[note_on(45, 100)]);
         let voice = piano.voices.iter().find(|v| v.active).unwrap();
         let ratio = |p: &Partial| {
-            (p.aftersound.magnitude_squared() / p.prompt.magnitude_squared().max(1e-20)).sqrt()
+            (p.horizontal.magnitude_squared() / p.verticals[0].magnitude_squared().max(1e-20)).sqrt()
         };
         let low = ratio(&voice.partials[0]);
         let high = ratio(&voice.partials[voice.partial_count.saturating_sub(3)]);
@@ -3768,9 +3772,10 @@ mod tests {
         let f0 = piano.fundamental[60 - LOW_NOTE as usize];
         for n in 0..voice.partial_count {
             let p = &voice.partials[n];
-            let amp = (p.prompt.magnitude_squared()
-                + p.aftersound.magnitude_squared()
-                + p.third.magnitude_squared())
+            let amp = (p.verticals[0].magnitude_squared()
+                + p.verticals[1].magnitude_squared()
+                + p.verticals[2].magnitude_squared()
+                + p.horizontal.magnitude_squared())
             .sqrt();
             std::println!("n={} ~f={:.0} amp={:.6}", n + 1, (n + 1) as f32 * f0, amp);
         }
@@ -3949,14 +3954,15 @@ mod tests {
             let mut den = 0.0f64;
             let mut rows = String::new();
             for p in &voice.partials[..voice.partial_count] {
-                let f = (p.prompt.rs.atan2(p.prompt.rc) as f64).abs() * FS as f64
+                let f = (p.verticals[0].rs.atan2(p.verticals[0].rc) as f64).abs() * FS as f64
                     / core::f64::consts::TAU;
                 if f < 20.0 {
                     continue;
                 }
-                let e = (p.prompt.magnitude_squared()
-                    + p.aftersound.magnitude_squared()
-                    + p.third.magnitude_squared()) as f64;
+                let e = (p.verticals[0].magnitude_squared()
+                    + p.verticals[1].magnitude_squared()
+                    + p.verticals[2].magnitude_squared()
+                    + p.horizontal.magnitude_squared()) as f64;
                 num += f.ln() * e;
                 den += e;
             }
@@ -3965,7 +3971,7 @@ mod tests {
                 rows += &format!(
                     " n{}:{:.1}dB",
                     i + 1,
-                    10.0 * (p.prompt.magnitude_squared() as f64).max(1e-30).log10()
+                    10.0 * (p.verticals[0].magnitude_squared() as f64).max(1e-30).log10()
                 );
             }
             println!("vel {velocity}: centroide {cent:.0} Hz, {} parciales", voice.partial_count);
@@ -4035,13 +4041,17 @@ mod tests {
             // partial that is still alive to watch. Radiation damping now
             // kills C4's eighth by two seconds, which is what the real
             // instrument does and what this test used to sit on.
-            let p = &voice.partials[3.min(voice.partial_count - 1)];
-            let sum_s = p.prompt.s + p.aftersound.s + p.third.s;
-            let sum_c = p.prompt.c + p.aftersound.c + p.third.c;
+            // The second partial: low enough to survive the watch. This
+            // used to sit on the fourth, and with the two-stage decay now
+            // emergent rather than scripted, C4's fourth genuinely dies
+            // within the three seconds the old version idled through.
+            let p = &voice.partials[1.min(voice.partial_count - 1)];
+            let sum_s = p.verticals[0].s + p.verticals[1].s + p.verticals[2].s;
+            let sum_c = p.verticals[0].c + p.verticals[1].c + p.verticals[2].c;
             let radiated = sum_s * sum_s + sum_c * sum_c;
-            let stored = p.prompt.magnitude_squared()
-                + p.aftersound.magnitude_squared()
-                + p.third.magnitude_squared();
+            let stored = p.verticals[0].magnitude_squared()
+                + p.verticals[1].magnitude_squared()
+                + p.verticals[2].magnitude_squared();
             (radiated / (3.0 * stored).max(1e-24), stored)
         };
         let (struck, _) = coherence(&piano);
@@ -4054,7 +4064,7 @@ mod tests {
         let mut total = 0.0;
         let mut samples = 0;
         let mut last_stored = 0.0;
-        for _ in 0..30 {
+        for _ in 0..20 {
             render(&mut piano, (FS * 0.1) as usize, &[]);
             let (c, stored) = coherence(&piano);
             total += c;
@@ -4153,11 +4163,11 @@ mod tests {
             decay_squared(&voice.duplex[0]) > 0.0,
             "treble note grew no duplex"
         );
-        let string_before = decay_squared(&voice.partials[0].prompt);
+        let string_before = decay_squared(&voice.partials[0].verticals[0]);
         let duplex_before = decay_squared(&voice.duplex[0]);
         render(&mut piano, 8, &[note_off(84)]);
         let voice = piano.voices.iter().find(|v| v.active).unwrap();
-        let string_after = decay_squared(&voice.partials[0].prompt);
+        let string_after = decay_squared(&voice.partials[0].verticals[0]);
         let duplex_after = decay_squared(&voice.duplex[0]);
         assert!(
             string_after < string_before * 0.9999,
@@ -4341,8 +4351,8 @@ mod tests {
         let magnitude = |piano: &ConcertGrand| {
             let voice = piano.voices.iter().find(|v| v.active).unwrap();
             let p = &voice.partials[0];
-            let s = p.prompt.s + p.aftersound.s + p.third.s + p.bloom.s;
-            let c = p.prompt.c + p.aftersound.c + p.third.c + p.bloom.c;
+            let s = p.verticals[0].s + p.verticals[1].s + p.verticals[2].s + p.horizontal.s + p.bloom.s;
+            let c = p.verticals[0].c + p.verticals[1].c + p.verticals[2].c + p.horizontal.c + p.bloom.c;
             (s * s + c * c).sqrt()
         };
         let at_strike = magnitude(&piano);
@@ -4361,7 +4371,7 @@ mod tests {
         let mut piano = prepared();
         render(&mut piano, 1, &[note_on(24, 100)]);
         let voice = piano.voices.iter().find(|v| v.active).unwrap();
-        let amp = |i: usize| voice.partials[i].prompt.magnitude_squared();
+        let amp = |i: usize| voice.partials[i].verticals[0].magnitude_squared();
         // Scan the transverse ladder only: nonlinear extras and the
         // mechanism thump are appended after it.
         let ladder = voice.partial_count.min(40);

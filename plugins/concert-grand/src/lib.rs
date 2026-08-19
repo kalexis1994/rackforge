@@ -439,7 +439,7 @@ impl BodyMode {
 /// the taper with `chiff` pinned to its 4.0 ceiling at the top three anchors
 /// and still could not reach. Flat here, with the level set by measurement;
 /// the per-note column carries the shape from there.
-const KNOCK_LEVEL: f32 = 0.055;
+const KNOCK_LEVEL: f32 = 0.028;
 
 /// The soundboard's modal loss factor.
 ///
@@ -1219,6 +1219,9 @@ pub struct ConcertGrand {
     room_len: [usize; ROOM_LINES],
     /// Two-pole state for the high-pass feeding the lid and the chamber.
     air_dc: [f32; 2],
+    /// Counts strikes, so per-strike randomness never repeats a note's exact
+    /// mechanical fingerprint twice in a row.
+    strike_serial: u32,
     /// The pedal's own noise: the rail and the dampers moving. A one-shot
     /// low-passed burst, softer on the way down, heavier on release when
     /// the whole damper rail lands back on the strings.
@@ -1316,6 +1319,7 @@ impl Default for ConcertGrand {
             room: [[0.0; ROOM_BUFFER]; ROOM_LINES],
             room_len: [1; ROOM_LINES],
             air_dc: [0.0; 2],
+            strike_serial: 0,
             pedal_noise_amp: 0.0,
             pedal_noise_lp: 0.0,
             pedal_noise_seed: 0x5EED_C0DE,
@@ -2747,7 +2751,16 @@ impl ConcertGrand {
         // Level rides the same law as the burst; T60s of tens of
         // milliseconds; frequencies jittered per note so the rack of keys
         // does not ring as one bell.
-        let clack_level = velocity * velocity * KNOCK_LEVEL * 8.0
+        // The x8 that matched the recordings' measured attack floor reads
+        // exaggerated at the keyboard: a synthetic three-mode ring is far
+        // more salient than the same energy smeared through a real action
+        // and a real room. The default now sits ~10 dB under the measured
+        // ceiling -- present, discreet -- and the fader still reaches the
+        // recording level at ~0.65 and x16 above it at the top.
+        self.strike_serial = self.strike_serial.wrapping_add(1);
+        let strike_salt = self.strike_serial.wrapping_mul(0x9E37_79B9);
+        let clack_level = velocity * velocity * KNOCK_LEVEL * 3.4
+            * (0.75 + 0.5 * hash01(strike_salt ^ 0xA5))
             * action
             * self.controls.lab(3)
             * Controls::noise_gain(self.controls.action_noise);
@@ -2764,8 +2777,13 @@ impl ConcertGrand {
                 if placed >= MAX_PARTIALS {
                     break;
                 }
-                let jitter =
-                    1.0 + 0.14 * (hash01((note as u32) << 8 | seed) - 0.5);
+                // Per STRIKE, not per note: a note whose knock is bit-for-
+                // bit identical on every repetition reads as a machine, and
+                // the ear flags it long before it can name it. A real action
+                // never lands twice the same way.
+                let jitter = 1.0
+                    + 0.14 * (hash01((note as u32) << 8 | seed) - 0.5)
+                    + 0.06 * (hash01(strike_salt ^ seed) - 0.5);
                 let amplitude = clack_level * level;
                 let decay = self.decay_per_sample(t60);
                 partials[placed] = Partial {

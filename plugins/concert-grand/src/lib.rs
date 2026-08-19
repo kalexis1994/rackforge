@@ -448,7 +448,7 @@ const BOARD_TOP_HZ: f32 = 8500.0;
 /// The lowest board mode. A grand's first soundboard mode sits near 60-70 Hz;
 /// the bank starts just below so the region around it is covered rather than
 /// bounded.
-const BOARD_BOTTOM_HZ: f32 = 50.0;
+const BOARD_BOTTOM_HZ: f32 = 62.0;
 
 /// Modal spacing, in hertz, at a given frequency — the measured density law.
 ///
@@ -563,6 +563,10 @@ const ROOM_DELAYS_S: [f32; ROOM_LINES] = [0.0239, 0.0293, 0.0347, 0.0419, 0.0473
 const ROOM_RT60_S: f32 = 1.4;
 /// One-pole damping coefficient target frequency, Hz.
 const ROOM_DAMP_HZ: f32 = 4200.0;
+/// One-pole coefficient for the high-pass on everything entering the lid and
+/// the chamber, at 44.1 kHz. The corner is the board's own radiation corner:
+/// the air is driven by what the board radiates, not by what the strings do.
+const AIR_HIGHPASS: f32 = 0.0094;
 const ROOM_BUFFER: usize = 4096;
 /// Wet level of the chamber against the direct sound.
 const ROOM_MIX: f32 = 0.09;
@@ -1109,6 +1113,8 @@ pub struct ConcertGrand {
     /// damping state.
     room: [[f32; ROOM_BUFFER]; ROOM_LINES],
     room_len: [usize; ROOM_LINES],
+    /// Two-pole state for the high-pass feeding the lid and the chamber.
+    air_dc: [f32; 2],
     room_gain: [f32; ROOM_LINES],
     room_lp: [f32; ROOM_LINES],
     room_damp: f32,
@@ -1181,6 +1187,7 @@ impl Default for ConcertGrand {
             lid_right: [(0, 0.0); LID_TAPS_RIGHT.len()],
             room: [[0.0; ROOM_BUFFER]; ROOM_LINES],
             room_len: [1; ROOM_LINES],
+            air_dc: [0.0; 2],
             room_gain: [0.0; ROOM_LINES],
             room_lp: [0.0; ROOM_LINES],
             room_damp: 0.5,
@@ -1503,6 +1510,22 @@ impl ConcertGrand {
             // A real plate's mobility is ragged: per-mode strength swings
             // ~±8 dB — a bank of equal modes is only a volume knob.
             mode.drive *= 0.65 + 0.8 * hash01(0xF00D ^ seed << 7);
+            // And the board does not radiate its own lowest modes any more
+            // than it radiates a string's lowest partials.
+            //
+            // The bank starts at 50 Hz, and every note in the compass kicks
+            // that mode -- a treble note hardest of all, because its strike
+            // is the sharpest and so the broadest in spectrum. Measured, a
+            // 49.8 Hz tone sat under every single note, at -75.8 dB under G2
+            // and rising to -68.9 dB under C4, at a fixed pitch that follows
+            // nothing being played. Six voices of a chord each contribute it
+            // and it sums into an audible drone an octave and a half below
+            // the music, which is what the user heard the moment they played
+            // chords on the packaged build and called an octave discrepancy.
+            //
+            // Nothing in the test suite could catch it: every render this
+            // model is measured against is one note, and one note buries it.
+            mode.drive *= Self::board_radiation(placed);
             self.board[index] = mode;
             frequency += board_spacing(frequency);
             index += 1;
@@ -1654,6 +1677,22 @@ impl ConcertGrand {
     /// curve is: A0's loss rate rises a factor of 6 from 750 Hz to 1500 Hz,
     /// then 3 and then 1.9 across the octaves above, which is a power law
     /// bending over into saturation rather than a clean square.
+    /// How much of what happens at this frequency the board actually
+    /// radiates, below its first mode. Sixth-order corner at 66 Hz, from the
+    /// YDP measurements: -40 dB at 27.5 Hz, -25 dB at 46 Hz, ~0 dB by 78 Hz.
+    ///
+    /// This was written for the string partials and applied only to them. The
+    /// board's OWN modes went out at full strength -- including the lowest,
+    /// which sits at 50 Hz and is struck by every note in the compass.
+    fn board_radiation(frequency: f32) -> f32 {
+        let ratio = frequency / RADIATION_CORNER_HZ;
+        let u = {
+            let r2 = ratio * ratio;
+            r2 * r2 * r2
+        };
+        u / (1.0 + u)
+    }
+
     fn radiation_efficiency(frequency: f32) -> f32 {
         let r = powf(frequency / RADIATION_COINCIDENCE, 2.6);
         r / (1.0 + r)
@@ -1919,12 +1958,7 @@ impl ConcertGrand {
             // ladder. Radiating them at full strength is a synthesizer's
             // sub bass, not a piano's. Sixth-order: the YDP measurements show
             // -40 dB at 27.5 Hz against ~0 dB by 78 Hz.
-            let ratio = frequency / RADIATION_CORNER_HZ;
-            let u = {
-                let r2 = ratio * ratio;
-                r2 * r2 * r2
-            };
-            let radiation = u / (1.0 + u);
+            let radiation = Self::board_radiation(frequency);
             let (board, _) = Self::board_response(frequency);
             let rough =
                 (0.71 + 0.58 * hash01((note as u32) << 8 | n as u32)) * board * radiation;
@@ -2829,9 +2863,54 @@ impl ConcertGrand {
 
     /// Cubic soft clip with unity gain at small levels; only a pedalled
     /// fortissimo cluster ever reaches it.
+    /// The output ceiling, and it is LINEAR until the signal is nearly at it.
+    ///
+    /// This used to be `x * (1 - x*x/6.75)`, a cubic, and a cubic has no
+    /// linear region at all: it bends the signal by some amount at every
+    /// level, and the amount it bends by is a third-order term. Feed a chord
+    /// through a third-order nonlinearity and it makes intermodulation
+    /// products at `2*f1 - f2` -- which, for two notes a fifth apart, lands
+    /// an octave BELOW the lower one. C2 and G2 put a tone at 32.8 Hz that
+    /// neither string is producing.
+    ///
+    /// Measured, rendering the same low C alone and then inside a six-note
+    /// chord and reading the energy below the lowest fundamental:
+    ///
+    /// ```text
+    /// band                    one note    chord
+    /// 33-50 Hz (an octave)     -55.9 dB   -36.5
+    /// 20-33 Hz (two octaves)   -55.6      -44.8
+    /// 5-20 Hz                  -64.1      -49.5
+    /// ```
+    ///
+    /// Nineteen decibels of octave-below rumble that appears only when more
+    /// than one note is held. Every render this model is measured against is
+    /// a single note, so nothing in the test suite could see it; the user
+    /// heard it the first time they played chords on the packaged build.
+    ///
+    /// It was not even reserved for loud playing. The headroom above was
+    /// sized so the loudest possible chord "stays out of the clamp" at 1.2,
+    /// but the cubic is already taking 21% off at 1.2 -- the clamp was never
+    /// the nonlinearity, the whole curve was.
+    ///
+    /// So: exactly the identity below the knee, and a bend only above it. The
+    /// ceiling is unchanged at 1.0, and normal playing no longer touches the
+    /// curve at all.
     fn soften(sample: f32) -> f32 {
-        let x = sample.clamp(-1.5, 1.5);
-        x * (1.0 - x * x / 6.75)
+        const KNEE: f32 = 0.9;
+        let magnitude = sample.abs();
+        if magnitude <= KNEE {
+            return sample;
+        }
+        // Above the knee: y/(1+y), whose slope is 1 where it joins, so there
+        // is no corner, and which approaches 1.0 without ever passing it.
+        let over = (magnitude - KNEE) / (1.0 - KNEE);
+        let shaped = KNEE + (1.0 - KNEE) * (over / (1.0 + over));
+        if sample < 0.0 {
+            -shaped
+        } else {
+            shaped
+        }
     }
 }
 
@@ -3098,6 +3177,41 @@ impl Processor for ConcertGrand {
                 + (open_left + open_right) * OPEN_MIX * sympathy
                 + halo_left
                 + halo_right;
+            // What drives the air is what the BOARD radiates, and the
+            // board radiates almost nothing below its first mode. The lid and
+            // the chamber were being fed the full signal instead, and the
+            // chamber is a six-line feedback network with a 1.4 s decay and
+            // only a 4.2 kHz lowpass in the loop -- nothing damps its low
+            // modes at all. So it rang at one of them, and it rang under
+            // everything.
+            //
+            // Measured: a fixed 46.2 Hz tone sat under every single note,
+            // following nothing, at -73.6 dB under C4 -- and setting the air
+            // control to zero was the only thing that removed it (-83.8 dB,
+            // and the peak moves off it entirely). Six voices of a chord each
+            // contribute their own copy, and it sums into an audible drone an
+            // octave and a half below the music. That is the octave
+            // discrepancy the user heard the moment they played chords on the
+            // packaged build, and no single-note render could show it.
+            //
+            // One pole at the radiation corner, subtracted: the ambience now
+            // receives the same spectrum the board actually puts into the
+            // room.
+            // Two poles, not one: a single pole rolls off at 6 dB an octave
+            // and the board's own measured law is sixth-order. Two is still
+            // gentler than the board, which is the safe direction -- it
+            // cannot remove anything the board would have radiated.
+            //
+            // The high-pass is cascaded, not the low-pass. Subtracting two
+            // cascaded low-passes gives `1 - H^2 = (1 - H)(1 + H)`, and near
+            // DC `1 + H` is nearly 2 -- so it lets through about twice what
+            // one pole does. Measured, that version was 5 dB WORSE than a
+            // single pole. Each stage has to high-pass what the last one
+            // handed it.
+            self.air_dc[0] += AIR_HIGHPASS * (staged - self.air_dc[0]);
+            let once = staged - self.air_dc[0];
+            self.air_dc[1] += AIR_HIGHPASS * (once - self.air_dc[1]);
+            let staged = once - self.air_dc[1];
             self.lid[self.lid_write] = staged;
             let mut lid_left = 0.0;
             for (offset, gain) in self.lid_left {
@@ -3817,6 +3931,53 @@ mod tests {
             .unwrap_or_default();
         // A chromatic sweep, for measurements that average across the compass.
         let chromatic = std::env::var("CG_CHROMATIC").is_ok();
+        // A chord, because the instrument is played with more than one
+        // finger and the shared board, room and saturator are the only places
+        // voices can interact. A single-note render cannot show an
+        // intermodulation product; this can.
+        if std::env::var("CG_CHORD").is_ok() {
+            let mut piano = Box::new(ConcertGrand::default());
+            for (index, value) in &overrides {
+                assert!(piano.set_parameter(*index, *value), "param {index} rejected");
+            }
+            let rate: u32 = std::env::var("CG_RATE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(44_100);
+            assert!(piano.prepare(rate as f64, 512, 0, 2));
+            let chord: Vec<_> = std::env::var("CG_CHORD")
+                .unwrap()
+                .split(',')
+                .filter(|p| !p.is_empty())
+                .map(|p| note_on(p.trim().parse().unwrap(), 110))
+                .collect();
+            let frames = rate as usize * 5;
+            let mut output = vec![0.0f32; frames * 2];
+            piano.process(&[], &mut output, &chord, &[], frames as u32, 0, 2);
+            let mono: Vec<i16> = output
+                .chunks_exact(2)
+                .map(|f| (((f[0] + f[1]) * 0.5).clamp(-1.0, 1.0) * 32_767.0) as i16)
+                .collect();
+            let mut bytes = Vec::with_capacity(44 + mono.len() * 2);
+            let data_len = (mono.len() * 2) as u32;
+            bytes.extend(b"RIFF");
+            bytes.extend((36 + data_len).to_le_bytes());
+            bytes.extend(b"WAVEfmt ");
+            bytes.extend(16u32.to_le_bytes());
+            bytes.extend(1u16.to_le_bytes());
+            bytes.extend(1u16.to_le_bytes());
+            bytes.extend(rate.to_le_bytes());
+            bytes.extend((rate * 2).to_le_bytes());
+            bytes.extend(2u16.to_le_bytes());
+            bytes.extend(16u16.to_le_bytes());
+            bytes.extend(b"data");
+            bytes.extend(data_len.to_le_bytes());
+            for sample in &mono {
+                bytes.extend(sample.to_le_bytes());
+            }
+            std::fs::write(format!("{out}/chord.wav"), bytes).unwrap();
+            return;
+        }
         let notes: Vec<(u8, u8)> = if chromatic {
             (0..30).map(|i| (21 + 3 * i as u8, 110u8)).collect()
         } else if cal.is_some() {
@@ -3832,8 +3993,15 @@ mod tests {
             for (index, value) in &overrides {
                 assert!(piano.set_parameter(*index, *value), "param {index} rejected");
             }
-            assert!(piano.prepare(44_100.0, 512, 0, 2));
-            let frames = 44_100 * 5;
+            // The rate the desktop actually runs at is not the rate this
+            // renders at by default, and a model can be right at one and
+            // wrong at the other. CG_RATE makes that testable.
+            let rate: u32 = std::env::var("CG_RATE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(44_100);
+            assert!(piano.prepare(rate as f64, 512, 0, 2));
+            let frames = rate as usize * 5;
             let mut output = vec![0.0f32; frames * 2];
             piano.process(
                 &[],
@@ -3857,8 +4025,8 @@ mod tests {
             bytes.extend(16u32.to_le_bytes());
             bytes.extend(1u16.to_le_bytes());
             bytes.extend(1u16.to_le_bytes());
-            bytes.extend(44_100u32.to_le_bytes());
-            bytes.extend((44_100u32 * 2).to_le_bytes());
+            bytes.extend(rate.to_le_bytes());
+            bytes.extend((rate * 2).to_le_bytes());
             bytes.extend(2u16.to_le_bytes());
             bytes.extend(16u16.to_le_bytes());
             bytes.extend(b"data");

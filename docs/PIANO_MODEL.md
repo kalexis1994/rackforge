@@ -500,6 +500,48 @@ code and is far beyond audibility at control rate).
 
 ## Known defects
 
+* **FIXED (v0.62.0): a fixed low drone under every note, audible only in
+  chords.** The user played the packaged build and heard "esa discrepancia de
+  octavas" — a bass note under the music that follows nothing. No render in
+  this repository could have shown it, because every one of them is a single
+  note and one note buries it.
+
+  Measured, a tone at a **fixed 46–50 Hz** sat under every note in the
+  compass, at −75.8 dB under G2 and rising to −68.9 dB under C4 — stronger
+  for higher notes, because a sharper strike is broader in spectrum. Six
+  voices of a chord each contribute their own copy and it sums.
+
+  Two sources, both the same omission: the model's measured radiation law
+  (the board radiates ~nothing below its first mode — −25 dB at 46 Hz, ~0 dB
+  by 78 Hz) was being applied to the string partials only.
+
+  1. The board bank's own lowest mode sits at 50 Hz and went out at full
+     drive. It now passes through the same corner.
+  2. The lid and the chamber were fed the full signal. The chamber is a
+     six-line feedback network with a 1.4 s decay and only a 4.2 kHz lowpass
+     in the loop, so **nothing damped its low modes at all** and it rang at
+     one of them. The air is driven by what the board radiates, so its feed
+     is now high-passed at the same corner.
+
+  Chord content below the lowest fundamental, before and after:
+
+    | band | before | after |
+    |---|---|---|
+    | 33–50 Hz (an octave below) | −36.5 dB | **−47.2** |
+    | 20–33 Hz (two octaves) | −44.8 | −50.7 |
+    | 5–20 Hz | −49.5 | −56.6 |
+
+  Ruled out along the way, with measurements: the sample rate (48 kHz and
+  44.1 kHz are the same to within a decibel); the output saturator (its peak
+  input is 0.29, far below the knee, and rewriting it changed nothing); and
+  any cross-voice interaction at all — six single notes summed digitally give
+  the identical spectrum to a real six-note chord.
+
+  **The gap this exposes is in the test suite, not the model.** Everything is
+  measured one note at a time. `CG_CHORD` now renders a chord, and it should
+  be part of how a change is judged.
+
+
 * **RETRACTED: "C2's partials 8 to 11 die 10-17 dB too fast".** They do the
   opposite. Measured without the flawed normalisation, every one of C2's
   partials from the sixth to the twelfth rings LONGER than the instrument's,

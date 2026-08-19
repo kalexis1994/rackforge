@@ -1575,8 +1575,17 @@ const STRING_TENSION_N: f32 = 850.0;
 /// measurements (~2.5 ms at A0 fortissimo, ~1 ms at C4, ~0.5 ms in the high
 /// treble, soft blows longer); the values sit inside the K ranges Chaigne
 /// and Askenfelt tabulate.
-const FELT_K_A0: f32 = 1.0e13;
-const FELT_K_DECADES: f32 = 3.2;
+///
+/// The bass end came down a decade on 0.82.0 (1e13 -> 1e12, decades up so
+/// the treble end is unchanged). At 1e13 the bass felt was so stiff that
+/// even a pianissimo blow bottomed out against the string-as-spring floor:
+/// contact time stopped depending on velocity, and the user heard it --
+/// "toco apenas y suena el martillazo". A decade softer, measured on C2,
+/// the soft blow's attack brightness drops 3.5 dB and its peak-to-sustain
+/// 2.6 dB while the fortissimo keeps its bite within 3.4 dB; the softer
+/// value is also the more physical one for a bass hammer.
+const FELT_K_A0: f32 = 1.0e12;
+const FELT_K_DECADES: f32 = 4.2;
 /// Hammer speed at full velocity, m/s. Measured fortissimo hammers arrive at
 /// 5-7 m/s; pianissimo under 1.
 const HAMMER_V_FF: f32 = 6.0;

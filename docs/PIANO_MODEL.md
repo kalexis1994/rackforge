@@ -785,6 +785,24 @@ code and is far beyond audibility at control rate).
   a travel should be the level someone WANTS, not the level a reference
   measured — the reference is one point on the travel, not its anchor.
 
+* **FIXED (v0.82.0): the soft bass blow still sounded like a hammer blow.**
+  The user: "toco apenas y suena el martillazo" — a pianissimo bass note
+  kept a percussive, bright attack. Isolated by renders: NOT the action
+  noise (velocity 45 with the knock on and off measured identical); the
+  tone itself. Measured on C2, attack brightness (500–3000 Hz rel.
+  60–250) moved only 7.7 dB from vel 30 to vel 110 — the felt at 1e13 was
+  so stiff that even a soft blow bottomed out against the string-as-spring
+  floor π√(m/k_s), making contact time velocity-INDEPENDENT in the bass.
+  The bass felt came down a decade (K_A0 1e13→1e12, decades 3.2→4.2 so the
+  treble end is untouched): the soft blow darkens 3.5 dB and loses 2.6 dB
+  of peak-to-sustain, the fortissimo keeps its character within 3.4 dB,
+  and 1e12 is the more physical bass-hammer value in Chaigne & Askenfelt's
+  tables anyway. Ruled out by the same sweep: three decades (1e10) guts
+  the fortissimo (−11 dB); raising Stulov's τ toward the bass contact time
+  (0.8–2 ms) re-brightens the pianissimo instead of separating the
+  dynamics, because less of the felt relaxes under the slow blow too. The
+  emergent contact-time tests still pass untouched.
+
 
 
 * **FIXED (v0.62.0): a fixed low drone under every note, audible only in

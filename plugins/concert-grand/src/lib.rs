@@ -235,7 +235,14 @@ const LN_1000: f32 = 6.907_755;
 /// Where the soundboard's bending wavelength overtakes the wavelength in air
 /// and it starts radiating in earnest. Fitted to the YDP A0's measured loss
 /// rates, which bend over between 1.5 and 3 kHz.
-const RADIATION_COINCIDENCE: f32 = 2500.0;
+/// Ege & Boutillon measure the ribbed board's coincidence transition at
+/// 1.1-1.5 kHz; this sat at 2500 for months, fitted before the decay chain
+/// was trustworthy enough to expose it. Moving it to the published value and
+/// re-measuring: every decay band from 300 Hz up moved TOWARD the
+/// instrument (300-700 Hz 1.04x -> 0.95, 700-1600 1.15 -> 1.04, top 1.37 ->
+/// 1.21) with the fit cost and the whole-note durations unchanged -- the
+/// physical number was simply right, no rate refit needed.
+const RADIATION_COINCIDENCE: f32 = 1200.0;
 /// The loss rate a fully radiating partial carries, in nepers per second.
 /// Fitted to the same measurement, less what the string's own losses already
 /// account for.

@@ -58,6 +58,7 @@
         if (!message || message.protocol !== PROTOCOL) return;
         if (message.kind === "context") {
           state.textContent = `Connected · ${message.surface ?? "play"} surface`;
+          selectedSoundId = message.instance?.selected_sound_id ?? selectedSoundId;
           void load();
           return;
         }
@@ -287,6 +288,12 @@
         return card;
       }
 
+      // The host's word on which voicing is selected; the shelf's
+      // highlight follows it, so a rebuilt shelf (every fresh context
+      // re-renders it) keeps pointing at the card the player chose
+      // instead of snapping back to the first one.
+      let selectedSoundId = null;
+
       async function drawPresets() {
         let factory = [];
         try {
@@ -301,6 +308,7 @@
           const card = presetCard(preset.name ?? preset.id, async () => {
             try {
               await call("plugin.select_sound", { sound_id: preset.id });
+              selectedSoundId = preset.id;
               state.textContent = `Voicing · ${preset.name ?? preset.id}`;
               await load(false);
             } catch (error) {
@@ -308,12 +316,17 @@
             }
           });
           card.title = preset.description ?? "";
+          card.dataset.soundId = preset.id;
           voicing.append(card);
         }
-        // The factory voicing shows as chosen from the start: the packaged
-        // default IS the first card, and a fresh panel plays exactly it.
-        const first = voicing.querySelector(".card");
-        if (first) first.setAttribute("aria-pressed", "true");
+        // The highlight follows the host's selection; a fresh panel with no
+        // word from the host yet falls back to the first factory card, which
+        // is the packaged default.
+        const chosen =
+          (selectedSoundId &&
+            voicing.querySelector(`.card[data-sound-id="${selectedSoundId}"]`)) ||
+          voicing.querySelector(".card");
+        if (chosen) chosen.setAttribute("aria-pressed", "true");
         for (const preset of userPresets()) {
           const tools = document.createElement("span");
           tools.className = "tools-inline";

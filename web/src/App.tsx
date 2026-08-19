@@ -21,6 +21,7 @@ import {
   Info,
   LogOut,
   Menu,
+  Keyboard,
   Piano,
   Play,
   RadioTower,
@@ -54,6 +55,7 @@ import {
   setPluginParameter,
   setPluginStateParameter,
   stopGateway,
+  sendVirtualMidi,
 } from "./gateway";
 import { RfLoader } from "./components/RfLoader";
 import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
@@ -578,6 +580,7 @@ function RackForgeApp() {
           </div>
         ) : null}
       </main>
+      <TypingKeyboardListener />
       {mobileMenuOpen ? (
         <MobileNavigation
           connection={connection}
@@ -4151,6 +4154,155 @@ function requestHostSettingsBootstrap() {
   return hostSettingsBootstrapPromise;
 }
 
+// The typing keyboard: play notes from the computer keys, FL Studio's
+// layout -- the Z row is one octave (Z = C3), the Q row the next
+// (Q = middle C), sharps on the row above each. Disabled by default and
+// enabled from Settings > Input; text fields always win.
+const TYPING_KEYBOARD_STORAGE = "rackforge.typing-keyboard.enabled";
+const TYPING_KEY_NOTES: Record<string, number> = {
+  KeyZ: 48, KeyS: 49, KeyX: 50, KeyD: 51, KeyC: 52, KeyV: 53, KeyG: 54,
+  KeyB: 55, KeyH: 56, KeyN: 57, KeyJ: 58, KeyM: 59, Comma: 60, KeyL: 61,
+  Period: 62, Semicolon: 63, Slash: 64,
+  KeyQ: 60, Digit2: 61, KeyW: 62, Digit3: 63, KeyE: 64, KeyR: 65,
+  Digit5: 66, KeyT: 67, Digit6: 68, KeyY: 69, Digit7: 70, KeyU: 71,
+  KeyI: 72, Digit9: 73, KeyO: 74, Digit0: 75, KeyP: 76, BracketLeft: 77,
+  Equal: 78, BracketRight: 79,
+};
+
+export function typingKeyboardEnabled(): boolean {
+  try {
+    return localStorage.getItem(TYPING_KEYBOARD_STORAGE) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setTypingKeyboardEnabled(enabled: boolean) {
+  try {
+    localStorage.setItem(TYPING_KEYBOARD_STORAGE, enabled ? "1" : "0");
+  } catch {
+    /* volatile hosts still toggle for the session */
+  }
+  window.dispatchEvent(new Event("rackforge:typing-keyboard"));
+}
+
+function TypingKeyboardListener() {
+  const [enabled, setEnabled] = useState(typingKeyboardEnabled);
+  useEffect(() => {
+    const sync = () => setEnabled(typingKeyboardEnabled());
+    window.addEventListener("rackforge:typing-keyboard", sync);
+    return () => window.removeEventListener("rackforge:typing-keyboard", sync);
+  }, []);
+  useEffect(() => {
+    if (!enabled) return;
+    const held = new Set<number>();
+    const isTextTarget = (target: EventTarget | null) => {
+      const element = target as HTMLElement | null;
+      if (!element) return false;
+      const tag = element.tagName;
+      if (tag === "TEXTAREA" || tag === "SELECT") return true;
+      if (element.isContentEditable) return true;
+      if (tag === "INPUT") {
+        // Only TEXT entry wins over the notes; a focused fader, checkbox
+        // or button is not typing.
+        const type = (element as HTMLInputElement).type;
+        return !["checkbox", "radio", "range", "button", "color"].includes(type);
+      }
+      return false;
+    };
+    const down = (event: KeyboardEvent) => {
+      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (isTextTarget(event.target)) return;
+      const note = TYPING_KEY_NOTES[event.code];
+      if (note === undefined || held.has(note)) return;
+      event.preventDefault();
+      held.add(note);
+      sendVirtualMidi(0x90, note, 100);
+    };
+    const up = (event: KeyboardEvent) => {
+      const note = TYPING_KEY_NOTES[event.code];
+      if (note === undefined || !held.has(note)) return;
+      held.delete(note);
+      sendVirtualMidi(0x80, note, 0);
+    };
+    const releaseAll = () => {
+      for (const note of held) sendVirtualMidi(0x80, note, 0);
+      held.clear();
+    };
+    // Keyboard events do not cross frame boundaries, and in Play mode the
+    // player's focus usually sits inside the plugin panel's iframe -- so
+    // the listener rides along into every same-origin frame, re-scanned as
+    // panels mount and unmount.
+    const attached = new Set<Window>();
+    const attach = (target: Window) => {
+      if (attached.has(target)) return;
+      attached.add(target);
+      target.addEventListener("keydown", down);
+      target.addEventListener("keyup", up);
+    };
+    attach(window);
+    const scanFrames = () => {
+      for (const frame of Array.from(document.querySelectorAll("iframe"))) {
+        try {
+          const inner = (frame as HTMLIFrameElement).contentWindow;
+          if (inner && inner.document) attach(inner);
+        } catch {
+          /* cross-origin frames keep their keys */
+        }
+      }
+    };
+    scanFrames();
+    const scanner = window.setInterval(scanFrames, 2000);
+    window.addEventListener("blur", releaseAll);
+    return () => {
+      window.clearInterval(scanner);
+      for (const target of attached) {
+        try {
+          target.removeEventListener("keydown", down);
+          target.removeEventListener("keyup", up);
+        } catch {
+          /* a navigated-away frame is already gone */
+        }
+      }
+      window.removeEventListener("blur", releaseAll);
+      releaseAll();
+    };
+  }, [enabled]);
+  return null;
+}
+
+function TypingKeyboardCard() {
+  const [enabled, setEnabled] = useState(typingKeyboardEnabled);
+  const toggle = (next: boolean) => {
+    setEnabled(next);
+    setTypingKeyboardEnabled(next);
+  };
+  return (
+    <article className="settings-card">
+      <div className="settings-icon settings-icon-svg">
+        <Keyboard aria-hidden="true" strokeWidth={1.7} />
+      </div>
+      <div className="settings-copy">
+        <span className="card-kicker">Computer keys</span>
+        <h2>Typing Keyboard</h2>
+        <p>
+          Play notes with the computer keyboard, FL Studio layout: the Z row
+          is one octave, the Q row the next, sharps on the row above each.
+          Text fields always take priority.
+        </p>
+      </div>
+      <label className="settings-check">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(event) => toggle(event.target.checked)}
+        />
+        <span>{enabled ? "Enabled" : "Disabled (default)"}</span>
+      </label>
+    </article>
+  );
+}
+
 function SettingsPage({
   initial,
   onConfigChange,
@@ -4171,6 +4323,9 @@ function SettingsPage({
   const [audioOperation, setAudioOperation] = useState<"refresh" | "test" | "save" | null>(null);
   const audioBusy = audioOperation !== null;
   const [audioMessage, setAudioMessage] = useState<string | null>(null);
+  const [settingsTab, setSettingsTab] = useState<
+    "audio" | "input" | "network" | "security"
+  >("audio");
   const loadAudioSettings = useCallback(async () => {
     setAudioOperation("refresh");
     setAudioMessage(null);
@@ -4278,8 +4433,27 @@ function SettingsPage({
         title="Settings"
         detail="Host-wide configuration. Plugin-specific controls live inside each plugin."
       />
+      <nav className="settings-tabs" role="tablist" aria-label="Settings sections">
+        {([
+          ["audio", "Audio & MIDI"],
+          ["input", "Input"],
+          ["network", "Network"],
+          ["security", "Security"],
+        ] as const).map(([id, label]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={settingsTab === id}
+            className={settingsTab === id ? "active" : ""}
+            onClick={() => setSettingsTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
       <section className="settings-grid">
-        {audioSettings && audioDraft ? (
+        {settingsTab === "input" ? <TypingKeyboardCard /> : null}
+        {settingsTab === "audio" && audioSettings && audioDraft ? (
           <article className="settings-card host-audio-settings-card">
             <div className="settings-icon">♫</div>
             <div className="settings-copy">
@@ -4376,6 +4550,7 @@ function SettingsPage({
             </div>
           </article>
         ) : null}
+        {settingsTab === "network" ? (
         <article className="settings-card">
           <div className="settings-icon">⌁</div>
           <div className="settings-copy">
@@ -4422,7 +4597,8 @@ function SettingsPage({
             </div>
           ) : null}
         </article>
-        <ChangePinCard />
+        ) : null}
+        {settingsTab === "security" ? <ChangePinCard /> : null}
       </section>
     </>
   );

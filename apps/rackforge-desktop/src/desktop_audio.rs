@@ -2061,7 +2061,7 @@ midi_inputs = []
         ]);
 
         assert_eq!(
-            desired_midi_inputs(&selected, &present),
+            desired_midi_inputs(&selected, &present, false),
             BTreeSet::from([
                 "Other keyboard".to_owned(),
                 "KL Essential 61 mk3 MIDI".to_owned(),

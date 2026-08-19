@@ -3969,6 +3969,76 @@ fn start_desktop_audio(
 
 /// True when an installed, enabled controller package should own the
 /// hardware surface: the built-in KeyLab handling stands down for it.
+/// The KeyLab ships WITH RackForge: its manifest is embedded (the driver
+/// crate carries it) and its driver binary travels beside the desktop exe.
+/// First boot installs it into the controller store like any package --
+/// the same contract Android's bundled install honors -- so a fresh
+/// machine has its controller without anyone running a command.
+fn ensure_bundled_controller(rackforge_root: &Path) {
+    let store = rackforge_controller_package::PackageStore::new(
+        rackforge_root.join("controllers"),
+    );
+    let manifest_text = keylab_essential_mk3::controller::PACKAGE_MANIFEST;
+    let Ok(manifest) = toml::from_str::<
+        rackforge_controller_package::ControllerPackageManifest,
+    >(manifest_text) else {
+        eprintln!("DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=manifest-invalid");
+        return;
+    };
+    let already = store
+        .list()
+        .map(|installed| {
+            installed.iter().any(|controller| {
+                controller.record.id == manifest.id
+                    && controller.record.version == manifest.version
+            })
+        })
+        .unwrap_or(false);
+    if already {
+        return;
+    }
+    let Some(driver) = std::env::current_exe().ok().and_then(|exe| {
+        let candidate = exe
+            .parent()?
+            .join("rackforge-arturia-keylab-essential-mk3-driver.exe");
+        candidate.is_file().then_some(candidate)
+    }) else {
+        eprintln!(
+            "DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=driver-binary-not-beside-exe"
+        );
+        return;
+    };
+    let staging = rackforge_root.join("controllers").join("staging").join(&manifest.id);
+    let staged = (|| -> std::io::Result<()> {
+        let bin = staging.join("bin").join("windows-x86-64");
+        fs::create_dir_all(&bin)?;
+        fs::write(
+            staging.join(rackforge_controller_package::CONTROLLER_MANIFEST_FILE),
+            manifest_text,
+        )?;
+        fs::copy(
+            &driver,
+            bin.join("rackforge-arturia-keylab-essential-mk3-driver.exe"),
+        )?;
+        Ok(())
+    })();
+    if let Err(error) = staged {
+        eprintln!("DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=staging error={error}");
+        return;
+    }
+    match store.install_directory(
+        &staging,
+        rackforge_controller_package::PackageTrust::Official,
+    ) {
+        Ok(installed) => println!(
+            "DESKTOP_BUNDLED_CONTROLLER_INSTALLED id={} version={}",
+            installed.record.id, installed.record.version
+        ),
+        Err(error) => eprintln!("DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=install error={error}"),
+    }
+    let _ = fs::remove_dir_all(rackforge_root.join("controllers").join("staging"));
+}
+
 fn external_controller_enabled(rackforge_root: &Path) -> bool {
     let root = rackforge_root.join("controllers");
     if !root.join("packages").exists() {
@@ -4177,6 +4247,7 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
         options.web_preferences.clone(),
         web_control_sender,
     )?;
+    ensure_bundled_controller(&options.rackforge_root);
     // The controller supervisor: every enabled .rfcontroller package runs
     // its driver, pointed back at this host through the TCP control bridge.
     // The loop exits on its own when the store holds nothing runnable.

@@ -690,6 +690,28 @@ code and is far beyond audibility at control rate).
 
 ## Known defects
 
+* **RETRACTED: "the bass carries ~11 dB of surplus in 4–8 kHz".** Measured
+  note-against-note on 0.75.0, C2's sustained 4–8 kHz sits at −22.4 dB
+  against the real note's −21.0 — matched. Two things buried the old
+  finding: several later pieces each legitimately removed high content (the
+  coincidence corner moving to 1200 Hz, the scripted phantoms retiring, the
+  slow stage gaining its incoherent radiation), and the original measurement
+  was itself flawed — it compared OUR SIX-NOTE CHORD against the REAL
+  SINGLE C2, so the chord's upper notes filled the band being blamed on the
+  bass. Same lesson as the earlier retraction, one door over: a comparison
+  is only a comparison when both sides are the same experiment.
+
+  What the honest measurement shows instead: the bass ATTACK's 2–4 kHz runs
+  ~12 dB under the reference sample (ours −7.8 dB rel. fundamental, the
+  YDP +4.3). Felt stiffness is not the lever (×8 in K moved it under a
+  decibel while overshooting the sustained band). The candidates are the
+  strike-moment nonlinear burst and the recording's own knock — and the
+  house default deliberately runs the action noise at 0.39, the user's
+  voicing. Logged as a gap against THAT sample, not necessarily against
+  this piano's intent.
+
+
+
 * **FIXED (v0.62.0): a fixed low drone under every note, audible only in
   chords.** The user played the packaged build and heard "esa discrepancia de
   octavas" — a bass note under the music that follows nothing. No render in

@@ -245,7 +245,11 @@ const RADIATION_RATE: f32 = 0.9;
 /// partial die while its fundamental rings for half a minute.
 const KAPPA_LOSS: f32 = 2.0e-5;
 
-const PARAM_COUNT: usize = 6 + LAB_COUNT;
+const PARAM_ROOM_SIZE: u32 = 23;
+const PARAM_ROOM_HARDNESS: u32 = 24;
+const PARAM_MIC_DISTANCE: u32 = 25;
+const PARAM_MIC_PATTERN: u32 = 26;
+const PARAM_COUNT: usize = 6 + LAB_COUNT + 4;
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
 /// entries are pre-scaled by the per-sample decay factor `g`, so magnitude
@@ -582,10 +586,48 @@ const LID_BUFFER: usize = 4096;
 /// high frequencies die faster than lows, the way air and walls damp a real
 /// room. RT60 ≈ 1.4 s at the bottom, ~a third of that at the top.
 const ROOM_LINES: usize = 6;
-const ROOM_DELAYS_S: [f32; ROOM_LINES] = [0.0239, 0.0293, 0.0347, 0.0419, 0.0473, 0.0551];
-const ROOM_RT60_S: f32 = 1.4;
-/// One-pole damping coefficient target frequency, Hz.
-const ROOM_DAMP_HZ: f32 = 4200.0;
+/// The lines' relative spread around the mean free path: mutually prime-ish
+/// ratios so the room's modes crowd instead of stacking.
+const ROOM_SPREAD: [f32; ROOM_LINES] = [0.62, 0.76, 0.90, 1.09, 1.23, 1.43];
+/// The speed of sound, m/s.
+const SOUND_SPEED: f32 = 343.0;
+/// THE RECORDING CHAIN, DERIVED RATHER THAN DRAWN.
+///
+/// Four controls describe a physical situation -- how big the space is,
+/// what its surfaces are made of, how far the microphone pair stands, and
+/// what kind of microphones they are -- and the ambience falls out:
+///
+/// * Sabine gives the decay per band: RT60(f) = 0.161*V / (S*alpha(f) +
+///   4*m_air(f)*V), the air soaking up the top of big rooms no matter what
+///   the walls do.
+/// * The mean free path 4V/S sets the delay-line lengths, so a bigger room
+///   is sparser and slower, not just longer.
+/// * Hard surfaces (concrete, sheet metal -- a galpon) keep their highs and
+///   let the lows boom; soft ones (seats, curtains, panelling -- an
+///   auditorium) eat the top first. One axis: alpha per band.
+/// * First-order mirror images of the piano in the six surfaces give the
+///   early reflections: their delays and levels are geometry, not taste.
+/// * The microphone pattern is the physical omni-to-figure-8 axis,
+///   p(theta) = (1-b) + b*cos(theta). Everything a "mic type" means falls
+///   out of b: the random-energy efficiency (1-b)^2 + b^2/3 sets how much
+///   room the mic hears (a cardioid at b=0.5 takes ~4.8 dB less reverb
+///   than an omni), and the b*cos term is the pressure-gradient part,
+///   whose 1/r low-frequency rise IS the proximity effect -- omnis have
+///   none, ribbons the most.
+/// * Distance divides the direct sound by r_ref/r while the reverberant
+///   field stays put. Close/far is that ratio plus proximity.
+const ROOM_VOLUME_MIN_M3: f32 = 45.0;
+const ROOM_VOLUME_MAX_M3: f32 = 45_000.0;
+const MIC_DISTANCE_MIN_M: f32 = 0.5;
+const MIC_DISTANCE_MAX_M: f32 = 16.0;
+/// The distance the dry calibration was made at: the direct gain is 1 here.
+const MIC_REFERENCE_M: f32 = 2.5;
+/// Air absorption per metre at 4 kHz, ISO 9613 order of magnitude at
+/// concert-hall humidity.
+const AIR_ABSORB_4K_PER_M: f32 = 0.0022;
+/// Where the proximity rise sits: the pressure-gradient term crosses the
+/// pressure term at f = c/(2*pi*r); this scales its audible strength.
+const PROXIMITY_STRENGTH: f32 = 0.35;
 /// One-pole coefficient for the high-pass on everything entering the lid and
 /// the chamber, at 44.1 kHz. The corner is the board's own radiation corner:
 /// the air is driven by what the board radiates, not by what the strings do.
@@ -975,6 +1017,12 @@ struct Controls {
     width: f32,
     level: f32,
     lab: [f32; LAB_COUNT],
+    /// The space and the microphones, physically: size, surface hardness,
+    /// pair distance, and the omni-to-figure-8 pattern axis.
+    room_size: f32,
+    room_hardness: f32,
+    mic_distance: f32,
+    mic_pattern: f32,
 }
 
 impl Default for Controls {
@@ -988,6 +1036,10 @@ impl Default for Controls {
             width: 0.47,
             level: 0.68,
             lab: [0.5; LAB_COUNT],
+            room_size: 0.5,
+            room_hardness: 0.45,
+            mic_distance: 0.46,
+            mic_pattern: 0.5,
         }
     }
 }
@@ -1025,6 +1077,10 @@ impl Controls {
             PARAM_WIDTH => self.width,
             PARAM_LEVEL => self.level,
             6..=22 => self.lab[index as usize - 6],
+            PARAM_ROOM_SIZE => self.room_size,
+            PARAM_ROOM_HARDNESS => self.room_hardness,
+            PARAM_MIC_DISTANCE => self.mic_distance,
+            PARAM_MIC_PATTERN => self.mic_pattern,
             _ => return None,
         };
         Some(value as f64)
@@ -1043,6 +1099,11 @@ impl Controls {
             PARAM_WIDTH => self.width = value,
             PARAM_LEVEL => self.level = value,
             6..=22 => self.lab[index as usize - 6] = value,
+            PARAM_ROOM_SIZE => self.room_size = value,
+            PARAM_ROOM_HARDNESS => self.room_hardness = value,
+            PARAM_MIC_DISTANCE => self.mic_distance = value,
+            PARAM_MIC_PATTERN => self.mic_pattern = value,
+            // (the engine watches these through `room_dirty` in process)
             _ => return false,
         }
         true
@@ -1116,6 +1177,24 @@ pub struct ConcertGrand {
     room_gain: [f32; ROOM_LINES],
     room_lp: [f32; ROOM_LINES],
     room_damp: f32,
+    /// Low-shelf state per line: hard rooms let the lows ring past the mids,
+    /// soft ones take them down with everything else.
+    room_low: [f32; ROOM_LINES],
+    room_low_coeff: f32,
+    room_low_gain: f32,
+    /// Early reflections: first-order mirror images of the piano in the six
+    /// surfaces, three read left and three right.
+    early: [f32; ROOM_BUFFER],
+    early_write: usize,
+    early_taps: [(usize, f32); 6],
+    /// The microphone chain, retuned whenever a room control moves.
+    direct_gain: f32,
+    reverb_gain: f32,
+    early_gain: f32,
+    proximity_gain: f32,
+    proximity_coeff: f32,
+    proximity: [f32; 2],
+    room_dirty: bool,
     room_write: usize,
 }
 
@@ -1189,6 +1268,19 @@ impl Default for ConcertGrand {
             room_gain: [0.0; ROOM_LINES],
             room_lp: [0.0; ROOM_LINES],
             room_damp: 0.5,
+            room_low: [0.0; ROOM_LINES],
+            room_low_coeff: 0.0,
+            room_low_gain: 0.0,
+            early: [0.0; ROOM_BUFFER],
+            early_write: 0,
+            early_taps: [(1, 0.0); 6],
+            direct_gain: 1.0,
+            reverb_gain: 1.0,
+            early_gain: 0.0,
+            proximity_gain: 0.0,
+            proximity_coeff: 0.0,
+            proximity: [0.0; 2],
+            room_dirty: false,
             room_write: 0,
         };
         piano.tune();
@@ -1627,15 +1719,110 @@ impl ConcertGrand {
 
     /// Sizes the chamber's delay lines and feedback for the current rate.
     fn tune_room(&mut self) {
+        // The space the sliders describe. Volume on a log axis, a hall-ish
+        // box (2.4 : 1.6 : 1), and per-band absorption from one hardness
+        // axis: soft surfaces eat the top first and take the lows with the
+        // mids; hard ones keep the top ringing and let the lows boom.
+        let volume = ROOM_VOLUME_MIN_M3
+            * powf(ROOM_VOLUME_MAX_M3 / ROOM_VOLUME_MIN_M3, self.controls.room_size);
+        let scale = powf(volume / 3.84, 1.0 / 3.0);
+        let (length, width, height) = (2.4 * scale, 1.6 * scale, scale);
+        let surface = 2.0 * (length * width + length * height + width * height);
+        let mean_free_path = 4.0 * volume / surface;
+        let hardness = self.controls.room_hardness;
+        let alpha_mid = 0.5 * expf(-2.6 * hardness) + 0.035;
+        let alpha_high = alpha_mid * (1.0 + 1.3 * (1.0 - hardness));
+        let alpha_low = alpha_mid * (0.55 + 0.65 * hardness);
+        // Sabine per band, with the air taking the top of big rooms no
+        // matter what the walls are made of.
+        let rt = |alpha: f32, air_per_m: f32| -> f32 {
+            (0.161 * volume / (surface * alpha + 4.0 * air_per_m * volume))
+                .clamp(0.10, 12.0)
+        };
+        let rt_low = rt(alpha_low, 0.0);
+        let rt_mid = rt(alpha_mid, 0.0002);
+        let rt_high = rt(alpha_high, AIR_ABSORB_4K_PER_M);
+
         for line in 0..ROOM_LINES {
-            let length =
-                ((ROOM_DELAYS_S[line] * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
-            self.room_len[line] = length;
-            // Per-line gain so every path decays at the same RT60.
-            self.room_gain[line] =
-                powf(10.0, -3.0 * ROOM_DELAYS_S[line] / ROOM_RT60_S);
+            let seconds = mean_free_path / SOUND_SPEED * ROOM_SPREAD[line];
+            let samples =
+                ((seconds * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
+            self.room_len[line] = samples;
+            // Per-line gain so every path decays at the mid-band RT60.
+            self.room_gain[line] = powf(10.0, -3.0 * seconds / rt_mid);
+            // The in-loop lowpass takes the highs down to their own faster
+            // RT60: its response at the damping corner supplies the extra
+            // per-pass loss 10^(-3*seconds*(1/rt_high - 1/rt_mid)).
         }
-        self.room_damp = 1.0 - expf(-core::f32::consts::TAU * ROOM_DAMP_HZ / self.sample_rate);
+        // The in-loop lowpass takes the highs down to their own faster RT60:
+        // one shared corner, from the mean path's required extra loss at
+        // 4 kHz.
+        let seconds_mean = mean_free_path / SOUND_SPEED;
+        let extra_high =
+            powf(10.0, -3.0 * seconds_mean * (1.0 / rt_high - 1.0 / rt_mid));
+        let corner = (4200.0 * extra_high / (1.0 - extra_high + 1e-4))
+            .clamp(300.0, 16_000.0);
+        self.room_damp =
+            1.0 - expf(-core::f32::consts::TAU * corner / self.sample_rate);
+        // The low shelf: gain that takes 150 Hz to its own RT60.
+        let low_ratio =
+            powf(10.0, -3.0 * seconds_mean * (1.0 / rt_low - 1.0 / rt_mid));
+        self.room_low_gain = (low_ratio - 1.0).clamp(-0.6, 0.35);
+        self.room_low_coeff =
+            1.0 - expf(-core::f32::consts::TAU * 150.0 / self.sample_rate);
+
+        // The microphones. Distance on a log axis; the direct sound falls
+        // as r_ref/r, the reverberant field holds, the early reflections
+        // arrive from their mirror images.
+        let distance = MIC_DISTANCE_MIN_M
+            * powf(
+                MIC_DISTANCE_MAX_M / MIC_DISTANCE_MIN_M,
+                self.controls.mic_distance,
+            );
+        self.direct_gain = (MIC_REFERENCE_M / distance).clamp(0.12, 3.0);
+        // The pattern axis b: p(theta) = (1-b) + b*cos(theta). Random-energy
+        // efficiency is what the mic hears of a diffuse field.
+        let b = self.controls.mic_pattern;
+        let random_energy = (1.0 - b) * (1.0 - b) + b * b / 3.0;
+        self.reverb_gain = sqrtf(random_energy) / 0.577;
+        // Proximity: the pressure-gradient term rises as c/(2*pi*f*r). Felt
+        // below ~ c/(2*pi*r); rendered as a 120 Hz shelf whose gain follows
+        // b/r.
+        self.proximity_gain =
+            PROXIMITY_STRENGTH * b * (1.0 / distance) * MIC_REFERENCE_M;
+        self.proximity_coeff =
+            1.0 - expf(-core::f32::consts::TAU * 120.0 / self.sample_rate);
+
+        // Early reflections: the piano stands a third of the way down the
+        // hall, mid-width, soundboard at 1 m; the pair faces it from
+        // `distance` away. Six first-order images, each with its own extra
+        // path and its 1/r loss and one bounce off its own surface.
+        let piano = (0.33 * length, 0.5 * width, 1.0_f32);
+        let mic = (0.33 * length + distance.min(0.6 * length), 0.5 * width, 1.4_f32);
+        let direct_path = {
+            let (dx, dy, dz) = (mic.0 - piano.0, mic.1 - piano.1, mic.2 - piano.2);
+            sqrtf(dx * dx + dy * dy + dz * dz).max(0.3)
+        };
+        let images = [
+            (piano.0, piano.1, -piano.2),                    // floor
+            (piano.0, piano.1, 2.0 * height - piano.2),      // ceiling
+            (piano.0, -piano.1, piano.2),                    // near wall
+            (piano.0, 2.0 * width - piano.1, piano.2),       // far wall
+            (-piano.0, piano.1, piano.2),                    // back wall
+            (2.0 * length - piano.0, piano.1, piano.2),      // front wall
+        ];
+        let reflect = 1.0 - alpha_mid;
+        for (slot, image) in self.early_taps.iter_mut().zip(images) {
+            let (dx, dy, dz) = (mic.0 - image.0, mic.1 - image.1, mic.2 - image.2);
+            let path = sqrtf(dx * dx + dy * dy + dz * dz).max(direct_path + 0.1);
+            let delay_s = (path - direct_path) / SOUND_SPEED;
+            let samples =
+                ((delay_s * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
+            let gain = reflect * (direct_path / path) * self.direct_gain;
+            *slot = (samples, gain);
+        }
+        self.early_gain = 0.55 * self.reverb_gain;
+        self.room_dirty = false;
     }
 
     /// T60 fitted to published decay ranges: tens of seconds for the lowest
@@ -2885,7 +3072,14 @@ impl Processor for ConcertGrand {
     }
 
     fn set_parameter(&mut self, index: u32, value: f64) -> bool {
-        self.controls.set(index, value)
+        let accepted = self.controls.set(index, value);
+        if accepted && (PARAM_ROOM_SIZE..=PARAM_MIC_PATTERN).contains(&index) {
+            // The room is a handful of float derivations; retuning at the
+            // next block is cheap and keeps every acoustic quantity honest
+            // while the slider moves.
+            self.room_dirty = true;
+        }
+        accepted
     }
 
     fn get_parameter(&self, index: u32) -> Option<f64> {
@@ -2895,6 +3089,8 @@ impl Processor for ConcertGrand {
     fn load_preset(&mut self, id: &str) -> bool {
         self.controls = match id {
             "concert" => Controls::default(),
+            // A mellow piano is also a mellow ROOM: softer surfaces, the
+            // pair a step further back, a ribbon-ward pattern.
             "mellow" => Controls {
                 brightness: 0.28,
                 dynamics: 0.5,
@@ -2903,7 +3099,12 @@ impl Processor for ConcertGrand {
                 width: 0.6,
                 level: 0.7,
                 lab: [0.5; LAB_COUNT],
+                room_size: 0.55,
+                room_hardness: 0.3,
+                mic_distance: 0.45,
+                mic_pattern: 0.8,
             },
+            // Bright: a harder, livelier hall, closer cardioids.
             "bright" => Controls {
                 brightness: 0.8,
                 dynamics: 0.75,
@@ -2912,7 +3113,13 @@ impl Processor for ConcertGrand {
                 width: 0.75,
                 level: 0.68,
                 lab: [0.5; LAB_COUNT],
+                room_size: 0.55,
+                room_hardness: 0.7,
+                mic_distance: 0.3,
+                mic_pattern: 0.5,
             },
+            // Intimate: a small damped room, the pair right at the rim,
+            // enough gradient in the pattern for the proximity warmth.
             "intimate" => Controls {
                 brightness: 0.4,
                 dynamics: 0.45,
@@ -2921,9 +3128,14 @@ impl Processor for ConcertGrand {
                 width: 0.35,
                 level: 0.72,
                 lab: [0.5; LAB_COUNT],
+                room_size: 0.22,
+                room_hardness: 0.35,
+                mic_distance: 0.08,
+                mic_pattern: 0.6,
             },
             _ => return false,
         };
+        self.room_dirty = true;
         true
     }
 
@@ -2938,6 +3150,10 @@ impl Processor for ConcertGrand {
             self.controls.level,
         ]);
         values[6..6 + LAB_COUNT].copy_from_slice(&self.controls.lab);
+        values[6 + LAB_COUNT] = self.controls.room_size;
+        values[6 + LAB_COUNT + 1] = self.controls.room_hardness;
+        values[6 + LAB_COUNT + 2] = self.controls.mic_distance;
+        values[6 + LAB_COUNT + 3] = self.controls.mic_pattern;
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.chunks_exact_mut(4).zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -2961,8 +3177,35 @@ impl Processor for ConcertGrand {
         if state.len() % 4 != 0 || state.len() > LEGACY_PARAM_COUNT * 4 {
             return false;
         }
+        // Every parameter's own default, so a shorter (older) state leaves
+        // the controls it does not know about where a fresh instrument puts
+        // them, not at an arbitrary 0.5.
+        let defaults = Controls::default();
         let mut values = [0.5_f32; PARAM_COUNT];
-        for (value, chunk) in values.iter_mut().zip(state.chunks_exact(4)) {
+        values[0] = defaults.brightness;
+        values[1] = defaults.dynamics;
+        values[2] = defaults.unison;
+        values[3] = defaults.decay;
+        values[4] = defaults.width;
+        values[5] = defaults.level;
+        values[6 + LAB_COUNT] = defaults.room_size;
+        values[6 + LAB_COUNT + 1] = defaults.room_hardness;
+        values[6 + LAB_COUNT + 2] = defaults.mic_distance;
+        values[6 + LAB_COUNT + 3] = defaults.mic_pattern;
+        // A 37-float state is from the era of the "in bass" tilt twins: its
+        // tail is tilt values, not room values, and reading it into the room
+        // controls would set the hall from leftovers. Take its head only.
+        let readable = if state.len() == LEGACY_PARAM_COUNT * 4 {
+            23.min(PARAM_COUNT)
+        } else {
+            state.len() / 4
+        };
+        for (value, chunk) in values
+            .iter_mut()
+            .zip(state.chunks_exact(4))
+            .take(readable)
+            .map(|(value, chunk)| (value, chunk))
+        {
             let Ok(bytes) = <[u8; 4]>::try_from(chunk) else {
                 return false;
             };
@@ -2982,7 +3225,12 @@ impl Processor for ConcertGrand {
             width: values[4],
             level: values[5],
             lab,
+            room_size: values[6 + LAB_COUNT],
+            room_hardness: values[6 + LAB_COUNT + 1],
+            mic_distance: values[6 + LAB_COUNT + 2],
+            mic_pattern: values[6 + LAB_COUNT + 3],
         };
+        self.room_dirty = true;
         true
     }
 
@@ -3000,6 +3248,9 @@ impl Processor for ConcertGrand {
         // Three full strikes per buffer: measured at ~0.5 ms each natively,
         // which leaves the rest of the callback to the voices already ringing.
         self.strike_budget = 3;
+        if self.room_dirty {
+            self.tune_room();
+        }
         let level = self.controls.level * self.controls.level;
         let mut midi_index = 0;
         let mut parameter_index = 0;
@@ -3135,6 +3386,22 @@ impl Processor for ConcertGrand {
             self.air_dc[1] += AIR_HIGHPASS * (once - self.air_dc[1]);
             let staged = once - self.air_dc[1];
             self.lid[self.lid_write] = staged;
+            // The early reflections: what the board radiates, mirrored in
+            // the six surfaces, three images read by each side of the pair.
+            self.early[self.early_write] = staged;
+            let mut early_left = 0.0;
+            let mut early_right = 0.0;
+            for (index, (offset, gain)) in self.early_taps.iter().enumerate() {
+                let sample = self.early
+                    [(self.early_write + ROOM_BUFFER - offset) % ROOM_BUFFER]
+                    * gain;
+                if index % 2 == 0 {
+                    early_left += sample;
+                } else {
+                    early_right += sample;
+                }
+            }
+            self.early_write = (self.early_write + 1) % ROOM_BUFFER;
             let mut lid_left = 0.0;
             for (offset, gain) in self.lid_left {
                 lid_left += self.lid[(self.lid_write + LID_BUFFER - offset) % LID_BUFFER] * gain;
@@ -3159,13 +3426,22 @@ impl Processor for ConcertGrand {
             for line in 0..ROOM_LINES {
                 let feedback = outs[line] - householder;
                 self.room_lp[line] += self.room_damp * (feedback - self.room_lp[line]);
+                // The low shelf: hard rooms let the bottom ring past the
+                // mids, soft ones take it down with everything else.
+                self.room_low[line] +=
+                    self.room_low_coeff * (self.room_lp[line] - self.room_low[line]);
+                let shaped =
+                    self.room_lp[line] + self.room_low_gain * self.room_low[line];
                 self.room[line][self.room_write % self.room_len[line]] =
-                    staged * 0.25 + self.room_lp[line] * self.room_gain[line];
+                    staged * 0.25 + shaped * self.room_gain[line];
             }
             self.room_write = self.room_write.wrapping_add(1);
             let air = self.controls.lab(16);
-            let room_left = (outs[0] - outs[1] + outs[2]) * ROOM_MIX * air;
-            let room_right = (outs[3] - outs[4] + outs[5]) * ROOM_MIX * air;
+            let wet = ROOM_MIX * air * self.reverb_gain;
+            let room_left = (outs[0] - outs[1] + outs[2]) * wet
+                + early_left * self.early_gain * air;
+            let room_right = (outs[3] - outs[4] + outs[5]) * wet
+                + early_right * self.early_gain * air;
 
             // There is one board and it is the through path, so there is one
             // gain. The pair it replaced was mixed 25 dB apart in the wrong
@@ -3194,23 +3470,33 @@ impl Processor for ConcertGrand {
             // clamp. That costs about 11 dB of output, which belongs in the
             // host's gain and not in a saturator: the desktop already runs
             // +6 dB and allows +12.
-            let board_gain = BOARD_MIX * self.controls.lab(14) * HEADROOM;
-            let left = Self::soften(
-                board_left * board_gain
-                    + undamped_left * undamped_gain * HEADROOM
-                    + open_left * OPEN_MIX * sympathy * HEADROOM
-                    + halo_left * HEADROOM
-                    + lid_left * air * HEADROOM
-                    + room_left * HEADROOM,
-            ) * level;
-            let right = Self::soften(
-                board_right * board_gain
-                    + undamped_right * undamped_gain * HEADROOM
-                    + open_right * OPEN_MIX * sympathy * HEADROOM
-                    + halo_right * HEADROOM
-                    + lid_right * air * HEADROOM
-                    + room_right * HEADROOM,
-            ) * level;
+            let board_gain =
+                BOARD_MIX * self.controls.lab(14) * HEADROOM * self.direct_gain;
+            let mut direct_left = board_left * board_gain
+                + undamped_left * undamped_gain * HEADROOM * self.direct_gain
+                + open_left * OPEN_MIX * sympathy * HEADROOM
+                + halo_left * HEADROOM
+                + lid_left * air * HEADROOM * self.direct_gain;
+            let mut direct_right = board_right * board_gain
+                + undamped_right * undamped_gain * HEADROOM * self.direct_gain
+                + open_right * OPEN_MIX * sympathy * HEADROOM
+                + halo_right * HEADROOM
+                + lid_right * air * HEADROOM * self.direct_gain;
+            // Proximity: the pressure-gradient microphone's low end rises
+            // with 1/r. A 120 Hz shelf whose gain follows the pattern and
+            // the distance -- an omni has none, a ribbon up close blooms.
+            if self.proximity_gain > 1e-3 {
+                self.proximity[0] +=
+                    self.proximity_coeff * (direct_left - self.proximity[0]);
+                self.proximity[1] +=
+                    self.proximity_coeff * (direct_right - self.proximity[1]);
+                direct_left += self.proximity_gain * self.proximity[0];
+                direct_right += self.proximity_gain * self.proximity[1];
+            }
+            let left =
+                Self::soften(direct_left + room_left * HEADROOM) * level;
+            let right =
+                Self::soften(direct_right + room_right * HEADROOM) * level;
             match channels {
                 0 => {}
                 1 => output[frame] = Self::soften(left + right),
@@ -3377,6 +3663,10 @@ mod tests {
         let mut dry = prepared();
         render(&mut dry, hold, &[note_on(60, 100)]);
         render(&mut dry, hold, &[note_off(60)]);
+        // The hall is allowed its own tail: the early reflections carry the
+        // last tens of milliseconds of the note past the damper, exactly as
+        // a real room does. The damper is judged after the air has cleared.
+        render(&mut dry, 3200, &[]);
         let damped = energy(&render(&mut dry, 1600, &[]));
 
         // With the pedal down the same release changes nothing audible.
@@ -3384,6 +3674,7 @@ mod tests {
         let pedal = MidiEvent { frame: 0, data: [0xb0, 64, 127], length: 3 };
         render(&mut pedalled, hold, &[pedal, note_on(60, 100)]);
         render(&mut pedalled, hold, &[note_off(60)]);
+        render(&mut pedalled, 3200, &[]);
         let sustained = energy(&render(&mut pedalled, 1600, &[]));
 
         assert!(

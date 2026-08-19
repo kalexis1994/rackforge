@@ -515,6 +515,36 @@ bone-dry direct-injected tone is precisely what an electric piano is, the
 comparison samples are recordings made in a room, and direct A/B listening
 named the missing tail as the single largest audible difference.
 
+### The recording chain, derived rather than drawn (tested)
+
+Four panel controls describe a physical situation — **Room Size**, **Wall
+Hardness**, **Mic Distance**, **Mic Pattern** — and the ambience falls out:
+
+* Sabine per band: RT60(f) = 0.161·V/(S·α(f) + 4·m_air·V). Hardness is one
+  axis of α(f): soft surfaces (seats, curtains — an auditorium) eat the top
+  first; hard ones (concrete, sheet metal — a galpón) keep the highs ringing
+  and let the lows boom (a low shelf inside the FDN loop carries RT_low ≠
+  RT_mid). The air takes the top of big rooms no matter what the walls do.
+* The mean free path 4V/S sets the six delay lines, so a big room is
+  sparser and slower, not just longer.
+* Early reflections are first-order mirror images of the piano in the six
+  surfaces: delays and levels are geometry (piano a third down the hall,
+  pair at `distance`), three images read left, three right.
+* The pattern control is the physical omni→figure-8 axis, p(θ)=(1−b)+b·cosθ.
+  Its random-energy efficiency (1−b)²+b²/3 sets how much room the pair
+  hears (a cardioid takes ≈4.8 dB less reverb than an omni), and the
+  gradient term's 1/r rise IS the proximity effect — none on an omni, most
+  on a ribbon up close (rendered as a 120 Hz shelf whose gain follows b/r).
+* Distance divides the direct sound by r_ref/r while the reverberant field
+  stays put; the calibration reference (gain 1) sits at 2.5 m.
+
+Rendered check — the same chord in four described spaces: the galpón comes
+out distant and bright (hard walls hold the top), the auditorium darker and
+fuller, the close ribbon loud and warm with proximity lows. Presets now
+carry a room and a pair, not just string settings. One test moved with the
+physics: the damper test now waits 0.2 s after release, because the hall is
+allowed its own tail.
+
 ### Sympathetic resonance (tested)
 
 With the dampers up, every other string's coinciding partials pick a struck

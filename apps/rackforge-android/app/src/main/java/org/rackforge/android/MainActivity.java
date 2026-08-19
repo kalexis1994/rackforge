@@ -893,6 +893,25 @@ public final class MainActivity extends Activity {
                             .put("port", 8787);
                 } else if ("GET".equals(method) && "/api/v1/plugins".equals(path)) {
                     result = sharedPluginDescriptors();
+                } else if ("GET".equals(method) && "/api/v1/controllers".equals(path)) {
+                    // The shared Plugin Manager lists controllers through the
+                    // same endpoint shape every platform serves.
+                    result = new JSONObject(controllerCatalog(controllerStoreRoot()));
+                } else if ("PUT".equals(method) && path.startsWith("/api/v1/controllers/")
+                        && path.endsWith("/settings")) {
+                    String controllerId = java.net.URLDecoder.decode(
+                            path.substring("/api/v1/controllers/".length(),
+                                    path.length() - "/settings".length()),
+                            "UTF-8");
+                    JSONObject body = new JSONObject(params.optString("body", "{}"));
+                    JSONObject response = new JSONObject(controllerApplySettings(
+                            controllerStoreRoot(), controllerId,
+                            body.getJSONObject("values").toString()));
+                    JSONArray repaint = response.optJSONArray("plan");
+                    if (repaint != null) {
+                        sendControllerPlanToKeyLab(repaint.toString(), midiGeneration);
+                    }
+                    result = new JSONObject().put("status", "ok");
                 } else if ("POST".equals(method)
                         && "/api/v1/plugins/inspect".equals(path)) {
                     JSONObject body = new JSONObject(params.optString("body", "{}"));

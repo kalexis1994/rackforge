@@ -752,6 +752,19 @@ code and is far beyond audibility at control rate).
   trap: a band level fitted in one time window and then applied outside it
   is not the measurement it came from.
 
+  AMENDED AGAIN on 0.79.0 — the seeded kick itself was wrong in SHAPE:
+  writing it into the resonator's state (`y1 = kick`) is an instantaneous
+  jump in the output, which is a broadband click by construction, and the
+  user heard the click. The real tension pulse lasts as long as the hammer
+  touches the string, so the kick is now a drive pulse with the contact's
+  timescale (τ 1.5 ms) added after the surplus scaling — same energy into
+  the modes' bands, nothing at the discontinuity frequencies. It also got
+  its own fader (Impact Burst, index 30, off/×1/×16 like the noises,
+  default 0.4 — below the calibrated centre, by the user's ear), decoupled
+  from Clang, which keeps the sustained longitudinal voice. Measured at
+  the top of its travel the fader adds +10 dB to C2's attack 1–2 kHz (the
+  first longitudinal mode's band) and +0.8 dB at 2–4 kHz.
+
 
 
 * **FIXED (v0.62.0): a fixed low drone under every note, audible only in

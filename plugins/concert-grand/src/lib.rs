@@ -259,7 +259,8 @@ const PARAM_MIC_PATTERN: u32 = 26;
 const PARAM_ACTION_NOISE: u32 = 27;
 const PARAM_RELEASE_NOISE: u32 = 28;
 const PARAM_PEDAL_NOISE: u32 = 29;
-const PARAM_COUNT: usize = 6 + LAB_COUNT + 7;
+const PARAM_IMPACT: u32 = 30;
+const PARAM_COUNT: usize = 6 + LAB_COUNT + 8;
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
 /// entries are pre-scaled by the per-sample decay factor `g`, so magnitude
@@ -664,8 +665,8 @@ const VOICE_DELAY: usize = 256;
 /// cross-voice loop gain goes as the square of this small number, well
 /// under the drain.
 const SYMPATHY_RATE: f32 = 0.004;
-/// The impact's own longitudinal kick, seeded into the bank's state at
-/// note-on.
+/// The impact's own longitudinal excitation: the tension pulse of the
+/// strike, fed to the bank as a pulse the length of the contact.
 ///
 /// The continuous y*y drive carries the sustained phantom forest, but the
 /// hammer ALSO excites the compressional wave directly: during contact the
@@ -675,8 +676,16 @@ const SYMPATHY_RATE: f32 = 0.004;
 /// spectra). Retiring the scripted clang removed this along with the
 /// script; measured on C2, the attack's 2-4 kHz ran ~12 dB under the
 /// reference with nothing left to supply it. Scales with the blow's energy
-/// (v^2), strongest on the wound strings, owned by the Clang fader.
-const IMPACT_CLANG: f32 = 0.25;
+/// (v^2), strongest on the wound strings, owned by the Impact Burst fader.
+///
+/// The first build of this seeded the kick as a STEP in the resonator's
+/// state -- an instantaneous jump in the output, which is a broadband click
+/// by construction, and the user heard exactly that. The real pulse lasts
+/// as long as the hammer touches the string, so the kick is now a drive
+/// pulse with the contact's own timescale: same energy into the modes'
+/// bands, nothing at the discontinuity frequencies.
+const IMPACT_CLANG: f32 = 28.0;
+const IMPACT_PULSE_TAU_S: f32 = 0.0015;
 /// One-pole coefficient for the high-pass on everything entering the lid and
 /// the chamber, at 44.1 kHz. The corner is the board's own radiation corner:
 /// the air is driven by what the board radiates, not by what the strings do.
@@ -761,6 +770,10 @@ struct Voice {
     /// carries the surplus instead, decaying over ~80 ms.
     upper_env: f32,
     upper_env_decay: f32,
+    /// The strike's tension pulse into the longitudinal bank: a drive term
+    /// alive for the contact time (~1.5 ms), not a state discontinuity.
+    clang_feed: f32,
+    clang_feed_decay: f32,
 }
 
 impl Default for Voice {
@@ -805,6 +818,8 @@ impl Default for Voice {
             longitudinal_upper: 1.0,
             upper_env: 0.0,
             upper_env_decay: 1.0,
+            clang_feed: 0.0,
+            clang_feed_decay: 0.0,
         }
     }
 }
@@ -865,9 +880,13 @@ impl Voice {
         // is gone within ~80 ms; the sustain keeps only the base y^2 feed.
         self.upper_env *= self.upper_env_decay;
         let upper = 1.0 + (self.longitudinal_upper - 1.0) * self.upper_env;
-        sum += self.longitudinal[0].tick(drive);
+        // The strike's own tension pulse, added AFTER the surplus scaling:
+        // its level answers to the Impact Burst fader alone.
+        let kick = self.clang_feed;
+        self.clang_feed *= self.clang_feed_decay;
+        sum += self.longitudinal[0].tick(drive + kick);
         for mode in self.longitudinal[1..].iter_mut() {
-            sum += mode.tick(drive * upper);
+            sum += mode.tick(drive * upper + kick);
         }
         if self.noise_amp > 1e-7 {
             // Park–Miller-style LCG: white noise costs one multiply-add.
@@ -1164,6 +1183,9 @@ struct Controls {
     action_noise: f32,
     release_noise: f32,
     pedal_noise: f32,
+    /// The strike's longitudinal burst -- the metallic bark of a hard bass
+    /// attack. Same curve: bottom off, centre the calibrated level.
+    impact: f32,
 }
 
 impl Default for Controls {
@@ -1192,6 +1214,9 @@ impl Default for Controls {
             action_noise: 0.39,
             release_noise: 0.6,
             pedal_noise: 0.5,
+            // Below the calibrated centre: the burst measured right against
+            // the reference bands, but the user's ear found it hot.
+            impact: 0.4,
         }
     }
 }
@@ -1245,6 +1270,7 @@ impl Controls {
             PARAM_ACTION_NOISE => self.action_noise,
             PARAM_RELEASE_NOISE => self.release_noise,
             PARAM_PEDAL_NOISE => self.pedal_noise,
+            PARAM_IMPACT => self.impact,
             _ => return None,
         };
         Some(value as f64)
@@ -1270,6 +1296,7 @@ impl Controls {
             PARAM_ACTION_NOISE => self.action_noise = value,
             PARAM_RELEASE_NOISE => self.release_noise = value,
             PARAM_PEDAL_NOISE => self.pedal_noise = value,
+            PARAM_IMPACT => self.impact = value,
             // (the engine watches the room block through `room_dirty`)
             _ => return false,
         }
@@ -3052,7 +3079,7 @@ impl ConcertGrand {
         let longitudinal_upper =
             self.controls.lab(4) * 16.0 * powf(1.0 - position, 1.5);
         let action_gain = Controls::noise_gain(self.controls.action_noise);
-        let clang_gain = self.controls.lab(4);
+        let impact_gain = Controls::noise_gain(self.controls.impact);
         let pair_spacing = self.controls.width * PAIR_SPACING_MAX_M;
         let pair_depth = MIC_DISTANCE_MIN_M
             * powf(
@@ -3123,15 +3150,15 @@ impl ConcertGrand {
             voice.noise_coefficient = noise_coefficient;
             voice.noise_body_coefficient = noise_body_coefficient;
             voice.noise_shrink = noise_shrink;
-            // The impact clang fires again on the wire it finds.
+            // The impact's tension pulse fires again on the wire it finds.
             let clang_kick = IMPACT_CLANG
                 * velocity
                 * velocity
                 * powf(1.0 - position, 1.2)
-                * self.controls.lab(4);
-            for (k, mode) in self.voices[slot].longitudinal.iter_mut().enumerate() {
-                mode.y1 += clang_kick / (k + 1) as f32;
-            }
+                * impact_gain;
+            self.voices[slot].clang_feed += clang_kick;
+            self.voices[slot].clang_feed_decay =
+                expf(-1.0 / (IMPACT_PULSE_TAU_S * sample_rate));
             // The re-struck wire is full of fresh high partials again.
             self.voices[slot].longitudinal_upper = longitudinal_upper;
             self.voices[slot].upper_env = 1.0;
@@ -3172,14 +3199,14 @@ impl ConcertGrand {
         // times higher than that of the transverse vibration", and it holds
         // across the instrument because scale design keeps it there.
         let longitudinal_first = LONGITUDINAL_RATIO * f0;
-        // The strike's own kick into the compressional modes: one impulse,
-        // rung at their own frequencies and dead within tens of
-        // milliseconds. Wound strings take it hardest.
+        // The strike's own kick into the compressional modes: a pulse the
+        // length of the contact, rung at their own frequencies and dead
+        // within tens of milliseconds. Wound strings take it hardest.
         let clang_kick = IMPACT_CLANG
             * velocity
             * velocity
             * powf(1.0 - position, 1.2)
-            * clang_gain;
+            * impact_gain;
         for (k, mode) in voice.longitudinal.iter_mut().enumerate() {
             let hz = longitudinal_first * (k + 1) as f32;
             if hz < nyquist * 0.9 {
@@ -3201,7 +3228,6 @@ impl ConcertGrand {
                 // 21 dB down in the sustain.
                 const MODE_PROFILE: [f32; LONGITUDINAL_MODES] = [1.0, 1.2, 1.0, 0.22];
                 mode.drive *= MODE_PROFILE[k];
-                mode.y1 = clang_kick / (k + 1) as f32;
             } else {
                 *mode = BodyMode::default();
             }
@@ -3215,6 +3241,8 @@ impl ConcertGrand {
         voice.longitudinal_upper = longitudinal_upper;
         voice.upper_env = 1.0;
         voice.upper_env_decay = expf(-1.0 / (0.08 * sample_rate));
+        voice.clang_feed = clang_kick;
+        voice.clang_feed_decay = expf(-1.0 / (IMPACT_PULSE_TAU_S * sample_rate));
         voice.tension_gain = tension_gain;
         voice.energy = 1.0;
         // The hammer/soundboard thump: heavier and darker in the bass.
@@ -3686,6 +3714,7 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 4] = self.controls.action_noise;
         values[6 + LAB_COUNT + 5] = self.controls.release_noise;
         values[6 + LAB_COUNT + 6] = self.controls.pedal_noise;
+        values[6 + LAB_COUNT + 7] = self.controls.impact;
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.chunks_exact_mut(4).zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -3727,6 +3756,7 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 4] = defaults.action_noise;
         values[6 + LAB_COUNT + 5] = defaults.release_noise;
         values[6 + LAB_COUNT + 6] = defaults.pedal_noise;
+        values[6 + LAB_COUNT + 7] = defaults.impact;
         // A 37-float state is from the era of the "in bass" tilt twins: its
         // tail is tilt values, not room values, and reading it into the room
         // controls would set the hall from leftovers. Take its head only.
@@ -3767,6 +3797,7 @@ impl Processor for ConcertGrand {
             action_noise: values[6 + LAB_COUNT + 4],
             release_noise: values[6 + LAB_COUNT + 5],
             pedal_noise: values[6 + LAB_COUNT + 6],
+            impact: values[6 + LAB_COUNT + 7],
         };
         self.room_dirty = true;
         true

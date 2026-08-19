@@ -54,3 +54,11 @@ print(json.dumps({"files": sorted(files)}, indent=2))
 PY
 
 echo "Demo assets written to $public"
+
+# The page itself is built separately, and the flag must travel WITH the
+# command -- never through web/.env.local. A stray .env.local carrying
+# VITE_RACKFORGE_BROWSER_HOST=1 once turned every plain npm build into a
+# browser-host build; the desktop app embedded one, its WebView booted a
+# complete second instrument (own AudioContext, own WebMIDI permission
+# prompt), and every note played two pianos at once.
+echo "Now build the page with:  VITE_RACKFORGE_BROWSER_HOST=1 npm run build"

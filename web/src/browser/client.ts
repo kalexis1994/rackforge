@@ -183,6 +183,17 @@ function handleEngineEvent(event: EngineEvent) {
  * this is called from the first gesture and is safe to call again afterwards.
  */
 export async function startBrowserHost(): Promise<void> {
+  // Inside the desktop shell the native engine IS the instrument. This
+  // module only exists there when the embedded dist was built with the
+  // browser-host flag by mistake -- which happened: the desktop shipped a
+  // demo build, its WebView asked for WebMIDI permission at startup, and
+  // granting it layered a second complete piano (its own AudioContext,
+  // worklet and wasm) over the native one. Every fader then edited only one
+  // of the two, which is unfixable from a panel. Refuse to boot, whatever
+  // the build flags say.
+  if (window.__RACKFORGE_HOST_SHELL__ === "desktop") {
+    throw new Error("the browser engine must not run inside the desktop shell");
+  }
   if (booting) {
     await booting;
     if (context?.state === "suspended") {

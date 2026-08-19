@@ -152,8 +152,7 @@ public final class MainActivity extends Activity {
     private LinearLayout playToolbar;
     private TextView playContextLabel;
     private AlertDialog pluginPickerDialog;
-    private String keyLightColor = "#145080";
-    private final Runnable[] pendingKeyLightApply = new Runnable[1];
+    private final Runnable[] pendingControllerApply = new Runnable[1];
     private AlertDialog installedPluginsDialog;
     private android.graphics.Typeface displayTypeface;
     private volatile boolean sharedUiReady;
@@ -212,7 +211,9 @@ public final class MainActivity extends Activity {
     private static native boolean keyLabSyncActivePlugin();
     private static native boolean keyLabSyncActiveMode(String mode);
     private static native String keyLabRenderPlan();
-    private static native String keyLabSetKeyLightColor(String hex);
+    private static native String ensureBundledControllers(String storeRoot);
+    private static native String controllerCatalog(String storeRoot);
+    private static native String controllerApplySettings(String storeRoot, String controllerId, String valuesJson);
     private static native boolean startNativeAudio(int deviceId, int latencyMode);
     private static native void setNativeOutputGain(int gainDb);
     static native void stopNativeAudio();
@@ -255,8 +256,11 @@ public final class MainActivity extends Activity {
         // spikes. Users can still opt into the more aggressive Low profile.
         latencyMode = preferences.getInt("audio.latency", 1);
         outputGainDb = preferences.getInt("audio.gain_db", 0);
-        keyLightColor = preferences.getString("controller.key_light_color", "#145080");
-        keyLabSetKeyLightColor(keyLightColor);
+        try {
+            ensureBundledControllers(controllerStoreRoot());
+        } catch (Throwable error) {
+            Log.w("RackForge", "Bundled controller install failed", error);
+        }
         setNativeOutputGain(outputGainDb);
         webView = new WebView(this);
         WebSettings settings = webView.getSettings();
@@ -2638,6 +2642,10 @@ public final class MainActivity extends Activity {
                 "resources/" + safePlugin + "/" + safeResource + ".resource");
     }
 
+    private String controllerStoreRoot() {
+        return new java.io.File(getFilesDir(), "controllers").getAbsolutePath();
+    }
+
     private void showInstalledPluginsDialog() {
         try {
             if (installedPluginsDialog != null && installedPluginsDialog.isShowing()) {
@@ -2680,6 +2688,19 @@ public final class MainActivity extends Activity {
                 JSONObject plugin = plugins.getJSONObject(index);
                 content.addView(installedPluginCard(plugin));
             }
+            try {
+                JSONObject controllerCatalog =
+                        new JSONObject(controllerCatalog(controllerStoreRoot()));
+                JSONArray controllers = controllerCatalog.getJSONArray("controllers");
+                if (controllers.length() > 0) {
+                    content.addView(settingsHeading("Controllers"));
+                    for (int index = 0; index < controllers.length(); index++) {
+                        content.addView(controllerCard(controllers.getJSONObject(index)));
+                    }
+                }
+            } catch (Throwable error) {
+                Log.w("RackForge", "Could not list controllers", error);
+            }
             JSONArray warnings = catalog.optJSONArray("warnings");
             if (warnings != null && warnings.length() > 0) {
                 TextView warning = settingsHeading("Store warnings");
@@ -2703,6 +2724,145 @@ public final class MainActivity extends Activity {
             Log.e("RackForge", "Could not list installed plugins", error);
             Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    private View controllerCard(JSONObject controller) throws Exception {
+        LinearLayout card = settingsCard();
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setOrientation(LinearLayout.HORIZONTAL);
+        TextView name = settingsHeading(controller.getString("name"));
+        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        headerRow.addView(name, nameParams);
+        TextView tag = new TextView(this);
+        tag.setText("CONTROLLER");
+        tag.setTextSize(10);
+        tag.setTextColor(0xFF0A1418);
+        tag.setBackgroundColor(0xFFF3BC7C);
+        tag.setPadding(dp(8), dp(2), dp(8), dp(2));
+        headerRow.addView(tag);
+        card.addView(headerRow);
+        card.addView(settingsValue("Version", controller.getString("version")
+                + " · " + controller.getString("trust")));
+        card.addView(settingsValue("Runtime", controller.getString("runtime")
+                + " · " + controller.getInt("devices") + " device profile(s)"));
+        Button configure = button("Configure");
+        String controllerId = controller.getString("id");
+        configure.setOnClickListener(view -> showControllerConfigDialog(controllerId));
+        card.addView(configure);
+        return card;
+    }
+
+    // The generic controller panel: derived from the package's settings
+    // schema, exactly like the desktop's /controllers/{id} page.
+    private void showControllerConfigDialog(String controllerId) {
+        try {
+            JSONObject catalog = new JSONObject(controllerCatalog(controllerStoreRoot()));
+            JSONArray controllers = catalog.getJSONArray("controllers");
+            JSONObject controller = null;
+            for (int index = 0; index < controllers.length(); index++) {
+                if (controllers.getJSONObject(index).getString("id").equals(controllerId)) {
+                    controller = controllers.getJSONObject(index);
+                }
+            }
+            if (controller == null) return;
+            ScrollView scroll = new ScrollView(this);
+            LinearLayout content = new LinearLayout(this);
+            content.setOrientation(LinearLayout.VERTICAL);
+            content.setPadding(dp(20), dp(22), dp(20), dp(26));
+            scroll.addView(content);
+            TextView title = new TextView(this);
+            title.setText(controller.getString("name"));
+            title.setTextColor(0xFFF2FAFC);
+            title.setTextSize(24);
+            applyDisplayTypeface(title);
+            content.addView(title);
+            TextView subtitle = new TextView(this);
+            subtitle.setText("Settings apply live to the hardware");
+            subtitle.setTextColor(0xFF91A9B1);
+            subtitle.setPadding(0, dp(2), 0, dp(12));
+            content.addView(subtitle);
+            JSONArray settings = controller.getJSONArray("settings");
+            if (settings.length() == 0) {
+                content.addView(settingsValue("Status", "This controller exposes no settings yet"));
+            }
+            for (int index = 0; index < settings.length(); index++) {
+                JSONObject setting = settings.getJSONObject(index);
+                if ("color".equals(setting.getString("kind"))) {
+                    content.addView(colorSettingCard(controllerId, setting));
+                } else {
+                    content.addView(settingsValue(setting.getString("name"),
+                            setting.getString("value")));
+                }
+            }
+            AlertDialog dialog = new AlertDialog.Builder(this)
+                    .setView(scroll)
+                    .setPositiveButton("Close", null)
+                    .create();
+            dialog.setOnShowListener(unused -> styleFullHeightDialog(dialog));
+            dialog.show();
+        } catch (Throwable error) {
+            Log.e("RackForge", "Could not open controller settings", error);
+            Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private View colorSettingCard(String controllerId, JSONObject setting) throws Exception {
+        LinearLayout card = settingsCard();
+        card.addView(settingsHeading(setting.getString("name")));
+        int initialColor = Integer.parseInt(setting.getString("value").substring(1), 16);
+        View preview = new View(this);
+        preview.setBackgroundColor(0xFF000000 | initialColor);
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(34));
+        previewParams.topMargin = dp(6);
+        previewParams.bottomMargin = dp(8);
+        card.addView(preview, previewParams);
+        SeekBar[] channels = new SeekBar[3];
+        String[] channelNames = {"Red", "Green", "Blue"};
+        int[] shifts = {16, 8, 0};
+        for (int channel = 0; channel < 3; channel++) {
+            SeekBar bar = new SeekBar(this);
+            bar.setMax(255);
+            bar.setProgress((initialColor >> shifts[channel]) & 0xFF);
+            channels[channel] = bar;
+            card.addView(settingsControl(channelNames[channel], bar));
+        }
+        String settingId = setting.getString("id");
+        SeekBar.OnSeekBarChangeListener listener = new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                int color = (channels[0].getProgress() << 16)
+                        | (channels[1].getProgress() << 8)
+                        | channels[2].getProgress();
+                preview.setBackgroundColor(0xFF000000 | color);
+                if (!fromUser) return;
+                String hex = String.format(Locale.ROOT, "#%06x", color);
+                // The hardware repaint is ~44 SysEx messages; settle for a
+                // quiet 200 ms before sending, exactly like the desktop.
+                if (pendingControllerApply[0] != null) {
+                    mainHandler.removeCallbacks(pendingControllerApply[0]);
+                }
+                pendingControllerApply[0] = () -> {
+                    try {
+                        JSONObject values = new JSONObject();
+                        values.put(settingId, hex);
+                        JSONObject response = new JSONObject(controllerApplySettings(
+                                controllerStoreRoot(), controllerId, values.toString()));
+                        JSONArray plan = response.optJSONArray("plan");
+                        if (plan != null) {
+                            sendControllerPlanToKeyLab(plan.toString(), midiGeneration);
+                        }
+                    } catch (Throwable error) {
+                        Log.e("RackForge", "Could not apply controller setting", error);
+                    }
+                };
+                mainHandler.postDelayed(pendingControllerApply[0], 200);
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { }
+        };
+        for (SeekBar bar : channels) bar.setOnSeekBarChangeListener(listener);
+        return card;
     }
 
     private View installedPluginCard(JSONObject plugin) throws Exception {
@@ -3130,56 +3290,6 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(48));
         refreshParams.bottomMargin = dp(14);
         content.addView(refreshDevices, refreshParams);
-
-        LinearLayout controllerCard = settingsCard();
-        content.addView(controllerCard);
-        controllerCard.addView(settingsHeading("Controller"));
-        controllerCard.addView(settingsValue("KeyLab Essential mk3", "Key light color"));
-        View colorPreview = new View(this);
-        colorPreview.setBackgroundColor(0xFF000000 | Integer.parseInt(keyLightColor.substring(1), 16));
-        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(34));
-        previewParams.topMargin = dp(6);
-        previewParams.bottomMargin = dp(8);
-        controllerCard.addView(colorPreview, previewParams);
-        int initialColor = Integer.parseInt(keyLightColor.substring(1), 16);
-        SeekBar[] channels = new SeekBar[3];
-        String[] channelNames = {"Red", "Green", "Blue"};
-        int[] shifts = {16, 8, 0};
-        for (int channel = 0; channel < 3; channel++) {
-            SeekBar bar = new SeekBar(this);
-            bar.setMax(255);
-            bar.setProgress((initialColor >> shifts[channel]) & 0xFF);
-            channels[channel] = bar;
-            controllerCard.addView(settingsControl(channelNames[channel], bar));
-        }
-        SeekBar.OnSeekBarChangeListener colorListener = new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
-                int color = (channels[0].getProgress() << 16)
-                        | (channels[1].getProgress() << 8)
-                        | channels[2].getProgress();
-                colorPreview.setBackgroundColor(0xFF000000 | color);
-                if (!fromUser) return;
-                String hex = String.format(Locale.ROOT, "#%06x", color);
-                // The hardware repaint is ~44 SysEx messages; settle for a
-                // quiet 200 ms before sending, exactly like the desktop.
-                if (pendingKeyLightApply[0] != null) {
-                    mainHandler.removeCallbacks(pendingKeyLightApply[0]);
-                }
-                pendingKeyLightApply[0] = () -> {
-                    keyLightColor = hex;
-                    preferences.edit().putString("controller.key_light_color", hex).apply();
-                    String plan = keyLabSetKeyLightColor(hex);
-                    if (plan != null && !plan.isEmpty()) {
-                        sendControllerPlanToKeyLab(plan, midiGeneration);
-                    }
-                };
-                mainHandler.postDelayed(pendingKeyLightApply[0], 200);
-            }
-            @Override public void onStartTrackingTouch(SeekBar bar) { }
-            @Override public void onStopTrackingTouch(SeekBar bar) { }
-        };
-        for (SeekBar bar : channels) bar.setOnSeekBarChangeListener(colorListener);
 
         LinearLayout audioCard = settingsCard();
         content.addView(audioCard);
@@ -4202,7 +4312,6 @@ public final class MainActivity extends Activity {
         // distinguish MIDI from DINTHRU/MCU/HUI/ALV, so address every cable. Only the
         // controller's private control cable consumes RackForge SysEx messages.
         List<MidiDeviceInfo.PortInfo> targets = namedMatches.isEmpty() ? inputs : namedMatches;
-        keyLabSetKeyLightColor(keyLightColor);
         String acquirePlan = keyLabAcquirePlan();
         int opened = 0;
         for (MidiDeviceInfo.PortInfo target : targets) {

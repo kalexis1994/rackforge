@@ -15,9 +15,11 @@ jni = "0.21"
 rackforge-core = { path = "../../../crates/rackforge-core" }
 rackforge-control-api = { path = "../../../crates/rackforge-control-api" }
 keylab-essential-mk3 = { package = "rackforge-controller-arturia-keylab-essential-mk3", path = "../../../hardware/keylab-bridge" }
+rackforge-controller-package = { path = "../../../crates/rackforge-controller-package" }
 rackforge-plugin-api = { path = "../../../crates/rackforge-plugin-api" }
 rackforge-repository = { path = "../../../crates/rackforge-repository" }
 rackforge-session-api = { path = "../../../crates/rackforge-session-api" }
 rackforge-surface-runtime = { path = "../../../crates/rackforge-surface-runtime" }
 serde_json.workspace = true
+toml = "0.9"
 semver.workspace = true

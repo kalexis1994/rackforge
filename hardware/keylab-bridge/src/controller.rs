@@ -6,7 +6,7 @@ use rackforge_controller_api::{
 use rackforge_controller_package::{ControllerPackageManifest, DeviceMatcher};
 use std::sync::OnceLock;
 
-const PACKAGE_MANIFEST: &str = include_str!(
+pub const PACKAGE_MANIFEST: &str = include_str!(
     "../../controllers/arturia-keylab-essential-mk3/package/rackforge-controller.toml"
 );
 

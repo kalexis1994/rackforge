@@ -76,12 +76,20 @@ Kotlin/Java layer owns MIDI and asks the native library for message
 same shared `keylab_protocol` crate the process driver uses. That
 sharing is the payoff: the ambient-color atomic added for the desktop's
 `key-light-color` setting was ALREADY inside Android's renderer.
-Android exposes `keyLabSetKeyLightColor(hex)` over JNI (parse, set the
-shared atomic, return the repaint plan), persists the value in
-SharedPreferences, applies it before every acquire, and offers an RGB
-picker card in the settings dialog with the same 200 ms debounce the
-desktop uses. Process-driver parity arrives with the `wasm-v1` runtime,
-which is also what community controllers need on Android.
+Everything above the execution layer is STANDARD on Android too: the
+bundled KeyLab `.rfcontroller` (the manifest the driver crate already
+embeds) auto-installs at boot into the same `PackageStore` layout
+(`<filesDir>/controllers`), `controllerCatalog` returns the exact JSON
+shape `GET /api/v1/controllers` serves on the desktop,
+`controllerApplySettings` validates against the manifest schema and
+writes the same `state/<id>/settings.toml`, and the UI lives where it
+does everywhere else: the plugin manager, a card with the CONTROLLER
+tag, opening a panel derived from the settings schema (color kind →
+preview plus RGB bars, 200 ms debounce). Only the runtime differs --
+the catalog reports `InProcess`, and applying a setting maps it onto
+the shared protocol crate directly instead of a watched file. Process
+drivers arrive with `wasm-v1`, which is also what community controllers
+need on Android.
 
 Still next: the hardcoded KeyLab library leaves the desktop entirely
 (the yield flag and the built-in display path become dead code once the

@@ -614,23 +614,34 @@ public final class MainActivity extends Activity {
     }
 
     private void injectPluginBridge() {
+        // Two subtleties, both learned from a panel stuck on "Connecting":
+        // the page announces itself with kind='ready' and the host must
+        // answer with the context AGAIN (the injection and the page's
+        // listener race, and whoever speaks first into a deaf room needs a
+        // second chance), and targetOrigin must be '*' because the WebView's
+        // scheme can make window.location.origin opaque, which turns
+        // postMessage into a silent no-op.
         String script = "(function(){"
+                + "window.__rackforgeContext=" + currentPluginWebContext() + ";"
                 + "if(!window.__rackforgeAndroidBridge){"
                 + "window.__rackforgeAndroidBridge=true;"
                 + "window.addEventListener('message',function(event){"
                 + "var data=event.data;"
-                + "if(data&&data.protocol==='rackforge.plugin.web@1'&&data.kind==='request'){"
+                + "if(!data||data.protocol!=='rackforge.plugin.web@1')return;"
+                + "if(data.kind==='request'){"
                 + "RackForgeAndroid.postMessage(JSON.stringify(data));"
+                + "}else if(data.kind==='ready'){"
+                + "window.postMessage(window.__rackforgeContext,'*');"
                 + "}});"
                 + "}"
-                + "window.postMessage(" + currentPluginWebContext() + ",window.location.origin);"
+                + "window.postMessage(window.__rackforgeContext,'*');"
                 + "})();";
         webView.evaluateJavascript(script, null);
     }
 
     private void sendPluginMessage(String json) {
         webView.evaluateJavascript(
-                "window.postMessage(" + json + ",window.location.origin);", null);
+                "window.postMessage(" + json + ",'*');", null);
     }
 
     private final class PluginWebBridge {

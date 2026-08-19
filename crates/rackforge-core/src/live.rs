@@ -11,7 +11,7 @@ use crate::live_midi_state::{
 use crate::midi_hotplug::{
     self, SupervisedSource, is_performance_midi_input, stable_alsa_source_id,
 };
-use crate::performance::{PerformanceBootstrap, PerformanceRepository};
+use crate::performance::PerformanceRepository;
 use crate::rack_graph::compile_instrument_definition;
 use crate::realtime::{self, XrunMonitor};
 use crate::session::SessionStore;
@@ -760,8 +760,6 @@ pub fn run(config: LiveConfig) -> Result<()> {
 
     let mut standalone_voices = Vec::with_capacity(plugins.len());
     let mut session_instances = Vec::with_capacity(plugins.len());
-    let mut primary_preset_id = None;
-    let mut primary_preset_name = None;
     for (plugin_id, plugin) in &plugins {
         let is_primary = plugin_id == &primary_id;
         let instance_id = plugin_instance_id(plugin_id, is_primary)?;
@@ -796,10 +794,6 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 "LIVE_PRESET_READY plugin={} id={} name={:?}",
                 plugin_id, preset.id, preset.name
             );
-            if is_primary {
-                primary_preset_id = Some(preset.id.clone());
-                primary_preset_name = Some(preset.name.clone());
-            }
         }
         instance.activate(
             f64::from(output_rate),
@@ -857,33 +851,12 @@ pub fn run(config: LiveConfig) -> Result<()> {
             instance,
         });
     }
-    let primary_preset_id =
-        primary_preset_id.context("primary LIVE plugin exposes no program for the initial Rack")?;
-    let primary_preset_name = primary_preset_name
-        .context("primary LIVE plugin exposes no named program for the initial Rack")?;
-    let primary_voice = standalone_voices
-        .iter_mut()
-        .find(|voice| voice.plugin.manifest().id == primary_id)
-        .context("primary plugin instance is unavailable")?;
     let mut state_store = PluginStateStore::new(config.data_root.as_deref())?;
-    let bootstrap_state = state_store.put(
-        &primary_plugin.manifest().id,
-        &primary_plugin.manifest().version,
-        primary_plugin.manifest().state_version,
-        Some(primary_preset_id.clone()),
-        &primary_voice
-            .instance
-            .save_state()
-            .context("capturing initial plugin state")?,
-    )?;
-    let mut performance_repository = PerformanceRepository::load_or_bootstrap(
-        config.data_root.as_deref(),
-        PerformanceBootstrap {
-            plugin_id: primary_plugin.manifest().id.clone(),
-            state: bootstrap_state,
-            name: primary_preset_name,
-        },
-    )?;
+    // A first boot starts with an EMPTY library on every platform: the
+    // performer builds their first Rack deliberately instead of inheriting
+    // an invented one. Existing libraries load exactly as persisted.
+    let mut performance_repository =
+        PerformanceRepository::load_or_empty(config.data_root.as_deref())?;
     let migrated = performance_repository.migrate_legacy_plugin_states(
         &primary_plugin.manifest().id,
         |program_id| {
@@ -903,7 +876,6 @@ pub fn run(config: LiveConfig) -> Result<()> {
         println!("PERFORMANCE_PLUGIN_STATES_MIGRATED count={migrated}");
     }
     let performance_library = performance_repository.library().clone();
-    let initial_surface_mode = persisted_mode.unwrap_or(SurfaceMode::Live);
     let mut live_state = match persisted_live {
         Some(live) if live.validate(&performance_library).is_ok() => live,
         Some(_) => {
@@ -912,6 +884,14 @@ pub fn run(config: LiveConfig) -> Result<()> {
         }
         None => performance_repository.initial_live_state(),
     };
+    // With nothing LIVE could play -- the empty first boot -- starting in
+    // PLAY lands on the active instrument instead of a silent stage. A
+    // persisted choice still wins.
+    let initial_surface_mode = persisted_mode.unwrap_or(if live_state.active.is_some() {
+        SurfaceMode::Live
+    } else {
+        SurfaceMode::Play
+    });
     if initial_surface_mode != SurfaceMode::Live {
         live_state.deactivate();
     }

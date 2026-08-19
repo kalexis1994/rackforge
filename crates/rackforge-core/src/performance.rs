@@ -72,9 +72,11 @@ impl PerformanceRepository {
         Ok(repository)
     }
 
-    /// Loads an existing library without inventing a playable Rack. Desktop
-    /// authoring uses this path because plugin state is chosen explicitly in
-    /// the Rack editor.
+    /// Loads an existing library without inventing a playable Rack. Every
+    /// RackForge host boots through this path: a first start has an empty
+    /// library and the performer builds the first Rack deliberately. The
+    /// bootstrap variant above remains for the browser demo, which must
+    /// sound the moment the page opens.
     pub fn load_or_empty(data_root: Option<&Path>) -> Result<Self> {
         let root = data_root.map(|root| root.join(PERFORMANCE_DIRECTORY));
         let mut repository = Self {

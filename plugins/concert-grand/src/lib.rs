@@ -70,8 +70,32 @@ const COMB_FLOOR: f32 = 0.26;
 /// because what traps it is weak coupling to the bridge and what it still
 /// does is radiate.
 const TAIL_KNEE_HZ: f32 = 420.0;
-/// Fitted against the YDP C2's per-partial decay times, partial by partial.
-const TAIL_MEASURED: f32 = 4.05;
+/// How long the string's own losses let a partial ring, at the bottom of the
+/// curve, and where that curve turns over.
+///
+/// These three numbers ARE the decay-against-frequency curve, and there is
+/// only one of them now. There used to be three: this one, a `4.05 * f^-0.357`
+/// correction gated to the bass, and a `1/(1 + 1.6 * register)` divisor on the
+/// whole note. Each was fitted on its own against a different measurement, and
+/// together they double-counted -- a bass note's 500 Hz partial was divided by
+/// 2.13 for its register and then by another 2.4 for its frequency, so it
+/// lived a fifth of the time the curve said.
+///
+/// Measured, per partial, across eleven notes of the YDP and eleven partials
+/// each: the model ran 1.47x long below 120 Hz and 0.51x short above 700 --
+/// the bass rang on while everything above it died at twice the proper rate.
+/// A single curve, refitted against all 122 of those points at once, is both
+/// simpler and closer: the mean error in log-decay falls from 0.55 to 0.36.
+///
+/// The shape is the one the physics asks for -- Valette's sigma = b1 + b2
+/// kappa^2, a floor plus a term that climbs with wave number -- and the fit
+/// only moved the knee to where the instrument actually puts it. It was at
+/// 180 Hz, nearly three octaves too low, which is why the curve was so steep
+/// that no single note could sit on it and both corrections were needed to
+/// drag the ends back.
+const STRING_T60_S: f32 = 21.0;
+const STRING_KNEE_HZ: f32 = 20.0;
+const STRING_TILT: f32 = 0.56;
 /// Below this the soundboard has too few modes to be ragged, so the synthetic
 /// scatter is faded out rather than gambling on where its notches land.
 const SCATTER_KNEE_HZ: f32 = 320.0;
@@ -1520,7 +1544,6 @@ impl ConcertGrand {
         &self,
         frequency: f32,
         f0: f32,
-        position: f32,
         string_scale: f32,
         treble_life: f32,
     ) -> f32 {
@@ -1533,7 +1556,7 @@ impl ConcertGrand {
         let partial_number: f32 = (frequency / f0.max(1.0)).max(1.0);
         let radiating = frequency;
         let frequency = frequency * string_scale;
-        let string = 24.0 / (1.0 + powf(frequency / 180.0, 1.25)) + 0.6;
+        let string = STRING_T60_S / (1.0 + powf(frequency / STRING_KNEE_HZ, STRING_TILT)) + 0.6;
         // Radiation is a second loss channel, in parallel with the string's
         // own, so the two rates add.
         //
@@ -1552,25 +1575,13 @@ impl ConcertGrand {
         let rate = LN_1000 / string
             + (RADIATION_RATE * Self::radiation_efficiency(radiating) + bending)
                 / treble_life.max(0.05);
-        // Below the top of the compass the whole instrument rang too long.
-        //
-        // Measured against the YDP, note by note, on the note's own envelope:
-        // A0 lasted 26.2 s against 14.1, C2 19.3 against 12.9, C3 23.9
-        // against 7.5, C4 20.0 against 10.0 -- and A4 11.8 against 11.7,
-        // which is exact. The error is a register error, not a global one.
-        //
-        // That is why turning the Decay control down brings the bass closer
-        // and ruins everything else: it shortens a treble that was already
-        // right. The user found that by ear before this was measured.
-        //
-        // 1.6 halves the bass overshoot -- A0 goes from 1.85x the instrument
-        // to 1.21x and C2 lands on 1.02 -- and stops there. Pushing further
-        // starts cutting F#1 short (0.70x at 2.4) without fixing C3, which is
-        // still 1.9x long: the per-note errors do not share a smooth shape,
-        // so a curve in the register cannot take all of them.
-        let register = ((0.58 - position) / 0.58).clamp(0.0, 1.0);
+        // There is no register correction here any more, and that is the
+        // point. One used to divide the whole note by up to 2.6 because the
+        // bass rang too long; but the bass rang too long because the curve
+        // above was too steep, and dividing the note flat also shortened the
+        // upper partials that were already dying too fast. The curve carries
+        // it now.
         (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay)
-            / (1.0 + 1.6 * register)
     }
 
     /// How readily the soundboard turns a partial of this frequency into
@@ -2155,7 +2166,7 @@ impl ConcertGrand {
             // curve kept falling. ×1.8 on the slow stage matches the
             // measured plateau.
             let t60 =
-                self.t60_seconds(frequency, f0, position, string_scale, treble_life) * board_decay * self.cal(note, 4);
+                self.t60_seconds(frequency, f0, string_scale, treble_life) * board_decay * self.cal(note, 4);
             let jitter = 0.55 + 0.9 * hash01((note as u32) << 10 | (n as u32) << 2 | 1);
             let cents = detune_cents * jitter;
             // The strings of the unison, struck together and equal: their
@@ -2217,24 +2228,19 @@ impl ConcertGrand {
             // A wire whose upper harmonics are still sounding after the body
             // has died is not a piano, and "mucha cuerda" is exactly what it
             // sounds like.
-            // The shape above, times the correction measured directly against
-            // the instrument. Rendering C2 and reading the T60 of each partial
-            // off its own envelope, then dividing the real instrument's by
-            // ours, gives a smooth law: shorten by 4.05 * f^-0.357. It asks
-            // for almost nothing at the fundamental and for a factor of two
-            // and a half by 650 Hz, which is the same story the ratio told --
-            // the upper partials were the ones ringing on.
-            let tail = (1.8 + 3.5 / (1.0 + powf(frequency / TAIL_KNEE_HZ, 1.2)))
-                * {
-                    // Only where it was measured. The law was fitted on C2's
-                    // partials and applying it across the whole compass took
-                    // the centroid nearly ten semitones dark -- a bass
-                    // measurement is not a licence to re-damp the treble.
-                    let measured =
-                        (TAIL_MEASURED * powf(frequency.max(20.0), -0.357)).clamp(0.15, 1.6);
-                    let bass = ((0.55 - position) / 0.55).clamp(0.0, 1.0);
-                    1.0 + (measured - 1.0) * bass
-                };
+            // How much longer the second stage lasts than the first, and
+            // nothing else. This is the two-stage decay itself -- the
+            // horizontal polarisation outliving the vertical one -- and it is
+            // structure, not a correction against a measurement.
+            //
+            // A `4.05 * f^-0.357` factor used to be multiplied in here,
+            // gated to the bass. It was fitted honestly, against C2's
+            // partials, but it was fitted on top of a decay curve that was
+            // already wrong, so it was measuring that curve's error and not
+            // the instrument. With the curve refitted it has nothing left to
+            // correct, and keeping it would take a bass note's 500 Hz partial
+            // down to two fifths of its proper life for the second time.
+            let tail = 1.8 + 3.5 / (1.0 + powf(frequency / TAIL_KNEE_HZ, 1.2));
             let intrinsic =
                 self.decay_per_sample(t60 * tail * self.controls.lab_at(12, position));
             let prompt_t60 = t60 * 1.94 * self.controls.lab_at(11, position) / (1.4 + 1.1 * position);
@@ -2349,7 +2355,7 @@ impl ConcertGrand {
                 }
                 // Longitudinal content decays faster than the transverse
                 // partial it rides above; no aftersound of its own.
-                let t60 = self.t60_seconds(frequency, f0, position, string_scale, treble_life) * 0.4;
+                let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life) * 0.4;
                 let decay = self.decay_per_sample(t60);
                 partials[placed] = Partial {
                     prompt: Component::start(amplitude, frequency, decay, sample_rate),
@@ -2376,7 +2382,7 @@ impl ConcertGrand {
                 if amplitude < floor * scale {
                     continue;
                 }
-                let t60 = self.t60_seconds(frequency, f0, position, string_scale, treble_life) * 0.35;
+                let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life) * 0.35;
                 let decay = self.decay_per_sample(t60);
                 partials[placed] = Partial {
                     prompt: Component::start(amplitude, frequency, decay, sample_rate),
@@ -2499,7 +2505,7 @@ impl ConcertGrand {
                 let frequency = f0 * ratio * jitter;
                 if frequency < nyquist {
                     // Short segments, short ring: undamped is not endless.
-                    let t60 = (self.t60_seconds(frequency, f0, position, 1.0, 1.0) * 0.35).min(0.9);
+                    let t60 = (self.t60_seconds(frequency, f0, 1.0, 1.0) * 0.35).min(0.9);
                     let decay = self.decay_per_sample(t60);
                     *slot = Component::start(level, frequency, decay, sample_rate);
                 }
@@ -2609,7 +2615,7 @@ impl ConcertGrand {
                     powf(2.0, (hash01((note as u32) << 12 | (n as u32) << 3 | 5) - 0.5) * 5.0 / 1200.0);
                 let detuned = (frequency * spread).min(nyquist);
                 let amplitude = amplitudes[n] * scale * 0.063;
-                let t60 = self.t60_seconds(frequency, f0, position, string_scale, treble_life) * 1.5;
+                let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life) * 1.5;
                 let slow = self.decay_per_sample(t60);
                 halo[n] = Partial {
                     prompt: Component::start(amplitude, detuned, slow, sample_rate),
@@ -3784,6 +3790,20 @@ mod tests {
         // bridge drains only the coherent part, and the ratio of radiated
         // (|sum|^2) to stored (sum of |z|^2) energy must fall over the
         // sustain while the stored energy itself survives.
+        //
+        // Read at ONE instant this proves nothing, and for a while it was
+        // read that way. A detuned unison beats: the strings dephase and
+        // then rephase, over and over, so the coherence cycles rather than
+        // decaying. Traced every 100 ms it runs 0.70, 0.28, 0.02, ... 0.71,
+        // 0.68, ... 0.82, 0.57 -- and whether a single late reading looks
+        // like dephasing depends only on where in that cycle it lands. This
+        // test used to sample 2.5 s in and pass on a beat minimum; a change
+        // to the decay curve moved the beat, not the physics, and it failed.
+        //
+        // So it compares the strike against the whole sustain instead. Right
+        // after the hammer the strings are together and the coherence is
+        // high; averaged over seconds it must sit well below that, and it
+        // cannot be faked by a beat phase because it spans many beats.
         let mut piano = prepared();
         render(&mut piano, 64, &[note_on(60, 100)]);
         let coherence = |piano: &ConcertGrand| {
@@ -3801,14 +3821,28 @@ mod tests {
                 + p.third.magnitude_squared();
             (radiated / (3.0 * stored).max(1e-24), stored)
         };
-        render(&mut piano, (FS * 0.1) as usize, &[]);
-        let (early_coherence, _) = coherence(&piano);
-        render(&mut piano, (FS * 2.5) as usize, &[]);
-        let (late_coherence, late_stored) = coherence(&piano);
-        assert!(late_stored > 0.0, "the strings died entirely");
+        let (struck, _) = coherence(&piano);
         assert!(
-            late_coherence < early_coherence * 0.7,
-            "no dephasing: {early_coherence} -> {late_coherence}"
+            struck > 0.7,
+            "the hammer must leave the strings in phase: {struck}"
+        );
+
+        // Many beats' worth, so no single phase can carry the result.
+        let mut total = 0.0;
+        let mut samples = 0;
+        let mut last_stored = 0.0;
+        for _ in 0..30 {
+            render(&mut piano, (FS * 0.1) as usize, &[]);
+            let (c, stored) = coherence(&piano);
+            total += c;
+            samples += 1;
+            last_stored = stored;
+        }
+        let sustained = total / samples as f32;
+        assert!(last_stored > 0.0, "the strings died entirely");
+        assert!(
+            sustained < struck * 0.7,
+            "no dephasing: struck {struck} -> sustained {sustained}"
         );
     }
 

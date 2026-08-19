@@ -190,7 +190,48 @@ time from one smooth curve fitted to the published order of magnitude — tens
 of seconds for the lowest fundamentals, under a second at the top of the
 compass:
 
-    T60(f) ≈ 24 / (1 + (f/180)^1.25) + 0.6   seconds
+    T60(f) ≈ 21 / (1 + (f/20)^0.56) + 0.6   seconds
+
+**This is the only decay-against-frequency curve in the model, and it took
+three tries to make it the only one.** It used to be one of three. The curve
+itself read `24 / (1 + (f/180)^1.25) + 0.6`; a second correction shortened the
+aftersound of bass partials by `4.05 · f^-0.357`; a third divided the whole
+note by up to 2.6 for its register. Each had been fitted honestly, but each
+was fitted on top of the others' errors, so they double-counted: a bass note's
+500 Hz partial was divided by 2.13 for its register and then by another 2.4 for
+its frequency, and lived a fifth of the time the curve claimed.
+
+Measured, the damage was flat and large. Reading the T60 of each partial off
+its own envelope — 122 partials across eleven notes of the YDP, ours against
+the instrument's:
+
+    band          before   after
+    0–120 Hz       1.47×    1.45×
+    120–300 Hz     1.24×    1.30×
+    300–700 Hz     1.06×    1.83×
+    700–1600 Hz    0.51×    1.15×
+    1600–8000 Hz   0.47×    0.93×
+
+Everything above 700 Hz was dying at twice the proper rate while the bass rang
+on — the two corrections were aimed at the bass and hit the whole note. Fitting
+one curve against all 122 points at once cut the mean error in log-decay from
+0.485 to 0.377, and the whole fit cost from 30.95 to 21.31, with the spectral
+centroid moving from 10.03 semitones off the instrument to 4.87.
+
+The knee is the substance of it. The physics wanted Valette's shape — a
+frequency-independent floor plus a term climbing with wave number — and the
+old curve had that shape but put its knee at 180 Hz, nearly three octaves
+below where the instrument puts it. That is why it was too steep for any
+single note to sit on, and why both corrections were needed to drag the ends
+back.
+
+The curve is read at the partial's frequency scaled by the string's weight,
+`(f0/220)^0.55`, and that scaling is not decoration: refitting without it is
+measurably worse (0.414 against 0.357 in log-decay), because the same 2 kHz is
+partial 218 on a massive A0 string and partial 92 on C2, and the bass one is
+far more heavily damped. With the weight carrying the note dependence, the
+curve needs no register term at all — `t60_seconds` no longer takes the note's
+position in the compass, and the compiler said so.
 
 On top of the smooth curve, each partial's decay is pulled by the board
 response below — where the board takes energy readily the partial dies

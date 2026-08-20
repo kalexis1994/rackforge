@@ -46,6 +46,7 @@ interface StorageManifest {
 interface Pending {
   resolve: (response: string) => void;
   reject: (error: Error) => void;
+  timeout: number;
 }
 
 let context: AudioContext | null = null;
@@ -155,6 +156,7 @@ function handleEngineEvent(event: EngineEvent) {
       const waiting = pending.get(event.id);
       if (!waiting) return;
       pending.delete(event.id);
+      window.clearTimeout(waiting.timeout);
       waiting.resolve(event.response);
       break;
     }
@@ -216,6 +218,7 @@ export async function startBrowserHost(): Promise<void> {
     node.onprocessorerror = () => {
       bootError = "the RackForge engine stopped on the audio thread";
       console.error(bootError);
+      rejectPending(new Error(bootError));
     };
     node.connect(audio.destination);
 
@@ -374,9 +377,21 @@ function send(request: string): Promise<string> {
   }
   const id = nextRequestId++;
   return new Promise<string>((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    const timeout = window.setTimeout(() => {
+      pending.delete(id);
+      reject(new Error("RackForge did not answer the control request in time."));
+    }, 30_000);
+    pending.set(id, { resolve, reject, timeout });
     node.port.postMessage({ kind: "request", id, request });
   });
+}
+
+function rejectPending(error: Error) {
+  for (const waiting of pending.values()) {
+    window.clearTimeout(waiting.timeout);
+    waiting.reject(error);
+  }
+  pending.clear();
 }
 
 /**
@@ -528,11 +543,22 @@ function sendPackage(
   }
   const id = nextRequestId++;
   return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      pending.delete(id);
+      reject(new Error("RackForge did not finish processing the plugin package in time."));
+    }, 120_000);
     pending.set(id, {
       resolve: (response) => resolve(JSON.parse(response)),
       reject,
+      timeout,
     });
-    node.port.postMessage({ kind: "package", id, action, payload });
+    // Keep the selection for the later install, but transfer the worklet copy
+    // instead of asking structured clone to duplicate another 56+ MB buffer.
+    const transferred = payload.slice();
+    node.port.postMessage(
+      { kind: "package", id, action, payload: transferred },
+      [transferred.buffer],
+    );
   });
 }
 

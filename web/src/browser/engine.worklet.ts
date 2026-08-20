@@ -24,6 +24,7 @@ import { PluginHost } from "./pluginHost";
 import {
   ENGINE_PROCESSOR,
   PACKAGED_STORAGE_PREFIX,
+  engineFailureEvent,
   type EngineCommand,
   type EngineEvent,
   type PackageMessage,
@@ -75,6 +76,7 @@ const READ_ONLY_OPERATIONS = new Set([
   "plugin_parameters",
   "plugin_state_parameters",
 ]);
+const READ_ONLY_PACKAGE_ACTIONS = new Set(["inspect", "catalog", "resource_status"]);
 
 /** Builds the directory tree the host boots against from a flat file list. */
 function seedDirectory(files: SeedFile[]): Map<string, Inode> {
@@ -137,12 +139,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
       try {
         this.#handle(event.data);
       } catch (error) {
-        this.#post({
-          kind: "booted",
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
-          warnings: [],
-        });
+        this.#reportFailure(event.data, error);
       }
     };
     this.#post({ kind: "ready" });
@@ -167,7 +164,9 @@ class RackForgeEngine extends AudioWorkletProcessor {
           id: command.id,
           response: this.#package(command.action, command.payload),
         });
-        this.#publishStorage();
+        if (!READ_ONLY_PACKAGE_ACTIONS.has(command.action)) {
+          this.#publishStorage();
+        }
         break;
       case "midi": {
         const [status, data1, data2] = command.data;
@@ -175,6 +174,16 @@ class RackForgeEngine extends AudioWorkletProcessor {
         break;
       }
     }
+  }
+
+  #reportFailure(command: EngineCommand, error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    const event = engineFailureEvent(command, message);
+    if (event) {
+      this.#post(event);
+      return;
+    }
+    console.warn(`RackForge MIDI delivery failed: ${message}`);
   }
 
   #boot(

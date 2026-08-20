@@ -117,6 +117,35 @@ export type EngineEvent =
   | RevisionMessage;
 
 /**
+ * Converts a worklet exception into the response the caller is waiting for.
+ * A package failure used to masquerade as a second boot failure, leaving its
+ * request promise unresolved and the interface on "Validating…" forever.
+ */
+export function engineFailureEvent(
+  command: EngineCommand,
+  message: string,
+): EngineEvent | null {
+  if (command.kind === "package") {
+    return {
+      kind: "response",
+      id: command.id,
+      response: JSON.stringify({ ok: false, error: message }),
+    };
+  }
+  if (command.kind === "request") {
+    return {
+      kind: "response",
+      id: command.id,
+      response: JSON.stringify({ status: "error", code: "internal", message }),
+    };
+  }
+  if (command.kind === "boot") {
+    return { kind: "booted", ok: false, error: message, warnings: [] };
+  }
+  return null;
+}
+
+/**
  * Storage the host does not own: RackForge ships these with the site, and a
  * stored copy would go stale as soon as the site was rebuilt.
  */

@@ -8,7 +8,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signature, VerifyingKey};
 use rackforge_plugin_api::{
     ParameterSchema, PluginKind, PluginManifest, PresetCatalog, RuntimeDescriptor,
-    validate_branding_assets, validate_plugin_identifier,
+    validate_branding_asset, validate_branding_assets, validate_plugin_identifier,
 };
 use semver::Version;
 use serde::de::DeserializeOwned;
@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Cursor, Read, Write};
+use std::io::{self, Cursor, Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use thiserror::Error;
@@ -875,9 +875,14 @@ fn inspect_owned_tree(path: &Path) -> Result<usize, RepositoryError> {
     Ok(files_removed)
 }
 
-/// Fully validates a user-selected `.rfplugin` and returns the identity of the
-/// package that would be installed. The temporary extraction is always
-/// removed, including when validation fails.
+/// Validates the structure and executable metadata of a user-selected
+/// `.rfplugin` and returns the identity of the package that would be installed.
+///
+/// Preview deliberately does not inflate packaged resources. A SoundFont or
+/// sample library can be hundreds of megabytes after decompression, and a
+/// browser host would otherwise duplicate all of it merely to paint a
+/// confirmation dialog. Installation still extracts every byte, enforces CRCs
+/// and repeats the complete payload validation before anything is committed.
 pub fn inspect_local_archive(
     store_root: impl AsRef<Path>,
     bytes: &[u8],
@@ -887,59 +892,221 @@ pub fn inspect_local_archive(
             "local artifact size is outside supported limits".into(),
         ));
     }
-    let root = ensure_real_directory(store_root.as_ref())?;
-    let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
-    let stage = root.join(format!(
-        ".inspect-local-{}-{serial}",
-        writer_discriminator()
-    ));
-    if stage.exists() {
+    // Preserve the existing contract that the caller's store root is real and
+    // writable without creating a package staging tree.
+    ensure_real_directory(store_root.as_ref())?;
+    let mut archive = ZipArchive::new(Cursor::new(bytes))
+        .map_err(|error| RepositoryError::UnsafeArchive(error.to_string()))?;
+    validate_archive_layout(&mut archive)?;
+    let manifest = read_archive_manifest(&mut archive)?;
+    let portable = manifest.portable_component().is_some();
+    let platform = if portable {
+        "wasm-v1"
+    } else {
+        repository_platform_key()?
+    };
+    validate_archive_payload(&mut archive, &manifest, platform)?;
+    let branding = read_archive_branding(&mut archive, &manifest)?;
+    Ok(LocalPackageInspection {
+        plugin_id: manifest.id,
+        plugin_name: manifest.name,
+        vendor: manifest.vendor,
+        version: manifest.version,
+        description: manifest.description,
+        kind: manifest.kind,
+        platform: platform.into(),
+        portable,
+        artifact_sha256: hex_digest(Sha256::digest(bytes).as_slice()),
+        archive_bytes: bytes.len() as u64,
+        branding,
+    })
+}
+
+fn validate_archive_layout<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+) -> Result<(), RepositoryError> {
+    if archive.is_empty() || archive.len() > MAX_PACKAGE_ENTRIES {
         return Err(RepositoryError::UnsafeArchive(
-            "inspection staging path already exists".into(),
+            "archive entry count is outside supported limits".into(),
         ));
     }
-    fs::create_dir(&stage)?;
-    let result = (|| {
-        extract_archive(bytes, &stage)?;
-        let manifest = read_extracted_manifest(&stage)?;
-        let portable = manifest.portable_component().is_some();
-        let platform = if portable {
-            "wasm-v1"
-        } else {
-            repository_platform_key()?
-        };
-        validate_extracted_payload(&stage, &manifest, platform)?;
-        let branding = manifest
-            .branding
-            .as_ref()
-            .map(|branding| {
-                fs::read(stage.join(&branding.banner)).map(|banner_png| {
-                    LocalPackageBrandingPreview {
-                        banner_png,
-                        background_color: branding.background_color.clone(),
-                        accent_color: branding.accent_color.clone(),
-                    }
-                })
-            })
-            .transpose()?;
-        Ok(LocalPackageInspection {
-            plugin_id: manifest.id,
-            plugin_name: manifest.name,
-            vendor: manifest.vendor,
-            version: manifest.version,
-            description: manifest.description,
-            kind: manifest.kind,
-            platform: platform.into(),
-            portable,
-            artifact_sha256: hex_digest(Sha256::digest(bytes).as_slice()),
-            archive_bytes: bytes.len() as u64,
-            branding,
-        })
-    })();
-    if stage.exists() {
-        let _ = fs::remove_dir_all(&stage);
+    let mut expanded = 0_u64;
+    let mut paths = BTreeSet::new();
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .map_err(|error| RepositoryError::UnsafeArchive(error.to_string()))?;
+        if entry.name().contains('\\') {
+            return Err(RepositoryError::UnsafeArchive(
+                "backslashes are forbidden in archive paths".into(),
+            ));
+        }
+        let relative = entry.enclosed_name().ok_or_else(|| {
+            RepositoryError::UnsafeArchive("archive path escapes package root".into())
+        })?;
+        if relative.as_os_str().is_empty() || !paths.insert(relative.to_path_buf()) {
+            return Err(RepositoryError::UnsafeArchive(
+                "empty or duplicate archive path".into(),
+            ));
+        }
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
+            return Err(RepositoryError::UnsafeArchive(
+                "symbolic links are forbidden in plugin packages".into(),
+            ));
+        }
+        expanded = expanded
+            .checked_add(entry.size())
+            .ok_or_else(|| RepositoryError::UnsafeArchive("expanded size overflow".into()))?;
+        if expanded > MAX_EXPANDED_PACKAGE_BYTES {
+            return Err(RepositoryError::UnsafeArchive(
+                "expanded package exceeds supported limit".into(),
+            ));
+        }
     }
-    result
+    Ok(())
+}
+
+fn read_archive_bytes<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    relative: &str,
+    maximum: u64,
+    label: &str,
+) -> Result<Vec<u8>, RepositoryError> {
+    let entry = archive.by_name(relative).map_err(|_| {
+        RepositoryError::InvalidPackage(format!("{label} is missing: {relative:?}"))
+    })?;
+    if entry.is_dir() || entry.size() == 0 || entry.size() > maximum {
+        return Err(RepositoryError::InvalidPackage(format!(
+            "{label} size is outside the supported limit"
+        )));
+    }
+    let capacity = usize::try_from(entry.size()).map_err(|_| {
+        RepositoryError::InvalidPackage(format!("{label} is too large for this host"))
+    })?;
+    let mut bytes = Vec::with_capacity(capacity);
+    entry
+        .take(maximum.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|error| RepositoryError::InvalidPackage(format!("reading {label}: {error}")))?;
+    if bytes.len() as u64 > maximum {
+        return Err(RepositoryError::InvalidPackage(format!(
+            "{label} size is outside the supported limit"
+        )));
+    }
+    Ok(bytes)
+}
+
+fn read_archive_manifest<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+) -> Result<PluginManifest, RepositoryError> {
+    let bytes = read_archive_bytes(
+        archive,
+        "rackforge-plugin.toml",
+        1024 * 1024,
+        "plugin manifest",
+    )?;
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    let manifest: PluginManifest =
+        toml::from_str(text).map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    manifest
+        .validate()
+        .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    Ok(manifest)
+}
+
+fn read_archive_metadata<R: Read + Seek, T: DeserializeOwned>(
+    archive: &mut ZipArchive<R>,
+    relative: &str,
+    label: &str,
+) -> Result<T, RepositoryError> {
+    let bytes = read_archive_bytes(archive, relative, MAX_PORTABLE_METADATA_BYTES, label)?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| RepositoryError::InvalidPackage(format!("parsing {label}: {error}")))
+}
+
+fn validate_archive_payload<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    manifest: &PluginManifest,
+    platform: &str,
+) -> Result<(), RepositoryError> {
+    if platform != "wasm-v1" {
+        let path = manifest.binaries.get(platform).ok_or_else(|| {
+            RepositoryError::InvalidPackage("package has no binary for this platform".into())
+        })?;
+        archive
+            .by_name(path)
+            .map_err(|_| RepositoryError::InvalidPackage("plugin executable is missing".into()))?;
+        return Ok(());
+    }
+    let component = manifest.portable_component().ok_or_else(|| {
+        RepositoryError::InvalidPackage("portable artifact has no wasm-v1 component".into())
+    })?;
+    let mut executable = archive
+        .by_name(&component.path)
+        .map_err(|_| RepositoryError::InvalidPackage("plugin executable is missing".into()))?;
+    if executable.is_dir() || executable.size() < 4 {
+        return Err(RepositoryError::InvalidPackage(
+            "portable component is not a WebAssembly binary".into(),
+        ));
+    }
+    let mut magic = [0_u8; 4];
+    executable.read_exact(&mut magic).map_err(|error| {
+        RepositoryError::InvalidPackage(format!("reading portable component: {error}"))
+    })?;
+    drop(executable);
+    if &magic != b"\0asm" {
+        return Err(RepositoryError::InvalidPackage(
+            "portable component is not a WebAssembly binary".into(),
+        ));
+    }
+    let runtime: RuntimeDescriptor =
+        read_archive_metadata(archive, &component.runtime_descriptor, "runtime descriptor")?;
+    runtime.validate_against(manifest).map_err(|error| {
+        RepositoryError::InvalidPackage(format!("invalid runtime descriptor: {error}"))
+    })?;
+    let parameters: ParameterSchema =
+        read_archive_metadata(archive, &component.parameter_schema, "parameter schema")?;
+    parameters.validate().map_err(|error| {
+        RepositoryError::InvalidPackage(format!("invalid parameter schema: {error}"))
+    })?;
+    let presets: PresetCatalog =
+        read_archive_metadata(archive, &component.preset_catalog, "preset catalog")?;
+    presets.validate().map_err(|error| {
+        RepositoryError::InvalidPackage(format!("invalid preset catalog: {error}"))
+    })?;
+    Ok(())
+}
+
+fn read_archive_branding<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    manifest: &PluginManifest,
+) -> Result<Option<LocalPackageBrandingPreview>, RepositoryError> {
+    let Some(branding) = &manifest.branding else {
+        return Ok(None);
+    };
+    let mut banner_png = None;
+    for (kind, relative) in branding.assets() {
+        let bytes = read_archive_bytes(
+            archive,
+            relative,
+            kind.max_file_bytes() as u64,
+            "branding asset",
+        )?;
+        validate_branding_asset(kind, &bytes)
+            .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+        if relative == branding.banner {
+            banner_png = Some(bytes);
+        }
+    }
+    Ok(Some(LocalPackageBrandingPreview {
+        banner_png: banner_png.expect("validated branding always includes its banner"),
+        background_color: branding.background_color.clone(),
+        accent_color: branding.accent_color.clone(),
+    }))
 }
 
 pub fn repository_platform_key() -> Result<&'static str, RepositoryError> {

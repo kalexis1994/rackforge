@@ -18,8 +18,8 @@ use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_plugin_api::{PluginManifest, WebSurfaceKind};
 use rackforge_repository::{
     InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions,
-    RepositoryError, cleanup_uninstall_tombstones, inspect_local_archive, install_local_archive,
-    remove_plugin_user_data, uninstall_plugin,
+    RepositoryError, cleanup_uninstall_tombstones, inspect_local_archive,
+    install_local_archive_cancellable, remove_plugin_user_data, uninstall_plugin,
 };
 use rackforge_resource_api::{
     BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, ClearInstalledResourceRequest,
@@ -36,8 +36,8 @@ use std::{
     env, fs,
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     path::{Component, Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-    sync::{Arc, Mutex, RwLock},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::{Arc, Mutex, OnceLock, RwLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::io::AsyncWriteExt;
@@ -66,6 +66,12 @@ const LOCKOUT_STEP_SECONDS: u64 = 5;
 const LOCKOUT_CAP_SECONDS: u64 = 15 * 60;
 static CLIENT_UPLOAD_SERIAL: AtomicU64 = AtomicU64::new(1);
 static PLUGIN_ACTIVATION_SERIAL: AtomicU64 = AtomicU64::new(1);
+static PLUGIN_INSTALL_CANCELLATIONS: OnceLock<Mutex<BTreeMap<String, Arc<AtomicBool>>>> =
+    OnceLock::new();
+
+fn plugin_install_cancellations() -> &'static Mutex<BTreeMap<String, Arc<AtomicBool>>> {
+    PLUGIN_INSTALL_CANCELLATIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -586,6 +592,10 @@ async fn main() -> Result<()> {
         )
         .route("/api/v1/plugins/inspect", post(inspect_selected_plugin))
         .route("/api/v1/plugins/install", post(install_selected_plugin))
+        .route(
+            "/api/v1/plugins/install/cancel",
+            post(cancel_selected_plugin_install),
+        )
         .route("/ws/v1/session", get(session_socket))
         .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_web_asset))
         .fallback_service(static_files)
@@ -1193,8 +1203,12 @@ async fn apply_controller_settings(
         }
         let body = values
             .iter()
-            .map(|(key, value)| format!("{key} = {value:?}
-"))
+            .map(|(key, value)| {
+                format!(
+                    "{key} = {value:?}
+"
+                )
+            })
             .collect::<String>();
         let temporary = path.with_extension("tmp");
         std::fs::write(&temporary, body)?;
@@ -1886,13 +1900,26 @@ async fn install_selected_plugin(
             .into_response();
     }
     let store_root = state.plugin_store_root.clone();
-    match tokio::task::spawn_blocking(move || {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    plugin_install_cancellations()
+        .lock()
+        .expect("plugin install cancellation lock poisoned")
+        .insert(selection_id.clone(), cancelled.clone());
+    let worker_cancelled = cancelled.clone();
+    let result = tokio::task::spawn_blocking(move || {
         fs::read(selection.path())
             .map_err(anyhow::Error::from)
-            .and_then(|bytes| install_local_archive(store_root, &bytes).map_err(Into::into))
+            .and_then(|bytes| {
+                install_local_archive_cancellable(store_root, &bytes, &worker_cancelled)
+                    .map_err(Into::into)
+            })
     })
-    .await
-    {
+    .await;
+    plugin_install_cancellations()
+        .lock()
+        .expect("plugin install cancellation lock poisoned")
+        .remove(&selection_id);
+    match result {
         Ok(Ok(installed)) => {
             let root = state
                 .plugin_store_root
@@ -1921,6 +1948,36 @@ async fn install_selected_plugin(
         )
             .into_response(),
     }
+}
+
+async fn cancel_selected_plugin_install(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<InstallSelectedPluginRequest>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let selection_id = request.selection_id.trim();
+    if selection_id.is_empty() {
+        return resource_error(ResourceError::InvalidRequest(
+            "selection_id is required".into(),
+        ));
+    }
+    let requested = plugin_install_cancellations()
+        .lock()
+        .expect("plugin install cancellation lock poisoned")
+        .get(selection_id)
+        .map(|cancelled| {
+            cancelled.store(true, Ordering::Release);
+            true
+        })
+        .unwrap_or(false);
+    Json(json!({
+        "status": if requested { "cancellation_requested" } else { "not_running" },
+        "selection_id": selection_id,
+    }))
+    .into_response()
 }
 
 async fn resource_mounts(headers: HeaderMap, State(state): State<Arc<AppState>>) -> Response {

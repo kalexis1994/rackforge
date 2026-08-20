@@ -13,7 +13,8 @@ use include_dir::{Dir, include_dir};
 use rackforge_control_api::{ClientId, ControlRequest, ControlResponse};
 use rackforge_core::PluginPackage;
 use rackforge_repository::{
-    LocalPackageInspection, MAX_PACKAGE_BYTES, inspect_local_archive, install_local_archive,
+    LocalPackageInspection, MAX_PACKAGE_BYTES, inspect_local_archive,
+    install_local_archive_cancellable,
 };
 use rackforge_resource_api::{
     BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, ClearInstalledResourceRequest,
@@ -30,9 +31,9 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -43,6 +44,12 @@ static WEB_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../web/dist");
 const DESKTOP_CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 const DESKTOP_SETTINGS_TIMEOUT: Duration = Duration::from_secs(20);
 static CLIENT_UPLOAD_SERIAL: AtomicU64 = AtomicU64::new(1);
+static PLUGIN_INSTALL_CANCELLATIONS: OnceLock<Mutex<BTreeMap<String, Arc<AtomicBool>>>> =
+    OnceLock::new();
+
+fn plugin_install_cancellations() -> &'static Mutex<BTreeMap<String, Arc<AtomicBool>>> {
+    PLUGIN_INSTALL_CANCELLATIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
 
 #[derive(Clone)]
 struct WebState {
@@ -484,6 +491,34 @@ fn release_injected_midi(state: &WebState) {
     }
 }
 
+/// Attempts the low-latency surface route. A disconnected sender belongs to
+/// an engine generation that has already retired; remove it and let the
+/// caller fall back to the Desktop control loop, which always sees the
+/// current generation. Queue pressure is different: the engine is alive, so
+/// report it instead of silently reordering the note through a slower path.
+fn try_injected_midi(
+    state: &WebState,
+    packet: crate::desktop_audio::MidiPacket,
+) -> Result<bool, String> {
+    let mut slot = state
+        .injected_midi
+        .lock()
+        .map_err(|_| "the audio route is unavailable".to_owned())?;
+    let Some(sender) = slot.as_ref() else {
+        return Ok(false);
+    };
+    match sender.try_send(packet) {
+        Ok(()) => Ok(true),
+        Err(mpsc::TrySendError::Full(_)) => {
+            Err("the audio queue is full; try the note again".into())
+        }
+        Err(mpsc::TrySendError::Disconnected(_)) => {
+            *slot = None;
+            Ok(false)
+        }
+    }
+}
+
 fn bind_public_server(state: WebState, port: u16) -> anyhow::Result<RunningServer> {
     let listener =
         std::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))
@@ -593,6 +628,10 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
             )
             .route("/api/v1/plugins/inspect", post(inspect_selected_plugin))
             .route("/api/v1/plugins/install", post(install_selected_plugin))
+            .route(
+                "/api/v1/plugins/install/cancel",
+                post(cancel_selected_plugin_install),
+            )
     } else {
         router.route("/api/v1/config", get(config))
     };
@@ -1153,13 +1192,26 @@ async fn install_selected_plugin(
         )
             .into_response();
     }
-    match tokio::task::spawn_blocking(move || {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    plugin_install_cancellations()
+        .lock()
+        .expect("plugin install cancellation lock poisoned")
+        .insert(selection_id.clone(), cancelled.clone());
+    let worker_cancelled = cancelled.clone();
+    let result = tokio::task::spawn_blocking(move || {
         fs::read(selection.path())
             .map_err(anyhow::Error::from)
-            .and_then(|bytes| install_local_archive(store_root, &bytes).map_err(Into::into))
+            .and_then(|bytes| {
+                install_local_archive_cancellable(store_root, &bytes, &worker_cancelled)
+                    .map_err(Into::into)
+            })
     })
-    .await
-    {
+    .await;
+    plugin_install_cancellations()
+        .lock()
+        .expect("plugin install cancellation lock poisoned")
+        .remove(&selection_id);
+    match result {
         Ok(Ok(installed)) => {
             state.plugin_catalog_revision.fetch_add(1, Ordering::AcqRel);
             state.package_scan_revision.fetch_add(1, Ordering::AcqRel);
@@ -1184,6 +1236,31 @@ async fn install_selected_plugin(
             .into_response(),
         Err(error) => internal_error(error),
     }
+}
+
+async fn cancel_selected_plugin_install(
+    Json(request): Json<InstallSelectedPluginRequest>,
+) -> Response {
+    let selection_id = request.selection_id.trim();
+    if selection_id.is_empty() {
+        return resource_error(ResourceError::InvalidRequest(
+            "selection_id is required".into(),
+        ));
+    }
+    let requested = plugin_install_cancellations()
+        .lock()
+        .expect("plugin install cancellation lock poisoned")
+        .get(selection_id)
+        .map(|cancelled| {
+            cancelled.store(true, Ordering::Release);
+            true
+        })
+        .unwrap_or(false);
+    Json(json!({
+        "status": if requested { "cancellation_requested" } else { "not_running" },
+        "selection_id": selection_id,
+    }))
+    .into_response()
 }
 
 async fn bind_resource(
@@ -1855,26 +1932,28 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
             {
                 return json!({"status":"error", "code":"invalid_request", "message": error});
             }
-            if let ControlRequest::VirtualMidi { client_id, message } = &request
-                && let Ok(slot) = state.injected_midi.lock()
-                && let Some(sender) = slot.as_ref()
-            {
-                let bytes = message.bytes();
-                return match sender.try_send(crate::desktop_audio::MidiPacket {
+            if let ControlRequest::VirtualMidi { client_id, message } = &request {
+                let packet = crate::desktop_audio::MidiPacket {
                     length: 3,
-                    data: bytes,
-                }) {
-                    Ok(()) => serde_json::to_value(ControlResponse::VirtualMidiAccepted {
-                        client_id: client_id.clone(),
-                        active_notes: 0,
-                    })
-                    .expect("virtual MIDI response"),
-                    Err(error) => json!({
-                        "status":"error",
-                        "code":"unavailable",
-                        "message": format!("the audio queue rejected a note: {error}"),
-                    }),
+                    data: message.bytes(),
                 };
+                match try_injected_midi(state, packet) {
+                    Ok(true) => {
+                        return serde_json::to_value(ControlResponse::VirtualMidiAccepted {
+                            client_id: client_id.clone(),
+                            active_notes: 0,
+                        })
+                        .expect("virtual MIDI response");
+                    }
+                    Err(message) => {
+                        return json!({
+                            "status":"error",
+                            "code":"unavailable",
+                            "message": message,
+                        });
+                    }
+                    Ok(false) => {}
+                }
             }
             let (response_sender, response_receiver) = mpsc::channel();
             if state
@@ -2100,6 +2179,45 @@ mod tests {
             ..WebServerPreferences::default()
         };
         assert!(preferences.validate().is_err());
+    }
+
+    #[test]
+    fn surface_midi_discards_a_retired_audio_generation_and_accepts_the_next_one() {
+        let (control, _receiver) = control_channel();
+        let state = WebState {
+            session: Arc::new(RwLock::new(SessionState::new(
+                SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
+            ))),
+            plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
+            legacy_plugins_root: PathBuf::new(),
+            plugin_store_root: None,
+            data_root: PathBuf::new(),
+            public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
+            control,
+            resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
+            resource_upload_root: PathBuf::new(),
+            web_packages_cache: Arc::new(Mutex::new(None)),
+            package_scan_revision: Arc::new(AtomicU64::new(0)),
+            controllers_root: PathBuf::new(),
+            injected_midi: Arc::new(Mutex::new(None)),
+        };
+        let packet = crate::desktop_audio::MidiPacket {
+            length: 3,
+            data: [0x90, 60, 100],
+        };
+
+        let (retired_sender, retired_receiver) = mpsc::sync_channel(1);
+        *state.injected_midi.lock().unwrap() = Some(retired_sender);
+        drop(retired_receiver);
+        assert!(!try_injected_midi(&state, packet).unwrap());
+        assert!(state.injected_midi.lock().unwrap().is_none());
+
+        let (current_sender, current_receiver) = mpsc::sync_channel(1);
+        *state.injected_midi.lock().unwrap() = Some(current_sender);
+        assert!(try_injected_midi(&state, packet).unwrap());
+        let delivered = current_receiver.recv().unwrap();
+        assert_eq!(delivered.length, packet.length);
+        assert_eq!(delivered.data, packet.data);
     }
 
     #[test]

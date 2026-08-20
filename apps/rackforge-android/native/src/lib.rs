@@ -23,7 +23,7 @@ use rackforge_plugin_api::{
 };
 use rackforge_repository::{
     PluginUserDataRemovalOptions, cleanup_uninstall_tombstones, inspect_local_archive,
-    install_local_archive, remove_plugin_user_data, uninstall_plugin,
+    install_local_archive_cancellable, remove_plugin_user_data, uninstall_plugin,
 };
 use rackforge_session_api::{
     HostControlTarget, InstanceId, MasterLevel, MasterPan, ProgramDraftState,
@@ -48,6 +48,7 @@ const SAMPLE_RATE: f64 = 48_000.0;
 const MAX_FRAMES: u32 = 4_096;
 const MAX_PENDING_MIDI_EVENTS: usize = 256;
 const AUDIO_RENDER_QUEUE_CAPACITY_FRAMES: usize = 2_048;
+static PLUGIN_INSTALL_CANCELLED: AtomicBool = AtomicBool::new(false);
 const LOW_RENDER_BLOCK_FRAMES: usize = 192;
 const BALANCED_RENDER_BLOCK_FRAMES: usize = 384;
 const LOW_RENDER_AHEAD_FRAMES: usize = 384;
@@ -264,15 +265,16 @@ impl AndroidControllerMenu {
                 value,
                 preview,
             } => {
-                let result =
-                    engine_call(|engine| engine.edit_program_field(draft_id, field_id, value, preview))
-                        .and_then(|()| {
-                            if preview {
-                                Ok(())
-                            } else {
-                                sync_menu_program_state(&mut self.menu)
-                            }
-                        });
+                let result = engine_call(|engine| {
+                    engine.edit_program_field(draft_id, field_id, value, preview)
+                })
+                .and_then(|()| {
+                    if preview {
+                        Ok(())
+                    } else {
+                        sync_menu_program_state(&mut self.menu)
+                    }
+                });
                 if let Err(error) = result {
                     eprintln!("PROGRAM_DRAFT_FIELD_FAILED {error:#}");
                 }
@@ -1005,39 +1007,36 @@ impl AndroidEngine {
         method: &str,
         params: &serde_json::Value,
     ) -> Result<serde_json::Value> {
-        let response = match parse_plugin_parameter_control_command(
-            method,
-            ANDROID_INSTANCE_ID,
-            params,
-        )
-        .map_err(anyhow::Error::msg)?
-        {
-            PluginParameterControlCommand::Read { instance_id } => {
-                let (schema, values) = plugin_parameters(self.runtime.0, &mut self.instance.0)?;
-                ControlResponse::PluginParameters {
-                    instance_id,
-                    schema: Box::new(schema),
-                    values,
+        let response =
+            match parse_plugin_parameter_control_command(method, ANDROID_INSTANCE_ID, params)
+                .map_err(anyhow::Error::msg)?
+            {
+                PluginParameterControlCommand::Read { instance_id } => {
+                    let (schema, values) = plugin_parameters(self.runtime.0, &mut self.instance.0)?;
+                    ControlResponse::PluginParameters {
+                        instance_id,
+                        schema: Box::new(schema),
+                        values,
+                    }
                 }
-            }
-            PluginParameterControlCommand::Set {
-                instance_id,
-                parameter_index,
-                value,
-            } => {
-                let value = set_plugin_parameter(
-                    self.runtime.0,
-                    &mut self.instance.0,
-                    parameter_index,
-                    value,
-                )?;
-                ControlResponse::PluginParameterSet {
+                PluginParameterControlCommand::Set {
                     instance_id,
                     parameter_index,
                     value,
+                } => {
+                    let value = set_plugin_parameter(
+                        self.runtime.0,
+                        &mut self.instance.0,
+                        parameter_index,
+                        value,
+                    )?;
+                    ControlResponse::PluginParameterSet {
+                        instance_id,
+                        parameter_index,
+                        value,
+                    }
                 }
-            }
-        };
+            };
         serde_json::to_value(response).context("serializing plugin parameter response")
     }
 
@@ -2109,7 +2108,8 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
         let config_available = active
             .as_ref()
             .is_some_and(|active| active.1 == plugin_id && active.5);
-        plugins.push(PlayPlugin::new(plugin_id, plugin_id, name).config_available(config_available));
+        plugins
+            .push(PlayPlugin::new(plugin_id, plugin_id, name).config_available(config_available));
         metadata.insert(
             plugin_id.to_owned(),
             ControllerPluginInfo {
@@ -2227,8 +2227,7 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_ensureBundledCont
             .list()
             .map(|installed| {
                 installed.iter().any(|controller| {
-                    controller.record.id == parsed.id
-                        && controller.record.version == parsed.version
+                    controller.record.id == parsed.id && controller.record.version == parsed.version
                 })
             })
             .unwrap_or(false);
@@ -2323,8 +2322,7 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerCatalog
             .iter()
             .map(|controller| {
                 let manifest = controller.package.manifest();
-                let stored =
-                    read_controller_store_settings(&store_root, &controller.record.id);
+                let stored = read_controller_store_settings(&store_root, &controller.record.id);
                 let settings: Vec<serde_json::Value> = manifest
                     .settings
                     .iter()
@@ -2405,8 +2403,12 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerApplySe
         }
         let body = values
             .iter()
-            .map(|(key, value)| format!("{key} = {value:?}
-"))
+            .map(|(key, value)| {
+                format!(
+                    "{key} = {value:?}
+"
+                )
+            })
             .collect::<String>();
         let temporary = path.with_extension("tmp");
         fs::write(&temporary, body)?;
@@ -2668,13 +2670,15 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_installPluginFile
     archive_path: JString,
     store_root: JString,
 ) -> jstring {
+    PLUGIN_INSTALL_CANCELLED.store(false, Ordering::Release);
     let result = (|| -> Result<String> {
         let archive_path = PathBuf::from(java_string(&mut env, archive_path)?);
         let store_root = PathBuf::from(java_string(&mut env, store_root)?);
         let bytes = std::fs::read(&archive_path)
             .with_context(|| format!("reading selected plugin {}", archive_path.display()))?;
-        let installed = install_local_archive(&store_root, &bytes)
-            .context("validating and installing the portable plugin")?;
+        let installed =
+            install_local_archive_cancellable(&store_root, &bytes, &PLUGIN_INSTALL_CANCELLED)
+                .context("validating and installing the portable plugin")?;
         let package = PluginPackage::open(&installed.path)
             .with_context(|| format!("opening installed plugin {}", installed.path.display()))?;
         let mut descriptor = package_descriptor(&package, None);
@@ -2683,6 +2687,14 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_installPluginFile
         Ok(descriptor.to_string())
     })();
     result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_cancelPluginInstall(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    PLUGIN_INSTALL_CANCELLED.store(true, Ordering::Release);
 }
 
 #[unsafe(no_mangle)]

@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Cursor, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use thiserror::Error;
 use url::Url;
 use zip::ZipArchive;
@@ -221,6 +221,8 @@ pub enum RepositoryError {
     InvalidPackage(String),
     #[error("immutable plugin version already exists with different contents")]
     ImmutableConflict,
+    #[error("plugin installation was cancelled")]
+    InstallationCancelled,
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
 }
@@ -591,16 +593,31 @@ pub fn install_local_archive(
     store_root: impl AsRef<Path>,
     bytes: &[u8],
 ) -> Result<InstalledPackage, RepositoryError> {
+    install_local_archive_cancellable(store_root, bytes, &AtomicBool::new(false))
+}
+
+/// Installs a local package while allowing the host to cancel before the
+/// immutable package is committed. Extraction checks the flag between chunks,
+/// and the staging directory is removed on every cancellation path.
+pub fn install_local_archive_cancellable(
+    store_root: impl AsRef<Path>,
+    bytes: &[u8],
+    cancelled: &AtomicBool,
+) -> Result<InstalledPackage, RepositoryError> {
     if bytes.is_empty() || bytes.len() as u64 > MAX_PACKAGE_BYTES {
         return Err(RepositoryError::Integrity(
             "local artifact size is outside supported limits".into(),
         ));
     }
+    ensure_installation_not_cancelled(cancelled)?;
     let root = ensure_real_directory(store_root.as_ref())?;
     let packages_root = ensure_real_child(&root, "packages")?;
     let records_root = ensure_real_child(&root, "records")?;
     let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
-    let stage = root.join(format!(".install-local-{}-{serial}", writer_discriminator()));
+    let stage = root.join(format!(
+        ".install-local-{}-{serial}",
+        writer_discriminator()
+    ));
     if stage.exists() {
         return Err(RepositoryError::UnsafeArchive(
             "staging path already exists".into(),
@@ -608,7 +625,8 @@ pub fn install_local_archive(
     }
     fs::create_dir(&stage)?;
     let result = (|| {
-        extract_archive(bytes, &stage)?;
+        extract_archive_cancellable(bytes, &stage, cancelled)?;
+        ensure_installation_not_cancelled(cancelled)?;
         let manifest = read_extracted_manifest(&stage)?;
         let platform = if manifest.portable_component().is_some() {
             "wasm-v1"
@@ -616,6 +634,7 @@ pub fn install_local_archive(
             repository_platform_key()?
         };
         validate_extracted_payload(&stage, &manifest, platform)?;
+        ensure_installation_not_cancelled(cancelled)?;
 
         let plugin_root = ensure_real_child(&packages_root, &manifest.id)?;
         let plugin_records = ensure_real_child(&records_root, &manifest.id)?;
@@ -642,6 +661,10 @@ pub fn install_local_archive(
             return Err(RepositoryError::ImmutableConflict);
         }
 
+        // Rename is the transaction commit. Cancellation is deliberately
+        // checked immediately before it; after this point the record must be
+        // written so discovery can never observe a half-installed package.
+        ensure_installation_not_cancelled(cancelled)?;
         fs::rename(&stage, &destination)?;
         if let Err(error) = write_json_atomic(&record_path, &record) {
             let _ = fs::remove_dir_all(&destination);
@@ -866,7 +889,10 @@ pub fn inspect_local_archive(
     }
     let root = ensure_real_directory(store_root.as_ref())?;
     let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
-    let stage = root.join(format!(".inspect-local-{}-{serial}", writer_discriminator()));
+    let stage = root.join(format!(
+        ".inspect-local-{}-{serial}",
+        writer_discriminator()
+    ));
     if stage.exists() {
         return Err(RepositoryError::UnsafeArchive(
             "inspection staging path already exists".into(),
@@ -1153,6 +1179,22 @@ fn ensure_real_child(parent: &Path, name: &str) -> Result<PathBuf, RepositoryErr
 }
 
 fn extract_archive(bytes: &[u8], destination: &Path) -> Result<(), RepositoryError> {
+    extract_archive_cancellable(bytes, destination, &AtomicBool::new(false))
+}
+
+fn ensure_installation_not_cancelled(cancelled: &AtomicBool) -> Result<(), RepositoryError> {
+    if cancelled.load(Ordering::Acquire) {
+        Err(RepositoryError::InstallationCancelled)
+    } else {
+        Ok(())
+    }
+}
+
+fn extract_archive_cancellable(
+    bytes: &[u8],
+    destination: &Path,
+    cancelled: &AtomicBool,
+) -> Result<(), RepositoryError> {
     let mut archive = ZipArchive::new(Cursor::new(bytes))
         .map_err(|error| RepositoryError::UnsafeArchive(error.to_string()))?;
     if archive.is_empty() || archive.len() > MAX_PACKAGE_ENTRIES {
@@ -1163,6 +1205,7 @@ fn extract_archive(bytes: &[u8], destination: &Path) -> Result<(), RepositoryErr
     let mut expanded = 0_u64;
     let mut paths = BTreeSet::new();
     for index in 0..archive.len() {
+        ensure_installation_not_cancelled(cancelled)?;
         let mut entry = archive
             .by_index(index)
             .map_err(|error| RepositoryError::UnsafeArchive(error.to_string()))?;
@@ -1208,7 +1251,15 @@ fn extract_archive(bytes: &[u8], destination: &Path) -> Result<(), RepositoryErr
             .create_new(true)
             .write(true)
             .open(&target)?;
-        io::copy(&mut entry, &mut output)?;
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            ensure_installation_not_cancelled(cancelled)?;
+            let read = entry.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            output.write_all(&buffer[..read])?;
+        }
         output.sync_all()?;
     }
     Ok(())
@@ -1645,6 +1696,39 @@ preset_catalog = "metadata/presets.json"
                 .already_installed
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cancelled_local_install_never_commits_or_leaves_staging_data() {
+        let wasm = b"\0asm\x01\0\0\0";
+        let bytes = archive(&[
+            ("rackforge-plugin.toml", portable_manifest()),
+            ("component.wasm", wasm),
+            ("metadata/runtime.json", portable_runtime()),
+            ("metadata/parameters.json", portable_parameters()),
+            ("metadata/presets.json", portable_presets()),
+        ]);
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-cancelled-{}-{}",
+            writer_discriminator(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let cancelled = AtomicBool::new(true);
+
+        let error = install_local_archive_cancellable(&root, &bytes, &cancelled).unwrap_err();
+
+        assert!(matches!(error, RepositoryError::InstallationCancelled));
+        assert!(!root.join("packages/org.rackforge.synth/1.2.3").exists());
+        if root.exists() {
+            assert!(fs::read_dir(&root).unwrap().all(|entry| {
+                !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".install-local-")
+            }));
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

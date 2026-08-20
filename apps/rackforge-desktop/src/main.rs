@@ -642,8 +642,13 @@ impl DesktopApp {
             .or_else(|| plugins.first())
             .map(|plugin| plugin.instance_id.as_str());
         #[cfg(windows)]
+        let mut replacement_audio = None;
+        #[cfg(windows)]
         {
-            self.audio = None;
+            // Catalog reloads replace every DSP instance. Retire the old
+            // generation through the single audio hand-off path so Web MIDI
+            // cannot keep a sender whose receiver dies with that generation.
+            self.stop_audio_runtime();
             if let Some(preferences) = self.audio_preferences.as_ref() {
                 match start_desktop_audio(
                     &plugins,
@@ -653,9 +658,7 @@ impl DesktopApp {
                     external_controller_enabled(&self.options.rackforge_root),
                 ) {
                     Ok(audio) => {
-                        self.audio = Some(audio);
-                        self.audio_recovery_at = None;
-                        self.audio_recovery_attempts = 0;
+                        replacement_audio = Some(audio);
                     }
                     Err(error) => {
                         warnings.push(format!("Audio/MIDI unavailable: {error:#}"));
@@ -700,11 +703,42 @@ impl DesktopApp {
         self.menu = menu;
         self.plugins = plugins;
         #[cfg(windows)]
-        if let Some(audio) = &self.audio {
-            sync_desktop_audio(audio, &self.session, &self.menu)?;
+        if let Some(audio) = replacement_audio {
+            match sync_desktop_audio(&audio, &self.session, &self.menu) {
+                Ok(()) => {
+                    self.publish_audio_runtime(audio);
+                    self.audio_recovery_at = None;
+                    self.audio_recovery_attempts = 0;
+                }
+                Err(error) => {
+                    warnings.push(format!("Audio/MIDI synchronization failed: {error:#}"));
+                    self.audio_recovery_at = Some(Instant::now() + Duration::from_secs(1));
+                    self.audio_recovery_attempts = 0;
+                }
+            }
         }
         self.persist_session_checkpoint();
         Ok(warnings)
+    }
+
+    #[cfg(windows)]
+    /// Retires the current engine generation and makes every producer stop
+    /// targeting it before its MIDI/audio receivers are dropped.
+    fn stop_audio_runtime(&mut self) {
+        self.web_servers.set_injected_midi(None);
+        self.audio = None;
+        self.audio_watchdog = None;
+    }
+
+    #[cfg(windows)]
+    /// Publishes a fully started engine as one generation. Hardware MIDI is
+    /// already connected by `DesktopAudio::start`; publishing its surface
+    /// sender last makes Touch Controller switch to the same generation.
+    fn publish_audio_runtime(&mut self, audio: desktop_audio::DesktopAudio) {
+        let injected_midi = audio.injected_midi_sender();
+        self.audio = Some(audio);
+        self.audio_watchdog = None;
+        self.web_servers.set_injected_midi(Some(injected_midi));
     }
 
     #[cfg(windows)]
@@ -724,9 +758,7 @@ impl DesktopApp {
             match self.audio_watchdog {
                 Some((last, since)) if blocks == last => {
                     if since.elapsed() >= Duration::from_secs(2) {
-                        self.web_servers.set_injected_midi(None);
-                        self.audio = None;
-                        self.audio_watchdog = None;
+                        self.stop_audio_runtime();
                         // A device that keeps dying earns exponential
                         // patience; one that stays up half a minute earns a
                         // fresh start.
@@ -762,8 +794,7 @@ impl DesktopApp {
         }
         let stream_error = self.audio.as_ref().and_then(|audio| audio.take_error());
         if let Some(error) = stream_error {
-            self.web_servers.set_injected_midi(None);
-            self.audio = None;
+            self.stop_audio_runtime();
             self.audio_recovery_attempts = 0;
             self.audio_recovery_at = Some(Instant::now() + Duration::from_millis(250));
             self.status = format!("{error} · reconnecting audio…");
@@ -796,13 +827,15 @@ impl DesktopApp {
         ) {
             Ok(audio) => {
                 if let Err(error) = sync_desktop_audio(&audio, &self.session, &self.menu) {
-                    self.status =
-                        format!("Audio reconnected, but controller sync failed: {error:#}");
+                    self.audio_recovery_attempts = self.audio_recovery_attempts.saturating_add(1);
+                    self.audio_recovery_at = Some(Instant::now() + Duration::from_secs(1));
+                    self.status = format!(
+                        "Audio reconnect synchronization failed · retrying · {error:#}"
+                    );
+                    return;
                 }
                 let summary = audio.summary().to_owned();
-                self.web_servers
-                    .set_injected_midi(Some(audio.injected_midi_sender()));
-                self.audio = Some(audio);
+                self.publish_audio_runtime(audio);
                 self.audio_recovery_attempts = 0;
                 self.status = format!("Audio reconnected · {summary}");
                 println!("DESKTOP_AUDIO_RECOVERED {summary}");
@@ -948,9 +981,20 @@ impl DesktopApp {
         // every ASIO driver, and instantiating the live one kills its
         // stream anyway (measured). Validation failures restore the
         // previous stream on the way out.
-        self.audio = None;
-        self.audio_watchdog = None;
-        let inventory = desktop_audio::AudioInventory::scan()?;
+        self.stop_audio_runtime();
+        let inventory = match desktop_audio::AudioInventory::scan() {
+            Ok(inventory) => inventory,
+            Err(error) => {
+                return match self.restore_audio(previous.as_ref(), active.as_deref()) {
+                    Ok(()) => Err(anyhow::anyhow!(
+                        "Could not scan audio devices: {error:#}. The previous settings were restored"
+                    )),
+                    Err(rollback) => Err(anyhow::anyhow!(
+                        "Could not scan audio devices: {error:#}. Reopening the previous audio settings also failed: {rollback:#}"
+                    )),
+                };
+            }
+        };
         self.audio_inventory_cache = Some((Instant::now(), inventory.clone()));
         if let Err(error) = inventory.validate(&preferences) {
             return match self.restore_audio(previous.as_ref(), active.as_deref()) {
@@ -979,7 +1023,17 @@ impl DesktopApp {
                 };
             }
         };
-        sync_desktop_audio(&candidate, &self.session, &self.menu)?;
+        if let Err(error) = sync_desktop_audio(&candidate, &self.session, &self.menu) {
+            drop(candidate);
+            return match self.restore_audio(previous.as_ref(), active.as_deref()) {
+                Ok(()) => Err(anyhow::anyhow!(
+                    "The new audio stream opened but could not synchronize: {error:#}. The previous settings were restored"
+                )),
+                Err(rollback) => Err(anyhow::anyhow!(
+                    "The new audio stream opened but could not synchronize: {error:#}. Reopening the previous audio settings also failed: {rollback:#}"
+                )),
+            };
+        }
         if let Err(error) = preferences.persist(&self.audio_config_path) {
             drop(candidate);
             return match self.restore_audio(previous.as_ref(), active.as_deref()) {
@@ -992,7 +1046,7 @@ impl DesktopApp {
             };
         }
         let summary = candidate.summary().to_owned();
-        self.audio = Some(candidate);
+        self.publish_audio_runtime(candidate);
         self.audio_preferences = Some(preferences);
         self.audio_recovery_at = None;
         self.audio_recovery_attempts = 0;
@@ -1006,7 +1060,8 @@ impl DesktopApp {
         preferences: Option<&desktop_audio::AudioPreferences>,
         active_instance_id: Option<&str>,
     ) -> Result<()> {
-        self.audio = preferences
+        self.stop_audio_runtime();
+        let restored = match preferences
             .map(|preferences| {
                 start_desktop_audio(
                     &self.plugins,
@@ -1017,9 +1072,24 @@ impl DesktopApp {
                 )
                 .context("reopening the previous audio stream")
             })
-            .transpose()?;
-        if let Some(audio) = &self.audio {
-            sync_desktop_audio(audio, &self.session, &self.menu)?;
+            .transpose()
+        {
+            Ok(restored) => restored,
+            Err(error) => {
+                self.audio_recovery_attempts = 0;
+                self.audio_recovery_at = Some(Instant::now() + Duration::from_secs(1));
+                return Err(error);
+            }
+        };
+        if let Some(audio) = &restored {
+            if let Err(error) = sync_desktop_audio(audio, &self.session, &self.menu) {
+                self.audio_recovery_attempts = 0;
+                self.audio_recovery_at = Some(Instant::now() + Duration::from_secs(1));
+                return Err(error);
+            }
+        }
+        if let Some(audio) = restored {
+            self.publish_audio_runtime(audio);
         }
         self.audio_recovery_at = None;
         self.audio_recovery_attempts = 0;
@@ -1688,7 +1758,7 @@ impl DesktopApp {
         let store_root = self
             .options
             .plugin_store_root
-            .as_deref()
+            .clone()
             .ok_or_else(|| "Desktop plugin storage is unavailable".to_owned())?;
         if self
             .options
@@ -1716,10 +1786,10 @@ impl DesktopApp {
         // discovery immediately and cannot be selected again.
         #[cfg(windows)]
         {
-            self.audio = None;
+            self.stop_audio_runtime();
         }
         self.plugins.clear();
-        let removed = match uninstall_plugin(store_root, plugin_id) {
+        let removed = match uninstall_plugin(&store_root, plugin_id) {
             Ok(removed) => removed,
             Err(error) => {
                 let recovery = self.reload_plugins().err();

@@ -438,6 +438,54 @@ textarea {
     0 30px 90px rgba(0, 0, 0, 0.58);
 }
 
+.modal-dialog:focus {
+  outline: none;
+}
+
+.modal-dialog-heading {
+  min-width: 0;
+}
+
+.modal-dialog-heading h2 {
+  overflow-wrap: anywhere;
+}
+
+.modal-dialog-message {
+  padding: 20px clamp(18px, 4vw, 30px) 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.modal-dialog-message > :first-child {
+  margin-top: 0;
+}
+
+.modal-dialog-message > :last-child {
+  margin-bottom: 0;
+}
+
+.modal-dialog-actions {
+  padding: 20px clamp(18px, 4vw, 30px);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.modal-dialog-actions > button {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 11px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.modal-dialog-actions > button:disabled {
+  cursor: wait;
+}
+
 .preset-modal-header,
 .preset-modal-toolbar {
   padding: 20px clamp(18px, 4vw, 30px);
@@ -465,6 +513,28 @@ textarea {
   border-radius: 12px;
   cursor: pointer;
   font-size: 22px;
+}
+
+.modal-dialog-close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  transition:
+    color 140ms ease,
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+
+.modal-dialog-close:hover:not(:disabled),
+.modal-dialog-close:focus-visible {
+  color: var(--ink);
+  background: rgba(85, 231, 255, 0.1);
+  border-color: rgba(85, 231, 255, 0.42);
+}
+
+.modal-dialog-close:active:not(:disabled) {
+  transform: scale(0.94);
 }
 
 .preset-modal-toolbar {
@@ -1745,13 +1815,6 @@ body {
   padding-left: 11px;
   border-left: 1px solid rgba(92, 226, 245, 0.24);
   font-size: 10px;
-}
-
-.plugin-remove-actions {
-  padding: 16px clamp(18px, 4vw, 30px) 24px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
 }
 
 .danger-button {
@@ -3220,7 +3283,7 @@ body {
 .install-plugin-dialog {
   width: min(720px, 100%);
   max-height: min(760px, calc(100dvh - 48px));
-  padding: 24px;
+  padding: 0;
   overflow: auto;
   color: #f4f2ec;
   background: #07131c;
@@ -3242,21 +3305,16 @@ body {
   font-size: clamp(1.45rem, 4vw, 2rem);
 }
 
-.install-plugin-dialog .icon-button {
-  min-height: 42px;
-  color: #f4f2ec;
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.16);
-}
-
 .install-plugin-intro {
-  margin: 18px 0 22px;
+  margin: 0;
+  padding: 18px 24px 22px;
   color: #9aaab5;
   font-size: 0.86rem;
   line-height: 1.55;
 }
 
 .install-plugin-sources {
+  padding: 0 24px 24px;
   display: grid;
   gap: 12px;
 }
@@ -3266,7 +3324,7 @@ body {
   --preview-background: #07131c;
   display: grid;
   gap: 18px;
-  margin-top: 20px;
+  margin: 20px 24px 0;
   overflow: hidden;
   background: color-mix(in srgb, var(--preview-background) 88%, #102534);
   border: 1px solid color-mix(in srgb, var(--preview-accent) 38%, transparent);
@@ -3359,28 +3417,6 @@ body {
   white-space: nowrap;
 }
 
-.plugin-install-preview-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 0 20px 20px;
-}
-
-.plugin-install-preview-actions button {
-  min-width: 128px;
-  min-height: 46px;
-  padding: 0 18px;
-  border-radius: 11px;
-  cursor: pointer;
-  font-weight: 800;
-}
-
-.plugin-install-preview-actions .secondary-button {
-  color: #d8e4e9;
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-}
-
 .install-source-card {
   width: 100%;
   min-height: 92px;
@@ -3440,8 +3476,9 @@ body {
 
 .install-plugin-status,
 .install-plugin-error,
-.install-plugin-success {
-  margin: 16px 0 0;
+.install-plugin-success,
+.install-plugin-cancelled {
+  margin: 16px 24px 0;
   padding: 12px 14px;
   border-radius: 10px;
   font-size: 0.8rem;
@@ -3450,26 +3487,6 @@ body {
 .install-plugin-complete {
   display: grid;
   gap: 14px;
-}
-
-.install-plugin-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-.install-plugin-actions button {
-  min-height: 44px;
-  padding: 0 18px;
-  border-radius: 11px;
-  cursor: pointer;
-  font-weight: 800;
-}
-
-.install-plugin-actions .secondary-button {
-  color: #d8e4e9;
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.16);
 }
 
 .install-plugin-status {
@@ -3490,6 +3507,26 @@ body {
   background: rgba(201, 242, 84, 0.11);
 }
 
+.install-plugin-cancelled {
+  color: #d8e4e9;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  line-height: 1.5;
+}
+
+.install-plugin-next-step {
+  margin: 0;
+  padding: 0 24px 4px;
+  color: #9aaab5;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.install-plugin-dialog > .modal-dialog-actions {
+  margin-top: 20px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
 @media (max-width: 640px) {
   .install-plugin-backdrop {
     align-items: end;
@@ -3499,7 +3536,7 @@ body {
   .install-plugin-dialog {
     width: 100%;
     max-height: min(86dvh, 720px);
-    padding: 22px 18px 24px;
+    padding: 0;
     border-width: 1px 0 0;
     border-radius: 20px 20px 0 0;
   }
@@ -3509,17 +3546,17 @@ body {
     flex-direction: column;
   }
 
-  .install-plugin-actions {
+  .install-plugin-dialog > .modal-dialog-actions {
     flex-direction: column;
   }
 
-  .install-plugin-actions button {
+  .install-plugin-dialog > .modal-dialog-actions button {
     width: 100%;
   }
 
   .plugin-install-preview {
     gap: 15px;
-    margin-top: 16px;
+    margin: 16px 18px 0;
     border-radius: 13px;
   }
 
@@ -3527,15 +3564,23 @@ body {
     padding: 0 15px;
   }
 
-  .plugin-install-preview-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 0 15px 15px;
+  .install-plugin-intro {
+    padding-inline: 18px;
   }
 
-  .plugin-install-preview-actions button {
-    width: 100%;
-    min-width: 0;
+  .install-plugin-sources {
+    padding-inline: 18px;
+  }
+
+  .install-plugin-status,
+  .install-plugin-error,
+  .install-plugin-success,
+  .install-plugin-cancelled {
+    margin-inline: 18px;
+  }
+
+  .install-plugin-next-step {
+    padding-inline: 18px;
   }
 }
 
@@ -5657,14 +5702,6 @@ body {
   line-height: 1.45;
 }
 
-.performance-delete-actions {
-  padding: 14px 18px 18px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 9px;
-  border-top: 1px solid var(--line);
-}
-
 .play-mode-transition-backdrop {
   z-index: 70;
 }
@@ -5674,7 +5711,7 @@ body {
 }
 
 .play-mode-transition-copy {
-  padding: 20px 22px 10px;
+  padding: 0;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.55;
@@ -5686,14 +5723,6 @@ body {
 
 .play-mode-transition-copy p:first-child {
   color: var(--ink);
-}
-
-.play-mode-transition-actions {
-  padding: 14px 18px 18px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 9px;
-  border-top: 1px solid var(--line);
 }
 
 @media (max-width: 560px) {

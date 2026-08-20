@@ -183,6 +183,7 @@ public final class MainActivity extends Activity {
     }
 
     private static native String installPluginFile(String archivePath, String storeRoot);
+    private static native void cancelPluginInstall();
     private static native String inspectPluginFile(String archivePath, String storeRoot);
     private static native String installedPlugins(String storeRoot);
     private static native String uninstallPlugin(String pluginId, String storeRoot,
@@ -926,6 +927,10 @@ public final class MainActivity extends Activity {
                         && "/api/v1/plugins/install".equals(path)) {
                     JSONObject body = new JSONObject(params.optString("body", "{}"));
                     result = installSelectedClientResource(body.getString("selection_id"));
+                } else if ("POST".equals(method)
+                        && "/api/v1/plugins/install/cancel".equals(path)) {
+                    cancelPluginInstall();
+                    result = new JSONObject().put("status", "cancellation_requested");
                 } else if ("POST".equals(method)
                         && "/api/v1/resources/selections/release".equals(path)) {
                     JSONObject body = new JSONObject(params.optString("body", "{}"));

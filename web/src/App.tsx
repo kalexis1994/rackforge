@@ -3,7 +3,6 @@ import {
   Suspense,
   useCallback,
   useEffect,
-  useId,
   useRef,
   useState,
   type CSSProperties,
@@ -60,6 +59,7 @@ import {
 import { RfLoader } from "./components/RfLoader";
 import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
 import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
+import { ModalDialog } from "./components/ModalDialog";
 import {
   bindNativePluginResource,
   hostHaptic,
@@ -1308,46 +1308,28 @@ function PlayModeTransitionDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const titleId = useId();
-  const descriptionId = useId();
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onCancel]);
   return (
-    <div
-      className="preset-modal-backdrop play-mode-transition-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onCancel();
-      }}
-    >
-      <section
-        className="preset-modal play-mode-transition-dialog"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-      >
-        <header className="preset-modal-header">
-          <div>
-            <span className="eyebrow">LIVE output active</span>
-            <h2 id={titleId}>Switch to PLAY?</h2>
-          </div>
-          <button className="preset-modal-close" onClick={onCancel} aria-label="Stay in LIVE">×</button>
-        </header>
-        <div className="play-mode-transition-copy" id={descriptionId}>
+    <ModalDialog
+      eyebrow="LIVE output active"
+      title="Switch to PLAY?"
+      role="alertdialog"
+      onClose={onCancel}
+      closeLabel="Stay in LIVE"
+      backdropClassName="play-mode-transition-backdrop"
+      className="play-mode-transition-dialog"
+      message={
+        <div className="play-mode-transition-copy">
           <p>The current LIVE Rack will stop sounding and RackForge will activate the selected PLAY instrument.</p>
           <p>Continue only if you intend to leave the live performance.</p>
         </div>
-        <footer className="play-mode-transition-actions">
+      }
+      actions={
+        <>
           <button className="secondary-button" onClick={onCancel}>Stay in LIVE</button>
           <button className="primary-button" onClick={onConfirm}>Switch to PLAY</button>
-        </footer>
-      </section>
-    </div>
+        </>
+      }
+    />
   );
 }
 
@@ -1431,13 +1413,14 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
   const remoteWeb = isRemoteWebClient();
   const [browseHost, setBrowseHost] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const cancellationRequestedRef = useRef(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activationError, setActivationError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PluginInstallPreview | null>(null);
   const [installed, setInstalled] = useState<InstalledPluginResult | null>(null);
-  const [activated, setActivated] = useState<PluginWebDescriptor | null>(null);
-  const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
+  const [installedDescriptor, setInstalledDescriptor] = useState<PluginWebDescriptor | null>(null);
+  const [cancelled, setCancelled] = useState(false);
   const navigate = useNavigate();
 
   const releaseSelection = useCallback(async (selectionId: string) => {
@@ -1452,19 +1435,6 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
     }
     onClose();
   }, [installed, onClose, preview, releaseSelection]);
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) closeDialog();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [busy, closeDialog]);
 
   const inspectSelection = async (selection: ResourceSelection) => {
     setStatus(`Validating ${selection.display_name}…`);
@@ -1483,19 +1453,19 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
 
   const finishInstall = async (result: InstalledPluginResult) => {
     setInstalled(result);
-    // Installation changes discovery even when activation subsequently fails.
-    void invalidatePluginCatalog().catch(() => undefined);
-    setActivationError(null);
-    setStatus(`Activating ${result.plugin_id}…`);
+    setStatus("Refreshing the plugin library…");
     try {
-      const descriptor = await activateInstalledPlugin(result);
-      setActivated(descriptor);
+      await invalidatePluginCatalog();
+      const descriptor = await hostJson<PluginWebDescriptor>(
+        `/api/v1/plugins/${encodeURIComponent(result.plugin_id)}`,
+      );
+      setInstalledDescriptor(descriptor);
       hostHaptic("confirm");
     } catch (reason) {
-      setActivationError(
-        reason instanceof Error
-          ? reason.message
-          : "The plugin was installed but could not be activated.",
+      setError(
+        `The package is installed, but RackForge could not refresh its actions: ${
+          reason instanceof Error ? reason.message : "unknown catalog error"
+        }`,
       );
     } finally {
       setStatus(null);
@@ -1504,19 +1474,88 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
 
   const installPreview = async () => {
     if (!preview) return;
+    const selectionId = preview.selection_id;
+    cancellationRequestedRef.current = false;
+    setCancelled(false);
+    setCancelling(false);
     setBusy(true);
     setError(null);
     setStatus(`Installing ${preview.plugin_name}…`);
     try {
       const result = await postResourceApi<InstalledPluginResult>("/api/v1/plugins/install", {
-        selection_id: preview.selection_id,
+        selection_id: selectionId,
       });
       setPreview(null);
       await finishInstall(result);
     } catch (reason) {
       setPreview(null);
       setStatus(null);
-      setError(reason instanceof Error ? reason.message : "Could not install this plugin.");
+      if (
+        cancellationRequestedRef.current ||
+        (reason instanceof Error && reason.message.toLowerCase().includes("cancel"))
+      ) {
+        setCancelled(true);
+        setError(null);
+        void invalidatePluginCatalog().catch(() => undefined);
+      } else {
+        setError(reason instanceof Error ? reason.message : "Could not install this plugin.");
+      }
+    } finally {
+      setBusy(false);
+      setCancelling(false);
+    }
+  };
+
+  const cancelInstallation = async () => {
+    if (!preview || !busy || cancelling) return;
+    cancellationRequestedRef.current = true;
+    setCancelling(true);
+    setStatus("Cancelling installation safely…");
+    try {
+      await postResourceApi("/api/v1/plugins/install/cancel", {
+        selection_id: preview.selection_id,
+      });
+    } catch (reason) {
+      cancellationRequestedRef.current = false;
+      setCancelling(false);
+      setStatus(`Installing ${preview.plugin_name}…`);
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "RackForge could not cancel the installation.",
+      );
+    }
+  };
+
+  const openInstalledPlugin = async (destination: "play" | "config") => {
+    if (!installed) return;
+    setBusy(true);
+    setError(null);
+    setStatus(
+      destination === "play"
+        ? `Opening ${installed.plugin_id} in PLAY…`
+        : `Opening ${installed.plugin_id} configuration…`,
+    );
+    try {
+      await activateInstalledPlugin(installed);
+      const refreshed = await requestSessionSnapshot();
+      const instance = refreshed.instances.find(
+        (candidate) => candidate.plugin_id === installed.plugin_id,
+      );
+      if (destination === "config" && !instance) {
+        throw new Error("RackForge activated the plugin but did not publish its configuration instance.");
+      }
+      navigate(
+        destination === "play"
+          ? "/play"
+          : `/plugins/${encodeURIComponent(instance!.instance_id)}`,
+      );
+      onClose();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Could not open the installed plugin.",
+      );
+      setStatus(null);
     } finally {
       setBusy(false);
     }
@@ -1614,29 +1653,80 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
       ? `${(preview.archive_bytes / (1024 * 1024)).toFixed(1)} MB`
       : `${Math.max(1, Math.round(preview.archive_bytes / 1024))} KB`
     : "";
+  const installing = busy && preview !== null && installed === null;
+  const canConfigure = installedDescriptor?.surfaces.some(
+    (surface) => surface.kind === "config",
+  ) ?? false;
+  const dialogTitle = installed
+    ? installed.already_installed ? "Plugin already installed" : "Plugin installed"
+    : cancelled
+      ? "Installation cancelled"
+      : preview
+        ? installing ? "Installing plugin" : "Review plugin"
+        : "Install plugin";
+  const dialogActions = installing ? (
+    <button
+      type="button"
+      className="secondary-button"
+      disabled={cancelling}
+      onClick={() => void cancelInstallation()}
+    >
+      <AsyncActionLabel active={cancelling} activeLabel="Cancelling…">
+        Cancel installation
+      </AsyncActionLabel>
+    </button>
+  ) : preview ? (
+    <>
+      <button className="secondary-button" onClick={cancelPreview} disabled={busy}>
+        Cancel
+      </button>
+      <button className="primary-button" onClick={() => void installPreview()} disabled={busy}>
+        Install
+      </button>
+    </>
+  ) : installed ? (
+    <>
+      <button className="secondary-button" onClick={closeDialog} disabled={busy}>
+        Close
+      </button>
+      {canConfigure ? (
+        <button
+          className="secondary-button"
+          onClick={() => void openInstalledPlugin("config")}
+          disabled={busy}
+        >
+          Open configuration
+        </button>
+      ) : null}
+      <button
+        className="primary-button"
+        onClick={() => void openInstalledPlugin("play")}
+        disabled={busy}
+      >
+        <AsyncActionLabel active={busy} activeLabel="Opening…">
+          Open in PLAY
+        </AsyncActionLabel>
+      </button>
+    </>
+  ) : cancelled || error ? (
+    <button className="secondary-button" onClick={closeDialog} disabled={busy}>
+      Close
+    </button>
+  ) : undefined;
 
   return (
-    <div
-      className="install-plugin-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !busy) closeDialog();
-      }}
-    >
-      <section
+    <>
+      <ModalDialog
+        eyebrow="Portable package"
+        title={dialogTitle}
+        onClose={closeDialog}
+        dismissible={!busy && !browseHost}
+        showClose={!installing}
+        closeLabel="Close plugin installer"
+        backdropClassName="install-plugin-backdrop"
         className="install-plugin-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="install-plugin-title"
+        actions={dialogActions}
       >
-        <header>
-          <div>
-            <span className="eyebrow">PORTABLE PACKAGE</span>
-            <h2 id="install-plugin-title">Install plugin</h2>
-          </div>
-          <button className="icon-button" onClick={closeDialog} disabled={busy}>
-            Close
-          </button>
-        </header>
         {!installed && !preview ? <p className="install-plugin-intro">
           {native || desktop
             ? "Select a portable .rfplugin package. RackForge validates it before installing anything."
@@ -1707,14 +1797,6 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
                 <span>{packageSize}</span>
               </div>
             </div>
-            <div className="plugin-install-preview-actions">
-              <button className="secondary-button" onClick={cancelPreview} disabled={busy}>
-                Cancel
-              </button>
-              <button className="primary-button" onClick={() => void installPreview()} disabled={busy}>
-                {busy ? <AsyncActionLabel active activeLabel="Installing…">Install</AsyncActionLabel> : "Install"}
-              </button>
-            </div>
           </div>
         ) : null}
         {status ? (
@@ -1724,51 +1806,25 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
           </p>
         ) : null}
         {error ? <p className="install-plugin-error">{error}</p> : null}
-        {activationError ? (
-          <p className="install-plugin-error">
-            The package is installed, but activation failed: {activationError}
+        {cancelled ? (
+          <p className="install-plugin-cancelled" role="status">
+            RackForge stopped before committing the package. No plugin was activated.
           </p>
         ) : null}
         {installed ? (
           <div className="install-plugin-complete">
             <div className="install-plugin-success" role="status">
               <strong>
-                {activated
-                  ? "Plugin installed and active"
-                  : installed.already_installed
-                    ? "Plugin already installed"
-                    : "Plugin installed"}
+                {installed.already_installed ? "Ready to open" : "Installation complete"}
               </strong>
               <span>{installed.plugin_id} v{installed.version}</span>
             </div>
-            {!busy && !status ? (
-              <div className="install-plugin-actions">
-                {activated?.surfaces.some((surface) => surface.kind === "config") ? (
-                  <button
-                    className="primary-button"
-                    onClick={() => {
-                      const instance = snapshot?.instances.find(
-                        (candidate) => candidate.plugin_id === installed.plugin_id,
-                      );
-                      navigate(
-                        instance
-                          ? `/plugins/${encodeURIComponent(instance.instance_id)}`
-                          : "/plugins",
-                      );
-                      onClose();
-                    }}
-                  >
-                    Open configuration
-                  </button>
-                ) : null}
-                <button className="secondary-button" onClick={onClose}>
-                  Close
-                </button>
-              </div>
-            ) : null}
+            <p className="install-plugin-next-step">
+              The package is installed but inactive. Open it in PLAY, configure it, or close this dialog.
+            </p>
           </div>
         ) : null}
-      </section>
+      </ModalDialog>
       {browseHost ? (
         <Suspense
           fallback={
@@ -1785,7 +1841,7 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
           />
         </Suspense>
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -2308,13 +2364,6 @@ function PluginPickerModal({
   const [activatingId, setActivatingId] = useState<string | null>(null);
   const [activationError, setActivationError] = useState<string | null>(null);
   const [pendingPlugin, setPendingPlugin] = useState<PluginWebDescriptor | null>(null);
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
   const activePluginId = active?.plugin_id;
   const orderedPlugins = [
     ...plugins.filter((plugin) => plugin.plugin_id === activePluginId),
@@ -2370,17 +2419,14 @@ function PluginPickerModal({
     }
   };
   return (
-    <div className="preset-modal-backdrop" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}>
-      <section className="preset-modal plugin-picker-modal" role="dialog" aria-modal="true" aria-labelledby="plugin-picker-title">
-        <header className="preset-modal-header">
-          <div>
-            <span className="eyebrow">PLAY · Instruments</span>
-            <h2 id="plugin-picker-title">Select plugin</h2>
-          </div>
-          <button className="preset-modal-close" onClick={onClose} aria-label="Close plugin selector">×</button>
-        </header>
+    <ModalDialog
+      eyebrow="PLAY · Instruments"
+      title="Select plugin"
+      onClose={onClose}
+      dismissible={activatingId === null}
+      closeLabel="Close plugin selector"
+      className="plugin-picker-modal"
+    >
         <div className="preset-modal-toolbar">
           <p>Choose the instrument you want to play. The active plugin stays first.</p>
         </div>
@@ -2468,8 +2514,7 @@ function PluginPickerModal({
             />
           )}
         </div>
-      </section>
-    </div>
+    </ModalDialog>
   );
 }
 
@@ -2504,13 +2549,6 @@ function PresetModal({
   useEffect(() => {
     void refresh();
   }, [refresh]);
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
   const load = (preset: HostPresetSummary) => {
     setBusyAction({ kind: "load", presetId: preset.id });
     setMessage(null);
@@ -2562,17 +2600,13 @@ function PresetModal({
       .finally(() => setBusyAction(null));
   };
   return (
-    <div className="preset-modal-backdrop" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}>
-      <section className="preset-modal" role="dialog" aria-modal="true" aria-labelledby="preset-modal-title">
-        <header className="preset-modal-header">
-          <div>
-            <span className="eyebrow">{instance.plugin_name} · Complete states</span>
-            <h2 id="preset-modal-title">Presets</h2>
-          </div>
-          <button className="preset-modal-close" onClick={onClose} aria-label="Close presets">×</button>
-        </header>
+    <ModalDialog
+      eyebrow={`${instance.plugin_name} · Complete states`}
+      title="Presets"
+      onClose={onClose}
+      dismissible={!busy}
+      closeLabel="Close presets"
+    >
         <div className="preset-modal-toolbar">
           <p>Load a captured state or save the instrument exactly as it sounds now.</p>
           <button className="preset-create-button" onClick={() => setCreating((value) => !value)}>
@@ -2651,8 +2685,7 @@ function PresetModal({
             </article>
           ))}
         </div>
-      </section>
-    </div>
+    </ModalDialog>
   );
 }
 
@@ -2702,31 +2735,36 @@ function PluginRemovalDialog({
 }) {
   const [deletePresets, setDeletePresets] = useState(false);
   const [deletePluginData, setDeletePluginData] = useState(false);
-  const titleId = useId();
-  const descriptionId = useId();
 
   return (
-    <div
-      className="preset-modal-backdrop plugin-remove-backdrop"
-      onMouseDown={(event) => {
-        if (!removing && event.target === event.currentTarget) onClose();
-      }}
+    <ModalDialog
+      eyebrow="Installed plugin"
+      title={`Remove ${pluginName}?`}
+      role="alertdialog"
+      onClose={onClose}
+      dismissible={!removing}
+      closeLabel="Close plugin removal"
+      backdropClassName="plugin-remove-backdrop"
+      className="plugin-remove-dialog"
+      actions={
+        <>
+          <button className="secondary-button" disabled={removing} onClick={onClose}>Cancel</button>
+          <button
+            className="danger-button"
+            disabled={removing}
+            onClick={() => void onConfirm({
+              delete_presets: deletePresets,
+              delete_plugin_data: deletePluginData,
+            })}
+          >
+            <AsyncActionLabel active={removing} activeLabel="Removing plugin…">
+              Remove plugin
+            </AsyncActionLabel>
+          </button>
+        </>
+      }
     >
-      <section
-        className="preset-modal plugin-remove-dialog"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-      >
-        <header className="preset-modal-header">
-          <div>
-            <span className="eyebrow">Installed plugin</span>
-            <h2 id={titleId}>Remove {pluginName}?</h2>
-          </div>
-          <button className="preset-modal-close" disabled={removing} onClick={onClose} aria-label="Close">×</button>
-        </header>
-        <div className="plugin-remove-copy" id={descriptionId}>
+        <div className="plugin-remove-copy">
           <p>RackForge will always remove every installed version of this plugin package.</p>
           <fieldset className="plugin-remove-options" disabled={removing}>
             <legend>Also remove user data</legend>
@@ -2757,23 +2795,7 @@ function PluginRemovalDialog({
           {active ? <p>It is currently active, so sound will stop briefly while RackForge selects another available instrument.</p> : null}
           {error ? <p className="form-error">{error}</p> : null}
         </div>
-        <footer className="plugin-remove-actions">
-          <button className="secondary-button" disabled={removing} onClick={onClose}>Cancel</button>
-          <button
-            className="danger-button"
-            disabled={removing}
-            onClick={() => void onConfirm({
-              delete_presets: deletePresets,
-              delete_plugin_data: deletePluginData,
-            })}
-          >
-            <AsyncActionLabel active={removing} activeLabel="Removing plugin…">
-              Remove plugin
-            </AsyncActionLabel>
-          </button>
-        </footer>
-      </section>
-    </div>
+    </ModalDialog>
   );
 }
 

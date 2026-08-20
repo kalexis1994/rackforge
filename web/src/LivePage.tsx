@@ -3,7 +3,6 @@ import {
   Suspense,
   useCallback,
   useEffect,
-  useId,
   useRef,
   useState,
   type ReactNode,
@@ -19,6 +18,7 @@ import {
 import { RfLoader } from "./components/RfLoader";
 import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
 import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
+import { ModalDialog } from "./components/ModalDialog";
 import { scopedId } from "./ids";
 import { isNativeHost } from "./host";
 import {
@@ -1143,8 +1143,6 @@ function PerformanceDeleteDialog({
   onClose: () => void;
   onConfirm: (cascade: boolean) => Promise<void>;
 }) {
-  const titleId = useId();
-  const descriptionId = useId();
   const [cascade, setCascade] = useState(false);
   const label = kindLabels[target.kind].slice(0, -1);
   const dependencyCount = rackPlan
@@ -1152,27 +1150,31 @@ function PerformanceDeleteDialog({
     : 0;
   const hasDependencies = dependencyCount > 0;
   return (
-    <div
-      className="preset-modal-backdrop performance-delete-backdrop"
-      onMouseDown={(event) => {
-        if (!deleting && event.target === event.currentTarget) onClose();
-      }}
+    <ModalDialog
+      eyebrow="Performance library"
+      title={`Delete ${target.name}?`}
+      role="alertdialog"
+      onClose={onClose}
+      dismissible={!deleting}
+      closeLabel="Close performance deletion"
+      backdropClassName="performance-delete-backdrop"
+      className="performance-delete-dialog"
+      actions={
+        <>
+          <button className="secondary-button" disabled={deleting} onClick={onClose}>Cancel</button>
+          <button
+            className="danger-button"
+            disabled={deleting || (hasDependencies && !cascade)}
+            onClick={() => void onConfirm(cascade)}
+          >
+            <AsyncActionLabel active={deleting} activeLabel={`Deleting ${label}…`}>
+              Delete {label}
+            </AsyncActionLabel>
+          </button>
+        </>
+      }
     >
-      <section
-        className="preset-modal performance-delete-dialog"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-      >
-        <header className="preset-modal-header">
-          <div>
-            <span className="eyebrow">Performance library</span>
-            <h2 id={titleId}>Delete {target.name}?</h2>
-          </div>
-          <button className="preset-modal-close" disabled={deleting} onClick={onClose} aria-label="Close">×</button>
-        </header>
-        <div className="performance-delete-copy" id={descriptionId}>
+        <div className="performance-delete-copy">
           <p>This permanently removes the {label} from the RackForge performance library.</p>
           {hasDependencies && rackPlan ? (
             <fieldset className="performance-delete-dependencies" disabled={deleting}>
@@ -1201,20 +1203,7 @@ function PerformanceDeleteDialog({
           )}
           {error ? <p className="form-error">{error}</p> : null}
         </div>
-        <footer className="performance-delete-actions">
-          <button className="secondary-button" disabled={deleting} onClick={onClose}>Cancel</button>
-          <button
-            className="danger-button"
-            disabled={deleting || (hasDependencies && !cascade)}
-            onClick={() => void onConfirm(cascade)}
-          >
-            <AsyncActionLabel active={deleting} activeLabel={`Deleting ${label}…`}>
-              Delete {label}
-            </AsyncActionLabel>
-          </button>
-        </footer>
-      </section>
-    </div>
+    </ModalDialog>
   );
 }
 

@@ -17,6 +17,56 @@ pub const CONTROL_SCHEMA_VERSION: u32 = 13;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum PluginParameterControlCommand {
+    Read { instance_id: InstanceId },
+    Set {
+        instance_id: InstanceId,
+        parameter_index: u32,
+        value: f64,
+    },
+}
+
+pub fn parse_plugin_parameter_control_command(
+    method: &str,
+    expected_instance_id: &str,
+    params: &serde_json::Value,
+) -> Result<PluginParameterControlCommand, String> {
+    let instance_id = params
+        .get("instance_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "plugin parameter command is missing instance_id".to_owned())?;
+    if instance_id != expected_instance_id {
+        return Err(format!(
+            "plugin instance {instance_id:?} is not the active host instance"
+        ));
+    }
+    let instance_id = InstanceId::new(instance_id)?;
+    match method {
+        "plugin_parameters" => Ok(PluginParameterControlCommand::Read { instance_id }),
+        "set_plugin_parameter" => {
+            let parameter_index = params
+                .get("parameter_index")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|index| u32::try_from(index).ok())
+                .ok_or_else(|| {
+                    "plugin parameter command has an invalid parameter_index".to_owned()
+                })?;
+            let value = params
+                .get("value")
+                .and_then(serde_json::Value::as_f64)
+                .filter(|value| value.is_finite())
+                .ok_or_else(|| "plugin parameter command has an invalid value".to_owned())?;
+            Ok(PluginParameterControlCommand::Set {
+                instance_id,
+                parameter_index,
+                value,
+            })
+        }
+        _ => Err(format!("unknown plugin parameter command {method:?}")),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlRequest {
@@ -324,6 +374,51 @@ pub mod transport {
         Unix(PathBuf),
     }
 
+    /// Reusable framed connection for latency-sensitive clients. Controller
+    /// drivers use this to forward performance MIDI without opening one TCP
+    /// connection for every note.
+    pub struct ControlConnection {
+        stream: ControlStream,
+    }
+
+    enum ControlStream {
+        Tcp(TcpStream),
+        #[cfg(unix)]
+        Unix(std::os::unix::net::UnixStream),
+    }
+
+    impl ControlConnection {
+        pub fn connect(endpoint: &ControlEndpoint) -> io::Result<Self> {
+            let stream = match endpoint {
+                ControlEndpoint::Tcp(address) => {
+                    let stream = TcpStream::connect_timeout(address, IO_TIMEOUT)?;
+                    stream.set_nodelay(true)?;
+                    stream.set_read_timeout(Some(IO_TIMEOUT))?;
+                    stream.set_write_timeout(Some(IO_TIMEOUT))?;
+                    ControlStream::Tcp(stream)
+                }
+                #[cfg(unix)]
+                ControlEndpoint::Unix(path) => {
+                    let stream = std::os::unix::net::UnixStream::connect(path)?;
+                    stream.set_read_timeout(Some(IO_TIMEOUT))?;
+                    stream.set_write_timeout(Some(IO_TIMEOUT))?;
+                    ControlStream::Unix(stream)
+                }
+            };
+            Ok(Self { stream })
+        }
+
+        pub fn exchange(&mut self, request: &ControlRequest) -> io::Result<ControlResponse> {
+            let line = encode_line(request)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            match &mut self.stream {
+                ControlStream::Tcp(stream) => round_trip(stream, &line),
+                #[cfg(unix)]
+                ControlStream::Unix(stream) => round_trip(stream, &line),
+            }
+        }
+    }
+
     /// Resolves the endpoint: `RACKFORGE_CONTROL_ADDR` wins everywhere;
     /// on Unix the caller's socket-path rule is the fallback. On other
     /// platforms the address is the only route, so its absence is an
@@ -365,6 +460,7 @@ pub mod transport {
         match endpoint {
             ControlEndpoint::Tcp(address) => {
                 let mut stream = TcpStream::connect_timeout(address, IO_TIMEOUT)?;
+                stream.set_nodelay(true)?;
                 stream.set_read_timeout(Some(IO_TIMEOUT))?;
                 stream.set_write_timeout(Some(IO_TIMEOUT))?;
                 round_trip(&mut stream, &line)
@@ -705,5 +801,140 @@ mod tests {
             decode_request(&encode_line(&restore).unwrap()).unwrap(),
             restore
         );
+    }
+
+    #[test]
+    fn play_ownership_commands_round_trip_as_one_contract() {
+        let commands = [
+            SessionCommand::CancelProgramEdit { draft_id: 19 },
+            SessionCommand::SetActiveMode {
+                mode: rackforge_session_api::SurfaceMode::Play,
+            },
+            SessionCommand::SelectPlugin {
+                instance_id: InstanceId::new("desktop.org.rackforge.rf-m1").unwrap(),
+            },
+        ];
+
+        for (index, command) in commands.into_iter().enumerate() {
+            let request = ControlRequest::Dispatch {
+                envelope: CommandEnvelope::new(
+                    ClientId::new("test.play-ownership").unwrap(),
+                    index as u64 + 1,
+                    command,
+                ),
+            };
+            assert_eq!(
+                decode_request(&encode_line(&request).unwrap()).unwrap(),
+                request
+            );
+        }
+    }
+
+    #[test]
+    fn virtual_midi_note_and_release_requests_round_trip() {
+        let client_id = ClientId::new("test.controller-midi").unwrap();
+        for request in [
+            ControlRequest::VirtualMidi {
+                client_id: client_id.clone(),
+                message: VirtualMidiMessage {
+                    status: 0x90,
+                    data1: 60,
+                    data2: 100,
+                },
+            },
+            ControlRequest::ReleaseVirtualMidi { client_id },
+        ] {
+            assert_eq!(
+                decode_request(&encode_line(&request).unwrap()).unwrap(),
+                request
+            );
+        }
+    }
+
+    #[test]
+    fn parses_host_plugin_parameter_read_and_write_commands() {
+        assert_eq!(
+            parse_plugin_parameter_control_command(
+                "plugin_parameters",
+                "android-main",
+                &serde_json::json!({"instance_id": "android-main"}),
+            )
+            .unwrap(),
+            PluginParameterControlCommand::Read {
+                instance_id: InstanceId::new("android-main").unwrap(),
+            }
+        );
+        assert_eq!(
+            parse_plugin_parameter_control_command(
+                "set_plugin_parameter",
+                "android-main",
+                &serde_json::json!({
+                    "instance_id": "android-main",
+                    "parameter_index": 123,
+                    "value": 0.625,
+                }),
+            )
+            .unwrap(),
+            PluginParameterControlCommand::Set {
+                instance_id: InstanceId::new("android-main").unwrap(),
+                parameter_index: 123,
+                value: 0.625,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_plugin_parameter_commands_for_another_host_instance() {
+        assert!(
+            parse_plugin_parameter_control_command(
+                "plugin_parameters",
+                "android-main",
+                &serde_json::json!({"instance_id": "desktop.org.rackforge.rf-106"}),
+            )
+            .unwrap_err()
+            .contains("not the active host instance")
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_plugin_parameter_commands() {
+        for parameter_index in [
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!(u64::from(u32::MAX) + 1),
+        ] {
+            assert!(
+                parse_plugin_parameter_control_command(
+                    "set_plugin_parameter",
+                    "android-main",
+                    &serde_json::json!({
+                        "instance_id": "android-main",
+                        "parameter_index": parameter_index,
+                        "value": 0.5,
+                    }),
+                )
+                .unwrap_err()
+                .contains("invalid parameter_index")
+            );
+        }
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!("NaN"),
+            serde_json::json!(true),
+        ] {
+            assert!(
+                parse_plugin_parameter_control_command(
+                    "set_plugin_parameter",
+                    "android-main",
+                    &serde_json::json!({
+                        "instance_id": "android-main",
+                        "parameter_index": 1,
+                        "value": value,
+                    }),
+                )
+                .unwrap_err()
+                .contains("invalid value")
+            );
+        }
     }
 }

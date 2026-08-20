@@ -557,6 +557,59 @@ textarea {
   padding: 0 clamp(18px, 4vw, 30px) 28px;
 }
 
+.plugin-switch-confirm {
+  margin: 0 clamp(18px, 4vw, 30px) 18px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: rgba(255, 160, 65, 0.08);
+  border: 1px solid rgba(255, 177, 92, 0.26);
+  border-radius: 14px;
+}
+
+.plugin-switch-confirm > div:first-child {
+  min-width: 0;
+}
+
+.plugin-switch-confirm strong {
+  color: #ffd4a4;
+  font-size: 12px;
+}
+
+.plugin-switch-confirm p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.plugin-switch-confirm-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+}
+
+.plugin-switch-confirm-actions button {
+  padding: 9px 12px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.plugin-switch-confirm-actions button.danger {
+  color: #ffd4dc;
+  background: rgba(255, 80, 112, 0.1);
+  border-color: rgba(255, 120, 144, 0.28);
+}
+
 .preset-row {
   overflow: hidden;
   display: grid;
@@ -711,6 +764,16 @@ textarea {
   .preset-modal-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .plugin-switch-confirm {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .plugin-switch-confirm-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
   }
 
   .preset-create-form,

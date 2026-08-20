@@ -7,7 +7,9 @@ use midir::{
     Ignore, MidiInput, MidiInputConnection, MidiInputPort, MidiOutput, MidiOutputConnection,
     MidiOutputPort,
 };
-use rackforge_control_api::{ControlRequest, ControlResponse};
+use rackforge_control_api::{
+    ControlRequest, ControlResponse, VirtualMidiMessage, transport::ControlConnection,
+};
 #[cfg(target_os = "linux")]
 use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_controller_api::LITTLE_V1;
@@ -46,7 +48,7 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -363,9 +365,90 @@ struct InputPortInfo {
 
 struct KeyLabInput {
     _connection: MidiInputConnection<()>,
+    _midi_forwarder: Option<MidiForwarder>,
     ack_receiver: Receiver<()>,
     input_receiver: Receiver<PhysicalInputEvent>,
     host_control_receiver: Receiver<HostControlEvent>,
+}
+
+struct MidiForwarder {
+    sender: Option<SyncSender<VirtualMidiMessage>>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl MidiForwarder {
+    fn from_environment() -> Result<Option<Self>, String> {
+        if env::var_os("RACKFORGE_FORWARD_MIDI").is_none() {
+            return Ok(None);
+        }
+        let endpoint = rackforge_control_api::transport::endpoint_from_env(default_control_socket)
+            .map_err(|error| format!("resolving MIDI forwarding endpoint: {error}"))?;
+        let client_id = ClientId::new("controller.arturia.keylab-essential-mk3.midi")
+            .map_err(|message| format!("invalid MIDI forwarding client id: {message}"))?;
+        let (sender, receiver) = mpsc::sync_channel::<VirtualMidiMessage>(4096);
+        let worker = thread::Builder::new()
+            .name("rackforge-keylab-midi-forwarder".into())
+            .spawn(move || {
+                let mut connection = None;
+                while let Ok(message) = receiver.recv() {
+                    let request = ControlRequest::VirtualMidi {
+                        client_id: client_id.clone(),
+                        message,
+                    };
+                    let mut delivered = false;
+                    for _ in 0..2 {
+                        if connection.is_none() {
+                            match ControlConnection::connect(&endpoint) {
+                                Ok(opened) => connection = Some(opened),
+                                Err(error) => {
+                                    eprintln!("MIDI_FORWARD_CONNECT_FAILED error={error}");
+                                    break;
+                                }
+                            }
+                        }
+                        match connection
+                            .as_mut()
+                            .expect("connection established")
+                            .exchange(&request)
+                        {
+                            Ok(ControlResponse::VirtualMidiAccepted { .. }) => {
+                                delivered = true;
+                                break;
+                            }
+                            Ok(ControlResponse::Error { message, .. }) => {
+                                eprintln!("MIDI_FORWARD_REJECTED error={message}");
+                                break;
+                            }
+                            Ok(_) | Err(_) => connection = None,
+                        }
+                    }
+                    if !delivered {
+                        eprintln!("MIDI_FORWARD_DROPPED");
+                    }
+                }
+                if let Some(mut connection) = connection {
+                    let _ = connection.exchange(&ControlRequest::ReleaseVirtualMidi { client_id });
+                }
+            })
+            .map_err(|error| format!("starting MIDI forwarding worker: {error}"))?;
+        Ok(Some(Self {
+            sender: Some(sender),
+            worker: Some(worker),
+        }))
+    }
+
+    fn sender(&self) -> Option<SyncSender<VirtualMidiMessage>> {
+        self.sender.clone()
+    }
+}
+
+impl Drop for MidiForwarder {
+    fn drop(&mut self) {
+        self.sender.take();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2339,17 +2422,22 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
     let (host_control_sender, host_control_receiver) = mpsc::channel();
     let host_controls = controller::package_profile().host_controls.clone();
     let host_actions = controller::package_profile().host_actions.clone();
+    let midi_forwarder = MidiForwarder::from_environment()?;
+    let midi_forward_sender = midi_forwarder.as_ref().and_then(MidiForwarder::sender);
     let mut keyboard_parts_held = false;
     let mut split_note_sent = false;
     let connection = midi.connect(
         &port.handle,
         "rackforge KeyLab DAW ACK",
         move |_timestamp, message, _context| {
+            let mut consumed_by_surface = false;
             if is_daw_preset_ack(message) {
                 let _ = ack_sender.send(());
+                consumed_by_surface = true;
             }
             if let Some(input) = parse_physical_input(message) {
                 let _ = input_sender.send(input);
+                consumed_by_surface = true;
             }
             if let Some(input) = parse_host_action(message, &host_actions) {
                 if input.input == menu::Input::KeyboardParts {
@@ -2359,6 +2447,7 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
                     }
                 }
                 let _ = input_sender.send(input);
+                consumed_by_surface = true;
             }
             if keyboard_parts_held
                 && !split_note_sent
@@ -2372,15 +2461,37 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
             }
             if let Some(input) = parse_host_control(message, &host_controls) {
                 let _ = host_control_sender.send(input);
+                consumed_by_surface = true;
+            }
+            if let Some(message) = forwardable_performance_message(message, consumed_by_surface)
+                && let Some(sender) = midi_forward_sender.as_ref()
+                && sender.try_send(message).is_err()
+            {
+                eprintln!("MIDI_FORWARD_QUEUE_FULL");
             }
         },
         (),
     )?;
     Ok(KeyLabInput {
         _connection: connection,
+        _midi_forwarder: midi_forwarder,
         ack_receiver,
         input_receiver,
         host_control_receiver,
+    })
+}
+
+fn forwardable_performance_message(
+    message: &[u8],
+    consumed_by_surface: bool,
+) -> Option<VirtualMidiMessage> {
+    if consumed_by_surface || message.len() != 3 || message[0] & 0xf0 == 0xf0 {
+        return None;
+    }
+    Some(VirtualMidiMessage {
+        status: message[0],
+        data1: message[1],
+        data2: message[2],
     })
 }
 
@@ -2699,6 +2810,25 @@ fn run_led_demo(midi: MidiOutput, port: &PortInfo, execute: bool) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forwards_performance_midi_but_not_controller_surface_messages() {
+        assert_eq!(
+            forwardable_performance_message(&[0x90, 60, 100], false),
+            Some(VirtualMidiMessage {
+                status: 0x90,
+                data1: 60,
+                data2: 100,
+            })
+        );
+        assert!(forwardable_performance_message(&[0x80, 60, 0], false).is_some());
+        assert!(forwardable_performance_message(&[0xb0, 64, 127], false).is_some());
+        assert!(forwardable_performance_message(&[0xe0, 0, 64], false).is_some());
+        assert!(forwardable_performance_message(&[0xb0, 113, 127], true).is_none());
+        assert!(forwardable_performance_message(&[0xc0, 4], false).is_none());
+        assert!(forwardable_performance_message(&[0xf8], false).is_none());
+        assert!(forwardable_performance_message(&[0xf0, 0x7d, 0xf7], false).is_none());
+    }
 
     #[test]
     fn parses_udev_usb_initialization_timestamp() {

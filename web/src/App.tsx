@@ -77,6 +77,10 @@ import {
   usePluginCatalog,
   usePluginDescriptor,
 } from "./pluginCatalog";
+import {
+  commitPlayPluginSelection,
+  preflightPlayPluginSelection,
+} from "./playPluginSelection";
 import { LivePage, type PerformanceGraphWorkspace } from "./LivePage";
 import { TouchControllerPage } from "./TouchControllerPage";
 import type { RootState } from "./store";
@@ -2277,6 +2281,7 @@ function PlayPage({
           active={active}
           instances={instances}
           plugins={installedPlugins}
+          programDraft={snapshot?.program_draft}
           onClose={() => onOverlayChange(null)}
         />
       )}
@@ -2291,15 +2296,18 @@ function PluginPickerModal({
   active,
   instances,
   plugins,
+  programDraft,
   onClose,
 }: {
   active: PluginInstance | undefined;
   instances: PluginInstance[];
   plugins: PluginWebDescriptor[];
+  programDraft: SessionSnapshot["program_draft"];
   onClose: () => void;
 }) {
   const [activatingId, setActivatingId] = useState<string | null>(null);
   const [activationError, setActivationError] = useState<string | null>(null);
+  const [pendingPlugin, setPendingPlugin] = useState<PluginWebDescriptor | null>(null);
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -2312,28 +2320,46 @@ function PluginPickerModal({
     ...plugins.filter((plugin) => plugin.plugin_id === activePluginId),
     ...plugins.filter((plugin) => plugin.plugin_id !== activePluginId),
   ];
-  const activate = async (plugin: PluginWebDescriptor) => {
+  const activate = async (
+    plugin: PluginWebDescriptor,
+    { discardDraft = false }: { discardDraft?: boolean } = {},
+  ) => {
     const instance = instances.find(
       (candidate) => candidate.plugin_id === plugin.plugin_id,
     );
+    const request = {
+      target: {
+        pluginId: plugin.plugin_id,
+        pluginName: plugin.plugin_name,
+        instanceId: instance?.instance_id,
+      },
+      activeInstanceId: active?.instance_id,
+      programDraft: programDraft
+        ? { draftId: programDraft.draft_id, dirty: programDraft.dirty }
+        : undefined,
+      discardDraft,
+    };
     setActivationError(null);
-    dispatchCommand({ type: "set_active_mode", mode: "play" });
-    if (instance) {
-      if (instance.instance_id !== active?.instance_id) {
-        dispatchCommand({
-          type: "select_plugin",
-          instance_id: instance.instance_id,
-        });
-      }
+    const preflight = preflightPlayPluginSelection(request);
+    if (preflight.status === "already_active") {
       onClose();
       return;
     }
+    if (preflight.status === "confirmation_required") {
+      setPendingPlugin(plugin);
+      return;
+    }
+    setPendingPlugin(null);
     setActivatingId(plugin.plugin_id);
     try {
-      await hostJson(`/api/v1/plugins/${encodeURIComponent(plugin.plugin_id)}/activate`, {
-        method: "POST",
+      await commitPlayPluginSelection(request, {
+        dispatch: dispatchCommandAwait,
+        activate: (pluginId) =>
+          hostJson(`/api/v1/plugins/${encodeURIComponent(pluginId)}/activate`, {
+            method: "POST",
+          }),
+        synchronize: synchronizePluginEnvironment,
       });
-      await synchronizePluginEnvironment();
       onClose();
     } catch (error) {
       setActivationError(
@@ -2358,6 +2384,38 @@ function PluginPickerModal({
         <div className="preset-modal-toolbar">
           <p>Choose the instrument you want to play. The active plugin stays first.</p>
         </div>
+        {pendingPlugin && programDraft && (
+          <section className="plugin-switch-confirm" role="alert">
+            <div>
+              <strong>
+                {programDraft.dirty
+                  ? "Discard unsaved program changes?"
+                  : "Close the current program editor?"}
+              </strong>
+              <p>
+                RackForge must close the active edit session before switching to {" "}
+                {pendingPlugin.plugin_name}.
+              </p>
+            </div>
+            <div className="plugin-switch-confirm-actions">
+              <button type="button" onClick={() => setPendingPlugin(null)}>
+                Keep editing
+              </button>
+              <button
+                type="button"
+                className="danger"
+                onClick={() => void activate(pendingPlugin, { discardDraft: true })}
+              >
+                <AsyncActionLabel
+                  active={activatingId === pendingPlugin.plugin_id}
+                  activeLabel="Switching…"
+                >
+                  Discard and switch
+                </AsyncActionLabel>
+              </button>
+            </div>
+          </section>
+        )}
         {activationError && <p className="form-error">{activationError}</p>}
         <div className="play-plugin-selector modal-list" role="list" aria-label="Instrument plugins">
           {orderedPlugins.map((plugin, index) => {

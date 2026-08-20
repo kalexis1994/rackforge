@@ -2081,6 +2081,7 @@ impl DesktopApp {
                 self.set_master_level(level, Some(command_ref))
             }
             SessionCommand::SetMasterPan { pan } => self.set_master_pan(pan, Some(command_ref)),
+            SessionCommand::SetActiveMode { mode } => self.set_active_mode(mode, Some(command_ref)),
             SessionCommand::SelectPlugin { instance_id } => {
                 self.select_plugin(&instance_id, Some(command_ref))
             }
@@ -2842,6 +2843,48 @@ impl DesktopApp {
         Ok(vec![event])
     }
 
+    fn set_active_mode(
+        &mut self,
+        mode: SurfaceMode,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        #[cfg(windows)]
+        if let Some(audio) = &self.audio {
+            audio
+                .set_running(mode != SurfaceMode::Idle)
+                .map_err(|error| format!("Could not change Desktop audio mode: {error:#}"))?;
+        }
+
+        let events = {
+            let mut session = self.session.write().expect("session lock poisoned");
+            let session_events = desktop_active_mode_events(&session, mode);
+
+            let mut events = Vec::with_capacity(session_events.len());
+            for session_event in session_events {
+                let revision = session.revision.next()?;
+                let event = EventEnvelope {
+                    schema_version: SESSION_SCHEMA_VERSION,
+                    revision,
+                    command: command.clone(),
+                    event: session_event,
+                };
+                session.apply(&event)?;
+                events.push(event);
+            }
+            events
+        };
+
+        let active_mode = active_mode_from_surface(mode);
+        self.menu.sync_active_mode(active_mode);
+        if mode == SurfaceMode::Play {
+            let snapshot = self.performance_snapshot();
+            self.menu.sync_performance_snapshot(snapshot);
+        }
+        self.status = format!("Active mode: {active_mode:?}");
+        self.persist_session_checkpoint();
+        Ok(events)
+    }
+
     fn select_plugin(
         &mut self,
         instance_id: &InstanceId,
@@ -3439,29 +3482,9 @@ impl DesktopApp {
                     ActiveMode::Live => SurfaceMode::Live,
                     ActiveMode::Play => SurfaceMode::Play,
                 };
-                self.menu.sync_active_mode(mode);
-                let mut session = self.session.write().expect("session lock poisoned");
-                session.active_mode = surface_mode;
-                let live_target_deactivated =
-                    surface_mode == SurfaceMode::Play && session.live.active.is_some();
-                if live_target_deactivated {
-                    session.live.deactivate();
+                if let Err(error) = self.set_active_mode(surface_mode, None) {
+                    self.status = error;
                 }
-                session.revision = Revision::new(session.revision.get().saturating_add(1));
-                self.status = format!("Active mode: {mode:?}");
-                drop(session);
-                if live_target_deactivated {
-                    let snapshot = self.performance_snapshot();
-                    self.menu.sync_performance_snapshot(snapshot);
-                }
-                #[cfg(windows)]
-                if let Some(audio) = &self.audio
-                    && let Err(error) = audio.set_running(mode != ActiveMode::Idle)
-                {
-                    self.status =
-                        format!("Mode changed, but audio state did not follow: {error:#}");
-                }
-                self.persist_session_checkpoint();
             }
             MenuCommand::SelectPlugin { instance_id } => {
                 let instance_id = match InstanceId::new(instance_id) {
@@ -3927,6 +3950,16 @@ fn active_mode_from_surface(mode: SurfaceMode) -> ActiveMode {
     }
 }
 
+fn desktop_active_mode_events(session: &SessionState, mode: SurfaceMode) -> Vec<SessionEvent> {
+    let mut events = vec![SessionEvent::ActiveModeChanged { mode }];
+    if mode == SurfaceMode::Play && session.live.active.is_some() {
+        let mut live = session.live.clone();
+        live.deactivate();
+        events.push(SessionEvent::LiveStateReconciled { live });
+    }
+    events
+}
+
 fn plugin_session_state(plugin: &DesktopPlugin) -> PluginInstanceState {
     PluginInstanceState {
         instance_id: InstanceId::new(plugin.instance_id.clone())
@@ -4363,7 +4396,13 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
                 }
                 let options = rackforge_controller_package::supervise::SuperviseOptions {
                     allow_community: false,
-                    extra_env: vec![("RACKFORGE_CONTROL_ADDR".into(), address)],
+                    extra_env: vec![
+                        ("RACKFORGE_CONTROL_ADDR".into(), address),
+                        // WinMM gives the packaged controller exclusive
+                        // ownership of its main input. Return ordinary MIDI
+                        // to Desktop while the driver retains surface events.
+                        ("RACKFORGE_FORWARD_MIDI".into(), "1".into()),
+                    ],
                     shutdown,
                 };
                 match rackforge_controller_package::supervise::supervise(&root, &options) {
@@ -4692,6 +4731,7 @@ fn show_startup_error(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackforge_performance_api::{LiveLocation, RackId};
     use rackforge_plugin_api::{
         BankDescriptor, PRESET_CATALOG_SCHEMA_VERSION, PROGRAM_EDIT_SCHEMA_VERSION,
         PROGRAM_SCHEMA_VERSION, PresetDescriptor, ProgramEditorField, ProgramEditorFieldKind,
@@ -4814,6 +4854,62 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<ProgramDocument>(&draft.document_json).unwrap(),
             prepared.document
+        );
+    }
+
+    #[test]
+    fn desktop_play_transition_is_a_recorded_session_event() {
+        let session = SessionState::new(SessionId::new("test.desktop-mode").unwrap());
+        assert_eq!(
+            desktop_active_mode_events(&session, SurfaceMode::Play),
+            vec![SessionEvent::ActiveModeChanged {
+                mode: SurfaceMode::Play
+            }]
+        );
+    }
+
+    #[test]
+    fn desktop_play_transition_deactivates_the_live_target() {
+        let mut session = SessionState::new(SessionId::new("test.desktop-live-mode").unwrap());
+        let rack_id = RackId::new("rack.stage").unwrap();
+        session.live.activate(
+            LiveLocation::Rack {
+                rack_id: rack_id.clone(),
+            },
+            rack_id,
+        );
+
+        let events = desktop_active_mode_events(&session, SurfaceMode::Play);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            events[0],
+            SessionEvent::ActiveModeChanged {
+                mode: SurfaceMode::Play
+            }
+        ));
+        let SessionEvent::LiveStateReconciled { live } = &events[1] else {
+            panic!("PLAY must reconcile LIVE navigation");
+        };
+        assert!(live.active.is_none());
+        assert!(live.active_rack_id.is_none());
+    }
+
+    #[test]
+    fn desktop_live_transition_preserves_the_selected_live_target() {
+        let mut session = SessionState::new(SessionId::new("test.desktop-live-mode").unwrap());
+        let rack_id = RackId::new("rack.stage").unwrap();
+        session.live.activate(
+            LiveLocation::Rack {
+                rack_id: rack_id.clone(),
+            },
+            rack_id,
+        );
+
+        assert_eq!(
+            desktop_active_mode_events(&session, SurfaceMode::Live),
+            vec![SessionEvent::ActiveModeChanged {
+                mode: SurfaceMode::Live
+            }]
         );
     }
 }

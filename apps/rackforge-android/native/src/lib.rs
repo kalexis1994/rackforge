@@ -4,7 +4,9 @@ use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
 use keylab_essential_mk3::protocol as keylab_protocol;
-use rackforge_control_api::ControlResponse;
+use rackforge_control_api::{
+    ControlResponse, PluginParameterControlCommand, parse_plugin_parameter_control_command,
+};
 use rackforge_core::{
     LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore, PluginStorage,
     midi_hotplug::{PanicScope, panic_packets},
@@ -1003,16 +1005,14 @@ impl AndroidEngine {
         method: &str,
         params: &serde_json::Value,
     ) -> Result<serde_json::Value> {
-        let instance_id = params
-            .get("instance_id")
-            .and_then(serde_json::Value::as_str)
-            .context("plugin parameter command is missing instance_id")?;
-        if instance_id != ANDROID_INSTANCE_ID {
-            bail!("plugin instance {instance_id:?} is not the active Android instance");
-        }
-        let instance_id = InstanceId::new(instance_id).map_err(anyhow::Error::msg)?;
-        let response = match method {
-            "plugin_parameters" => {
+        let response = match parse_plugin_parameter_control_command(
+            method,
+            ANDROID_INSTANCE_ID,
+            params,
+        )
+        .map_err(anyhow::Error::msg)?
+        {
+            PluginParameterControlCommand::Read { instance_id } => {
                 let (schema, values) = plugin_parameters(self.runtime.0, &mut self.instance.0)?;
                 ControlResponse::PluginParameters {
                     instance_id,
@@ -1020,16 +1020,11 @@ impl AndroidEngine {
                     values,
                 }
             }
-            "set_plugin_parameter" => {
-                let parameter_index = params
-                    .get("parameter_index")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|index| u32::try_from(index).ok())
-                    .context("plugin parameter command has an invalid parameter_index")?;
-                let value = params
-                    .get("value")
-                    .and_then(serde_json::Value::as_f64)
-                    .context("plugin parameter command has an invalid value")?;
+            PluginParameterControlCommand::Set {
+                instance_id,
+                parameter_index,
+                value,
+            } => {
                 let value = set_plugin_parameter(
                     self.runtime.0,
                     &mut self.instance.0,
@@ -1042,7 +1037,6 @@ impl AndroidEngine {
                     value,
                 }
             }
-            _ => bail!("unknown plugin parameter command {method:?}"),
         };
         serde_json::to_value(response).context("serializing plugin parameter response")
     }

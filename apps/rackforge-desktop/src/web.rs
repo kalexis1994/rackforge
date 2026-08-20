@@ -401,25 +401,54 @@ pub fn start(
 }
 
 fn control_bridge(listener: std::net::TcpListener, state: WebState) {
-    use std::io::{BufRead, BufReader, Write};
-    const MAX_REQUEST_BYTES: u64 = 1024 * 1024;
     for connection in listener.incoming() {
-        let Ok(mut stream) = connection else {
+        let Ok(stream) = connection else {
             std::thread::sleep(Duration::from_millis(50));
             continue;
         };
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-        let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-        let mut bytes = Vec::new();
-        if std::io::Read::take(BufReader::new(&stream), MAX_REQUEST_BYTES)
+        let connection_state = state.clone();
+        let _ = std::thread::Builder::new()
+            .name("rackforge-control-client".into())
+            .spawn(move || handle_control_bridge_connection(stream, connection_state));
+    }
+}
+
+fn handle_control_bridge_connection(mut stream: std::net::TcpStream, state: WebState) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    const MAX_REQUEST_BYTES: u64 = 1024 * 1024;
+
+    let _ = stream.set_nodelay(true);
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let Ok(reader_stream) = stream.try_clone() else {
+        return;
+    };
+    let mut reader = BufReader::new(reader_stream);
+    let mut bytes = Vec::new();
+    let mut virtual_midi_clients = std::collections::BTreeSet::<ClientId>::new();
+    loop {
+        bytes.clear();
+        match reader
+            .by_ref()
+            .take(MAX_REQUEST_BYTES + 1)
             .read_until(b'\n', &mut bytes)
-            .is_err()
-            || bytes.is_empty()
         {
-            continue;
+            Ok(0) | Err(_) => break,
+            Ok(_) if bytes.len() as u64 > MAX_REQUEST_BYTES => break,
+            Ok(_) => {}
         }
         let response = match serde_json::from_slice::<ControlRequest>(&bytes) {
-            Ok(request) => response_for(request, &state),
+            Ok(request) => {
+                match &request {
+                    ControlRequest::VirtualMidi { client_id, .. } => {
+                        virtual_midi_clients.insert(client_id.clone());
+                    }
+                    ControlRequest::ReleaseVirtualMidi { client_id } => {
+                        virtual_midi_clients.remove(client_id);
+                    }
+                    _ => {}
+                }
+                response_for(request, &state)
+            }
             Err(error) => json!({
                 "status": "error",
                 "code": "invalid_request",
@@ -428,7 +457,30 @@ fn control_bridge(listener: std::net::TcpListener, state: WebState) {
         };
         let mut line = response.to_string().into_bytes();
         line.push(b'\n');
-        let _ = stream.write_all(&line);
+        if stream.write_all(&line).is_err() {
+            break;
+        }
+    }
+    for client_id in virtual_midi_clients {
+        release_injected_midi(&state);
+        let _ = response_for(ControlRequest::ReleaseVirtualMidi { client_id }, &state);
+    }
+}
+
+fn release_injected_midi(state: &WebState) {
+    let Ok(slot) = state.injected_midi.lock() else {
+        return;
+    };
+    let Some(sender) = slot.as_ref() else {
+        return;
+    };
+    for channel in 0..16 {
+        for (controller, value) in [(64, 0), (123, 0)] {
+            let _ = sender.try_send(crate::desktop_audio::MidiPacket {
+                length: 3,
+                data: [0xb0 | channel, controller, value],
+            });
+        }
     }
 }
 
@@ -1803,7 +1855,7 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
             {
                 return json!({"status":"error", "code":"invalid_request", "message": error});
             }
-            if let ControlRequest::VirtualMidi { message, .. } = &request
+            if let ControlRequest::VirtualMidi { client_id, message } = &request
                 && let Ok(slot) = state.injected_midi.lock()
                 && let Some(sender) = slot.as_ref()
             {
@@ -1812,7 +1864,11 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
                     length: 3,
                     data: bytes,
                 }) {
-                    Ok(()) => json!({"status":"ok"}),
+                    Ok(()) => serde_json::to_value(ControlResponse::VirtualMidiAccepted {
+                        client_id: client_id.clone(),
+                        active_notes: 0,
+                    })
+                    .expect("virtual MIDI response"),
                     Err(error) => json!({
                         "status":"error",
                         "code":"unavailable",
@@ -2007,6 +2063,7 @@ mod tests {
         ClientId, CommandEnvelope, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, InstanceId,
         Revision, SessionCommand, SessionId,
     };
+    use rackforge_surface_api::SurfaceMode;
 
     #[test]
     fn network_http_server_is_disabled_by_default() {
@@ -2099,6 +2156,68 @@ mod tests {
                 })
                 .unwrap();
         });
+        let response = response_for(request, &state);
+        responder.join().unwrap();
+        assert_eq!(
+            response.get("status").and_then(Value::as_str),
+            Some("command_applied")
+        );
+    }
+
+    #[test]
+    fn dispatches_play_mode_changes_to_the_desktop_runtime() {
+        let (control, receiver) = control_channel();
+        let state = WebState {
+            session: Arc::new(RwLock::new(SessionState::new(
+                SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
+            ))),
+            plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
+            legacy_plugins_root: PathBuf::new(),
+            plugin_store_root: None,
+            data_root: PathBuf::new(),
+            public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
+            control,
+            resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
+            resource_upload_root: PathBuf::new(),
+            web_packages_cache: Arc::new(Mutex::new(None)),
+            package_scan_revision: Arc::new(AtomicU64::new(0)),
+            controllers_root: PathBuf::new(),
+            injected_midi: Arc::new(Mutex::new(None)),
+        };
+        let request = ControlRequest::Dispatch {
+            envelope: CommandEnvelope::new(
+                ClientId::new("test.desktop-mode-web").unwrap(),
+                17,
+                SessionCommand::SetActiveMode {
+                    mode: SurfaceMode::Play,
+                },
+            ),
+        };
+        let responder = std::thread::spawn(move || {
+            let DesktopControlCall::Session { request, response } = receiver.recv().unwrap() else {
+                panic!("unexpected Desktop control call");
+            };
+            assert!(matches!(
+                request,
+                ControlRequest::Dispatch {
+                    envelope: CommandEnvelope {
+                        command: SessionCommand::SetActiveMode {
+                            mode: SurfaceMode::Play
+                        },
+                        ..
+                    }
+                }
+            ));
+            response
+                .send(ControlResponse::CommandApplied {
+                    client_id: ClientId::new("test.desktop-mode-web").unwrap(),
+                    command_id: 17,
+                    revision: Revision::new(1),
+                    events: Vec::new(),
+                })
+                .unwrap();
+        });
+
         let response = response_for(request, &state);
         responder.join().unwrap();
         assert_eq!(

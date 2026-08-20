@@ -10,6 +10,7 @@ import {
 import { openSessionChannel, type SessionChannel } from "./host";
 import { randomIdToken } from "./ids";
 import { invalidatePluginCatalog } from "./pluginCatalog";
+import { serializeSessionCommand } from "./sessionCommandProtocol";
 import type {
   CoreCommandAppliedMessage,
   CoreErrorMessage,
@@ -32,7 +33,6 @@ function createClientId() {
 }
 
 const CLIENT_ID = createClientId();
-const SESSION_SCHEMA_VERSION = 14;
 const RECONNECT_DELAY_MS = 1200;
 const PERFORMANCE_REFRESH_MS = 2000;
 const COMMAND_TIMEOUT_MS = 8_000;
@@ -565,15 +565,7 @@ export function dispatchCommand(command: SessionCommand) {
 }
 
 function commandPayload(id: number, command: SessionCommand) {
-  return JSON.stringify({
-    op: "dispatch",
-    envelope: {
-      schema_version: SESSION_SCHEMA_VERSION,
-      client_id: CLIENT_ID,
-      command_id: id,
-      command,
-    },
-  });
+  return serializeSessionCommand(CLIENT_ID, id, command);
 }
 
 export function dispatchCommandAwait(

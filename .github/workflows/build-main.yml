@@ -17,6 +17,62 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  quality:
+    name: Tests and contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out RackForge
+        uses: actions/checkout@v6
+
+      - name: Install native test dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
+            libudev-dev \
+            pkg-config
+
+      - name: Set up Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Set up pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.9.0 --activate
+          pnpm --dir web install --frozen-lockfile
+
+      - name: Test Web contracts
+        shell: bash
+        run: pnpm --dir web test
+
+      - name: Build Web workspace
+        shell: bash
+        run: pnpm --dir web build
+
+      - name: Test shared runtime contracts
+        shell: bash
+        run: |
+          cargo test --locked \
+            -p rackforge-control-api \
+            -p rackforge-session-api \
+            -p rackforge-performance-api \
+            -p rackforge-repository \
+            -p rackforge-resource-host \
+            -p rackforge-surface-runtime \
+            -p rackforge-core \
+            -p rackforge-controller-arturia-keylab-essential-mk3
+
   windows:
     name: Windows x86-64
     runs-on: windows-2022
@@ -56,7 +112,7 @@ jobs:
 
       - name: Build RackForge Desktop
         shell: pwsh
-        run: ./tools/build-windows-desktop.ps1
+        run: ./tools/build-windows-desktop.ps1 -RunTests
 
       - name: Upload Windows executable
         uses: actions/upload-artifact@v4
@@ -182,6 +238,9 @@ jobs:
         shell: bash
         run: |
           cargo check --locked --all-targets \
+            -p rackforge-core \
+            -p rackforge-controller-arturia-keylab-essential-mk3
+          cargo test --locked \
             -p rackforge-core \
             -p rackforge-controller-arturia-keylab-essential-mk3
 

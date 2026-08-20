@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$OutputDirectory = "dist/windows-x86_64"
+    [string]$OutputDirectory = "dist/windows-x86_64",
+    [switch]$RunTests
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,10 +59,23 @@ try {
         }
     }
 
+    if ($RunTests) {
+        $tests = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && cargo +stable-x86_64-pc-windows-msvc test --locked -p rackforge-desktop' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName
+        & $env:ComSpec /d /s /c $tests
+        if ($LASTEXITCODE -ne 0) {
+            throw "RackForge Desktop tests failed."
+        }
+    }
+
     $build = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && cargo +stable-x86_64-pc-windows-msvc build --locked --release -p rackforge-desktop' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName
     & $env:ComSpec /d /s /c $build
     if ($LASTEXITCODE -ne 0) {
         throw "RackForge Desktop build failed."
+    }
+    $controllerBuild = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && cargo +stable-x86_64-pc-windows-msvc build --locked --release -p rackforge-controller-arturia-keylab-essential-mk3 --bin rackforge-arturia-keylab-essential-mk3-driver' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName
+    & $env:ComSpec /d /s /c $controllerBuild
+    if ($LASTEXITCODE -ne 0) {
+        throw "RackForge controller driver build failed."
     }
 } finally {
     Pop-Location
@@ -75,6 +89,15 @@ if (-not (Test-Path -LiteralPath $source)) {
     $source = Join-Path $runtime "target/release/rackforge-desktop.exe"
 }
 Copy-Item -LiteralPath $source -Destination (Join-Path $output "RackForge.exe") -Force
+$controllerSource = Join-Path $runtime "target/x86_64-pc-windows-msvc/release/rackforge-arturia-keylab-essential-mk3-driver.exe"
+if (-not (Test-Path -LiteralPath $controllerSource)) {
+    $controllerSource = Join-Path $runtime "target/release/rackforge-arturia-keylab-essential-mk3-driver.exe"
+}
+if (-not (Test-Path -LiteralPath $controllerSource)) {
+    throw "The bundled KeyLab controller driver was not produced."
+}
+Copy-Item -LiteralPath $controllerSource `
+    -Destination (Join-Path $output "rackforge-arturia-keylab-essential-mk3-driver.exe") -Force
 Copy-Item -LiteralPath (Join-Path $repository "THIRD_PARTY_NOTICES.md") `
     -Destination (Join-Path $output "THIRD_PARTY_NOTICES.md") -Force
 Write-Host "RackForge Desktop: $(Join-Path $output 'RackForge.exe')"

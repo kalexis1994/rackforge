@@ -4057,7 +4057,7 @@ export function PluginFrame({
           className={`plugin-frame${frameLoaded ? " loaded" : ""}`}
           title={`${instance.plugin_name} ${surface}`}
           src={selectedSurface.entry_url}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts allow-same-origin allow-downloads"
           referrerPolicy="same-origin"
           onLoad={() => setFrameLoaded(true)}
         />

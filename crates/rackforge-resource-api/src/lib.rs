@@ -130,6 +130,11 @@ pub struct LoadGrantedResourceRequest {
     /// plugin instances can resolve it without retaining the source grant.
     #[serde(default)]
     pub persist: bool,
+    /// Auditions the resource in the active audio instance without changing
+    /// the instance's persistent resource registry or restoring its previous
+    /// sound selection. Intended for in-progress plugin editor documents.
+    #[serde(default)]
+    pub preview: bool,
     /// Optional host-side preparation for a source format whose dependencies
     /// live beside the selected file. The plugin still receives one validated
     /// file resource; native paths never cross into its WebAssembly instance.

@@ -2336,6 +2336,11 @@ async fn load_granted_resource(
     if require_authorized(&state, &headers).is_err() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
+    if request.persist && request.preview {
+        return resource_error(ResourceError::InvalidRequest(
+            "a resource preview cannot be persisted".into(),
+        ));
+    }
     let registry = match PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root) {
         Ok(registry) => registry,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -2382,8 +2387,7 @@ async fn load_granted_resource(
             Err(error) => return resource_error(error),
         },
     };
-    let uploaded_grant = request
-        .persist
+    let uploaded_grant = (request.persist || request.preview)
         .then(|| (request.plugin_id.clone(), request.grant_id.clone()));
     let control = json!({
         "op": "load_plugin_resource",
@@ -2392,16 +2396,12 @@ async fn load_granted_resource(
         "resource_id": request.target_resource_id,
         "path": path,
         "persist": request.persist,
+        "preview": request.preview,
     });
     let response = match core_request(&state.control_socket, &control).await {
         Ok(response)
             if response.get("status").and_then(Value::as_str) == Some("plugin_resource_loaded") =>
         {
-            if let Some((plugin_id, grant_id)) = uploaded_grant {
-                let _ = state
-                    .resource_browser
-                    .release_owned_grant(&plugin_id, &grant_id);
-            }
             Json(json!({"status":"ok"})).into_response()
         }
         Ok(response) => {
@@ -2414,6 +2414,11 @@ async fn load_granted_resource(
         }
         Err(error) => resource_error(ResourceError::Backend(error.to_string())),
     };
+    if let Some((plugin_id, grant_id)) = uploaded_grant {
+        let _ = state
+            .resource_browser
+            .release_owned_grant(&plugin_id, &grant_id);
+    }
     drop(bundled);
     response
 }

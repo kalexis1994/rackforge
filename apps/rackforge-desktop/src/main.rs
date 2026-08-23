@@ -1574,6 +1574,7 @@ impl DesktopApp {
                     resource_id,
                     path,
                     persist,
+                    preview,
                     response,
                 } => {
                     let _ = response.send(self.load_plugin_resource(
@@ -1581,6 +1582,7 @@ impl DesktopApp {
                         &resource_id,
                         &path,
                         persist,
+                        preview,
                     ));
                 }
                 web::DesktopControlCall::ClearResource {
@@ -1924,7 +1926,11 @@ impl DesktopApp {
         resource_id: &str,
         path: &Path,
         persist: bool,
+        preview: bool,
     ) -> Result<(), String> {
+        if persist && preview {
+            return Err("A resource preview cannot be persisted".into());
+        }
         let index = self
             .plugins
             .iter()
@@ -1940,6 +1946,7 @@ impl DesktopApp {
             .find(|resource| resource.id == resource_id)
             .map(|resource| resource.import_targets.clone())
             .ok_or_else(|| format!("Plugin does not declare resource {resource_id:?}"))?;
+        let mut candidate_resources = plugin.resources.clone();
         let mut previous = Vec::new();
         let installed_count;
         if !import_targets.is_empty() {
@@ -1961,10 +1968,14 @@ impl DesktopApp {
                 let selected_path = storage
                     .write_atomic(plugin_id, data_path, &bytes)
                     .map_err(|error| format!("Could not install {target_id:?}: {error:#}"))?;
-                previous.push((
-                    target_id.clone(),
-                    plugin.resources.insert(target_id, selected_path),
-                ));
+                if preview {
+                    candidate_resources.insert(target_id, selected_path);
+                } else {
+                    previous.push((
+                        target_id.clone(),
+                        plugin.resources.insert(target_id, selected_path),
+                    ));
+                }
             }
         } else {
             let data_path = persist
@@ -1992,23 +2003,32 @@ impl DesktopApp {
                 path.to_path_buf()
             };
             installed_count = 1;
-            previous.push((
-                resource_id.to_owned(),
-                plugin
-                    .resources
-                    .insert(resource_id.to_owned(), selected_path),
-            ));
+            if preview {
+                candidate_resources.insert(resource_id.to_owned(), selected_path);
+            } else {
+                previous.push((
+                    resource_id.to_owned(),
+                    plugin
+                        .resources
+                        .insert(resource_id.to_owned(), selected_path),
+                ));
+            }
         }
 
         let prepare =
             (|| -> anyhow::Result<(PluginInstance<'static>, PresetCatalog, Option<String>)> {
+                let resources = if preview {
+                    &candidate_resources
+                } else {
+                    &plugin.resources
+                };
                 let mut instance = plugin
                     .runtime
-                    .create_instance_with_resource_overrides(&plugin.resources)?;
+                    .create_instance_with_resource_overrides(resources)?;
                 let catalog = instance.preset_catalog()?;
-                let selected_sound_id = plugin
-                    .selected_sound_id
-                    .as_ref()
+                let selected_sound_id = (!preview)
+                    .then_some(plugin.selected_sound_id.as_ref())
+                    .flatten()
                     .filter(|id| {
                         catalog
                             .presets
@@ -2026,7 +2046,7 @@ impl DesktopApp {
                         instance_id: plugin.instance_id.clone(),
                         plugin: plugin.runtime,
                         preset_id: selected_sound_id.clone(),
-                        resources: plugin.resources.clone(),
+                        resources: resources.clone(),
                         initial_state: read_live_state(&live_state_dir, &plugin.plugin_id),
                     })?;
                 }
@@ -2035,31 +2055,37 @@ impl DesktopApp {
 
         match prepare {
             Ok((instance, catalog, selected_sound_id)) => {
-                let (banks, sound_summaries, sounds) = desktop_catalog_views(&catalog);
                 plugin.instance = instance;
-                plugin.banks = banks;
-                plugin.sound_summaries = sound_summaries;
-                plugin.sounds = sounds;
-                plugin.selected_sound_id = selected_sound_id;
-                let next_session_state = plugin_session_state(plugin);
-                let mut session = self.session.write().expect("session lock poisoned");
-                if let Some(state) = session
-                    .instances
-                    .iter_mut()
-                    .find(|state| state.instance_id.as_str() == plugin.instance_id)
-                {
-                    *state = next_session_state;
-                    session.revision = Revision::new(session.revision.get().saturating_add(1));
+                if !preview {
+                    let (banks, sound_summaries, sounds) = desktop_catalog_views(&catalog);
+                    plugin.banks = banks;
+                    plugin.sound_summaries = sound_summaries;
+                    plugin.sounds = sounds;
+                    plugin.selected_sound_id = selected_sound_id;
+                    let next_session_state = plugin_session_state(plugin);
+                    let mut session = self.session.write().expect("session lock poisoned");
+                    if let Some(state) = session
+                        .instances
+                        .iter_mut()
+                        .find(|state| state.instance_id.as_str() == plugin.instance_id)
+                    {
+                        *state = next_session_state;
+                        session.revision = Revision::new(session.revision.get().saturating_add(1));
+                    }
                 }
-                self.status = format!(
-                    "{} installed and activated {} recognized resource{} from {}",
-                    plugin.name,
-                    installed_count,
-                    if installed_count == 1 { "" } else { "s" },
-                    path.file_name()
-                        .map(|name| name.to_string_lossy())
-                        .unwrap_or_else(|| path.display().to_string().into())
-                );
+                self.status = if preview {
+                    format!("{} is auditioning an in-progress resource", plugin.name)
+                } else {
+                    format!(
+                        "{} installed and activated {} recognized resource{} from {}",
+                        plugin.name,
+                        installed_count,
+                        if installed_count == 1 { "" } else { "s" },
+                        path.file_name()
+                            .map(|name| name.to_string_lossy())
+                            .unwrap_or_else(|| path.display().to_string().into())
+                    )
+                };
                 Ok(())
             }
             Err(error) => {

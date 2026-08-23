@@ -3960,6 +3960,58 @@ export function PluginFrame({
             ),
           );
       } else if (
+        event.data.method === "plugin.preview_resource" &&
+        surface === "config" &&
+        params.edit_mode === 1 &&
+        typeof params.target_resource_id === "string" &&
+        descriptor?.resources.some(
+          (resource) =>
+            resource.id === params.target_resource_id && resource.kind === "file",
+        ) &&
+        typeof params.file_name === "string" &&
+        params.file_name.length > 0 &&
+        params.file_name.length <= 160 &&
+        params.bytes instanceof ArrayBuffer &&
+        params.bytes.byteLength > 0 &&
+        params.bytes.byteLength <= 128 * 1024 * 1024
+      ) {
+        setResourceBusy("Updating builder audition…");
+        const fileName = params.file_name.replace(/[^a-z0-9._ -]+/gi, "-");
+        hostJson<ResourceSelection>(
+          `/api/v1/resources/uploads?name=${encodeURIComponent(fileName)}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream" },
+            body: new Blob([params.bytes], { type: "application/vnd.rackforge.bank+zip" }),
+          },
+        )
+          .then((selection) => postResourceApi<ResourceGrant>(
+            "/api/v1/resources/bind-selection",
+            {
+              plugin_id: instance.plugin_id,
+              resource_id: params.target_resource_id,
+              selection_id: selection.selection_id,
+            },
+          ))
+          .then((grant) => postResourceApi("/api/v1/resources/load", {
+            plugin_id: instance.plugin_id,
+            instance_id: instance.instance_id,
+            target_resource_id: params.target_resource_id,
+            grant_id: grant.grant_id,
+            entry_id: null,
+            persist: false,
+            preview: true,
+            bundle: null,
+          }))
+          .then((result) => respond(true, undefined, result))
+          .catch((error: unknown) =>
+            respond(
+              false,
+              error instanceof Error ? error.message : "Could not audition this resource.",
+            ),
+          )
+          .finally(() => setResourceBusy(null));
+      } else if (
         (((event.data.method === "plugin.load_resource" ||
           event.data.method === "plugin.install_resource") && surface === "config") ||
           (event.data.method === "plugin.activate_resource" && surface === "play")) &&
@@ -3985,6 +4037,7 @@ export function PluginFrame({
           grant_id: params.grant_id,
           entry_id: typeof params.entry_id === "string" ? params.entry_id : null,
           persist: event.data.method !== "plugin.load_resource",
+          preview: false,
           bundle: params.bundle === "nki_dependencies" ? params.bundle : null,
         })
           .then((result) => respond(true, undefined, result))

@@ -136,6 +136,11 @@ pub enum ControlRequest {
         path: PathBuf,
         #[serde(default)]
         persist: bool,
+        /// Replaces the live audio instance for audition only. The supplied
+        /// path is not retained in the dynamic resource registry and the new
+        /// resource chooses its own first playable sound.
+        #[serde(default)]
+        preview: bool,
     },
     /// Removes one installed private resource and reactivates the instance
     /// with the remaining resource set, restoring package defaults.
@@ -750,6 +755,7 @@ mod tests {
             resource_id: "factory-soundfont".into(),
             path: PathBuf::from("/authorized/library/piano.sf2"),
             persist: true,
+            preview: false,
         };
         assert_eq!(
             decode_request(&encode_line(&request).unwrap()).unwrap(),

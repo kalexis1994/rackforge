@@ -497,6 +497,7 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             resource_id,
             path,
             persist,
+            preview,
         } => load_plugin_resource(
             context,
             &plugin_id,
@@ -504,6 +505,7 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             &resource_id,
             &path,
             persist,
+            preview,
         ),
         ControlRequest::ClearPluginResource {
             plugin_id,
@@ -632,7 +634,15 @@ fn load_plugin_resource(
     resource_id: &str,
     path: &Path,
     persist: bool,
+    preview: bool,
 ) -> ControlResponse {
+    if persist && preview {
+        return error_response(
+            ControlErrorCode::InvalidRequest,
+            "a resource preview cannot be persisted",
+            None,
+        );
+    }
     let snapshot = match context.store.lock() {
         Ok(store) => store.snapshot(),
         Err(_) => return internal_error("session store lock is poisoned", None),
@@ -797,23 +807,16 @@ fn load_plugin_resource(
             }
         }
     }
-    if let Ok(mut registry) = context.dynamic_resources.lock() {
-        registry.insert(instance_id.clone(), resources);
-    } else {
-        return internal_error(
-            "dynamic resource registry is poisoned",
-            Some(snapshot.revision),
-        );
-    }
-    let resources = match context.dynamic_resources.lock() {
-        Ok(registry) => registry.get(instance_id).cloned().unwrap_or_default(),
-        Err(_) => {
+    if !preview {
+        if let Ok(mut registry) = context.dynamic_resources.lock() {
+            registry.insert(instance_id.clone(), resources.clone());
+        } else {
             return internal_error(
                 "dynamic resource registry is poisoned",
                 Some(snapshot.revision),
             );
         }
-    };
+    }
     let mut replacement = match runtime
         .0
         .create_instance_with_resource_overrides(&resources)
@@ -827,7 +830,8 @@ fn load_plugin_resource(
         }
         Err(error) => return internal_error(error.to_string(), Some(snapshot.revision)),
     };
-    if let Some(sound_id) = instance_state.selected_sound_id.as_deref()
+    if !preview
+        && let Some(sound_id) = instance_state.selected_sound_id.as_deref()
         && let Err(error) = replacement.load_preset(sound_id)
     {
         if persist {

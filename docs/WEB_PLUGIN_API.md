@@ -148,6 +148,14 @@ from plugin JavaScript.
   `target_resource_id`, `grant_id` and `entry_id`. RackForge prepares a new
   plugin instance away from the real-time audio callback and swaps it at an
   audio block boundary.
+- `plugin.preview_resource`: available to `CONFIG`; accepts a declared file
+  resource target, `edit_mode: 1`, a display file name and a transferable
+  `ArrayBuffer` up to 128 MB. RackForge rejects preview requests outside this
+  explicit editing state (`edit_mode: 0`). It validates the resource in a
+  replacement instance and swaps that instance at an audio block boundary
+  without installing the file or changing the persistent resource registry.
+  The preview resource selects its first playable sound, which lets an editor
+  audition an in-progress document.
 - `plugin.install_resource`: available to `CONFIG`; asks a fresh plugin
   instance to accept a granted file and then copies it atomically to the
   resource's declared private `data_path`. File grants omit `entry_id`;

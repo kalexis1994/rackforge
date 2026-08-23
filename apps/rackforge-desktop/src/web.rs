@@ -124,6 +124,7 @@ pub enum DesktopControlCall {
         resource_id: String,
         path: PathBuf,
         persist: bool,
+        preview: bool,
         response: Sender<Result<(), String>>,
     },
     ClearResource {
@@ -1478,6 +1479,11 @@ async fn load_granted_resource(
     State(state): State<WebState>,
     Json(request): Json<LoadGrantedResourceRequest>,
 ) -> Response {
+    if request.persist && request.preview {
+        return resource_error(ResourceError::InvalidRequest(
+            "a resource preview cannot be persisted".into(),
+        ));
+    }
     let packages = match discover_web_packages(&state) {
         Ok(packages) => packages,
         Err(error) => return internal_error(error),
@@ -1535,8 +1541,7 @@ async fn load_granted_resource(
             Err(error) => return resource_error(error),
         },
     };
-    let uploaded_grant = request
-        .persist
+    let uploaded_grant = (request.persist || request.preview)
         .then(|| (request.plugin_id.clone(), request.grant_id.clone()));
     let (response_sender, response_receiver) = mpsc::channel();
     if state
@@ -1546,6 +1551,7 @@ async fn load_granted_resource(
             resource_id: request.target_resource_id,
             path,
             persist: request.persist,
+            preview: request.preview,
             response: response_sender,
         })
         .is_err()
@@ -1559,19 +1565,17 @@ async fn load_granted_resource(
     })
     .await
     {
-        Ok(Ok(Ok(()))) => {
-            if let Some((plugin_id, grant_id)) = uploaded_grant {
-                let _ = state
-                    .resource_browser
-                    .release_owned_grant(&plugin_id, &grant_id);
-            }
-            Json(json!({"status":"ok"})).into_response()
-        }
+        Ok(Ok(Ok(()))) => Json(json!({"status":"ok"})).into_response(),
         Ok(Ok(Err(message))) => resource_error(ResourceError::Backend(message)),
         _ => resource_error(ResourceError::Backend(
             "Desktop runtime did not finish loading the resource".into(),
         )),
     };
+    if let Some((plugin_id, grant_id)) = uploaded_grant {
+        let _ = state
+            .resource_browser
+            .release_owned_grant(&plugin_id, &grant_id);
+    }
     drop(bundled);
     response
 }

@@ -1276,9 +1276,14 @@ impl BrowserHost {
             }
             MenuCommand::ReturnToActiveMode {
                 mode: next,
+                cancel_draft_id,
                 selected_sound_id,
-                ..
             } => {
+                if let Some(draft_id) = cancel_draft_id {
+                    self.apply_controller_session_command(SessionCommand::CancelProgramEdit {
+                        draft_id,
+                    });
+                }
                 if let (Some(instance_id), Some(sound_id)) = (
                     self.store.state().active_instance_id.clone(),
                     selected_sound_id,
@@ -1291,6 +1296,13 @@ impl BrowserHost {
                 self.apply_controller_session_command(SessionCommand::SetActiveMode {
                     mode: mode(next),
                 });
+                let focus_sound_id = self
+                    .store
+                    .state()
+                    .active_instance()
+                    .and_then(|instance| instance.selected_sound_id.as_deref());
+                self.controller
+                    .complete_return_to_active_mode(next, focus_sound_id);
             }
             MenuCommand::ForceHome => {
                 self.audio.silence();

@@ -313,6 +313,22 @@ impl BrowserKeyLabController {
         actions
     }
 
+    /// Finishes the navigation requested by a long BACK gesture.
+    ///
+    /// The menu deliberately waits for the host to confirm the activation so
+    /// it can focus the canonical program returned by the runtime. Native
+    /// hosts already perform this acknowledgement; without it the browser
+    /// changed the session while LITTLE remained on its previous screen.
+    pub fn complete_return_to_active_mode(
+        &mut self,
+        mode: ActiveMode,
+        selected_sound_id: Option<&str>,
+    ) {
+        self.menu
+            .complete_return_to_active_mode(mode, selected_sound_id);
+        self.queue_current_screen(true);
+    }
+
     pub fn has_output(&self) -> bool {
         !self.output.is_empty()
     }

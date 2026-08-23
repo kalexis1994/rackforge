@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { hostJson } from "./host";
+import { hostJson, IS_BROWSER_HOST } from "./host";
 import type { PluginWebDescriptor } from "./types";
 
 export interface PluginCatalogSnapshot {
@@ -16,6 +16,38 @@ let snapshot: PluginCatalogSnapshot = {
 let generation = 0;
 let inFlight: Promise<PluginWebDescriptor[]> | null = null;
 const listeners = new Set<() => void>();
+let browserAssetRefreshInstalled = false;
+let browserAssetReadyRefreshDone = false;
+
+/**
+ * Re-reads installed plugin descriptors when the browser's service worker
+ * starts serving package files.
+ *
+ * An installed plugin's iframe and branding live in Cache Storage. During a
+ * reload the catalog can finish just before a newly activated worker claims
+ * the page; that transient state must not remain cached as "no web view" for
+ * the rest of the visit.
+ */
+function ensureBrowserAssetRefresh() {
+  if (
+    browserAssetRefreshInstalled ||
+    !IS_BROWSER_HOST ||
+    !("serviceWorker" in navigator)
+  ) {
+    return;
+  }
+  browserAssetRefreshInstalled = true;
+  const refresh = () => {
+    browserAssetReadyRefreshDone = true;
+    void refreshPluginCatalog(true).catch(() => undefined);
+  };
+  navigator.serviceWorker.addEventListener("controllerchange", refresh);
+  void navigator.serviceWorker.ready.then(() => {
+    if (navigator.serviceWorker.controller && !browserAssetReadyRefreshDone) {
+      refresh();
+    }
+  }).catch(() => undefined);
+}
 
 function publish(next: PluginCatalogSnapshot) {
   snapshot = next;
@@ -34,6 +66,7 @@ function getSnapshot() {
 }
 
 export function refreshPluginCatalog(force = false): Promise<PluginWebDescriptor[]> {
+  ensureBrowserAssetRefresh();
   if (inFlight && !force) return inFlight;
   if (snapshot.status === "ready" && !force) return Promise.resolve(snapshot.plugins);
 

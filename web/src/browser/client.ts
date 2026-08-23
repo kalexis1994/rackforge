@@ -16,7 +16,12 @@ import {
   type EngineEvent,
   type SeedFile,
 } from "./protocol";
-import { pluginAssetUrl, publishPluginAssets, whenServing } from "./pluginAssets";
+import {
+  canServePluginAssets,
+  pluginAssetUrl,
+  publishPluginAssets,
+  whenServing,
+} from "./pluginAssets";
 import {
   readStoredFiles,
   requestPersistentStorage,
@@ -721,9 +726,10 @@ interface PackagePreview {
  */
 function withAssetUrls(plugin: CatalogEntry, serving: boolean): PluginWebDescriptor {
   const asset = (entry: string) => pluginAssetUrl(plugin.package_root, entry, plugin.version);
+  const assetsAvailable = canServePluginAssets(plugin.package_root, serving);
   return {
     ...plugin,
-    branding: serving && plugin.branding
+    branding: assetsAvailable && plugin.branding
       ? {
           icon_url: asset(plugin.branding.icon),
           banner_url: asset(plugin.branding.banner),
@@ -734,13 +740,19 @@ function withAssetUrls(plugin: CatalogEntry, serving: boolean): PluginWebDescrip
       : null,
     // Without a worker to serve them, a plugin's own pages have no address,
     // and the interface says so rather than loading a broken frame.
-    surfaces: serving
+    surfaces: assetsAvailable
       ? plugin.surfaces.map((surface) => ({
           kind: surface.kind,
           entry_url: asset(surface.entry),
         }))
       : [],
   };
+}
+
+function catalogNeedsAssetWorker(catalog: CatalogEntry[]): boolean {
+  return catalog.some((plugin) =>
+    !canServePluginAssets(plugin.package_root, false)
+    && (plugin.branding !== null || plugin.surfaces.length > 0));
 }
 
 /** One plugin as the host describes it, before its files have an address. */
@@ -805,7 +817,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     if (!answer.ok || !answer.catalog) {
       throw new HostRequestError(answer.error ?? "The plugin catalog is unavailable.", 503);
     }
-    const serving = await whenServing();
+    const serving = catalogNeedsAssetWorker(answer.catalog) ? await whenServing() : false;
     return answer.catalog.map((plugin) => withAssetUrls(plugin, serving)) as T;
   }
   if (path === "/api/v1/host/audio" && method === "GET") {
@@ -1073,7 +1085,8 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     if (!descriptor) {
       throw new HostRequestError("This plugin is not loaded.", 404);
     }
-    return withAssetUrls(descriptor, await whenServing()) as T;
+    const serving = catalogNeedsAssetWorker([descriptor]) ? await whenServing() : false;
+    return withAssetUrls(descriptor, serving) as T;
   }
   throw new HostRequestError(
     "The browser host does not provide this; it is part of an installed RackForge.",

@@ -13,7 +13,8 @@ import "./styles.css";
 const Router = IS_BROWSER_HOST ? HashRouter : BrowserRouter;
 
 if (IS_BROWSER_HOST) {
-  // Deferred so a networked build never loads it at all.
+  // A networked build never loads it. The browser host starts registration
+  // immediately so its first plugin-catalog response cannot outrun the worker.
   void import("./browser/pwa").then(({ registerServiceWorker }) => registerServiceWorker());
 }
 

@@ -14,20 +14,33 @@
 
 import { assetUrl } from "../assets";
 
-/** Registered once the page has settled, so it never competes with the boot. */
-export function registerServiceWorker() {
-  if (!("serviceWorker" in navigator)) return;
-  const register = () => {
-    void navigator.serviceWorker
+let registration: Promise<ServiceWorkerRegistration | null> | null = null;
+
+/**
+ * Starts the worker exactly once and exposes the same promise to consumers
+ * that need it before advertising worker-backed URLs.
+ *
+ * Registration used to wait for the window `load` event. The plugin catalog
+ * can be requested before that event, so its five-second readiness check
+ * occasionally expired and permanently cached a descriptor with no branding
+ * or web surfaces. Starting here is cheap; installation and cache population
+ * still happen asynchronously beside the host boot.
+ */
+export function ensureServiceWorker(): Promise<ServiceWorkerRegistration | null> {
+  if (!("serviceWorker" in navigator)) return Promise.resolve(null);
+  if (!registration) {
+    registration = navigator.serviceWorker
       .register(assetUrl("sw.js"), { scope: import.meta.env.BASE_URL })
       .catch((error: unknown) => {
-        // Not fatal: without it RackForge simply needs the network to start.
+        // Not fatal: packaged plugins are served directly and the application
+        // itself can still run online. Installed plugin pages need the worker.
         console.warn("RackForge could not register its offline worker", error);
+        return null;
       });
-  };
-  if (document.readyState === "complete") {
-    register();
-  } else {
-    window.addEventListener("load", register, { once: true });
   }
+  return registration;
+}
+
+export function registerServiceWorker() {
+  void ensureServiceWorker();
 }

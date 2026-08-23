@@ -5,14 +5,18 @@ four contextual keys, encoder, LEDs, DAW handshake, health checks, and safe
 restoration using the official MIDI/SysEx protocol.
 
 Acquisition, rendering, gesture handling, LED state, and restoration form one
-portable state machine shared by Windows, Android, and Raspberry Pi transports.
+portable state machine shared by Windows, Android, Raspberry Pi, and the
+autonomous browser host. The browser transport uses Web MIDI from the HTTPS
+page and requests SysEx explicitly; when that permission is unavailable,
+ordinary musical MIDI remains available but LITTLE cannot claim the display.
 The RGB profile keeps mode buttons, transport, contextual buttons, and all 16
 pads at dim blue `(10, 40, 64)`.
 
 The package currently publishes the isolated `process-v1` artifact for
 Raspberry Pi while the same I/O-free state machine is prepared for
 `wasm-v1`. Desktop and Android embed the shared implementation through their
-native host adapters.
+native host adapters, and the Web build embeds it in the WASI browser host
+while JavaScript retains ownership of the browser's MIDI input/output handles.
 
 Reserved controls:
 

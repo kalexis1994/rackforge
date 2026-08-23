@@ -3632,6 +3632,8 @@ dependencies = [
  "anyhow",
  "rackforge-audio-api",
  "rackforge-control-api",
+ "rackforge-controller-arturia-keylab-essential-mk3",
+ "rackforge-controller-package",
  "rackforge-core",
  "rackforge-host-capabilities",
  "rackforge-midi-api",
@@ -3639,9 +3641,11 @@ dependencies = [
  "rackforge-plugin-api",
  "rackforge-repository",
  "rackforge-session-api",
+ "rackforge-surface-runtime",
  "semver",
  "serde",
  "serde_json",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]

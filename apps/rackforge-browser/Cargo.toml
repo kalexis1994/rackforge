@@ -11,7 +11,9 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 anyhow.workspace = true
 rackforge-audio-api = { path = "../../crates/rackforge-audio-api" }
+keylab-essential-mk3 = { package = "rackforge-controller-arturia-keylab-essential-mk3", path = "../../hardware/keylab-bridge" }
 rackforge-control-api = { path = "../../crates/rackforge-control-api" }
+rackforge-controller-package = { path = "../../crates/rackforge-controller-package" }
 rackforge-core = { path = "../../crates/rackforge-core" }
 rackforge-host-capabilities = { path = "../../crates/rackforge-host-capabilities" }
 rackforge-midi-api = { path = "../../crates/rackforge-midi-api" }
@@ -19,6 +21,8 @@ rackforge-performance-api = { path = "../../crates/rackforge-performance-api" }
 rackforge-plugin-api = { path = "../../crates/rackforge-plugin-api" }
 rackforge-repository = { path = "../../crates/rackforge-repository" }
 rackforge-session-api = { path = "../../crates/rackforge-session-api" }
+rackforge-surface-runtime = { path = "../../crates/rackforge-surface-runtime" }
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml = "0.9"

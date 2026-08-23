@@ -384,10 +384,7 @@ const BROWSER: &[(Capability, Support)] = &[
     (Capability::MasterLevelAndPan, Support::Yes),
     (Capability::VirtualMidi, Support::Yes),
     (Capability::MidiInput, Support::Yes),
-    (
-        Capability::MidiOutput,
-        Support::Planned("Web MIDI outputs are not connected yet; controller surfaces need them"),
-    ),
+    (Capability::MidiOutput, Support::Unaudited),
     (Capability::MidiHotplug, Support::Yes),
     (Capability::PluginParameters, Support::Yes),
     (Capability::HostPresets, Support::Yes),
@@ -421,10 +418,7 @@ const BROWSER: &[(Capability, Support)] = &[
         ),
     ),
     (Capability::PluginWebSurfaces, Support::Yes),
-    (
-        Capability::ControllerPackages,
-        Support::Planned("blocked on MIDI output, and unavailable in browsers without Web MIDI"),
-    ),
+    (Capability::ControllerPackages, Support::Unaudited),
     (
         Capability::AudioDeviceSelection,
         Support::Unavailable(why::NO_WEB_AUDIO_DEVICES),

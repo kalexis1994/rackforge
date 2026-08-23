@@ -58,6 +58,34 @@ let nextRequestId = 1;
 const pending = new Map<number, Pending>();
 const listeners = new Set<SessionChannelCallbacks>();
 
+interface BrowserMidiInput {
+  id: string;
+  name: string | null;
+  state: string;
+  onmidimessage: ((event: { data?: Uint8Array }) => void) | null;
+}
+
+interface BrowserMidiOutput {
+  id: string;
+  name: string | null;
+  state: string;
+  send(data: Uint8Array, timestamp?: number): void;
+}
+
+interface BrowserMidiAccess {
+  inputs: Map<string, BrowserMidiInput>;
+  outputs: Map<string, BrowserMidiOutput>;
+  onstatechange: (() => void) | null;
+}
+
+let webMidiSupported = false;
+let webMidiSysex = false;
+let midiInputNames: string[] = [];
+let keyLabConnected = false;
+let keyLabOutput: BrowserMidiOutput | null = null;
+const CONTROLLER_COLOR_KEY = "rackforge.controller.arturia-keylab-essential-mk3.color";
+const DEFAULT_CONTROLLER_COLOR = "#145080";
+
 async function fetchBytes(path: string): Promise<Uint8Array> {
   const response = await fetch(assetUrl(path), { cache: "no-store" });
   if (!response.ok) {
@@ -175,6 +203,21 @@ function handleEngineEvent(event: EngineEvent) {
       break;
     case "revision":
       break;
+    case "controller_output": {
+      const output = keyLabOutput;
+      if (!output || output.state !== "connected") break;
+      let timestamp = performance.now();
+      for (const message of event.messages) {
+        try {
+          output.send(new Uint8Array(message.bytes), timestamp);
+        } catch (error) {
+          console.warn("RackForge could not write the Arturia display", error);
+          break;
+        }
+        timestamp += message.settle_after_ms;
+      }
+      break;
+    }
   }
 }
 
@@ -400,44 +443,140 @@ function rejectPending(error: Error) {
  * controls instead.
  */
 function attachWebMidi(node: AudioWorkletNode) {
-  interface MidiInput {
-    onmidimessage: ((event: MIDIMessageEvent) => void) | null;
-  }
-  interface MidiAccess {
-    inputs: Map<string, MidiInput>;
-    onstatechange: (() => void) | null;
-  }
   const midi = (
-    navigator as Navigator & { requestMIDIAccess?: () => Promise<MidiAccess> }
+    navigator as Navigator & {
+      requestMIDIAccess?: (options?: { sysex?: boolean }) => Promise<BrowserMidiAccess>;
+    }
   ).requestMIDIAccess;
+  webMidiSupported = Boolean(midi);
   if (!midi) return;
 
-  const listen = (access: MidiAccess) => {
-    for (const input of access.inputs.values()) {
-      // Assigned rather than added, so a controller that reappears is not
-      // wired twice and does not play every note in duplicate.
-      input.onmidimessage = (event: MIDIMessageEvent) => {
-        const data = event.data;
-        if (!data || data.length === 0 || data[0] >= 0xf0) return;
+  const connect = (access: BrowserMidiAccess, sysex: boolean) => {
+    webMidiSysex = sysex;
+    const reconcile = () => {
+      midiInputNames = [...access.inputs.values()]
+        .filter((input) => input.state === "connected")
+        .map((input) => input.name?.trim() || "MIDI input");
+      const controllerInput = sysex
+        ? [...access.inputs.values()].find(
+            (input) => input.state === "connected" && isKeyLabMainEndpoint(input.name),
+          )
+        : undefined;
+      const controllerOutput = sysex
+        ? [...access.outputs.values()].find(
+            (output) => output.state === "connected" && isKeyLabMainEndpoint(output.name),
+          )
+        : undefined;
+      const nextPair = Boolean(controllerInput && controllerOutput);
+      const pairChanged =
+        keyLabOutput?.id !== controllerOutput?.id || keyLabConnected !== nextPair;
+
+      for (const input of access.inputs.values()) {
+        // Assignment makes hotplug reconciliation idempotent.
+        input.onmidimessage = (event) => {
+          const data = event.data;
+          if (!data || data.length === 0) return;
+          const isController =
+            nextPair && controllerInput?.id === input.id && data[0] < 0xf0;
+          if (data[0] >= 0xf0) return;
+          node.port.postMessage({
+            kind: isController ? "controller_midi" : "midi",
+            data: [data[0], data[1] ?? 0, data[2] ?? 0],
+            length: Math.min(data.length, 3),
+          });
+        };
+      }
+
+      if (pairChanged && keyLabConnected) {
+        node.port.postMessage({ kind: "controller_connection", connected: false });
+      }
+      keyLabOutput = controllerOutput ?? null;
+      keyLabConnected = nextPair;
+      if (pairChanged && nextPair) {
         node.port.postMessage({
-          kind: "midi",
-          data: [data[0], data[1] ?? 0, data[2] ?? 0],
-          length: Math.min(data.length, 3),
+          kind: "controller_setting",
+          color: parseControllerColor(savedControllerColor()),
         });
-      };
-    }
+        node.port.postMessage({ kind: "controller_connection", connected: true });
+      }
+    };
+    reconcile();
+    access.onstatechange = reconcile;
   };
 
+  // LITTLE needs SysEx for the OLED and LEDs. If that permission is denied,
+  // retry ordinary Web MIDI so keys and controls keep working as instruments.
   void midi
-    .call(navigator)
-    .then((access) => {
-      listen(access);
-      // Controllers are plugged in mid-performance far more often than before
-      // one, so the page keeps listening for them rather than asking someone
-      // to reload.
-      access.onstatechange = () => listen(access);
-    })
-    .catch(() => undefined);
+    .call(navigator, { sysex: true })
+    .then((access) => connect(access, true))
+    .catch(() =>
+      midi
+        .call(navigator, { sysex: false })
+        .then((access) => connect(access, false))
+        .catch(() => undefined),
+    );
+}
+
+function requestControllerCatalog(): Promise<{
+  controllers: Array<{
+    id: string;
+    name: string;
+    version: string;
+    enabled: boolean;
+    trust: string;
+    runtime: string;
+    devices: number;
+    settings: Array<{
+      id: string;
+      name: string;
+      kind: string;
+      default: string;
+      page: string | null;
+    }>;
+  }>;
+  error?: string;
+}> {
+  const node = engine;
+  if (!node) return Promise.reject(new Error("The RackForge engine is not running."));
+  const id = nextRequestId++;
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      pending.delete(id);
+      reject(new Error("RackForge did not answer the controller catalog request."));
+    }, 10_000);
+    pending.set(id, {
+      resolve: (response) => resolve(JSON.parse(response)),
+      reject,
+      timeout,
+    });
+    node.port.postMessage({ kind: "controller_catalog", id });
+  });
+}
+
+export function isKeyLabMainEndpoint(name: string | null): boolean {
+  const folded = (name ?? "").trim().toLowerCase();
+  return (
+    (folded.includes("keylab") || folded.includes("kl essential")) &&
+    folded.endsWith("midi") &&
+    !["mcu", "hui", "dinthru", "alv"].some((part) => folded.includes(part))
+  );
+}
+
+function savedControllerColor(): string {
+  try {
+    return localStorage.getItem(CONTROLLER_COLOR_KEY) ?? DEFAULT_CONTROLLER_COLOR;
+  } catch {
+    return DEFAULT_CONTROLLER_COLOR;
+  }
+}
+
+export function parseControllerColor(value: string): [number, number, number] {
+  const normalized = /^#[0-9a-f]{6}$/i.test(value) ? value : DEFAULT_CONTROLLER_COLOR;
+  return [
+    Number.parseInt(normalized.slice(1, 3), 16),
+    Number.parseInt(normalized.slice(3, 5), 16),
+    Number.parseInt(normalized.slice(5, 7), 16),
+  ];
 }
 
 /**
@@ -687,7 +826,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
             buffer_frames: [RENDER_FRAMES],
           },
         ],
-        midi_inputs: [],
+        midi_inputs: [...midiInputNames],
       },
       preferences: {
         schema_version: 1,
@@ -696,10 +835,56 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
         sample_rate_hz: rate,
         buffer_frames: RENDER_FRAMES,
         output_gain_db: 0,
-        midi_inputs: [],
+        midi_inputs: [...midiInputNames],
       },
       runtime_status: engine ? "running" : "stopped",
     } satisfies HostAudioSettings as T;
+  }
+  if (path === "/api/v1/controllers" && method === "GET") {
+    const answer = await requestControllerCatalog();
+    if (answer.error) throw new HostRequestError(answer.error, 503);
+    const runtime = !webMidiSupported
+      ? "Browser · Web MIDI unavailable"
+      : !webMidiSysex
+        ? "Browser · SysEx permission required"
+        : keyLabConnected
+          ? "Browser · connected"
+          : "Browser · waiting for device";
+    return {
+      controllers: answer.controllers.map((controller) => ({
+        ...controller,
+        runtime,
+        settings: controller.settings.map((setting) => ({
+          ...setting,
+          value:
+            setting.id === "key-light-color" ? savedControllerColor() : setting.default,
+        })),
+      })),
+    } as T;
+  }
+  if (
+    path === "/api/v1/controllers/org.rackforge.arturia-keylab-essential-mk3/settings" &&
+    method === "PUT"
+  ) {
+    const request = JSON.parse(String(init.body ?? "{}")) as {
+      values?: Record<string, string>;
+    };
+    const value = request.values?.["key-light-color"];
+    if (value !== undefined) {
+      if (!/^#[0-9a-f]{6}$/i.test(value)) {
+        throw new HostRequestError("The controller color must use #rrggbb.", 400);
+      }
+      try {
+        localStorage.setItem(CONTROLLER_COLOR_KEY, value);
+      } catch {
+        throw new HostRequestError("The browser could not save this setting.", 507);
+      }
+      engine?.port.postMessage({
+        kind: "controller_setting",
+        color: parseControllerColor(value),
+      });
+    }
+    return { status: "ok" } as T;
   }
   if (path.startsWith("/api/v1/resources/uploads") && method === "POST") {
     const name = new URLSearchParams(path.split("?")[1] ?? "").get("name") ?? "package.rfplugin";

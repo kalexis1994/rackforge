@@ -27,6 +27,7 @@ use rackforge_control_api::{
     ControlErrorCode, ControlRequest, ControlResponse, MidiSourceStatus, PluginParameterValue,
     VirtualMidiMessage,
 };
+use rackforge_controller_package::ControllerPackageManifest;
 use rackforge_core::performance::{PerformanceBootstrap, PerformanceRepository};
 use rackforge_core::session::SessionStore;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
@@ -56,6 +57,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::audio::{AudioEngine, RenderRequest};
+use crate::controller::{
+    BrowserControllerAction, BrowserControllerOutput, BrowserKeyLabController,
+};
 
 /// Where the embedder mounts RackForge's private storage.
 pub const DATA_ROOT: &str = "/rackforge";
@@ -111,6 +115,10 @@ pub struct BrowserHost {
     /// Notes a browser client is holding down, so a disconnect can release
     /// exactly the notes that connection owns.
     virtual_notes: BTreeMap<ClientId, BTreeSet<(u8, u8)>>,
+    /// Portable LITTLE state for the bundled Arturia `.rfcontroller`. Web
+    /// MIDI itself stays in the page; this owns no browser handle.
+    controller: BrowserKeyLabController,
+    controller_command_id: u64,
     warnings: Vec<String>,
 }
 
@@ -239,7 +247,7 @@ impl BrowserHost {
         );
         let audio_state = browser_audio_state(sample_rate_hz, maximum_frames, output_channels);
 
-        let host = Self {
+        let mut host = Self {
             stream,
             checkpoint,
             store: SessionStore::new(session)?,
@@ -249,8 +257,11 @@ impl BrowserHost {
             audio,
             audio_state,
             virtual_notes: BTreeMap::new(),
+            controller: BrowserKeyLabController::default(),
+            controller_command_id: 1,
             warnings,
         };
+        host.sync_controller();
         host.save_checkpoint();
         Ok(host)
     }
@@ -272,10 +283,12 @@ impl BrowserHost {
     }
 
     pub fn handle(&mut self, request: ControlRequest) -> ControlResponse {
-        match self.dispatch(request) {
+        let response = match self.dispatch(request) {
             Ok(response) => response,
             Err(failure) => failure.into_response(),
-        }
+        };
+        self.sync_controller();
+        response
     }
 
     fn dispatch(&mut self, request: ControlRequest) -> Result<ControlResponse, Failure> {
@@ -1057,6 +1070,7 @@ impl BrowserHost {
         self.audio.silence();
         self.plugins = plugins;
         self.store = SessionStore::new(session)?;
+        self.sync_controller();
         self.save_checkpoint();
         Ok(warnings)
     }
@@ -1066,8 +1080,164 @@ impl BrowserHost {
         self.audio.push_midi(frame, data, length);
     }
 
+    pub fn controller_connect(&mut self) {
+        self.sync_controller();
+        self.controller.connect();
+    }
+
+    pub fn controller_disconnect(&mut self) {
+        self.controller.disconnect();
+    }
+
+    pub fn push_controller_midi(&mut self, data: [u8; 3], length: u8) {
+        let outcome = self.controller.handle_midi(&data[..usize::from(length)]);
+        if !outcome.consumed {
+            self.audio.push_midi(0, data, length);
+        }
+        self.apply_controller_actions(outcome.actions);
+    }
+
+    pub fn controller_output_pending(&self) -> bool {
+        self.controller.has_output()
+    }
+
+    pub fn drain_controller_output(&mut self) -> Vec<BrowserControllerOutput> {
+        self.controller.drain_output()
+    }
+
+    pub fn set_controller_color(&mut self, rgb: [u8; 3]) {
+        self.controller.set_ambient_color(rgb);
+    }
+
+    pub fn controller_catalog(&self) -> serde_json::Value {
+        let manifest: ControllerPackageManifest =
+            toml::from_str(keylab_essential_mk3::controller::PACKAGE_MANIFEST)
+                .expect("the bundled Arturia controller manifest is validated at build time");
+        serde_json::json!({
+            "controllers": [{
+                "id": manifest.id,
+                "name": manifest.name,
+                "version": manifest.version,
+                "enabled": true,
+                "trust": "official",
+                "runtime": "Browser",
+                "devices": manifest.devices.len(),
+                "settings": manifest.settings.into_iter().map(|setting| serde_json::json!({
+                    "id": setting.id,
+                    "name": setting.name,
+                    "kind": match setting.kind {
+                        rackforge_controller_package::ControllerSettingKind::Color => "color",
+                    },
+                    "default": setting.default,
+                    "page": setting.page,
+                })).collect::<Vec<_>>(),
+            }]
+        })
+    }
+
+    fn sync_controller(&mut self) {
+        self.controller.sync(self.store.state());
+    }
+
+    fn apply_controller_actions(&mut self, actions: Vec<BrowserControllerAction>) {
+        for action in actions {
+            let command_ref = CommandRef {
+                client_id: ClientId::new("controller.browser.arturia-keylab")
+                    .expect("built-in controller client id is valid"),
+                command_id: self.controller_command_id,
+            };
+            self.controller_command_id = self.controller_command_id.saturating_add(1);
+            match action {
+                BrowserControllerAction::MasterLevel(level) => {
+                    let _ = self.apply(SessionCommand::SetMasterLevel { level }, &command_ref);
+                }
+                BrowserControllerAction::MasterPan(pan) => {
+                    let _ = self.apply(SessionCommand::SetMasterPan { pan }, &command_ref);
+                }
+                BrowserControllerAction::Menu(command) => {
+                    self.apply_controller_menu_command(command, &command_ref);
+                }
+            }
+        }
+        self.sync_controller();
+    }
+
+    fn apply_controller_menu_command(
+        &mut self,
+        command: rackforge_surface_runtime::MenuCommand,
+        command_ref: &CommandRef,
+    ) {
+        use rackforge_surface_runtime::{ActiveMode, MenuCommand};
+        let mode = |mode| match mode {
+            ActiveMode::Idle => SurfaceMode::Idle,
+            ActiveMode::Live => SurfaceMode::Live,
+            ActiveMode::Play => SurfaceMode::Play,
+        };
+        match command {
+            MenuCommand::SetActiveMode { mode: next } => {
+                let _ = self.apply(
+                    SessionCommand::SetActiveMode { mode: mode(next) },
+                    command_ref,
+                );
+            }
+            MenuCommand::SelectPlugin { instance_id } => {
+                if let Ok(instance_id) = InstanceId::new(instance_id) {
+                    let _ = self.apply(SessionCommand::SelectPlugin { instance_id }, command_ref);
+                }
+            }
+            MenuCommand::SelectSound { id } => {
+                if let Some(instance_id) = self.store.state().active_instance_id.clone() {
+                    let _ = self.apply(
+                        SessionCommand::SelectSound {
+                            instance_id,
+                            sound_id: id,
+                        },
+                        command_ref,
+                    );
+                }
+            }
+            MenuCommand::ReturnToActiveMode {
+                mode: next,
+                selected_sound_id,
+                ..
+            } => {
+                if let (Some(instance_id), Some(sound_id)) = (
+                    self.store.state().active_instance_id.clone(),
+                    selected_sound_id,
+                ) {
+                    let _ = self.apply(
+                        SessionCommand::SelectSound {
+                            instance_id,
+                            sound_id,
+                        },
+                        command_ref,
+                    );
+                }
+                let _ = self.apply(
+                    SessionCommand::SetActiveMode { mode: mode(next) },
+                    command_ref,
+                );
+            }
+            MenuCommand::ForceHome => {
+                self.audio.silence();
+                let _ = self.apply(
+                    SessionCommand::SetActiveMode {
+                        mode: SurfaceMode::Idle,
+                    },
+                    command_ref,
+                );
+            }
+            // The autonomous browser host does not render racks yet. Keep the
+            // menus visible, but never pretend an unsupported LIVE/config
+            // operation was applied.
+            _ => {}
+        }
+    }
+
     /// Renders one interleaved block for the page's audio callback.
     pub fn render(&mut self, frames: u32) -> &[f32] {
+        let actions = self.controller.poll();
+        self.apply_controller_actions(actions);
         let active = self.store.state().active_instance_id.clone();
         let request = RenderRequest { frames };
         let Some(index) = active.and_then(|id| {

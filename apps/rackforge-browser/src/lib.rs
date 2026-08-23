@@ -11,6 +11,7 @@
 //! protocol the native gateway speaks over its control socket.
 
 pub mod audio;
+pub mod controller;
 pub mod host;
 
 use host::BrowserHost;
@@ -371,6 +372,78 @@ pub extern "C" fn rf_push_midi(frame: u32, status: u8, data1: u8, data2: u8, len
             host.push_midi(frame, [status, data1, data2], length.clamp(1, 3));
         }
     });
+}
+
+/// Announces that the page has opened the certified KeyLab MIDI input/output
+/// pair with SysEx permission.
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_controller_connect() {
+    HOST.with(|host| {
+        if let Some(host) = host.borrow_mut().as_mut() {
+            host.controller_connect();
+        }
+    });
+}
+
+/// Restores the keyboard before the browser releases its MIDI output.
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_controller_disconnect() {
+    HOST.with(|host| {
+        if let Some(host) = host.borrow_mut().as_mut() {
+            host.controller_disconnect();
+        }
+    });
+}
+
+/// Delivers MIDI known to originate at the certified KeyLab endpoint.
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_push_controller_midi(status: u8, data1: u8, data2: u8, length: u8) {
+    HOST.with(|host| {
+        if let Some(host) = host.borrow_mut().as_mut() {
+            host.push_controller_midi([status, data1, data2], length.clamp(1, 3));
+        }
+    });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_controller_output_pending() -> u32 {
+    HOST.with(|host| {
+        host.borrow()
+            .as_ref()
+            .is_some_and(BrowserHost::controller_output_pending) as u32
+    })
+}
+
+/// Returns and clears the pending Web MIDI output plan.
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_controller_output() -> i32 {
+    HOST.with(|host| match host.borrow_mut().as_mut() {
+        Some(host) => publish(&host.drain_controller_output()),
+        None => publish(&Vec::<controller::BrowserControllerOutput>::new()),
+    })
+}
+
+/// Applies the one setting currently exposed by the bundled controller.
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_controller_set_color(red: u8, green: u8, blue: u8) {
+    HOST.with(|host| {
+        if let Some(host) = host.borrow_mut().as_mut() {
+            host.set_controller_color([red, green, blue]);
+        }
+    });
+}
+
+/// Describes the bundled controller from its embedded `.rfcontroller`
+/// manifest, keeping the web catalog version in lockstep with native builds.
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_controller_catalog() -> i32 {
+    HOST.with(|host| match host.borrow().as_ref() {
+        Some(host) => publish(&host.controller_catalog()),
+        None => publish(&serde_json::json!({
+            "controllers": [],
+            "error": "the RackForge host is not open",
+        })),
+    })
 }
 
 /// Renders one interleaved block and returns a pointer to it. The block holds

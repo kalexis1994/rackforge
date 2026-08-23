@@ -16,7 +16,7 @@ cannot exist on that host, and `unaudited` means nobody has checked yet.
 | Set master level and pan | yes | yes | yes | yes |
 | Play from an on-screen keyboard or pads | yes | yes | yes | yes |
 | Play from a connected MIDI controller | yes | yes | yes | yes |
-| Send MIDI to hardware | unaudited | unaudited | yes | planned |
+| Send MIDI to hardware | unaudited | unaudited | yes | unaudited |
 | Notice controllers connecting while running | unaudited | unaudited | yes | yes |
 | Read and write plugin parameters | yes | yes | yes | yes |
 | Save, load, rename and delete host presets | yes | yes | yes | yes |
@@ -29,7 +29,7 @@ cannot exist on that host, and `unaudited` means nobody has checked yet.
 | Remove an installed plugin and its data | yes | yes | yes | yes |
 | Give a plugin a sound library or ROM it declares | yes | yes | yes | planned |
 | Show a plugin's own PLAY and CONFIG interfaces | yes | yes | yes | yes |
-| Drive hardware surfaces from a .rfcontroller | unaudited | unaudited | yes | planned |
+| Drive hardware surfaces from a .rfcontroller | unaudited | unaudited | yes | unaudited |
 | Choose the audio device and buffer size | yes | yes | yes | no |
 | Keep instruments and performances between runs | yes | yes | yes | yes |
 | Restore the previous session on the next start | yes | yes | yes | yes |
@@ -40,13 +40,11 @@ cannot exist on that host, and `unaudited` means nobody has checked yet.
 
 ### Browser
 
-- **Send MIDI to hardware** (planned): Web MIDI outputs are not connected yet; controller surfaces need them
 - **Create, preview and save Custom Programs** (planned): the program-draft commands are not implemented in the browser host
 - **Audition a program and keep the selected one** (planned): audition leases are not implemented in the browser host
 - **Play a Rack, with every slot rendered** (planned): the page renders the active PLAY instrument; Rack slots are not mixed yet
 - **Edit one Rack slot without disturbing PLAY** (planned): isolated plugin state is not exposed by the browser host yet
 - **Give a plugin a sound library or ROM it declares** (planned): the host installs a chosen file into a plugin's private storage and reloads it, but no packaged plugin here asks for one, so the path a plugin's own interface takes is unproven
-- **Drive hardware surfaces from a .rfcontroller** (planned): blocked on MIDI output, and unavailable in browsers without Web MIDI
 - **Choose the audio device and buffer size** (no): a page renders into the output the browser gives it and cannot enumerate or configure audio hardware
 - **Survive a plugin that stops responding** (no): the engine inside a page does not meter guest execution, so a plugin that stops responding blocks the audio callback
 

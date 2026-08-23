@@ -186,6 +186,7 @@ const PAGE_SIDE = new Map([
   ["persistent_storage", "the page files the host's storage in IndexedDB"],
   ["offline_operation", "the service worker serves the site with the network off"],
   ["midi_input", "Web MIDI delivers messages the page forwards as live MIDI"],
+  ["midi_output", "the page schedules certified SysEx plans on a Web MIDI output"],
   ["midi_hotplug", "the page re-attaches inputs when Web MIDI reports a change"],
 ]);
 
@@ -310,6 +311,25 @@ const PROBES = {
     const listed = JSON.parse(readResponse(host.rf_plugin_catalog()));
     const declared = listed.catalog?.some((plugin) => plugin.surfaces?.length > 0);
     return declared ? null : "no loaded plugin declares a web surface";
+  },
+  controller_packages: () => {
+    host.rf_controller_connect();
+    if (host.rf_controller_output_pending() !== 1) {
+      return "the bundled controller produced no acquisition plan";
+    }
+    const messages = JSON.parse(readResponse(host.rf_controller_output()));
+    const valid =
+      messages.length > 3 &&
+      messages.every(
+        (message) =>
+          Array.isArray(message.bytes) &&
+          message.bytes[0] === 0xf0 &&
+          message.bytes.at(-1) === 0xf7 &&
+          Number.isInteger(message.settle_after_ms),
+      );
+    host.rf_controller_disconnect();
+    readResponse(host.rf_controller_output());
+    return valid ? null : "the bundled controller returned an invalid SysEx plan";
   },
   plugin_install: () => {
     if (!packagePath) return "no .rfplugin was given to install";

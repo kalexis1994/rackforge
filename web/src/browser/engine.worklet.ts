@@ -53,6 +53,18 @@ interface HostExports {
     data2: number,
     length: number,
   ) => void;
+  rf_controller_connect: () => void;
+  rf_controller_disconnect: () => void;
+  rf_push_controller_midi: (
+    status: number,
+    data1: number,
+    data2: number,
+    length: number,
+  ) => void;
+  rf_controller_output_pending: () => number;
+  rf_controller_output: () => number;
+  rf_controller_set_color: (red: number, green: number, blue: number) => void;
+  rf_controller_catalog: () => number;
   rf_render: (frames: number) => number;
   rf_inspect_plugin: (pointer: number, length: number) => number;
   rf_install_plugin: (pointer: number, length: number) => number;
@@ -154,6 +166,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
       case "request": {
         const response = this.#request(command.request);
         this.#post({ kind: "response", id: command.id, response });
+        this.#publishControllerOutput();
         if (!READ_ONLY_OPERATIONS.has(operationOf(command.request))) {
           this.#publishStorage();
         }
@@ -168,12 +181,38 @@ class RackForgeEngine extends AudioWorkletProcessor {
         if (!READ_ONLY_PACKAGE_ACTIONS.has(command.action)) {
           this.#publishStorage();
         }
+        this.#publishControllerOutput();
         break;
       case "midi": {
         const [status, data1, data2] = command.data;
         this.#host?.rf_push_midi(0, status, data1, data2, command.length);
         break;
       }
+      case "controller_midi": {
+        const [status, data1, data2] = command.data;
+        this.#host?.rf_push_controller_midi(status, data1, data2, command.length);
+        this.#publishControllerOutput();
+        break;
+      }
+      case "controller_connection":
+        if (command.connected) {
+          this.#host?.rf_controller_connect();
+        } else {
+          this.#host?.rf_controller_disconnect();
+        }
+        this.#publishControllerOutput();
+        break;
+      case "controller_setting":
+        this.#host?.rf_controller_set_color(...command.color);
+        this.#publishControllerOutput();
+        break;
+      case "controller_catalog":
+        this.#post({
+          kind: "response",
+          id: command.id,
+          response: this.#readResponse(this.#host?.rf_controller_catalog() ?? 0),
+        });
+        break;
     }
   }
 
@@ -302,6 +341,18 @@ class RackForgeEngine extends AudioWorkletProcessor {
     });
   }
 
+  #publishControllerOutput() {
+    const host = this.#host;
+    if (!host || host.rf_controller_output_pending() === 0) return;
+    const messages = JSON.parse(this.#readResponse(host.rf_controller_output())) as Array<{
+      bytes: number[];
+      settle_after_ms: number;
+    }>;
+    if (messages.length > 0) {
+      this.#post({ kind: "controller_output", messages });
+    }
+  }
+
   #readResponse(length: number): string {
     const host = this.#host;
     if (!host || length <= 0) {
@@ -330,6 +381,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
 
     const frames = Math.min(output[0].length, this.#frames);
     const pointer = host.rf_render(frames);
+    this.#publishControllerOutput();
     if (pointer === 0) {
       for (const channel of output) {
         channel.fill(0);

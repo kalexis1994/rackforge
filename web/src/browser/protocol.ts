@@ -65,11 +65,36 @@ export interface MidiMessage {
   length: number;
 }
 
+export interface ControllerMidiMessage {
+  kind: "controller_midi";
+  data: [number, number, number];
+  length: number;
+}
+
+export interface ControllerConnectionMessage {
+  kind: "controller_connection";
+  connected: boolean;
+}
+
+export interface ControllerSettingMessage {
+  kind: "controller_setting";
+  color: [number, number, number];
+}
+
+export interface ControllerCatalogMessage {
+  kind: "controller_catalog";
+  id: number;
+}
+
 export type EngineCommand =
   | BootMessage
   | RequestMessage
   | PackageMessage
-  | MidiMessage;
+  | MidiMessage
+  | ControllerMidiMessage
+  | ControllerConnectionMessage
+  | ControllerSettingMessage
+  | ControllerCatalogMessage;
 
 /**
  * Sent as soon as the processor exists. A port message posted before that is
@@ -111,12 +136,18 @@ export interface RevisionMessage {
   revision: number;
 }
 
+export interface ControllerOutputMessage {
+  kind: "controller_output";
+  messages: Array<{ bytes: number[]; settle_after_ms: number }>;
+}
+
 export type EngineEvent =
   | ReadyMessage
   | BootedMessage
   | ResponseMessage
   | StorageMessage
-  | RevisionMessage;
+  | RevisionMessage
+  | ControllerOutputMessage;
 
 /**
  * Converts a worklet exception into the response the caller is waiting for.
@@ -139,6 +170,13 @@ export function engineFailureEvent(
       kind: "response",
       id: command.id,
       response: JSON.stringify({ status: "error", code: "internal", message }),
+    };
+  }
+  if (command.kind === "controller_catalog") {
+    return {
+      kind: "response",
+      id: command.id,
+      response: JSON.stringify({ controllers: [], error: message }),
     };
   }
   if (command.kind === "boot") {

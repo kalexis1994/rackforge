@@ -65,6 +65,7 @@ interface HostExports {
   rf_controller_output: () => number;
   rf_controller_set_color: (red: number, green: number, blue: number) => void;
   rf_controller_catalog: () => number;
+  rf_session_revision: () => number;
   rf_render: (frames: number) => number;
   rf_inspect_plugin: (pointer: number, length: number) => number;
   rf_install_plugin: (pointer: number, length: number) => number;
@@ -145,6 +146,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
   #channels = 2;
   #frames = 128;
   #failed = false;
+  #sessionRevision = 0;
 
   constructor() {
     super();
@@ -192,6 +194,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
         const [status, data1, data2] = command.data;
         this.#host?.rf_push_controller_midi(status, data1, data2, command.length);
         this.#publishControllerOutput();
+        this.#publishRevisionIfChanged();
         break;
       }
       case "controller_connection":
@@ -256,6 +259,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
     wasi.initialize(instance as { exports: { memory: WebAssembly.Memory } });
     this.#pluginHost.attach(exports.memory);
     this.#host = exports;
+    this.#sessionRevision = exports.rf_session_revision();
     this.#frames = maximumFrames;
     this.#channels = channels;
 
@@ -353,6 +357,15 @@ class RackForgeEngine extends AudioWorkletProcessor {
     }
   }
 
+  #publishRevisionIfChanged() {
+    const host = this.#host;
+    if (!host) return;
+    const revision = host.rf_session_revision();
+    if (revision === this.#sessionRevision) return;
+    this.#sessionRevision = revision;
+    this.#post({ kind: "revision", revision });
+  }
+
   #readResponse(length: number): string {
     const host = this.#host;
     if (!host || length <= 0) {
@@ -382,6 +395,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
     const frames = Math.min(output[0].length, this.#frames);
     const pointer = host.rf_render(frames);
     this.#publishControllerOutput();
+    this.#publishRevisionIfChanged();
     if (pointer === 0) {
       for (const channel of output) {
         channel.fill(0);

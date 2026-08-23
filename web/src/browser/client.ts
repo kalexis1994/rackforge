@@ -207,6 +207,7 @@ function handleEngineEvent(event: EngineEvent) {
       milestones.ready?.();
       break;
     case "revision":
+      void publishSnapshot();
       break;
     case "controller_output": {
       const output = keyLabOutput;
@@ -254,7 +255,13 @@ export async function startBrowserHost(): Promise<void> {
   booting = (async () => {
     const audio = new AudioContext({ latencyHint: "interactive" });
     await audio.audioWorklet.addModule(engineWorkletUrl);
-    const [wasm, files] = await Promise.all([fetchBytes(HOST_MODULE), loadStorage()]);
+    // The worker keeps non-hashed files available offline. Tie the host ABI to
+    // the hashed UI build so a deployment can never pair a new worklet with
+    // yesterday's cached WebAssembly exports.
+    const [wasm, files] = await Promise.all([
+      fetchBytes(`${HOST_MODULE}?v=${encodeURIComponent(__UI_REVISION__)}`),
+      loadStorage(),
+    ]);
 
     const node = new AudioWorkletNode(audio, ENGINE_PROCESSOR, {
       numberOfInputs: 0,
@@ -332,12 +339,27 @@ export function browserHostError(): string | null {
  * changes the session behind the interface's back — installing a plugin, for
  * one — the channel republishes it.
  */
+let snapshotPublishing: Promise<void> | null = null;
+let snapshotQueued = false;
+
 async function publishSnapshot(): Promise<void> {
   if (!engine || listeners.size === 0) return;
-  const snapshot = await send(JSON.stringify({ op: "snapshot" }));
-  for (const listener of listeners) {
-    listener.onMessage(snapshot);
+  if (snapshotPublishing) {
+    snapshotQueued = true;
+    return snapshotPublishing;
   }
+  snapshotPublishing = (async () => {
+    do {
+      snapshotQueued = false;
+      const snapshot = await send(JSON.stringify({ op: "snapshot" }));
+      for (const listener of listeners) {
+        listener.onMessage(snapshot);
+      }
+    } while (snapshotQueued);
+  })().finally(() => {
+    snapshotPublishing = null;
+  });
+  return snapshotPublishing;
 }
 
 /** Resolves once the browser has let the context start. */

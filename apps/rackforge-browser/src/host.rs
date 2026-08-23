@@ -33,9 +33,12 @@ use rackforge_core::session::SessionStore;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{
     CompiledParameterLink, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
-    PluginStorage,
+    PluginStorage, compile_semantic_parameter_links,
 };
-use rackforge_midi_api::{MidiSourceDescriptor, MidiSourceId, MidiSourceKey};
+use rackforge_midi_api::{
+    IngressMidiEvent, MidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
+    ParameterLinkPassThrough,
+};
 use rackforge_performance_api::{
     LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
 };
@@ -71,6 +74,7 @@ const STORE_DIRECTORY: &str = "store";
 /// The browser cannot enumerate audio hardware, so it reports the single
 /// output the page gave it.
 const BROWSER_DEVICE_ID: &str = "browser.audio-output";
+const BROWSER_KEYLAB_SOURCE_KEY: MidiSourceKey = MidiSourceKey::new(1);
 
 /// The audio format the page renders in.
 #[derive(Clone, Copy)]
@@ -119,6 +123,7 @@ pub struct BrowserHost {
     /// MIDI itself stays in the page; this owns no browser handle.
     controller: BrowserKeyLabController,
     controller_command_id: u64,
+    parameter_links: Vec<CompiledParameterLink>,
     warnings: Vec<String>,
 }
 
@@ -259,8 +264,10 @@ impl BrowserHost {
             virtual_notes: BTreeMap::new(),
             controller: BrowserKeyLabController::default(),
             controller_command_id: 1,
+            parameter_links: Vec::new(),
             warnings,
         };
+        host.rebuild_parameter_links()?;
         host.sync_controller();
         host.save_checkpoint();
         Ok(host)
@@ -741,6 +748,20 @@ impl BrowserHost {
             .record(Some(command_ref.clone()), event)
             .map(|envelope| vec![envelope])
             .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
+        if recorded.iter().any(|envelope| {
+            matches!(
+                envelope.event,
+                SessionEvent::ParameterLinkUpserted { .. }
+                    | SessionEvent::ParameterLinkRemoved { .. }
+            )
+        }) {
+            self.rebuild_parameter_links().map_err(|error| {
+                Failure::new(
+                    ControlErrorCode::Internal,
+                    format!("rebuilding MIDI parameter links: {error:#}"),
+                )
+            })?;
+        }
         self.save_checkpoint();
         Ok(recorded)
     }
@@ -1070,6 +1091,7 @@ impl BrowserHost {
         self.audio.silence();
         self.plugins = plugins;
         self.store = SessionStore::new(session)?;
+        self.rebuild_parameter_links()?;
         self.sync_controller();
         self.save_checkpoint();
         Ok(warnings)
@@ -1091,7 +1113,25 @@ impl BrowserHost {
 
     pub fn push_controller_midi(&mut self, data: [u8; 3], length: u8) {
         let outcome = self.controller.handle_midi(&data[..usize::from(length)]);
-        if !outcome.consumed {
+        let mut consumed = outcome.consumed;
+        if let Ok(packet) = MidiPacket::new(0, &data[..usize::from(length)]) {
+            let ingress = IngressMidiEvent {
+                source: BROWSER_KEYLAB_SOURCE_KEY,
+                packet,
+            };
+            let active_instance_id = self.store.state().active_instance_id.as_ref();
+            for link in self.parameter_links.iter().filter(|link| {
+                active_instance_id
+                    .is_some_and(|instance_id| link.link.instance_id == instance_id.as_str())
+            }) {
+                let Some(mapped) = link.apply(ingress) else {
+                    continue;
+                };
+                consumed |= mapped.pass_through == ParameterLinkPassThrough::Consume;
+                self.audio.push_parameter(mapped.event);
+            }
+        }
+        if !consumed {
             self.audio.push_midi(0, data, length);
         }
         self.apply_controller_actions(outcome.actions);
@@ -1139,34 +1179,74 @@ impl BrowserHost {
         self.controller.sync(self.store.state());
     }
 
+    fn rebuild_parameter_links(&mut self) -> Result<()> {
+        let controller = keylab_essential_mk3::controller::package_profile();
+        let Some(profile) = controller.semantic_profile.as_ref() else {
+            self.parameter_links.clear();
+            return Ok(());
+        };
+        let source_id = MidiSourceId::new(profile.source_id.clone()).map_err(anyhow::Error::msg)?;
+        let explicit = &self.store.state().parameter_links;
+        let mut compiled = Vec::new();
+        for plugin in &self.plugins {
+            compiled.extend(compile_semantic_parameter_links(
+                controller.driver_id.as_str(),
+                controller.name.as_str(),
+                profile,
+                &source_id,
+                BROWSER_KEYLAB_SOURCE_KEY,
+                plugin.instance_id.as_str(),
+                plugin.runtime.parameters(),
+                explicit,
+            )?);
+            for link in explicit.iter().filter(|link| {
+                link.instance_id == plugin.instance_id.as_str()
+                    && link.source.source_id == source_id
+            }) {
+                compiled.push(CompiledParameterLink::new(
+                    link.clone(),
+                    BROWSER_KEYLAB_SOURCE_KEY,
+                    plugin.runtime.parameters(),
+                )?);
+            }
+        }
+        self.parameter_links = compiled;
+        Ok(())
+    }
+
+    fn next_controller_command_ref(&mut self) -> CommandRef {
+        let command_ref = CommandRef {
+            client_id: ClientId::new("controller.browser.arturia-keylab")
+                .expect("built-in controller client id is valid"),
+            command_id: self.controller_command_id,
+        };
+        self.controller_command_id = self.controller_command_id.saturating_add(1);
+        command_ref
+    }
+
+    fn apply_controller_session_command(&mut self, command: SessionCommand) {
+        let command_ref = self.next_controller_command_ref();
+        let _ = self.apply(command, &command_ref);
+    }
+
     fn apply_controller_actions(&mut self, actions: Vec<BrowserControllerAction>) {
         for action in actions {
-            let command_ref = CommandRef {
-                client_id: ClientId::new("controller.browser.arturia-keylab")
-                    .expect("built-in controller client id is valid"),
-                command_id: self.controller_command_id,
-            };
-            self.controller_command_id = self.controller_command_id.saturating_add(1);
             match action {
                 BrowserControllerAction::MasterLevel(level) => {
-                    let _ = self.apply(SessionCommand::SetMasterLevel { level }, &command_ref);
+                    self.apply_controller_session_command(SessionCommand::SetMasterLevel { level });
                 }
                 BrowserControllerAction::MasterPan(pan) => {
-                    let _ = self.apply(SessionCommand::SetMasterPan { pan }, &command_ref);
+                    self.apply_controller_session_command(SessionCommand::SetMasterPan { pan });
                 }
                 BrowserControllerAction::Menu(command) => {
-                    self.apply_controller_menu_command(command, &command_ref);
+                    self.apply_controller_menu_command(command);
                 }
             }
         }
         self.sync_controller();
     }
 
-    fn apply_controller_menu_command(
-        &mut self,
-        command: rackforge_surface_runtime::MenuCommand,
-        command_ref: &CommandRef,
-    ) {
+    fn apply_controller_menu_command(&mut self, command: rackforge_surface_runtime::MenuCommand) {
         use rackforge_surface_runtime::{ActiveMode, MenuCommand};
         let mode = |mode| match mode {
             ActiveMode::Idle => SurfaceMode::Idle,
@@ -1175,25 +1255,23 @@ impl BrowserHost {
         };
         match command {
             MenuCommand::SetActiveMode { mode: next } => {
-                let _ = self.apply(
-                    SessionCommand::SetActiveMode { mode: mode(next) },
-                    command_ref,
-                );
+                self.apply_controller_session_command(SessionCommand::SetActiveMode {
+                    mode: mode(next),
+                });
             }
             MenuCommand::SelectPlugin { instance_id } => {
                 if let Ok(instance_id) = InstanceId::new(instance_id) {
-                    let _ = self.apply(SessionCommand::SelectPlugin { instance_id }, command_ref);
+                    self.apply_controller_session_command(SessionCommand::SelectPlugin {
+                        instance_id,
+                    });
                 }
             }
             MenuCommand::SelectSound { id } => {
                 if let Some(instance_id) = self.store.state().active_instance_id.clone() {
-                    let _ = self.apply(
-                        SessionCommand::SelectSound {
-                            instance_id,
-                            sound_id: id,
-                        },
-                        command_ref,
-                    );
+                    self.apply_controller_session_command(SessionCommand::SelectSound {
+                        instance_id,
+                        sound_id: id,
+                    });
                 }
             }
             MenuCommand::ReturnToActiveMode {
@@ -1205,33 +1283,30 @@ impl BrowserHost {
                     self.store.state().active_instance_id.clone(),
                     selected_sound_id,
                 ) {
-                    let _ = self.apply(
-                        SessionCommand::SelectSound {
-                            instance_id,
-                            sound_id,
-                        },
-                        command_ref,
-                    );
+                    self.apply_controller_session_command(SessionCommand::SelectSound {
+                        instance_id,
+                        sound_id,
+                    });
                 }
-                let _ = self.apply(
-                    SessionCommand::SetActiveMode { mode: mode(next) },
-                    command_ref,
-                );
+                self.apply_controller_session_command(SessionCommand::SetActiveMode {
+                    mode: mode(next),
+                });
             }
             MenuCommand::ForceHome => {
                 self.audio.silence();
-                let _ = self.apply(
-                    SessionCommand::SetActiveMode {
-                        mode: SurfaceMode::Idle,
-                    },
-                    command_ref,
-                );
+                self.apply_controller_session_command(SessionCommand::SetActiveMode {
+                    mode: SurfaceMode::Idle,
+                });
             }
             // The autonomous browser host does not render racks yet. Keep the
             // menus visible, but never pretend an unsupported LIVE/config
             // operation was applied.
             _ => {}
         }
+    }
+
+    pub fn revision(&self) -> u32 {
+        self.store.state().revision.get().min(u64::from(u32::MAX)) as u32
     }
 
     /// Renders one interleaved block for the page's audio callback.

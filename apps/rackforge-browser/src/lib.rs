@@ -446,6 +446,13 @@ pub extern "C" fn rf_controller_catalog() -> i32 {
     })
 }
 
+/// Current session revision, used by the worklet to publish controller-driven
+/// changes that did not originate in a web control request.
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_session_revision() -> u32 {
+    HOST.with(|host| host.borrow().as_ref().map_or(0, BrowserHost::revision))
+}
+
 /// Renders one interleaved block and returns a pointer to it. The block holds
 /// `frames * channels` `f32` samples and stays valid until the next render.
 #[unsafe(no_mangle)]

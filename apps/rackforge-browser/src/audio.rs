@@ -7,7 +7,7 @@
 //! rather than stepping them at a block boundary.
 
 use rackforge_core::PluginInstance;
-use rackforge_plugin_api::abi::MidiEventV1;
+use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use rackforge_session_api::{MasterLevel, MasterPan};
 
 /// How long a master level or pan change takes to reach its target. Matches
@@ -16,6 +16,7 @@ const MASTER_SMOOTHING_FRAMES: u32 = 256;
 /// Live messages waiting for the next block. Beyond this a controller is
 /// sending faster than the page can render, and the oldest is dropped.
 const MIDI_QUEUE_CAPACITY: usize = 512;
+const PARAMETER_QUEUE_CAPACITY: usize = 512;
 
 #[derive(Clone, Copy)]
 pub struct RenderRequest {
@@ -65,6 +66,7 @@ pub struct AudioEngine {
     input: Vec<f32>,
     output: Vec<f32>,
     midi: Vec<MidiEventV1>,
+    parameters: Vec<ParameterEventV1>,
     level: Smoothed,
     left: Smoothed,
     right: Smoothed,
@@ -86,6 +88,7 @@ impl AudioEngine {
             input: Vec::new(),
             output: vec![0.0; samples],
             midi: Vec::with_capacity(MIDI_QUEUE_CAPACITY),
+            parameters: Vec::with_capacity(PARAMETER_QUEUE_CAPACITY),
             level: Smoothed::new(level.amplitude()),
             left: Smoothed::new(left),
             right: Smoothed::new(right),
@@ -106,6 +109,7 @@ impl AudioEngine {
     /// note-off to a voice that never received its note-on.
     pub fn silence(&mut self) {
         self.midi.clear();
+        self.parameters.clear();
     }
 
     pub fn push_midi(&mut self, frame: u32, data: [u8; 3], length: u8) {
@@ -119,10 +123,18 @@ impl AudioEngine {
         });
     }
 
+    pub fn push_parameter(&mut self, event: ParameterEventV1) {
+        if self.parameters.len() >= PARAMETER_QUEUE_CAPACITY {
+            self.parameters.remove(0);
+        }
+        self.parameters.push(event);
+    }
+
     pub fn render_silence(&mut self, request: RenderRequest) -> &[f32] {
         let samples = self.block_samples(request);
         self.output[..samples].fill(0.0);
         self.midi.clear();
+        self.parameters.clear();
         &self.output[..samples]
     }
 
@@ -136,6 +148,8 @@ impl AudioEngine {
         let samples = self.block_samples(request);
         self.midi.sort_by_key(|event| event.frame);
         self.midi.retain(|event| event.frame < frames);
+        self.parameters.sort_by_key(|event| event.frame);
+        self.parameters.retain(|event| event.frame < frames);
 
         let rendered = instance.process_interleaved(
             &self.input,
@@ -144,9 +158,10 @@ impl AudioEngine {
             0,
             self.channels,
             &self.midi,
-            &[],
+            &self.parameters,
         );
         self.midi.clear();
+        self.parameters.clear();
         if rendered.is_err() {
             self.output[..samples].fill(0.0);
             return &self.output[..samples];

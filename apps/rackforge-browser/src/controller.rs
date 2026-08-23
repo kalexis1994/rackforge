@@ -404,4 +404,21 @@ mod tests {
             vec![Input::HomeChord]
         );
     }
+
+    #[test]
+    fn long_back_is_emitted_once_while_the_button_is_still_held() {
+        let mut gestures = GestureTracker::default();
+        let now = Instant::now();
+        assert!(gestures.press(Input::Button4, now));
+        assert_eq!(gestures.poll(now + LONG_PRESS), vec![Input::Button4Long]);
+        assert!(
+            gestures
+                .poll(now + LONG_PRESS + Duration::from_secs(1))
+                .is_empty()
+        );
+        assert_eq!(
+            gestures.release(Input::Button4, now + LONG_PRESS + Duration::from_secs(2)),
+            None
+        );
+    }
 }

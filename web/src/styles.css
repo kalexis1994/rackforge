@@ -171,20 +171,55 @@ textarea {
 .plugin-picker-banner,
 .plugin-picker-shade {
   position: absolute;
-  inset: 0;
+  inset: 3px;
+  border-radius: 12px;
 }
 
 .plugin-picker-banner {
   z-index: 0;
-  width: 100%;
-  height: 100%;
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
+  box-sizing: border-box;
   object-fit: cover;
+  border: 1px solid color-mix(in srgb, var(--plugin-accent, #55e7ff) 34%, transparent);
 }
 
 .plugin-picker-shade {
   z-index: 1;
+  border: 1px solid rgba(220, 249, 255, 0.08);
   pointer-events: none;
   background: linear-gradient(90deg, rgba(2, 10, 16, 0.9) 0%, rgba(2, 10, 16, 0.7) 58%, rgba(2, 10, 16, 0.82) 100%);
+}
+
+.plugin-picker-shade::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(
+      circle at 84% 28%,
+      color-mix(in srgb, var(--plugin-accent, #55e7ff) 34%, transparent),
+      transparent 48%
+    ),
+    linear-gradient(
+      112deg,
+      color-mix(in srgb, var(--plugin-accent, #55e7ff) 28%, rgba(3, 14, 21, 0.54)) 0%,
+      color-mix(in srgb, var(--plugin-accent, #55e7ff) 10%, transparent) 52%,
+      color-mix(in srgb, var(--plugin-accent, #55e7ff) 22%, rgba(2, 10, 16, 0.48)) 100%
+    );
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.plugin-picker-card.branded:hover .plugin-picker-shade::after,
+.plugin-picker-card.branded:focus-visible .plugin-picker-shade::after {
+  opacity: 1;
+}
+
+.plugin-picker-card.branded.inactive:hover .plugin-picker-shade::after,
+.plugin-picker-card.branded.inactive:focus-visible .plugin-picker-shade::after {
+  opacity: 0.42;
 }
 
 .plugin-picker-card.branded {
@@ -436,6 +471,44 @@ textarea {
   box-shadow:
     inset 0 1px 0 rgba(225, 250, 255, 0.1),
     0 30px 90px rgba(0, 0, 0, 0.58);
+}
+
+.play-plugin-selector button.plugin-picker-card.inactive {
+  color: #858b8e;
+  background: rgba(23, 29, 33, 0.78);
+  border-color: rgba(150, 158, 162, 0.16);
+}
+
+.play-plugin-selector button.plugin-picker-card.inactive .plugin-picker-banner,
+.play-plugin-selector button.plugin-picker-card.inactive .plugin-picker-icon {
+  filter: grayscale(1);
+  opacity: 0.48;
+}
+
+.play-plugin-selector button.plugin-picker-card.inactive .plugin-picker-shade {
+  background: rgba(9, 14, 17, 0.82);
+}
+
+.play-plugin-selector button.plugin-picker-card.inactive:hover,
+.play-plugin-selector button.plugin-picker-card.inactive:focus-visible {
+  color: #c4cbce;
+  background: rgba(31, 39, 43, 0.92);
+  border-color: rgba(174, 184, 188, 0.34);
+}
+
+.plugin-activation-dialog {
+  width: min(520px, 100%);
+}
+
+.plugin-activation-copy {
+  padding: 22px clamp(18px, 4vw, 30px) 8px;
+}
+
+.plugin-activation-copy p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .modal-dialog:focus {
@@ -1447,6 +1520,7 @@ body {
   .plugin-install-button {
     justify-content: center;
   }
+
 }
 
 .hero-grid {
@@ -1525,10 +1599,6 @@ body {
   background: var(--acid);
   font-size: 12px;
   font-weight: 800;
-}
-
-.primary-button span {
-  margin-left: 20px;
 }
 
 .session-card {
@@ -1665,6 +1735,79 @@ body {
 
 .installed-plugin-card:hover {
   transform: none;
+}
+
+.plugin-manager-grid {
+  align-items: stretch;
+}
+
+.plugin-manager-card {
+  min-height: 184px;
+  padding: 18px;
+  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-rows: minmax(88px, 1fr) auto;
+  align-items: center;
+  gap: 14px 18px;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    filter 150ms ease;
+}
+
+.plugin-manager-card-copy {
+  min-width: 0;
+}
+
+.plugin-manager-card.inactive {
+  background: color-mix(in srgb, var(--paper) 86%, #707070 14%);
+  border-color: color-mix(in srgb, var(--line) 78%, #777 22%);
+}
+
+.plugin-manager-card.inactive .plugin-tile,
+.plugin-manager-card.inactive .plugin-manager-card-copy {
+  filter: grayscale(1);
+  opacity: 0.58;
+}
+
+.plugin-manager-card-actions {
+  min-width: 0;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.plugin-manager-card-actions button {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 9px;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+}
+
+.plugin-manager-card-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.plugin-manager-remove {
+  min-width: 0;
+}
+
+.plugin-manager-error {
+  margin-block: 12px;
+}
+
+@media (max-width: 700px) {
+  .plugin-manager-card-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .plugin-card-remove {
@@ -3221,6 +3364,18 @@ body {
 
   .plugin-card {
     grid-template-columns: 64px minmax(0, 1fr) 28px;
+  }
+
+  .plugin-manager-card {
+    min-height: 210px;
+    padding: 14px;
+    grid-template-columns: 64px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 12px;
+  }
+
+  .plugin-manager-card-actions {
+    grid-template-columns: 1fr;
   }
 
   .plugin-tile {
@@ -8259,6 +8414,10 @@ body {
   flex: 0 0 auto;
   place-items: center;
   vertical-align: -0.12em;
+  margin: 0 !important;
+  padding: 0;
+  max-width: none;
+  aspect-ratio: 1;
 }
 
 .async-spinner > span {
@@ -8270,6 +8429,9 @@ body {
   border-radius: 50%;
   opacity: 0.9;
   animation: async-spinner-rotate 720ms linear infinite;
+  margin: 0 !important;
+  padding: 0;
+  max-width: none;
 }
 
 .async-spinner--medium {
@@ -8286,6 +8448,11 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.55rem;
+}
+
+.async-action-label {
+  min-width: 0;
+  margin: 0 !important;
 }
 
 .async-status-line {
@@ -8584,6 +8751,57 @@ body {
   color: var(--muted);
   background: rgba(118, 225, 245, 0.07);
   box-shadow: var(--inner-light);
+}
+
+.plugin-manager-card-actions button:not(:disabled) {
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 110ms ease;
+}
+
+.plugin-manager-card-actions .secondary-button:not(:disabled):hover,
+.plugin-manager-card-actions .secondary-button:not(:disabled):focus-visible {
+  color: #dffbff;
+  background: rgba(85, 231, 255, 0.16);
+  border-color: rgba(85, 231, 255, 0.48);
+  box-shadow:
+    var(--inner-light),
+    0 0 0 1px rgba(85, 231, 255, 0.08),
+    0 8px 22px rgba(22, 178, 205, 0.14);
+}
+
+.plugin-manager-card-actions .primary-button:not(:disabled):hover,
+.plugin-manager-card-actions .primary-button:not(:disabled):focus-visible {
+  color: #010c11;
+  background: linear-gradient(135deg, #c2f9ff, #6beaff);
+  border-color: rgba(192, 248, 255, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.86),
+    0 0 0 1px rgba(85, 231, 255, 0.16),
+    0 10px 26px rgba(40, 201, 228, 0.28);
+}
+
+.plugin-manager-card-actions .danger-button:not(:disabled):hover,
+.plugin-manager-card-actions .danger-button:not(:disabled):focus-visible {
+  color: #fff7f8;
+  background: #b6374a;
+  border-color: #ff8294;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 9px 24px rgba(166, 38, 58, 0.28);
+}
+
+.plugin-manager-card-actions button:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.plugin-manager-card-actions button:focus-visible {
+  outline: 2px solid rgba(151, 241, 255, 0.92);
+  outline-offset: 2px;
 }
 
 .error-banner,

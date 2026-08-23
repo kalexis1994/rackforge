@@ -276,12 +276,16 @@ export function bindNativePluginResource(options: {
   plugin_id: string;
   resource_id: string;
   kind: "file" | "directory";
+  extensions?: string[];
 }): Promise<ResourceGrant> {
   if (nativeBridge()) {
     return requestNative("resource.bind", options, 10 * 60_000);
   }
   if (isDesktopHost()) {
-    return selectNativeResource({ kind: options.kind }).then((selection) =>
+    return selectNativeResource({
+      kind: options.kind,
+      extensions: options.extensions,
+    }).then((selection) =>
       hostJson<ResourceGrant>("/api/v1/resources/bind-selection", {
         method: "POST",
         headers: { "content-type": "application/json" },

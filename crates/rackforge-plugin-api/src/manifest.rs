@@ -11,9 +11,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 #[cfg(feature = "package-validation")]
 use std::io::Cursor;
-use std::path::{Component, Path};
 #[cfg(feature = "package-validation")]
 use std::path::PathBuf;
+use std::path::{Component, Path};
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

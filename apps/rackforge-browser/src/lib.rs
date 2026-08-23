@@ -226,6 +226,40 @@ pub unsafe extern "C" fn rf_uninstall_plugin(pointer: *const u8, length: usize) 
     })
 }
 
+/// Enables or disables an installed plugin and reloads the browser session.
+/// Returns the response length.
+///
+/// # Safety
+///
+/// `pointer` must address `length` readable bytes of UTF-8 JSON.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rf_set_plugin_active(pointer: *const u8, length: usize) -> i32 {
+    // SAFETY: forwarded from this function's contract.
+    let bytes = unsafe { std::slice::from_raw_parts(pointer, length) };
+    let request = match serde_json::from_slice::<PluginActivationRequest>(bytes) {
+        Ok(request) => request,
+        Err(error) => {
+            return publish(&serde_json::json!({
+                "ok": false,
+                "error": format!("unreadable activation request: {error}"),
+            }));
+        }
+    };
+    HOST.with(|host| match host.borrow_mut().as_mut() {
+        Some(host) => match host.set_package_active(&request.plugin_id, request.active) {
+            Ok(changed) => publish(&serde_json::json!({ "ok": true, "changed": changed })),
+            Err(error) => publish(&serde_json::json!({
+                "ok": false,
+                "error": format!("{error:#}"),
+            })),
+        },
+        None => publish(&serde_json::json!({
+            "ok": false,
+            "error": "the RackForge host is not open",
+        })),
+    })
+}
+
 /// Installs a file into a plugin's private storage. The request is a JSON
 /// header followed by a newline and then the file's bytes, so one call carries
 /// both without a second allocation. Returns the response length.
@@ -316,6 +350,12 @@ struct UninstallRequest {
     delete_plugin_data: bool,
 }
 
+#[derive(serde::Deserialize)]
+struct PluginActivationRequest {
+    plugin_id: String,
+    active: bool,
+}
+
 /// Returns a pointer to the buffer written by the most recent [`rf_open`] or
 /// [`rf_request`] call.
 #[unsafe(no_mangle)]
@@ -354,8 +394,11 @@ fn error_response(message: impl Into<String>) -> ControlResponse {
 /// Serializes a value into the response buffer and reports its length.
 fn publish<T: serde::Serialize>(value: &T) -> i32 {
     let encoded = serde_json::to_vec(value).unwrap_or_else(|error| {
-        format!("{{\"status\":\"error\",\"code\":\"internal\",\"message\":{:?}}}", error.to_string())
-            .into_bytes()
+        format!(
+            "{{\"status\":\"error\",\"code\":\"internal\",\"message\":{:?}}}",
+            error.to_string()
+        )
+        .into_bytes()
     });
     let length = encoded.len();
     RESPONSE.with(|response| *response.borrow_mut() = encoded);

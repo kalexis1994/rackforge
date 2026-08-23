@@ -91,7 +91,11 @@ pub(crate) fn checked_samples(frames: u32, channels: u32) -> Result<usize> {
         .context("audio sample count overflow")
 }
 
-pub(crate) fn memory_range(offset: i32, samples: usize, memory_size: usize) -> Result<Range<usize>> {
+pub(crate) fn memory_range(
+    offset: i32,
+    samples: usize,
+    memory_size: usize,
+) -> Result<Range<usize>> {
     byte_range(
         offset,
         samples,

@@ -23,7 +23,8 @@ use rackforge_plugin_api::{
 };
 use rackforge_repository::{
     PluginUserDataRemovalOptions, cleanup_uninstall_tombstones, inspect_local_archive,
-    install_local_archive_cancellable, remove_plugin_user_data, uninstall_plugin,
+    install_local_archive_cancellable, plugin_is_enabled, remove_plugin_user_data,
+    set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
     HostControlTarget, InstanceId, MasterLevel, MasterPan, ProgramDraftState,
@@ -1801,10 +1802,7 @@ fn report(env: &mut JNIEnv<'_>, error: anyhow::Error) {
     let _ = env.throw_new("java/lang/IllegalStateException", format!("{error:#}"));
 }
 
-fn package_descriptor(
-    package: &PluginPackage,
-    active_plugin: Option<&(String, String)>,
-) -> serde_json::Value {
+fn package_descriptor(package: &PluginPackage, active: bool) -> serde_json::Value {
     let manifest = package.manifest();
     let play_entry = manifest.web_ui.as_ref().and_then(|web| {
         web.surfaces
@@ -1844,9 +1842,7 @@ fn package_descriptor(
         "web_api_version": manifest.web_ui.as_ref().map_or(0, |web| web.api_version),
         "branding": manifest.branding,
         "resources": manifest.resources,
-        "active": active_plugin.is_some_and(|(id, version)| {
-            id == &manifest.id && version == &manifest.version
-        }),
+        "active": active,
     })
 }
 
@@ -1855,11 +1851,6 @@ fn installed_plugins_json(store_root: &Path) -> Result<String> {
     let packages_root = store_root.join("packages");
     std::fs::create_dir_all(&packages_root)
         .with_context(|| format!("creating {}", packages_root.display()))?;
-    let active_plugin = engine().lock().ok().and_then(|guard| {
-        guard
-            .as_ref()
-            .map(|engine| (engine.plugin_id.clone(), engine.plugin_version.clone()))
-    });
     let mut versions = BTreeMap::<String, Vec<(semver::Version, serde_json::Value)>>::new();
     let mut warnings = Vec::new();
     for plugin in std::fs::read_dir(&packages_root)
@@ -1879,10 +1870,14 @@ fn installed_plugins_json(store_root: &Path) -> Result<String> {
             }
             match PluginPackage::open(version.path()) {
                 Ok(package) => match semver::Version::parse(&package.manifest().version) {
-                    Ok(parsed) => versions
-                        .entry(package.manifest().id.clone())
-                        .or_default()
-                        .push((parsed, package_descriptor(&package, active_plugin.as_ref()))),
+                    Ok(parsed) => {
+                        let active =
+                            plugin_is_enabled(store_root, &package.manifest().id).unwrap_or(true);
+                        versions
+                            .entry(package.manifest().id.clone())
+                            .or_default()
+                            .push((parsed, package_descriptor(&package, active)));
+                    }
                     Err(error) => warnings.push(format!(
                         "{}: invalid plugin version: {error}",
                         version.path().display()
@@ -2093,7 +2088,10 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|plugin| plugin["compatible"].as_bool().unwrap_or(false))
+        .filter(|plugin| {
+            plugin["compatible"].as_bool().unwrap_or(false)
+                && plugin["active"].as_bool().unwrap_or(false)
+        })
     {
         let Some(root) = descriptor["package_root"].as_str() else {
             continue;
@@ -2681,7 +2679,7 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_installPluginFile
                 .context("validating and installing the portable plugin")?;
         let package = PluginPackage::open(&installed.path)
             .with_context(|| format!("opening installed plugin {}", installed.path.display()))?;
-        let mut descriptor = package_descriptor(&package, None);
+        let mut descriptor = package_descriptor(&package, false);
         descriptor["already_installed"] = installed.already_installed.into();
         descriptor["artifact_sha256"] = installed.record.artifact_sha256.into();
         Ok(descriptor.to_string())
@@ -2793,6 +2791,11 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_activateInstalled
             eprintln!("PERFORMANCE_LIBRARY_UNAVAILABLE {error:#}");
         }
         let candidate = AndroidEngine::open_package(&package_root, data_root.clone())?;
+        set_plugin_enabled(
+            packages_root.parent().unwrap_or(&packages_root),
+            &candidate.plugin_id,
+            true,
+        )?;
         midi_queue()
             .lock()
             .map_err(|_| anyhow::anyhow!("MIDI queue lock poisoned"))?
@@ -2807,6 +2810,42 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_activateInstalled
         Err(error) => {
             report(&mut env, error);
             JNI_FALSE
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_deactivateInstalledPlugin(
+    mut env: JNIEnv,
+    _class: JClass,
+    plugin_id: JString,
+    store_root: JString,
+) -> jint {
+    let result = (|| -> Result<i32> {
+        let plugin_id = java_string(&mut env, plugin_id)?;
+        let store_root = PathBuf::from(java_string(&mut env, store_root)?);
+        let was_current = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+            .as_ref()
+            .is_some_and(|engine| engine.plugin_id == plugin_id);
+        set_plugin_enabled(&store_root, &plugin_id, false)?;
+        if was_current {
+            midi_queue()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("MIDI queue lock poisoned"))?
+                .clear();
+            *engine()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("engine lock poisoned"))? = None;
+        }
+        Ok(if was_current { 1 } else { 2 })
+    })();
+    match result {
+        Ok(status) => status,
+        Err(error) => {
+            report(&mut env, error);
+            0
         }
     }
 }

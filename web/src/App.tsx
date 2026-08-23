@@ -1402,6 +1402,33 @@ async function activateInstalledPlugin(
     : new Error("RackForge installed the plugin but activation did not finish in time.");
 }
 
+async function setInstalledPluginActive(pluginId: string, active: boolean) {
+  const action = active ? "activate" : "deactivate";
+  const response = await hostJson<{ status?: string; plugin_id?: string }>(
+    `/api/v1/plugins/${encodeURIComponent(pluginId)}/${action}`,
+    { method: "POST" },
+  );
+  const startedAt = performance.now();
+  let lastError: unknown;
+  while (performance.now() - startedAt < PLUGIN_ACTIVATION_TIMEOUT_MS) {
+    try {
+      const descriptor = await hostJson<PluginWebDescriptor>(
+        `/api/v1/plugins/${encodeURIComponent(pluginId)}`,
+      );
+      if (descriptor.active === active) {
+        await synchronizePluginEnvironment();
+        return response;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`RackForge did not finish ${active ? "activating" : "deactivating"} the plugin.`);
+}
+
 const MAX_CLIENT_RESOURCE_BYTES = 512 * 1024 * 1024;
 
 function InstallPluginDialog({ onClose }: { onClose: () => void }) {
@@ -2364,6 +2391,7 @@ function PluginPickerModal({
   const [activatingId, setActivatingId] = useState<string | null>(null);
   const [activationError, setActivationError] = useState<string | null>(null);
   const [pendingPlugin, setPendingPlugin] = useState<PluginWebDescriptor | null>(null);
+  const [pendingActivation, setPendingActivation] = useState<PluginWebDescriptor | null>(null);
   const activePluginId = active?.plugin_id;
   const orderedPlugins = [
     ...plugins.filter((plugin) => plugin.plugin_id === activePluginId),
@@ -2418,15 +2446,24 @@ function PluginPickerModal({
       setActivatingId(null);
     }
   };
+  const requestActivation = (plugin: PluginWebDescriptor) => {
+    if (!plugin.active) {
+      setActivationError(null);
+      setPendingActivation(plugin);
+      return;
+    }
+    void activate(plugin);
+  };
   return (
-    <ModalDialog
-      eyebrow="PLAY · Instruments"
-      title="Select plugin"
-      onClose={onClose}
-      dismissible={activatingId === null}
-      closeLabel="Close plugin selector"
-      className="plugin-picker-modal"
-    >
+    <>
+      <ModalDialog
+        eyebrow="PLAY · Instruments"
+        title="Select plugin"
+        onClose={onClose}
+        dismissible={activatingId === null && pendingActivation === null}
+        closeLabel="Close plugin selector"
+        className="plugin-picker-modal"
+      >
         <div className="preset-modal-toolbar">
           <p>Choose the instrument you want to play. The active plugin stays first.</p>
         </div>
@@ -2472,10 +2509,11 @@ function PluginPickerModal({
             const activating = activatingId === plugin.plugin_id;
             return (
               <button
-                className={`plugin-picker-card${selected ? " active" : ""}${plugin.branding ? " branded" : ""}`}
+                className={`plugin-picker-card${selected ? " active" : ""}${!plugin.active ? " inactive" : ""}${plugin.branding ? " branded" : ""}`}
                 disabled={activatingId !== null}
                 key={plugin.plugin_id}
-                onClick={() => void activate(plugin)}
+                onClick={() => requestActivation(plugin)}
+                aria-disabled={!plugin.active}
                 style={plugin.branding ? {
                   "--plugin-accent": plugin.branding.accent_color,
                   "--plugin-background": plugin.branding.background_color,
@@ -2492,16 +2530,18 @@ function PluginPickerModal({
                 <span className="play-plugin-copy">
                   <strong>{plugin.plugin_name}{formatPluginVersion(plugin.version)}</strong>
                   <small>
-                    {instance
+                    {!plugin.active
+                      ? "Installed · Activation required"
+                      : instance
                       ? `${instance.sounds.length} programs · Ready`
-                      : "Installed · Activates on selection"}
+                      : "Active · Preparing runtime"}
                   </small>
                 </span>
                 <span className="play-plugin-status">
                   {activating ? (
                     <AsyncActionLabel active activeLabel="Loading…">SELECT</AsyncActionLabel>
                   ) : (
-                    <>{selected ? "PLAYING" : "SELECT"}<i aria-hidden="true">→</i></>
+                    <>{selected ? "PLAYING" : plugin.active ? "SELECT" : "INACTIVE"}<i aria-hidden="true">→</i></>
                   )}
                 </span>
               </button>
@@ -2514,7 +2554,52 @@ function PluginPickerModal({
             />
           )}
         </div>
-    </ModalDialog>
+      </ModalDialog>
+      {pendingActivation ? (
+        <ModalDialog
+          eyebrow="Plugin activation"
+          title={`Activate ${pendingActivation.plugin_name}?`}
+          onClose={() => setPendingActivation(null)}
+          dismissible={activatingId === null}
+          closeLabel="Cancel plugin activation"
+          className="plugin-activation-dialog"
+          actions={
+            <>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setPendingActivation(null)}
+                disabled={activatingId !== null}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  const plugin = pendingActivation;
+                  setPendingActivation(null);
+                  void activate(plugin);
+                }}
+                disabled={activatingId !== null}
+              >
+                <AsyncActionLabel
+                  active={activatingId === pendingActivation.plugin_id}
+                  activeLabel="Activating…"
+                >
+                  Activate plugin
+                </AsyncActionLabel>
+              </button>
+            </>
+          }
+        >
+          <div className="plugin-activation-copy">
+            <p>This plugin is installed but inactive.</p>
+            <p>RackForge must activate it before it can be used in PLAY.</p>
+          </div>
+        </ModalDialog>
+      ) : null}
+    </>
   );
 }
 
@@ -2925,6 +3010,7 @@ function PluginsPage({
   onInstall: () => void;
 }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const { plugins: installed } = usePluginCatalog();
   const [controllers, setControllers] = useState<ControllerSummary[]>([]);
   useEffect(() => {
@@ -2940,6 +3026,8 @@ function PluginsPage({
   }, []);
   const [pendingRemoval, setPendingRemoval] = useState<PluginWebDescriptor | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [changingPluginId, setChangingPluginId] = useState<string | null>(null);
+  const [activationError, setActivationError] = useState<string | null>(null);
   const [removalError, setRemovalError] = useState<string | null>(null);
   const [removalMessage, setRemovalMessage] = useState<string | null>(() => {
     const state = location.state as { pluginRemovalMessage?: unknown } | null;
@@ -2975,18 +3063,48 @@ function PluginsPage({
   };
 
   const running = snapshot?.instances ?? [];
-  const runningPluginIds = new Set(running.map((instance) => instance.plugin_id));
   const requestRemoval = (plugin: PluginWebDescriptor) => {
     setRemovalError(null);
-    setPendingRemoval(
-      runningPluginIds.has(plugin.plugin_id) && !plugin.active
-        ? { ...plugin, active: true }
-        : plugin,
-    );
+    setPendingRemoval(plugin);
   };
-  const available = installed.filter(
-    (plugin) => !runningPluginIds.has(plugin.plugin_id),
-  );
+  const changeActivation = async (plugin: PluginWebDescriptor) => {
+    if (!plugin.managed && plugin.active) return;
+    setChangingPluginId(plugin.plugin_id);
+    setActivationError(null);
+    setRemovalMessage(null);
+    try {
+      await setInstalledPluginActive(plugin.plugin_id, !plugin.active);
+      setRemovalMessage(
+        plugin.active
+          ? `${plugin.plugin_name} is now inactive.`
+          : `${plugin.plugin_name} is active and ready to use.`,
+      );
+    } catch (error) {
+      setActivationError(
+        error instanceof Error ? error.message : "Could not change plugin activation.",
+      );
+    } finally {
+      setChangingPluginId(null);
+    }
+  };
+  const openInPlay = async (plugin: PluginWebDescriptor) => {
+    if (!plugin.active) return;
+    setChangingPluginId(plugin.plugin_id);
+    setActivationError(null);
+    try {
+      await hostJson(`/api/v1/plugins/${encodeURIComponent(plugin.plugin_id)}/activate`, {
+        method: "POST",
+      });
+      await synchronizePluginEnvironment();
+      navigate("/play");
+    } catch (error) {
+      setActivationError(
+        error instanceof Error ? error.message : "Could not open the plugin in PLAY.",
+      );
+    } finally {
+      setChangingPluginId(null);
+    }
+  };
 
   return (
     <>
@@ -3002,56 +3120,84 @@ function PluginsPage({
         </button>
       </div>
       <div className="plugin-section-heading">
-        <span className="card-kicker">Running now</span>
+        <span className="card-kicker">Instrument plugins</span>
+        <small>Installation and runtime activation are managed separately</small>
       </div>
       {removalMessage ? <p className="plugin-removal-message">{removalMessage}</p> : null}
-      <PluginGrid
-        instances={running}
-        plugins={installed}
-        expanded
-        onRemove={requestRemoval}
-      />
-      {available.length > 0 && (
-        <>
-          <div className="plugin-section-heading">
-            <span className="card-kicker">Installed</span>
-            <small>Ready for a safe host activation</small>
-          </div>
-          <div className="plugin-grid expanded">
-            {available.map((plugin, index) => (
-              <article className="plugin-card installed-plugin-card" key={plugin.plugin_id}>
-                <div className={`plugin-tile tile-${(index + running.length) % 4}${plugin.branding ? " branded" : ""}`}>
-                  <PluginIcon plugin={plugin} name={plugin.plugin_name} />
-                  {!plugin.branding && <i />}
-                </div>
-                <div>
-                  <span className="card-kicker">
-                    {plugin.active ? "Active package" : "Installed package"}{" "}
-                    <span className="plugin-kind-tag instrument">Instrument</span>
-                  </span>
-                  <h3>{plugin.plugin_name}</h3>
-                  <p>
-                    Version {plugin.version}
-                    {plugin.surfaces.length === 0 ? " · No Web view" : " · Web view ready"}
-                  </p>
-                </div>
-                {plugin.managed ? (
-                  <button
-                    className="plugin-remove-button"
-                    onClick={() => requestRemoval(plugin)}
-                    aria-label={`Remove ${plugin.plugin_name}`}
+      {activationError ? <p className="form-error plugin-manager-error">{activationError}</p> : null}
+      <div className="plugin-grid expanded plugin-manager-grid">
+        {installed.map((plugin, index) => {
+          const instance = running.find((candidate) => candidate.plugin_id === plugin.plugin_id);
+          const busy = changingPluginId === plugin.plugin_id;
+          const configAvailable = plugin.surfaces.some((surface) => surface.kind === "config");
+          return (
+            <article
+              className={`plugin-card installed-plugin-card plugin-manager-card${plugin.active ? "" : " inactive"}`}
+              key={plugin.plugin_id}
+            >
+              <div className={`plugin-tile tile-${index % 4}${plugin.branding ? " branded" : ""}`}>
+                <PluginIcon plugin={plugin} name={plugin.plugin_name} />
+                {!plugin.branding && <i />}
+              </div>
+              <div className="plugin-manager-card-copy">
+                <span className="card-kicker">
+                  {plugin.active ? "Active" : "Inactive"}{" "}
+                  <span className="plugin-kind-tag instrument">Instrument</span>
+                </span>
+                <h3>{plugin.plugin_name}{formatPluginVersion(plugin.version)}</h3>
+                <p>
+                  {plugin.surfaces.length === 0 ? "No Web interface" : "Web interface ready"}
+                  {instance ? ` · ${instance.sounds.length} programs` : ""}
+                </p>
+              </div>
+              <div className="plugin-manager-card-actions" aria-label={`${plugin.plugin_name} actions`}>
+                <button
+                  type="button"
+                  className={plugin.active ? "secondary-button" : "primary-button"}
+                  disabled={busy || (!plugin.managed && plugin.active)}
+                  onClick={() => void changeActivation(plugin)}
+                >
+                  <AsyncActionLabel
+                    active={busy}
+                    activeLabel={plugin.active ? "Deactivating…" : "Activating…"}
                   >
-                    <Trash2 aria-hidden="true" />
-                    <span>Remove</span>
-                  </button>
-                ) : (
-                  <span className="plugin-installed-mark" aria-label="Installed">✓</span>
-                )}
-              </article>
-            ))}
-          </div>
-        </>
-      )}
+                    {plugin.active
+                      ? plugin.managed ? "Deactivate" : "Built-in active"
+                      : "Activate"}
+                  </AsyncActionLabel>
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={!plugin.active || busy}
+                  onClick={() => void openInPlay(plugin)}
+                >
+                  Go to PLAY
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={!plugin.active || !configAvailable || !instance || busy}
+                  onClick={() => navigate(`/plugins/${encodeURIComponent(instance!.instance_id)}`)}
+                >
+                  Config
+                </button>
+                <button
+                  type="button"
+                  className="danger-button plugin-manager-remove"
+                  disabled={!plugin.managed || busy}
+                  onClick={() => requestRemoval(plugin)}
+                >
+                  Remove
+                </button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      {installed.length === 0 ? (
+        <EmptyState title="No plugins installed" />
+      ) : null}
       {controllers.length > 0 && (
         <>
           <div className="plugin-section-heading">
@@ -3154,6 +3300,7 @@ function PluginGrid({
 
 function PluginPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
   const { instanceId } = useParams();
+  const { plugins, status: catalogStatus } = usePluginCatalog();
   const instance = snapshot?.instances.find(
     (item) => item.instance_id === decodeURIComponent(instanceId ?? ""),
   );
@@ -3166,6 +3313,27 @@ function PluginPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
         />
       </section>
     );
+  if (catalogStatus !== "ready") {
+    return (
+      <section className="plugin-surface-shell direct-surface">
+        <PluginSurfaceState
+          title="Checking plugin activation"
+          detail="RackForge is verifying that this plugin is active before opening Config."
+        />
+      </section>
+    );
+  }
+  const descriptor = plugins.find((plugin) => plugin.plugin_id === instance.plugin_id);
+  if (!descriptor?.active) {
+    return (
+      <section className="plugin-surface-shell direct-surface">
+        <PluginSurfaceState
+          title="Plugin inactive"
+          detail="Activate this plugin from Plugin Manager before opening its configuration."
+        />
+      </section>
+    );
+  }
   return <PluginConfigSurface instance={instance} />;
 }
 
@@ -3710,10 +3878,20 @@ export function PluginFrame({
           respond(false, "Another resource selection is already open.");
         } else if (isNativeHost() || isDesktopHost()) {
           pendingResourceRequestRef.current = event.data.request_id;
+          const extensions = Array.isArray(params.extensions)
+            ? params.extensions
+                .filter(
+                  (extension: unknown): extension is string =>
+                    typeof extension === "string" &&
+                    /^\.?[a-z0-9]+$/i.test(extension),
+                )
+                .slice(0, 16)
+            : undefined;
           bindNativePluginResource({
             plugin_id: instance.plugin_id,
             resource_id: resource.id,
             kind: resource.kind,
+            extensions,
           })
             .then((grant) => respond(true, undefined, grant))
             .catch((error: unknown) =>
@@ -3736,7 +3914,7 @@ export function PluginFrame({
         }
       } else if (
         event.data.method === "plugin.resource_bindings" &&
-        surface === "config"
+        (surface === "play" || surface === "config")
       ) {
         postResourceApi("/api/v1/resources/grants", {
           plugin_id: instance.plugin_id,
@@ -3782,9 +3960,9 @@ export function PluginFrame({
             ),
           );
       } else if (
-        (event.data.method === "plugin.load_resource" ||
-          event.data.method === "plugin.install_resource") &&
-        surface === "config" &&
+        (((event.data.method === "plugin.load_resource" ||
+          event.data.method === "plugin.install_resource") && surface === "config") ||
+          (event.data.method === "plugin.activate_resource" && surface === "play")) &&
         typeof params.target_resource_id === "string" &&
         descriptor?.resources.some(
           (resource) =>
@@ -3794,9 +3972,11 @@ export function PluginFrame({
         (params.entry_id === null || params.entry_id === undefined ||
           typeof params.entry_id === "string")
       ) {
-        const operationLabel = event.data.method === "plugin.install_resource"
-          ? "Installing resource…"
-          : "Loading resource…";
+        const operationLabel = event.data.method === "plugin.activate_resource"
+          ? "Activating resource…"
+          : event.data.method === "plugin.install_resource"
+            ? "Installing resource…"
+            : "Loading resource…";
         setResourceBusy(operationLabel);
         postResourceApi("/api/v1/resources/load", {
           plugin_id: instance.plugin_id,
@@ -3804,7 +3984,8 @@ export function PluginFrame({
           target_resource_id: params.target_resource_id,
           grant_id: params.grant_id,
           entry_id: typeof params.entry_id === "string" ? params.entry_id : null,
-          persist: event.data.method === "plugin.install_resource",
+          persist: event.data.method !== "plugin.load_resource",
+          bundle: params.bundle === "nki_dependencies" ? params.bundle : null,
         })
           .then((result) => respond(true, undefined, result))
           .catch((error: unknown) =>

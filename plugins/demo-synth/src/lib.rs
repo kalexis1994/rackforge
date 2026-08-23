@@ -47,7 +47,14 @@ struct Voice {
 }
 
 impl Voice {
-    fn start(&mut self, note: u8, channel: u8, velocity: u8, settings: &Settings, sample_rate: f32) {
+    fn start(
+        &mut self,
+        note: u8,
+        channel: u8,
+        velocity: u8,
+        settings: &Settings,
+        sample_rate: f32,
+    ) {
         let frequency = note_frequency(note);
         let increment = core::f32::consts::TAU * frequency / sample_rate.max(1.0);
         let (rotation_sine, rotation_cosine) = rotation(increment);
@@ -462,7 +469,11 @@ mod tests {
     fn silence_until_a_note_arrives() {
         let mut synth = DemoSynth::default();
         assert!(synth.prepare(48_000.0, 128, 0, 2));
-        assert!(render(&mut synth, 64, &[]).iter().all(|sample| *sample == 0.0));
+        assert!(
+            render(&mut synth, 64, &[])
+                .iter()
+                .all(|sample| *sample == 0.0)
+        );
     }
 
     #[test]

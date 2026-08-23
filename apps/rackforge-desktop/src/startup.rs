@@ -125,7 +125,9 @@ fn resolve_options(cli: CliOptions) -> Result<Startup> {
             web_preferences.enabled = true;
         }
         if !cli.install_controllers.is_empty() {
-            bail!("--install-controller needs an initialized RackForge Root; run the app once first");
+            bail!(
+                "--install-controller needs an initialized RackForge Root; run the app once first"
+            );
         }
         return Ok(Startup::FirstStart {
             web_preferences,

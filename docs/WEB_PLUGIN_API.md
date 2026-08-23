@@ -133,8 +133,10 @@ from plugin JavaScript.
   explorer and returns a grant with an opaque `grant_id`, display name and
   selected kind. The plugin cannot supply its own plugin ID, browse native
   paths or receive a Windows path, POSIX path or Android content URI.
-- `plugin.resource_bindings`: available to `CONFIG`; returns the persistent
-  opaque grants owned by the current plugin. It takes no parameters.
+- `plugin.resource_bindings`: available to `PLAY` and `CONFIG`; returns the
+  persistent opaque grants owned by the current plugin. It takes no parameters.
+  `PLAY` can use this read-only collection to present libraries that were
+  previously added in `CONFIG`; it cannot open a new host resource selector.
 - `plugin.resource_status`: available to `CONFIG`; reports whether each
   declared private `data_path` currently contains an installed regular file.
   It returns resource identifiers and booleans without exposing native paths.
@@ -157,6 +159,11 @@ from plugin JavaScript.
   authenticates its entries with the plugin, persists each recognized target
   separately, and returns `installed_resource_ids`. Repeated ZIP imports are
   cumulative; the ZIP itself is not reported as installed.
+- `plugin.activate_resource`: available to `PLAY`; activates and persists one
+  file grant that the same plugin previously added through `CONFIG`. It accepts
+  the same target, grant and optional bundle fields as `plugin.install_resource`,
+  but cannot create a grant or browse storage. This keeps library management in
+  `CONFIG` while allowing musical library selection from `PLAY`.
 - `plugin.clear_resource`: available to `CONFIG`; removes one installed private
   resource. It accepts `target_resource_id`, which must be a declared file
   resource with a `data_path`. RackForge deletes the installed file, prepares a

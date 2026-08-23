@@ -130,6 +130,18 @@ pub struct LoadGrantedResourceRequest {
     /// plugin instances can resolve it without retaining the source grant.
     #[serde(default)]
     pub persist: bool,
+    /// Optional host-side preparation for a source format whose dependencies
+    /// live beside the selected file. The plugin still receives one validated
+    /// file resource; native paths never cross into its WebAssembly instance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<ResourceBundleKind>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceBundleKind {
+    /// Packages one NKI plus ordinary audio and artwork below its directory.
+    NkiDependencies,
 }
 
 /// Removes one installed private resource so the package default plays again.

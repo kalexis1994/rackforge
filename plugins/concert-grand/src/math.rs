@@ -63,7 +63,8 @@ pub fn lnf(x: f32) -> f32 {
     }
     let t = (mantissa - 1.0) / (mantissa + 1.0);
     let t2 = t * t;
-    let series = t * (2.0 + t2 * (2.0 / 3.0 + t2 * (2.0 / 5.0 + t2 * (2.0 / 7.0 + t2 * (2.0 / 9.0)))));
+    let series =
+        t * (2.0 + t2 * (2.0 / 3.0 + t2 * (2.0 / 5.0 + t2 * (2.0 / 7.0 + t2 * (2.0 / 9.0)))));
     series + exponent as f32 * LN_2
 }
 
@@ -127,7 +128,10 @@ mod tests {
         }
         for i in 1..2000 {
             let x = i as f32 * 0.37;
-            assert!((lnf(x) - x.ln()).abs() < 2e-6 * (1.0 + x.ln().abs()), "ln({x})");
+            assert!(
+                (lnf(x) - x.ln()).abs() < 2e-6 * (1.0 + x.ln().abs()),
+                "ln({x})"
+            );
             assert!((sqrtf(x) - x.sqrt()).abs() / x.sqrt() < 1e-6, "sqrt({x})");
         }
         assert!((powf(10.0, -3.95) - 10.0_f32.powf(-3.95)).abs() < 1e-8);

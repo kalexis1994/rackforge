@@ -29,6 +29,11 @@ fn run() -> Result<()> {
     let command = arguments.first().map(String::as_str).unwrap_or("");
     match command {
         "inspect" if arguments.len() == 2 => inspect(Path::new(&arguments[1])),
+        "validate-resource" if arguments.len() == 4 => validate_resource(
+            Path::new(&arguments[1]),
+            &arguments[2],
+            Path::new(&arguments[3]),
+        ),
         "smoke" => {
             let (package, binary, resources, preset, data_root) =
                 parse_plugin_arguments("smoke", &arguments[1..])?;
@@ -68,6 +73,7 @@ fn run() -> Result<()> {
         ),
         _ => bail!(
             "usage:\n  rackforge-core inspect PACKAGE\n  \
+             rackforge-core validate-resource PACKAGE RESOURCE_ID FILE\n  \
              rackforge-core smoke PACKAGE [--library FILE] [--resource ID=PATH]... \
              [--preset ID] [--data-root DIRECTORY]\n  \
              rackforge-core stress PACKAGE [--library FILE] [--resource ID=PATH]... \
@@ -81,6 +87,19 @@ fn run() -> Result<()> {
              rackforge-core program-save DATA_ROOT RELATIVE_PATH DOCUMENT"
         ),
     }
+}
+
+fn validate_resource(package_path: &Path, resource_id: &str, path: &Path) -> Result<()> {
+    let package = PluginPackage::open(package_path)?;
+    let plugin = unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), None) }?;
+    plugin.validate_resource_file(resource_id, path)?;
+    println!(
+        "RESOURCE_VALID plugin={} resource={} path={}",
+        plugin.descriptor().id,
+        resource_id,
+        path.display()
+    );
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]

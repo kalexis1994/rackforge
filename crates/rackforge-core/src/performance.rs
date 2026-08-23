@@ -208,7 +208,10 @@ impl PerformanceRepository {
         if marker.is_file() {
             return Ok(());
         }
-        let temporary = root.join(format!(".initialized.tmp.{}", crate::storage::writer_discriminator()));
+        let temporary = root.join(format!(
+            ".initialized.tmp.{}",
+            crate::storage::writer_discriminator()
+        ));
         if temporary.exists() {
             fs::remove_file(&temporary)
                 .with_context(|| format!("removing stale {}", temporary.display()))?;
@@ -375,7 +378,10 @@ fn write_new_document<T: Serialize>(directory: &Path, id: &str, document: &T) ->
         bail!("refusing to overwrite {}", destination.display());
     }
     let bytes = serde_json::to_vec_pretty(document)?;
-    let temporary = directory.join(format!(".{id}.json.tmp.{}", crate::storage::writer_discriminator()));
+    let temporary = directory.join(format!(
+        ".{id}.json.tmp.{}",
+        crate::storage::writer_discriminator()
+    ));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -396,7 +402,10 @@ fn write_document<T: Serialize>(directory: &Path, id: &str, document: &T) -> Res
     fs::create_dir_all(directory).with_context(|| format!("creating {}", directory.display()))?;
     let destination = directory.join(format!("{id}.json"));
     let bytes = serde_json::to_vec_pretty(document)?;
-    let temporary = directory.join(format!(".{id}.json.tmp.{}", crate::storage::writer_discriminator()));
+    let temporary = directory.join(format!(
+        ".{id}.json.tmp.{}",
+        crate::storage::writer_discriminator()
+    ));
     if temporary.exists() {
         fs::remove_file(&temporary)
             .with_context(|| format!("removing stale {}", temporary.display()))?;

@@ -245,7 +245,12 @@ pub enum Host {
 }
 
 impl Host {
-    pub const ALL: &'static [Self] = &[Self::Windows, Self::Android, Self::RaspberryPi, Self::Browser];
+    pub const ALL: &'static [Self] = &[
+        Self::Windows,
+        Self::Android,
+        Self::RaspberryPi,
+        Self::Browser,
+    ];
 
     pub const fn name(self) -> &'static str {
         match self {
@@ -286,11 +291,9 @@ impl Host {
 
 /// Reasons that recur, written once so they read the same in every row.
 mod why {
-    pub const NO_WEB_AUDIO_DEVICES: &str =
-        "a page renders into the output the browser gives it and cannot enumerate or configure \
+    pub const NO_WEB_AUDIO_DEVICES: &str = "a page renders into the output the browser gives it and cannot enumerate or configure \
          audio hardware";
-    pub const NO_BROWSER_METERING: &str =
-        "the engine inside a page does not meter guest execution, so a plugin that stops \
+    pub const NO_BROWSER_METERING: &str = "the engine inside a page does not meter guest execution, so a plugin that stops \
          responding blocks the audio callback";
 }
 
@@ -399,7 +402,9 @@ const BROWSER: &[(Capability, Support)] = &[
     (Capability::PerformanceLibrary, Support::Yes),
     (
         Capability::RackRendering,
-        Support::Planned("the page renders the active PLAY instrument; Rack slots are not mixed yet"),
+        Support::Planned(
+            "the page renders the active PLAY instrument; Rack slots are not mixed yet",
+        ),
     ),
     (
         Capability::RackSlotStateEditing,

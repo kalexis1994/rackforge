@@ -19,7 +19,7 @@ use rackforge_repository::{
 use rackforge_resource_api::{
     BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, ClearInstalledResourceRequest,
     ListGrantsRequest, LoadGrantedResourceRequest, MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser,
-    ResourceEntryKind, ResourceError, SelectHostEntryRequest,
+    ResourceBundleKind, ResourceEntryKind, ResourceError, SelectHostEntryRequest,
 };
 use rackforge_resource_host::NativeResourceBrowser;
 use rackforge_session_api::SessionState;
@@ -132,6 +132,10 @@ pub enum DesktopControlCall {
         response: Sender<Result<(), String>>,
     },
     ActivatePlugin {
+        plugin_id: String,
+        response: Sender<Result<(), String>>,
+    },
+    DeactivatePlugin {
         plugin_id: String,
         response: Sender<Result<(), String>>,
     },
@@ -271,10 +275,7 @@ impl DesktopWebServers {
     /// Points surface notes at the running audio engine. Called when the
     /// engine starts and again after every recovery, since a restarted
     /// engine owns a new queue.
-    pub fn set_injected_midi(
-        &self,
-        sender: Option<SyncSender<crate::desktop_audio::MidiPacket>>,
-    ) {
+    pub fn set_injected_midi(&self, sender: Option<SyncSender<crate::desktop_audio::MidiPacket>>) {
         if let Ok(mut slot) = self.state.injected_midi.lock() {
             *slot = sender;
         }
@@ -586,6 +587,10 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
             "/api/v1/plugins/{plugin_id}/activate",
             post(activate_plugin),
         )
+        .route(
+            "/api/v1/plugins/{plugin_id}/deactivate",
+            post(deactivate_plugin),
+        )
         .route("/ws/v1/session", get(session_socket))
         .route("/plugin-assets/{plugin_id}/{*asset}", get(plugin_asset))
         .route("/api/v1/controllers", get(controller_catalog))
@@ -827,6 +832,62 @@ async fn activate_plugin(
             .into_response(),
         _ => resource_error(ResourceError::Backend(
             "Desktop runtime did not finish activating the plugin".into(),
+        )),
+    }
+}
+
+async fn deactivate_plugin(
+    AxumPath(plugin_id): AxumPath<String>,
+    State(state): State<WebState>,
+) -> Response {
+    let package = match discover_web_packages(&state) {
+        Ok(packages) => packages.get(&plugin_id).cloned(),
+        Err(error) => return internal_error(error),
+    };
+    let Some(package) = package else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"status":"error", "message":"Plugin is not installed."})),
+        )
+            .into_response();
+    };
+    if !package.public.managed {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"status":"error", "message":"Built-in plugins cannot be deactivated."})),
+        )
+            .into_response();
+    }
+    let (response_sender, response_receiver) = mpsc::channel();
+    if state
+        .control
+        .send(DesktopControlCall::DeactivatePlugin {
+            plugin_id: plugin_id.clone(),
+            response: response_sender,
+        })
+        .is_err()
+    {
+        return resource_error(ResourceError::Backend(
+            "Desktop runtime is shutting down".into(),
+        ));
+    }
+    match tokio::task::spawn_blocking(move || {
+        response_receiver.recv_timeout(Duration::from_secs(45))
+    })
+    .await
+    {
+        Ok(Ok(Ok(()))) => {
+            state.plugin_catalog_revision.fetch_add(1, Ordering::AcqRel);
+            state.package_scan_revision.fetch_add(1, Ordering::AcqRel);
+            Json(json!({"status":"inactive", "plugin_id":plugin_id})).into_response()
+        }
+        Ok(Ok(Err(message))) => (
+            StatusCode::CONFLICT,
+            Json(json!({"status":"error", "message":message})),
+        )
+            .into_response(),
+        _ => resource_error(ResourceError::Backend(
+            "Desktop runtime did not finish deactivating the plugin".into(),
         )),
     }
 }
@@ -1446,13 +1507,33 @@ async fn load_granted_resource(
             "target is not a declared file resource".into(),
         ));
     }
-    let path = match state.resource_browser.resolve_granted_file(
-        &request.plugin_id,
-        &request.grant_id,
-        request.entry_id.as_deref(),
-    ) {
-        Ok(path) => path,
-        Err(error) => return resource_error(error),
+    let bundled;
+    let path = match request.bundle {
+        Some(ResourceBundleKind::NkiDependencies) => {
+            match state.resource_browser.bundle_granted_nki(
+                &request.plugin_id,
+                &request.grant_id,
+                request.entry_id.as_deref(),
+            ) {
+                Ok(staged) => {
+                    let path = staged.path().to_path_buf();
+                    bundled = Some(staged);
+                    path
+                }
+                Err(error) => return resource_error(error),
+            }
+        }
+        None => match state.resource_browser.resolve_granted_file(
+            &request.plugin_id,
+            &request.grant_id,
+            request.entry_id.as_deref(),
+        ) {
+            Ok(path) => {
+                bundled = None;
+                path
+            }
+            Err(error) => return resource_error(error),
+        },
     };
     let uploaded_grant = request
         .persist
@@ -1473,7 +1554,7 @@ async fn load_granted_resource(
             "Desktop runtime is shutting down".into(),
         ));
     }
-    match tokio::task::spawn_blocking(move || {
+    let response = match tokio::task::spawn_blocking(move || {
         response_receiver.recv_timeout(Duration::from_secs(30))
     })
     .await
@@ -1490,7 +1571,9 @@ async fn load_granted_resource(
         _ => resource_error(ResourceError::Backend(
             "Desktop runtime did not finish loading the resource".into(),
         )),
-    }
+    };
+    drop(bundled);
+    response
 }
 
 async fn clear_installed_resource(
@@ -1989,19 +2072,29 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
         .map(|instance| instance.plugin_id.clone())
         .collect::<std::collections::BTreeSet<_>>();
     let revision = state.package_scan_revision.load(Ordering::Acquire);
-    if let Some((cached_revision, cached)) =
-        state.web_packages_cache.lock().expect("web package cache").as_ref()
+    if let Some((cached_revision, cached)) = state
+        .web_packages_cache
+        .lock()
+        .expect("web package cache")
+        .as_ref()
         && *cached_revision == revision
     {
         let mut packages = cached.clone();
         for package in packages.values_mut() {
-            package.public.active = active.contains(&package.public.plugin_id);
+            package.public.active = if package.public.managed {
+                state.plugin_store_root.as_ref().is_some_and(|store| {
+                    rackforge_repository::plugin_is_enabled(store, &package.public.plugin_id)
+                        .unwrap_or(false)
+                })
+            } else {
+                active.contains(&package.public.plugin_id)
+            };
         }
         return Ok(packages);
     }
     let mut roots = crate::direct_package_roots(&state.legacy_plugins_root)?;
     if let Some(store_root) = state.plugin_store_root.as_deref() {
-        roots.extend(crate::versioned_package_roots(store_root)?);
+        roots.extend(crate::all_versioned_package_roots(store_root)?);
     }
     let mut packages = BTreeMap::<String, (Version, PluginWebPackage)>::new();
     for root in roots {
@@ -2043,7 +2136,14 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
                 plugin_id: manifest.id.clone(),
                 plugin_name: manifest.name.clone(),
                 version: manifest.version.clone(),
-                active: active.contains(&manifest.id),
+                active: if managed {
+                    state.plugin_store_root.as_ref().is_some_and(|store| {
+                        rackforge_repository::plugin_is_enabled(store, &manifest.id)
+                            .unwrap_or(false)
+                    })
+                } else {
+                    active.contains(&manifest.id)
+                },
                 managed,
                 api_version: manifest.web_ui.as_ref().map_or(0, |web| web.api_version),
                 branding: manifest

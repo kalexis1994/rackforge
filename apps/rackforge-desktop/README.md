@@ -91,7 +91,7 @@ RackForge Root/
 └── logs/
 ```
 
-Use **File → Install Plugin…** to choose a package. RackForge checks the file
+Use **Plugin Manager → Install plugin** to choose a package. RackForge checks the file
 type and size, extracts it into an isolated staging directory, validates its
 manifest and complete payload, and then shows the plugin identity, target,
 size and SHA-256 digest before asking for confirmation. Local packages are not
@@ -99,9 +99,12 @@ publisher-signed, so native packages also display an explicit trust warning.
 
 After confirmation, Desktop installs the exact bytes that were inspected. The
 commit is atomic, versions are immutable and kept side by side, and incomplete
-files are rolled back. A newly installed plugin is activated immediately when
-possible. Updating a plugin that is already loaded requires a RackForge
-restart, which avoids unloading or replacing native code while it is in use.
+files are rolled back. A newly installed plugin remains inactive until the
+user activates it from Plugin Manager or chooses to open it after installation.
+Activation and installation are separate, persistent states, so an incompatible
+runtime cannot silently replace the instrument currently in use. Updating a
+native plugin that is already loaded may still require a RackForge restart,
+which avoids unloading or replacing native code while it is in use.
 The same portable WASM `.rfplugin` can be copied between Windows and Raspberry
 Pi; RackForge itself supplies the platform-specific host runtime.
 
@@ -124,9 +127,10 @@ From the repository root, run:
 powershell -ExecutionPolicy Bypass -File tools/build-windows-desktop.ps1
 ```
 
-The script uses the stable MSVC Rust target and Visual Studio Build Tools, then
-writes a portable release executable to
-`dist/windows-x86_64/RackForge.exe`.
+The script uses the stable MSVC Rust target and Visual Studio Build Tools. Both
+release builds and builds invoked with `-Configuration Debug` write the latest
+desktop executable to the single canonical path
+`dist/windows-x86_64/rackforge.exe`.
 
 The Desktop host is a platform shell around the shared RackForge Web
 application. Windows MIDI/audio backends remain platform layers; controller

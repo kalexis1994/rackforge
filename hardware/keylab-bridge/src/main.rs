@@ -7,11 +7,11 @@ use midir::{
     Ignore, MidiInput, MidiInputConnection, MidiInputPort, MidiOutput, MidiOutputConnection,
     MidiOutputPort,
 };
+#[cfg(target_os = "linux")]
+use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_control_api::{
     ControlRequest, ControlResponse, VirtualMidiMessage, transport::ControlConnection,
 };
-#[cfg(target_os = "linux")]
-use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_controller_api::LITTLE_V1;
 use rackforge_controller_api::{ButtonPhase, HostActionBinding, HostActionTarget};
 use rackforge_controller_arturia_keylab_essential_mk3::protocol as keylab_protocol;
@@ -23,14 +23,14 @@ use rackforge_platform_api::{
     PLATFORM_CONTROL_SCHEMA_VERSION, PlatformControlPayload, PlatformControlRequest,
     PlatformControlResponse, PlatformOperation, WifiConnectionId, WifiPassphrase, WifiSsid,
 };
+use rackforge_session_api::SurfaceMode;
 use rackforge_session_api::{
     ClientId, CommandEnvelope, EventEnvelope, InstanceId, MasterLevel, PluginInstanceState,
     SessionCommand, SessionState,
 };
+use rackforge_session_api::{HostControlBinding, HostControlTarget, MasterPan};
 #[cfg(target_os = "linux")]
 use rackforge_session_api::{SessionEvent, SurfaceActivationRequest};
-use rackforge_session_api::SurfaceMode;
-use rackforge_session_api::{HostControlBinding, HostControlTarget, MasterPan};
 use rackforge_surface_runtime as menu;
 use serde_json::Value;
 use std::env;
@@ -966,7 +966,6 @@ fn run_menu_demo(
     Ok(())
 }
 
-
 /// Where the host keeps this controller's user settings, if it told us.
 fn controller_settings_path() -> Option<std::path::PathBuf> {
     env::var_os("RACKFORGE_CONTROLLER_SETTINGS").map(std::path::PathBuf::from)
@@ -975,9 +974,7 @@ fn controller_settings_path() -> Option<std::path::PathBuf> {
 /// Applies the settings file when its mtime moves. Returns true when a
 /// value changed and the hardware should repaint. The only setting today
 /// is `key-light-color` (#rrggbb, scaled to the SysEx 7-bit range).
-fn refresh_controller_settings(
-    last_modified: &mut Option<std::time::SystemTime>,
-) -> bool {
+fn refresh_controller_settings(last_modified: &mut Option<std::time::SystemTime>) -> bool {
     let Some(path) = controller_settings_path() else {
         return false;
     };
@@ -997,7 +994,9 @@ fn refresh_controller_settings(
         return false;
     };
     let mut changed = false;
-    if let Some(value) = table.get("key-light-color").and_then(|value| value.as_str())
+    if let Some(value) = table
+        .get("key-light-color")
+        .and_then(|value| value.as_str())
         && let Some(rgb) = parse_hex_color(value)
     {
         // The picker speaks 8-bit sRGB; the KeyLab's SysEx speaks 7-bit.
@@ -1527,19 +1526,16 @@ fn register_host_controls() -> Result<(), String> {
     Ok(())
 }
 
-
 fn apply_master_pan(pan: MasterPan) -> Result<(), String> {
     dispatch_session_command(SessionCommand::SetMasterPan { pan })?;
     println!("MASTER_PAN normalized={}/{}", pan.get(), MasterPan::MAX);
     Ok(())
 }
 
-
 /// Where the host's pan stands right now.
 fn current_pan() -> Option<i16> {
     Some(live_snapshot().ok()?.master_pan.get())
 }
-
 
 fn apply_host_control(event: HostControlEvent) -> Result<(), String> {
     match event.target {
@@ -1567,7 +1563,6 @@ fn apply_host_control(event: HostControlEvent) -> Result<(), String> {
         }
     }
 }
-
 
 fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
     if let Err(error) = refresh_performance_snapshot(menu) {
@@ -1861,11 +1856,9 @@ fn web_control_request(request: &Value) -> Result<Value, String> {
     Ok(response)
 }
 
-
 fn keep_audition_alive(lease_id: u64) -> Result<(), String> {
     dispatch_session_command(SessionCommand::KeepAuditionAlive { lease_id }).map(|_| ())
 }
-
 
 #[cfg(target_os = "linux")]
 fn apply_pending_menu_command(

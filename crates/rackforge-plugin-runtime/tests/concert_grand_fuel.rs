@@ -12,8 +12,8 @@
 
 use std::path::PathBuf;
 
-use rackforge_plugin_runtime::{PortableEngine, RuntimeLimits};
 use rackforge_plugin_runtime::MidiEvent;
+use rackforge_plugin_runtime::{PortableEngine, RuntimeLimits};
 
 fn wasm_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -50,7 +50,11 @@ fn report_fuel_per_block() {
         let mut instance = module.instantiate().expect("instantiate");
         instance.prepare(48_000.0, FRAMES, 0, 2).expect("prepare");
         if pedal {
-            let cc = [MidiEvent { frame: 0, data: [0xb0, 64, 127], length: 3 }];
+            let cc = [MidiEvent {
+                frame: 0,
+                data: [0xb0, 64, 127],
+                length: 3,
+            }];
             instance
                 .process_interleaved_with_midi(&[], &mut output, FRAMES, &cc)
                 .expect("pedal");

@@ -6,7 +6,9 @@
 //! same behavior — enumerate enabled packages, spawn each driver, restart
 //! with backoff when one dies — so it lives here and the CLI delegates.
 
-use crate::{DriverRuntimeKind, InstalledController, PackageStore, PackageTrust, development_target};
+use crate::{
+    DriverRuntimeKind, InstalledController, PackageStore, PackageTrust, development_target,
+};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -111,8 +113,8 @@ pub fn supervise(root: &Path, options: &SuperviseOptions) -> Result<usize, Strin
         .map_err(|error| format!("listing controller store: {error}"))?
         .into_iter()
         .filter(|installed| installed.record.enabled)
-        .filter_map(|installed| {
-            match ensure_executable(&installed, options.allow_community) {
+        .filter_map(
+            |installed| match ensure_executable(&installed, options.allow_community) {
                 Ok(()) => Some(ManagedController {
                     installed,
                     child: None,
@@ -125,8 +127,8 @@ pub fn supervise(root: &Path, options: &SuperviseOptions) -> Result<usize, Strin
                     );
                     None
                 }
-            }
-        })
+            },
+        )
         .collect::<Vec<_>>();
     let count = managed.len();
     if count == 0 {
@@ -185,8 +187,7 @@ pub fn supervise(root: &Path, options: &SuperviseOptions) -> Result<usize, Strin
                 .and_then(|mut command| {
                     command.stdin(Stdio::piped());
                     command.spawn().map_err(|error| error.to_string())
-                })
-                {
+                }) {
                     Ok(child) => {
                         println!(
                             "CONTROLLER_STARTED id={} pid={}",

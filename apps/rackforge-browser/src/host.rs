@@ -37,11 +37,11 @@ use rackforge_performance_api::{
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{
-    Capability, HostPresetSummary, PluginKind, PresetCatalog, ResourceKind,
+    Capability, HostPresetSummary, PluginKind, PluginManifest, PresetCatalog, ResourceKind,
 };
 use rackforge_repository::{
-    PluginUserDataRemovalOptions, inspect_local_archive, install_local_archive,
-    remove_plugin_user_data, uninstall_plugin,
+    PluginUserDataRemovalOptions, inspect_local_archive, install_local_archive, plugin_is_enabled,
+    remove_plugin_user_data, set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
     BankSummary, ClientId, CommandEnvelope, CommandRef, EventEnvelope, InstanceId, MasterLevel,
@@ -172,10 +172,16 @@ impl BrowserHost {
         // longer installed is ignored rather than refused: a performer opening
         // RackForge should get an instrument, not an explanation.
         for plugin in &mut plugins {
-            let Ok(Some(sound)) = checkpoint.selected_sound(&session_id, plugin.instance_id.as_str()) else {
+            let Ok(Some(sound)) =
+                checkpoint.selected_sound(&session_id, plugin.instance_id.as_str())
+            else {
                 continue;
             };
-            if plugin.presets.presets.iter().any(|preset| preset.id == sound)
+            if plugin
+                .presets
+                .presets
+                .iter()
+                .any(|preset| preset.id == sound)
                 && plugin.instance.load_preset(&sound).is_ok()
             {
                 plugin.selected_sound_id = Some(sound);
@@ -189,8 +195,11 @@ impl BrowserHost {
             .flatten()
             .and_then(|id| InstanceId::new(id).ok())
             .filter(|id| instances.iter().any(|instance| instance.instance_id == *id));
-        let active_instance_id = restored_instance
-            .or_else(|| instances.first().map(|instance| instance.instance_id.clone()));
+        let active_instance_id = restored_instance.or_else(|| {
+            instances
+                .first()
+                .map(|instance| instance.instance_id.clone())
+        });
         let session = SessionState {
             schema_version: SESSION_SCHEMA_VERSION,
             revision: Revision::ZERO,
@@ -366,7 +375,10 @@ impl BrowserHost {
             ControlRequest::Dispatch { envelope } => self.dispatch_command(envelope),
             other => Err(Failure::new(
                 ControlErrorCode::Unavailable,
-                format!("the browser host does not implement {}", request_name(&other)),
+                format!(
+                    "the browser host does not implement {}",
+                    request_name(&other)
+                ),
             )),
         }
     }
@@ -403,9 +415,7 @@ impl BrowserHost {
         if live != previous_live {
             self.store
                 .record(None, SessionEvent::LiveStateReconciled { live })
-                .map_err(|error| {
-                    Failure::new(ControlErrorCode::Internal, format!("{error:#}"))
-                })?;
+                .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
         }
         let snapshot = self.performance_snapshot();
         Ok(ControlResponse::PerformanceEdited {
@@ -671,71 +681,36 @@ impl BrowserHost {
     /// browser host answers from what it actually loaded, so a package that
     /// failed to load is absent rather than offered and then unplayable.
     pub fn plugin_catalog(&self) -> serde_json::Value {
-        let active = self.store.state().active_instance_id.clone();
-        let catalog: Vec<serde_json::Value> = self
-            .plugins
-            .iter()
-            .map(|plugin| {
-                let manifest = plugin.runtime.manifest();
-                serde_json::json!({
-                    "plugin_id": manifest.id,
-                    "plugin_name": manifest.name,
-                    "version": manifest.version,
-                    "active": active.as_ref() == Some(&plugin.instance_id),
-                    "managed": plugin.managed,
-                    "api_version": manifest.api.major,
-                    "branding": manifest.branding.as_ref().map(|branding| {
-                        serde_json::json!({
-                            "icon": branding.icon,
-                            "banner": branding.banner,
-                            "splash": branding.splash,
-                            "background_color": branding.background_color,
-                            "accent_color": branding.accent_color,
-                        })
-                    }),
-                    // Paths inside the package, not URLs: the page publishes
-                    // these files itself and knows where it put them.
-                    "package_root": plugin.package_root.strip_prefix(DATA_ROOT).unwrap_or(&plugin.package_root),
-                    "surfaces": manifest
-                        .web_ui
-                        .as_ref()
-                        .map(|web_ui| {
-                            web_ui
-                                .surfaces
-                                .iter()
-                                .map(|surface| {
-                                    serde_json::json!({
-                                        "kind": match surface.kind {
-                                            rackforge_plugin_api::WebSurfaceKind::Config => "config",
-                                            _ => "play",
-                                        },
-                                        "entry": surface.entry,
-                                    })
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default(),
-                    "resources": manifest
-                        .resources
-                        .iter()
-                        .map(|resource| {
-                            serde_json::json!({
-                                "id": resource.id,
-                                "name": resource.name,
-                                "kind": match resource.kind {
-                                    rackforge_plugin_api::ResourceKind::Directory => "directory",
-                                    _ => "file",
-                                },
-                                "required": resource.required,
-                                "data_path": resource.data_path,
-                                "package_path": resource.package_path,
-                            })
-                        })
-                        .collect::<Vec<_>>(),
-                })
-            })
-            .collect();
-        serde_json::Value::Array(catalog)
+        let data_root = PathBuf::from(DATA_ROOT);
+        let mut catalog = BTreeMap::<String, (semver::Version, bool, serde_json::Value)>::new();
+        for root in all_package_roots(&data_root).unwrap_or_default() {
+            let Ok(package) = PluginPackage::open(&root) else {
+                continue;
+            };
+            let manifest = package.manifest();
+            let Ok(version) = semver::Version::parse(&manifest.version) else {
+                continue;
+            };
+            let managed = root.starts_with(data_root.join(STORE_DIRECTORY));
+            let is_active =
+                !managed || plugin_is_enabled(store_root(), &manifest.id).unwrap_or(true);
+            let candidate = plugin_catalog_entry(manifest, &root, is_active, managed);
+            let replace = catalog
+                .get(&manifest.id)
+                .is_none_or(|(current, current_managed, _)| {
+                    (managed && !*current_managed)
+                        || (managed == *current_managed && version >= *current)
+                });
+            if replace {
+                catalog.insert(manifest.id.clone(), (version, managed, candidate));
+            }
+        }
+        serde_json::Value::Array(
+            catalog
+                .into_values()
+                .map(|(_, _, descriptor)| descriptor)
+                .collect(),
+        )
     }
 
     /// Installs a file a plugin declares — a sound library, a ROM — into that
@@ -772,7 +747,10 @@ impl BrowserHost {
 
         let storage = PluginStorage::new(PathBuf::from(DATA_ROOT));
         let path = PathBuf::from(&relative);
-        if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
             storage.ensure_directory(plugin_id, parent)?;
         }
         storage.write_atomic(plugin_id, &path, bytes)?;
@@ -841,13 +819,16 @@ impl BrowserHost {
         let mut presets_removed = 0;
         if options.presets {
             for preset in self.state_store.list_presets(plugin_id).unwrap_or_default() {
-                if self.state_store.delete_preset(plugin_id, &preset.id).is_ok() {
+                if self
+                    .state_store
+                    .delete_preset(plugin_id, &preset.id)
+                    .is_ok()
+                {
                     presets_removed += 1;
                 }
             }
         }
-        let user_data =
-            remove_plugin_user_data(PathBuf::from(DATA_ROOT), plugin_id, options)?;
+        let user_data = remove_plugin_user_data(PathBuf::from(DATA_ROOT), plugin_id, options)?;
         let warnings = self.reload_plugins()?;
         Ok(serde_json::json!({
             "plugin_id": removed.plugin_id,
@@ -878,7 +859,7 @@ impl BrowserHost {
         }))
     }
 
-    /// Installs a `.rfplugin` into the page's plugin store and loads it.
+    /// Installs a `.rfplugin` into the page's plugin store without enabling it.
     ///
     /// Only portable packages are accepted: a native one would install
     /// perfectly well and then refuse to run, which is a worse answer than
@@ -897,9 +878,39 @@ impl BrowserHost {
             "plugin_id": installed.record.plugin_id,
             "version": installed.record.version,
             "already_installed": installed.already_installed,
-            "activation_required": false,
+            "activation_required": true,
             "warnings": warnings,
         }))
+    }
+
+    /// Changes package enablement and rebuilds the browser audio session over
+    /// the enabled set. Installation remains immutable and untouched.
+    pub fn set_package_active(
+        &mut self,
+        plugin_id: &str,
+        active: bool,
+    ) -> Result<serde_json::Value> {
+        let installed = all_package_roots(&PathBuf::from(DATA_ROOT))?
+            .into_iter()
+            .filter(|root| root.starts_with(PathBuf::from(DATA_ROOT).join(STORE_DIRECTORY)))
+            .filter_map(|root| PluginPackage::open(root).ok())
+            .any(|package| package.manifest().id == plugin_id);
+        if !installed {
+            bail!("{plugin_id} is not an installed plugin");
+        }
+        let previous = plugin_is_enabled(store_root(), plugin_id)?;
+        set_plugin_enabled(store_root(), plugin_id, active)?;
+        match self.reload_plugins() {
+            Ok(warnings) => Ok(serde_json::json!({
+                "plugin_id": plugin_id,
+                "active": active,
+                "warnings": warnings,
+            })),
+            Err(error) => {
+                let _ = set_plugin_enabled(store_root(), plugin_id, previous);
+                Err(error)
+            }
+        }
     }
 
     /// Rebuilds the session over the packages now on disk, keeping what the
@@ -925,7 +936,11 @@ impl BrowserHost {
             match load_plugin(&root, &data_root, self.stream) {
                 Ok(mut plugin) => {
                     if let Some(sound) = selected.get(&plugin.instance_id)
-                        && plugin.presets.presets.iter().any(|preset| preset.id == *sound)
+                        && plugin
+                            .presets
+                            .presets
+                            .iter()
+                            .any(|preset| preset.id == *sound)
                         && plugin.instance.load_preset(sound).is_ok()
                     {
                         plugin.selected_sound_id = Some(sound.clone());
@@ -936,21 +951,33 @@ impl BrowserHost {
             }
         }
         prefer_installed(&mut plugins);
-        if plugins.is_empty() {
-            bail!("no playable instrument remains after reloading the plugin store");
-        }
-
         let instances: Vec<PluginInstanceState> =
             plugins.iter().map(session_instance_state).collect();
-        let active_instance_id = previous
-            .active_instance_id
+        let previous_active_instance_id = previous.active_instance_id.clone();
+        let active_instance_id = previous_active_instance_id
+            .clone()
             .filter(|id| instances.iter().any(|instance| instance.instance_id == *id))
-            .or_else(|| instances.first().map(|instance| instance.instance_id.clone()));
+            .or_else(|| {
+                instances
+                    .first()
+                    .map(|instance| instance.instance_id.clone())
+            });
+        let active_mode = if previous_active_instance_id != active_instance_id
+            && previous_active_instance_id.is_some()
+        {
+            SurfaceMode::Idle
+        } else {
+            previous.active_mode
+        };
         // Loading plugins is a discontinuity rather than an edit, so the
         // session starts again from the revision it had reached instead of
         // pretending a sequence of events produced this.
         let session = SessionState {
-            revision: previous.revision.next().map_err(|message| anyhow!(message))?,
+            revision: previous
+                .revision
+                .next()
+                .map_err(|message| anyhow!(message))?,
+            active_mode,
             active_instance_id,
             instances,
             audition: None,
@@ -1028,7 +1055,6 @@ fn request_name(request: &ControlRequest) -> &'static str {
     }
 }
 
-
 /// Keeps one plugin per identity when a package is both shipped with the site
 /// and installed into the store: the installed copy wins, because installing
 /// is the only way a person can upgrade a bundled instrument, and two
@@ -1071,6 +1097,24 @@ fn package_roots(data_root: &Path) -> Result<Vec<PathBuf>> {
             .with_context(|| format!("reading {}", packages.display()))?
             .flatten()
         {
+            let plugin_id = plugin.file_name().to_string_lossy().into_owned();
+            if plugin_is_enabled(store_root(), &plugin_id)? {
+                roots.extend(manifest_roots(&plugin.path())?);
+            }
+        }
+    }
+    roots.sort();
+    Ok(roots)
+}
+
+fn all_package_roots(data_root: &Path) -> Result<Vec<PathBuf>> {
+    let mut roots = manifest_roots(&data_root.join(PLUGIN_DIRECTORY))?;
+    let packages = data_root.join(STORE_DIRECTORY).join("packages");
+    if packages.is_dir() {
+        for plugin in fs::read_dir(&packages)
+            .with_context(|| format!("reading {}", packages.display()))?
+            .flatten()
+        {
             // One directory per plugin, one directory per version inside it.
             roots.extend(manifest_roots(&plugin.path())?);
         }
@@ -1079,12 +1123,62 @@ fn package_roots(data_root: &Path) -> Result<Vec<PathBuf>> {
     Ok(roots)
 }
 
+fn plugin_catalog_entry(
+    manifest: &PluginManifest,
+    package_root: &Path,
+    active: bool,
+    managed: bool,
+) -> serde_json::Value {
+    serde_json::json!({
+        "plugin_id": manifest.id,
+        "plugin_name": manifest.name,
+        "version": manifest.version,
+        "active": active,
+        "managed": managed,
+        "api_version": manifest.api.major,
+        "branding": manifest.branding.as_ref().map(|branding| {
+            serde_json::json!({
+                "icon": branding.icon,
+                "banner": branding.banner,
+                "splash": branding.splash,
+                "background_color": branding.background_color,
+                "accent_color": branding.accent_color,
+            })
+        }),
+        "package_root": package_root.strip_prefix(DATA_ROOT).unwrap_or(package_root),
+        "surfaces": manifest.web_ui.as_ref().map(|web_ui| {
+            web_ui.surfaces.iter().map(|surface| {
+                serde_json::json!({
+                    "kind": match surface.kind {
+                        rackforge_plugin_api::WebSurfaceKind::Config => "config",
+                        _ => "play",
+                    },
+                    "entry": surface.entry,
+                })
+            }).collect::<Vec<_>>()
+        }).unwrap_or_default(),
+        "resources": manifest.resources.iter().map(|resource| {
+            serde_json::json!({
+                "id": resource.id,
+                "name": resource.name,
+                "kind": match resource.kind {
+                    rackforge_plugin_api::ResourceKind::Directory => "directory",
+                    _ => "file",
+                },
+                "required": resource.required,
+                "data_path": resource.data_path,
+                "package_path": resource.package_path,
+            })
+        }).collect::<Vec<_>>(),
+    })
+}
+
 /// Lists the directories directly below `directory` that hold a plugin
 /// manifest.
 fn manifest_roots(directory: &Path) -> Result<Vec<PathBuf>> {
     let mut roots = Vec::new();
-    for entry in fs::read_dir(directory)
-        .with_context(|| format!("reading {}", directory.display()))?
+    for entry in
+        fs::read_dir(directory).with_context(|| format!("reading {}", directory.display()))?
     {
         let path = entry
             .with_context(|| format!("listing {}", directory.display()))?

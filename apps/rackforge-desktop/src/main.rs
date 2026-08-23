@@ -32,8 +32,8 @@ use rackforge_plugin_api::{
 };
 use rackforge_repository::{
     InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions,
-    cleanup_uninstall_tombstones, inspect_local_archive, install_local_archive,
-    remove_plugin_user_data, uninstall_plugin,
+    cleanup_uninstall_tombstones, inspect_local_archive, install_local_archive, plugin_is_enabled,
+    remove_plugin_user_data, set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
     AuditionEndReason, BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId,
@@ -829,9 +829,8 @@ impl DesktopApp {
                 if let Err(error) = sync_desktop_audio(&audio, &self.session, &self.menu) {
                     self.audio_recovery_attempts = self.audio_recovery_attempts.saturating_add(1);
                     self.audio_recovery_at = Some(Instant::now() + Duration::from_secs(1));
-                    self.status = format!(
-                        "Audio reconnect synchronization failed · retrying · {error:#}"
-                    );
+                    self.status =
+                        format!("Audio reconnect synchronization failed · retrying · {error:#}");
                     return;
                 }
                 let summary = audio.summary().to_owned();
@@ -998,7 +997,9 @@ impl DesktopApp {
         self.audio_inventory_cache = Some((Instant::now(), inventory.clone()));
         if let Err(error) = inventory.validate(&preferences) {
             return match self.restore_audio(previous.as_ref(), active.as_deref()) {
-                Ok(()) => Err(anyhow::anyhow!("{error:#}. The previous settings were kept")),
+                Ok(()) => Err(anyhow::anyhow!(
+                    "{error:#}. The previous settings were kept"
+                )),
                 Err(rollback) => Err(anyhow::anyhow!(
                     "{error:#}. Reopening the previous audio settings also failed: {rollback:#}"
                 )),
@@ -1291,22 +1292,14 @@ impl DesktopApp {
                 Self::show_install_info("Plugin installed", &self.status);
                 false
             }
-            PluginInstallActivation::Reload => match self.activate_plugin_id(&inspection.plugin_id)
-            {
-                Ok(()) => {
-                    self.status = format!("{label} installed and active");
-                    Self::show_install_info("Plugin installed", &self.status);
-                    true
-                }
-                Err(error) => {
-                    self.status = format!(
-                        "{label} was installed from {}, but could not be activated: {error:#}. Restart RackForge to try again.",
-                        archive.display()
-                    );
-                    Self::show_install_error(&self.status);
-                    false
-                }
-            },
+            PluginInstallActivation::Reload => {
+                self.status = format!(
+                    "{label} was installed from {} and is inactive. Activate it from Plugin Manager when you are ready to use it.",
+                    archive.display()
+                );
+                Self::show_install_info("Plugin installed", &self.status);
+                false
+            }
         }
     }
 
@@ -1603,6 +1596,12 @@ impl DesktopApp {
                 } => {
                     let _ = response.send(self.activate_plugin_id(&plugin_id));
                 }
+                web::DesktopControlCall::DeactivatePlugin {
+                    plugin_id,
+                    response,
+                } => {
+                    let _ = response.send(self.deactivate_plugin_id(&plugin_id));
+                }
                 web::DesktopControlCall::UninstallPlugin {
                     plugin_id,
                     delete_presets,
@@ -1693,7 +1692,9 @@ impl DesktopApp {
         self.live_state_dirty = None;
         #[cfg(windows)]
         {
-            let Some(audio) = self.audio.as_ref() else { return };
+            let Some(audio) = self.audio.as_ref() else {
+                return;
+            };
             let active = self
                 .session
                 .read()
@@ -1724,28 +1725,110 @@ impl DesktopApp {
     }
 
     fn activate_plugin_id(&mut self, plugin_id: &str) -> Result<(), String> {
-        if !self
-            .plugins
-            .iter()
-            .any(|plugin| plugin.plugin_id == plugin_id)
-        {
-            self.reload_plugins()
-                .map_err(|error| format!("Could not load the installed plugin: {error:#}"))?;
+        let store_root = self
+            .options
+            .plugin_store_root
+            .clone()
+            .ok_or_else(|| "Desktop plugin storage is unavailable".to_owned())?;
+        let was_enabled = plugin_is_enabled(&store_root, plugin_id)
+            .map_err(|error| format!("Could not read plugin activation state: {error}"))?;
+        set_plugin_enabled(&store_root, plugin_id, true)
+            .map_err(|error| format!("Could not enable the installed plugin: {error}"))?;
+        let activation = (|| {
+            if !was_enabled
+                || !self
+                    .plugins
+                    .iter()
+                    .any(|plugin| plugin.plugin_id == plugin_id)
+            {
+                self.reload_plugins()
+                    .map_err(|error| format!("Could not load the installed plugin: {error:#}"))?;
+            }
+            let instance_id = self
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == plugin_id)
+                .map(|plugin| plugin.instance_id.clone())
+                .ok_or_else(|| {
+                    format!("Installed plugin {plugin_id:?} is not compatible with Desktop")
+                })?;
+            let instance_id = InstanceId::new(instance_id)
+                .map_err(|error| format!("Installed plugin has an invalid instance id: {error}"))?;
+            self.select_plugin(&instance_id, None)?;
+            self.apply_command(MenuCommand::SetActiveMode {
+                mode: ActiveMode::Play,
+            });
+            Ok(())
+        })();
+        if let Err(error) = activation {
+            if !was_enabled {
+                let rollback = set_plugin_enabled(&store_root, plugin_id, false);
+                let reload = self.reload_plugins();
+                if let Err(rollback) = rollback {
+                    return Err(format!(
+                        "{error}. Restoring the inactive state also failed: {rollback}"
+                    ));
+                }
+                if let Err(reload) = reload {
+                    return Err(format!(
+                        "{error}. The package was disabled again, but Desktop could not restore its plugin graph: {reload:#}"
+                    ));
+                }
+            }
+            return Err(error);
         }
-        let instance_id = self
-            .plugins
-            .iter()
-            .find(|plugin| plugin.plugin_id == plugin_id)
-            .map(|plugin| plugin.instance_id.clone())
-            .ok_or_else(|| {
-                format!("Installed plugin {plugin_id:?} is not compatible with Desktop")
-            })?;
-        let instance_id = InstanceId::new(instance_id)
-            .map_err(|error| format!("Installed plugin has an invalid instance id: {error}"))?;
-        self.select_plugin(&instance_id, None)?;
-        self.apply_command(MenuCommand::SetActiveMode {
-            mode: ActiveMode::Play,
+        Ok(())
+    }
+
+    fn deactivate_plugin_id(&mut self, plugin_id: &str) -> Result<(), String> {
+        let store_root = self
+            .options
+            .plugin_store_root
+            .clone()
+            .ok_or_else(|| "Desktop plugin storage is unavailable".to_owned())?;
+        if self
+            .options
+            .plugins_root
+            .join(plugin_id)
+            .join("rackforge-plugin.toml")
+            .is_file()
+        {
+            return Err("Built-in plugins cannot be deactivated".into());
+        }
+        if self
+            .session
+            .read()
+            .is_ok_and(|session| session.audition.is_some() || session.program_draft.is_some())
+        {
+            return Err("Finish or cancel the active plugin edit before deactivating it".into());
+        }
+        let was_selected = self.session.read().is_ok_and(|session| {
+            session
+                .active_instance_id
+                .as_ref()
+                .is_some_and(|instance_id| {
+                    self.plugins.iter().any(|plugin| {
+                        plugin.plugin_id == plugin_id && plugin.instance_id == instance_id.as_str()
+                    })
+                })
         });
+        if was_selected {
+            self.apply_command(MenuCommand::SetActiveMode {
+                mode: ActiveMode::Idle,
+            });
+        }
+        set_plugin_enabled(&store_root, plugin_id, false)
+            .map_err(|error| format!("Could not disable the plugin: {error}"))?;
+        if let Err(error) = self.reload_plugins() {
+            let rollback = set_plugin_enabled(&store_root, plugin_id, true);
+            return Err(match rollback {
+                Ok(()) => format!("Could not reload Desktop without the plugin: {error:#}"),
+                Err(rollback) => format!(
+                    "Could not reload Desktop without the plugin: {error:#}. Re-enabling it also failed: {rollback}"
+                ),
+            });
+        }
+        self.status = format!("Plugin deactivated: {plugin_id}");
         Ok(())
     }
 
@@ -2246,8 +2329,12 @@ impl DesktopApp {
                 // desktop's MIDI capture yields it), so the reservation is
                 // satisfied by construction: nothing else reads those CCs.
                 // Validate and acknowledge.
-                if controls.iter().any(|binding| binding.midi_cc.validate().is_err())
-                    || actions.iter().any(|binding| binding.midi_cc.validate().is_err())
+                if controls
+                    .iter()
+                    .any(|binding| binding.midi_cc.validate().is_err())
+                    || actions
+                        .iter()
+                        .any(|binding| binding.midi_cc.validate().is_err())
                 {
                     Err("invalid reserved host binding registration".into())
                 } else {
@@ -2584,8 +2671,7 @@ impl DesktopApp {
                     .plugins
                     .iter()
                     .any(|plugin| {
-                        plugin.instance_id == active_id.as_str()
-                            && plugin.plugin_id == plugin_id
+                        plugin.instance_id == active_id.as_str() && plugin.plugin_id == plugin_id
                     })
                     .then(|| active_id.clone()),
                 // The stale id is gone entirely: if the active instance
@@ -4177,13 +4263,11 @@ fn start_desktop_audio(
 /// the same contract Android's bundled install honors -- so a fresh
 /// machine has its controller without anyone running a command.
 fn ensure_bundled_controller(rackforge_root: &Path) {
-    let store = rackforge_controller_package::PackageStore::new(
-        rackforge_root.join("controllers"),
-    );
+    let store = rackforge_controller_package::PackageStore::new(rackforge_root.join("controllers"));
     let manifest_text = keylab_essential_mk3::controller::PACKAGE_MANIFEST;
-    let Ok(manifest) = toml::from_str::<
-        rackforge_controller_package::ControllerPackageManifest,
-    >(manifest_text) else {
+    let Ok(manifest) =
+        toml::from_str::<rackforge_controller_package::ControllerPackageManifest>(manifest_text)
+    else {
         eprintln!("DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=manifest-invalid");
         return;
     };
@@ -4191,8 +4275,7 @@ fn ensure_bundled_controller(rackforge_root: &Path) {
         .list()
         .map(|installed| {
             installed.iter().any(|controller| {
-                controller.record.id == manifest.id
-                    && controller.record.version == manifest.version
+                controller.record.id == manifest.id && controller.record.version == manifest.version
             })
         })
         .unwrap_or(false);
@@ -4205,12 +4288,13 @@ fn ensure_bundled_controller(rackforge_root: &Path) {
             .join("rackforge-arturia-keylab-essential-mk3-driver.exe");
         candidate.is_file().then_some(candidate)
     }) else {
-        eprintln!(
-            "DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=driver-binary-not-beside-exe"
-        );
+        eprintln!("DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=driver-binary-not-beside-exe");
         return;
     };
-    let staging = rackforge_root.join("controllers").join("staging").join(&manifest.id);
+    let staging = rackforge_root
+        .join("controllers")
+        .join("staging")
+        .join(&manifest.id);
     let staged = (|| -> std::io::Result<()> {
         let bin = staging.join("bin").join("windows-x86-64");
         fs::create_dir_all(&bin)?;
@@ -4345,6 +4429,17 @@ fn direct_package_roots(root: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn versioned_package_roots(store_root: &Path) -> Result<Vec<PathBuf>> {
+    versioned_package_roots_with_activation(store_root, true)
+}
+
+pub(crate) fn all_versioned_package_roots(store_root: &Path) -> Result<Vec<PathBuf>> {
+    versioned_package_roots_with_activation(store_root, false)
+}
+
+fn versioned_package_roots_with_activation(
+    store_root: &Path,
+    enabled_only: bool,
+) -> Result<Vec<PathBuf>> {
     let packages_root = store_root.join("packages");
     fs::create_dir_all(&packages_root)
         .with_context(|| format!("creating plugin store {}", packages_root.display()))?;
@@ -4354,6 +4449,13 @@ fn versioned_package_roots(store_root: &Path) -> Result<Vec<PathBuf>> {
         .flatten()
     {
         if !plugin.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let plugin_id = plugin.file_name().to_string_lossy().into_owned();
+        if enabled_only
+            && !plugin_is_enabled(store_root, &plugin_id)
+                .with_context(|| format!("reading activation state for {plugin_id}"))?
+        {
             continue;
         }
         roots.extend(

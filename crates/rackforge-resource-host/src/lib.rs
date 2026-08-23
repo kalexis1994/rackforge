@@ -7,13 +7,18 @@ use rackforge_resource_api::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fs,
+    fs::{self, File, OpenOptions},
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
+use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 const SELECTION_TTL_SECONDS: u64 = 30 * 60;
+const MAX_NKI_BUNDLE_ENTRIES: usize = 8_192;
+const MAX_NKI_BUNDLE_EXPANDED_BYTES: u64 = 256 * 1_048_576;
+const MAX_NKI_BUNDLE_BYTES: u64 = 128 * 1_048_576;
 
 #[derive(Clone, Debug)]
 pub struct NativeMount {
@@ -243,6 +248,145 @@ impl NativeResourceBrowser {
             ));
         }
         Ok(path)
+    }
+
+    /// Builds the single private resource a portable NKI player receives.
+    ///
+    /// The selected map remains the only instrument in the bundle. Ordinary
+    /// samples and artwork beneath its directory are included because Kontakt
+    /// records those as external dependencies rather than embedding them in
+    /// the NKI. The returned staging file removes itself when the load request
+    /// finishes, whether validation succeeds or fails.
+    pub fn bundle_granted_nki(
+        &self,
+        plugin_id: &str,
+        grant_id: &str,
+        entry_id: Option<&str>,
+    ) -> Result<ConsumedResourceFile, ResourceError> {
+        let selected = self.resolve_granted_file(plugin_id, grant_id, entry_id)?;
+        if !selected
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("nki"))
+        {
+            return Err(ResourceError::InvalidRequest(
+                "NKI dependency bundling requires a selected .nki file".into(),
+            ));
+        }
+        let root = selected
+            .parent()
+            .ok_or_else(|| ResourceError::InvalidRequest("NKI has no parent directory".into()))?;
+        let root = fs::canonicalize(root).map_err(backend)?;
+
+        let mut files = Vec::new();
+        let mut directories = vec![root.clone()];
+        let mut expanded_bytes = 0_u64;
+        while let Some(directory) = directories.pop() {
+            let entries = fs::read_dir(&directory).map_err(backend)?;
+            for entry in entries {
+                let path = entry.map_err(backend)?.path();
+                let metadata = fs::symlink_metadata(&path).map_err(backend)?;
+                if metadata.file_type().is_symlink() {
+                    continue;
+                }
+                if metadata.is_dir() {
+                    directories.push(path);
+                    continue;
+                }
+                if !metadata.is_file() {
+                    continue;
+                }
+                let extension = path
+                    .extension()
+                    .map(|value| value.to_string_lossy().to_ascii_lowercase())
+                    .unwrap_or_default();
+                let include = match extension.as_str() {
+                    "nki" => fs::canonicalize(&path).map_err(backend)? == selected,
+                    "wav" | "wave" | "flac" | "tga" | "png" | "jpg" | "jpeg" => true,
+                    _ => false,
+                };
+                if !include {
+                    continue;
+                }
+                expanded_bytes = expanded_bytes.checked_add(metadata.len()).ok_or_else(|| {
+                    ResourceError::InvalidRequest("NKI bundle size overflow".into())
+                })?;
+                if expanded_bytes > MAX_NKI_BUNDLE_EXPANDED_BYTES {
+                    return Err(ResourceError::InvalidRequest(
+                        "NKI dependencies exceed the supported size".into(),
+                    ));
+                }
+                let canonical = fs::canonicalize(path).map_err(backend)?;
+                if !canonical.starts_with(&root) {
+                    return Err(ResourceError::OutsideMount);
+                }
+                files.push(canonical);
+                if files.len() > MAX_NKI_BUNDLE_ENTRIES {
+                    return Err(ResourceError::InvalidRequest(
+                        "NKI has too many dependency files".into(),
+                    ));
+                }
+            }
+        }
+        files.sort();
+
+        let output =
+            std::env::temp_dir().join(format!("rackforge-nki-{}.rfbank", random_handle()?));
+        let staged = ConsumedResourceFile {
+            path: output.clone(),
+            owned: true,
+        };
+        let target = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&output)
+            .map_err(backend)?;
+        let mut archive = ZipWriter::new(target);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Deflated)
+            .unix_permissions(0o644);
+        let display_name = selected
+            .file_stem()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Kontakt instrument".into());
+        let manifest = serde_json::to_vec(&serde_json::json!({
+            "schema_version": 1,
+            "id": display_name,
+            "name": display_name,
+            "source_format": "rf-instrument",
+        }))
+        .map_err(|error| ResourceError::Backend(error.to_string()))?;
+        archive
+            .start_file("bank.json", options)
+            .and_then(|_| archive.write_all(&manifest).map_err(Into::into))
+            .map_err(|error: zip::result::ZipError| ResourceError::Backend(error.to_string()))?;
+        for path in files {
+            let relative = path
+                .strip_prefix(&root)
+                .map_err(|_| ResourceError::OutsideMount)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            archive
+                .start_file(relative, options)
+                .map_err(|error| ResourceError::Backend(error.to_string()))?;
+            let mut source = File::open(path).map_err(backend)?;
+            let mut buffer = [0_u8; 64 * 1024];
+            loop {
+                let read = source.read(&mut buffer).map_err(backend)?;
+                if read == 0 {
+                    break;
+                }
+                archive.write_all(&buffer[..read]).map_err(backend)?;
+            }
+        }
+        archive
+            .finish()
+            .map_err(|error| ResourceError::Backend(error.to_string()))?;
+        if fs::metadata(&output).map_err(backend)?.len() > MAX_NKI_BUNDLE_BYTES {
+            return Err(ResourceError::InvalidRequest(
+                "compressed NKI bundle exceeds the supported size".into(),
+            ));
+        }
+        Ok(staged)
     }
 
     pub fn select_host_entry(&self, entry_id: &str) -> Result<ResourceSelection, ResourceError> {
@@ -1055,6 +1199,107 @@ mod tests {
                 .unwrap(),
             fs::canonicalize(&source).unwrap()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn nki_bundles_include_the_selected_map_samples_and_artwork() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-resource-nki-bundle-test-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        let library = root.join("Accordion");
+        fs::create_dir_all(library.join("Samples/Wallpaper")).unwrap();
+        fs::write(library.join("Selected.nki"), b"map").unwrap();
+        fs::write(library.join("Other.nki"), b"other map").unwrap();
+        fs::write(library.join("Samples/C4.wav"), b"wave").unwrap();
+        fs::write(library.join("Samples/Wallpaper/front.tga"), b"image").unwrap();
+        fs::write(library.join("notes.txt"), b"not a dependency").unwrap();
+
+        let browser = NativeResourceBrowser::new([NativeMount {
+            name: "Test".into(),
+            root: root.clone(),
+            read_only: true,
+        }])
+        .unwrap();
+        let mount = browser.mounts().unwrap().remove(0);
+        let mount_root = browser.mount_root(&mount.id).unwrap();
+        let library_entry = browser
+            .entries(&mount_root.id)
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "Accordion")
+            .unwrap();
+        let grant = browser
+            .bind(&BindResourceRequest {
+                plugin_id: "org.rackforge.test".into(),
+                resource_id: "library".into(),
+                entry_id: library_entry.id,
+            })
+            .unwrap();
+        let selected = browser
+            .grant_entries(&BrowseGrantRequest {
+                plugin_id: "org.rackforge.test".into(),
+                grant_id: grant.grant_id.clone(),
+                parent_id: None,
+            })
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "Selected.nki")
+            .unwrap();
+        let staged = browser
+            .bundle_granted_nki("org.rackforge.test", &grant.grant_id, Some(&selected.id))
+            .unwrap();
+        let staged_path = staged.path().to_path_buf();
+        let file = File::open(&staged_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut names = (0..archive.len())
+            .map(|index| archive.by_index(index).unwrap().name().to_string())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "Samples/C4.wav",
+                "Samples/Wallpaper/front.tga",
+                "Selected.nki",
+                "bank.json",
+            ]
+        );
+        drop(archive);
+        drop(staged);
+        assert!(!staged_path.exists());
+
+        let file_grant = browser
+            .bind(&BindResourceRequest {
+                plugin_id: "org.rackforge.direct-nki".into(),
+                resource_id: "user-soundfont".into(),
+                entry_id: selected.id,
+            })
+            .unwrap();
+        let direct = browser
+            .bundle_granted_nki("org.rackforge.direct-nki", &file_grant.grant_id, None)
+            .unwrap();
+        let file = File::open(direct.path()).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut names = (0..archive.len())
+            .map(|index| archive.by_index(index).unwrap().name().to_string())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "Samples/C4.wav",
+                "Samples/Wallpaper/front.tga",
+                "Selected.nki",
+                "bank.json",
+            ]
+        );
+        drop(archive);
+        drop(direct);
         fs::remove_dir_all(root).unwrap();
     }
 

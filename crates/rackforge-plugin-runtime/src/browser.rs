@@ -77,7 +77,8 @@ pub mod host {
         pub fn rf_instantiate(module: i32) -> i32;
         pub fn rf_instance_release(instance: i32);
         pub fn rf_memory_size(instance: i32) -> i32;
-        pub fn rf_memory_read(instance: i32, offset: i32, destination: *mut u8, length: i32) -> i32;
+        pub fn rf_memory_read(instance: i32, offset: i32, destination: *mut u8, length: i32)
+        -> i32;
         pub fn rf_memory_write(instance: i32, offset: i32, source: *const u8, length: i32) -> i32;
         pub fn rf_export_present(instance: i32, export: i32) -> i32;
         pub fn rf_call_0(instance: i32, export: i32) -> i32;
@@ -208,7 +209,8 @@ impl PortableModule {
         let parameter_offset = raw.call_0(export::PARAMETER_PTR, "parameter_ptr")?;
         let transfer_offset = raw.call_0(export::TRANSFER_PTR, "transfer_ptr")?;
 
-        let input_capacity = raw.call_0(export::CAPACITY_INPUT_SAMPLES, "capacity_input_samples")?;
+        let input_capacity =
+            raw.call_0(export::CAPACITY_INPUT_SAMPLES, "capacity_input_samples")?;
         let output_capacity =
             raw.call_0(export::CAPACITY_OUTPUT_SAMPLES, "capacity_output_samples")?;
         if input_capacity < 0 || output_capacity < 0 {
@@ -398,12 +400,7 @@ impl RawInstance {
         // SAFETY: the destination holds `length` bytes and the source range was
         // just bounds-checked against linear memory.
         let written = unsafe {
-            host::rf_memory_read(
-                self.handle.0,
-                offset,
-                buffer.as_mut_ptr(),
-                length as i32,
-            )
+            host::rf_memory_read(self.handle.0, offset, buffer.as_mut_ptr(), length as i32)
         };
         checked(written, "memory_read")?;
         if written < 0 || written as usize != length {
@@ -417,12 +414,7 @@ impl RawInstance {
         // SAFETY: the source holds `len` bytes and the destination range was
         // just bounds-checked against linear memory.
         let written = unsafe {
-            host::rf_memory_write(
-                self.handle.0,
-                offset,
-                bytes.as_ptr(),
-                bytes.len() as i32,
-            )
+            host::rf_memory_write(self.handle.0, offset, bytes.as_ptr(), bytes.len() as i32)
         };
         checked(written, "memory_write")?;
         if written < 0 || written as usize != bytes.len() {
@@ -505,8 +497,7 @@ impl PortableInstance {
 
     pub fn set_parameter(&mut self, index: u32, value: f64) -> Result<()> {
         // SAFETY: the handle is live for as long as `self`.
-        let status =
-            unsafe { host::rf_call_set_parameter(self.raw.handle.0, index as i32, value) };
+        let status = unsafe { host::rf_call_set_parameter(self.raw.handle.0, index as i32, value) };
         check_status(checked(status, "set_parameter")?, "set_parameter")
     }
 
@@ -558,9 +549,8 @@ impl PortableInstance {
         let offset = i64::try_from(offset).context("resource offset is too large")?;
         self.write_transfer(bytes)?;
         // SAFETY: the handle is live for as long as `self`.
-        let status = unsafe {
-            host::rf_call_resource_write(self.raw.handle.0, offset, bytes.len() as i32)
-        };
+        let status =
+            unsafe { host::rf_call_resource_write(self.raw.handle.0, offset, bytes.len() as i32) };
         check_status(checked(status, "resource_write")?, "resource_write")
     }
 
@@ -656,11 +646,7 @@ impl PortableInstance {
         if capabilities & crate::shared::PROGRAM_EDIT_DECLARATIVE == 0 {
             bail!("portable plugin does not expose a declarative program editor");
         }
-        self.exchange_program_bytes(
-            export::PROGRAM_EDITOR_VIEW,
-            document,
-            "program_editor_view",
-        )
+        self.exchange_program_bytes(export::PROGRAM_EDITOR_VIEW, document, "program_editor_view")
     }
 
     pub fn apply_program_edit(&mut self, request: &[u8]) -> Result<Vec<u8>> {

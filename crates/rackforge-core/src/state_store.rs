@@ -377,7 +377,10 @@ fn temporary_path(destination: &Path) -> PathBuf {
         .file_name()
         .unwrap_or_default()
         .to_string_lossy();
-    destination.with_file_name(format!(".{name}.tmp.{}", crate::storage::writer_discriminator()))
+    destination.with_file_name(format!(
+        ".{name}.tmp.{}",
+        crate::storage::writer_discriminator()
+    ))
 }
 
 #[cfg(unix)]

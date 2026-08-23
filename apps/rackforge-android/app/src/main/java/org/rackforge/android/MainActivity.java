@@ -189,6 +189,7 @@ public final class MainActivity extends Activity {
     private static native String uninstallPlugin(String pluginId, String storeRoot,
             String dataRoot, boolean deletePresets, boolean deletePluginData);
     private static native boolean activateInstalledPlugin(String packageRoot, String storeRoot, String dataRoot);
+    private static native int deactivateInstalledPlugin(String pluginId, String storeRoot);
     private static native String pluginPackageRoot();
     private static native String pluginWebEntry();
     private static native String pluginWebContext();
@@ -676,8 +677,8 @@ public final class MainActivity extends Activity {
                     return;
                 }
                 if ("plugin.resource_bindings".equals(method)) {
-                    if (!"config".equals(pluginWebSurface)) {
-                        respondToPlugin(requestId, false, "Resource bindings require CONFIG.");
+                    if (!"config".equals(pluginWebSurface) && !"play".equals(pluginWebSurface)) {
+                        respondToPlugin(requestId, false, "Resource bindings require PLAY or CONFIG.");
                         return;
                     }
                     respondToPlugin(requestId, true, null, pluginResourceBindings());
@@ -712,9 +713,16 @@ public final class MainActivity extends Activity {
                     return;
                 }
                 if ("plugin.load_resource".equals(method)
-                        || "plugin.install_resource".equals(method)) {
-                    if (!"config".equals(pluginWebSurface)) {
-                        respondToPlugin(requestId, false, "Resource loading requires CONFIG.");
+                        || "plugin.install_resource".equals(method)
+                        || "plugin.activate_resource".equals(method)) {
+                    boolean configOperation = "config".equals(pluginWebSurface)
+                            && ("plugin.load_resource".equals(method)
+                                || "plugin.install_resource".equals(method));
+                    boolean playActivation = "play".equals(pluginWebSurface)
+                            && "plugin.activate_resource".equals(method);
+                    if (!configOperation && !playActivation) {
+                        respondToPlugin(requestId, false,
+                                "Resource loading is not available to this surface.");
                         return;
                     }
                     JSONObject params = request.getJSONObject("params");
@@ -994,6 +1002,28 @@ public final class MainActivity extends Activity {
                             plugin.optString("package_root"),
                             plugin.optString("plugin_name", pluginId),
                             plugin.optString("version")));
+                    return;
+                } else if ("POST".equals(method)
+                        && path.startsWith("/api/v1/plugins/")
+                        && path.endsWith("/deactivate")) {
+                    String pluginId = java.net.URLDecoder.decode(
+                            path.substring("/api/v1/plugins/".length(),
+                                    path.length() - "/deactivate".length()),
+                            "UTF-8");
+                    if (installedPluginRecord(pluginId) == null) {
+                        respondNativeHost(requestId, false, 404,
+                                "Plugin is not installed.", null);
+                        return;
+                    }
+                    if (engineStarting) {
+                        respondNativeHost(requestId, false, 409,
+                                "RackForge is already changing plugins.", null);
+                        return;
+                    }
+                    respondNativeHost(requestId, true, 202, null,
+                            new JSONObject().put("status", "deactivating")
+                                    .put("plugin_id", pluginId));
+                    runOnUiThread(() -> deactivatePlugin(pluginId));
                     return;
                 } else if ("DELETE".equals(method)
                         && path.startsWith("/api/v1/plugins/")) {
@@ -1799,6 +1829,7 @@ public final class MainActivity extends Activity {
             Log.w("RackForge", "Could not refresh LITTLE after resource loading", error);
         }
         mainHandler.post(() -> {
+            sendPluginMessage(currentPluginWebContext());
             refreshKeyLabDisplay();
             emitSessionSnapshot();
         });
@@ -3271,6 +3302,66 @@ public final class MainActivity extends Activity {
         }, "rackforge-plugin-activate").start();
     }
 
+    private void deactivatePlugin(String pluginId) {
+        if (engineStarting) return;
+        engineStarting = true;
+        new Thread(() -> {
+            boolean wasCurrent = false;
+            try {
+                try {
+                    String current = new JSONObject(pluginWebContext())
+                            .getJSONObject("instance").getString("plugin_id");
+                    wasCurrent = pluginId.equals(current);
+                } catch (Throwable ignored) {
+                    // No current plugin is a valid state.
+                }
+                if (wasCurrent) {
+                    releaseAllVirtualMidi();
+                    releaseMidiNotes();
+                    audioRunning = false;
+                    stopNativeAudio();
+                    stopService(new Intent(this, AudioEngineService.class));
+                }
+                int status = deactivateInstalledPlugin(
+                        pluginId, pluginStoreRoot().getAbsolutePath());
+                if (status == 0) {
+                    throw new IllegalStateException(
+                            "The native runtime rejected plugin deactivation.");
+                }
+                if (wasCurrent) {
+                    preferences.edit().remove("plugin.active_root").apply();
+                    pluginPackageRoot = null;
+                    pluginWebEntry = null;
+                    pluginConfigWebEntry = null;
+                    activePluginName = "No plugin";
+                    activePluginVersion = "";
+                    currentPage = "idle";
+                }
+                keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
+                boolean finalWasCurrent = wasCurrent;
+                runOnUiThread(() -> {
+                    engineStarting = false;
+                    if (activePluginLabel != null) {
+                        activePluginLabel.setText(activePluginDisplayName());
+                    }
+                    if (finalWasCurrent) showIdle();
+                    else emitSessionSnapshot();
+                });
+            } catch (Throwable error) {
+                Log.e("RackForge", "Plugin deactivation failed", error);
+                runOnUiThread(() -> {
+                    engineStarting = false;
+                    new AlertDialog.Builder(this)
+                            .setTitle("Could not deactivate plugin")
+                            .setMessage(error.getMessage() == null
+                                    ? error.toString() : error.getMessage())
+                            .setPositiveButton("Close", null)
+                            .show();
+                });
+            }
+        }, "rackforge-plugin-deactivate").start();
+    }
+
     private void showViewMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
         menu.getMenu().add("Play").setOnMenuItemClickListener(item -> { showPlay(); return true; });
@@ -3823,14 +3914,15 @@ public final class MainActivity extends Activity {
     private List<String> startupPluginRoots(File store) throws Exception {
         List<String> roots = new ArrayList<>();
         String preferred = preferences.getString("plugin.active_root", null);
-        if (preferred != null && !preferred.isBlank()) roots.add(preferred);
         JSONObject catalog = new JSONObject(installedPlugins(store.getAbsolutePath()));
         JSONArray plugins = catalog.getJSONArray("plugins");
         for (int index = 0; index < plugins.length(); index++) {
             JSONObject plugin = plugins.getJSONObject(index);
-            if (!plugin.optBoolean("compatible")) continue;
+            if (!plugin.optBoolean("compatible") || !plugin.optBoolean("active")) continue;
             String root = plugin.optString("package_root", "");
-            if (!root.isBlank() && !roots.contains(root)) roots.add(root);
+            if (root.isBlank()) continue;
+            if (root.equals(preferred)) roots.add(0, root);
+            else if (!roots.contains(root)) roots.add(root);
         }
         return roots;
     }
@@ -3871,6 +3963,13 @@ public final class MainActivity extends Activity {
                 throw new IllegalStateException("The bundled default instrument was rejected");
             }
             JSONObject installed = new JSONObject(descriptor);
+            if (!activateInstalledPlugin(
+                    installed.getString("package_root"),
+                    store.getAbsolutePath(),
+                    pluginDataRoot().getAbsolutePath())) {
+                throw new IllegalStateException(
+                        "The bundled default instrument could not be enabled");
+            }
             Log.i("RackForge", "Bundled default plugin ready: "
                     + installed.optString("plugin_name", "RF-Soundfonts"));
             preferences.edit().putBoolean("plugin.bundled_default_initialized", true).apply();

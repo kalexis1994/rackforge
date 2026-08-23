@@ -90,10 +90,7 @@ impl NativePluginInstance<'_> {
         self.absent()
     }
 
-    pub fn prepare_program_save(
-        &mut self,
-        _document: &ProgramDocument,
-    ) -> Result<PreparedProgram> {
+    pub fn prepare_program_save(&mut self, _document: &ProgramDocument) -> Result<PreparedProgram> {
         self.absent()
     }
 

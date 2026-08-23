@@ -293,13 +293,24 @@ impl Component {
 
     /// Starts from an arbitrary (position, velocity/omega) state — the
     /// state a hammer simulation leaves the mode in at contact end.
-    fn start_state(s0: f32, c0: f32, frequency: f32, decay_per_sample: f32, sample_rate: f32) -> Self {
+    fn start_state(
+        s0: f32,
+        c0: f32,
+        frequency: f32,
+        decay_per_sample: f32,
+        sample_rate: f32,
+    ) -> Self {
         if s0 == 0.0 && c0 == 0.0 {
             return Self::default();
         }
         let omega = core::f32::consts::TAU * frequency / sample_rate;
         let (sin, cos) = sincosf(omega);
-        Self { s: s0, c: c0, rc: decay_per_sample * cos, rs: decay_per_sample * sin }
+        Self {
+            s: s0,
+            c: c0,
+            rc: decay_per_sample * cos,
+            rs: decay_per_sample * sin,
+        }
     }
 
     #[inline(always)]
@@ -583,7 +594,11 @@ fn board_spacing(frequency: f32) -> f32 {
     }
     let taper = FLAT * powf(frequency / KNEE_HZ, 1.92);
     let floor_overlap = 0.038 * frequency;
-    if taper < floor_overlap { taper } else { floor_overlap }
+    if taper < floor_overlap {
+        taper
+    } else {
+        floor_overlap
+    }
 }
 
 /// The open top octave: from ~F6 to C8 a piano's strings have no dampers.
@@ -593,11 +608,20 @@ fn board_spacing(frequency: f32) -> f32 {
 /// beyond anything the struck string itself sustains.
 /// (Frequency Hz, T60 s, pan 0..1.)
 const OPEN_STRINGS: [(f32, f32, f32); 14] = [
-    (1480.0, 2.4, 0.42), (1661.0, 2.3, 0.58), (1865.0, 2.2, 0.46),
-    (2093.0, 2.0, 0.55), (2349.0, 1.9, 0.40), (2637.0, 1.8, 0.60),
-    (2960.0, 1.7, 0.48), (3322.0, 1.6, 0.54), (3729.0, 1.5, 0.44),
-    (4186.0, 1.4, 0.56), (4699.0, 1.3, 0.50), (5274.0, 1.2, 0.46),
-    (5920.0, 1.1, 0.54), (6645.0, 1.0, 0.48),
+    (1480.0, 2.4, 0.42),
+    (1661.0, 2.3, 0.58),
+    (1865.0, 2.2, 0.46),
+    (2093.0, 2.0, 0.55),
+    (2349.0, 1.9, 0.40),
+    (2637.0, 1.8, 0.60),
+    (2960.0, 1.7, 0.48),
+    (3322.0, 1.6, 0.54),
+    (3729.0, 1.5, 0.44),
+    (4186.0, 1.4, 0.56),
+    (4699.0, 1.3, 0.50),
+    (5274.0, 1.2, 0.46),
+    (5920.0, 1.1, 0.54),
+    (6645.0, 1.0, 0.48),
 ];
 /// Wet level of the open-string halo.
 const OPEN_MIX: f32 = 0.012;
@@ -648,10 +672,18 @@ const HALO_MIX: f32 = 0.05;
 /// taps, different per side so the image widens, no tail — this is the air
 /// around an open grand, not a hall. A dry direct-injected tone is precisely
 /// what an electric piano is. (Delay in seconds, gain.)
-const LID_TAPS_LEFT: [(f32, f32); 4] =
-    [(0.0113, 0.17), (0.0191, 0.12), (0.0257, 0.09), (0.0331, 0.06)];
-const LID_TAPS_RIGHT: [(f32, f32); 4] =
-    [(0.0097, 0.15), (0.0179, 0.11), (0.0243, 0.08), (0.0311, 0.05)];
+const LID_TAPS_LEFT: [(f32, f32); 4] = [
+    (0.0113, 0.17),
+    (0.0191, 0.12),
+    (0.0257, 0.09),
+    (0.0331, 0.06),
+];
+const LID_TAPS_RIGHT: [(f32, f32); 4] = [
+    (0.0097, 0.15),
+    (0.0179, 0.11),
+    (0.0243, 0.08),
+    (0.0311, 0.05),
+];
 /// Delay line length: covers the longest tap at rates up to 74 kHz
 /// (higher rates shorten the taps via the clamp in tune_lid).
 const LID_BUFFER: usize = 4096;
@@ -959,7 +991,10 @@ impl Voice {
         }
         if self.noise_amp > 1e-7 {
             // Park–Miller-style LCG: white noise costs one multiply-add.
-            self.noise_seed = self.noise_seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            self.noise_seed = self
+                .noise_seed
+                .wrapping_mul(1_664_525)
+                .wrapping_add(1_013_904_223);
             let white = (self.noise_seed >> 9) as f32 * (1.0 / 4_194_304.0) - 1.0;
             self.noise_lp += self.noise_coefficient * (white - self.noise_lp);
             // A light treble hammer on a short key cannot radiate the low
@@ -1152,8 +1187,7 @@ impl Voice {
                 index += 1;
             }
         }
-        let duplex_energy =
-            self.duplex[0].magnitude_squared() + self.duplex[1].magnitude_squared();
+        let duplex_energy = self.duplex[0].magnitude_squared() + self.duplex[1].magnitude_squared();
         self.energy = energy + duplex_energy;
         if self.partial_count == 0
             && self.noise_amp <= 1e-7
@@ -1192,13 +1226,7 @@ impl Voice {
         }
     }
 
-    fn damp(
-        &mut self,
-        factor: f32,
-        thud_coefficient: f32,
-        thud_decay: f32,
-        release_gain: f32,
-    ) {
+    fn damp(&mut self, factor: f32, thud_coefficient: f32, thud_decay: f32, release_gain: f32) {
         for partial in &mut self.partials[..self.partial_count] {
             for lane in 0..LANES {
                 partial.rc[lane] *= factor;
@@ -1209,8 +1237,7 @@ impl Voice {
         // their own, whether or not the string still carries energy: release
         // a silent key on a real action and it still says something. The
         // string-energy term rides on top for notes damped while loud.
-        let thud =
-            ((0.004 + 0.10 * sqrtf(self.energy)) * release_gain).min(0.045);
+        let thud = ((0.004 + 0.10 * sqrtf(self.energy)) * release_gain).min(0.045);
         if thud > self.noise_amp {
             self.noise_amp = thud;
             self.noise_coefficient = thud_coefficient;
@@ -1266,8 +1293,8 @@ impl Default for Controls {
             // softer and heavier, bloom up, both decay stages a little
             // longer, the board eased.
             lab: [
-                0.52, 0.5, 0.5, 0.32, 0.5, 0.5, 0.5, 0.49, 0.55, 0.56, 0.5,
-                0.57, 0.58, 0.5, 0.45, 0.5, 0.5,
+                0.52, 0.5, 0.5, 0.32, 0.5, 0.5, 0.5, 0.49, 0.55, 0.56, 0.5, 0.57, 0.58, 0.5, 0.45,
+                0.5, 0.5,
             ],
             room_size: 0.28,
             room_hardness: 0.35,
@@ -1512,16 +1539,36 @@ impl Default for ConcertGrand {
             // action. No multiplier can scale a source that is not there.
             strike_budget: 0,
             cal: [
-                [0.8445, 2.3440, 0.5097, 0.3392, 1.3207, 0.9236, 1.6842, 1.0000, 0.3686],
-                [0.7931, 2.7660, 0.4900, 0.3392, 1.1193, 0.4180, 0.4024, 1.0000, 0.6902],
-                [0.2500, 2.4965, 0.7820, 0.3392, 1.1920, 0.5434, 0.8348, 1.0000, 0.6229],
-                [0.3239, 1.9095, 1.5685, 0.2891, 0.9485, 0.4932, 0.2500, 1.0000, 0.7351],
-                [2.3340, 2.4650, 1.7729, 0.3334, 0.6545, 0.3269, 1.3111, 1.0000, 1.7943],
-                [3.5576, 2.3624, 2.0355, 2.6568, 0.4078, 0.4731, 0.2952, 1.0000, 0.6440],
-                [3.9996, 0.8523, 3.1826, 1.0000, 0.4986, 0.7958, 0.2500, 1.0000, 0.8474],
-                [0.5556, 0.8146, 4.0000, 3.9996, 0.3813, 1.0000, 1.9942, 1.0000, 0.3461],
-                [0.7394, 0.6903, 1.6997, 4.0000, 0.2950, 1.1800, 0.3836, 1.0000, 0.3835],
-                [1.5869, 1.0000, 1.8832, 4.0000, 0.3835, 1.0000, 1.0000, 1.0000, 0.6556],
+                [
+                    0.8445, 2.3440, 0.5097, 0.3392, 1.3207, 0.9236, 1.6842, 1.0000, 0.3686,
+                ],
+                [
+                    0.7931, 2.7660, 0.4900, 0.3392, 1.1193, 0.4180, 0.4024, 1.0000, 0.6902,
+                ],
+                [
+                    0.2500, 2.4965, 0.7820, 0.3392, 1.1920, 0.5434, 0.8348, 1.0000, 0.6229,
+                ],
+                [
+                    0.3239, 1.9095, 1.5685, 0.2891, 0.9485, 0.4932, 0.2500, 1.0000, 0.7351,
+                ],
+                [
+                    2.3340, 2.4650, 1.7729, 0.3334, 0.6545, 0.3269, 1.3111, 1.0000, 1.7943,
+                ],
+                [
+                    3.5576, 2.3624, 2.0355, 2.6568, 0.4078, 0.4731, 0.2952, 1.0000, 0.6440,
+                ],
+                [
+                    3.9996, 0.8523, 3.1826, 1.0000, 0.4986, 0.7958, 0.2500, 1.0000, 0.8474,
+                ],
+                [
+                    0.5556, 0.8146, 4.0000, 3.9996, 0.3813, 1.0000, 1.9942, 1.0000, 0.3461,
+                ],
+                [
+                    0.7394, 0.6903, 1.6997, 4.0000, 0.2950, 1.1800, 0.3836, 1.0000, 0.3835,
+                ],
+                [
+                    1.5869, 1.0000, 1.8832, 4.0000, 0.3835, 1.0000, 1.0000, 1.0000, 0.6556,
+                ],
             ],
             board: [BodyMode::default(); BOARD_MODES],
             board_count: 0,
@@ -1653,8 +1700,7 @@ const HAMMER_V_FF: f32 = 6.0;
 const CONTACT_STRETCH: f32 = 1.0;
 const RECIPE_FLOOR: f32 = 0.0;
 #[cfg(test)]
-static CONTACT_STEPS: core::sync::atomic::AtomicU32 =
-    core::sync::atomic::AtomicU32::new(0);
+static CONTACT_STEPS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 /// Integrates the felt hammer against the string's modal system from first
 /// touch to release: nonlinear felt (F ∝ ξ^2.5), the string pushing back,
@@ -1747,8 +1793,8 @@ fn simulate_strike(
         // and no middle harmonics is heard as a thinner string at the same
         // pitch.
         let ideal = sincosf(core::f32::consts::PI * nf * x0).0;
-        let comb = if ideal < 0.0 { -1.0 } else { 1.0 }
-            * sqrtf(ideal * ideal + COMB_FLOOR * COMB_FLOOR);
+        let comb =
+            if ideal < 0.0 { -1.0 } else { 1.0 } * sqrtf(ideal * ideal + COMB_FLOOR * COMB_FLOOR);
         shape[n] = comb * expf(-1.2 * spread * spread);
     }
     let mut q = [0.0f32; SIM_MODES];
@@ -1810,8 +1856,7 @@ fn simulate_strike(
             // many modes we chose to integrate -- the old build divided the
             // hammer mass by (sim_modes/SIM_MODES) to undo exactly that
             // artefact, and the correction is retired with the cause.
-            v[n] +=
-                (-omega[n] * omega[n] * q[n] + (2.0 / string_mass) * shape[n] * force) * dt;
+            v[n] += (-omega[n] * omega[n] * q[n] + (2.0 / string_mass) * shape[n] * force) * dt;
             q[n] += v[n] * dt;
         }
     }
@@ -1887,8 +1932,7 @@ impl ConcertGrand {
                 .unwrap_or(below_cents);
             let stretched = below_cents + (above_cents - below_cents) * fraction;
             let semitones = index as f32 - a4 as f32;
-            self.fundamental[index] =
-                440.0 * powf(2.0, semitones / 12.0 + stretched / 1200.0);
+            self.fundamental[index] = 440.0 * powf(2.0, semitones / 12.0 + stretched / 1200.0);
         }
     }
 
@@ -2020,7 +2064,10 @@ impl ConcertGrand {
         // axis: soft surfaces eat the top first and take the lows with the
         // mids; hard ones keep the top ringing and let the lows boom.
         let volume = ROOM_VOLUME_MIN_M3
-            * powf(ROOM_VOLUME_MAX_M3 / ROOM_VOLUME_MIN_M3, self.controls.room_size);
+            * powf(
+                ROOM_VOLUME_MAX_M3 / ROOM_VOLUME_MIN_M3,
+                self.controls.room_size,
+            );
         let scale = powf(volume / 3.84, 1.0 / 3.0);
         let (length, width, height) = (2.4 * scale, 1.6 * scale, scale);
         let surface = 2.0 * (length * width + length * height + width * height);
@@ -2032,8 +2079,7 @@ impl ConcertGrand {
         // Sabine per band, with the air taking the top of big rooms no
         // matter what the walls are made of.
         let rt = |alpha: f32, air_per_m: f32| -> f32 {
-            (0.161 * volume / (surface * alpha + 4.0 * air_per_m * volume))
-                .clamp(0.10, 12.0)
+            (0.161 * volume / (surface * alpha + 4.0 * air_per_m * volume)).clamp(0.10, 12.0)
         };
         let rt_low = rt(alpha_low, 0.0);
         let rt_mid = rt(alpha_mid, 0.0002);
@@ -2041,8 +2087,7 @@ impl ConcertGrand {
 
         for line in 0..ROOM_LINES {
             let seconds = mean_free_path / SOUND_SPEED * ROOM_SPREAD[line];
-            let samples =
-                ((seconds * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
+            let samples = ((seconds * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
             self.room_len[line] = samples;
             self.room_index[line] %= samples;
             // Per-line gain so every path decays at the mid-band RT60.
@@ -2055,18 +2100,13 @@ impl ConcertGrand {
         // one shared corner, from the mean path's required extra loss at
         // 4 kHz.
         let seconds_mean = mean_free_path / SOUND_SPEED;
-        let extra_high =
-            powf(10.0, -3.0 * seconds_mean * (1.0 / rt_high - 1.0 / rt_mid));
-        let corner = (4200.0 * extra_high / (1.0 - extra_high + 1e-4))
-            .clamp(300.0, 16_000.0);
-        self.room_damp =
-            1.0 - expf(-core::f32::consts::TAU * corner / self.sample_rate);
+        let extra_high = powf(10.0, -3.0 * seconds_mean * (1.0 / rt_high - 1.0 / rt_mid));
+        let corner = (4200.0 * extra_high / (1.0 - extra_high + 1e-4)).clamp(300.0, 16_000.0);
+        self.room_damp = 1.0 - expf(-core::f32::consts::TAU * corner / self.sample_rate);
         // The low shelf: gain that takes 150 Hz to its own RT60.
-        let low_ratio =
-            powf(10.0, -3.0 * seconds_mean * (1.0 / rt_low - 1.0 / rt_mid));
+        let low_ratio = powf(10.0, -3.0 * seconds_mean * (1.0 / rt_low - 1.0 / rt_mid));
         self.room_low_gain = (low_ratio - 1.0).clamp(-0.6, 0.35);
-        self.room_low_coeff =
-            1.0 - expf(-core::f32::consts::TAU * 150.0 / self.sample_rate);
+        self.room_low_coeff = 1.0 - expf(-core::f32::consts::TAU * 150.0 / self.sample_rate);
 
         // The microphones. Distance on a log axis; the direct sound falls
         // as r_ref/r, the reverberant field holds, the early reflections
@@ -2085,36 +2125,37 @@ impl ConcertGrand {
         // Proximity: the pressure-gradient term rises as c/(2*pi*f*r). Felt
         // below ~ c/(2*pi*r); rendered as a 120 Hz shelf whose gain follows
         // b/r.
-        self.proximity_gain =
-            PROXIMITY_STRENGTH * b * (1.0 / distance) * MIC_REFERENCE_M;
-        self.proximity_coeff =
-            1.0 - expf(-core::f32::consts::TAU * 120.0 / self.sample_rate);
+        self.proximity_gain = PROXIMITY_STRENGTH * b * (1.0 / distance) * MIC_REFERENCE_M;
+        self.proximity_coeff = 1.0 - expf(-core::f32::consts::TAU * 120.0 / self.sample_rate);
 
         // Early reflections: the piano stands a third of the way down the
         // hall, mid-width, soundboard at 1 m; the pair faces it from
         // `distance` away. Six first-order images, each with its own extra
         // path and its 1/r loss and one bounce off its own surface.
         let piano = (0.33 * length, 0.5 * width, 1.0_f32);
-        let mic = (0.33 * length + distance.min(0.6 * length), 0.5 * width, 1.4_f32);
+        let mic = (
+            0.33 * length + distance.min(0.6 * length),
+            0.5 * width,
+            1.4_f32,
+        );
         let direct_path = {
             let (dx, dy, dz) = (mic.0 - piano.0, mic.1 - piano.1, mic.2 - piano.2);
             sqrtf(dx * dx + dy * dy + dz * dz).max(0.3)
         };
         let images = [
-            (piano.0, piano.1, -piano.2),                    // floor
-            (piano.0, piano.1, 2.0 * height - piano.2),      // ceiling
-            (piano.0, -piano.1, piano.2),                    // near wall
-            (piano.0, 2.0 * width - piano.1, piano.2),       // far wall
-            (-piano.0, piano.1, piano.2),                    // back wall
-            (2.0 * length - piano.0, piano.1, piano.2),      // front wall
+            (piano.0, piano.1, -piano.2),               // floor
+            (piano.0, piano.1, 2.0 * height - piano.2), // ceiling
+            (piano.0, -piano.1, piano.2),               // near wall
+            (piano.0, 2.0 * width - piano.1, piano.2),  // far wall
+            (-piano.0, piano.1, piano.2),               // back wall
+            (2.0 * length - piano.0, piano.1, piano.2), // front wall
         ];
         let reflect = 1.0 - alpha_mid;
         for (slot, image) in self.early_taps.iter_mut().zip(images) {
             let (dx, dy, dz) = (mic.0 - image.0, mic.1 - image.1, mic.2 - image.2);
             let path = sqrtf(dx * dx + dy * dy + dz * dz).max(direct_path + 0.1);
             let delay_s = (path - direct_path) / SOUND_SPEED;
-            let samples =
-                ((delay_s * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
+            let samples = ((delay_s * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
             let gain = reflect * (direct_path / path) * self.direct_gain;
             *slot = (samples, gain);
         }
@@ -2139,8 +2180,7 @@ impl ConcertGrand {
         let partial_number: f32 = (frequency / f0.max(1.0)).max(1.0);
         let radiating = frequency;
         let frequency = frequency * string_scale;
-        let string =
-            STRING_T60_S / (1.0 + powf(frequency / STRING_KNEE_HZ, STRING_TILT)) + 0.6;
+        let string = STRING_T60_S / (1.0 + powf(frequency / STRING_KNEE_HZ, STRING_TILT)) + 0.6;
         let bending = KAPPA_LOSS * partial_number * partial_number;
         // Dephased strings still radiate. The antisymmetric configurations
         // drive the bridge far less than the coherent one, but not zero --
@@ -2153,13 +2193,7 @@ impl ConcertGrand {
         (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay)
     }
 
-    fn t60_seconds(
-        &self,
-        frequency: f32,
-        f0: f32,
-        string_scale: f32,
-        treble_life: f32,
-    ) -> f32 {
+    fn t60_seconds(&self, frequency: f32, f0: f32, string_scale: f32, treble_life: f32) -> f32 {
         // Which partial this is. The string's losses go with the WAVE NUMBER,
         // not the frequency -- kappa ~ n/L -- so the same 6 kHz is partial 218
         // on A0 and partial 92 on C2, and the bass one is far more heavily
@@ -2430,7 +2464,10 @@ impl ConcertGrand {
         // bend, not a piano's live blow. Measured piano glides are a few
         // cents at most.
         let glide_cents = if velocity > 0.6 {
-            11.5 * self.controls.lab(10) * velocity * velocity * ((0.35_f32 - position) / 0.35).clamp(0.0, 1.0)
+            11.5 * self.controls.lab(10)
+                * velocity
+                * velocity
+                * ((0.35_f32 - position) / 0.35).clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -2472,10 +2509,8 @@ impl ConcertGrand {
         // decay unevenness partly EMERGES -- a wider unison dephases sooner,
         // traps its energy, and sings; a just one stays coherent and drains)
         // and a modest spread in the string's own losses.
-        let unison_precision =
-            0.5 + 1.0 * hash01((note as u32).wrapping_mul(2_654_435_761) ^ 0x51);
-        let string_life =
-            0.88 + 0.24 * hash01((note as u32).wrapping_mul(2_246_822_519) ^ 0xA7);
+        let unison_precision = 0.5 + 1.0 * hash01((note as u32).wrapping_mul(2_654_435_761) ^ 0x51);
+        let string_life = 0.88 + 0.24 * hash01((note as u32).wrapping_mul(2_246_822_519) ^ 0xA7);
         let detune_cents = (0.9 + 0.9 * position)
             * (self.controls.unison * 2.86)
             * self.controls.lab(13)
@@ -2559,8 +2594,7 @@ impl ConcertGrand {
             // -40 dB at 27.5 Hz against ~0 dB by 78 Hz.
             let radiation = Self::board_radiation(frequency);
             let (board, _) = Self::board_response(frequency);
-            let rough =
-                (0.71 + 0.58 * hash01((note as u32) << 8 | n as u32)) * board * radiation;
+            let rough = (0.71 + 0.58 * hash01((note as u32) << 8 | n as u32)) * board * radiation;
             colour[count] = rough;
             // Bridge force, not string displacement: the ear hears the force
             // the string exerts on the bridge, proportional to the string's
@@ -2617,8 +2651,7 @@ impl ConcertGrand {
                 // left alone. The contact time is an OUTCOME.
                 let length = Self::string_length(position);
                 let wave_speed = 2.0 * length * f0;
-                let string_mass =
-                    STRING_TENSION_N / (wave_speed * wave_speed) * length;
+                let string_mass = STRING_TENSION_N / (wave_speed * wave_speed) * length;
                 // A0 to ~E1 single-strung, doubled through the wound bass,
                 // three from ~C2 -- the same stringing the unison uses.
                 let strings_struck = 1.0
@@ -2632,10 +2665,8 @@ impl ConcertGrand {
                 // string-as-spring, tau = pi*sqrt(m / (T*L/(x0*(L-x0)))),
                 // and that is proportional to sqrt(m).
                 let head = 0.0035 + 0.0075 * powf(1.0 - position, 2.5);
-                let mass = (head / strings_struck
-                    * self.controls.lab(8)
-                    * HAMMER_MASS_SCALE)
-                    .max(1e-4);
+                let mass =
+                    (head / strings_struck * self.controls.lab(8) * HAMMER_MASS_SCALE).max(1e-4);
                 // The action's dynamic span: how much faster the hammer
                 // arrives at full velocity than at none. `dynamics` is the
                 // regulation -- a shallow action compresses the span, a deep
@@ -2652,7 +2683,7 @@ impl ConcertGrand {
                 let exponent = ((3.2 + 1.8 * position)
                     * (0.62 + 0.76 * self.controls.brightness)
                     * self.controls.lab(0))
-                    .clamp(1.2, 5.0);
+                .clamp(1.2, 5.0);
                 let (q, over_omega) = simulate_strike(
                     &frequencies,
                     sim_modes,
@@ -2714,8 +2745,7 @@ impl ConcertGrand {
                 let mut magnitudes = [0.0f32; SIM_MODES];
                 for n in 0..sim_modes {
                     let bridge = (n + 1) as f32;
-                    magnitudes[n] =
-                        bridge * sqrtf(q[n] * q[n] + over_omega[n] * over_omega[n]);
+                    magnitudes[n] = bridge * sqrtf(q[n] * q[n] + over_omega[n] * over_omega[n]);
                     sim_peak = sim_peak.max(magnitudes[n] * colour[n]);
                 }
                 if sim_peak > 0.0 {
@@ -2785,14 +2815,17 @@ impl ConcertGrand {
             }
         }
 
-
         let floor = peak * 1e-3;
         let budget_left = PARTIAL_BUDGET.saturating_sub(self.active_partials);
         // Sixteen slots stay reserved for the nonlinear extras (phantoms and
         // the longitudinal clang): the lowest notes fill the whole array with
         // their transverse ladder otherwise, and the growl never fits.
-        let cap = if budget_left < count { budget_left.max(12) } else { count }
-            .min(MAX_PARTIALS - 16);
+        let cap = if budget_left < count {
+            budget_left.max(12)
+        } else {
+            count
+        }
+        .min(MAX_PARTIALS - 16);
 
         // Energy normalisation, then the velocity curve: level roughly
         // velocity^1.7 (sound pressure grows faster than hammer speed).
@@ -2802,8 +2835,8 @@ impl ConcertGrand {
                 energy += amplitudes[n] * amplitudes[n];
             }
         }
-        let scale = 0.28 * self.cal(note, 7) * powf(velocity.max(0.01), 2.2)
-            / sqrtf(energy.max(1e-9));
+        let scale =
+            0.28 * self.cal(note, 7) * powf(velocity.max(0.01), 2.2) / sqrtf(energy.max(1e-9));
 
         // Everything a partial needs, computed before a voice is borrowed:
         // both components draw their decay from the same loss curve, read at
@@ -2844,10 +2877,10 @@ impl ConcertGrand {
             // How many strings this note actually has: single to ~E1,
             // doubled through the wound bass, three from ~C2 upward -- the
             // same stringing the hammer divides its mass over.
-            let second = ((index as f32 - 5.0) / 5.0).clamp(0.0, 1.0)
-                * if self.soft { 0.6 } else { 1.0 };
-            let third_string = ((index as f32 - 9.0) / 6.0).clamp(0.0, 1.0)
-                * if self.soft { 0.25 } else { 1.0 };
+            let second =
+                ((index as f32 - 5.0) / 5.0).clamp(0.0, 1.0) * if self.soft { 0.6 } else { 1.0 };
+            let third_string =
+                ((index as f32 - 9.0) / 6.0).clamp(0.0, 1.0) * if self.soft { 0.25 } else { 1.0 };
             // Equal strings, equal shares. The old split gave the "second
             // string" 0.44 and the third 0.22 of the note, which is not how
             // a unison is strung.
@@ -2858,9 +2891,7 @@ impl ConcertGrand {
                 powf(2.0, cents / 2400.0),
                 powf(
                     2.0,
-                    cents * (0.9
-                        + 0.4 * hash01((note as u32) << 9 | (n as u32) << 2 | 3))
-                        / 1200.0,
+                    cents * (0.9 + 0.4 * hash01((note as u32) << 9 | (n as u32) << 2 | 3)) / 1200.0,
                 ),
             ];
             // THE TWO-STAGE DECAY, WITHOUT A SCRIPT.
@@ -2897,31 +2928,28 @@ impl ConcertGrand {
             .max(0.05);
             let fast_t60 = (t60 * self.controls.lab(11)).max(0.02);
             let intrinsic = self.decay_per_sample(slow_t60);
-            let bridge_rate =
-                (6.907_755 * (1.0 / fast_t60 - 1.0 / slow_t60)).max(0.0);
-            let drained =
-                1.0 - expf(-bridge_rate * CULL_INTERVAL as f32 / sample_rate);
+            let bridge_rate = (6.907_755 * (1.0 / fast_t60 - 1.0 / slow_t60)).max(0.0);
+            let drained = 1.0 - expf(-bridge_rate * CULL_INTERVAL as f32 / sample_rate);
             // Normalised by the weight vector's square sum: with I - k*w*w^T
             // the coherent mode loses k*(w.w) per step, so dividing makes it
             // lose exactly `drained`, and the fast stage means what the
             // curve says.
-            let weights = shares[0] * 0.0 + 1.0
+            let weights = shares[0] * 0.0
+                + 1.0
                 + second * second
                 + third_string * third_string
                 + HORIZONTAL_BRIDGE * HORIZONTAL_BRIDGE;
             let coupling = drained / weights;
             // The partial swells in over many of its own periods, and slowly
             // enough to matter: a bass note does not arrive, it gathers.
-            let rise_seconds =
-                ((5.0 / frequency) * self.controls.lab(9)).clamp(0.0008, 0.15);
+            let rise_seconds = ((5.0 / frequency) * self.controls.lab(9)).clamp(0.0008, 0.15);
             let rise = expf(-1.0 / (rise_seconds * sample_rate));
             // The horizontal picks up more of the blow in the bass: a wound
             // string's mass sits far off its bending axis and the bridge's
             // cross-coupling hands a larger share of the vertical motion
             // sideways. This is also where the second decay stage is most
             // prominent in measured pianos.
-            let horizontal_share =
-                HORIZONTAL_SHARE * (0.65 + 1.2 * powf(1.0 - position, 1.5));
+            let horizontal_share = HORIZONTAL_SHARE * (0.65 + 1.2 * powf(1.0 - position, 1.5));
             let (pq, po) = (phase_q[n], phase_o[n]);
             let mut built = Partial::default();
             built.set_lane(
@@ -3043,7 +3071,10 @@ impl ConcertGrand {
         // recording level at ~0.65 and x16 above it at the top.
         self.strike_serial = self.strike_serial.wrapping_add(1);
         let strike_salt = self.strike_serial.wrapping_mul(0x9E37_79B9);
-        let clack_level = velocity * velocity * KNOCK_LEVEL * 3.4
+        let clack_level = velocity
+            * velocity
+            * KNOCK_LEVEL
+            * 3.4
             * (0.75 + 0.5 * hash01(strike_salt ^ 0xA5))
             * action
             * self.controls.lab(3)
@@ -3071,7 +3102,10 @@ impl ConcertGrand {
                 let amplitude = clack_level * level;
                 let decay = self.decay_per_sample(t60);
                 let mut built = Partial::default();
-                built.set_lane(0, Component::start(amplitude, freq * jitter, decay, sample_rate));
+                built.set_lane(
+                    0,
+                    Component::start(amplitude, freq * jitter, decay, sample_rate),
+                );
                 built.set_lane(
                     LANE_BLOOM,
                     Component::start(-amplitude, freq * jitter, rise, sample_rate),
@@ -3093,14 +3127,21 @@ impl ConcertGrand {
         // mid and treble notes than strings alone can explain. Three short
         // dark components stand in for it.
         {
-            let thump_level = powf(velocity, 1.9) * 0.095 * 0.32 * (1.0 - 0.35 * position)
+            let thump_level = powf(velocity, 1.9)
+                * 0.095
+                * 0.32
+                * (1.0 - 0.35 * position)
                 * Controls::noise_gain(self.controls.action_noise)
                 * self.controls.lab(2)
                 * self.cal(note, 2);
             let rise = expf(-1.0 / (0.004 * sample_rate));
-            for (freq, level, seed) in
-                [(46.0_f32, 1.0_f32, 17u32), (71.0, 0.7, 23), (103.0, 0.45, 31), (149.0, 0.30, 37), (214.0, 0.20, 41)]
-            {
+            for (freq, level, seed) in [
+                (46.0_f32, 1.0_f32, 17u32),
+                (71.0, 0.7, 23),
+                (103.0, 0.45, 31),
+                (149.0, 0.30, 37),
+                (214.0, 0.20, 41),
+            ] {
                 if placed >= MAX_PARTIALS {
                     break;
                 }
@@ -3108,7 +3149,10 @@ impl ConcertGrand {
                 let amplitude = thump_level * level;
                 let decay = self.decay_per_sample(0.30);
                 let mut built = Partial::default();
-                built.set_lane(0, Component::start(amplitude, freq * jitter, decay, sample_rate));
+                built.set_lane(
+                    0,
+                    Component::start(amplitude, freq * jitter, decay, sample_rate),
+                );
                 built.set_lane(
                     LANE_BLOOM,
                     Component::start(-amplitude, freq * jitter, rise, sample_rate),
@@ -3132,7 +3176,10 @@ impl ConcertGrand {
             // leave proportionally more of it.
             let level = 0.018 * powf(velocity, 1.7) * (1.0 - 0.45 * velocity) * 0.32;
             for (slot, (ratio, seed)) in duplex.iter_mut().zip([(2.015_f32, 11), (4.03, 29)]) {
-                let jitter = powf(2.0, (hash01((note as u32) << 6 | seed) - 0.5) * 10.0 / 1200.0);
+                let jitter = powf(
+                    2.0,
+                    (hash01((note as u32) << 6 | seed) - 0.5) * 10.0 / 1200.0,
+                );
                 let frequency = f0 * ratio * jitter;
                 if frequency < nyquist {
                     // Short segments, short ring: undamped is not endless.
@@ -3148,8 +3195,8 @@ impl ConcertGrand {
         // the amplitude-to-length ratio in disguise: a treble string is short
         // and stiff and barely stretches, a bass string is long and slack and
         // stretches plenty.
-        let tension_gain = TENSION_GAIN * bass_gate / (1.0 + 40.0 * position)
-            * self.controls.lab(10);
+        let tension_gain =
+            TENSION_GAIN * bass_gate / (1.0 + 40.0 * position) * self.controls.lab(10);
         let longitudinal_gain = LONGITUDINAL_MIX * self.controls.lab(5);
         // The attack surplus into the upper compressional modes. This was
         // x16, calibrated against a normalization that turned out not to be
@@ -3163,8 +3210,7 @@ impl ConcertGrand {
         // "el golpe del martillo exagerado en notas bajas". Swept 2/4/6
         // against the targets on C2 and A0: x2 lands the 2 kHz band and
         // the thump on the reference; anything higher re-grows the knock.
-        let longitudinal_upper =
-            self.controls.lab(4) * 2.0 * powf(1.0 - position, 1.5);
+        let longitudinal_upper = self.controls.lab(4) * 2.0 * powf(1.0 - position, 1.5);
         let action_gain = Controls::noise_gain(self.controls.action_noise);
         let impact_gain = Controls::noise_gain(self.controls.impact);
         let pair_spacing = self.controls.width * PAIR_SPACING_MAX_M;
@@ -3193,7 +3239,11 @@ impl ConcertGrand {
             for fresh in partials[..placed].iter() {
                 let target = if fresh.slope != 0.0 {
                     let h = roundf(fresh.slope.abs() * 16.0) as usize;
-                    if h < MAX_PARTIALS { by_harmonic[h] } else { usize::MAX }
+                    if h < MAX_PARTIALS {
+                        by_harmonic[h]
+                    } else {
+                        usize::MAX
+                    }
                 } else {
                     usize::MAX
                 };
@@ -3221,7 +3271,8 @@ impl ConcertGrand {
             voice.energy = 1.0;
             // The mechanism knocks again in full.
             voice.noise_amp = voice.noise_amp.max(
-                velocity * velocity
+                velocity
+                    * velocity
                     * KNOCK_LEVEL
                     * action
                     * chiff_mult
@@ -3240,14 +3291,15 @@ impl ConcertGrand {
                 * powf(1.0 - position, 1.2)
                 * impact_gain;
             self.voices[slot].clang_feed += clang_kick;
-            self.voices[slot].clang_feed_decay =
-                expf(-1.0 / (IMPACT_PULSE_TAU_S * sample_rate));
+            self.voices[slot].clang_feed_decay = expf(-1.0 / (IMPACT_PULSE_TAU_S * sample_rate));
             // The re-struck wire is full of fresh high partials again.
             self.voices[slot].longitudinal_upper = longitudinal_upper;
             self.voices[slot].upper_env = 1.0;
             return;
         }
-        let Some(voice) = self.allocate_voice() else { return };
+        let Some(voice) = self.allocate_voice() else {
+            return;
+        };
         voice.active = true;
         voice.note = note;
         voice.channel = channel;
@@ -3354,8 +3406,7 @@ impl ConcertGrand {
         // recording, and this model had it 25 to 31 dB short between 300 Hz
         // and 3 kHz. The key, the jack and the shank are the same size up
         // there; only the string got small.
-        voice.noise_amp =
-            velocity * velocity * KNOCK_LEVEL * action * chiff_mult * action_gain;
+        voice.noise_amp = velocity * velocity * KNOCK_LEVEL * action * chiff_mult * action_gain;
         voice.noise_decay = noise_decay;
         voice.noise_coefficient = noise_coefficient;
         voice.noise_body = 0.0;
@@ -3373,8 +3424,8 @@ impl ConcertGrand {
             let spacing = pair_spacing;
             let lateral = (position - 0.5) * PIANO_LATERAL_SPREAD_M;
             let depth = pair_depth;
-            let arrival = spacing * lateral
-                / (SOUND_SPEED * sqrtf(lateral * lateral + depth * depth));
+            let arrival =
+                spacing * lateral / (SOUND_SPEED * sqrtf(lateral * lateral + depth * depth));
             let samples = ((arrival.abs() * sample_rate) as usize).min(VOICE_DELAY - 1);
             // Bass (lateral negative) reaches the LEFT microphone first, so
             // the right one lags, and mirrored for the treble.
@@ -3407,8 +3458,10 @@ impl ConcertGrand {
             let rise = expf(-1.0 / (0.030 * sample_rate));
             for n in 0..halo_count {
                 let frequency = frequencies[n];
-                let spread =
-                    powf(2.0, (hash01((note as u32) << 12 | (n as u32) << 3 | 5) - 0.5) * 5.0 / 1200.0);
+                let spread = powf(
+                    2.0,
+                    (hash01((note as u32) << 12 | (n as u32) << 3 | 5) - 0.5) * 5.0 / 1200.0,
+                );
                 let detuned = (frequency * spread).min(nyquist);
                 let amplitude = amplitudes[n] * scale * 0.063;
                 let t60 = self.t60_seconds(frequency, f0, string_scale, treble_life) * 1.5;
@@ -3476,8 +3529,7 @@ impl ConcertGrand {
 
     /// The damper thud's colour and length: dark and short.
     fn damper_thud(&self) -> (f32, f32) {
-        let coefficient =
-            1.0 - expf(-core::f32::consts::TAU * 260.0 / self.sample_rate);
+        let coefficient = 1.0 - expf(-core::f32::consts::TAU * 260.0 / self.sample_rate);
         let decay = expf(-1.0 / (0.010 * self.sample_rate));
         (coefficient, decay)
     }
@@ -3670,11 +3722,7 @@ impl ConcertGrand {
         // is no corner, and which approaches 1.0 without ever passing it.
         let over = (magnitude - KNEE) / (1.0 - KNEE);
         let shaped = KNEE + (1.0 - KNEE) * (over / (1.0 + over));
-        if sample < 0.0 {
-            -shaped
-        } else {
-            shaped
-        }
+        if sample < 0.0 { -shaped } else { shaped }
     }
 }
 
@@ -3953,8 +4001,7 @@ impl Processor for ConcertGrand {
                 } else {
                     0.0
                 };
-                let sympathy =
-                    (bridge_feed - voice.last_out) * sympathy_rate * free;
+                let sympathy = (bridge_feed - voice.last_out) * sympathy_rate * free;
                 let sample = voice.tick(sympathy);
                 voice.last_out = sample;
                 strings_total += sample;
@@ -3962,10 +4009,10 @@ impl Processor for ConcertGrand {
                 // microphone hears this string first; the delay is geometry
                 // fixed at note-on, so there is nothing to interpolate.
                 voice.pair[voice.pair_write] = sample;
-                let left_tap = voice.pair
-                    [(voice.pair_write + VOICE_DELAY - voice.pair_left) % VOICE_DELAY];
-                let right_tap = voice.pair
-                    [(voice.pair_write + VOICE_DELAY - voice.pair_right) % VOICE_DELAY];
+                let left_tap =
+                    voice.pair[(voice.pair_write + VOICE_DELAY - voice.pair_left) % VOICE_DELAY];
+                let right_tap =
+                    voice.pair[(voice.pair_write + VOICE_DELAY - voice.pair_right) % VOICE_DELAY];
                 voice.pair_write = (voice.pair_write + 1) % VOICE_DELAY;
                 left += left_tap * voice.pan_left;
                 right += right_tap * voice.pan_right;
@@ -4083,9 +4130,8 @@ impl Processor for ConcertGrand {
             let mut early_left = 0.0;
             let mut early_right = 0.0;
             for (index, (offset, gain)) in self.early_taps.iter().enumerate() {
-                let sample = self.early
-                    [(self.early_write + ROOM_BUFFER - offset) % ROOM_BUFFER]
-                    * gain;
+                let sample =
+                    self.early[(self.early_write + ROOM_BUFFER - offset) % ROOM_BUFFER] * gain;
                 if index % 2 == 0 {
                     early_left += sample;
                 } else {
@@ -4121,20 +4167,18 @@ impl Processor for ConcertGrand {
                 // mids, soft ones take it down with everything else.
                 self.room_low[line] +=
                     self.room_low_coeff * (self.room_lp[line] - self.room_low[line]);
-                let shaped =
-                    self.room_lp[line] + self.room_low_gain * self.room_low[line];
+                let shaped = self.room_lp[line] + self.room_low_gain * self.room_low[line];
                 let index = self.room_index[line];
-                self.room[line][index] =
-                    staged * 0.25 + shaped * self.room_gain[line];
+                self.room[line][index] = staged * 0.25 + shaped * self.room_gain[line];
                 let next = index + 1;
                 self.room_index[line] = if next == self.room_len[line] { 0 } else { next };
             }
             let air = self.controls.lab(16);
             let wet = ROOM_MIX * air * self.reverb_gain;
-            let room_left = (outs[0] - outs[1] + outs[2]) * wet
-                + early_left * self.early_gain * air;
-            let room_right = (outs[3] - outs[4] + outs[5]) * wet
-                + early_right * self.early_gain * air;
+            let room_left =
+                (outs[0] - outs[1] + outs[2]) * wet + early_left * self.early_gain * air;
+            let room_right =
+                (outs[3] - outs[4] + outs[5]) * wet + early_right * self.early_gain * air;
 
             // There is one board and it is the through path, so there is one
             // gain. The pair it replaced was mixed 25 dB apart in the wrong
@@ -4163,8 +4207,7 @@ impl Processor for ConcertGrand {
             // clamp. That costs about 11 dB of output, which belongs in the
             // host's gain and not in a saturator: the desktop already runs
             // +6 dB and allows +12.
-            let board_gain =
-                BOARD_MIX * self.controls.lab(14) * HEADROOM * self.direct_gain;
+            let board_gain = BOARD_MIX * self.controls.lab(14) * HEADROOM * self.direct_gain;
             let mut direct_left = board_left * board_gain
                 + undamped_left * undamped_gain * HEADROOM * self.direct_gain
                 + open_left * OPEN_MIX * sympathy * HEADROOM
@@ -4180,8 +4223,7 @@ impl Processor for ConcertGrand {
                     .pedal_noise_seed
                     .wrapping_mul(1_664_525)
                     .wrapping_add(1_013_904_223);
-                let white =
-                    (self.pedal_noise_seed >> 9) as f32 * (1.0 / 4_194_304.0) - 1.0;
+                let white = (self.pedal_noise_seed >> 9) as f32 * (1.0 / 4_194_304.0) - 1.0;
                 // Dark and woody: the rail speaks through the case.
                 self.pedal_noise_lp += 0.035 * (white - self.pedal_noise_lp);
                 let knock = self.pedal_noise_lp * self.pedal_noise_amp;
@@ -4193,17 +4235,13 @@ impl Processor for ConcertGrand {
             // with 1/r. A 120 Hz shelf whose gain follows the pattern and
             // the distance -- an omni has none, a ribbon up close blooms.
             if self.proximity_gain > 1e-3 {
-                self.proximity[0] +=
-                    self.proximity_coeff * (direct_left - self.proximity[0]);
-                self.proximity[1] +=
-                    self.proximity_coeff * (direct_right - self.proximity[1]);
+                self.proximity[0] += self.proximity_coeff * (direct_left - self.proximity[0]);
+                self.proximity[1] += self.proximity_coeff * (direct_right - self.proximity[1]);
                 direct_left += self.proximity_gain * self.proximity[0];
                 direct_right += self.proximity_gain * self.proximity[1];
             }
-            let left =
-                Self::soften(direct_left + room_left * HEADROOM) * level;
-            let right =
-                Self::soften(direct_right + room_right * HEADROOM) * level;
+            let left = Self::soften(direct_left + room_left * HEADROOM) * level;
+            let right = Self::soften(direct_right + room_right * HEADROOM) * level;
             match channels {
                 0 => {}
                 1 => output[frame] = Self::soften(left + right),
@@ -4250,11 +4288,19 @@ mod tests {
     }
 
     fn note_on(note: u8, velocity: u8) -> MidiEvent {
-        MidiEvent { frame: 0, data: [0x90, note, velocity], length: 3 }
+        MidiEvent {
+            frame: 0,
+            data: [0x90, note, velocity],
+            length: 3,
+        }
     }
 
     fn note_off(note: u8) -> MidiEvent {
-        MidiEvent { frame: 0, data: [0x80, note, 0], length: 3 }
+        MidiEvent {
+            frame: 0,
+            data: [0x80, note, 0],
+            length: 3,
+        }
     }
 
     fn render(piano: &mut ConcertGrand, frames: usize, midi: &[MidiEvent]) -> Vec<f32> {
@@ -4317,16 +4363,14 @@ mod tests {
             let b = piano.inharmonicity[index];
             let x0 = ConcertGrand::strike_point(note);
             // The same felt low-pass the model applies at note-on.
-            let cutoff =
-                ((2.4 / piano.contact_time(note, velocity)) * 1.25).max(1.5 * f0);
+            let cutoff = ((2.4 / piano.contact_time(note, velocity)) * 1.25).max(1.5 * f0);
             let mut weighted = 0.0;
             let mut total = 0.0;
             for n in 1..=40 {
                 let nf = n as f32;
                 let frequency = nf * f0 * sqrtf(1.0 + b * nf * nf);
                 let r = frequency / cutoff;
-                let amp = sincosf(core::f32::consts::PI * nf * x0).0.abs()
-                    * expf(-1.2 * r * r);
+                let amp = sincosf(core::f32::consts::PI * nf * x0).0.abs() * expf(-1.2 * r * r);
                 weighted += amp * frequency;
                 total += amp;
             }
@@ -4379,7 +4423,11 @@ mod tests {
 
         // With the pedal down the same release changes nothing audible.
         let mut pedalled = prepared();
-        let pedal = MidiEvent { frame: 0, data: [0xb0, 64, 127], length: 3 };
+        let pedal = MidiEvent {
+            frame: 0,
+            data: [0xb0, 64, 127],
+            length: 3,
+        };
         render(&mut pedalled, hold, &[pedal, note_on(60, 100)]);
         render(&mut pedalled, hold, &[note_off(60)]);
         render(&mut pedalled, 3200, &[]);
@@ -4406,7 +4454,11 @@ mod tests {
     #[test]
     fn silence_before_a_note_and_sound_after_one() {
         let mut piano = prepared();
-        assert!(render(&mut piano, 512, &[]).iter().all(|sample| *sample == 0.0));
+        assert!(
+            render(&mut piano, 512, &[])
+                .iter()
+                .all(|sample| *sample == 0.0)
+        );
         let sounding = render(&mut piano, 4000, &[note_on(69, 100)]);
         assert!(sounding.iter().any(|sample| sample.abs() > 0.01));
     }
@@ -4446,7 +4498,10 @@ mod tests {
         }
         let mut migrated = Box::new(ConcertGrand::default());
         assert!(migrated.load_state(&legacy));
-        assert_eq!(migrated.get_parameter(PARAM_BRIGHTNESS), Some(0.9_f32 as f64));
+        assert_eq!(
+            migrated.get_parameter(PARAM_BRIGHTNESS),
+            Some(0.9_f32 as f64)
+        );
 
         // Longer than even the legacy layout is not a state of ours.
         assert!(!older.load_state(&[0u8; 38 * 4]));
@@ -4487,7 +4542,10 @@ mod tests {
         }
 
         let db = |high: f32, low: f32| 10.0 * (high / low).log10();
-        println!("{:>5}  {:>28}  {:>28}  {:>28}", "param", "n33", "n60", "n88");
+        println!(
+            "{:>5}  {:>28}  {:>28}  {:>28}",
+            "param", "n33", "n60", "n88"
+        );
         for index in 0..PARAM_COUNT as u32 {
             let mut line = format!("{index:>5}");
             for note in [33u8, 60, 88] {
@@ -4496,10 +4554,7 @@ mod tests {
                 let level = db(energy(&high) + 1e-20, energy(&low) + 1e-20);
                 // The attack is the first 30 ms, where the hammer controls act.
                 let head = (0.030 * FS) as usize * 2;
-                let attack = db(
-                    energy(&high[..head]) + 1e-20,
-                    energy(&low[..head]) + 1e-20,
-                );
+                let attack = db(energy(&high[..head]) + 1e-20, energy(&low[..head]) + 1e-20);
                 // Weight each band by how much energy is actually in it. The
                 // unweighted maximum was worthless: 30 dB of change in a band
                 // that holds nothing at all reads as a powerful control and
@@ -4589,7 +4644,9 @@ mod tests {
             render(&mut piano, 64, &[note_on(note, 125)]);
             for block in 0..6 {
                 render(&mut piano, (FS * 0.12) as usize, &[]);
-                let Some(voice) = piano.voices.iter().find(|v| v.active) else { break };
+                let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+                    break;
+                };
                 let mut stretch = 0.0f32;
                 for partial in &voice.partials[..voice.partial_count] {
                     let w = partial.slope;
@@ -4624,7 +4681,10 @@ mod tests {
             ("single ff bass", vec![21u8]),
             ("bass octave ff", vec![21, 33]),
             ("five-note chord ff", vec![28, 35, 40, 44, 47]),
-            ("ten-note chord ff", vec![28, 33, 40, 45, 47, 52, 57, 59, 64, 69]),
+            (
+                "ten-note chord ff",
+                vec![28, 33, 40, 45, 47, 52, 57, 59, 64, 69],
+            ),
         ] {
             let mut piano = prepared();
             let events: Vec<MidiEvent> = notes.iter().map(|n| note_on(*n, 127)).collect();
@@ -4651,7 +4711,9 @@ mod tests {
         for note in [21u8, 36, 48, 60, 72] {
             let mut piano = prepared();
             render(&mut piano, 128, &[note_on(note, 125)]);
-            let Some(voice) = piano.voices.iter().find(|v| v.active) else { continue };
+            let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+                continue;
+            };
             let count = voice.partial_count;
             // SIM_MODES is the ceiling on how many partials the simulation can
             // even reach; everything above it is recipe by construction.
@@ -4670,7 +4732,10 @@ mod tests {
     #[test]
     #[ignore]
     fn how_long_the_hammer_stays() {
-        println!("{:>5} {:>4} {:>12} {:>12} {:>8}", "note", "vel", "simulado", "pedido", "razon");
+        println!(
+            "{:>5} {:>4} {:>12} {:>12} {:>8}",
+            "note", "vel", "simulado", "pedido", "razon"
+        );
         for note in [21u8, 36, 48, 60] {
             for velocity in [60u8, 127] {
                 CONTACT_STEPS.store(0, core::sync::atomic::Ordering::Relaxed);
@@ -4699,12 +4764,17 @@ mod tests {
     #[test]
     #[ignore]
     fn strike_or_pluck() {
-        println!("{:>5} {:>4} {:>26}", "note", "vel", "energia: posicion / velocidad");
+        println!(
+            "{:>5} {:>4} {:>26}",
+            "note", "vel", "energia: posicion / velocidad"
+        );
         for note in [21u8, 36, 48, 60] {
             for velocity in [60u8, 127] {
                 let mut piano = prepared();
                 render(&mut piano, 64, &[note_on(note, velocity)]);
-                let Some(voice) = piano.voices.iter().find(|v| v.active) else { continue };
+                let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+                    continue;
+                };
                 // At note-on the components hold (s, c) = amplitude * (pq, po),
                 // which is the strike's (position, velocity/omega) direction.
                 let (mut pos, mut vel) = (0.0f32, 0.0f32);
@@ -4821,7 +4891,10 @@ mod tests {
         if std::env::var("CG_CHORD").is_ok() {
             let mut piano = Box::new(ConcertGrand::default());
             for (index, value) in &overrides {
-                assert!(piano.set_parameter(*index, *value), "param {index} rejected");
+                assert!(
+                    piano.set_parameter(*index, *value),
+                    "param {index} rejected"
+                );
             }
             let rate: u32 = std::env::var("CG_RATE")
                 .ok()
@@ -4870,7 +4943,17 @@ mod tests {
         } else if cal.is_some() {
             (0..30).map(|i| (21 + 3 * i as u8, 125u8)).collect()
         } else {
-            vec![(21u8, 123u8), (36, 120), (48, 125), (60, 125), (69, 125), (30, 85), (30, 124), (48, 105), (60, 70)]
+            vec![
+                (21u8, 123u8),
+                (36, 120),
+                (48, 125),
+                (60, 125),
+                (69, 125),
+                (30, 85),
+                (30, 124),
+                (48, 105),
+                (60, 70),
+            ]
         };
         for (note, velocity) in notes {
             let mut piano = Box::new(ConcertGrand::default());
@@ -4878,7 +4961,10 @@ mod tests {
                 piano.cal = table;
             }
             for (index, value) in &overrides {
-                assert!(piano.set_parameter(*index, *value), "param {index} rejected");
+                assert!(
+                    piano.set_parameter(*index, *value),
+                    "param {index} rejected"
+                );
             }
             // The rate the desktop actually runs at is not the rate this
             // renders at by default, and a model can be right at one and
@@ -4952,8 +5038,7 @@ mod tests {
             let mut den = 0.0f64;
             let mut rows = String::new();
             for p in &voice.partials[..voice.partial_count] {
-                let f = (p.rs[0].atan2(p.rc[0]) as f64).abs() * FS as f64
-                    / core::f64::consts::TAU;
+                let f = (p.rs[0].atan2(p.rc[0]) as f64).abs() * FS as f64 / core::f64::consts::TAU;
                 if f < 20.0 {
                     continue;
                 }
@@ -4965,14 +5050,20 @@ mod tests {
                 den += e;
             }
             let cent = (num / den.max(1e-30)).exp();
-            for (i, p) in voice.partials[..voice.partial_count.min(14)].iter().enumerate() {
+            for (i, p) in voice.partials[..voice.partial_count.min(14)]
+                .iter()
+                .enumerate()
+            {
                 rows += &format!(
                     " n{}:{:.1}dB",
                     i + 1,
                     10.0 * (p.lane_magnitude_squared(0) as f64).max(1e-30).log10()
                 );
             }
-            println!("vel {velocity}: centroide {cent:.0} Hz, {} parciales", voice.partial_count);
+            println!(
+                "vel {velocity}: centroide {cent:.0} Hz, {} parciales",
+                voice.partial_count
+            );
             println!("  {rows}");
         }
     }
@@ -4985,7 +5076,11 @@ mod tests {
         // must carry more energy two seconds in.
         let late_energy = |with_bass: bool| -> f32 {
             let mut piano = prepared();
-            let pedal = MidiEvent { frame: 0, data: [0xb0, 64, 127], length: 3 };
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xb0, 64, 127],
+                length: 3,
+            };
             let mut opening = vec![pedal, note_on(60, 30)];
             if with_bass {
                 opening.push(note_on(48, 120));
@@ -5038,8 +5133,14 @@ mod tests {
             .iter()
             .find(|v| v.active && !v.halo && v.note == 96)
             .expect("treble voice");
-        assert_eq!(treble.pair_right, 0, "the treble reaches the right mic first");
-        assert!(treble.pair_left > 0, "the left mic must lag on a treble note");
+        assert_eq!(
+            treble.pair_right, 0,
+            "the treble reaches the right mic first"
+        );
+        assert!(
+            treble.pair_left > 0,
+            "the left mic must lag on a treble note"
+        );
 
         let mut coincident = prepared();
         coincident.set_parameter(PARAM_WIDTH, 0.0);
@@ -5115,7 +5216,11 @@ mod tests {
         let mut energies = [0.0f32; 3];
         for (slot, cc) in energies.iter_mut().zip([127u8, 55, 0]) {
             let mut piano = prepared();
-            let pedal = MidiEvent { frame: 0, data: [0xb0, 64, cc], length: 3 };
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xb0, 64, cc],
+                length: 3,
+            };
             render(&mut piano, 64, &[pedal, note_on(48, 110)]);
             render(&mut piano, (FS * 0.3) as usize, &[]);
             render(&mut piano, 64, &[note_off(48)]);
@@ -5138,7 +5243,11 @@ mod tests {
         let mut piano = prepared();
         // C3 is held when the rod is pressed; E3 comes later.
         render(&mut piano, 64, &[note_on(48, 110)]);
-        let sostenuto_on = MidiEvent { frame: 0, data: [0xb0, 66, 127], length: 3 };
+        let sostenuto_on = MidiEvent {
+            frame: 0,
+            data: [0xb0, 66, 127],
+            length: 3,
+        };
         render(&mut piano, 64, &[sostenuto_on]);
         render(&mut piano, 64, &[note_on(52, 110)]);
         render(&mut piano, (FS * 0.2) as usize, &[]);
@@ -5275,8 +5384,7 @@ mod tests {
         // What the test has to hold now is the other failure — that the tail
         // is a tail and not a drone.
         let mut piano = prepared();
-        let chord: Vec<MidiEvent> =
-            [48u8, 55, 64].iter().map(|n| note_on(*n, 120)).collect();
+        let chord: Vec<MidiEvent> = [48u8, 55, 64].iter().map(|n| note_on(*n, 120)).collect();
         render(&mut piano, (FS * 0.3) as usize, &chord);
         let offs: Vec<MidiEvent> = [48u8, 55, 64].iter().map(|n| note_off(*n)).collect();
         render(&mut piano, 64, &offs);
@@ -5322,7 +5430,11 @@ mod tests {
         render(&mut dry, 64, &[note_on(60, 100)]);
         let without = dry.active_partials;
         let mut pedalled = prepared();
-        let pedal = MidiEvent { frame: 0, data: [0xb0, 64, 127], length: 3 };
+        let pedal = MidiEvent {
+            frame: 0,
+            data: [0xb0, 64, 127],
+            length: 3,
+        };
         render(&mut pedalled, 64, &[pedal, note_on(60, 100)]);
         assert!(
             pedalled.active_partials > without,
@@ -5330,7 +5442,11 @@ mod tests {
             pedalled.active_partials
         );
         // And lifting the pedal releases the halo with everything else.
-        let lift = MidiEvent { frame: 0, data: [0xb0, 64, 0], length: 3 };
+        let lift = MidiEvent {
+            frame: 0,
+            data: [0xb0, 64, 0],
+            length: 3,
+        };
         render(&mut pedalled, 16, &[note_off(60), lift]);
         render(&mut pedalled, (FS * 1.0) as usize, &[]);
         let late = energy(&render(&mut pedalled, 512, &[]));
@@ -5372,7 +5488,11 @@ mod tests {
         let strike = |soft: bool| {
             let mut piano = prepared();
             if soft {
-                let cc = MidiEvent { frame: 0, data: [0xb0, 67, 127], length: 3 };
+                let cc = MidiEvent {
+                    frame: 0,
+                    data: [0xb0, 67, 127],
+                    length: 3,
+                };
                 render(&mut piano, 8, &[cc]);
             }
             energy(&render(&mut piano, 2048, &[note_on(60, 110)]))
@@ -5390,9 +5510,17 @@ mod tests {
         assert!(piano.prepare(48_000.0, 512, 0, 2));
         let mut output = vec![0.0f32; 512 * 2];
         // One buffer at 48 kHz / 512 frames is 10.67 ms of budget.
-        for (label, notes) in [("single", 1usize), ("five-note chord", 5), ("ten-note chord", 10)] {
+        for (label, notes) in [
+            ("single", 1usize),
+            ("five-note chord", 5),
+            ("ten-note chord", 10),
+        ] {
             let events: Vec<MidiEvent> = (0..notes)
-                .map(|i| MidiEvent { frame: 0, data: [0x90, 40 + 4 * i as u8, 110], length: 3 })
+                .map(|i| MidiEvent {
+                    frame: 0,
+                    data: [0x90, 40 + 4 * i as u8, 110],
+                    length: 3,
+                })
                 .collect();
             let start = std::time::Instant::now();
             const ROUNDS: u32 = 50;
@@ -5401,7 +5529,10 @@ mod tests {
                 piano.process(&[], &mut output, &events, &[], 512, 0, 2);
             }
             let per = start.elapsed().as_secs_f64() * 1000.0 / ROUNDS as f64;
-            std::println!("{label}: {per:.2} ms per buffer ({:.0}% of budget)", per / 10.67 * 100.0);
+            std::println!(
+                "{label}: {per:.2} ms per buffer ({:.0}% of budget)",
+                per / 10.67 * 100.0
+            );
         }
         // Steady state: what a held chord costs once the strikes are over.
         // This is what fast playing accumulates, and what the callback pays
@@ -5409,9 +5540,17 @@ mod tests {
         for held in [5usize, 10, 20] {
             piano.reset();
             let events: Vec<MidiEvent> = (0..held)
-                .map(|i| MidiEvent { frame: 0, data: [0x90, 33 + 3 * i as u8, 115], length: 3 })
+                .map(|i| MidiEvent {
+                    frame: 0,
+                    data: [0x90, 33 + 3 * i as u8, 115],
+                    length: 3,
+                })
                 .collect();
-            let pedal = MidiEvent { frame: 0, data: [0xb0, 64, 127], length: 3 };
+            let pedal = MidiEvent {
+                frame: 0,
+                data: [0xb0, 64, 127],
+                length: 3,
+            };
             piano.process(&[], &mut output, &[pedal], &[], 512, 0, 2);
             for chunk in events.chunks(3) {
                 piano.process(&[], &mut output, chunk, &[], 512, 0, 2);
@@ -5425,7 +5564,8 @@ mod tests {
             let live: usize = piano.voices.iter().filter(|v| v.active).count();
             std::println!(
                 "{held} pedalled notes ({live} voices, {} partials): {per:.2} ms ({:.0}% of budget)",
-                piano.active_partials, per / 10.67 * 100.0
+                piano.active_partials,
+                per / 10.67 * 100.0
             );
         }
     }
@@ -5449,25 +5589,45 @@ mod tests {
             assert!(piano.prepare(48_000.0, 512, 0, 2));
             let mut out = vec![0.0f32; 512 * 2];
             if pedal {
-                let cc = [MidiEvent { frame: 0, data: [0xb0, 64, 127], length: 3 }];
+                let cc = [MidiEvent {
+                    frame: 0,
+                    data: [0xb0, 64, 127],
+                    length: 3,
+                }];
                 piano.process(&[], &mut out, &cc, &[], 512, 0, 2);
             }
             if note == 0 {
                 for n in 0..24u8 {
-                    let on = [MidiEvent { frame: 0, data: [0x90, 72 + n % 24, 110], length: 3 }];
+                    let on = [MidiEvent {
+                        frame: 0,
+                        data: [0x90, 72 + n % 24, 110],
+                        length: 3,
+                    }];
                     piano.process(&[], &mut out, &on, &[], 512, 0, 2);
                 }
                 for n in 0..24u8 {
-                    let off = [MidiEvent { frame: 0, data: [0x80, 72 + n % 24, 0], length: 3 }];
+                    let off = [MidiEvent {
+                        frame: 0,
+                        data: [0x80, 72 + n % 24, 0],
+                        length: 3,
+                    }];
                     piano.process(&[], &mut out, &off, &[], 512, 0, 2);
                 }
             } else {
-                let on = [MidiEvent { frame: 0, data: [0x90, note, 110], length: 3 }];
+                let on = [MidiEvent {
+                    frame: 0,
+                    data: [0x90, note, 110],
+                    length: 3,
+                }];
                 piano.process(&[], &mut out, &on, &[], 512, 0, 2);
                 for _ in 0..40 {
                     piano.process(&[], &mut out, &[], &[], 512, 0, 2);
                 }
-                let off = [MidiEvent { frame: 0, data: [0x80, note, 0], length: 3 }];
+                let off = [MidiEvent {
+                    frame: 0,
+                    data: [0x80, note, 0],
+                    length: 3,
+                }];
                 piano.process(&[], &mut out, &off, &[], 512, 0, 2);
             }
             let loud = |o: &[f32]| o.iter().fold(0.0f32, |m, s| m.max(s.abs()));
@@ -5506,10 +5666,18 @@ mod tests {
         for round in 0..4000 {
             let mut events = Vec::new();
             if round % 37 == 0 {
-                events.push(MidiEvent { frame: 0, data: [0xb0, 64, 127], length: 3 });
+                events.push(MidiEvent {
+                    frame: 0,
+                    data: [0xb0, 64, 127],
+                    length: 3,
+                });
             }
             if round % 53 == 0 {
-                events.push(MidiEvent { frame: 0, data: [0xb0, 64, 0], length: 3 });
+                events.push(MidiEvent {
+                    frame: 0,
+                    data: [0xb0, 64, 0],
+                    length: 3,
+                });
             }
             for _ in 0..(next() % 12) {
                 let note = (21 + next() % 88) as u8;
@@ -5523,7 +5691,10 @@ mod tests {
             }
             events.sort_by_key(|e| e.frame);
             piano.process(&[], &mut output, &events, &[], 128, 0, 2);
-            assert!(output.iter().all(|s| s.is_finite()), "non-finite output at round {round}");
+            assert!(
+                output.iter().all(|s| s.is_finite()),
+                "non-finite output at round {round}"
+            );
         }
     }
 
@@ -5592,12 +5763,21 @@ mod tests {
             let (amplitude, decay) = ConcertGrand::board_response(frequency);
             let again = ConcertGrand::board_response(frequency);
             assert_eq!((amplitude, decay), again);
-            assert!((0.3..3.4).contains(&amplitude), "level {amplitude} at {frequency} Hz");
-            assert!((0.6..1.8).contains(&decay), "decay {decay} at {frequency} Hz");
+            assert!(
+                (0.3..3.4).contains(&amplitude),
+                "level {amplitude} at {frequency} Hz"
+            );
+            assert!(
+                (0.6..1.8).contains(&decay),
+                "decay {decay} at {frequency} Hz"
+            );
             minimum = minimum.min(amplitude);
             maximum = maximum.max(amplitude);
         }
-        assert!(maximum > minimum * 2.0, "the board is flat: {minimum}..{maximum}");
+        assert!(
+            maximum > minimum * 2.0,
+            "the board is flat: {minimum}..{maximum}"
+        );
     }
 
     #[test]
@@ -5628,7 +5808,11 @@ mod tests {
             expf(-1.2 * argument * argument)
         };
         assert!(window(2.0) > 0.9, "low partials pass ({})", window(2.0));
-        assert!(window(40.0) < 0.35, "partial 40 unattenuated ({})", window(40.0));
+        assert!(
+            window(40.0) < 0.35,
+            "partial 40 unattenuated ({})",
+            window(40.0)
+        );
     }
 
     #[test]
@@ -5640,8 +5824,7 @@ mod tests {
         // one — an accidental bass boost, not a soundboard.
         let sample_rate = FS as f32;
         for frequency in [BOARD_BOTTOM_HZ, 1000.0, BOARD_TOP_HZ] {
-            let mut mode =
-                BodyMode::tune(frequency, board_t60(frequency), 0.5, sample_rate);
+            let mut mode = BodyMode::tune(frequency, board_t60(frequency), 0.5, sample_rate);
             let omega = core::f32::consts::TAU * frequency / sample_rate;
             let mut peak = 0.0_f32;
             for n in 0..(sample_rate as usize) {
@@ -5700,7 +5883,11 @@ mod bench {
     use super::*;
 
     fn note_on(note: u8, velocity: u8) -> MidiEvent {
-        MidiEvent { frame: 0, data: [0x90, note, velocity], length: 3 }
+        MidiEvent {
+            frame: 0,
+            data: [0x90, note, velocity],
+            length: 3,
+        }
     }
 
     /// Not a test: wall-time per 512-frame block at 44.1 kHz, per scenario.
@@ -5718,15 +5905,27 @@ mod bench {
         let scenarios: [(&str, Vec<MidiEvent>, bool); 4] = [
             ("idle", vec![], false),
             ("single C2", vec![note_on(36, 120)], false),
-            ("ten-note chord", chord.iter().map(|&n| note_on(n, 120)).collect(), false),
-            ("twenty, pedal", twenty.iter().map(|&n| note_on(n, 120)).collect(), true),
+            (
+                "ten-note chord",
+                chord.iter().map(|&n| note_on(n, 120)).collect(),
+                false,
+            ),
+            (
+                "twenty, pedal",
+                twenty.iter().map(|&n| note_on(n, 120)).collect(),
+                true,
+            ),
         ];
         for (label, midi, pedal) in scenarios {
             let mut piano = Box::new(ConcertGrand::default());
             assert!(piano.prepare(RATE, FRAMES as u32, 0, 2));
             let mut output = vec![0.0f32; FRAMES * 2];
             if pedal {
-                let cc = MidiEvent { frame: 0, data: [0xB0, 64, 127], length: 3 };
+                let cc = MidiEvent {
+                    frame: 0,
+                    data: [0xB0, 64, 127],
+                    length: 3,
+                };
                 piano.process(&[], &mut output, &[cc], &[], FRAMES as u32, 0, 2);
             }
             piano.process(&[], &mut output, &midi, &[], FRAMES as u32, 0, 2);
@@ -5749,4 +5948,3 @@ mod bench {
         }
     }
 }
-

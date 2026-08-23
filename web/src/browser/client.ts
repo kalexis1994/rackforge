@@ -524,6 +524,8 @@ function sendPackage(
     | "inspect"
     | "install"
     | "catalog"
+    | "activate"
+    | "deactivate"
     | "uninstall"
     | "import_resource"
     | "resource_status",
@@ -749,9 +751,32 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     return answer.installed as T;
   }
   if (path.startsWith("/api/v1/plugins/") && path.endsWith("/activate") && method === "POST") {
-    // Installing already loaded and activated the package here, so there is
-    // nothing left to start.
-    return { status: "active" } as T;
+    const pluginId = decodeURIComponent(
+      path.slice("/api/v1/plugins/".length, -"/activate".length),
+    );
+    const answer = await sendPackage(
+      "activate",
+      new TextEncoder().encode(JSON.stringify({ plugin_id: pluginId, active: true })),
+    );
+    if (!answer.ok) {
+      throw new HostRequestError(answer.error ?? "This plugin could not be activated.", 409);
+    }
+    await publishSnapshot();
+    return { status: "active", plugin_id: pluginId } as T;
+  }
+  if (path.startsWith("/api/v1/plugins/") && path.endsWith("/deactivate") && method === "POST") {
+    const pluginId = decodeURIComponent(
+      path.slice("/api/v1/plugins/".length, -"/deactivate".length),
+    );
+    const answer = await sendPackage(
+      "deactivate",
+      new TextEncoder().encode(JSON.stringify({ plugin_id: pluginId, active: false })),
+    );
+    if (!answer.ok) {
+      throw new HostRequestError(answer.error ?? "This plugin could not be deactivated.", 409);
+    }
+    await publishSnapshot();
+    return { status: "inactive", plugin_id: pluginId } as T;
   }
   if (path === "/api/v1/resources/mounts" && method === "GET") {
     // There is no host storage to browse: a page can only be given a file.
@@ -812,7 +837,14 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
       plugin_id?: string;
       target_resource_id?: string;
       grant_id?: string;
+      bundle?: string | null;
     };
+    if (request.bundle) {
+      throw new HostRequestError(
+        "This browser received only the NKI file, without its sibling samples. Choose an .rfbank archive instead.",
+        400,
+      );
+    }
     const grant = request.grant_id ? grants.get(request.grant_id) : undefined;
     if (!grant) {
       throw new HostRequestError("This file is no longer available; choose it again.", 404);

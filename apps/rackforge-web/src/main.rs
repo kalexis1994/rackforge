@@ -19,12 +19,13 @@ use rackforge_plugin_api::{PluginManifest, WebSurfaceKind};
 use rackforge_repository::{
     InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions,
     RepositoryError, cleanup_uninstall_tombstones, inspect_local_archive,
-    install_local_archive_cancellable, remove_plugin_user_data, uninstall_plugin,
+    install_local_archive_cancellable, plugin_is_enabled, remove_plugin_user_data,
+    set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_resource_api::{
     BindResourceRequest, BindSelectionRequest, BrowseGrantRequest, ClearInstalledResourceRequest,
     ListGrantsRequest, LoadGrantedResourceRequest, MAX_CLIENT_UPLOAD_BYTES, ResourceBrowser,
-    ResourceEntryKind, ResourceError, SelectHostEntryRequest,
+    ResourceBundleKind, ResourceEntryKind, ResourceError, SelectHostEntryRequest,
 };
 use rackforge_resource_host::NativeResourceBrowser;
 use semver::Version;
@@ -561,6 +562,10 @@ async fn main() -> Result<()> {
             "/api/v1/plugins/{plugin_id}/activate",
             post(activate_plugin),
         )
+        .route(
+            "/api/v1/plugins/{plugin_id}/deactivate",
+            post(deactivate_plugin),
+        )
         .route("/api/v1/resources/mounts", get(resource_mounts))
         .route(
             "/api/v1/resources/mounts/{mount_id}/root",
@@ -831,6 +836,12 @@ impl PluginWebRegistry {
         let _ = cleanup_uninstall_tombstones(plugin_store_root);
         let mut packages = BTreeMap::new();
         Self::scan_directory(plugins_root, true, &mut packages)?;
+        for package in packages.values_mut() {
+            package.public.active = plugin_is_enabled(plugin_store_root, &package.public.plugin_id)
+                .with_context(|| {
+                    format!("reading activation state for {}", package.public.plugin_id)
+                })?;
+        }
 
         let store_packages = plugin_store_root.join("packages");
         let plugin_entries = match fs::read_dir(&store_packages) {
@@ -849,7 +860,10 @@ impl PluginWebRegistry {
             if !plugin_entry.file_type()?.is_dir() {
                 continue;
             }
-            Self::scan_directory(&plugin_entry.path(), false, &mut packages)?;
+            let plugin_id = plugin_entry.file_name().to_string_lossy().into_owned();
+            let active = plugin_is_enabled(plugin_store_root, &plugin_id)
+                .with_context(|| format!("reading activation state for {plugin_id}"))?;
+            Self::scan_directory(&plugin_entry.path(), active, &mut packages)?;
         }
         Ok(Self { packages })
     }
@@ -1261,68 +1275,99 @@ async fn activate_plugin(
         Ok(registry) => registry,
         Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
     };
-    if !registry.packages.contains_key(&plugin_id) {
+    let Some(package) = registry.packages.get(&plugin_id) else {
         return (
             StatusCode::NOT_FOUND,
             Json(json!({"status":"error", "message":"Plugin is not installed."})),
         )
             .into_response();
-    }
-    // Installing the first plugin recreates audio.toml. The systemd path unit
-    // then starts Core, which may need several seconds to validate resources
-    // and open the audio interface. Activation is one operation from the UI's
-    // perspective, so wait for that supervised startup instead of exposing a
-    // transient missing-socket error to the user.
-    let startup_deadline = std::time::Instant::now() + Duration::from_secs(20);
-    let snapshot = loop {
-        match core_request(&state.control_socket, &json!({"op":"snapshot"})).await {
-            Ok(snapshot) => break snapshot,
-            Err(error) if std::time::Instant::now() < startup_deadline => {
-                tokio::time::sleep(Duration::from_millis(250)).await;
-                let _ = error;
-            }
-            Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
-        }
     };
-    let instance_id = match plugin_instance_id_from_snapshot(&snapshot, &plugin_id) {
-        Some(instance_id) => instance_id.to_owned(),
-        None => {
-            let root = state
-                .plugin_store_root
-                .parent()
-                .unwrap_or_else(|| Path::new("."));
-            if let Err(message) = request_audio_runtime_restart(root) {
-                return (
-                    StatusCode::CONFLICT,
-                    Json(json!({"status":"error", "message":message})),
-                )
-                    .into_response();
+    let package_root = package.root.clone();
+    let was_enabled = match plugin_is_enabled(&state.plugin_store_root, &plugin_id) {
+        Ok(enabled) => enabled,
+        Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+    };
+    if let Err(error) = set_plugin_enabled(&state.plugin_store_root, &plugin_id, true) {
+        return resource_error(ResourceError::Backend(error.to_string()));
+    }
+    let snapshot = core_request(&state.control_socket, &json!({"op":"snapshot"}))
+        .await
+        .ok();
+    let instance_id = if let Some(instance_id) = snapshot
+        .as_ref()
+        .and_then(|snapshot| plugin_instance_id_from_snapshot(snapshot, &plugin_id))
+    {
+        instance_id.to_owned()
+    } else {
+        let root = state
+            .plugin_store_root
+            .parent()
+            .unwrap_or_else(|| Path::new("."));
+        let audio_config_path = root.join("config/audio.toml");
+        let previous_audio_config = fs::read(&audio_config_path).ok();
+        let configure = if audio_config_path.is_file() {
+            replace_startup_plugin(&audio_config_path, &package_root).map(|_| ())
+        } else {
+            ensure_startup_plugin(root, &package_root).map(|_| ())
+        };
+        if let Err(error) = configure {
+            if !was_enabled {
+                let _ = set_plugin_enabled(&state.plugin_store_root, &plugin_id, false);
             }
-            let deadline = std::time::Instant::now() + Duration::from_secs(45);
-            let mut loaded = None;
-            while std::time::Instant::now() < deadline {
-                tokio::time::sleep(Duration::from_millis(250)).await;
-                if let Ok(snapshot) =
-                    core_request(&state.control_socket, &json!({"op":"snapshot"})).await
-                    && let Some(instance_id) =
-                        plugin_instance_id_from_snapshot(&snapshot, &plugin_id)
-                {
-                    loaded = Some(instance_id.to_owned());
-                    break;
-                }
-            }
-            let Some(instance_id) = loaded else {
-                return (
-                    StatusCode::CONFLICT,
-                    Json(json!({
-                        "status":"error",
-                        "message":"The audio runtime restarted, but Core could not load this plugin. The package may be incompatible with the installed RackForge runtime."
-                    })),
-                )
-                    .into_response();
-            };
-            instance_id
+            return resource_error(ResourceError::Backend(format!(
+                "Could not prepare the plugin audio runtime: {error:#}"
+            )));
         }
+        let engine_was_running = running_audio_engine_pid(root).is_some();
+        if engine_was_running && let Err(message) = request_audio_runtime_restart(root) {
+            if let Some(previous) = previous_audio_config.as_deref() {
+                let _ = restore_startup_plugin(&audio_config_path, previous);
+            } else {
+                let _ = fs::remove_file(&audio_config_path);
+            }
+            if !was_enabled {
+                let _ = set_plugin_enabled(&state.plugin_store_root, &plugin_id, false);
+            }
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({"status":"error", "message":message})),
+            )
+                .into_response();
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(45);
+        let mut loaded = None;
+        while std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            if let Ok(snapshot) =
+                core_request(&state.control_socket, &json!({"op":"snapshot"})).await
+                && let Some(instance_id) = plugin_instance_id_from_snapshot(&snapshot, &plugin_id)
+            {
+                loaded = Some(instance_id.to_owned());
+                break;
+            }
+        }
+        let Some(instance_id) = loaded else {
+            if let Some(previous) = previous_audio_config.as_deref() {
+                let _ = restore_startup_plugin(&audio_config_path, previous);
+            } else {
+                let _ = fs::remove_file(&audio_config_path);
+            }
+            if !was_enabled {
+                let _ = set_plugin_enabled(&state.plugin_store_root, &plugin_id, false);
+            }
+            if engine_was_running {
+                let _ = request_audio_runtime_restart(root);
+            }
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "status":"error",
+                    "message":"Core could not load this plugin. Its previous audio configuration and activation state were restored."
+                })),
+            )
+                .into_response();
+        };
+        instance_id
     };
     for command in [
         json!({"type":"set_active_mode", "mode":"play"}),
@@ -1355,6 +1400,97 @@ async fn activate_plugin(
         }
     }
     Json(json!({"status":"active", "plugin_id":plugin_id})).into_response()
+}
+
+async fn deactivate_plugin(
+    AxumPath(plugin_id): AxumPath<String>,
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    if require_authorized(&state, &headers).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let registry = match PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root) {
+        Ok(registry) => registry,
+        Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+    };
+    let Some(package) = registry.packages.get(&plugin_id) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"status":"error", "message":"Plugin is not installed."})),
+        )
+            .into_response();
+    };
+    if !package.public.managed {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"status":"error", "message":"Built-in plugins cannot be deactivated."})),
+        )
+            .into_response();
+    }
+    if let Ok(snapshot) = core_request(&state.control_socket, &json!({"op":"snapshot"})).await
+        && plugin_instance_id_from_snapshot(&snapshot, &plugin_id).is_some()
+    {
+        let request = json!({
+            "op":"dispatch",
+            "envelope":{
+                "schema_version":rackforge_control_api::SESSION_SCHEMA_VERSION,
+                "client_id":"web.plugin-manager",
+                "command_id":PLUGIN_ACTIVATION_SERIAL.fetch_add(1, Ordering::Relaxed),
+                "command":{"type":"set_active_mode", "mode":"idle"},
+            }
+        });
+        match core_request(&state.control_socket, &request).await {
+            Ok(response)
+                if response.get("status").and_then(Value::as_str) == Some("command_applied") => {}
+            Ok(response) => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(json!({
+                        "status":"error",
+                        "message":response.get("message").and_then(Value::as_str)
+                            .unwrap_or("Core rejected plugin deactivation")
+                    })),
+                )
+                    .into_response();
+            }
+            Err(error) => return resource_error(ResourceError::Backend(error.to_string())),
+        }
+    }
+    if let Err(error) = set_plugin_enabled(&state.plugin_store_root, &plugin_id, false) {
+        return resource_error(ResourceError::Backend(error.to_string()));
+    }
+    let root = state
+        .plugin_store_root
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let audio_config_path = root.join("config/audio.toml");
+    let configured_primary_plugin_id = fs::read_to_string(&audio_config_path)
+        .ok()
+        .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
+        .and_then(|document| document.get("package")?.as_str().map(PathBuf::from))
+        .and_then(|path| fs::read_to_string(path.join("rackforge-plugin.toml")).ok())
+        .and_then(|text| toml::from_str::<PluginManifest>(&text).ok())
+        .map(|manifest| manifest.id);
+    if configured_primary_plugin_id.as_deref() == Some(&plugin_id) {
+        let fallback = registry
+            .packages
+            .values()
+            .find(|candidate| candidate.public.plugin_id != plugin_id && candidate.public.active)
+            .map(|candidate| candidate.root.clone());
+        let update = if let Some(fallback) = fallback {
+            replace_startup_plugin(&audio_config_path, &fallback).map(|_| ())
+        } else {
+            deactivate_startup_plugin(&audio_config_path).map(|_| ())
+        };
+        if let Err(error) = update {
+            let _ = set_plugin_enabled(&state.plugin_store_root, &plugin_id, true);
+            return resource_error(ResourceError::Backend(format!(
+                "Could not preserve a safe startup configuration: {error:#}"
+            )));
+        }
+    }
+    Json(json!({"status":"inactive", "plugin_id":plugin_id})).into_response()
 }
 
 fn plugin_instance_id_from_snapshot<'a>(snapshot: &'a Value, plugin_id: &str) -> Option<&'a str> {
@@ -1899,6 +2035,22 @@ async fn install_selected_plugin(
         )
             .into_response();
     }
+    // Raspberry Pi releases before activation persistence kept packages in
+    // `plugins/`. Materialize those legacy choices before the repository
+    // creates activation.json for the newly installed (inactive) package.
+    if let Ok(registry) = PluginWebRegistry::scan(&state.plugins_root, &state.plugin_store_root) {
+        for package in registry
+            .packages
+            .values()
+            .filter(|package| package.public.active)
+        {
+            if let Err(error) =
+                set_plugin_enabled(&state.plugin_store_root, &package.public.plugin_id, true)
+            {
+                return resource_error(ResourceError::Backend(error.to_string()));
+            }
+        }
+    }
     let store_root = state.plugin_store_root.clone();
     let cancelled = Arc::new(AtomicBool::new(false));
     plugin_install_cancellations()
@@ -1920,23 +2072,7 @@ async fn install_selected_plugin(
         .expect("plugin install cancellation lock poisoned")
         .remove(&selection_id);
     match result {
-        Ok(Ok(installed)) => {
-            let root = state
-                .plugin_store_root
-                .parent()
-                .unwrap_or_else(|| Path::new("."));
-            if let Err(error) = ensure_startup_plugin(root, &installed.path) {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "status":"error",
-                        "message":format!("the package was installed, but its audio runtime could not be prepared: {error:#}")
-                    })),
-                )
-                    .into_response();
-            }
-            Json(install_response(installed)).into_response()
-        }
+        Ok(Ok(installed)) => Json(install_response(installed)).into_response(),
         Ok(Err(error)) => (
             StatusCode::BAD_REQUEST,
             Json(json!({"status": "error", "message": error.to_string()})),
@@ -2218,13 +2354,33 @@ async fn load_granted_resource(
             "target is not a declared file resource".into(),
         ));
     }
-    let path = match state.resource_browser.resolve_granted_file(
-        &request.plugin_id,
-        &request.grant_id,
-        request.entry_id.as_deref(),
-    ) {
-        Ok(path) => path,
-        Err(error) => return resource_error(error),
+    let bundled;
+    let path = match request.bundle {
+        Some(ResourceBundleKind::NkiDependencies) => {
+            match state.resource_browser.bundle_granted_nki(
+                &request.plugin_id,
+                &request.grant_id,
+                request.entry_id.as_deref(),
+            ) {
+                Ok(staged) => {
+                    let path = staged.path().to_path_buf();
+                    bundled = Some(staged);
+                    path
+                }
+                Err(error) => return resource_error(error),
+            }
+        }
+        None => match state.resource_browser.resolve_granted_file(
+            &request.plugin_id,
+            &request.grant_id,
+            request.entry_id.as_deref(),
+        ) {
+            Ok(path) => {
+                bundled = None;
+                path
+            }
+            Err(error) => return resource_error(error),
+        },
     };
     let uploaded_grant = request
         .persist
@@ -2237,7 +2393,7 @@ async fn load_granted_resource(
         "path": path,
         "persist": request.persist,
     });
-    match core_request(&state.control_socket, &control).await {
+    let response = match core_request(&state.control_socket, &control).await {
         Ok(response)
             if response.get("status").and_then(Value::as_str) == Some("plugin_resource_loaded") =>
         {
@@ -2257,7 +2413,9 @@ async fn load_granted_resource(
             resource_error(ResourceError::Backend(message))
         }
         Err(error) => resource_error(ResourceError::Backend(error.to_string())),
-    }
+    };
+    drop(bundled);
+    response
 }
 
 async fn clear_installed_resource(

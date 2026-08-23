@@ -30,6 +30,8 @@ pub const MAX_PACKAGE_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_EXPANDED_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
 pub const MAX_PACKAGE_ENTRIES: usize = 16_384;
 const MAX_PORTABLE_METADATA_BYTES: u64 = 1024 * 1024;
+const PLUGIN_ACTIVATION_SCHEMA_VERSION: u32 = 1;
+const PLUGIN_ACTIVATION_FILE: &str = "activation.json";
 
 static TEMP_SERIAL: AtomicU64 = AtomicU64::new(0);
 
@@ -124,6 +126,112 @@ pub struct InstalledPackage {
     pub path: PathBuf,
     pub record: InstallationRecord,
     pub already_installed: bool,
+}
+
+/// Persistent package enablement, deliberately separate from installation.
+///
+/// A missing document means a pre-enable/disable RackForge installation and
+/// therefore keeps every existing package enabled. As soon as the first new
+/// package is installed, the current package set is materialized and the new
+/// package remains disabled until the user explicitly activates it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PluginActivationDocument {
+    schema_version: u32,
+    enabled_plugins: BTreeSet<String>,
+}
+
+/// Returns whether an installed managed package is enabled for host loading.
+/// Legacy stores without an activation document preserve their old behavior.
+pub fn plugin_is_enabled(
+    store_root: impl AsRef<Path>,
+    plugin_id: &str,
+) -> Result<bool, RepositoryError> {
+    validate_plugin_identifier(plugin_id)
+        .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    let root = ensure_real_directory(store_root.as_ref())?;
+    Ok(read_plugin_activation_document(&root)?
+        .is_none_or(|document| document.enabled_plugins.contains(plugin_id)))
+}
+
+/// Enables or disables one managed package without changing its immutable
+/// installation. The first mutation migrates legacy stores by enabling every
+/// package that was already installed.
+pub fn set_plugin_enabled(
+    store_root: impl AsRef<Path>,
+    plugin_id: &str,
+    enabled: bool,
+) -> Result<(), RepositoryError> {
+    validate_plugin_identifier(plugin_id)
+        .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    let root = ensure_real_directory(store_root.as_ref())?;
+    let mut document = activation_document_or_legacy_default(&root)?;
+    if enabled {
+        document.enabled_plugins.insert(plugin_id.to_owned());
+    } else {
+        document.enabled_plugins.remove(plugin_id);
+    }
+    write_json_atomic(&root.join(PLUGIN_ACTIVATION_FILE), &document)
+}
+
+fn read_plugin_activation_document(
+    root: &Path,
+) -> Result<Option<PluginActivationDocument>, RepositoryError> {
+    let path = root.join(PLUGIN_ACTIVATION_FILE);
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let document: PluginActivationDocument = serde_json::from_slice(&bytes)
+        .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    if document.schema_version != PLUGIN_ACTIVATION_SCHEMA_VERSION {
+        return Err(RepositoryError::InvalidPackage(format!(
+            "unsupported plugin activation schema {}",
+            document.schema_version
+        )));
+    }
+    for plugin_id in &document.enabled_plugins {
+        validate_plugin_identifier(plugin_id)
+            .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    }
+    Ok(Some(document))
+}
+
+fn activation_document_or_legacy_default(
+    root: &Path,
+) -> Result<PluginActivationDocument, RepositoryError> {
+    if let Some(document) = read_plugin_activation_document(root)? {
+        return Ok(document);
+    }
+    Ok(PluginActivationDocument {
+        schema_version: PLUGIN_ACTIVATION_SCHEMA_VERSION,
+        enabled_plugins: installed_plugin_ids(root)?,
+    })
+}
+
+fn installed_plugin_ids(root: &Path) -> Result<BTreeSet<String>, RepositoryError> {
+    let packages_root = ensure_real_child(root, "packages")?;
+    let mut ids = BTreeSet::new();
+    for entry in fs::read_dir(packages_root)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let plugin_id = entry.file_name().to_string_lossy().into_owned();
+        if validate_plugin_identifier(&plugin_id).is_ok() {
+            ids.insert(plugin_id);
+        }
+    }
+    Ok(ids)
+}
+
+fn prepare_new_plugin_disabled(root: &Path) -> Result<(), RepositoryError> {
+    if read_plugin_activation_document(root)?.is_none() {
+        let document = activation_document_or_legacy_default(root)?;
+        write_json_atomic(&root.join(PLUGIN_ACTIVATION_FILE), &document)?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -525,6 +633,7 @@ pub fn install_archive(
     let root = ensure_real_directory(store_root.as_ref())?;
     let packages_root = ensure_real_child(&root, "packages")?;
     let records_root = ensure_real_child(&root, "records")?;
+    prepare_new_plugin_disabled(&root)?;
     let plugin_root = ensure_real_child(&packages_root, &selected.plugin.id)?;
     let plugin_records = ensure_real_child(&records_root, &selected.plugin.id)?;
     let destination = plugin_root.join(&selected.release.version);
@@ -635,6 +744,7 @@ pub fn install_local_archive_cancellable(
         };
         validate_extracted_payload(&stage, &manifest, platform)?;
         ensure_installation_not_cancelled(cancelled)?;
+        prepare_new_plugin_disabled(&root)?;
 
         let plugin_root = ensure_real_child(&packages_root, &manifest.id)?;
         let plugin_records = ensure_real_child(&records_root, &manifest.id)?;
@@ -755,6 +865,10 @@ pub fn uninstall_plugin(
     let mut cleanup_pending = fs::remove_dir_all(&package_tombstone).is_err();
     if records_moved && fs::remove_dir_all(&record_tombstone).is_err() {
         cleanup_pending = true;
+    }
+    if let Some(mut document) = read_plugin_activation_document(&root)? {
+        document.enabled_plugins.remove(plugin_id);
+        write_json_atomic(&root.join(PLUGIN_ACTIVATION_FILE), &document)?;
     }
     Ok(UninstalledPackage {
         plugin_id: plugin_id.into(),
@@ -1802,6 +1916,7 @@ preset_catalog = "metadata/presets.json"
         ));
         let installed = install_archive(&root, &selected, &bytes).unwrap();
         assert!(installed.path.join("lib/synth.so").is_file());
+        assert!(!plugin_is_enabled(&root, "org.rackforge.synth").unwrap());
         assert!(!root.join("active").exists());
         let repeated = install_archive(&root, &selected, &bytes).unwrap();
         assert!(repeated.already_installed);
@@ -1853,6 +1968,7 @@ preset_catalog = "metadata/presets.json"
         assert_eq!(installed.record.version, "1.2.3");
         assert_eq!(installed.record.platform, "wasm-v1");
         assert_eq!(installed.record.repository_id, "local");
+        assert!(!plugin_is_enabled(&root, "org.rackforge.synth").unwrap());
         assert_eq!(
             fs::read(installed.path.join("component.wasm")).unwrap(),
             wasm
@@ -1951,6 +2067,7 @@ preset_catalog = "metadata/presets.json"
             TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         install_local_archive(&root, &bytes).unwrap();
+        set_plugin_enabled(&root, "org.rackforge.synth", true).unwrap();
         let data = root.join("data/plugins/org.rackforge.synth/user-preset.bin");
         fs::create_dir_all(data.parent().unwrap()).unwrap();
         fs::write(&data, b"user state").unwrap();
@@ -1961,6 +2078,7 @@ preset_catalog = "metadata/presets.json"
         assert!(!removed.cleanup_pending);
         assert!(!root.join("packages/org.rackforge.synth").exists());
         assert!(!root.join("records/org.rackforge.synth").exists());
+        assert!(!plugin_is_enabled(&root, "org.rackforge.synth").unwrap());
         assert_eq!(fs::read(data).unwrap(), b"user state");
         assert!(matches!(
             uninstall_plugin(&root, "org.rackforge.synth"),
@@ -2023,6 +2141,62 @@ preset_catalog = "metadata/presets.json"
         assert!(!android_resource.exists());
         assert!(state_blob.is_file());
         assert!(other_plugin.is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_plugin_store_keeps_existing_packages_enabled() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-activation-legacy-{}-{}",
+            writer_discriminator(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(root.join("packages/org.rackforge.first/1.0.0")).unwrap();
+
+        assert!(plugin_is_enabled(&root, "org.rackforge.first").unwrap());
+        assert!(!root.join(PLUGIN_ACTIVATION_FILE).exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn preparing_an_install_preserves_legacy_packages_but_not_the_new_one() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-activation-install-{}-{}",
+            writer_discriminator(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(root.join("packages/org.rackforge.legacy/1.0.0")).unwrap();
+
+        let canonical_root = ensure_real_directory(&root).unwrap();
+        prepare_new_plugin_disabled(&canonical_root).unwrap();
+        fs::create_dir_all(root.join("packages/org.rackforge.new/1.0.0")).unwrap();
+
+        assert!(plugin_is_enabled(&root, "org.rackforge.legacy").unwrap());
+        assert!(!plugin_is_enabled(&root, "org.rackforge.new").unwrap());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn activation_can_be_toggled_without_changing_installed_files() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-repository-activation-toggle-{}-{}",
+            writer_discriminator(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package = root.join("packages/org.rackforge.synth/1.0.0/plugin.bin");
+        fs::create_dir_all(package.parent().unwrap()).unwrap();
+        fs::write(&package, b"immutable package").unwrap();
+
+        set_plugin_enabled(&root, "org.rackforge.synth", false).unwrap();
+        assert!(!plugin_is_enabled(&root, "org.rackforge.synth").unwrap());
+        assert_eq!(fs::read(&package).unwrap(), b"immutable package");
+
+        set_plugin_enabled(&root, "org.rackforge.synth", true).unwrap();
+        assert!(plugin_is_enabled(&root, "org.rackforge.synth").unwrap());
+        assert_eq!(fs::read(&package).unwrap(), b"immutable package");
+
         fs::remove_dir_all(root).unwrap();
     }
 

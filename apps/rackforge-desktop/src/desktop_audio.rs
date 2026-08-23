@@ -764,7 +764,9 @@ impl DesktopAudio {
         for data in messages {
             self.injected_midi
                 .try_send(MidiPacket { length: 3, data })
-                .map_err(|error| anyhow::anyhow!("MIDI queue rejected an injected note: {error}"))?;
+                .map_err(|error| {
+                    anyhow::anyhow!("MIDI queue rejected an injected note: {error}")
+                })?;
         }
         Ok(())
     }
@@ -1864,9 +1866,14 @@ fn reconnect_keylab_inputs(
         connections.remove(&name);
     }
     thread::sleep(Duration::from_millis(100));
-    if let Err(error) =
-        reconcile_midi_inputs(selected, connections, sender, telemetry, controller_sender, false)
-    {
+    if let Err(error) = reconcile_midi_inputs(
+        selected,
+        connections,
+        sender,
+        telemetry,
+        controller_sender,
+        false,
+    ) {
         eprintln!("DESKTOP_KEYLAB_INPUT_REOPEN_FAILED error={error:#}");
     } else {
         println!("DESKTOP_KEYLAB_INPUTS_REOPENED");

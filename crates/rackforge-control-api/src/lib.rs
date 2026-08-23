@@ -19,7 +19,9 @@ pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PluginParameterControlCommand {
-    Read { instance_id: InstanceId },
+    Read {
+        instance_id: InstanceId,
+    },
     Set {
         instance_id: InstanceId,
         parameter_index: u32,

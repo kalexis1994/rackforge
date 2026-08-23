@@ -50,6 +50,8 @@ export interface PackageMessage {
     | "inspect"
     | "install"
     | "catalog"
+    | "activate"
+    | "deactivate"
     | "uninstall"
     | "import_resource"
     | "resource_status";

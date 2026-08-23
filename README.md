@@ -15,10 +15,16 @@ portable plugin packages can run across all three platforms.
 
 New installations include the RackForge Concert Grand — a physically
 modelled piano developed in this repository, with no samples and a
-[documented model](docs/PIANO_MODEL.md). The open-source
-[RF-Soundfonts](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts)
-instrument, with its sampled YDP Grand Piano, installs separately as a
-portable `.rfplugin`.
+[documented model](docs/PIANO_MODEL.md).
+
+Open-source plugins maintained in their own repositories include:
+
+- [RF-106](https://github.com/kalexis1994/rackforge-plugin-rf-106), a portable
+  synthesizer instrument.
+- [RF-Soundfonts](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts),
+  a SoundFont instrument that includes the sampled YDP Grand Piano.
+
+Both install separately as portable `.rfplugin` packages.
 
 > RackForge `v0.1.x` is a public preview. Packages are functional but not yet
 > production-signed, and additional instrument plugins are distributed

@@ -37,6 +37,7 @@ fn main() {
 
 fn generate_bundled_plugin_module() {
     println!("cargo:rerun-if-env-changed=RACKFORGE_BUNDLED_PLUGIN");
+    println!("cargo:rerun-if-env-changed=RACKFORGE_BUNDLED_OFFICIAL_PLUGINS");
     println!("cargo:rerun-if-env-changed=RACKFORGE_BUNDLED_CONTROLLER_DRIVER");
     let output = std::path::PathBuf::from(
         std::env::var_os("OUT_DIR").expect("Cargo always defines OUT_DIR"),
@@ -53,6 +54,39 @@ fn generate_bundled_plugin_module() {
         }
         None => "const BUNDLED_DEFAULT_PLUGIN: Option<&[u8]> = None;\n".into(),
     };
+    let official_plugins = std::env::var_os("RACKFORGE_BUNDLED_OFFICIAL_PLUGINS")
+        .map(std::path::PathBuf::from)
+        .map(|directory| {
+            println!("cargo:rerun-if-changed={}", directory.display());
+            let mut archives = std::fs::read_dir(&directory)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "RACKFORGE_BUNDLED_OFFICIAL_PLUGINS must name a readable directory: {error}"
+                    )
+                })
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("rfplugin"))
+                })
+                .collect::<Vec<_>>();
+            archives.sort();
+            archives
+        })
+        .unwrap_or_default();
+    source.push_str("const BUNDLED_OFFICIAL_PLUGINS: &[(&str, &[u8])] = &[\n");
+    for archive in official_plugins {
+        let archive = std::fs::canonicalize(&archive)
+            .expect("bundled official plugin must be a readable package");
+        let name = archive
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("bundled official plugin filename must be UTF-8");
+        println!("cargo:rerun-if-changed={}", archive.display());
+        source.push_str(&format!("    ({name:?}, include_bytes!({archive:?})),\n"));
+    }
+    source.push_str("];\n");
     source.push_str(
         &match std::env::var_os("RACKFORGE_BUNDLED_CONTROLLER_DRIVER") {
             Some(path) => {

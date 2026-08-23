@@ -47,10 +47,35 @@ if [[ ! -f "$bundled_default_marker" ]]; then
     "$root/bin/rackforge-store" install-local \
       "$bundled_plugin" \
       "$root/plugin-store"
+    "$root/bin/rackforge-store" enable \
+      org.rackforge.concert-grand \
+      "$root/plugin-store"
     bundled_plugins=org.rackforge.concert-grand
   fi
   if [[ -f "$bundled_plugin" || ${#installed_plugins[@]} -gt 0 ]]; then
     printf '1\n' > "$bundled_default_marker"
+  fi
+fi
+
+official_plugin="$source_root/bundled-plugins/RF-106.rfplugin"
+official_plugin_id=org.rackforge.rf-106
+official_known=false
+if [[ -d "$root/plugin-store/packages/$official_plugin_id" ]]; then
+  official_known=true
+fi
+if [[ -f "$official_plugin" ]]; then
+  "$root/bin/rackforge-store" install-local \
+    "$official_plugin" \
+    "$root/plugin-store"
+  if [[ "$official_known" == false ]]; then
+    "$root/bin/rackforge-store" enable \
+      "$official_plugin_id" \
+      "$root/plugin-store"
+  fi
+  if [[ "$bundled_plugins" == none ]]; then
+    bundled_plugins="$official_plugin_id"
+  else
+    bundled_plugins="$bundled_plugins,$official_plugin_id"
   fi
 fi
 

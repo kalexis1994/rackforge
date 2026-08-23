@@ -212,6 +212,8 @@ public final class MainActivity extends Activity {
     private static native String uninstallPlugin(String pluginId, String storeRoot,
             String dataRoot, boolean deletePresets, boolean deletePluginData);
     private static native boolean activateInstalledPlugin(String packageRoot, String storeRoot, String dataRoot);
+    private static native boolean setInstalledPluginEnabled(String pluginId, String storeRoot,
+            boolean enabled);
     private static native int deactivateInstalledPlugin(String pluginId, String storeRoot);
     private static native String pluginPackageRoot();
     private static native String pluginWebEntry();
@@ -308,7 +310,7 @@ public final class MainActivity extends Activity {
                 Log.w("RackForge", "Install inbox failed", error);
             }
             try {
-                ensureBundledPlugin();
+                ensureBundledPlugins();
             } catch (Throwable error) {
                 Log.w("RackForge", "Bundled plugin install failed", error);
             }
@@ -2920,46 +2922,72 @@ public final class MainActivity extends Activity {
                 "resources/" + safePlugin + "/" + safeResource + ".resource");
     }
 
-    // The Concert Grand ships inside the APK and installs itself on first
-    // boot, exactly like the desktop's bundled default plugin. The install
-    // descriptor's already_installed flag makes this idempotent.
-    private void ensureBundledPlugin() throws Exception {
-        java.io.File temporary = new java.io.File(getCacheDir(), "bundled-concert-grand.rfplugin");
-        try (java.io.InputStream in = getAssets().open("bundled-plugins/RackForge-Concert-Grand.rfplugin");
-             java.io.OutputStream out = new java.io.FileOutputStream(temporary)) {
-            byte[] buffer = new byte[65536];
-            int read;
-            while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
-        } catch (java.io.FileNotFoundException missing) {
+    // Official plugins ship as immutable .rfplugin assets. Every package is
+    // installed idempotently; a newly introduced plugin starts enabled, while
+    // later app updates preserve an explicit user disable.
+    private void ensureBundledPlugins() throws Exception {
+        String[] assets = getAssets().list("bundled-plugins");
+        if (assets == null || assets.length == 0) {
             Log.i("RackForge", "No bundled plugin in this build");
             return;
         }
-        try {
-            JSONObject descriptor = new JSONObject(installPluginFile(
-                    temporary.getAbsolutePath(), pluginStoreRoot().getAbsolutePath()));
-            boolean already = descriptor.optBoolean("already_installed");
-            Log.i("RackForge", "Bundled Concert Grand "
-                    + (already ? "already installed" : "installed"));
-            if (!already) {
-                keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
-            }
-            activateBundledPluginIfIdle();
-        } finally {
-            temporary.delete();
+        java.util.Arrays.sort(assets);
+        java.util.Set<String> knownPlugins = new java.util.HashSet<>();
+        JSONObject before = new JSONObject(installedPlugins(pluginStoreRoot().getAbsolutePath()));
+        JSONArray installedBefore = before.getJSONArray("plugins");
+        for (int index = 0; index < installedBefore.length(); index++) {
+            knownPlugins.add(installedBefore.getJSONObject(index).getString("plugin_id"));
         }
+        boolean changed = false;
+        for (String asset : assets) {
+            if (!asset.toLowerCase(Locale.ROOT).endsWith(".rfplugin")) continue;
+            java.io.File temporary = java.io.File.createTempFile(
+                    "rackforge-bundled-", ".rfplugin", getCacheDir());
+            try (java.io.InputStream in = getAssets().open("bundled-plugins/" + asset);
+                 java.io.OutputStream out = new java.io.FileOutputStream(temporary)) {
+                byte[] buffer = new byte[65536];
+                int read;
+                while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
+            }
+            try {
+                JSONObject descriptor = new JSONObject(installPluginFile(
+                        temporary.getAbsolutePath(), pluginStoreRoot().getAbsolutePath()));
+                String pluginId = descriptor.getString("plugin_id");
+                boolean known = knownPlugins.contains(pluginId);
+                if (!known && !setInstalledPluginEnabled(
+                        pluginId, pluginStoreRoot().getAbsolutePath(), true)) {
+                    throw new IllegalStateException("Could not enable bundled plugin " + pluginId);
+                }
+                knownPlugins.add(pluginId);
+                changed |= !descriptor.optBoolean("already_installed") || !known;
+                Log.i("RackForge", "Bundled plugin " + pluginId + " "
+                        + descriptor.optString("version")
+                        + (descriptor.optBoolean("already_installed")
+                        ? " already installed" : " installed"));
+            } finally {
+                if (!temporary.delete() && temporary.exists()) temporary.deleteOnExit();
+            }
+        }
+        if (changed) keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
+        activateBundledPluginIfIdle();
     }
 
     // A freshly provisioned device should make sound out of the box: if no
     // plugin is active, the bundled piano steps up.
     private void activateBundledPluginIfIdle() {
         try {
+            if (pluginPackageRoot() != null) return;
             JSONObject catalog = new JSONObject(installedPlugins(pluginStoreRoot().getAbsolutePath()));
             JSONArray plugins = catalog.getJSONArray("plugins");
             JSONObject candidate = null;
             for (int index = 0; index < plugins.length(); index++) {
                 JSONObject plugin = plugins.getJSONObject(index);
-                if (plugin.optBoolean("active")) return;
-                if (plugin.optBoolean("compatible") && candidate == null) candidate = plugin;
+                if (!plugin.optBoolean("active") || !plugin.optBoolean("compatible")) continue;
+                if ("org.rackforge.concert-grand".equals(plugin.optString("plugin_id"))) {
+                    candidate = plugin;
+                    break;
+                }
+                if (candidate == null) candidate = plugin;
             }
             if (candidate == null) return;
             activatePlugin(candidate.getString("package_root"),

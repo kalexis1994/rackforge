@@ -29,6 +29,14 @@ command -v pnpm >/dev/null 2>&1 || {
   printf 'pnpm is required to build the shared RackForge UI.\n' >&2
   exit 2
 }
+command -v python3 >/dev/null 2>&1 || {
+  printf 'python3 is required to fetch official RackForge plugins.\n' >&2
+  exit 2
+}
+
+official_plugins="$repository/dist/bundled-plugins/official"
+python3 "$repository/tools/fetch-official-plugins.py" \
+  --output-directory "$official_plugins"
 
 export ANDROID_HOME="$sdk_root"
 export ANDROID_SDK_ROOT="$sdk_root"
@@ -54,18 +62,31 @@ install -m 0644 \
   "$repository/target/aarch64-linux-android/release/librackforge_android_native.so" \
   "$native_output/librackforge_android.so"
 
+# Builds predating generated assets copied this ignored artifact into the
+# source tree. Gradle would merge both copies, so remove only the known legacy
+# build output before creating the generated package set.
+legacy_bundled_plugin="$android_project/app/src/main/assets/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+rm -f -- "$legacy_bundled_plugin"
+
 bundled_output="$android_project/app/build/generated/bundled-plugins"
 rm -rf -- "$bundled_output"
-if [[ -n "${RACKFORGE_BUNDLED_PLUGIN:-}" ]]; then
-  [[ -f "$RACKFORGE_BUNDLED_PLUGIN" ]] || {
+install -d "$bundled_output/bundled-plugins"
+default_plugin="${RACKFORGE_BUNDLED_PLUGIN:-}"
+if [[ -z "$default_plugin" && -f "$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
+  default_plugin="$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+fi
+if [[ -n "$default_plugin" ]]; then
+  [[ -f "$default_plugin" ]] || {
     printf 'RACKFORGE_BUNDLED_PLUGIN is not a file: %s\n' \
-      "$RACKFORGE_BUNDLED_PLUGIN" >&2
+      "$default_plugin" >&2
     exit 2
   }
-  install -d "$bundled_output/bundled"
-  install -m 0644 "$RACKFORGE_BUNDLED_PLUGIN" \
-    "$bundled_output/bundled/RackForge-Concert-Grand.rfplugin"
+  install -m 0644 "$default_plugin" \
+    "$bundled_output/bundled-plugins/$(basename "$default_plugin")"
 fi
+for archive in "$official_plugins"/*.rfplugin; do
+  install -m 0644 "$archive" "$bundled_output/bundled-plugins/$(basename "$archive")"
+done
 
 web_output="$android_project/app/build/generated/web-ui/rackforge"
 rm -rf -- "$web_output"

@@ -10,6 +10,14 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 public="$root/web/public/demo"
 storage="$public/rackforge"
 
+# Windows ships the interpreter as `python`; most Linux distributions ship it
+# only as `python3`. Run candidates before trusting the Microsoft Store shim.
+python=
+for candidate in python3 python; do
+  if "$candidate" -c "" >/dev/null 2>&1; then python=$candidate; break; fi
+done
+[ -n "$python" ] || { echo "no working python interpreter on PATH" >&2; exit 1; }
+
 echo "Building the browser host"
 cargo build --release --target wasm32-wasip1 -p rackforge-browser --manifest-path "$root/Cargo.toml"
 
@@ -28,17 +36,12 @@ piano="$storage/plugins/concert-grand"
 cp -r "$root/plugins/concert-grand/package" "$piano"
 cp "$root/target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm" "$piano/component.wasm"
 
+"$python" "$root/tools/fetch-official-plugins.py" \
+  --output-directory "$root/dist/bundled-plugins/official" \
+  --extract-directory "$storage/plugins"
+
 # The host reads its storage through WASI, which has no way to list what the
 # page has not fetched yet. The manifest is that list.
-# Windows ships the interpreter as `python`; most Linux distributions ship it
-# only as `python3`. Take whichever this machine has -- and run each
-# candidate before trusting it, because Windows puts a `python3` on PATH
-# that is only a Microsoft Store advert and exits without interpreting.
-python=
-for candidate in python3 python; do
-  if "$candidate" -c "" >/dev/null 2>&1; then python=$candidate; break; fi
-done
-[ -n "$python" ] || { echo "no working python interpreter on PATH" >&2; exit 1; }
 "$python" - "$storage" > "$public/storage.json" <<'PY'
 import json
 import os

@@ -14,6 +14,7 @@ $cargoProfileArgument = if ($Configuration -eq "Release") { " --release" } else 
 $cargoProfileDirectory = $Configuration.ToLowerInvariant()
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
 $llvmBin = Join-Path $env:ProgramFiles "LLVM/bin"
+$officialPlugins = Join-Path $repository "dist/bundled-plugins/official"
 
 $runningRackForge = Get-Process -ErrorAction SilentlyContinue | Where-Object {
     $_.ProcessName -in @("rackforge", "rackforge-desktop")
@@ -59,6 +60,20 @@ $clang = Join-Path $llvmBin "clang.exe"
 $libclang = Join-Path $llvmBin "libclang.dll"
 if (-not (Test-Path -LiteralPath $clang) -or -not (Test-Path -LiteralPath $libclang)) {
     throw "LLVM/Clang was not found at $llvmBin. Install LLVM (winget install LLVM.LLVM) to build RackForge with ASIO support."
+}
+
+& python (Join-Path $repository "tools/fetch-official-plugins.py") `
+    --output-directory $officialPlugins
+if ($LASTEXITCODE -ne 0) {
+    throw "RackForge official plugin download failed."
+}
+$env:RACKFORGE_BUNDLED_OFFICIAL_PLUGINS = $officialPlugins
+if (-not $env:RACKFORGE_BUNDLED_PLUGIN) {
+    $localDefaultPlugin = Join-Path $repository `
+        "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+    if (Test-Path -LiteralPath $localDefaultPlugin -PathType Leaf) {
+        $env:RACKFORGE_BUNDLED_PLUGIN = $localDefaultPlugin
+    }
 }
 
 Push-Location $runtime

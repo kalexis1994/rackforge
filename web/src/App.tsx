@@ -3010,7 +3010,7 @@ function ControllerPage() {
       <PageHeading
         eyebrow="Controller"
         title={controller.name}
-        detail={`Version ${controller.version} · ${controller.trust} · settings apply live`}
+        detail={`Version ${controller.version} · ${controller.trust} · ${controller.runtime} · settings apply live`}
       />
       <div className="controller-settings">
         {controller.settings.length === 0 && (
@@ -3135,10 +3135,27 @@ function PluginsPage({
     setChangingPluginId(plugin.plugin_id);
     setActivationError(null);
     try {
-      await hostJson(`/api/v1/plugins/${encodeURIComponent(plugin.plugin_id)}/activate`, {
-        method: "POST",
-      });
-      await synchronizePluginEnvironment();
+      const instance = running.find(
+        (candidate) => candidate.plugin_id === plugin.plugin_id,
+      );
+      const request = {
+        target: {
+          pluginId: plugin.plugin_id,
+          pluginName: plugin.plugin_name,
+          instanceId: instance?.instance_id,
+        },
+        activeInstanceId: snapshot?.active_instance_id,
+      };
+      if (preflightPlayPluginSelection(request).status !== "already_active") {
+        await commitPlayPluginSelection(request, {
+          dispatch: dispatchCommandAwait,
+          activate: (pluginId) =>
+            hostJson(`/api/v1/plugins/${encodeURIComponent(pluginId)}/activate`, {
+              method: "POST",
+            }),
+          synchronize: synchronizePluginEnvironment,
+        });
+      }
       navigate("/play");
     } catch (error) {
       setActivationError(
@@ -3268,6 +3285,7 @@ function PluginsPage({
                   <p>
                     Version {controller.version} · {controller.trust}
                     {controller.devices > 0 ? ` · ${controller.devices} device profile(s)` : ""}
+                    {` · ${controller.runtime}`}
                   </p>
                 </div>
               </NavLink>

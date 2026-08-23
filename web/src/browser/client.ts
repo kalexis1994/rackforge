@@ -63,17 +63,18 @@ let nextRequestId = 1;
 const pending = new Map<number, Pending>();
 const listeners = new Set<SessionChannelCallbacks>();
 
-interface BrowserMidiInput {
+export interface BrowserMidiEndpoint {
   id: string;
   name: string | null;
+  manufacturer?: string | null;
   state: string;
+}
+
+interface BrowserMidiInput extends BrowserMidiEndpoint {
   onmidimessage: ((event: { data?: Uint8Array }) => void) | null;
 }
 
-interface BrowserMidiOutput {
-  id: string;
-  name: string | null;
-  state: string;
+interface BrowserMidiOutput extends BrowserMidiEndpoint {
   send(data: Uint8Array, timestamp?: number): void;
 }
 
@@ -87,6 +88,8 @@ let webMidiSupported = false;
 let webMidiSysex = false;
 let midiInputNames: string[] = [];
 let keyLabConnected = false;
+let keyLabInputId: string | null = null;
+let keyLabDisplayConnected = false;
 let keyLabOutput: BrowserMidiOutput | null = null;
 const CONTROLLER_COLOR_KEY = "rackforge.controller.arturia-keylab-essential-mk3.color";
 const DEFAULT_CONTROLLER_COLOR = "#145080";
@@ -484,19 +487,19 @@ function attachWebMidi(node: AudioWorkletNode) {
       midiInputNames = [...access.inputs.values()]
         .filter((input) => input.state === "connected")
         .map((input) => input.name?.trim() || "MIDI input");
-      const controllerInput = sysex
-        ? [...access.inputs.values()].find(
-            (input) => input.state === "connected" && isKeyLabMainEndpoint(input.name),
-          )
-        : undefined;
-      const controllerOutput = sysex
-        ? [...access.outputs.values()].find(
-            (output) => output.state === "connected" && isKeyLabMainEndpoint(output.name),
-          )
-        : undefined;
-      const nextPair = Boolean(controllerInput && controllerOutput);
+      const { input: controllerInput, output: controllerOutput } = resolveKeyLabTransport(
+        access.inputs.values(),
+        access.outputs.values(),
+        sysex,
+      );
+      // The semantic controller profile uses ordinary channel messages and
+      // remains useful without SysEx. Only LITTLE's OLED and LEDs require the
+      // output plus the stronger browser permission.
+      const nextController = Boolean(controllerInput);
       const pairChanged =
-        keyLabOutput?.id !== controllerOutput?.id || keyLabConnected !== nextPair;
+        keyLabInputId !== (controllerInput?.id ?? null) ||
+        keyLabOutput?.id !== controllerOutput?.id ||
+        keyLabConnected !== nextController;
 
       for (const input of access.inputs.values()) {
         // Assignment makes hotplug reconciliation idempotent.
@@ -504,7 +507,7 @@ function attachWebMidi(node: AudioWorkletNode) {
           const data = event.data;
           if (!data || data.length === 0) return;
           const isController =
-            nextPair && controllerInput?.id === input.id && data[0] < 0xf0;
+            nextController && controllerInput?.id === input.id && data[0] < 0xf0;
           if (data[0] >= 0xf0) return;
           node.port.postMessage({
             kind: isController ? "controller_midi" : "midi",
@@ -517,9 +520,11 @@ function attachWebMidi(node: AudioWorkletNode) {
       if (pairChanged && keyLabConnected) {
         node.port.postMessage({ kind: "controller_connection", connected: false });
       }
+      keyLabInputId = controllerInput?.id ?? null;
       keyLabOutput = controllerOutput ?? null;
-      keyLabConnected = nextPair;
-      if (pairChanged && nextPair) {
+      keyLabConnected = nextController;
+      keyLabDisplayConnected = Boolean(controllerInput && controllerOutput && sysex);
+      if (pairChanged && nextController) {
         node.port.postMessage({
           kind: "controller_setting",
           color: parseControllerColor(savedControllerColor()),
@@ -580,13 +585,54 @@ function requestControllerCatalog(): Promise<{
   });
 }
 
-export function isKeyLabMainEndpoint(name: string | null): boolean {
+export function isKeyLabMainEndpoint(
+  name: string | null,
+  manufacturer: string | null = null,
+): boolean {
   const folded = (name ?? "").trim().toLowerCase();
-  return (
-    (folded.includes("keylab") || folded.includes("kl essential")) &&
-    folded.endsWith("midi") &&
-    !["mcu", "hui", "dinthru", "alv"].some((part) => folded.includes(part))
+  const maker = (manufacturer ?? "").trim().toLowerCase();
+  if (
+    !folded ||
+    !["keylab", "kl essential"].some((part) => folded.includes(part)) ||
+    ["mcu", "hui", "dinthru", "alv"].some((part) => folded.includes(part))
+  ) {
+    return false;
+  }
+  if (folded.endsWith("midi")) return true;
+
+  // Chromium on Android assigns every Web MIDI port the USB product name,
+  // not the desktop port label. The KeyLab's main endpoint therefore appears
+  // simply as "KeyLab Essential 61 mk3". Android preserves port ordering, so
+  // resolveKeyLabTransport pairs the first matching input and output.
+  const androidProductNames = new Set([
+    "keylab essential 61 mk3",
+    "arturia keylab essential 61 mk3",
+    "kl essential 61 mk3",
+  ]);
+  return androidProductNames.has(folded) || maker.includes("arturia");
+}
+
+export function resolveKeyLabTransport<
+  Input extends BrowserMidiEndpoint,
+  Output extends BrowserMidiEndpoint,
+>(
+  inputs: Iterable<Input>,
+  outputs: Iterable<Output>,
+  sysex: boolean,
+): { input?: Input; output?: Output } {
+  const input = [...inputs].find(
+    (candidate) =>
+      candidate.state === "connected" &&
+      isKeyLabMainEndpoint(candidate.name, candidate.manufacturer),
   );
+  const output = sysex
+    ? [...outputs].find(
+        (candidate) =>
+          candidate.state === "connected" &&
+          isKeyLabMainEndpoint(candidate.name, candidate.manufacturer),
+      )
+    : undefined;
+  return { input, output };
 }
 
 function savedControllerColor(): string {
@@ -879,11 +925,15 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     if (answer.error) throw new HostRequestError(answer.error, 503);
     const runtime = !webMidiSupported
       ? "Browser · Web MIDI unavailable"
-      : !webMidiSysex
-        ? "Browser · SysEx permission required"
+      : keyLabDisplayConnected
+        ? "Browser · connected · LITTLE active"
         : keyLabConnected
-          ? "Browser · connected"
-          : "Browser · waiting for device";
+          ? webMidiSysex
+            ? "Browser · controls active · waiting for display output"
+            : "Browser · controls active · SysEx required for LITTLE"
+          : !webMidiSysex
+            ? "Browser · SysEx permission required for LITTLE"
+            : "Browser · waiting for device";
     return {
       controllers: answer.controllers.map((controller) => ({
         ...controller,

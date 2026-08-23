@@ -36,14 +36,11 @@ if (-not (Test-Path -LiteralPath $ndkRoot)) {
     throw "Android NDK 27.0.12077973 not found below $sdkRoot."
 }
 
-# The Concert Grand ships inside the APK, exactly like the desktop bundle.
-$bundledPlugin = Join-Path $repository "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
-$assetDirectory = Join-Path $androidProject "app/src/main/assets/bundled-plugins"
-if (Test-Path -LiteralPath $bundledPlugin) {
-    New-Item -ItemType Directory -Force $assetDirectory | Out-Null
-    Copy-Item $bundledPlugin (Join-Path $assetDirectory "RackForge-Concert-Grand.rfplugin") -Force
-} else {
-    Write-Warning "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin not found; the APK ships without the bundled piano."
+$officialPlugins = Join-Path $repository "dist/bundled-plugins/official"
+& python (Join-Path $repository "tools/fetch-official-plugins.py") `
+    --output-directory $officialPlugins
+if ($LASTEXITCODE -ne 0) {
+    throw "RackForge official plugin download failed."
 }
 
 $env:JAVA_HOME = $jdkRoot
@@ -97,19 +94,36 @@ if (Test-Path -LiteralPath $webOutput) {
 New-Item -ItemType Directory -Path $webOutput -Force | Out-Null
 Copy-Item -Path (Join-Path $repository "web/dist/*") -Destination $webOutput -Recurse -Force
 
+# Older RackForge builds copied the bundled piano into the source asset tree.
+# It is ignored by Git, but Gradle still merges it and reports a duplicate now
+# that all bundled packages are produced under app/build/generated. Remove only
+# that known legacy build artifact; user-installed plugins never live here.
+$legacyBundledPlugin = Join-Path $androidProject `
+    "app/src/main/assets/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+if (Test-Path -LiteralPath $legacyBundledPlugin) {
+    Remove-Item -LiteralPath $legacyBundledPlugin -Force
+}
+
 $bundledOutput = Join-Path $androidProject "app/build/generated/bundled-plugins"
 if (Test-Path -LiteralPath $bundledOutput) {
     Remove-Item -LiteralPath $bundledOutput -Recurse -Force
 }
-if ($env:RACKFORGE_BUNDLED_PLUGIN) {
-    if (-not (Test-Path -LiteralPath $env:RACKFORGE_BUNDLED_PLUGIN -PathType Leaf)) {
-        throw "RACKFORGE_BUNDLED_PLUGIN is not a file: $env:RACKFORGE_BUNDLED_PLUGIN"
-    }
-    $bundledDirectory = Join-Path $bundledOutput "bundled"
-    New-Item -ItemType Directory -Path $bundledDirectory -Force | Out-Null
-    Copy-Item -LiteralPath $env:RACKFORGE_BUNDLED_PLUGIN `
-        -Destination (Join-Path $bundledDirectory "RF-Soundfonts.rfplugin") -Force
+$bundledDirectory = Join-Path $bundledOutput "bundled-plugins"
+New-Item -ItemType Directory -Path $bundledDirectory -Force | Out-Null
+$defaultPlugin = $env:RACKFORGE_BUNDLED_PLUGIN
+if (-not $defaultPlugin) {
+    $candidate = Join-Path $repository "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $defaultPlugin = $candidate }
 }
+if ($defaultPlugin) {
+    if (-not (Test-Path -LiteralPath $defaultPlugin -PathType Leaf)) {
+        throw "RACKFORGE_BUNDLED_PLUGIN is not a file: $defaultPlugin"
+    }
+    Copy-Item -LiteralPath $defaultPlugin `
+        -Destination (Join-Path $bundledDirectory (Split-Path -Leaf $defaultPlugin)) -Force
+}
+Copy-Item -Path (Join-Path $officialPlugins "*.rfplugin") `
+    -Destination $bundledDirectory -Force
 
 Push-Location $androidProject
 try {

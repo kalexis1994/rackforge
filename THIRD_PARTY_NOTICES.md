@@ -1,5 +1,17 @@
 # Third-Party Notices
 
+RackForge release builds include RF-106 as a separately packaged portable
+instrument. Its `.rfplugin` archive retains its own license and notice files.
+
+## RF-106
+
+- Project: <https://github.com/kalexis1994/rackforge-plugin-rf-106>
+- Bundled release: `v0.2.6`
+- License: GPL-3.0-only
+
+RF-106 and RackForge remain separate software components. The complete RF-106
+license and notices are distributed inside `RF-106.rfplugin`.
+
 RackForge includes the Chakra Petch typeface for display typography.
 
 ## Chakra Petch

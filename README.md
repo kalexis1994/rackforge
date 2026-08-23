@@ -15,16 +15,16 @@ portable plugin packages can run across all three platforms.
 
 New installations include the RackForge Concert Grand — a physically
 modelled piano developed in this repository, with no samples and a
-[documented model](docs/PIANO_MODEL.md).
+[documented model](docs/PIANO_MODEL.md) — plus the portable RF-106 synthesizer.
 
 Open-source plugins maintained in their own repositories include:
 
-- [RF-106](https://github.com/kalexis1994/rackforge-plugin-rf-106), a portable
-  synthesizer instrument.
+- [RF-106](https://github.com/kalexis1994/rackforge-plugin-rf-106), the portable
+  synthesizer included with RackForge builds.
 - [RF-Soundfonts](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts),
   a SoundFont instrument that includes the sampled YDP Grand Piano.
 
-Both install separately as portable `.rfplugin` packages.
+RF-Soundfonts installs separately as a portable `.rfplugin` package.
 
 > RackForge `v0.1.x` is a public preview. Packages are functional but not yet
 > production-signed, and additional instrument plugins are distributed
@@ -54,7 +54,7 @@ installation and no server behind it:
 
 It is the same host as every other platform — the same session, performance
 library and portable plugin runtime, compiled to WebAssembly — playing the
-bundled RackForge Demo Synth. Play it from the on-screen keyboard in Touch
+bundled Concert Grand or RF-106. Play them from the on-screen keyboard in Touch
 Controller, or from a USB MIDI controller in browsers that support Web MIDI
 (Chrome and Edge; Firefox asks for permission; Safari has none). Sound starts
 after the first click or tap, which is a rule browsers apply to every page.
@@ -90,7 +90,7 @@ Download the current packages from the
 2. Run the executable and choose where RackForge should store plugins,
    performances, and settings.
 3. Open Settings and select the MIDI input and audio output. The Concert
-   Grand is ready on the first run.
+   Grand and RF-106 are ready on the first run.
 4. Install other `.rfplugin` instruments from the Plugins section as needed.
 
 Windows builds are currently unsigned, so Windows may ask you to confirm that
@@ -105,7 +105,7 @@ and troubleshooting.
 2. Allow installation from your browser or file manager, then install the APK.
 3. Connect the MIDI controller and, optionally, a class-compliant USB audio
    interface through a powered USB hub.
-4. Select the devices and play the included Concert Grand, or install another
+4. Select the devices and play Concert Grand or RF-106, or install another
    `.rfplugin` instrument such as RF-Soundfonts.
 
 The preview APK is ARM64 and debug-signed. The phone speaker can be used for
@@ -129,7 +129,7 @@ The installer:
 - verifies the archive against the release's `SHA256SUMS.txt`;
 - preserves the previous release and restores it if installation fails;
 - installs the runtime, Web interface, controller host, and systemd services;
-- installs the bundled Concert Grand on a new plugin store;
+- installs and enables the pinned Concert Grand and RF-106 packages;
 - enables RackForge automatically at boot and starts its control services.
 
 When it finishes, open `http://RASPBERRY_PI_ADDRESS:8787` from another device
@@ -163,7 +163,7 @@ The normal workflow is the same on every platform:
 
 1. Connect the MIDI controller and audio output.
 2. Select the MIDI and audio devices in Settings.
-3. Play the included Concert Grand or install another `.rfplugin`.
+3. Play Concert Grand or RF-106, or install another `.rfplugin`.
 4. Open PLAY, select the instrument, and choose a program.
 5. Open LIVE to place instruments inside Racks and organize them into Songs
    and Setlists.
@@ -200,8 +200,8 @@ Current preview limitations:
 - Windows packages are not code-signed.
 - Android packages are ARM64 and debug-signed.
 - Raspberry Pi packages require a 64-bit Raspberry Pi OS userspace.
-- The Concert Grand is the only bundled instrument; RF-Soundfonts and other
-  `.rfplugin` instruments remain separate downloads.
+- RF-Soundfonts and other optional `.rfplugin` instruments remain separate
+  downloads.
 - Desktop's optional HTTP server is disabled by default.
 - The reliability milestone still includes package conformance gates and
   measured audio/MIDI stress tests.
@@ -217,15 +217,16 @@ audio or filesystem APIs. Start with:
 
 Production instruments with their own assets — sample libraries, firmware —
 maintain their own repositories and release pipelines. This repository carries
-the conformance fixtures and the bundled Concert Grand, which is treated as
-part of RackForge itself: it is built from the same commit as every host and
-packaged by `rackforge-store pack-wasm`.
+the conformance fixtures and the bundled Concert Grand, which is built from
+the same commit as every host. RF-106 remains in its own repository and release
+pipeline; RackForge pins its version and SHA-256 so builds stay reproducible.
 
 ## For contributors
 
 Every push to `main` runs the cross-platform GitHub Actions workflow. It
-packages the bundled Concert Grand from the same commit, then builds the
-Windows executable, Android APK, and Raspberry Pi ARM64 archive. Release
+packages the Concert Grand from the same commit, verifies the pinned RF-106
+release, then builds the Windows executable, Android APK, and Raspberry Pi
+ARM64 archive. Release
 packages and `SHA256SUMS.txt` are published from those artifacts.
 
 <details>

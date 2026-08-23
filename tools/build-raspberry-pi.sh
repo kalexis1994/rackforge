@@ -17,7 +17,12 @@ esac
 command -v cargo >/dev/null
 command -v pnpm >/dev/null
 command -v tar >/dev/null
+command -v python3 >/dev/null
 bash -n "$repository/platforms/raspberry-pi/install-release.sh"
+
+official_plugins="$repository/dist/bundled-plugins/official"
+python3 "$repository/tools/fetch-official-plugins.py" \
+  --output-directory "$official_plugins"
 
 cd "$repository"
 pnpm --dir web install --frozen-lockfile
@@ -62,16 +67,25 @@ RACKFORGE_SOURCE="$repository" bash \
 
 cp -a "$repository/web/dist" "$release/web/dist"
 cp -a "$repository/config/." "$release/config/"
-if [[ -n "${RACKFORGE_BUNDLED_PLUGIN:-}" ]]; then
-  [[ -f "$RACKFORGE_BUNDLED_PLUGIN" ]] || {
+default_plugin_archive="${RACKFORGE_BUNDLED_PLUGIN:-}"
+if [[ -z "$default_plugin_archive" && -f "$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
+  default_plugin_archive="$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+fi
+if [[ -n "$default_plugin_archive" ]]; then
+  [[ -f "$default_plugin_archive" ]] || {
     printf 'RACKFORGE_BUNDLED_PLUGIN is not a file: %s\n' \
-      "$RACKFORGE_BUNDLED_PLUGIN" >&2
+      "$default_plugin_archive" >&2
     exit 2
   }
   install -d "$release/bundled-plugins"
-  install -m 0644 "$RACKFORGE_BUNDLED_PLUGIN" \
+  install -m 0644 "$default_plugin_archive" \
     "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin"
 fi
+install -d "$release/bundled-plugins"
+for archive in "$official_plugins"/*.rfplugin; do
+  install -m 0644 "$archive" \
+    "$release/bundled-plugins/$(basename "$archive")"
+done
 install -d "$release/platforms/raspberry-pi" "$release/hardware"
 for entry in appliance audio config etc provision sbin scripts systemd README.md install-release.sh
 do
@@ -86,16 +100,19 @@ default_plugin=none
 if [[ -f "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
   default_plugin=org.rackforge.concert-grand
 fi
-printf 'revision=%s\narchitecture=linux-aarch64\ndefault_plugin=%s\n' \
-  "$revision" "$default_plugin" >"$release/build-info.txt"
+official_plugin=none
+if [[ -f "$release/bundled-plugins/RF-106.rfplugin" ]]; then
+  official_plugin=org.rackforge.rf-106@0.2.6
+fi
+printf 'revision=%s\narchitecture=linux-aarch64\ndefault_plugin=%s\nofficial_plugin=%s\n' \
+  "$revision" "$default_plugin" "$official_plugin" >"$release/build-info.txt"
 
 cat >"$release/INSTALL.md" <<'EOF'
 # RackForge for Raspberry Pi ARM64
 
-This artifact contains the RackForge hosts, Raspberry Pi integration, and the
-bundled RackForge Concert Grand — the physically modelled piano built from
-this repository. Instruments such as RF-Soundfonts are versioned and
-distributed by their own pipelines.
+This artifact contains the RackForge hosts, Raspberry Pi integration, the
+RackForge Concert Grand, and the pinned official RF-106 package. Instruments
+such as RF-Soundfonts are versioned and distributed by their own pipelines.
 
 Extract it for the user who will run RackForge. The installer derives the
 deployment root from that user's home directory; it can also be overridden

@@ -5305,6 +5305,7 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
     }
 
     install_bundled_default_plugin(&options)?;
+    install_bundled_official_plugins(&options)?;
 
     let session = Arc::new(RwLock::new(SessionState::new(
         SessionId::new(DEFAULT_LIVE_SESSION_ID).expect("valid live session id"),
@@ -5393,6 +5394,36 @@ fn install_bundled_default_plugin(options: &Options) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
     fs::write(&marker, b"1\n")?;
+    Ok(())
+}
+
+fn install_bundled_official_plugins(options: &Options) -> Result<()> {
+    let Some(store_root) = options.plugin_store_root.as_deref() else {
+        return Ok(());
+    };
+    for (archive_name, bytes) in BUNDLED_OFFICIAL_PLUGINS {
+        let inspection = inspect_local_archive(store_root, bytes)
+            .with_context(|| format!("validating bundled official plugin {archive_name}"))?;
+        let known_plugin = store_root
+            .join("packages")
+            .join(&inspection.plugin_id)
+            .is_dir();
+        let installed = install_local_archive(store_root, bytes)
+            .with_context(|| format!("installing bundled official plugin {archive_name}"))?;
+        if !known_plugin {
+            set_plugin_enabled(store_root, &inspection.plugin_id, true).with_context(|| {
+                format!("enabling bundled official plugin {}", inspection.plugin_id)
+            })?;
+        }
+        eprintln!(
+            "DESKTOP_OFFICIAL_PLUGIN id={} version={} path={} existing={} enabled_by_build={}",
+            installed.record.plugin_id,
+            installed.record.version,
+            installed.path.display(),
+            installed.already_installed,
+            !known_plugin
+        );
+    }
     Ok(())
 }
 

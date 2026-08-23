@@ -64,6 +64,6 @@ prints a clear error and exits before opening MIDI, plugins, or ALSA. The
 kernel releases this lock automatically when the owning process exits or
 crashes; the persistent lock file is not a stale PID-file gate.
 
-RF-Soundfonts and its openly licensed YDP Grand Piano are included as the
-default instrument. Other plugins are installed separately as `.rfplugin`
-packages. Proprietary banks and ROMs are never bundled with RackForge.
+Concert Grand and RF-106 are included as official instruments. RF-Soundfonts
+and other plugins are installed separately as `.rfplugin` packages.
+Proprietary banks and ROMs are never bundled with RackForge.

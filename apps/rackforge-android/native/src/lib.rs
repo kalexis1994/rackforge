@@ -2953,6 +2953,29 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_activateInstalled
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_setInstalledPluginEnabled(
+    mut env: JNIEnv,
+    _class: JClass,
+    plugin_id: JString,
+    store_root: JString,
+    enabled: jboolean,
+) -> jboolean {
+    let result = (|| -> Result<()> {
+        let plugin_id = java_string(&mut env, plugin_id)?;
+        let store_root = PathBuf::from(java_string(&mut env, store_root)?);
+        set_plugin_enabled(&store_root, &plugin_id, enabled == JNI_TRUE)?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_org_rackforge_android_MainActivity_deactivateInstalledPlugin(
     mut env: JNIEnv,
     _class: JClass,

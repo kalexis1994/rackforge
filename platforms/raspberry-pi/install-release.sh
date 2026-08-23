@@ -19,7 +19,8 @@ Optional environment variables:
   RACKFORGE_OPTIMIZE=1           Apply reversible appliance optimizations.
 
 The repository and its release must be public for unauthenticated downloads.
-Instrument .rfplugin packages are installed separately after RackForge starts.
+RackForge includes its pinned official instruments. Additional .rfplugin
+packages can be installed after RackForge starts.
 EOF
 }
 

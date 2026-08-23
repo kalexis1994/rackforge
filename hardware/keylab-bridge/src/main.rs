@@ -29,7 +29,6 @@ use rackforge_session_api::{
     SessionCommand, SessionState,
 };
 use rackforge_session_api::{HostControlBinding, HostControlTarget, MasterPan};
-#[cfg(target_os = "linux")]
 use rackforge_session_api::{SessionEvent, SurfaceActivationRequest};
 use rackforge_surface_runtime as menu;
 use serde_json::Value;
@@ -128,6 +127,11 @@ enum Command {
         seconds: u64,
         execute: bool,
     },
+    Monitor {
+        selector: Option<String>,
+        seconds: u64,
+        execute: bool,
+    },
     Serve {
         selector: Option<String>,
         execute: bool,
@@ -167,6 +171,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                         .collect(),
                     host_controls: profile.host_controls.clone(),
                     host_actions: profile.host_actions.clone(),
+                    semantic_profile: profile.semantic_profile.clone(),
                 })?
             );
             return Ok(());
@@ -198,6 +203,14 @@ fn run() -> Result<(), Box<dyn Error>> {
         } => {
             let selected = select_port(&ports, selector.as_deref())?;
             run_menu_demo(midi, selected, seconds, execute)?;
+        }
+        Command::Monitor {
+            selector,
+            seconds,
+            execute,
+        } => {
+            let selected = select_port(&ports, selector.as_deref())?;
+            run_monitor(midi, selected, selector.as_deref(), seconds, execute)?;
         }
         Command::Serve { selector, execute } => {
             run_serve(selector.as_deref(), execute)?;
@@ -234,7 +247,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Cli, String> {
     }
     if !matches!(
         command,
-        Some("demo" | "menu-demo" | "serve" | "restore" | "led-demo")
+        Some("demo" | "menu-demo" | "monitor" | "serve" | "restore" | "led-demo")
     ) {
         return Err(usage("Comando desconocido"));
     }
@@ -253,7 +266,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Cli, String> {
                         .clone(),
                 );
             }
-            "--seconds" if matches!(command, Some("demo" | "menu-demo")) => {
+            "--seconds" if matches!(command, Some("demo" | "menu-demo" | "monitor")) => {
                 index += 1;
                 seconds = args
                     .get(index)
@@ -271,6 +284,11 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Cli, String> {
     }
     let command = match command {
         Some("menu-demo") => Command::MenuDemo {
+            selector,
+            seconds,
+            execute,
+        },
+        Some("monitor") => Command::Monitor {
             selector,
             seconds,
             execute,
@@ -296,6 +314,7 @@ fn usage(reason: &str) -> String {
            rackforge-arturia-keylab-essential-mk3-driver list\n\
            rackforge-arturia-keylab-essential-mk3-driver demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
            rackforge-arturia-keylab-essential-mk3-driver menu-demo [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
+           rackforge-arturia-keylab-essential-mk3-driver monitor [--port ID|NOMBRE] [--seconds 1..120] [--execute]\n\
            rackforge-arturia-keylab-essential-mk3-driver serve [--port ID|NOMBRE] [--execute]\n\
            rackforge-arturia-keylab-essential-mk3-driver restore [--port ID|NOMBRE] [--execute]\n\
            rackforge-arturia-keylab-essential-mk3-driver led-demo [--port ID|NOMBRE] [--execute]"
@@ -366,6 +385,7 @@ struct InputPortInfo {
 struct KeyLabInput {
     _connection: MidiInputConnection<()>,
     _midi_forwarder: Option<MidiForwarder>,
+    source_name: String,
     ack_receiver: Receiver<()>,
     input_receiver: Receiver<PhysicalInputEvent>,
     host_control_receiver: Receiver<HostControlEvent>,
@@ -377,7 +397,7 @@ struct MidiForwarder {
 }
 
 impl MidiForwarder {
-    fn from_environment() -> Result<Option<Self>, String> {
+    fn from_environment(source_name: &str) -> Result<Option<Self>, String> {
         if env::var_os("RACKFORGE_FORWARD_MIDI").is_none() {
             return Ok(None);
         }
@@ -385,6 +405,7 @@ impl MidiForwarder {
             .map_err(|error| format!("resolving MIDI forwarding endpoint: {error}"))?;
         let client_id = ClientId::new("controller.arturia.keylab-essential-mk3.midi")
             .map_err(|message| format!("invalid MIDI forwarding client id: {message}"))?;
+        let source_name = source_name.to_owned();
         let (sender, receiver) = mpsc::sync_channel::<VirtualMidiMessage>(4096);
         let worker = thread::Builder::new()
             .name("rackforge-keylab-midi-forwarder".into())
@@ -393,6 +414,7 @@ impl MidiForwarder {
                 while let Ok(message) = receiver.recv() {
                     let request = ControlRequest::VirtualMidi {
                         client_id: client_id.clone(),
+                        source_name: Some(source_name.clone()),
                         message,
                     };
                     let mut delivered = false;
@@ -917,6 +939,89 @@ fn run_demo(
     Ok(())
 }
 
+fn run_monitor(
+    midi: MidiOutput,
+    port: &PortInfo,
+    _input_selector: Option<&str>,
+    seconds: u64,
+    execute: bool,
+) -> Result<(), Box<dyn Error>> {
+    println!("Salida:  [{}] {}", port.index, port.name);
+    if !execute {
+        println!("DRY-RUN: use --execute para seleccionar el modo DAW y capturar MIDI.");
+        return Ok(());
+    }
+
+    let mut session = KeyLabSession::open(midi, port)?;
+    session.start()?;
+
+    let mut discovery = MidiInput::new("rackforge KeyLab MIDI monitor discovery")?;
+    discovery.ignore(Ignore::None);
+    let input_names = enumerate_input_ports(&discovery)?
+        .into_iter()
+        .filter(|input| {
+            let folded = input.name.to_ascii_lowercase();
+            (folded.contains("keylab") || folded.contains("kl essential"))
+                && !folded.contains("dinthru")
+                && !folded.contains("alv")
+        })
+        .map(|input| input.name)
+        .collect::<Vec<_>>();
+    drop(discovery);
+    if input_names.is_empty() {
+        return Err("No se encontraron entradas MIDI/MCU del KeyLab".into());
+    }
+
+    let (sender, receiver) = mpsc::sync_channel::<(String, Vec<u8>)>(4096);
+    let mut connections = Vec::with_capacity(input_names.len());
+    for input_name in input_names {
+        let mut midi_input = MidiInput::new("rackforge KeyLab MIDI monitor")?;
+        midi_input.ignore(Ignore::None);
+        let input = enumerate_input_ports(&midi_input)?
+            .into_iter()
+            .find(|input| input.name == input_name)
+            .ok_or_else(|| format!("La entrada MIDI {input_name:?} desapareció"))?;
+        println!("Entrada: [{}] {}", input.index, input.name);
+        let callback_name = input.name.clone();
+        let callback_sender = sender.clone();
+        connections.push(midi_input.connect(
+            &input.handle,
+            "rackforge KeyLab raw MIDI monitor",
+            move |_timestamp, message, _context| {
+                let _ = callback_sender.try_send((callback_name.clone(), message.to_vec()));
+            },
+            (),
+        )?);
+    }
+    drop(sender);
+
+    println!("MIDI_MONITOR_READY seconds={seconds}");
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        match receiver.recv_timeout(remaining.min(Duration::from_millis(250))) {
+            Ok((source, message)) if !message.is_empty() && message[0] != 0xf0 => {
+                if message.len() >= 3 && message[0] & 0xf0 == 0xb0 {
+                    println!(
+                        "MIDI_CC source={source:?} channel={} controller={} value={} hex={}",
+                        (message[0] & 0x0f) + 1,
+                        message[1],
+                        message[2],
+                        hex(&message)
+                    );
+                } else {
+                    println!("MIDI_RAW source={source:?} hex={}", hex(&message));
+                }
+            }
+            Ok(_) | Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    drop(connections);
+    session.restore()?;
+    println!("MIDI_MONITOR_DONE");
+    Ok(())
+}
+
 fn run_menu_demo(
     midi: MidiOutput,
     port: &PortInfo,
@@ -1063,7 +1168,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
             }
         };
         let usb_generation = keylab_usb_generation();
-        if let Err(error) = register_host_controls() {
+        if let Err(error) = register_host_controls(None) {
             // A host that does not know the registration yet is not a host
             // to boycott: without the reservation the surface still works,
             // only the master-control CCs lack a formal claim.
@@ -1095,6 +1200,11 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 continue;
             }
         };
+        if let Err(error) = register_host_controls(Some(&input.source_name)) {
+            eprintln!("Core no pudo asociar el perfil al endpoint MIDI: {error}");
+            thread::sleep(Duration::from_millis(500));
+            continue;
+        }
         menu.clear_pressed_button();
         let mut messages = render_menu_messages(&menu)?;
         let port_name = port.name.clone();
@@ -1368,13 +1478,25 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                         }
                     }
                     if wifi_task.is_none() {
+                        let previous_button_leds = messages.button_leds.clone();
                         if let Err(error) = refresh_live_catalog(&mut menu) {
                             eprintln!("No se pudo refrescar el catálogo LIVE: {error}");
                         } else {
                             messages = render_menu_messages(&menu)?;
+                            if let Err(error) = send_changed_button_leds(
+                                &mut session,
+                                &previous_button_leds,
+                                &messages.button_leds,
+                            ) {
+                                eprintln!("No se pudo actualizar los botones: {error}");
+                                break;
+                            }
                         }
                     }
-                    if let Err(error) = send_menu_with_header_override(
+                    // A healthy OLED heartbeat only reasserts the display. Re-sending
+                    // unchanged button LED messages makes the KeyLab briefly blank and
+                    // restore the four soft-key LEDs every few seconds.
+                    if let Err(error) = send_menu_display_with_header_override(
                         &mut session,
                         &messages,
                         transient_header.visible_message(Instant::now()),
@@ -1510,18 +1632,24 @@ fn dispatch_session_command(command: SessionCommand) -> Result<Vec<EventEnvelope
     }
 }
 
-fn register_host_controls() -> Result<(), String> {
+fn register_host_controls(midi_source_name: Option<&str>) -> Result<(), String> {
     let profile = controller::package_profile();
     dispatch_session_command(SessionCommand::RegisterHostBindings {
         controller_id: profile.driver_id.clone(),
         controls: profile.host_controls.clone(),
         actions: profile.host_actions.clone(),
+        midi_source_name: midi_source_name.map(str::to_owned),
+        semantic_profile: profile.semantic_profile.clone(),
     })?;
     println!(
-        "HOST_BINDINGS_RESERVED controller={} controls={} actions={}",
+        "HOST_BINDINGS_RESERVED controller={} controls={} actions={} semantic={}",
         profile.driver_id,
         profile.host_controls.len(),
-        profile.host_actions.len()
+        profile.host_actions.len(),
+        profile
+            .semantic_profile
+            .as_ref()
+            .map_or(0, |profile| profile.controls.len())
     );
     Ok(())
 }
@@ -1860,12 +1988,16 @@ fn keep_audition_alive(lease_id: u64) -> Result<(), String> {
     dispatch_session_command(SessionCommand::KeepAuditionAlive { lease_id }).map(|_| ())
 }
 
-#[cfg(target_os = "linux")]
+// LITTLE navigation is portable controller behavior. Only the settings arms
+// below are platform-specific; Play/Live navigation, sound selection, program
+// editing and emergency stop must always reach the host control API.
 fn apply_pending_menu_command(
     menu: &mut menu::Menu,
     wifi_task: &mut Option<WifiTask>,
     audio_task: &mut Option<AudioTask>,
 ) -> Result<bool, String> {
+    #[cfg(not(target_os = "linux"))]
+    let _ = (&mut *wifi_task, &mut *audio_task);
     let Some(command) = menu.take_command() else {
         return Ok(false);
     };
@@ -2043,6 +2175,7 @@ fn apply_pending_menu_command(
             return_to_active_mode(menu, mode, selected_sound_id)?;
             Ok(true)
         }
+        #[cfg(target_os = "linux")]
         menu::MenuCommand::SetWebEnabled { enabled } => {
             web_control_request(&serde_json::json!({
                 "op": "set",
@@ -2052,6 +2185,7 @@ fn apply_pending_menu_command(
             println!("WEB_SETTING_SET field=enabled value={enabled}");
             Ok(true)
         }
+        #[cfg(target_os = "linux")]
         menu::MenuCommand::SetWebAccess { access } => {
             let value = match access {
                 menu::WebAccess::Local => "local",
@@ -2065,6 +2199,7 @@ fn apply_pending_menu_command(
             println!("WEB_SETTING_SET field=access value={value}");
             Ok(true)
         }
+        #[cfg(target_os = "linux")]
         menu::MenuCommand::SetWebPort { port } => {
             web_control_request(&serde_json::json!({
                 "op": "set",
@@ -2074,6 +2209,7 @@ fn apply_pending_menu_command(
             println!("WEB_SETTING_SET field=port value={port}");
             Ok(true)
         }
+        #[cfg(target_os = "linux")]
         menu::MenuCommand::ActivateSavedWifi { connection_id } => {
             let connection_id =
                 WifiConnectionId::new(connection_id).map_err(|error| error.to_string())?;
@@ -2086,6 +2222,7 @@ fn apply_pending_menu_command(
             )?;
             Ok(true)
         }
+        #[cfg(target_os = "linux")]
         menu::MenuCommand::ForgetSavedWifi { connection_id } => {
             let connection_id =
                 WifiConnectionId::new(connection_id).map_err(|error| error.to_string())?;
@@ -2098,6 +2235,7 @@ fn apply_pending_menu_command(
             )?;
             Ok(true)
         }
+        #[cfg(target_os = "linux")]
         menu::MenuCommand::ConnectDiscoveredWifi { ssid, passphrase } => {
             let ssid = WifiSsid::new(ssid).map_err(|error| error.to_string())?;
             let passphrase = passphrase
@@ -2114,6 +2252,7 @@ fn apply_pending_menu_command(
             )?;
             Ok(true)
         }
+        #[cfg(target_os = "linux")]
         menu::MenuCommand::DisconnectWifi => {
             start_wifi_change(
                 wifi_task,
@@ -2124,6 +2263,7 @@ fn apply_pending_menu_command(
             )?;
             Ok(true)
         }
+        #[cfg(target_os = "linux")]
         menu::MenuCommand::SetWifiEnabled { enabled } => {
             start_wifi_change(
                 wifi_task,
@@ -2134,10 +2274,12 @@ fn apply_pending_menu_command(
             )?;
             Ok(true)
         }
+        #[cfg(target_os = "linux")]
         menu::MenuCommand::ScanWifi => {
             start_wifi_scan(wifi_task, menu)?;
             Ok(true)
         }
+        #[cfg(target_os = "linux")]
         menu::MenuCommand::ApplyAudioOutput { profile } => {
             start_audio_change(audio_task, menu, profile)?;
             Ok(true)
@@ -2146,6 +2288,19 @@ fn apply_pending_menu_command(
             dispatch_session_command(SessionCommand::EmergencyStop)?;
             println!("HOME_FORCED audio=stopped mode=idle");
             Ok(true)
+        }
+        #[cfg(not(target_os = "linux"))]
+        menu::MenuCommand::SetWebEnabled { .. }
+        | menu::MenuCommand::SetWebAccess { .. }
+        | menu::MenuCommand::SetWebPort { .. }
+        | menu::MenuCommand::ActivateSavedWifi { .. }
+        | menu::MenuCommand::ForgetSavedWifi { .. }
+        | menu::MenuCommand::ConnectDiscoveredWifi { .. }
+        | menu::MenuCommand::DisconnectWifi
+        | menu::MenuCommand::SetWifiEnabled { .. }
+        | menu::MenuCommand::ScanWifi
+        | menu::MenuCommand::ApplyAudioOutput { .. } => {
+            Err("this controller setting is not available on the current platform".into())
         }
     }
 }
@@ -2314,7 +2469,6 @@ fn poll_audio_task(_task: &mut Option<AudioTask>, _menu: &mut menu::Menu) -> boo
     false
 }
 
-#[cfg(target_os = "linux")]
 fn return_to_active_mode(
     menu: &mut menu::Menu,
     mode: menu::ActiveMode,
@@ -2346,19 +2500,6 @@ fn return_to_active_mode(
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
-fn apply_pending_menu_command(
-    menu: &mut menu::Menu,
-    _wifi_task: &mut Option<WifiTask>,
-    _audio_task: &mut Option<AudioTask>,
-) -> Result<bool, String> {
-    match menu.take_command() {
-        Some(_) => Ok(true),
-        None => Ok(false),
-    }
-}
-
-#[cfg(target_os = "linux")]
 fn replace_program_name(document_json: &str, name: &str) -> Result<String, String> {
     let name = name.trim();
     if name.is_empty() || name.len() > 64 || !name.is_ascii() || name.contains('\0') {
@@ -2415,7 +2556,7 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
     let (host_control_sender, host_control_receiver) = mpsc::channel();
     let host_controls = controller::package_profile().host_controls.clone();
     let host_actions = controller::package_profile().host_actions.clone();
-    let midi_forwarder = MidiForwarder::from_environment()?;
+    let midi_forwarder = MidiForwarder::from_environment(&port.name)?;
     let midi_forward_sender = midi_forwarder.as_ref().and_then(MidiForwarder::sender);
     let mut keyboard_parts_held = false;
     let mut split_note_sent = false;
@@ -2468,6 +2609,7 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
     Ok(KeyLabInput {
         _connection: connection,
         _midi_forwarder: midi_forwarder,
+        source_name: port.name.clone(),
         ack_receiver,
         input_receiver,
         host_control_receiver,
@@ -2582,15 +2724,44 @@ fn send_menu_with_header_override(
     messages: &MenuMessages,
     header_override: Option<&[u8]>,
 ) -> Result<(), Box<dyn Error>> {
+    send_menu_display_with_header_override(session, messages, header_override)?;
+    for message in &messages.button_leds {
+        session.send(message)?;
+    }
+    Ok(())
+}
+
+fn send_menu_display_with_header_override(
+    session: &mut KeyLabSession,
+    messages: &MenuMessages,
+    header_override: Option<&[u8]>,
+) -> Result<(), Box<dyn Error>> {
     session.send(&messages.body)?;
     thread::sleep(Duration::from_millis(20));
     session.send(header_override.unwrap_or(&messages.header))?;
     thread::sleep(Duration::from_millis(20));
     session.send(&messages.footer)?;
-    for message in &messages.button_leds {
-        session.send(message)?;
+    Ok(())
+}
+
+fn send_changed_button_leds(
+    session: &mut KeyLabSession,
+    previous: &[Vec<u8>; 4],
+    current: &[Vec<u8>; 4],
+) -> Result<(), Box<dyn Error>> {
+    for index in changed_button_led_indices(previous, current) {
+        session.send(&current[index])?;
     }
     Ok(())
+}
+
+fn changed_button_led_indices(previous: &[Vec<u8>; 4], current: &[Vec<u8>; 4]) -> Vec<usize> {
+    previous
+        .iter()
+        .zip(current)
+        .enumerate()
+        .filter_map(|(index, (previous, current))| (previous != current).then_some(index))
+        .collect()
 }
 
 fn send_menu_frames(
@@ -2816,11 +2987,30 @@ mod tests {
         );
         assert!(forwardable_performance_message(&[0x80, 60, 0], false).is_some());
         assert!(forwardable_performance_message(&[0xb0, 64, 127], false).is_some());
+        // Ordinary faders remain visible to Desktop MIDI Learn and Parameter
+        // Links even though the .rfcontroller owns the physical endpoint.
+        assert!(forwardable_performance_message(&[0xb0, 82, 96], false).is_some());
         assert!(forwardable_performance_message(&[0xe0, 0, 64], false).is_some());
+        // The four LITTLE soft keys are an intentional controller-plane
+        // reservation. They navigate RackForge and never become musical MIDI.
+        for controller in 44..=47 {
+            let message = [0xb0, controller, 127];
+            assert!(parse_physical_input(&message).is_some());
+            assert!(forwardable_performance_message(&message, true).is_none());
+        }
         assert!(forwardable_performance_message(&[0xb0, 113, 127], true).is_none());
         assert!(forwardable_performance_message(&[0xc0, 4], false).is_none());
         assert!(forwardable_performance_message(&[0xf8], false).is_none());
         assert!(forwardable_performance_message(&[0xf0, 0x7d, 0xf7], false).is_none());
+    }
+
+    #[test]
+    fn only_changed_button_leds_are_selected_for_refresh() {
+        let previous = [vec![0], vec![1], vec![2], vec![3]];
+        assert!(changed_button_led_indices(&previous, &previous).is_empty());
+
+        let current = [vec![0], vec![9], vec![2], vec![8]];
+        assert_eq!(changed_button_led_indices(&previous, &current), vec![1, 3]);
     }
 
     #[test]
@@ -2881,6 +3071,25 @@ mod tests {
         assert!(
             tracker
                 .release(menu::Input::Button4, started + Duration::from_millis(770))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn long_back_is_emitted_while_held_and_not_repeated_on_release() {
+        let started = Instant::now();
+        let mut tracker = ButtonGestureTracker::default();
+        assert!(tracker.press(menu::Input::Button4, started));
+        assert_eq!(
+            tracker.poll(started + LONG_PRESS_THRESHOLD),
+            vec![menu::Input::Button4Long]
+        );
+        assert!(
+            tracker
+                .release(
+                    menu::Input::Button4,
+                    started + LONG_PRESS_THRESHOLD + Duration::from_millis(1)
+                )
                 .is_none()
         );
     }

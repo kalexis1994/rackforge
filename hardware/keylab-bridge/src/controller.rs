@@ -1,7 +1,9 @@
+use rackforge_control_profile::{CONTROL_PROFILE_SCHEMA_VERSION, SemanticControlId, roles};
 use rackforge_controller_api::{
     ControllerDriver, ControllerProfile, GestureCapabilities, HostActionBinding, HostActionTarget,
     HostControlBinding, HostControlTarget, LITTLE_V1, MidiButtonBinding, MidiControlChangeBinding,
-    SurfaceImplementation, SurfaceQuality, negotiate_surface,
+    SemanticControlBinding, SemanticControlProfile, SurfaceImplementation, SurfaceQuality,
+    negotiate_surface,
 };
 use rackforge_controller_package::{ControllerPackageManifest, DeviceMatcher};
 use std::sync::OnceLock;
@@ -53,6 +55,38 @@ impl ControllerDriver for KeyLabEssentialMk3 {
                     release_value: 0,
                 },
             }],
+            semantic_profile: Some(SemanticControlProfile {
+                schema_version: CONTROL_PROFILE_SCHEMA_VERSION,
+                source_id: "controller.arturia.keylab-essential-mk3.midi".into(),
+                controls: [
+                    (roles::SYNTH_OSCILLATOR_PULSE_WIDTH, 96),
+                    (roles::SYNTH_OSCILLATOR_SUB_LEVEL, 97),
+                    (roles::SYNTH_OSCILLATOR_NOISE_LEVEL, 98),
+                    (roles::SYNTH_FILTER_ENVELOPE_AMOUNT, 99),
+                    (roles::SYNTH_FILTER_LFO_AMOUNT, 100),
+                    (roles::SYNTH_FILTER_KEY_TRACKING, 101),
+                    (roles::SYNTH_LFO_DELAY, 102),
+                    (roles::SYNTH_AMPLIFIER_LEVEL, 103),
+                    (roles::SYNTH_AMP_ENVELOPE_ATTACK, 105),
+                    (roles::SYNTH_AMP_ENVELOPE_DECAY, 106),
+                    (roles::SYNTH_AMP_ENVELOPE_SUSTAIN, 107),
+                    (roles::SYNTH_AMP_ENVELOPE_RELEASE, 108),
+                    (roles::SYNTH_FILTER_CUTOFF, 109),
+                    (roles::SYNTH_FILTER_RESONANCE, 110),
+                    (roles::SYNTH_LFO_RATE, 111),
+                    (roles::SYNTH_LFO_DEPTH, 112),
+                ]
+                .into_iter()
+                .map(|(role, controller)| SemanticControlBinding {
+                    role: SemanticControlId::new(role).expect("built-in semantic role is valid"),
+                    midi_cc: MidiControlChangeBinding {
+                        channel: 0,
+                        controller,
+                    },
+                    invert: false,
+                })
+                .collect(),
+            }),
         })
     }
 
@@ -173,6 +207,7 @@ fn is_alsa_address(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[test]
     fn unknown_midi_devices_never_receive_a_display_driver() {
@@ -225,6 +260,32 @@ mod tests {
         assert!(display_driver("KL Essential 61 mk3 DINTHRU 28:1").is_none());
         assert!(display_driver("KL Essential 61 mk3 MCU/HUI 28:2").is_none());
         assert!(display_driver("KL Essential 61 mk3 ALV 28:3").is_none());
+    }
+
+    #[test]
+    fn rackforge_profile_maps_all_eight_encoders_and_faders() {
+        let semantic = package_profile().semantic_profile.as_ref().unwrap();
+        let controls = semantic
+            .controls
+            .iter()
+            .map(|binding| (binding.midi_cc.controller, binding.role.as_str()))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(controls.len(), 16);
+        assert_eq!(
+            controls.get(&96),
+            Some(&roles::SYNTH_OSCILLATOR_PULSE_WIDTH)
+        );
+        assert_eq!(controls.get(&103), Some(&roles::SYNTH_AMPLIFIER_LEVEL));
+        assert_eq!(controls.get(&105), Some(&roles::SYNTH_AMP_ENVELOPE_ATTACK));
+        assert_eq!(controls.get(&112), Some(&roles::SYNTH_LFO_DEPTH));
+        assert!(
+            !controls.contains_key(&104),
+            "encoder 9 is reserved for master pan"
+        );
+        assert!(
+            !controls.contains_key(&113),
+            "fader 9 is reserved for master level"
+        );
     }
 
     #[test]

@@ -9,6 +9,7 @@ license.workspace = true
 package-validation = ["dep:png"]
 
 [dependencies]
+rackforge-control-profile = { path = "../rackforge-control-profile" }
 rackforge-program-api = { path = "../rackforge-program-api" }
 rackforge-midi-api = { path = "../rackforge-midi-api" }
 rackforge-surface-api = { path = "../rackforge-surface-api" }

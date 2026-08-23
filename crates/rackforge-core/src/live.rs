@@ -16,7 +16,7 @@ use crate::rack_graph::compile_instrument_definition;
 use crate::realtime::{self, XrunMonitor};
 use crate::session::SessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
-use crate::{LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore};
+use crate::{CompiledParameterLink, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore};
 use alsa::pcm::PCM;
 use anyhow::{Context, Result, bail};
 use midir::MidiInput;
@@ -28,11 +28,11 @@ use rackforge_midi_api::{
     CompiledMidiRoute, DEFAULT_INPUT_BUS_ID, IngressMidiEvent, MIDI_ROUTING_SCHEMA_VERSION,
     MidiInputBusId, MidiPacket, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget,
     MidiRouteTransform, MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry,
-    MidiSourceSelector, MidiTargetId, PluginChannelModel,
+    MidiSourceSelector, MidiTargetId, ParameterLink, ParameterLinkPassThrough, PluginChannelModel,
 };
 #[cfg(test)]
 use rackforge_performance_api::RackKeyboardParts;
-use rackforge_plugin_api::abi::MidiEventV1;
+use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use rackforge_plugin_api::{ParameterKind, PluginKind};
 use rackforge_session_api::{
     BankSummary, ButtonPhase, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, HostActionBinding,
@@ -42,7 +42,7 @@ use rackforge_session_api::{
 };
 use semver::Version;
 use std::cell::UnsafeCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
@@ -52,7 +52,7 @@ use std::{env, fs, thread};
 const MIDI_QUEUE_CAPACITY: usize = 2_048;
 const AUDIO_CONTROL_QUEUE_CAPACITY: usize = 64;
 const MASTER_LEVEL_SMOOTHING_FRAMES: u32 = 480;
-const VIRTUAL_MIDI_SOURCE_ID: &str = "rackforge.virtual.touch";
+pub(crate) const VIRTUAL_MIDI_SOURCE_ID: &str = "rackforge.virtual.touch";
 const AUDIO_WORKER_PRIORITY: i32 = realtime::DEFAULT_AUDIO_PRIORITY - 1;
 const WORKER_SHUTDOWN_EPOCH: u64 = u64::MAX;
 
@@ -135,6 +135,7 @@ struct RackSlotVoice<'plugin> {
     pan: f32,
     output: Vec<f32>,
     events: Vec<MidiEventV1>,
+    parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
 }
 
@@ -434,7 +435,7 @@ fn process_rack_voice(voice: &mut RackSlotVoice<'_>, period_frames: u32, channel
         0,
         channels,
         &voice.events,
-        &[],
+        &voice.parameter_events,
     );
     if let Err(error) = process_result {
         voice.output.fill(0.0);
@@ -491,6 +492,7 @@ fn create_rack_voices<'plugin>(
             pan: f32::from(spec.pan_per_mille) / 1_000.0,
             output: vec![0.0; period_frames as usize * channels as usize],
             events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
+            parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             process_faulted: false,
         });
     }
@@ -511,6 +513,7 @@ fn rack_voices_from_prepared(
             pan: f32::from(prepared.pan_per_mille) / 1_000.0,
             output: prepared.output,
             events: prepared.events,
+            parameter_events: prepared.parameter_events,
             process_faulted: false,
         })
         .collect()
@@ -659,6 +662,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         persisted_master_level,
         persisted_master_pan,
         persisted_live,
+        persisted_parameter_links,
     ) = match checkpoint.as_ref() {
         Some(store) => match (
             store.active_mode(&session_id),
@@ -667,6 +671,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
             store.master_level(&session_id),
             store.master_pan(&session_id),
             store.live_state(&session_id),
+            store.parameter_links(&session_id),
         ) {
             (
                 Ok(mode),
@@ -675,6 +680,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 Ok(master_level),
                 Ok(master_pan),
                 Ok(live),
+                Ok(parameter_links),
             ) => (
                 mode,
                 active_instance,
@@ -682,8 +688,9 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 master_level,
                 master_pan,
                 live,
+                parameter_links,
             ),
-            (mode, active_instance, sound_id, master_level, master_pan, live) => {
+            (mode, active_instance, sound_id, master_level, master_pan, live, parameter_links) => {
                 if let Err(error) = mode {
                     eprintln!("SESSION_CHECKPOINT_IGNORED {error:#}");
                 }
@@ -702,10 +709,13 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 if let Err(error) = live {
                     eprintln!("SESSION_CHECKPOINT_IGNORED {error:#}");
                 }
-                (None, None, None, None, None, None)
+                if let Err(error) = parameter_links {
+                    eprintln!("SESSION_CHECKPOINT_IGNORED {error:#}");
+                }
+                (None, None, None, None, None, None, Vec::new())
             }
         },
-        None => (None, None, None, None, None, None),
+        None => (None, None, None, None, None, None, Vec::new()),
     };
     let packages = discover_plugin_packages(&config.package)?;
     let primary_id = packages
@@ -946,7 +956,8 @@ pub fn run(config: LiveConfig) -> Result<()> {
     )?;
 
     let (sender, receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
-    let (midi_port_names, mut midi_sources) = connect_midi_sources(sender)?;
+    let (midi_port_names, mut midi_sources, midi_observer, connected_midi_sources) =
+        connect_midi_sources(sender)?;
     let virtual_midi_source = MidiSourceKey::new(midi_port_names.len() as u32);
     let virtual_midi_source_id = MidiSourceId::new(VIRTUAL_MIDI_SOURCE_ID)?;
     midi_sources.register(
@@ -956,6 +967,16 @@ pub fn run(config: LiveConfig) -> Result<()> {
             name: "RackForge Touch Controller".into(),
             primary: false,
         },
+    )?;
+    connected_midi_sources
+        .lock()
+        .map_err(|_| anyhow::anyhow!("MIDI connection state lock poisoned"))?
+        .insert(virtual_midi_source.get());
+    let initial_parameter_links = compile_parameter_links_for_runtime(
+        &persisted_parameter_links,
+        &midi_sources,
+        &standalone_voices,
+        &rack_voices,
     )?;
     println!("MIDI_READY ports={midi_port_names:?}");
     let play_route = compile_default_play_route(
@@ -1021,6 +1042,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         instances: session_instances,
         audition: None,
         program_draft: None,
+        parameter_links: persisted_parameter_links,
     };
     if let Some(checkpoint) = &checkpoint {
         checkpoint
@@ -1062,6 +1084,9 @@ pub fn run(config: LiveConfig) -> Result<()> {
                     .map(|runtime| (plugin.manifest().id.clone(), runtime))
             })
             .collect(),
+        midi_sources.clone(),
+        midi_observer,
+        Arc::clone(&connected_midi_sources),
         f64::from(output_rate),
         period_frames as u32,
         channels as u32,
@@ -1078,6 +1103,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         &mut standalone_voices,
         active_instance_id,
         rack_voices,
+        initial_parameter_links,
         &play_route,
         &virtual_play_route,
         virtual_midi_source,
@@ -1130,7 +1156,12 @@ fn performance_midi_names(midi: &MidiInput) -> Result<Vec<String>> {
 /// across replugging for the rest of the session.
 fn connect_midi_sources(
     sender: SyncSender<IngressMidiEvent>,
-) -> Result<(Vec<String>, MidiSourceRegistry)> {
+) -> Result<(
+    Vec<String>,
+    MidiSourceRegistry,
+    Receiver<IngressMidiEvent>,
+    Arc<Mutex<BTreeSet<u32>>>,
+)> {
     let discovery = MidiInput::new("rackforge-core-discovery")?;
     let names = performance_midi_names(&discovery)?;
     let mut registry = MidiSourceRegistry::default();
@@ -1156,8 +1187,16 @@ fn connect_midi_sources(
             connected: false,
         });
     }
-    midi_hotplug::spawn(sender, supervised, midi_hotplug::DEFAULT_POLL_INTERVAL)?;
-    Ok((names, registry))
+    let (observer_sender, observer_receiver) = mpsc::sync_channel(64);
+    let connected_sources = Arc::new(Mutex::new(BTreeSet::new()));
+    midi_hotplug::spawn(
+        sender,
+        Some(observer_sender),
+        Arc::clone(&connected_sources),
+        supervised,
+        midi_hotplug::DEFAULT_POLL_INTERVAL,
+    )?;
+    Ok((names, registry, observer_receiver, connected_sources))
 }
 
 fn play_route_id() -> &'static str {
@@ -1233,6 +1272,62 @@ fn standalone_voice_mut<'voices, 'plugin>(
         .ok_or_else(|| format!("unknown plugin instance {instance_id}"))
 }
 
+fn compile_parameter_links_for_runtime(
+    links: &[ParameterLink],
+    sources: &MidiSourceRegistry,
+    standalone_voices: &[StandaloneVoice<'_>],
+    rack_voices: &[RackSlotVoice<'_>],
+) -> Result<Vec<CompiledParameterLink>> {
+    links
+        .iter()
+        .filter_map(|link| {
+            // Missing hardware remains persisted and pending. It is never
+            // treated as an invalid link merely because it is unplugged.
+            let source_key = sources.resolve_optional(&link.source.source_id)?;
+            let schema = standalone_voices
+                .iter()
+                .find(|voice| voice.instance_id.as_str() == link.instance_id)
+                .map(|voice| voice.plugin.parameters())
+                .or_else(|| {
+                    rack_voices
+                        .iter()
+                        .find(|voice| voice.slot_id == link.instance_id)
+                        .map(|voice| voice.plugin.parameters())
+                });
+            Some(match schema {
+                Some(schema) => CompiledParameterLink::new(link.clone(), source_key, schema),
+                None => Err(anyhow::anyhow!(
+                    "parameter link {} targets unknown instance {}",
+                    link.id,
+                    link.instance_id
+                )),
+            })
+        })
+        .collect()
+}
+
+fn apply_parameter_links(
+    links: &[CompiledParameterLink],
+    event: IngressMidiEvent,
+    instance_id: &str,
+    output: &mut Vec<ParameterEventV1>,
+) -> bool {
+    let mut consume = false;
+    for link in links
+        .iter()
+        .filter(|link| link.link.instance_id == instance_id)
+    {
+        let Some(mapped) = link.apply(event) else {
+            continue;
+        };
+        consume |= mapped.pass_through == ParameterLinkPassThrough::Consume;
+        if output.len() < MAX_EVENTS_PER_BLOCK {
+            output.push(mapped.event);
+        }
+    }
+    consume
+}
+
 fn audio_loop(
     initial_output: OpenedAudioOutput,
     receiver: &Receiver<IngressMidiEvent>,
@@ -1241,6 +1336,7 @@ fn audio_loop(
     standalone_voices: &mut [StandaloneVoice<'static>],
     mut active_instance_id: InstanceId,
     mut rack_voices: Vec<RackSlotVoice<'static>>,
+    mut parameter_links: Vec<CompiledParameterLink>,
     play_route: &CompiledMidiRoute,
     virtual_play_route: &CompiledMidiRoute,
     virtual_midi_source: MidiSourceKey,
@@ -1259,6 +1355,7 @@ fn audio_loop(
     let mut mix_output = vec![0.0_f32; period_frames * channels];
     let mut device_output = vec![0_i32; period_frames * channels];
     let mut events = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
+    let mut parameter_events = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
     let mut meter_frames = 0_usize;
     let mut meter_peak = 0_f32;
     let mut meter_clipped = 0_usize;
@@ -1308,11 +1405,11 @@ fn audio_loop(
         }
         while let Ok(command) = control_receiver.try_recv() {
             match command {
-                AudioControlCommand::InjectVirtualMidi { packets } => {
+                AudioControlCommand::InjectVirtualMidi { events } => {
                     let available = MAX_EVENTS_PER_BLOCK.saturating_sub(pending_virtual_midi.len());
-                    let accepted = packets.len().min(available);
-                    let omitted = packets.len().saturating_sub(accepted);
-                    pending_virtual_midi.extend(packets.into_iter().take(accepted));
+                    let accepted = events.len().min(available);
+                    let omitted = events.len().saturating_sub(accepted);
+                    pending_virtual_midi.extend(events.into_iter().take(accepted));
                     dropped_events += omitted;
                 }
                 AudioControlCommand::ApplyAudioOutput { profile, reply } => {
@@ -1603,6 +1700,10 @@ fn audio_loop(
                         });
                     let _ = reply.send(result);
                 }
+                AudioControlCommand::ReplaceParameterLinks { links, reply } => {
+                    parameter_links = links;
+                    let _ = reply.send(Ok(()));
+                }
                 AudioControlCommand::ReplaceStandaloneVoice {
                     instance_id,
                     instance,
@@ -1872,8 +1973,10 @@ fn audio_loop(
             }
         }
         events.clear();
+        parameter_events.clear();
         for voice in &mut rack_voices {
             voice.events.clear();
+            voice.parameter_events.clear();
         }
         if replay_controller_state {
             let omitted = match render_mode {
@@ -1897,12 +2000,56 @@ fn audio_loop(
             }
             replay_controller_state = false;
         }
-        for packet in pending_virtual_midi.drain(..) {
-            let event = IngressMidiEvent {
-                source: virtual_midi_source,
-                packet,
-            };
-            controller_states.observe(virtual_midi_source, plugin_midi_event(packet));
+        for event in pending_virtual_midi.drain(..) {
+            let packet = event.packet;
+            controller_states.observe(event.source, plugin_midi_event(packet));
+            if event.source != virtual_midi_source {
+                if reserved_midi_controls.consume(event.source, plugin_midi_event(packet)) {
+                    continue;
+                }
+                match render_mode {
+                    AudioRenderMode::Silent => {}
+                    AudioRenderMode::Plugin => {
+                        let consume = apply_parameter_links(
+                            &parameter_links,
+                            event,
+                            active_instance_id.as_str(),
+                            &mut parameter_events,
+                        );
+                        if !consume && let Some(routed) = play_route.route(event) {
+                            if events.len() < MAX_EVENTS_PER_BLOCK {
+                                events.push(plugin_midi_event(routed.packet));
+                            } else {
+                                dropped_events += 1;
+                            }
+                        }
+                    }
+                    AudioRenderMode::Rack => {
+                        for voice in &mut rack_voices {
+                            let consume = apply_parameter_links(
+                                &parameter_links,
+                                event,
+                                &voice.slot_id,
+                                &mut voice.parameter_events,
+                            );
+                            if !consume
+                                && let Some(routed) = route_rack_event_through_stages(
+                                    event,
+                                    &voice.midi_stages,
+                                    play_route,
+                                )
+                            {
+                                if voice.events.len() < MAX_EVENTS_PER_BLOCK {
+                                    voice.events.push(routed);
+                                } else {
+                                    dropped_events += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
             match render_mode {
                 AudioRenderMode::Silent => {}
                 AudioRenderMode::Plugin => {
@@ -1940,7 +2087,13 @@ fn audio_loop(
             match render_mode {
                 AudioRenderMode::Silent => {}
                 AudioRenderMode::Plugin => {
-                    if let Some(routed) = play_route.route(event) {
+                    let consume = apply_parameter_links(
+                        &parameter_links,
+                        event,
+                        active_instance_id.as_str(),
+                        &mut parameter_events,
+                    );
+                    if !consume && let Some(routed) = play_route.route(event) {
                         if events.len() < MAX_EVENTS_PER_BLOCK {
                             events.push(plugin_midi_event(routed.packet));
                         } else {
@@ -1950,8 +2103,18 @@ fn audio_loop(
                 }
                 AudioRenderMode::Rack => {
                     for voice in &mut rack_voices {
-                        if let Some(routed) =
-                            route_rack_event_through_stages(event, &voice.midi_stages, play_route)
+                        let consume = apply_parameter_links(
+                            &parameter_links,
+                            event,
+                            &voice.slot_id,
+                            &mut voice.parameter_events,
+                        );
+                        if !consume
+                            && let Some(routed) = route_rack_event_through_stages(
+                                event,
+                                &voice.midi_stages,
+                                play_route,
+                            )
                         {
                             if voice.events.len() < MAX_EVENTS_PER_BLOCK {
                                 voice.events.push(routed);
@@ -1979,7 +2142,7 @@ fn audio_loop(
                         0,
                         channels as u32,
                         &events,
-                        &[],
+                        &parameter_events,
                     );
                 if quarantine_failed_process(
                     process_result,

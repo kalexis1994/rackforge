@@ -1,4 +1,8 @@
 pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
+pub use rackforge_midi_api::{
+    MidiChannel, MidiSourceDescriptor, ParameterLink, ParameterLinkChannel, ParameterLinkId,
+    ParameterLinkMessage, ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform,
+};
 pub use rackforge_performance_api::{LibraryRevision, PerformanceEdit, PerformanceSnapshot};
 pub use rackforge_plugin_api::{
     HostPreset, HostPresetSummary, ParameterSchema, PluginStateReference,
@@ -13,7 +17,7 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 13;
+pub const CONTROL_SCHEMA_VERSION: u32 = 14;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 
@@ -129,6 +133,19 @@ pub enum ControlRequest {
         parameter_index: u32,
         value: f64,
     },
+    /// Lists stable MIDI identities, including disconnected saved endpoints.
+    MidiSources,
+    /// Arms a transient observer. No persisted link is changed by Learn.
+    BeginMidiLearn {
+        instance_id: String,
+        parameter_index: u32,
+    },
+    MidiLearnStatus {
+        learn_id: u64,
+    },
+    CancelMidiLearn {
+        learn_id: u64,
+    },
     LoadPluginResource {
         plugin_id: String,
         instance_id: InstanceId,
@@ -160,6 +177,12 @@ pub enum ControlRequest {
     /// notes owned by a connection that disappears.
     VirtualMidi {
         client_id: ClientId,
+        /// Physical input selected by an external controller driver.
+        ///
+        /// The host resolves this display name against its own approved MIDI
+        /// source registry. UI-owned virtual keyboards leave it empty.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_name: Option<String>,
         message: VirtualMidiMessage,
     },
     ReleaseVirtualMidi {
@@ -244,6 +267,20 @@ pub enum ControlResponse {
         parameter_index: u32,
         value: f64,
     },
+    MidiSources {
+        sources: Vec<MidiSourceStatus>,
+    },
+    MidiLearnStarted {
+        learn_id: u64,
+    },
+    MidiLearnStatus {
+        learn_id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        candidate: Option<MidiLearnCandidate>,
+    },
+    MidiLearnCancelled {
+        learn_id: u64,
+    },
     PluginResourceLoaded {
         instance_id: InstanceId,
         resource_id: String,
@@ -290,6 +327,21 @@ pub struct PluginParameterValue {
     pub value: f64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MidiSourceStatus {
+    pub source: MidiSourceDescriptor,
+    pub connected: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MidiLearnCandidate {
+    pub source: MidiSourceDescriptor,
+    pub channel: MidiChannel,
+    pub message: ParameterLinkMessage,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VirtualMidiMessage {
@@ -304,10 +356,12 @@ impl VirtualMidiMessage {
             return Err("MIDI data bytes must be in 0..=127");
         }
         match self.status & 0xf0 {
-            0x80 | 0x90 => Ok(()),
-            0xb0 if self.data1 == 64 => Ok(()),
-            0xb0 => Err("the touch controller only accepts sustain control changes"),
-            _ => Err("the touch controller only accepts note and sustain messages"),
+            // Three-byte channel voice messages. Virtual MIDI is also the
+            // transport used by external controller packages that own their
+            // WinMM endpoint, so CC, pressure and pitch bend must survive the
+            // bridge for MIDI Learn and parameter links.
+            0x80 | 0x90 | 0xa0 | 0xb0 | 0xe0 => Ok(()),
+            _ => Err("virtual MIDI only accepts three-byte channel voice messages"),
         }
     }
 
@@ -550,6 +604,7 @@ mod tests {
                 }],
                 audition: None,
                 program_draft: None,
+                parameter_links: Vec::new(),
             }),
         };
         assert_eq!(
@@ -563,6 +618,7 @@ mod tests {
         let client_id = ClientId::new("web.touch.test-1").unwrap();
         let request = ControlRequest::VirtualMidi {
             client_id: client_id.clone(),
+            source_name: None,
             message: VirtualMidiMessage {
                 status: 0x90,
                 data1: 60,
@@ -598,7 +654,16 @@ mod tests {
                 data2: 127
             }
             .validate()
-            .is_err()
+            .is_ok()
+        );
+        assert!(
+            VirtualMidiMessage {
+                status: 0xe0,
+                data1: 0,
+                data2: 64
+            }
+            .validate()
+            .is_ok()
         );
         assert!(
             VirtualMidiMessage {
@@ -844,6 +909,7 @@ mod tests {
         for request in [
             ControlRequest::VirtualMidi {
                 client_id: client_id.clone(),
+                source_name: Some("Stage Controller".into()),
                 message: VirtualMidiMessage {
                     status: 0x90,
                     data1: 60,
@@ -857,6 +923,42 @@ mod tests {
                 request
             );
         }
+    }
+
+    #[test]
+    fn midi_source_and_learn_contract_round_trips() {
+        let source = MidiSourceDescriptor {
+            id: rackforge_midi_api::MidiSourceId::new("usb.controller.main").unwrap(),
+            name: "Stage Controller".into(),
+            primary: true,
+        };
+        let requests = [
+            ControlRequest::MidiSources,
+            ControlRequest::BeginMidiLearn {
+                instance_id: "live.main.instrument.1".into(),
+                parameter_index: 17,
+            },
+            ControlRequest::MidiLearnStatus { learn_id: 9 },
+            ControlRequest::CancelMidiLearn { learn_id: 9 },
+        ];
+        for request in requests {
+            assert_eq!(
+                decode_request(&encode_line(&request).unwrap()).unwrap(),
+                request
+            );
+        }
+        let response = ControlResponse::MidiLearnStatus {
+            learn_id: 9,
+            candidate: Some(MidiLearnCandidate {
+                source,
+                channel: MidiChannel::from_user_number(2).unwrap(),
+                message: ParameterLinkMessage::ControlChange { controller: 74 },
+            }),
+        };
+        assert_eq!(
+            decode_response(&encode_line(&response).unwrap()).unwrap(),
+            response
+        );
     }
 
     #[test]

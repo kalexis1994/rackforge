@@ -486,6 +486,7 @@ fn release_injected_midi(state: &WebState) {
     for channel in 0..16 {
         for (controller, value) in [(64, 0), (123, 0)] {
             let _ = sender.try_send(crate::desktop_audio::MidiPacket {
+                source: crate::desktop_audio::VIRTUAL_MIDI_SOURCE_KEY,
                 length: 3,
                 data: [0xb0 | channel, controller, value],
             });
@@ -1981,7 +1982,11 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         | ControlRequest::PluginParameters { .. }
         | ControlRequest::SetPluginParameter { .. }
         | ControlRequest::PluginStateParameters { .. }
-        | ControlRequest::SetPluginStateParameter { .. }) => {
+        | ControlRequest::SetPluginStateParameter { .. }
+        | ControlRequest::MidiSources
+        | ControlRequest::BeginMidiLearn { .. }
+        | ControlRequest::MidiLearnStatus { .. }
+        | ControlRequest::CancelMidiLearn { .. }) => {
             let (response_sender, response_receiver) = mpsc::channel();
             if state
                 .control
@@ -2019,8 +2024,14 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
             {
                 return json!({"status":"error", "code":"invalid_request", "message": error});
             }
-            if let ControlRequest::VirtualMidi { client_id, message } = &request {
+            if let ControlRequest::VirtualMidi {
+                client_id,
+                source_name: None,
+                message,
+            } = &request
+            {
                 let packet = crate::desktop_audio::MidiPacket {
+                    source: crate::desktop_audio::VIRTUAL_MIDI_SOURCE_KEY,
                     length: 3,
                     data: message.bytes(),
                 };
@@ -2306,6 +2317,7 @@ mod tests {
             injected_midi: Arc::new(Mutex::new(None)),
         };
         let packet = crate::desktop_audio::MidiPacket {
+            source: crate::desktop_audio::VIRTUAL_MIDI_SOURCE_KEY,
             length: 3,
             data: [0x90, 60, 100],
         };
@@ -2322,6 +2334,65 @@ mod tests {
         let delivered = current_receiver.recv().unwrap();
         assert_eq!(delivered.length, packet.length);
         assert_eq!(delivered.data, packet.data);
+    }
+
+    #[test]
+    fn forwarded_physical_midi_bypasses_the_touch_fast_path() {
+        let (control, receiver) = control_channel();
+        let (audio_sender, audio_receiver) = mpsc::sync_channel(1);
+        let state = WebState {
+            session: Arc::new(RwLock::new(SessionState::new(
+                SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
+            ))),
+            plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
+            legacy_plugins_root: PathBuf::new(),
+            plugin_store_root: None,
+            data_root: PathBuf::new(),
+            public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
+            control,
+            resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
+            resource_upload_root: PathBuf::new(),
+            web_packages_cache: Arc::new(Mutex::new(None)),
+            package_scan_revision: Arc::new(AtomicU64::new(0)),
+            controllers_root: PathBuf::new(),
+            injected_midi: Arc::new(Mutex::new(Some(audio_sender))),
+        };
+        let client_id = ClientId::new("controller.test.forwarder").unwrap();
+        let request = ControlRequest::VirtualMidi {
+            client_id: client_id.clone(),
+            source_name: Some("Enabled Controller".into()),
+            message: rackforge_control_api::VirtualMidiMessage {
+                status: 0xb0,
+                data1: 74,
+                data2: 96,
+            },
+        };
+        let responder = std::thread::spawn(move || {
+            let DesktopControlCall::Session { request, response } = receiver.recv().unwrap() else {
+                panic!("forwarded physical MIDI must reach the Desktop host");
+            };
+            assert!(matches!(
+                request,
+                ControlRequest::VirtualMidi {
+                    source_name: Some(ref name),
+                    ..
+                } if name == "Enabled Controller"
+            ));
+            response
+                .send(ControlResponse::VirtualMidiAccepted {
+                    client_id,
+                    active_notes: 0,
+                })
+                .unwrap();
+        });
+
+        let response = response_for(request, &state);
+        responder.join().unwrap();
+        assert_eq!(
+            response.get("status").and_then(Value::as_str),
+            Some("virtual_midi_accepted")
+        );
+        assert!(audio_receiver.try_recv().is_err());
     }
 
     #[test]

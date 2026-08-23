@@ -17,13 +17,18 @@ use eframe::egui::{
     StrokeKind, Vec2,
 };
 use rackforge_control_api::{
-    ClientId, ControlErrorCode, ControlRequest, ControlResponse, VirtualMidiMessage,
+    ClientId, ControlErrorCode, ControlRequest, ControlResponse, MidiLearnCandidate,
+    MidiSourceStatus, ParameterLinkMessage, VirtualMidiMessage,
 };
 use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{
-    IsolatedPluginStateEditor, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
-    PluginStorage, validate_state_reference,
+    CompiledParameterLink, IsolatedPluginStateEditor, LoadedPlugin, PluginInstance, PluginPackage,
+    PluginStateStore, PluginStorage, compile_semantic_parameter_links, validate_state_reference,
+};
+#[cfg(windows)]
+use rackforge_midi_api::{
+    MidiChannel, MidiPacket as RoutedMidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
 };
 use rackforge_performance_api::{PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot};
 use rackforge_plugin_api::{
@@ -37,10 +42,11 @@ use rackforge_repository::{
 };
 use rackforge_session_api::{
     AuditionEndReason, BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId,
-    MasterLevel, MasterPan, PluginInstanceState, ProgramDraftState, Revision,
-    SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SessionId, SessionState, SoundSummary,
+    MasterLevel, MasterPan, ParameterLink, PluginInstanceState, ProgramDraftState, Revision,
+    SESSION_SCHEMA_VERSION, SemanticControlProfile, SessionCommand, SessionEvent, SessionId,
+    SessionState, SoundSummary,
 };
-use rackforge_surface_api::SurfaceMode;
+use rackforge_surface_api::{SurfaceActivationRequest, SurfaceMode};
 use rackforge_surface_runtime::{
     ActiveMode, Header, Input, Menu, MenuCommand, PlayPlugin, PlaySound, ProgramExitDecision,
     ProgramExitDestination,
@@ -131,10 +137,157 @@ struct DesktopPlugin {
     resource_data_paths: BTreeMap<String, PathBuf>,
 }
 
+#[derive(Clone)]
+struct RegisteredSemanticProfile {
+    profile: SemanticControlProfile,
+    runtime_source_id: Option<String>,
+    runtime_source_name: Option<String>,
+}
+
+#[cfg(windows)]
+fn compile_desktop_parameter_links(
+    links: &[ParameterLink],
+    plugins: &[DesktopPlugin],
+    performance: &PerformanceRepository,
+    semantic_profiles: &BTreeMap<String, RegisteredSemanticProfile>,
+) -> Result<Vec<CompiledParameterLink>> {
+    let mut compiled = links
+        .iter()
+        .map(|link| {
+            let plugin_id = plugins
+                .iter()
+                .find(|plugin| plugin.instance_id == link.instance_id)
+                .map(|plugin| plugin.plugin_id.as_str())
+                .or_else(|| {
+                    performance
+                        .library()
+                        .racks
+                        .iter()
+                        .flat_map(|rack| rack.slots.iter())
+                        .find(|slot| slot.id.as_str() == link.instance_id)
+                        .map(|slot| slot.plugin_id.as_str())
+                })
+                .with_context(|| {
+                    format!(
+                        "MIDI Link {} targets missing instance {}",
+                        link.id, link.instance_id
+                    )
+                })?;
+            let plugin = plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == plugin_id)
+                .with_context(|| {
+                    format!("MIDI Link {} targets inactive plugin {plugin_id}", link.id)
+                })?;
+            CompiledParameterLink::new(
+                link.clone(),
+                desktop_audio::stable_midi_source_key_from_id(&link.source.source_id),
+                plugin.runtime.parameters(),
+            )
+            .with_context(|| format!("validating MIDI Link {}", link.id))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    for (controller_id, registered) in semantic_profiles {
+        let Some(runtime_source_id) = &registered.runtime_source_id else {
+            continue;
+        };
+        let profile = &registered.profile;
+        let source_id = MidiSourceId::new(runtime_source_id.clone())?;
+        let source_key = desktop_audio::stable_midi_source_key_from_id(&source_id);
+        for plugin in plugins {
+            compiled.extend(
+                compile_semantic_parameter_links(
+                    controller_id,
+                    registered
+                        .runtime_source_name
+                        .as_deref()
+                        .unwrap_or(controller_id),
+                    profile,
+                    &source_id,
+                    source_key,
+                    &plugin.instance_id,
+                    plugin.runtime.parameters(),
+                    links,
+                )
+                .with_context(|| {
+                    format!(
+                        "compiling semantic controller {controller_id} for {}",
+                        plugin.plugin_id
+                    )
+                })?,
+            );
+        }
+    }
+    Ok(compiled)
+}
+
+#[cfg(windows)]
+fn virtual_midi_source_descriptor(client_id: &ClientId) -> MidiSourceDescriptor {
+    let name = client_id.as_str().to_owned();
+    MidiSourceDescriptor {
+        // Client IDs and MIDI source IDs share RackForge's stable-ID syntax.
+        // Keeping the same text lets a controller package reconnect to links
+        // learned before a restart.
+        id: MidiSourceId::new(client_id.as_str().to_owned())
+            .expect("a valid client id is also a valid MIDI source id"),
+        name,
+        primary: false,
+    }
+}
+
+#[cfg(windows)]
+fn approved_midi_source(
+    preferences: Option<&desktop_audio::AudioPreferences>,
+    source_name: &str,
+) -> Result<MidiSourceDescriptor, String> {
+    let preferences = preferences.ok_or_else(|| "MIDI inputs are unavailable".to_owned())?;
+    if !preferences
+        .midi_inputs
+        .iter()
+        .any(|name| name == source_name)
+    {
+        return Err(format!(
+            "MIDI input {source_name:?} is disabled in RackForge Audio & MIDI settings"
+        ));
+    }
+    desktop_audio::midi_source_descriptor(source_name).map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+fn approved_midi_source_statuses(
+    preferences: Option<&desktop_audio::AudioPreferences>,
+    present: &BTreeSet<String>,
+) -> Vec<MidiSourceStatus> {
+    preferences
+        .map(|preferences| preferences.midi_inputs.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|name| {
+            desktop_audio::midi_source_descriptor(&name)
+                .ok()
+                .map(|source| MidiSourceStatus {
+                    connected: present.contains(&name),
+                    source,
+                })
+        })
+        .collect()
+}
+
 #[derive(Clone, Default)]
 struct VirtualMidiClientState {
     notes: BTreeSet<(u8, u8)>,
     channels: BTreeSet<u8>,
+    /// Canonical host-owned source selected for this forwarding client.
+    /// `None` means an actual virtual controller such as the touch keyboard.
+    midi_source: Option<MidiSourceDescriptor>,
+}
+
+#[cfg(windows)]
+struct DesktopMidiLearn {
+    id: u64,
+    started_at: Instant,
+    candidate: Option<MidiLearnCandidate>,
 }
 
 enum PluginInstallEvent {
@@ -290,6 +443,9 @@ struct DesktopApp {
     plugin_install: Option<PluginInstallTask>,
     performance_repository: PerformanceRepository,
     state_store: PluginStateStore,
+    /// Runtime controller defaults. They are deliberately not persisted as
+    /// user MIDI links; the signed controller package registers them again.
+    controller_semantic_profiles: BTreeMap<String, RegisteredSemanticProfile>,
     virtual_midi: BTreeMap<ClientId, VirtualMidiClientState>,
     next_program_draft_id: u64,
     next_audition_lease_id: u64,
@@ -319,6 +475,10 @@ struct DesktopApp {
     /// the cached scan.
     #[cfg(windows)]
     audio_inventory_cache: Option<(Instant, desktop_audio::AudioInventory)>,
+    #[cfg(windows)]
+    midi_learn: Option<DesktopMidiLearn>,
+    #[cfg(windows)]
+    next_midi_learn_id: u64,
     /// Raised on exit so the controller supervisor reaps its drivers.
     controller_shutdown: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
@@ -414,6 +574,12 @@ impl DesktopApp {
                     warnings.push(format!("Could not restore master pan: {error:#}"));
                     None
                 });
+        let restored_parameter_links = session_checkpoint
+            .parameter_links(&session_id)
+            .unwrap_or_else(|error| {
+                warnings.push(format!("Could not restore MIDI parameter links: {error:#}"));
+                Vec::new()
+            });
         let performance_repository = PerformanceRepository::load_or_empty(Some(&options.data_root))
             .context("loading Desktop performance library")?;
         let state_store = PluginStateStore::new(Some(&options.data_root))
@@ -511,11 +677,18 @@ impl DesktopApp {
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
             state.instances = plugins.iter().map(plugin_session_state).collect();
+            state.parameter_links = restored_parameter_links.clone();
             menu.sync_active_mode(active_mode_from_surface(state.active_mode));
         }
         #[cfg(windows)]
         if let Some(audio) = &audio {
             sync_desktop_audio(audio, &session, &menu)?;
+            audio.replace_parameter_links(compile_desktop_parameter_links(
+                &restored_parameter_links,
+                &plugins,
+                &performance_repository,
+                &BTreeMap::new(),
+            )?)?;
         }
         if let Err(error) =
             session_checkpoint.save(&session.read().expect("session lock poisoned").clone())
@@ -577,6 +750,7 @@ impl DesktopApp {
             performance_repository,
             state_store,
             live_state_dirty: None,
+            controller_semantic_profiles: BTreeMap::new(),
             virtual_midi: BTreeMap::new(),
             next_program_draft_id: 1,
             next_audition_lease_id: 1,
@@ -596,6 +770,10 @@ impl DesktopApp {
             audio_last_stall: None,
             #[cfg(windows)]
             audio_inventory_cache: None,
+            #[cfg(windows)]
+            midi_learn: None,
+            #[cfg(windows)]
+            next_midi_learn_id: 1,
             controller_shutdown: None,
         })
     }
@@ -1441,11 +1619,97 @@ impl DesktopApp {
     }
 
     #[cfg(windows)]
+    fn observe_midi_learn(
+        &mut self,
+        source: MidiSourceKey,
+        length: u8,
+        data: [u8; 3],
+        observed_at: Instant,
+    ) {
+        let names = self
+            .audio_inventory_cache
+            .as_ref()
+            .map(|(_, inventory)| inventory.midi_inputs.clone())
+            .or_else(|| {
+                self.audio_preferences
+                    .as_ref()
+                    .map(|preferences| preferences.midi_inputs.clone())
+            })
+            .unwrap_or_default();
+        let Some(name) = names
+            .into_iter()
+            .find(|name| desktop_audio::stable_midi_source_key(name) == source)
+        else {
+            return;
+        };
+        let Ok(descriptor) = desktop_audio::midi_source_descriptor(&name) else {
+            return;
+        };
+        self.observe_midi_learn_from_source(descriptor, length, data, observed_at);
+    }
+
+    #[cfg(windows)]
+    fn observe_midi_learn_from_source(
+        &mut self,
+        descriptor: MidiSourceDescriptor,
+        length: u8,
+        data: [u8; 3],
+        observed_at: Instant,
+    ) {
+        if self
+            .midi_learn
+            .as_ref()
+            .is_none_or(|learn| learn.candidate.is_some() || observed_at < learn.started_at)
+        {
+            return;
+        }
+        let Ok(packet) = RoutedMidiPacket::new(0, &data[..usize::from(length)]) else {
+            return;
+        };
+        let message = match packet.kind() {
+            rackforge_midi_api::MidiMessageKind::ControlChange => {
+                ParameterLinkMessage::ControlChange {
+                    controller: packet.data[1],
+                }
+            }
+            rackforge_midi_api::MidiMessageKind::PitchBend => ParameterLinkMessage::PitchBend,
+            rackforge_midi_api::MidiMessageKind::Note => ParameterLinkMessage::Note {
+                note: packet.data[1],
+            },
+            rackforge_midi_api::MidiMessageKind::ChannelPressure => {
+                ParameterLinkMessage::ChannelPressure
+            }
+            rackforge_midi_api::MidiMessageKind::PolyPressure => {
+                ParameterLinkMessage::PolyPressure {
+                    note: packet.data[1],
+                }
+            }
+            rackforge_midi_api::MidiMessageKind::ProgramChange => return,
+        };
+        if let Some(learn) = self.midi_learn.as_mut() {
+            learn.candidate = Some(MidiLearnCandidate {
+                source: descriptor,
+                channel: MidiChannel::from_zero_based(packet.data[0] & 0x0f)
+                    .expect("MIDI packet channel is valid"),
+                message,
+            });
+        }
+    }
+
+    #[cfg(windows)]
     fn handle_controller_event(&mut self, event: desktop_audio::DesktopControllerEvent) {
         use desktop_audio::DesktopControllerEvent;
         use keylab_essential_mk3::protocol::InputPhase;
 
         match event {
+            DesktopControllerEvent::MidiObserved {
+                source,
+                length,
+                data,
+                observed_at,
+            } => {
+                self.observe_midi_learn(source, length, data, observed_at);
+            }
             DesktopControllerEvent::Connected => {
                 self.status = "Arturia KeyLab connected · LITTLE active".into();
                 self.render_controller_screen();
@@ -2203,10 +2467,37 @@ impl DesktopApp {
         }
     }
 
+    fn replace_parameter_links(&mut self, links: Vec<ParameterLink>) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let compiled = compile_desktop_parameter_links(
+                &links,
+                &self.plugins,
+                &self.performance_repository,
+                &self.controller_semantic_profiles,
+            )
+            .map_err(|error| format!("Could not compile MIDI parameter links: {error:#}"))?;
+            self.audio
+                .as_ref()
+                .ok_or_else(|| "Desktop audio is unavailable".to_owned())?
+                .replace_parameter_links(compiled)
+                .map_err(|error| format!("Could not apply MIDI parameter links: {error:#}"))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = links;
+            Err("Desktop audio is unavailable".into())
+        }
+    }
+
     fn handle_web_control(&mut self, request: ControlRequest) -> ControlResponse {
         let envelope = match request {
-            ControlRequest::VirtualMidi { client_id, message } => {
-                return self.accept_virtual_midi(client_id, message);
+            ControlRequest::VirtualMidi {
+                client_id,
+                source_name,
+                message,
+            } => {
+                return self.accept_virtual_midi(client_id, source_name, message);
             }
             ControlRequest::ReleaseVirtualMidi { client_id } => {
                 return self.release_virtual_midi(client_id);
@@ -2256,6 +2547,51 @@ impl DesktopApp {
             command_id,
         };
         let result = match envelope.command {
+            SessionCommand::UpsertParameterLink { link } => {
+                let mut links = self
+                    .session
+                    .read()
+                    .expect("session lock poisoned")
+                    .parameter_links
+                    .clone();
+                if let Some(existing) = links.iter_mut().find(|existing| existing.id == link.id) {
+                    *existing = link.clone();
+                } else {
+                    links.push(link.clone());
+                }
+                self.replace_parameter_links(links).and_then(|()| {
+                    let events = self.apply_program_events(
+                        vec![SessionEvent::ParameterLinkUpserted { link }],
+                        Some(command_ref),
+                    )?;
+                    self.persist_session_checkpoint();
+                    Ok(events)
+                })
+            }
+            SessionCommand::RemoveParameterLink { link_id } => {
+                let current = self
+                    .session
+                    .read()
+                    .expect("session lock poisoned")
+                    .parameter_links
+                    .clone();
+                if !current.iter().any(|link| link.id == link_id) {
+                    Err(format!("Unknown MIDI parameter link {link_id}"))
+                } else {
+                    let links = current
+                        .into_iter()
+                        .filter(|link| link.id != link_id)
+                        .collect();
+                    self.replace_parameter_links(links).and_then(|()| {
+                        let events = self.apply_program_events(
+                            vec![SessionEvent::ParameterLinkRemoved { link_id }],
+                            Some(command_ref),
+                        )?;
+                        self.persist_session_checkpoint();
+                        Ok(events)
+                    })
+                }
+            }
             SessionCommand::SetMasterLevel { level } => {
                 self.set_master_level(level, Some(command_ref))
             }
@@ -2268,6 +2604,10 @@ impl DesktopApp {
                 instance_id,
                 sound_id,
             } => self.select_sound(&instance_id, &sound_id, Some(command_ref)),
+            SessionCommand::ActivateSurface {
+                instance_id,
+                request,
+            } => self.activate_surface(instance_id, request, Some(command_ref)),
             SessionCommand::BeginProgramEdit {
                 instance_id,
                 program_id,
@@ -2349,6 +2689,8 @@ impl DesktopApp {
                 controller_id,
                 controls,
                 actions,
+                midi_source_name,
+                semantic_profile,
             } => {
                 // A controller driver reserving its host-control CCs. On this
                 // host the driver owns its surface endpoint exclusively (the
@@ -2364,13 +2706,86 @@ impl DesktopApp {
                 {
                     Err("invalid reserved host binding registration".into())
                 } else {
-                    println!(
-                        "DESKTOP_HOST_BINDINGS_RESERVED controller={} controls={} actions={}",
-                        controller_id,
-                        controls.len(),
-                        actions.len()
-                    );
-                    Ok(Vec::new())
+                    (|| -> Result<Vec<EventEnvelope>, String> {
+                        if let Some(profile) = &semantic_profile {
+                            profile.validate_against_reserved(&controls, &actions)?;
+                        }
+                        let previous = self
+                            .controller_semantic_profiles
+                            .get(&controller_id)
+                            .cloned();
+                        match semantic_profile {
+                            Some(profile) => {
+                                #[cfg(windows)]
+                                let resolved_source =
+                                    midi_source_name.as_deref().and_then(|name| {
+                                        self.approved_midi_source(name).ok().map(|source| {
+                                            (source.id.as_str().to_owned(), source.name)
+                                        })
+                                    });
+                                #[cfg(not(windows))]
+                                let resolved_source: Option<(
+                                    String,
+                                    String,
+                                )> = None;
+                                let (runtime_source_id, runtime_source_name) = resolved_source
+                                    .map(|(id, name)| (Some(id), Some(name)))
+                                    .unwrap_or_else(|| {
+                                        if midi_source_name.is_none() {
+                                            previous.as_ref().map_or((None, None), |registered| {
+                                                (
+                                                    registered.runtime_source_id.clone(),
+                                                    registered.runtime_source_name.clone(),
+                                                )
+                                            })
+                                        } else {
+                                            (None, None)
+                                        }
+                                    });
+                                self.controller_semantic_profiles.insert(
+                                    controller_id.clone(),
+                                    RegisteredSemanticProfile {
+                                        profile,
+                                        runtime_source_id,
+                                        runtime_source_name,
+                                    },
+                                );
+                            }
+                            None => {
+                                self.controller_semantic_profiles.remove(&controller_id);
+                            }
+                        }
+                        let explicit_links = self
+                            .session
+                            .read()
+                            .expect("session lock poisoned")
+                            .parameter_links
+                            .clone();
+                        if self.audio.is_some() {
+                            if let Err(error) = self.replace_parameter_links(explicit_links) {
+                                match previous {
+                                    Some(profile) => {
+                                        self.controller_semantic_profiles
+                                            .insert(controller_id.clone(), profile);
+                                    }
+                                    None => {
+                                        self.controller_semantic_profiles.remove(&controller_id);
+                                    }
+                                }
+                                return Err(error);
+                            }
+                        }
+                        println!(
+                            "DESKTOP_HOST_BINDINGS_RESERVED controller={} controls={} actions={} semantic={}",
+                            controller_id,
+                            controls.len(),
+                            actions.len(),
+                            self.controller_semantic_profiles
+                                .get(&controller_id)
+                                .map_or(0, |registered| registered.profile.controls.len())
+                        );
+                        Ok(Vec::new())
+                    })()
                 }
             }
             other => Err(format!(
@@ -2397,9 +2812,15 @@ impl DesktopApp {
         }
     }
 
+    #[cfg(windows)]
+    fn approved_midi_source(&self, source_name: &str) -> Result<MidiSourceDescriptor, String> {
+        approved_midi_source(self.audio_preferences.as_ref(), source_name)
+    }
+
     fn accept_virtual_midi(
         &mut self,
         client_id: ClientId,
+        source_name: Option<String>,
         message: VirtualMidiMessage,
     ) -> ControlResponse {
         if let Err(message) = message.validate() {
@@ -2412,15 +2833,42 @@ impl DesktopApp {
             };
         }
         #[cfg(windows)]
-        let result = self
-            .audio
-            .as_ref()
-            .ok_or_else(|| "Desktop audio is unavailable".to_owned())
-            .and_then(|audio| {
-                audio
-                    .inject_midi_messages(vec![message.bytes()])
-                    .map_err(|error| error.to_string())
-            });
+        let midi_source = match source_name
+            .as_deref()
+            .map(|name| self.approved_midi_source(name))
+            .transpose()
+        {
+            Ok(descriptor) => descriptor,
+            Err(message) => {
+                return ControlResponse::Error {
+                    code: ControlErrorCode::Unavailable,
+                    message,
+                    current_revision: Some(
+                        self.session.read().expect("session lock poisoned").revision,
+                    ),
+                };
+            }
+        };
+        #[cfg(not(windows))]
+        let midi_source: Option<MidiSourceDescriptor> = None;
+        #[cfg(windows)]
+        let result = {
+            let routing_descriptor = midi_source
+                .clone()
+                .unwrap_or_else(|| virtual_midi_source_descriptor(&client_id));
+            let source = desktop_audio::stable_midi_source_key_from_id(&routing_descriptor.id);
+            if let Some(descriptor) = midi_source.clone() {
+                self.observe_midi_learn_from_source(descriptor, 3, message.bytes(), Instant::now());
+            }
+            self.audio
+                .as_ref()
+                .ok_or_else(|| "Desktop audio is unavailable".to_owned())
+                .and_then(|audio| {
+                    audio
+                        .inject_midi_messages_from(source, vec![message.bytes()])
+                        .map_err(|error| error.to_string())
+                })
+        };
         #[cfg(not(windows))]
         let result: Result<(), String> = Err("Desktop audio is unavailable".into());
         if let Err(message) = result {
@@ -2433,6 +2881,7 @@ impl DesktopApp {
             };
         }
         let state = self.virtual_midi.entry(client_id.clone()).or_default();
+        state.midi_source = midi_source;
         let channel = message.channel();
         state.channels.insert(channel);
         if let Some(note) = message.note_on() {
@@ -2463,15 +2912,21 @@ impl DesktopApp {
             }
         }
         #[cfg(windows)]
-        let result = self
-            .audio
-            .as_ref()
-            .ok_or_else(|| "Desktop audio is unavailable".to_owned())
-            .and_then(|audio| {
-                audio
-                    .inject_midi_messages(messages)
-                    .map_err(|error| error.to_string())
-            });
+        let result = {
+            let descriptor = state
+                .midi_source
+                .clone()
+                .unwrap_or_else(|| virtual_midi_source_descriptor(&client_id));
+            let source = desktop_audio::stable_midi_source_key_from_id(&descriptor.id);
+            self.audio
+                .as_ref()
+                .ok_or_else(|| "Desktop audio is unavailable".to_owned())
+                .and_then(|audio| {
+                    audio
+                        .inject_midi_messages_from(source, messages)
+                        .map_err(|error| error.to_string())
+                })
+        };
         #[cfg(not(windows))]
         let result: Result<(), String> = {
             let _ = messages;
@@ -2492,6 +2947,163 @@ impl DesktopApp {
 
     fn handle_performance_control(&mut self, request: ControlRequest) -> ControlResponse {
         match request {
+            ControlRequest::MidiSources => {
+                #[cfg(windows)]
+                {
+                    let inventory = match self.scan_inventory() {
+                        Ok(inventory) => inventory,
+                        Err(error) => {
+                            return ControlResponse::Error {
+                                code: ControlErrorCode::Unavailable,
+                                message: format!("Could not scan MIDI inputs: {error:#}"),
+                                current_revision: Some(
+                                    self.session.read().expect("session lock poisoned").revision,
+                                ),
+                            };
+                        }
+                    };
+                    let present = inventory
+                        .midi_inputs
+                        .iter()
+                        .cloned()
+                        .collect::<BTreeSet<_>>();
+                    let sources =
+                        approved_midi_source_statuses(self.audio_preferences.as_ref(), &present);
+                    ControlResponse::MidiSources { sources }
+                }
+                #[cfg(not(windows))]
+                {
+                    ControlResponse::MidiSources {
+                        sources: Vec::new(),
+                    }
+                }
+            }
+            ControlRequest::BeginMidiLearn {
+                instance_id,
+                parameter_index,
+            } => {
+                #[cfg(windows)]
+                {
+                    let plugin_id = self
+                        .plugins
+                        .iter()
+                        .find(|plugin| plugin.instance_id == instance_id)
+                        .map(|plugin| plugin.plugin_id.as_str())
+                        .or_else(|| {
+                            self.performance_repository
+                                .library()
+                                .racks
+                                .iter()
+                                .flat_map(|rack| rack.slots.iter())
+                                .find(|slot| slot.id.as_str() == instance_id)
+                                .map(|slot| slot.plugin_id.as_str())
+                        });
+                    let parameter = plugin_id
+                        .and_then(|plugin_id| {
+                            self.plugins
+                                .iter()
+                                .find(|plugin| plugin.plugin_id == plugin_id)
+                        })
+                        .and_then(|plugin| {
+                            plugin
+                                .runtime
+                                .parameters()
+                                .parameters
+                                .iter()
+                                .find(|parameter| parameter.index == parameter_index)
+                        });
+                    if parameter.is_none_or(|parameter| {
+                        parameter.flags.read_only
+                            || matches!(
+                                parameter.kind,
+                                rackforge_plugin_api::ParameterKind::Meter { .. }
+                            )
+                    }) {
+                        return ControlResponse::Error {
+                            code: ControlErrorCode::InvalidRequest,
+                            message: format!("Parameter {parameter_index} is missing or read-only"),
+                            current_revision: Some(
+                                self.session.read().expect("session lock poisoned").revision,
+                            ),
+                        };
+                    }
+                    let learn_id = self.next_midi_learn_id;
+                    self.next_midi_learn_id = self.next_midi_learn_id.wrapping_add(1).max(1);
+                    self.midi_learn = Some(DesktopMidiLearn {
+                        id: learn_id,
+                        started_at: Instant::now(),
+                        candidate: None,
+                    });
+                    ControlResponse::MidiLearnStarted { learn_id }
+                }
+                #[cfg(not(windows))]
+                {
+                    ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message: "MIDI Learn is unavailable".into(),
+                        current_revision: None,
+                    }
+                }
+            }
+            ControlRequest::MidiLearnStatus { learn_id } => {
+                #[cfg(windows)]
+                {
+                    match self
+                        .midi_learn
+                        .as_ref()
+                        .filter(|learn| learn.id == learn_id)
+                    {
+                        Some(learn) => ControlResponse::MidiLearnStatus {
+                            learn_id,
+                            candidate: learn.candidate.clone(),
+                        },
+                        None => ControlResponse::Error {
+                            code: ControlErrorCode::NotFound,
+                            message: format!("MIDI Learn session {learn_id} does not exist"),
+                            current_revision: Some(
+                                self.session.read().expect("session lock poisoned").revision,
+                            ),
+                        },
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message: "MIDI Learn is unavailable".into(),
+                        current_revision: None,
+                    }
+                }
+            }
+            ControlRequest::CancelMidiLearn { learn_id } => {
+                #[cfg(windows)]
+                {
+                    if self
+                        .midi_learn
+                        .as_ref()
+                        .is_some_and(|learn| learn.id == learn_id)
+                    {
+                        self.midi_learn = None;
+                        ControlResponse::MidiLearnCancelled { learn_id }
+                    } else {
+                        ControlResponse::Error {
+                            code: ControlErrorCode::NotFound,
+                            message: format!("MIDI Learn session {learn_id} does not exist"),
+                            current_revision: Some(
+                                self.session.read().expect("session lock poisoned").revision,
+                            ),
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message: "MIDI Learn is unavailable".into(),
+                        current_revision: None,
+                    }
+                }
+            }
             ControlRequest::PerformanceSnapshot => ControlResponse::PerformanceSnapshot {
                 snapshot: Box::new(self.performance_snapshot()),
             },
@@ -3198,6 +3810,45 @@ impl DesktopApp {
         }
         self.persist_session_checkpoint();
         Ok(vec![event])
+    }
+
+    fn activate_surface(
+        &mut self,
+        instance_id: InstanceId,
+        request: SurfaceActivationRequest,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        {
+            let session = self.session.read().expect("session lock poisoned");
+            validate_desktop_surface_activation(&session, &instance_id, &request)?;
+        }
+
+        #[cfg(windows)]
+        let response = self
+            .audio
+            .as_ref()
+            .ok_or_else(|| "Desktop audio is unavailable".to_owned())?
+            .activate_surface(instance_id.as_str(), request.clone())
+            .map_err(|error| format!("Could not activate the plugin surface: {error:#}"))?;
+        #[cfg(not(windows))]
+        let response: rackforge_surface_api::SurfaceActivationResponse = {
+            let _ = (&instance_id, &request);
+            return Err("Desktop plugin surfaces require the Windows audio runtime".into());
+        };
+        response
+            .validate()
+            .map_err(|error| format!("Plugin returned an invalid surface response: {error}"))?;
+
+        let events = self.apply_program_events(
+            vec![SessionEvent::SurfaceActivated {
+                instance_id,
+                request,
+                response,
+            }],
+            command,
+        )?;
+        self.status = "Returned to the active LITTLE surface".into();
+        Ok(events)
     }
 
     fn allocate_program_id(counter: &mut u64) -> u64 {
@@ -4132,6 +4783,31 @@ fn active_mode_from_surface(mode: SurfaceMode) -> ActiveMode {
     }
 }
 
+fn validate_desktop_surface_activation(
+    session: &SessionState,
+    instance_id: &InstanceId,
+    request: &SurfaceActivationRequest,
+) -> Result<(), String> {
+    request.validate().map_err(|error| error.to_string())?;
+    let instance = session
+        .instance(instance_id)
+        .ok_or_else(|| format!("Unknown plugin instance: {instance_id}"))?;
+    if session.active_instance_id.as_ref() != Some(instance_id) {
+        return Err(format!("Plugin instance {instance_id} is not active"));
+    }
+    if !instance
+        .ui_layouts
+        .iter()
+        .any(|layout| layout == &request.layout_id)
+    {
+        return Err(format!(
+            "Plugin {} does not expose layout {}",
+            instance.plugin_id, request.layout_id
+        ));
+    }
+    Ok(())
+}
+
 fn desktop_active_mode_events(session: &SessionState, mode: SurfaceMode) -> Vec<SessionEvent> {
     let mut events = vec![SessionEvent::ActiveModeChanged { mode }];
     if mode == SurfaceMode::Play && session.live.active.is_some() {
@@ -4290,11 +4966,35 @@ fn start_desktop_audio(
 /// machine has its controller without anyone running a command.
 fn ensure_bundled_controller(rackforge_root: &Path) {
     let store = rackforge_controller_package::PackageStore::new(rackforge_root.join("controllers"));
-    let manifest_text = keylab_essential_mk3::controller::PACKAGE_MANIFEST;
+    let driver = BUNDLED_CONTROLLER_DRIVER
+        .map(|bytes| bytes.to_vec())
+        .or_else(|| {
+            std::env::current_exe().ok().and_then(|exe| {
+                fs::read(
+                    exe.parent()?
+                        .join("rackforge-arturia-keylab-essential-mk3-driver.exe"),
+                )
+                .ok()
+            })
+        });
+    let Some(driver) = driver else {
+        eprintln!("DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=driver-binary-unavailable");
+        return;
+    };
+    let manifest_text = match rackforge_controller_package::stamp_bundled_manifest(
+        keylab_essential_mk3::controller::PACKAGE_MANIFEST,
+        &[("windows-x86-64", driver.as_slice())],
+    ) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            eprintln!("DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=manifest-invalid error={error}");
+            return;
+        }
+    };
     let Ok(manifest) =
-        toml::from_str::<rackforge_controller_package::ControllerPackageManifest>(manifest_text)
+        toml::from_str::<rackforge_controller_package::ControllerPackageManifest>(&manifest_text)
     else {
-        eprintln!("DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=manifest-invalid");
+        eprintln!("DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=stamped-manifest-invalid");
         return;
     };
     let already = store
@@ -4308,29 +5008,23 @@ fn ensure_bundled_controller(rackforge_root: &Path) {
     if already {
         return;
     }
-    let Some(driver) = std::env::current_exe().ok().and_then(|exe| {
-        let candidate = exe
-            .parent()?
-            .join("rackforge-arturia-keylab-essential-mk3-driver.exe");
-        candidate.is_file().then_some(candidate)
-    }) else {
-        eprintln!("DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=driver-binary-not-beside-exe");
-        return;
-    };
     let staging = rackforge_root
         .join("controllers")
         .join("staging")
         .join(&manifest.id);
     let staged = (|| -> std::io::Result<()> {
+        if staging.exists() {
+            fs::remove_dir_all(&staging)?;
+        }
         let bin = staging.join("bin").join("windows-x86-64");
         fs::create_dir_all(&bin)?;
         fs::write(
             staging.join(rackforge_controller_package::CONTROLLER_MANIFEST_FILE),
-            manifest_text,
+            &manifest_text,
         )?;
-        fs::copy(
-            &driver,
+        fs::write(
             bin.join("rackforge-arturia-keylab-essential-mk3-driver.exe"),
+            &driver,
         )?;
         Ok(())
     })();
@@ -5067,6 +5761,50 @@ mod tests {
     }
 
     #[test]
+    fn desktop_accepts_little_return_for_the_active_compatible_plugin() {
+        let instance_id = InstanceId::new("desktop.org.rackforge.rf-106").unwrap();
+        let mut session = SessionState::new(SessionId::new("test.desktop-little").unwrap());
+        session.active_mode = SurfaceMode::Play;
+        session.active_instance_id = Some(instance_id.clone());
+        session.instances.push(PluginInstanceState {
+            instance_id: instance_id.clone(),
+            plugin_id: "org.rackforge.rf-106".into(),
+            plugin_name: "RF-106".into(),
+            ui_layouts: vec!["little@1".into()],
+            config_available: false,
+            banks: Vec::new(),
+            sounds: vec![SoundSummary {
+                id: "factory.rf106.002".into(),
+                name: "A13 Trumpet".into(),
+                bank: None,
+                detail: None,
+                category: None,
+                tags: Vec::new(),
+                editable: false,
+            }],
+            selected_sound_id: Some("factory.rf106.002".into()),
+        });
+        let request = SurfaceActivationRequest::return_to(
+            "little@1",
+            SurfaceMode::Play,
+            Some("factory.rf106.002".into()),
+        );
+
+        assert!(validate_desktop_surface_activation(&session, &instance_id, &request).is_ok());
+
+        let wrong_layout = SurfaceActivationRequest::return_to(
+            "unknown@1",
+            SurfaceMode::Play,
+            Some("factory.rf106.002".into()),
+        );
+        assert!(
+            validate_desktop_surface_activation(&session, &instance_id, &wrong_layout)
+                .unwrap_err()
+                .contains("does not expose layout")
+        );
+    }
+
+    #[test]
     fn desktop_play_transition_deactivates_the_live_target() {
         let mut session = SessionState::new(SessionId::new("test.desktop-live-mode").unwrap());
         let rack_id = RackId::new("rack.stage").unwrap();
@@ -5109,5 +5847,50 @@ mod tests {
                 mode: SurfaceMode::Live
             }]
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn midi_source_api_exposes_only_the_settings_allowlist() {
+        let preferences = desktop_audio::AudioPreferences {
+            schema_version: 1,
+            driver: "WASAPI".into(),
+            output_device: "Speakers".into(),
+            sample_rate_hz: 48_000,
+            buffer_frames: None,
+            output_gain_db: 0,
+            midi_inputs: vec!["Enabled Keyboard".into(), "Disconnected Keyboard".into()],
+        };
+        let present = BTreeSet::from(["Enabled Keyboard".into(), "Hidden Keyboard".into()]);
+        let sources = approved_midi_source_statuses(Some(&preferences), &present);
+
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].source.name, "Enabled Keyboard");
+        assert!(sources[0].connected);
+        assert_eq!(sources[1].source.name, "Disconnected Keyboard");
+        assert!(!sources[1].connected);
+        assert!(
+            sources
+                .iter()
+                .all(|source| source.source.name != "Hidden Keyboard")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn forwarded_controller_must_resolve_to_an_approved_physical_input() {
+        let preferences = desktop_audio::AudioPreferences {
+            schema_version: 1,
+            driver: "WASAPI".into(),
+            output_device: "Speakers".into(),
+            sample_rate_hz: 48_000,
+            buffer_frames: None,
+            output_gain_db: 0,
+            midi_inputs: vec!["KL Essential 61 mk3 MIDI".into()],
+        };
+        let physical =
+            approved_midi_source(Some(&preferences), "KL Essential 61 mk3 MIDI").unwrap();
+        assert_eq!(physical.name, "KL Essential 61 mk3 MIDI");
+        assert!(approved_midi_source(Some(&preferences), "Hidden MIDI").is_err());
     }
 }

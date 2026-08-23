@@ -60,6 +60,7 @@ import { RfLoader } from "./components/RfLoader";
 import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
 import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
 import { ModalDialog } from "./components/ModalDialog";
+import { ParameterLinkHost } from "./components/ParameterLinkHost";
 import {
   bindNativePluginResource,
   hostHaptic,
@@ -273,6 +274,45 @@ export function App() {
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
+    const preventNativeContextMenu = (event: MouseEvent) => event.preventDefault();
+    const attachedDocuments = new Set<Document>();
+    const attach = (target: Document) => {
+      if (attachedDocuments.has(target)) return;
+      attachedDocuments.add(target);
+      target.addEventListener("contextmenu", preventNativeContextMenu, true);
+    };
+    const scanFrames = () => {
+      attach(document);
+      for (const frame of document.querySelectorAll("iframe")) {
+        try {
+          if (frame.contentDocument) attach(frame.contentDocument);
+        } catch {
+          // Cross-origin content keeps its own browser policy. RackForge and
+          // installed plugin surfaces are intentionally same-origin.
+        }
+      }
+    };
+    const frameLoaded = (event: Event) => {
+      if (event.target instanceof HTMLIFrameElement) scanFrames();
+    };
+    scanFrames();
+    document.addEventListener("load", frameLoaded, true);
+    const observer = new MutationObserver(scanFrames);
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("load", frameLoaded, true);
+      for (const target of attachedDocuments) {
+        try {
+          target.removeEventListener("contextmenu", preventNativeContextMenu, true);
+        } catch {
+          // A navigated or removed iframe no longer needs cleanup.
+        }
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     const refresh = () =>
       hostJson<WebAuthStatus>("/api/v1/auth/status")
@@ -352,11 +392,13 @@ function RackForgeApp() {
       state,
       onStateChange,
       onSelectSound,
+      parameterLinkInstanceId,
     }: {
       instance: PluginInstance;
       state?: PluginStateReference;
       onStateChange: (state: PluginStateReference) => void;
       onSelectSound: (soundId: string) => Promise<unknown>;
+      parameterLinkInstanceId: string;
     }) => (
       <PluginFrame
         instance={instance}
@@ -365,6 +407,7 @@ function RackForgeApp() {
         isolatedState={state}
         onIsolatedStateChange={onStateChange}
         onSelectSound={onSelectSound}
+        parameterLinkInstanceId={parameterLinkInstanceId}
       />
     ),
     [],
@@ -3434,6 +3477,7 @@ function PluginConfigSurface({ instance }: { instance: PluginInstance }) {
 }
 
 const ISOLATED_PARAMETER_DEBOUNCE_MS = 48;
+const LIVE_PARAMETER_SYNC_MS = 100;
 
 interface PendingIsolatedParameterWrite {
   value: number;
@@ -3449,6 +3493,7 @@ export function PluginFrame({
   isolatedState,
   onIsolatedStateChange,
   onSelectSound,
+  parameterLinkInstanceId,
 }: {
   instance: PluginInstance;
   surface: PluginWebSurfaceKind;
@@ -3457,6 +3502,7 @@ export function PluginFrame({
   isolatedState?: PluginStateReference;
   onIsolatedStateChange?: (state: PluginStateReference) => void;
   onSelectSound?: (soundId: string) => Promise<unknown>;
+  parameterLinkInstanceId?: string;
 }) {
   const catalogDescriptor = usePluginDescriptor(instance.plugin_id);
   const descriptor = catalogDescriptor.descriptor;
@@ -3466,6 +3512,7 @@ export function PluginFrame({
       ? descriptor ? "ready" : "unavailable"
       : "loading";
   const [frameLoaded, setFrameLoaded] = useState(false);
+  const [frameDocumentGeneration, setFrameDocumentGeneration] = useState(0);
   // The splash's own lifecycle: the icon fill reaches the top, THEN the
   // whole overlay fades, THEN it unmounts. Removing it on iframe load was
   // an abrupt cut.
@@ -3477,6 +3524,7 @@ export function PluginFrame({
   const [resourceBusy, setResourceBusy] = useState<string | null>(null);
   const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const liveParameterValuesRef = useRef<Map<number, number>>(new Map());
   const pendingResourceRequestRef = useRef<string | null>(null);
   const isolatedStateRef = useRef<PluginStateReference | undefined>(isolatedState);
   const [isolatedContextState, setIsolatedContextState] = useState<
@@ -3565,6 +3613,14 @@ export function PluginFrame({
     return isolatedMaterializeRef.current;
   }, [instance.plugin_id, publishIsolatedState]);
 
+  const loadParameterSchemaForLink = useCallback(async () => {
+    if (isolated) {
+      const state = await ensureIsolatedState();
+      return requestPluginStateParameters(state);
+    }
+    return requestPluginParameters(instance.instance_id);
+  }, [ensureIsolatedState, instance.instance_id, isolated]);
+
   const flushIsolatedParameterWrite = useCallback((
     parameterIndex: number,
     pending: PendingIsolatedParameterWrite,
@@ -3636,12 +3692,140 @@ export function PluginFrame({
     isolatedWritesRef.current.clear();
   }, [sendPluginResponse]);
 
+  const resetParameterForLink = useCallback(async (parameterIndex: number) => {
+    const current = await loadParameterSchemaForLink();
+    const parameter = current.schema.parameters.find(
+      (candidate) => candidate.index === parameterIndex,
+    );
+    if (!parameter) throw new Error(`Plugin parameter ${parameterIndex} no longer exists.`);
+    if (parameter.flags.read_only || parameter.kind.type === "meter") {
+      throw new Error(`${parameter.name} is read-only and cannot be reset.`);
+    }
+
+    const selectedSoundId = isolated
+      ? isolatedContextState?.selected_sound_id
+      : instance.selected_sound_id;
+    let resetValue: number | undefined;
+    if (selectedSoundId) {
+      const programState = await materializePluginState(instance.plugin_id, selectedSoundId);
+      const programParameters = await requestPluginStateParameters(programState);
+      resetValue = programParameters.values.find(
+        (candidate) => candidate.index === parameterIndex,
+      )?.value;
+    }
+    if (resetValue === undefined) {
+      if ("default" in parameter.kind) {
+        resetValue = Number(parameter.kind.default);
+      } else if (parameter.kind.type === "trigger") {
+        resetValue = 0;
+      }
+    }
+    if (resetValue === undefined || !Number.isFinite(resetValue)) {
+      throw new Error(`No program value is available for ${parameter.name}.`);
+    }
+
+    let canonicalValue: number;
+    if (isolated) {
+      const pending = isolatedWritesRef.current.get(parameterIndex);
+      if (pending) {
+        window.clearTimeout(pending.timer);
+        flushIsolatedParameterWrite(parameterIndex, pending);
+      }
+      await isolatedWriteChainRef.current;
+      const base = await ensureIsolatedState();
+      const result = await setPluginStateParameter(base, parameterIndex, resetValue);
+      publishIsolatedState(result.state);
+      canonicalValue = result.value;
+    } else {
+      canonicalValue = await setPluginParameter(
+        instance.instance_id,
+        parameterIndex,
+        resetValue,
+      );
+    }
+
+    frameRef.current?.contentWindow?.postMessage(
+      {
+        protocol: "rackforge.plugin.web@1",
+        kind: "parameter_changed",
+        parameter_index: parameterIndex,
+        value: canonicalValue,
+      },
+      window.location.origin,
+    );
+  }, [
+    ensureIsolatedState,
+    flushIsolatedParameterWrite,
+    instance.instance_id,
+    instance.plugin_id,
+    instance.selected_sound_id,
+    isolated,
+    isolatedContextState?.selected_sound_id,
+    loadParameterSchemaForLink,
+    publishIsolatedState,
+  ]);
+
   const selectedSurface = descriptor?.surfaces.find(
     (candidate) => candidate.kind === surface,
   );
 
+  // Parameter changes can originate outside the iframe (MIDI Learn links,
+  // semantic .rfcontroller profiles, automation, or another RackForge
+  // surface). Keep the visible plugin UI synchronized with the canonical
+  // audio instance and publish only values that actually changed. The
+  // request is serialized and visibility-aware so slow bridges cannot build
+  // an unbounded polling backlog.
   useEffect(() => {
-    setFrameLoaded(false);
+    liveParameterValuesRef.current.clear();
+    if (!frameLoaded || isolated || !selectedSurface) return;
+
+    let cancelled = false;
+    let timer = 0;
+    const synchronize = async () => {
+      if (cancelled) return;
+      if (document.visibilityState !== "hidden") {
+        try {
+          const result = await requestPluginParameters(instance.instance_id);
+          if (cancelled) return;
+          const previous = liveParameterValuesRef.current;
+          for (const parameter of result.values) {
+            if (previous.get(parameter.index) === parameter.value) continue;
+            previous.set(parameter.index, parameter.value);
+            frameRef.current?.contentWindow?.postMessage(
+              {
+                protocol: "rackforge.plugin.web@1",
+                kind: "parameter_changed",
+                parameter_index: parameter.index,
+                value: parameter.value,
+              },
+              window.location.origin,
+            );
+          }
+        } catch {
+          // The regular plugin request path owns user-facing errors. A
+          // transient reconnect during background synchronization must not
+          // replace a useful plugin UI with repeated warnings.
+        }
+      }
+      if (!cancelled) {
+        timer = window.setTimeout(synchronize, LIVE_PARAMETER_SYNC_MS);
+      }
+    };
+    void synchronize();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      liveParameterValuesRef.current.clear();
+    };
+  }, [
+    frameDocumentGeneration,
+    frameLoaded,
+    instance.instance_id,
+    isolated,
+    selectedSurface?.entry_url,
+  ]);
+
+  useEffect(() => {
     setSplashDone(false);
     setSplashGone(false);
   }, [descriptor?.version, selectedSurface?.entry_url]);
@@ -3729,6 +3913,8 @@ export function PluginFrame({
         return;
       }
       if (event.data.kind === "ready") {
+        setFrameLoaded(true);
+        setFrameDocumentGeneration((generation) => generation + 1);
         send(context);
         return;
       }
@@ -4293,7 +4479,10 @@ export function PluginFrame({
           src={selectedSurface.entry_url}
           sandbox="allow-scripts allow-same-origin allow-downloads"
           referrerPolicy="same-origin"
-          onLoad={() => setFrameLoaded(true)}
+          onLoad={() => {
+            setFrameLoaded(true);
+            setFrameDocumentGeneration((generation) => generation + 1);
+          }}
         />
         {!splashGone && (
           <div
@@ -4331,6 +4520,15 @@ export function PluginFrame({
           </div>
         ) : null}
       </div>
+      <ParameterLinkHost
+        frameRef={frameRef}
+        frameLoaded={frameLoaded}
+        frameDocumentGeneration={frameDocumentGeneration}
+        instanceId={parameterLinkInstanceId ?? instance.instance_id}
+        links={snapshot?.parameter_links ?? []}
+        loadParameters={loadParameterSchemaForLink}
+        resetParameter={resetParameterForLink}
+      />
       {resourceRequest ? (
         <Suspense
           fallback={

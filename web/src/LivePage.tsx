@@ -86,6 +86,7 @@ interface LivePageProps {
     state?: PluginStateReference;
     onStateChange: (state: PluginStateReference) => void;
     onSelectSound: (soundId: string) => Promise<unknown>;
+    parameterLinkInstanceId: string;
   }) => ReactNode;
 }
 

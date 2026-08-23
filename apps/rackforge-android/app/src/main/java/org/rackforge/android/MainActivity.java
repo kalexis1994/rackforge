@@ -63,6 +63,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -162,6 +163,9 @@ public final class MainActivity extends Activity {
     private int sharedUiBottomInsetPixels;
     private volatile boolean nativeSessionConnected;
     private long nativeSessionRevision;
+    private long nextMidiLearnId = 1;
+    private final Object midiLearnLock = new Object();
+    private MidiLearnState midiLearn;
     private final Map<String, VirtualMidiClientState> virtualMidiClients =
             new ConcurrentHashMap<>();
 
@@ -180,6 +184,25 @@ public final class MainActivity extends Activity {
     private static final class VirtualMidiClientState {
         final Set<Integer> notes = new HashSet<>();
         final Set<Integer> channels = new HashSet<>();
+    }
+
+    private static final class MidiSourceIdentity {
+        final String id;
+        final String name;
+
+        MidiSourceIdentity(String id, String name) {
+            this.id = id;
+            this.name = name;
+        }
+    }
+
+    private static final class MidiLearnState {
+        final long id;
+        JSONObject candidate;
+
+        MidiLearnState(long id) {
+            this.id = id;
+        }
     }
 
     private static native String installPluginFile(String archivePath, String storeRoot);
@@ -201,6 +224,12 @@ public final class MainActivity extends Activity {
     private static native String importPluginResourceArchive(
             String importerId, String archivePath, String resourceRoot);
     private static native void sendMidiMessage(int status, int data1, int data2, int length);
+    private static native void sendMidiMessageFromSource(
+            int sourceKey, int status, int data1, int data2, int length);
+    private static native void resetMidiSources();
+    private static native int registerMidiSource(
+            String sourceId, String displayName, boolean primary, String controllerId);
+    private static native boolean replaceParameterLinks(String linksJson);
     private static native void releaseMidiNotes();
     private static native String keyLabAcquirePlan();
     private static native String keyLabRestorePlan();
@@ -1417,7 +1446,8 @@ public final class MainActivity extends Activity {
                 .put("master_level", 1000)
                 .put("master_pan", 0)
                 .put("live", new JSONObject().put("mode", "rack"))
-                .put("instances", instances);
+                .put("instances", instances)
+                .put("parameter_links", parameterLinks());
         if (instances.length() > 0) snapshot.put("active_instance_id", "android-main");
         if (context != null && !context.isNull("program_draft")) {
             snapshot.put("program_draft", context.get("program_draft"));
@@ -1496,8 +1526,61 @@ public final class MainActivity extends Activity {
                 handlePluginParameterSessionRequest(operation, request);
                 return;
             }
+            if ("midi_sources".equals(operation)) {
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "midi_sources")
+                        .put("sources", midiSourceStatuses())
+                        .toString());
+                return;
+            }
+            if ("begin_midi_learn".equals(operation)) {
+                validateMidiLearnTarget(
+                        request.getString("instance_id"),
+                        request.getInt("parameter_index"));
+                long learnId;
+                synchronized (midiLearnLock) {
+                    learnId = nextMidiLearnId++;
+                    midiLearn = new MidiLearnState(learnId);
+                }
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "midi_learn_started")
+                        .put("learn_id", learnId)
+                        .toString());
+                return;
+            }
+            if ("midi_learn_status".equals(operation)) {
+                long learnId = request.getLong("learn_id");
+                JSONObject candidate;
+                synchronized (midiLearnLock) {
+                    if (midiLearn == null || midiLearn.id != learnId) {
+                        throw new IllegalArgumentException("Unknown MIDI Learn session " + learnId);
+                    }
+                    candidate = midiLearn.candidate;
+                }
+                JSONObject response = new JSONObject()
+                        .put("status", "midi_learn_status")
+                        .put("learn_id", learnId);
+                if (candidate != null) response.put("candidate", candidate);
+                emitNativeSessionEvent("message", response.toString());
+                return;
+            }
+            if ("cancel_midi_learn".equals(operation)) {
+                long learnId = request.getLong("learn_id");
+                synchronized (midiLearnLock) {
+                    if (midiLearn == null || midiLearn.id != learnId) {
+                        throw new IllegalArgumentException("Unknown MIDI Learn session " + learnId);
+                    }
+                    midiLearn = null;
+                }
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "midi_learn_cancelled")
+                        .put("learn_id", learnId)
+                        .toString());
+                return;
+            }
             if (!"dispatch".equals(operation)) return;
-            JSONObject command = request.getJSONObject("envelope").getJSONObject("command");
+            JSONObject envelope = request.getJSONObject("envelope");
+            JSONObject command = envelope.getJSONObject("command");
             String type = command.optString("type");
             switch (type) {
                 case "set_active_mode" -> runOnUiThread(() -> {
@@ -1507,6 +1590,14 @@ public final class MainActivity extends Activity {
                     else showPlay();
                 });
                 case "select_sound" -> selectControllerSound(command.optString("sound_id"));
+                case "upsert_parameter_link" -> {
+                    upsertParameterLink(command.getJSONObject("link"));
+                    confirmSharedCommand(envelope);
+                }
+                case "remove_parameter_link" -> {
+                    removeParameterLink(command.getString("link_id"));
+                    confirmSharedCommand(envelope);
+                }
                 default -> Log.d("RackForge", "Shared UI command pending on Android: " + type);
             }
         } catch (Throwable error) {
@@ -1521,6 +1612,99 @@ public final class MainActivity extends Activity {
                 // Logging above is the final fallback when even JSON encoding fails.
             }
         }
+    }
+
+    private JSONArray parameterLinks() {
+        try {
+            return new JSONArray(preferences.getString("session.parameter_links", "[]"));
+        } catch (Throwable error) {
+            Log.e("RackForge", "Discarding malformed persisted MIDI parameter links", error);
+            preferences.edit().remove("session.parameter_links").apply();
+            return new JSONArray();
+        }
+    }
+
+    private void validateMidiLearnTarget(String instanceId, int parameterIndex) throws Exception {
+        if (!"android-main".equals(instanceId)) {
+            throw new IllegalArgumentException(
+                    "Android MIDI Learn cannot audition inactive Rack Slot " + instanceId);
+        }
+        JSONObject response = new JSONObject(pluginParameterCommand(
+                "plugin_parameters",
+                new JSONObject().put("instance_id", instanceId).toString()));
+        JSONArray parameters = response.getJSONObject("schema").getJSONArray("parameters");
+        for (int index = 0; index < parameters.length(); index++) {
+            JSONObject parameter = parameters.getJSONObject(index);
+            if (parameter.optInt("index", -1) != parameterIndex) continue;
+            JSONObject flags = parameter.optJSONObject("flags");
+            JSONObject kind = parameter.optJSONObject("kind");
+            if ((flags != null && flags.optBoolean("read_only"))
+                    || (kind != null && "meter".equals(kind.optString("type")))) {
+                throw new IllegalArgumentException(
+                        parameter.optString("name", "Parameter") + " is read-only");
+            }
+            return;
+        }
+        throw new IllegalArgumentException("Unknown plugin parameter " + parameterIndex);
+    }
+
+    private void upsertParameterLink(JSONObject link) throws Exception {
+        JSONArray current = parameterLinks();
+        JSONArray updated = new JSONArray();
+        String id = link.getString("id");
+        boolean replaced = false;
+        for (int index = 0; index < current.length(); index++) {
+            JSONObject existing = current.getJSONObject(index);
+            if (id.equals(existing.optString("id"))) {
+                updated.put(link);
+                replaced = true;
+            } else {
+                updated.put(existing);
+            }
+        }
+        if (!replaced) updated.put(link);
+        applyAndPersistParameterLinks(updated);
+    }
+
+    private void removeParameterLink(String linkId) throws Exception {
+        JSONArray current = parameterLinks();
+        JSONArray updated = new JSONArray();
+        boolean found = false;
+        for (int index = 0; index < current.length(); index++) {
+            JSONObject existing = current.getJSONObject(index);
+            if (linkId.equals(existing.optString("id"))) {
+                found = true;
+            } else {
+                updated.put(existing);
+            }
+        }
+        if (!found) throw new IllegalArgumentException("Unknown MIDI parameter link " + linkId);
+        applyAndPersistParameterLinks(updated);
+    }
+
+    private void applyAndPersistParameterLinks(JSONArray links) {
+        if (!replaceParameterLinks(links.toString())) {
+            throw new IllegalStateException("The audio runtime rejected the MIDI parameter links");
+        }
+        preferences.edit().putString("session.parameter_links", links.toString()).apply();
+    }
+
+    private void syncParameterLinksToRuntime() {
+        if (!replaceParameterLinks(parameterLinks().toString())) {
+            throw new IllegalStateException("The audio runtime rejected the saved MIDI parameter links");
+        }
+    }
+
+    private void confirmSharedCommand(JSONObject envelope) throws Exception {
+        nativeSessionRevision++;
+        emitNativeSessionEvent("message", new JSONObject()
+                .put("status", "command_applied")
+                .put("client_id", envelope.getString("client_id"))
+                .put("command_id", envelope.getLong("command_id"))
+                .put("revision", nativeSessionRevision)
+                .put("events", new JSONArray())
+                .toString());
+        emitSessionSnapshot();
     }
 
     private void handlePluginParameterSessionRequest(
@@ -3985,6 +4169,7 @@ public final class MainActivity extends Activity {
         lastObservedRenderErrors = -1;
         lastObservedMidiDroppedEvents = -1;
         lastObservedMaximumCallbackUs = -1;
+        syncParameterLinksToRuntime();
         if (!startNativeAudio(selectedAudioDeviceId, latencyMode)) {
             throw new IllegalStateException("Native low-latency audio rejected the selected output");
         }
@@ -4273,6 +4458,8 @@ public final class MainActivity extends Activity {
         private final boolean keyLabSurface;
         private final boolean forwardMidi;
         private final int generation;
+        private final int sourceKey;
+        private final MidiSourceIdentity source;
         private int runningStatus = -1;
         private int messageStatus = -1;
         private int expectedDataBytes;
@@ -4280,10 +4467,13 @@ public final class MainActivity extends Activity {
         private final byte[] messageData = new byte[2];
         private boolean inSysEx;
 
-        MidiStreamDecoder(boolean keyLabSurface, boolean forwardMidi, int generation) {
+        MidiStreamDecoder(boolean keyLabSurface, boolean forwardMidi, int generation,
+                int sourceKey, MidiSourceIdentity source) {
             this.keyLabSurface = keyLabSurface;
             this.forwardMidi = forwardMidi;
             this.generation = generation;
+            this.sourceKey = sourceKey;
+            this.source = source;
         }
 
         synchronized void accept(byte[] bytes, int offset, int count) {
@@ -4337,6 +4527,7 @@ public final class MainActivity extends Activity {
             if (dataCount != expectedDataBytes) return;
             int data1 = messageData[0] & 0x7F;
             int data2 = expectedDataBytes > 1 ? messageData[1] & 0x7F : 0;
+            if (forwardMidi) observeMidiLearn(source, messageStatus, data1, data2);
             boolean consumed = false;
             if (keyLabSurface && (messageStatus & 0xF0) == 0xB0) {
                 String response = keyLabHandleMidi(messageStatus, data1, data2);
@@ -4349,7 +4540,8 @@ public final class MainActivity extends Activity {
                 }
             }
             if (!consumed && forwardMidi && audioRunning) {
-                sendMidiMessage(messageStatus, data1, data2, expectedDataBytes + 1);
+                sendMidiMessageFromSource(
+                        sourceKey, messageStatus, data1, data2, expectedDataBytes + 1);
             }
             messageStatus = runningStatus;
             dataCount = 0;
@@ -4498,6 +4690,7 @@ public final class MainActivity extends Activity {
         MidiManager manager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
         if (manager == null) return;
         int generation = midiGeneration;
+        AtomicInteger registeredSources = new AtomicInteger();
         Set<String> enabledInputs = preferences.getStringSet("midi.inputs", null);
         for (MidiDeviceInfo info : manager.getDevices()) {
             if (info.getType() != MidiDeviceInfo.TYPE_USB) continue;
@@ -4529,9 +4722,28 @@ public final class MainActivity extends Activity {
                         Log.i("RackForge", "KeyLab source port " + portInfo.getPortNumber()
                                 + " " + portInfo.getName() + " primary=" + keyLabPrimary);
                     }
+                    MidiSourceIdentity source = midiSourceIdentity(info, portInfo);
+                    final int sourceKey;
+                    if (forwardMidi) {
+                        try {
+                            sourceKey = registerMidiSource(
+                                    source.id,
+                                    source.name,
+                                    registeredSources.getAndIncrement() == 0,
+                                    keyLabPrimary
+                                            ? "org.rackforge.arturia-keylab-essential-mk3"
+                                            : "");
+                        } catch (Throwable error) {
+                            Log.e("RackForge", "Could not register MIDI source " + source.name, error);
+                            try { port.close(); } catch (Exception ignored) { }
+                            continue;
+                        }
+                    } else {
+                        sourceKey = 0;
+                    }
                     port.connect(new MidiReceiver() {
                         private final MidiStreamDecoder decoder = new MidiStreamDecoder(
-                                keyLabPrimary, forwardMidi, generation);
+                                keyLabPrimary, forwardMidi, generation, sourceKey, source);
 
                         @Override
                         public void onSend(byte[] data, int offset, int count, long timestamp) {
@@ -4719,6 +4931,91 @@ public final class MainActivity extends Activity {
         return name;
     }
 
+    private static MidiSourceIdentity midiSourceIdentity(
+            MidiDeviceInfo info, MidiDeviceInfo.PortInfo port) {
+        Bundle properties = info.getProperties();
+        String manufacturer = properties.getString(MidiDeviceInfo.PROPERTY_MANUFACTURER, "");
+        String product = properties.getString(MidiDeviceInfo.PROPERTY_PRODUCT, "");
+        String name = midiDeviceName(info);
+        String serial = properties.getString(MidiDeviceInfo.PROPERTY_SERIAL_NUMBER, "");
+        String portName = port.getName() == null ? "" : port.getName();
+        String seed = manufacturer + "\u001f" + product + "\u001f" + name + "\u001f"
+                + serial + "\u001f" + info.getType() + "\u001f" + port.getPortNumber()
+                + "\u001f" + portName;
+        String display = portName.isBlank() ? name : name + " · " + portName;
+        return new MidiSourceIdentity("android.midi." + sha256Hex(seed), display);
+    }
+
+    private static String sha256Hex(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte item : digest) hex.append(String.format(Locale.ROOT, "%02x", item & 0xff));
+            return hex.toString();
+        } catch (Exception error) {
+            throw new IllegalStateException("SHA-256 is unavailable", error);
+        }
+    }
+
+    private void observeMidiLearn(
+            MidiSourceIdentity source, int status, int data1, int data2) {
+        int kind = status & 0xF0;
+        JSONObject message = new JSONObject();
+        try {
+            switch (kind) {
+                case 0x80, 0x90 -> message.put("type", "note").put("note", data1);
+                case 0xA0 -> message.put("type", "poly_pressure").put("note", data1);
+                case 0xB0 -> message.put("type", "control_change").put("controller", data1);
+                case 0xD0 -> message.put("type", "channel_pressure");
+                case 0xE0 -> message.put("type", "pitch_bend");
+                default -> { return; }
+            }
+            JSONObject candidate = new JSONObject()
+                    .put("source", new JSONObject()
+                            .put("id", source.id)
+                            .put("name", source.name)
+                            .put("primary", false))
+                    .put("channel", (status & 0x0F) + 1)
+                    .put("message", message);
+            synchronized (midiLearnLock) {
+                if (midiLearn != null && midiLearn.candidate == null) {
+                    midiLearn.candidate = candidate;
+                }
+            }
+        } catch (Exception error) {
+            Log.e("RackForge", "Could not encode MIDI Learn candidate", error);
+        }
+    }
+
+    private JSONArray midiSourceStatuses() throws Exception {
+        LinkedHashMap<String, JSONObject> sources = new LinkedHashMap<>();
+        Set<String> enabledInputs = preferences.getStringSet("midi.inputs", null);
+        MidiManager manager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
+        if (manager != null) {
+            for (MidiDeviceInfo info : manager.getDevices()) {
+                if (info.getType() != MidiDeviceInfo.TYPE_USB) continue;
+                String deviceName = midiDeviceName(info);
+                if (enabledInputs != null && !enabledInputs.contains(deviceName)) continue;
+                boolean keyLab = isKeyLabDevice(info, manager);
+                for (MidiDeviceInfo.PortInfo port : info.getPorts()) {
+                    if (port.getType() != MidiDeviceInfo.PortInfo.TYPE_OUTPUT) continue;
+                    if (keyLab && !isPrimaryKeyLabPort(port)) continue;
+                    MidiSourceIdentity identity = midiSourceIdentity(info, port);
+                    sources.put(identity.id, new JSONObject()
+                            .put("source", new JSONObject()
+                                    .put("id", identity.id)
+                                    .put("name", identity.name)
+                                    .put("primary", sources.isEmpty()))
+                            .put("connected", true));
+                }
+            }
+        }
+        JSONArray result = new JSONArray();
+        for (JSONObject source : sources.values()) result.put(source);
+        return result;
+    }
+
     private void closeMidi() {
         synchronized (openKeyLabDestinations) {
             for (MidiInputPort port : openKeyLabDestinations.keySet()) {
@@ -4741,6 +5038,7 @@ public final class MainActivity extends Activity {
             for (MidiDevice device : openMidiDevices) try { device.close(); } catch (Exception ignored) { }
             openMidiDevices.clear();
         }
+        resetMidiSources();
     }
 
     private void renderDiagnostics() {

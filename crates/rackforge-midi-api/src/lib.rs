@@ -7,6 +7,7 @@ pub const MIDI_ROUTING_SCHEMA_VERSION: u32 = 1;
 pub const MIDI_CHANNEL_COUNT: u8 = 16;
 pub const DEFAULT_INPUT_BUS_ID: &str = "main";
 pub const MAX_TRANSPOSE_SEMITONES: i8 = 48;
+pub const PARAMETER_LINK_SCHEMA_VERSION: u32 = 1;
 
 macro_rules! string_id {
     ($name:ident) => {
@@ -38,6 +39,105 @@ string_id!(MidiSourceId);
 string_id!(MidiRouteId);
 string_id!(MidiTargetId);
 string_id!(MidiInputBusId);
+string_id!(ParameterLinkId);
+
+/// A host-owned mapping from one persistent MIDI control to one public plugin
+/// parameter. Plugin state remains opaque; links live with the RackForge
+/// session and are compiled against the parameter schema before audio starts.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterLink {
+    pub schema_version: u32,
+    pub id: ParameterLinkId,
+    pub instance_id: String,
+    pub parameter_index: u32,
+    pub source: ParameterLinkSource,
+    #[serde(default)]
+    pub channel: ParameterLinkChannel,
+    pub message: ParameterLinkMessage,
+    #[serde(default)]
+    pub transform: ParameterLinkTransform,
+    #[serde(default)]
+    pub pass_through: ParameterLinkPassThrough,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterLinkSource {
+    /// Stable backend identity. The display name is only a UI snapshot.
+    pub source_id: MidiSourceId,
+    pub display_name: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ParameterLinkChannel {
+    #[default]
+    Omni,
+    Channel {
+        channel: MidiChannel,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ParameterLinkMessage {
+    ControlChange { controller: u8 },
+    PitchBend,
+    Note { note: u8 },
+    ChannelPressure,
+    PolyPressure { note: u8 },
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterLinkTransform {
+    #[serde(default)]
+    pub invert: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParameterLinkPassThrough {
+    /// Observe the message and still deliver it to the instrument.
+    #[default]
+    PassThrough,
+    /// Explicit opt-in for controls that must not reach the instrument.
+    Consume,
+}
+
+impl ParameterLink {
+    pub fn validate(&self) -> Result<(), MidiRoutingError> {
+        if self.schema_version != PARAMETER_LINK_SCHEMA_VERSION {
+            return Err(MidiRoutingError::UnsupportedParameterLinkSchema(
+                self.schema_version,
+            ));
+        }
+        if self.instance_id.trim().is_empty() || self.instance_id.contains('\0') {
+            return Err(MidiRoutingError::InvalidParameterLinkInstance);
+        }
+        if self.source.display_name.trim().is_empty() {
+            return Err(MidiRoutingError::EmptySourceName);
+        }
+        let number = match self.message {
+            ParameterLinkMessage::ControlChange { controller }
+            | ParameterLinkMessage::Note { note: controller }
+            | ParameterLinkMessage::PolyPressure { note: controller } => Some(controller),
+            ParameterLinkMessage::PitchBend | ParameterLinkMessage::ChannelPressure => None,
+        };
+        if number.is_some_and(|number| number > 127) {
+            return Err(MidiRoutingError::InvalidParameterLinkNumber);
+        }
+        Ok(())
+    }
+
+    pub fn matches_channel(&self, channel: MidiChannel) -> bool {
+        match self.channel {
+            ParameterLinkChannel::Omni => true,
+            ParameterLinkChannel::Channel { channel: expected } => expected == channel,
+        }
+    }
+}
 
 /// A compact identifier assigned while RackForge is running.
 ///
@@ -515,6 +615,34 @@ impl MidiSourceRegistry {
             .ok_or_else(|| MidiRoutingError::UnknownSource(id.to_string()))
     }
 
+    pub fn resolve_optional(&self, id: &MidiSourceId) -> Option<MidiSourceKey> {
+        self.sources
+            .iter()
+            .find(|source| &source.descriptor.id == id)
+            .map(|source| source.key)
+    }
+
+    /// Resolves a currently approved source by the backend display name.
+    /// External controller drivers use this only as a discovery hint; the
+    /// registry remains the authority for the stable identity and runtime key.
+    pub fn resolve_name(&self, name: &str) -> Option<(MidiSourceKey, &MidiSourceDescriptor)> {
+        self.sources
+            .iter()
+            .find(|source| source.descriptor.name == name)
+            .map(|source| (source.key, &source.descriptor))
+    }
+
+    pub fn descriptors(&self) -> impl Iterator<Item = &MidiSourceDescriptor> {
+        self.sources.iter().map(|source| &source.descriptor)
+    }
+
+    pub fn descriptor(&self, key: MidiSourceKey) -> Option<&MidiSourceDescriptor> {
+        self.sources
+            .iter()
+            .find(|source| source.key == key)
+            .map(|source| &source.descriptor)
+    }
+
     pub fn primary_key(&self) -> Result<MidiSourceKey, MidiRoutingError> {
         self.sources
             .iter()
@@ -738,6 +866,12 @@ pub enum MidiRoutingError {
     },
     #[error("MIDI data bytes must be in 0..=127")]
     InvalidDataByte,
+    #[error("unsupported parameter-link schema version {0}")]
+    UnsupportedParameterLinkSchema(u32),
+    #[error("parameter link instance_id cannot be empty")]
+    InvalidParameterLinkInstance,
+    #[error("parameter link message number must be in 0..=127")]
+    InvalidParameterLinkNumber,
 }
 
 fn validate_identifier(value: &str) -> Result<(), MidiRoutingError> {
@@ -848,6 +982,15 @@ mod tests {
                 .unwrap_err(),
             MidiRoutingError::DuplicateSourceId("controller.a".into())
         );
+    }
+
+    #[test]
+    fn external_drivers_resolve_names_through_the_host_registry() {
+        let sources = registry();
+        let (key, descriptor) = sources.resolve_name("KeyLab Essential 61 mk3").unwrap();
+        assert_eq!(key, MidiSourceKey::new(10));
+        assert_eq!(descriptor.id.as_str(), "controller.keylab");
+        assert!(sources.resolve_name("Disabled controller").is_none());
     }
 
     #[test]

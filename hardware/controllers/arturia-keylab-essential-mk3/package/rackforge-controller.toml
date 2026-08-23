@@ -45,6 +45,110 @@ controller = 119
 press_value = 127
 release_value = 0
 
+# RackForge Control Profile v1. The first eight DAW-preset encoders and faders
+# are transport-independent synth controls. Encoder 9 and fader 9 remain the
+# reserved RackForge master pan and level above. Plugins opt in by publishing
+# matching semantic roles.
+[semantic_profile]
+schema_version = 1
+source_id = "controller.arturia.keylab-essential-mk3.midi"
+
+[[semantic_profile.controls]]
+role = "synth.oscillator.pulse_width"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 96
+
+[[semantic_profile.controls]]
+role = "synth.oscillator.sub.level"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 97
+
+[[semantic_profile.controls]]
+role = "synth.oscillator.noise.level"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 98
+
+[[semantic_profile.controls]]
+role = "synth.filter.envelope.amount"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 99
+
+[[semantic_profile.controls]]
+role = "synth.filter.lfo.amount"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 100
+
+[[semantic_profile.controls]]
+role = "synth.filter.key_tracking"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 101
+
+[[semantic_profile.controls]]
+role = "synth.lfo.delay"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 102
+
+[[semantic_profile.controls]]
+role = "synth.amplifier.level"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 103
+
+[[semantic_profile.controls]]
+role = "synth.envelope.amp.attack"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 105
+
+[[semantic_profile.controls]]
+role = "synth.envelope.amp.decay"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 106
+
+[[semantic_profile.controls]]
+role = "synth.envelope.amp.sustain"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 107
+
+[[semantic_profile.controls]]
+role = "synth.envelope.amp.release"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 108
+
+[[semantic_profile.controls]]
+role = "synth.filter.cutoff"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 109
+
+[[semantic_profile.controls]]
+role = "synth.filter.resonance"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 110
+
+[[semantic_profile.controls]]
+role = "synth.lfo.rate"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 111
+
+[[semantic_profile.controls]]
+role = "synth.lfo.depth"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 112
+
 [[devices]]
 id = "arturia.keylab-essential-mk3"
 usb_vendor_id = 0x1c75

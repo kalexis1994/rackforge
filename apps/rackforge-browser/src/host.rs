@@ -24,14 +24,17 @@ use rackforge_audio_api::{
     AudioSampleFormat, AudioStreamCapabilities, AudioTransport, AudioValueRange,
 };
 use rackforge_control_api::{
-    ControlErrorCode, ControlRequest, ControlResponse, PluginParameterValue, VirtualMidiMessage,
+    ControlErrorCode, ControlRequest, ControlResponse, MidiSourceStatus, PluginParameterValue,
+    VirtualMidiMessage,
 };
 use rackforge_core::performance::{PerformanceBootstrap, PerformanceRepository};
 use rackforge_core::session::SessionStore;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{
-    LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore, PluginStorage,
+    CompiledParameterLink, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
+    PluginStorage,
 };
+use rackforge_midi_api::{MidiSourceDescriptor, MidiSourceId, MidiSourceKey};
 use rackforge_performance_api::{
     LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
 };
@@ -223,6 +226,7 @@ impl BrowserHost {
             instances,
             audition: None,
             program_draft: None,
+            parameter_links: Vec::new(),
             session_id,
         };
 
@@ -349,6 +353,33 @@ impl BrowserHost {
                 parameter_index,
                 value,
             } => self.set_plugin_parameter(&instance_id, parameter_index, value),
+            ControlRequest::MidiSources => {
+                let mut sources = Vec::new();
+                for link in &self.store.state().parameter_links {
+                    if sources
+                        .iter()
+                        .any(|status: &MidiSourceStatus| status.source.id == link.source.source_id)
+                    {
+                        continue;
+                    }
+                    sources.push(MidiSourceStatus {
+                        source: MidiSourceDescriptor {
+                            id: MidiSourceId::new(link.source.source_id.to_string())
+                                .expect("persisted source ids are validated"),
+                            name: link.source.display_name.clone(),
+                            primary: false,
+                        },
+                        connected: false,
+                    });
+                }
+                Ok(ControlResponse::MidiSources { sources })
+            }
+            ControlRequest::BeginMidiLearn { .. }
+            | ControlRequest::MidiLearnStatus { .. }
+            | ControlRequest::CancelMidiLearn { .. } => Err(Failure::new(
+                ControlErrorCode::Unavailable,
+                "MIDI Learn is unavailable until this browser grants Web MIDI access",
+            )),
             ControlRequest::AudioSnapshot => Ok(ControlResponse::AudioSnapshot {
                 snapshot: Box::new(self.audio_state.clone()),
             }),
@@ -356,9 +387,9 @@ impl BrowserHost {
                 ControlErrorCode::Unavailable,
                 "the browser host plays through the page's audio output, which it cannot reconfigure",
             )),
-            ControlRequest::VirtualMidi { client_id, message } => {
-                self.virtual_midi(client_id, message)
-            }
+            ControlRequest::VirtualMidi {
+                client_id, message, ..
+            } => self.virtual_midi(client_id, message),
             ControlRequest::ReleaseVirtualMidi { client_id } => {
                 self.release_virtual_midi(&client_id);
                 Ok(ControlResponse::VirtualMidiReleased { client_id })
@@ -645,6 +676,45 @@ impl BrowserHost {
                     instance_id,
                     sound_id,
                 }
+            }
+            SessionCommand::UpsertParameterLink { link } => {
+                let plugin = self
+                    .plugins
+                    .iter()
+                    .find(|plugin| plugin.instance_id.as_str() == link.instance_id)
+                    .ok_or_else(|| {
+                        Failure::new(
+                            ControlErrorCode::NotFound,
+                            format!("no plugin instance {}", link.instance_id),
+                        )
+                    })?;
+                CompiledParameterLink::new(
+                    link.clone(),
+                    MidiSourceKey::new(1),
+                    plugin.runtime.parameters(),
+                )
+                .map_err(|error| {
+                    Failure::new(
+                        ControlErrorCode::Rejected,
+                        format!("invalid MIDI parameter link: {error:#}"),
+                    )
+                })?;
+                SessionEvent::ParameterLinkUpserted { link }
+            }
+            SessionCommand::RemoveParameterLink { link_id } => {
+                if !self
+                    .store
+                    .state()
+                    .parameter_links
+                    .iter()
+                    .any(|link| link.id == link_id)
+                {
+                    return Err(Failure::new(
+                        ControlErrorCode::NotFound,
+                        format!("no MIDI parameter link {link_id}"),
+                    ));
+                }
+                SessionEvent::ParameterLinkRemoved { link_id }
             }
             other => {
                 return Err(Failure::new(

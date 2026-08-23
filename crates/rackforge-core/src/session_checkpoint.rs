@@ -1,5 +1,7 @@
 use anyhow::{Context, Result, bail};
-use rackforge_session_api::{LivePerformanceState, SessionId, SessionState, SurfaceMode};
+use rackforge_session_api::{
+    LivePerformanceState, ParameterLink, SessionId, SessionState, SurfaceMode,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 #[cfg(unix)]
@@ -10,7 +12,7 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-const CHECKPOINT_SCHEMA_VERSION: u32 = 3;
+const CHECKPOINT_SCHEMA_VERSION: u32 = 4;
 const CHECKPOINT_DIRECTORY: &str = "sessions";
 const LIVE_CHECKPOINT_FILE: &str = "live.main.json";
 
@@ -30,6 +32,8 @@ struct SessionCheckpoint {
     active_instance_id: Option<String>,
     #[serde(default)]
     selected_sounds: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    parameter_links: Vec<ParameterLink>,
 }
 
 impl SessionCheckpoint {
@@ -54,6 +58,7 @@ impl SessionCheckpoint {
                     })
                 })
                 .collect(),
+            parameter_links: state.parameter_links.clone(),
         }
     }
 }
@@ -119,6 +124,13 @@ impl SessionCheckpointStore {
             .map(|checkpoint| checkpoint.live))
     }
 
+    pub fn parameter_links(&self, session_id: &SessionId) -> Result<Vec<ParameterLink>> {
+        Ok(self
+            .load(session_id)?
+            .map(|checkpoint| checkpoint.parameter_links)
+            .unwrap_or_default())
+    }
+
     pub fn save(&self, state: &SessionState) -> Result<()> {
         let parent = self
             .path
@@ -171,7 +183,10 @@ impl SessionCheckpointStore {
         };
         let checkpoint: SessionCheckpoint = serde_json::from_slice(&bytes)
             .with_context(|| format!("parsing session checkpoint {}", self.path.display()))?;
-        if !matches!(checkpoint.schema_version, 1 | 2 | CHECKPOINT_SCHEMA_VERSION) {
+        if !matches!(
+            checkpoint.schema_version,
+            1 | 2 | 3 | CHECKPOINT_SCHEMA_VERSION
+        ) {
             bail!(
                 "unsupported session checkpoint schema {} in {}",
                 checkpoint.schema_version,
@@ -241,6 +256,11 @@ fn sync_directory(_directory: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackforge_midi_api::{
+        MidiSourceId, PARAMETER_LINK_SCHEMA_VERSION, ParameterLinkChannel, ParameterLinkId,
+        ParameterLinkMessage, ParameterLinkPassThrough, ParameterLinkSource,
+        ParameterLinkTransform,
+    };
     use rackforge_session_api::{
         DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, InstanceId, PluginInstanceState,
         Revision, SESSION_SCHEMA_VERSION, SoundSummary,
@@ -278,6 +298,7 @@ mod tests {
             }],
             audition: None,
             program_draft: None,
+            parameter_links: Vec::new(),
         }
     }
 
@@ -296,7 +317,21 @@ mod tests {
     fn round_trips_only_stable_session_context() {
         let root = temporary_data_root("round-trip");
         let store = SessionCheckpointStore::live(&root);
-        let state = session(SurfaceMode::Play, "custom.user.stage-piano");
+        let mut state = session(SurfaceMode::Play, "custom.user.stage-piano");
+        state.parameter_links.push(ParameterLink {
+            schema_version: PARAMETER_LINK_SCHEMA_VERSION,
+            id: ParameterLinkId::new("link.cutoff").unwrap(),
+            instance_id: DEFAULT_LIVE_INSTANCE_ID.into(),
+            parameter_index: 17,
+            source: ParameterLinkSource {
+                source_id: MidiSourceId::new("alsa.stage-controller").unwrap(),
+                display_name: "Stage Controller".into(),
+            },
+            channel: ParameterLinkChannel::Omni,
+            message: ParameterLinkMessage::ControlChange { controller: 74 },
+            transform: ParameterLinkTransform { invert: true },
+            pass_through: ParameterLinkPassThrough::PassThrough,
+        });
 
         store.save(&state).unwrap();
 
@@ -325,6 +360,10 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some("custom.user.stage-piano")
+        );
+        assert_eq!(
+            store.parameter_links(&state.session_id).unwrap(),
+            state.parameter_links
         );
         assert!(!store.path.with_extension("json.tmp").exists());
         fs::remove_dir_all(root).unwrap();

@@ -24,6 +24,9 @@ import type {
   PluginStateParameterResult,
   PluginStateParameterSnapshot,
   PluginStateReference,
+  MidiLearnCandidate,
+  MidiSourceStatus,
+  ParameterLink,
   SessionSnapshot,
   SessionCommand,
 } from "./types";
@@ -566,6 +569,48 @@ export function dispatchCommand(command: SessionCommand) {
 
 function commandPayload(id: number, command: SessionCommand) {
   return serializeSessionCommand(CLIENT_ID, id, command);
+}
+
+export function requestMidiSources(): Promise<MidiSourceStatus[]> {
+  return requestPresetOperation(
+    { op: "midi_sources" },
+    "midi_sources",
+    (message) => (message.sources ?? []) as MidiSourceStatus[],
+  );
+}
+
+export function beginMidiLearn(instanceId: string, parameterIndex: number): Promise<number> {
+  return requestPresetOperation(
+    { op: "begin_midi_learn", instance_id: instanceId, parameter_index: parameterIndex },
+    "midi_learn_started",
+    (message) => Number(message.learn_id),
+  );
+}
+
+export function requestMidiLearnStatus(
+  learnId: number,
+): Promise<MidiLearnCandidate | null> {
+  return requestPresetOperation(
+    { op: "midi_learn_status", learn_id: learnId },
+    "midi_learn_status",
+    (message) => (message.candidate ?? null) as MidiLearnCandidate | null,
+  );
+}
+
+export function cancelMidiLearn(learnId: number): Promise<void> {
+  return requestPresetOperation(
+    { op: "cancel_midi_learn", learn_id: learnId },
+    "midi_learn_cancelled",
+    () => undefined,
+  );
+}
+
+export async function upsertParameterLink(link: ParameterLink): Promise<void> {
+  await dispatchCommandAwait({ type: "upsert_parameter_link", link });
+}
+
+export async function removeParameterLink(linkId: string): Promise<void> {
+  await dispatchCommandAwait({ type: "remove_parameter_link", link_id: linkId });
 }
 
 export function dispatchCommandAwait(

@@ -16,6 +16,7 @@ rackforge-core = { path = "../../../crates/rackforge-core" }
 rackforge-control-api = { path = "../../../crates/rackforge-control-api" }
 keylab-essential-mk3 = { package = "rackforge-controller-arturia-keylab-essential-mk3", path = "../../../hardware/keylab-bridge" }
 rackforge-controller-package = { path = "../../../crates/rackforge-controller-package" }
+rackforge-midi-api = { path = "../../../crates/rackforge-midi-api" }
 rackforge-performance-api = { path = "../../../crates/rackforge-performance-api" }
 rackforge-plugin-api = { path = "../../../crates/rackforge-plugin-api" }
 rackforge-repository = { path = "../../../crates/rackforge-repository" }

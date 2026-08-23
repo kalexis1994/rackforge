@@ -37,11 +37,12 @@ fn main() {
 
 fn generate_bundled_plugin_module() {
     println!("cargo:rerun-if-env-changed=RACKFORGE_BUNDLED_PLUGIN");
+    println!("cargo:rerun-if-env-changed=RACKFORGE_BUNDLED_CONTROLLER_DRIVER");
     let output = std::path::PathBuf::from(
         std::env::var_os("OUT_DIR").expect("Cargo always defines OUT_DIR"),
     )
     .join("bundled_plugin.rs");
-    let source = match std::env::var_os("RACKFORGE_BUNDLED_PLUGIN") {
+    let mut source = match std::env::var_os("RACKFORGE_BUNDLED_PLUGIN") {
         Some(path) => {
             let path = std::fs::canonicalize(path)
                 .expect("RACKFORGE_BUNDLED_PLUGIN must name a readable package");
@@ -52,6 +53,20 @@ fn generate_bundled_plugin_module() {
         }
         None => "const BUNDLED_DEFAULT_PLUGIN: Option<&[u8]> = None;\n".into(),
     };
+    source.push_str(
+        &match std::env::var_os("RACKFORGE_BUNDLED_CONTROLLER_DRIVER") {
+            Some(path) => {
+                let path = std::fs::canonicalize(path).expect(
+                    "RACKFORGE_BUNDLED_CONTROLLER_DRIVER must name a readable driver",
+                );
+                println!("cargo:rerun-if-changed={}", path.display());
+                format!(
+                    "const BUNDLED_CONTROLLER_DRIVER: Option<&[u8]> = Some(include_bytes!({path:?}));\n"
+                )
+            }
+            None => "const BUNDLED_CONTROLLER_DRIVER: Option<&[u8]> = None;\n".into(),
+        },
+    );
     std::fs::write(output, source).expect("writing bundled plugin module");
 }
 

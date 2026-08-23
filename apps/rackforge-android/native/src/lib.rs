@@ -8,10 +8,15 @@ use rackforge_control_api::{
     ControlResponse, PluginParameterControlCommand, parse_plugin_parameter_control_command,
 };
 use rackforge_core::{
-    LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore, PluginStorage,
+    CompiledParameterLink, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
+    PluginStorage, compile_semantic_parameter_links,
     midi_hotplug::{PanicScope, panic_packets},
     performance::PerformanceRepository,
     plugin_parameters, set_plugin_parameter,
+};
+use rackforge_midi_api::{
+    IngressMidiEvent, MidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
+    MidiSourceRegistry, ParameterLink, ParameterLinkPassThrough,
 };
 use rackforge_performance_api::{
     LivePerformanceState, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot,
@@ -19,7 +24,8 @@ use rackforge_performance_api::{
 use rackforge_plugin_api::{
     PROGRAM_EDITOR_SCHEMA_VERSION, PluginKind, PreparedProgram, PresetCatalog, ProgramDocument,
     ProgramEditRequest, ProgramEditorValue, ProgramEditorView, ProgramFieldEditRequest,
-    WebSurfaceKind, abi::MidiEventV1,
+    WebSurfaceKind,
+    abi::{MidiEventV1, ParameterEventV1},
 };
 use rackforge_repository::{
     PluginUserDataRemovalOptions, cleanup_uninstall_tombstones, inspect_local_archive,
@@ -28,6 +34,7 @@ use rackforge_repository::{
 };
 use rackforge_session_api::{
     HostControlTarget, InstanceId, MasterLevel, MasterPan, ProgramDraftState,
+    SemanticControlProfile,
 };
 use rackforge_surface_runtime::{
     ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayPlugin, PlaySound,
@@ -57,7 +64,14 @@ const BALANCED_RENDER_AHEAD_FRAMES: usize = 1_152;
 
 static ENGINE: OnceLock<Mutex<Option<AndroidEngine>>> = OnceLock::new();
 static AUDIO: OnceLock<Mutex<Option<NativeAudioOutput>>> = OnceLock::new();
-static MIDI_QUEUE: OnceLock<Mutex<VecDeque<MidiEventV1>>> = OnceLock::new();
+static MIDI_QUEUE: OnceLock<Mutex<VecDeque<AndroidMidiIngress>>> = OnceLock::new();
+static MIDI_SOURCES: OnceLock<Mutex<MidiSourceRegistry>> = OnceLock::new();
+/// Associates Android's runtime-assigned source identity with the signed
+/// semantic profile supplied by the matching `.rfcontroller` package.
+static MIDI_SEMANTIC_PROFILES: OnceLock<
+    Mutex<BTreeMap<MidiSourceId, (String, SemanticControlProfile)>>,
+> = OnceLock::new();
+static NEXT_MIDI_SOURCE_KEY: AtomicU32 = AtomicU32::new(1);
 static CONTROLLER_MENU: OnceLock<Mutex<AndroidControllerMenu>> = OnceLock::new();
 static PERFORMANCE: OnceLock<Mutex<Option<AndroidPerformance>>> = OnceLock::new();
 static OUTPUT_GAIN_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
@@ -101,6 +115,13 @@ const HOST_CONTROL_HEADER_MS: u64 = 1_500;
 const PRIO_PROCESS: i32 = 0;
 const ANDROID_AUDIO_THREAD_NICE: i32 = -16;
 const ANDROID_INSTANCE_ID: &str = "android-main";
+const VIRTUAL_MIDI_SOURCE_KEY: MidiSourceKey = MidiSourceKey::new(u32::MAX);
+
+#[derive(Clone, Copy)]
+struct AndroidMidiIngress {
+    source: MidiSourceKey,
+    event: MidiEventV1,
+}
 
 struct AndroidControllerMenu {
     menu: SurfaceMenu,
@@ -608,6 +629,9 @@ struct AndroidEngine {
     instance: SendablePluginInstance,
     runtime: SendableLoadedPlugin,
     midi: Vec<MidiEventV1>,
+    parameter_events: Vec<ParameterEventV1>,
+    parameter_links: Vec<CompiledParameterLink>,
+    persisted_parameter_links: Vec<ParameterLink>,
     plugin_id: String,
     plugin_name: String,
     plugin_version: String,
@@ -969,6 +993,9 @@ impl AndroidEngine {
             instance: SendablePluginInstance(instance),
             runtime: SendableLoadedPlugin(plugin),
             midi: Vec::with_capacity(256),
+            parameter_events: Vec::with_capacity(256),
+            parameter_links: Vec::new(),
+            persisted_parameter_links: Vec::new(),
             plugin_id,
             plugin_name,
             plugin_version,
@@ -1435,13 +1462,97 @@ impl AndroidEngine {
             bail!("invalid Android stereo output buffer");
         }
         if let Ok(mut queue) = midi_queue().try_lock() {
-            self.midi.extend(queue.drain(..));
+            for ingress in queue.drain(..) {
+                let packet = MidiPacket {
+                    frame: ingress.event.frame,
+                    length: ingress.event.length,
+                    data: ingress.event.data,
+                };
+                let ingress_event = IngressMidiEvent {
+                    source: ingress.source,
+                    packet,
+                };
+                let mut consume = false;
+                for link in &self.parameter_links {
+                    if link.link.instance_id != ANDROID_INSTANCE_ID {
+                        continue;
+                    }
+                    if let Some(output) = link.apply(ingress_event) {
+                        if self.parameter_events.len() < MAX_PENDING_MIDI_EVENTS {
+                            self.parameter_events.push(output.event);
+                        }
+                        consume |= output.pass_through == ParameterLinkPassThrough::Consume;
+                    }
+                }
+                if !consume {
+                    self.midi.push(ingress.event);
+                }
+            }
         }
-        self.instance
-            .0
-            .process_interleaved(&[], output, frames, 0, 2, &self.midi, &[])?;
+        self.instance.0.process_interleaved(
+            &[],
+            output,
+            frames,
+            0,
+            2,
+            &self.midi,
+            &self.parameter_events,
+        )?;
         self.midi.clear();
+        self.parameter_events.clear();
         Ok(())
+    }
+
+    fn replace_parameter_links(&mut self, links: Vec<ParameterLink>) -> Result<()> {
+        let sources = midi_sources()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))?;
+        let mut compiled = Vec::with_capacity(links.len());
+        for link in &links {
+            link.validate()?;
+            if link.instance_id != ANDROID_INSTANCE_ID {
+                // Rack-slot links remain persisted and pending until Android's
+                // corresponding isolated performance voice is active.
+                continue;
+            }
+            let source_key = sources
+                .resolve_optional(&link.source.source_id)
+                .unwrap_or(VIRTUAL_MIDI_SOURCE_KEY);
+            let candidate =
+                CompiledParameterLink::new(link.clone(), source_key, self.runtime.0.parameters())?;
+            if sources.resolve_optional(&link.source.source_id).is_some() {
+                compiled.push(candidate);
+            }
+        }
+        let semantic_profiles = midi_semantic_profiles()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("semantic MIDI profile lock poisoned"))?;
+        for (source_id, (controller_id, profile)) in semantic_profiles.iter() {
+            let Some(source_key) = sources.resolve_optional(source_id) else {
+                continue;
+            };
+            let display_name = sources
+                .descriptor(source_key)
+                .map(|descriptor| descriptor.name.as_str())
+                .unwrap_or(controller_id);
+            compiled.extend(compile_semantic_parameter_links(
+                controller_id,
+                display_name,
+                profile,
+                source_id,
+                source_key,
+                ANDROID_INSTANCE_ID,
+                self.runtime.0.parameters(),
+                &links,
+            )?);
+        }
+        self.persisted_parameter_links = links;
+        self.parameter_links = compiled;
+        Ok(())
+    }
+
+    fn recompile_parameter_links(&mut self) -> Result<()> {
+        self.replace_parameter_links(self.persisted_parameter_links.clone())
     }
 }
 
@@ -1453,8 +1564,24 @@ fn audio() -> &'static Mutex<Option<NativeAudioOutput>> {
     AUDIO.get_or_init(|| Mutex::new(None))
 }
 
-fn midi_queue() -> &'static Mutex<VecDeque<MidiEventV1>> {
+fn midi_queue() -> &'static Mutex<VecDeque<AndroidMidiIngress>> {
     MIDI_QUEUE.get_or_init(|| Mutex::new(VecDeque::with_capacity(MAX_PENDING_MIDI_EVENTS)))
+}
+
+fn midi_sources() -> &'static Mutex<MidiSourceRegistry> {
+    MIDI_SOURCES.get_or_init(|| Mutex::new(MidiSourceRegistry::default()))
+}
+
+fn midi_semantic_profiles()
+-> &'static Mutex<BTreeMap<MidiSourceId, (String, SemanticControlProfile)>> {
+    MIDI_SEMANTIC_PROFILES.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn bundled_semantic_profile(controller_id: &str) -> Option<SemanticControlProfile> {
+    let profile = keylab_essential_mk3::controller::package_profile();
+    (profile.driver_id == controller_id)
+        .then(|| profile.semantic_profile.clone())
+        .flatten()
 }
 
 fn controller_menu() -> &'static Mutex<AndroidControllerMenu> {
@@ -1486,7 +1613,7 @@ fn smooth_master_sample(current: &mut f32, target: f32) {
     };
 }
 
-fn enqueue_midi(bytes: &[u8]) {
+fn enqueue_midi(source: MidiSourceKey, bytes: &[u8]) {
     if bytes.is_empty() || bytes.len() > 3 {
         return;
     }
@@ -1497,10 +1624,13 @@ fn enqueue_midi(bytes: &[u8]) {
             MIDI_DROPPED_EVENTS.fetch_add(1, Ordering::Relaxed);
             return;
         }
-        queue.push_back(MidiEventV1 {
-            frame: 0,
-            length: bytes.len() as u8,
-            data,
+        queue.push_back(AndroidMidiIngress {
+            source,
+            event: MidiEventV1 {
+                frame: 0,
+                length: bytes.len() as u8,
+                data,
+            },
         });
     }
 }
@@ -1521,10 +1651,13 @@ fn release_all_midi_notes() {
             MIDI_DROPPED_EVENTS.fetch_add(evicted as u64, Ordering::Relaxed);
         }
         for packet in packets {
-            queue.push_back(MidiEventV1 {
-                frame: 0,
-                length: packet.length,
-                data: packet.data,
+            queue.push_back(AndroidMidiIngress {
+                source: VIRTUAL_MIDI_SOURCE_KEY,
+                event: MidiEventV1 {
+                    frame: 0,
+                    length: packet.length,
+                    data: packet.data,
+                },
             });
         }
         MIDI_PANIC_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -2218,9 +2351,13 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_ensureBundledCont
             .into();
         let store_root = PathBuf::from(store_root);
         let store = rackforge_controller_package::PackageStore::new(&store_root);
-        let manifest = keylab_essential_mk3::controller::PACKAGE_MANIFEST;
+        let manifest = rackforge_controller_package::stamp_bundled_manifest(
+            keylab_essential_mk3::controller::PACKAGE_MANIFEST,
+            &[],
+        )
+        .context("stamping the bundled controller manifest")?;
         let parsed: rackforge_controller_package::ControllerPackageManifest =
-            toml::from_str(manifest).context("parsing the bundled controller manifest")?;
+            toml::from_str(&manifest).context("parsing the bundled controller manifest")?;
         let already = store
             .list()
             .map(|installed| {
@@ -2234,7 +2371,7 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_ensureBundledCont
             fs::create_dir_all(&staging)?;
             fs::write(
                 staging.join(rackforge_controller_package::CONTROLLER_MANIFEST_FILE),
-                manifest,
+                &manifest,
             )?;
             store
                 .install_directory(
@@ -2790,7 +2927,8 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_activateInstalled
         if let Err(error) = ensure_performance_menu(&data_root) {
             eprintln!("PERFORMANCE_LIBRARY_UNAVAILABLE {error:#}");
         }
-        let candidate = AndroidEngine::open_package(&package_root, data_root.clone())?;
+        let mut candidate = AndroidEngine::open_package(&package_root, data_root.clone())?;
+        candidate.recompile_parameter_links()?;
         set_plugin_enabled(
             packages_root.parent().unwrap_or(&packages_root),
             &candidate.plugin_id,
@@ -2861,7 +2999,140 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_sendMidiMessage(
 ) {
     let bytes = [status as u8, data_1 as u8, data_2 as u8];
     if (1..=3).contains(&length) {
-        enqueue_midi(&bytes[..length as usize]);
+        enqueue_midi(VIRTUAL_MIDI_SOURCE_KEY, &bytes[..length as usize]);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_sendMidiMessageFromSource(
+    _env: JNIEnv,
+    _class: JClass,
+    source_key: jint,
+    status: jint,
+    data_1: jint,
+    data_2: jint,
+    length: jint,
+) {
+    let bytes = [status as u8, data_1 as u8, data_2 as u8];
+    if source_key > 0 && (1..=3).contains(&length) {
+        enqueue_midi(
+            MidiSourceKey::new(source_key as u32),
+            &bytes[..length as usize],
+        );
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_resetMidiSources(
+    mut env: JNIEnv,
+    _class: JClass,
+) {
+    let result = (|| -> Result<()> {
+        *midi_sources()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))? =
+            MidiSourceRegistry::default();
+        midi_semantic_profiles()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("semantic MIDI profile lock poisoned"))?
+            .clear();
+        NEXT_MIDI_SOURCE_KEY.store(1, Ordering::Relaxed);
+        if let Some(engine) = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+            .as_mut()
+        {
+            engine.recompile_parameter_links()?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        report(&mut env, error);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_registerMidiSource(
+    mut env: JNIEnv,
+    _class: JClass,
+    source_id: JString,
+    display_name: JString,
+    primary: jboolean,
+    controller_id: JString,
+) -> jint {
+    let result = (|| -> Result<u32> {
+        let controller_id = java_string(&mut env, controller_id)?;
+        let descriptor = MidiSourceDescriptor {
+            id: MidiSourceId::new(java_string(&mut env, source_id)?)?,
+            name: java_string(&mut env, display_name)?,
+            primary: primary == JNI_TRUE,
+        };
+        let source_id = descriptor.id.clone();
+        let mut sources = midi_sources()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))?;
+        let key = if let Some(existing) = sources.resolve_optional(&descriptor.id) {
+            existing
+        } else {
+            let key = MidiSourceKey::new(NEXT_MIDI_SOURCE_KEY.fetch_add(1, Ordering::Relaxed));
+            sources.register(key, descriptor)?;
+            key
+        };
+        drop(sources);
+        {
+            let mut profiles = midi_semantic_profiles()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("semantic MIDI profile lock poisoned"))?;
+            match bundled_semantic_profile(&controller_id) {
+                Some(profile) => {
+                    profiles.insert(source_id, (controller_id, profile));
+                }
+                None => {
+                    profiles.remove(&source_id);
+                }
+            }
+        }
+        if let Some(engine) = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+            .as_mut()
+        {
+            engine.recompile_parameter_links()?;
+        }
+        Ok(key.get())
+    })();
+    match result {
+        Ok(key) => key as jint,
+        Err(error) => {
+            report(&mut env, error);
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_replaceParameterLinks(
+    mut env: JNIEnv,
+    _class: JClass,
+    links_json: JString,
+) -> jboolean {
+    let result = (|| -> Result<()> {
+        let links: Vec<ParameterLink> = serde_json::from_str(&java_string(&mut env, links_json)?)
+            .context("parsing Android MIDI parameter links")?;
+        let mut guard = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+        let engine = guard
+            .as_mut()
+            .context("RackForge engine is not initialized")?;
+        engine.replace_parameter_links(links)
+    })();
+    match result {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
     }
 }
 

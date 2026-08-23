@@ -68,6 +68,43 @@ export interface SessionSnapshot {
   instances: PluginInstance[];
   audition?: AuditionState;
   program_draft?: ProgramDraftState;
+  parameter_links?: ParameterLink[];
+}
+
+export interface MidiSourceDescriptor {
+  id: string;
+  name: string;
+  primary: boolean;
+}
+
+export interface MidiSourceStatus {
+  source: MidiSourceDescriptor;
+  connected: boolean;
+}
+
+export type ParameterLinkMessage =
+  | { type: "control_change"; controller: number }
+  | { type: "pitch_bend" }
+  | { type: "note"; note: number }
+  | { type: "channel_pressure" }
+  | { type: "poly_pressure"; note: number };
+
+export interface ParameterLink {
+  schema_version: 1;
+  id: string;
+  instance_id: string;
+  parameter_index: number;
+  source: { source_id: string; display_name: string };
+  channel: { mode: "omni" } | { mode: "channel"; channel: number };
+  message: ParameterLinkMessage;
+  transform: { invert: boolean };
+  pass_through: "pass_through" | "consume";
+}
+
+export interface MidiLearnCandidate {
+  source: MidiSourceDescriptor;
+  channel: number;
+  message: ParameterLinkMessage;
 }
 
 export type LiveBrowseMode = "rack" | "song" | "setlist";

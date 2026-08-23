@@ -11,6 +11,7 @@ rackforge-performance-api = { path = "../rackforge-performance-api" }
 rackforge-program-api = { path = "../rackforge-program-api" }
 rackforge-surface-api = { path = "../rackforge-surface-api" }
 rackforge-controller-api = { path = "../rackforge-controller-api" }
+rackforge-midi-api = { path = "../rackforge-midi-api" }
 
 [dev-dependencies]
 serde_json.workspace = true

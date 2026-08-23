@@ -1,3 +1,4 @@
+use rackforge_control_profile::{CONTROL_PROFILE_SCHEMA_VERSION, SemanticControlId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -110,6 +111,86 @@ pub struct HostActionBinding {
     pub midi_cc: MidiButtonBinding,
 }
 
+/// The semantic controls exposed by one stable MIDI endpoint of a controller.
+///
+/// This declaration maps the device's physical MIDI dialect to RackForge's
+/// transport-independent control vocabulary. It does not name a plugin or a
+/// plugin parameter index.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticControlProfile {
+    pub schema_version: u32,
+    pub source_id: String,
+    #[serde(default)]
+    pub controls: Vec<SemanticControlBinding>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticControlBinding {
+    pub role: SemanticControlId,
+    pub midi_cc: MidiControlChangeBinding,
+    #[serde(default)]
+    pub invert: bool,
+}
+
+impl SemanticControlProfile {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != CONTROL_PROFILE_SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported semantic control profile {}",
+                self.schema_version
+            ));
+        }
+        validate_identifier(&self.source_id)?;
+        if self.controls.is_empty() {
+            return Err("semantic control profile has no controls".into());
+        }
+        let mut roles = BTreeSet::new();
+        let mut midi = BTreeSet::new();
+        for binding in &self.controls {
+            binding.role.validate().map_err(|error| error.to_string())?;
+            binding.midi_cc.validate()?;
+            if !roles.insert(binding.role.as_str()) {
+                return Err(format!("duplicate semantic control role {}", binding.role));
+            }
+            if !midi.insert((binding.midi_cc.channel, binding.midi_cc.controller)) {
+                return Err(format!(
+                    "duplicate semantic MIDI binding ch={} cc={}",
+                    binding.midi_cc.channel, binding.midi_cc.controller
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_against_reserved(
+        &self,
+        controls: &[HostControlBinding],
+        actions: &[HostActionBinding],
+    ) -> Result<(), String> {
+        self.validate()?;
+        let reserved = controls
+            .iter()
+            .map(|binding| (binding.midi_cc.channel, binding.midi_cc.controller))
+            .chain(
+                actions
+                    .iter()
+                    .map(|binding| (binding.midi_cc.channel, binding.midi_cc.controller)),
+            )
+            .collect::<BTreeSet<_>>();
+        for binding in &self.controls {
+            if reserved.contains(&(binding.midi_cc.channel, binding.midi_cc.controller)) {
+                return Err(format!(
+                    "semantic control {} reuses reserved MIDI binding ch={} cc={}",
+                    binding.role, binding.midi_cc.channel, binding.midi_cc.controller
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SurfaceContract {
@@ -210,6 +291,8 @@ pub struct ControllerProfile {
     pub host_controls: Vec<HostControlBinding>,
     #[serde(default)]
     pub host_actions: Vec<HostActionBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_profile: Option<SemanticControlProfile>,
 }
 
 impl ControllerProfile {
@@ -263,6 +346,9 @@ impl ControllerProfile {
                     binding.midi_cc.channel, binding.midi_cc.controller
                 ));
             }
+        }
+        if let Some(profile) = &self.semantic_profile {
+            profile.validate_against_reserved(&self.host_controls, &self.host_actions)?;
         }
         Ok(())
     }
@@ -349,7 +435,33 @@ mod tests {
             surfaces,
             host_controls: Vec::new(),
             host_actions: Vec::new(),
+            semantic_profile: None,
         }
+    }
+
+    #[test]
+    fn semantic_controls_cannot_collide_with_reserved_host_controls() {
+        let mut controller = medium_controller(true);
+        controller.host_controls.push(HostControlBinding {
+            target: HostControlTarget::MasterLevel,
+            midi_cc: MidiControlChangeBinding {
+                channel: 0,
+                controller: 113,
+            },
+        });
+        controller.semantic_profile = Some(SemanticControlProfile {
+            schema_version: CONTROL_PROFILE_SCHEMA_VERSION,
+            source_id: "controller.example.midi".into(),
+            controls: vec![SemanticControlBinding {
+                role: SemanticControlId::new("plugin.output.level").unwrap(),
+                midi_cc: MidiControlChangeBinding {
+                    channel: 0,
+                    controller: 113,
+                },
+                invert: false,
+            }],
+        });
+        assert!(controller.validate().is_err());
     }
 
     #[test]

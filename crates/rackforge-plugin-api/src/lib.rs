@@ -21,7 +21,7 @@ pub use manifest::{
 };
 pub use parameter::{
     EnumChoice, PageDescriptor, ParameterDescriptor, ParameterFlags, ParameterKind,
-    ParameterSchema, SuggestedControl,
+    ParameterSchema, PluginSemanticControl, SuggestedControl,
 };
 pub use preset::{BankDescriptor, PresetCatalog, PresetDescriptor};
 pub use program::{
@@ -30,6 +30,9 @@ pub use program::{
     ProgramDocument, ProgramEditRequest, ProgramEditorChoice, ProgramEditorField,
     ProgramEditorFieldKind, ProgramEditorPage, ProgramEditorValue, ProgramEditorView, ProgramError,
     ProgramFieldEditRequest, validate_plugin_identifier, validate_program_identifier,
+};
+pub use rackforge_control_profile::{
+    CONTROL_PROFILE_SCHEMA_VERSION, SemanticControlId, roles as semantic_roles,
 };
 pub use rackforge_midi_api::{MidiInputBusId, PluginChannelModel};
 pub use rackforge_surface_api::{
@@ -44,6 +47,9 @@ pub use state::{
 
 pub const MIN_MANIFEST_SCHEMA_VERSION: u32 = 1;
 pub const MANIFEST_SCHEMA_VERSION: u32 = 2;
-pub const PARAMETER_SCHEMA_VERSION: u32 = 1;
+pub const MIN_PARAMETER_SCHEMA_VERSION: u32 = 1;
+/// Schema v2 adds host-owned semantic control declarations. Schema v1 remains
+/// readable so existing `.rfplugin` packages do not need repackaging.
+pub const PARAMETER_SCHEMA_VERSION: u32 = 2;
 pub const PRESET_CATALOG_SCHEMA_VERSION: u32 = 1;
 pub const RUNTIME_DESCRIPTOR_SCHEMA_VERSION: u32 = 1;

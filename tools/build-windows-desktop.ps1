@@ -71,23 +71,34 @@ try {
         }
     }
 
+    # Build the bundled controller first. Desktop embeds these exact bytes in
+    # rackforge.exe, so startup can atomically install the matching immutable
+    # .rfcontroller version without relying on a sidecar executable.
+    $controllerBuild = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && cargo +stable-x86_64-pc-windows-msvc build --locked{4} -p rackforge-controller-arturia-keylab-essential-mk3 --bin rackforge-arturia-keylab-essential-mk3-driver' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName, $cargoProfileArgument
+    & $env:ComSpec /d /s /c $controllerBuild
+    if ($LASTEXITCODE -ne 0) {
+        throw "RackForge controller driver build failed."
+    }
+    $controllerSource = Join-Path $runtime "target/x86_64-pc-windows-msvc/$cargoProfileDirectory/rackforge-arturia-keylab-essential-mk3-driver.exe"
+    if (-not (Test-Path -LiteralPath $controllerSource)) {
+        $controllerSource = Join-Path $runtime "target/$cargoProfileDirectory/rackforge-arturia-keylab-essential-mk3-driver.exe"
+    }
+    if (-not (Test-Path -LiteralPath $controllerSource)) {
+        throw "RackForge controller driver was not produced at $controllerSource"
+    }
+
     if ($RunTests) {
-        $tests = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && cargo +stable-x86_64-pc-windows-msvc test --locked -p rackforge-desktop' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName
+        $tests = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && set "RACKFORGE_BUNDLED_CONTROLLER_DRIVER={4}" && cargo +stable-x86_64-pc-windows-msvc test --locked -p rackforge-desktop' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName, $controllerSource
         & $env:ComSpec /d /s /c $tests
         if ($LASTEXITCODE -ne 0) {
             throw "RackForge Desktop tests failed."
         }
     }
 
-    $build = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && cargo +stable-x86_64-pc-windows-msvc build --locked{4} -p rackforge-desktop' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName, $cargoProfileArgument
+    $build = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && set "RACKFORGE_BUNDLED_CONTROLLER_DRIVER={4}" && cargo +stable-x86_64-pc-windows-msvc build --locked{5} -p rackforge-desktop' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName, $controllerSource, $cargoProfileArgument
     & $env:ComSpec /d /s /c $build
     if ($LASTEXITCODE -ne 0) {
         throw "RackForge Desktop build failed."
-    }
-    $controllerBuild = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && cargo +stable-x86_64-pc-windows-msvc build --locked{4} -p rackforge-controller-arturia-keylab-essential-mk3 --bin rackforge-arturia-keylab-essential-mk3-driver' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName, $cargoProfileArgument
-    & $env:ComSpec /d /s /c $controllerBuild
-    if ($LASTEXITCODE -ne 0) {
-        throw "RackForge controller driver build failed."
     }
 } finally {
     Pop-Location

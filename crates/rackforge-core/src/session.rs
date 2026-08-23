@@ -166,6 +166,7 @@ mod tests {
             }],
             audition: None,
             program_draft: None,
+            parameter_links: Vec::new(),
         };
         SessionStore::with_capacity(state, capacity).unwrap()
     }

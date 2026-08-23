@@ -25,18 +25,31 @@ if [[ -e "$output" ]]; then
 fi
 
 install -d "$output/bin/linux-aarch64"
-install -m 0644 "$template" "$output/rackforge-controller.toml"
 install -m 0755 \
   "$binary" \
   "$output/bin/linux-aarch64/rackforge-arturia-keylab-essential-mk3-driver"
 
-digest="$(
+driver_digest="$(
   sha256sum "$output/bin/linux-aarch64/rackforge-arturia-keylab-essential-mk3-driver" |
     awk '{print $1}'
 )"
+package_digest="$(
+  {
+    cat "$template"
+    printf '\0linux-aarch64\0'
+    cat "$binary"
+  } | sha256sum | awk '{print $1}'
+)"
+base_version="$(awk -F '"' '/^version = "/ { print $2; exit }' "$template")"
+base_version="${base_version%%+*}"
+bundled_version="${base_version}+bundled.${package_digest:0:12}"
+sed \
+  "0,/^version = \"[^\"]*\"/s//version = \"$bundled_version\"/" \
+  "$template" > "$output/rackforge-controller.toml"
 {
   printf '\n[integrity.sha256]\n'
-  printf 'linux-aarch64 = "%s"\n' "$digest"
+  printf 'linux-aarch64 = "%s"\n' "$driver_digest"
 } >>"$output/rackforge-controller.toml"
 
-printf 'CONTROLLER_PACKAGE_BUILT path=%s sha256=%s\n' "$output" "$digest"
+printf 'CONTROLLER_PACKAGE_BUILT path=%s version=%s sha256=%s\n' \
+  "$output" "$bundled_version" "$driver_digest"

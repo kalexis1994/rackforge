@@ -272,6 +272,7 @@ mod tests {
             schema_version: 1,
             pages: Vec::new(),
             parameters: vec![parameter],
+            semantic_controls: Vec::new(),
         }
     }
 

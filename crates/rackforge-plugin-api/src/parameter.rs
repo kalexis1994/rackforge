@@ -1,4 +1,5 @@
-use crate::PARAMETER_SCHEMA_VERSION;
+use crate::{MIN_PARAMETER_SCHEMA_VERSION, PARAMETER_SCHEMA_VERSION};
+use rackforge_control_profile::SemanticControlId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use thiserror::Error;
@@ -11,12 +12,21 @@ pub struct ParameterSchema {
     pub pages: Vec<PageDescriptor>,
     #[serde(default)]
     pub parameters: Vec<ParameterDescriptor>,
+    /// Optional mappings from RackForge semantic roles to this plugin's public
+    /// parameters. These are hints for automatic controller profiles; explicit
+    /// user MIDI Links always take priority.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub semantic_controls: Vec<PluginSemanticControl>,
 }
 
 impl ParameterSchema {
     pub fn validate(&self) -> Result<(), SchemaError> {
-        if self.schema_version != PARAMETER_SCHEMA_VERSION {
+        if !(MIN_PARAMETER_SCHEMA_VERSION..=PARAMETER_SCHEMA_VERSION).contains(&self.schema_version)
+        {
             return Err(SchemaError::UnsupportedSchema(self.schema_version));
+        }
+        if self.schema_version < 2 && !self.semantic_controls.is_empty() {
+            return Err(SchemaError::SemanticControlsRequireSchema2);
         }
         let mut page_ids = BTreeSet::new();
         for page in &self.pages {
@@ -57,8 +67,53 @@ impl ParameterSchema {
             }
             parameter.kind.validate(&parameter.id)?;
         }
+        let mut semantic_roles = BTreeSet::new();
+        for binding in &self.semantic_controls {
+            binding
+                .role
+                .validate()
+                .map_err(|_| SchemaError::InvalidSemanticRole(binding.role.to_string()))?;
+            if !semantic_roles.insert(binding.role.as_str()) {
+                return Err(SchemaError::DuplicateSemanticRole(binding.role.to_string()));
+            }
+            let parameter = self
+                .parameters
+                .iter()
+                .find(|parameter| parameter.index == binding.parameter_index)
+                .ok_or_else(|| SchemaError::UnknownSemanticParameter {
+                    role: binding.role.to_string(),
+                    parameter_index: binding.parameter_index,
+                })?;
+            if parameter.flags.read_only || matches!(parameter.kind, ParameterKind::Meter { .. }) {
+                return Err(SchemaError::ReadOnlySemanticParameter {
+                    role: binding.role.to_string(),
+                    parameter: parameter.id.clone(),
+                });
+            }
+        }
         Ok(())
     }
+
+    pub fn parameter_for_semantic_role(
+        &self,
+        role: &SemanticControlId,
+    ) -> Option<&ParameterDescriptor> {
+        let index = self
+            .semantic_controls
+            .iter()
+            .find(|binding| &binding.role == role)?
+            .parameter_index;
+        self.parameters
+            .iter()
+            .find(|parameter| parameter.index == index)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginSemanticControl {
+    pub role: SemanticControlId,
+    pub parameter_index: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -228,6 +283,8 @@ fn validate_identifier(value: &str) -> Result<(), SchemaError> {
 pub enum SchemaError {
     #[error("unsupported parameter schema {0}")]
     UnsupportedSchema(u32),
+    #[error("semantic controls require parameter schema 2")]
+    SemanticControlsRequireSchema2,
     #[error("invalid identifier {0:?}")]
     InvalidIdentifier(String),
     #[error("empty display name for {0}")]
@@ -246,6 +303,14 @@ pub enum SchemaError {
     InvalidRange(String),
     #[error("invalid choices for parameter {0}")]
     InvalidChoices(String),
+    #[error("invalid semantic control role {0:?}")]
+    InvalidSemanticRole(String),
+    #[error("duplicate semantic control role {0}")]
+    DuplicateSemanticRole(String),
+    #[error("semantic role {role} references unknown parameter index {parameter_index}")]
+    UnknownSemanticParameter { role: String, parameter_index: u32 },
+    #[error("semantic role {role} references read-only parameter {parameter}")]
+    ReadOnlySemanticParameter { role: String, parameter: String },
 }
 
 #[cfg(test)]
@@ -255,7 +320,7 @@ mod tests {
     #[test]
     fn validates_declarative_pages_and_parameters() {
         let schema = ParameterSchema {
-            schema_version: 1,
+            schema_version: PARAMETER_SCHEMA_VERSION,
             pages: vec![PageDescriptor {
                 id: "level".into(),
                 name: "Level".into(),
@@ -279,6 +344,10 @@ mod tests {
                 flags: ParameterFlags::default(),
                 suggested_control: SuggestedControl::Knob,
             }],
+            semantic_controls: vec![PluginSemanticControl {
+                role: SemanticControlId::new("plugin.output.level").unwrap(),
+                parameter_index: 0,
+            }],
         };
         assert_eq!(schema.validate(), Ok(()));
     }
@@ -300,5 +369,65 @@ mod tests {
             invalid.validate(),
             Err(SchemaError::InvalidHeader("sound".into()))
         );
+    }
+
+    #[test]
+    fn semantic_roles_are_unique_and_target_writable_parameters() {
+        let mut schema = ParameterSchema {
+            schema_version: PARAMETER_SCHEMA_VERSION,
+            pages: vec![PageDescriptor {
+                id: "main".into(),
+                name: "Main".into(),
+                order: 0,
+                header: None,
+            }],
+            parameters: vec![ParameterDescriptor {
+                index: 7,
+                id: "cutoff".into(),
+                name: "Cutoff".into(),
+                page: "main".into(),
+                group: None,
+                order: 0,
+                kind: ParameterKind::Float {
+                    minimum: 0.0,
+                    maximum: 1.0,
+                    default: 0.5,
+                    step: 0.01,
+                    unit: None,
+                },
+                flags: ParameterFlags {
+                    automatable: true,
+                    ..Default::default()
+                },
+                suggested_control: SuggestedControl::Knob,
+            }],
+            semantic_controls: vec![PluginSemanticControl {
+                role: SemanticControlId::new("synth.filter.cutoff").unwrap(),
+                parameter_index: 7,
+            }],
+        };
+        assert_eq!(schema.validate(), Ok(()));
+        assert_eq!(
+            schema
+                .parameter_for_semantic_role(
+                    &SemanticControlId::new("synth.filter.cutoff").unwrap()
+                )
+                .unwrap()
+                .index,
+            7
+        );
+        let mut legacy = schema.clone();
+        legacy.schema_version = 1;
+        assert_eq!(
+            legacy.validate(),
+            Err(SchemaError::SemanticControlsRequireSchema2)
+        );
+        schema
+            .semantic_controls
+            .push(schema.semantic_controls[0].clone());
+        assert!(matches!(
+            schema.validate(),
+            Err(SchemaError::DuplicateSemanticRole(_))
+        ));
     }
 }

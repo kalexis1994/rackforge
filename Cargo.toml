@@ -4,6 +4,7 @@ members = [
     "crates/rackforge-core",
     "crates/rackforge-audio-api",
     "crates/rackforge-control-api",
+    "crates/rackforge-control-profile",
     "crates/rackforge-controller-api",
     "crates/rackforge-controller-package",
     "crates/rackforge-controller-host",

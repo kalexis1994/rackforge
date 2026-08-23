@@ -31,6 +31,7 @@ interface RackSlotPopoverProps {
     state?: PluginStateReference;
     onStateChange: (state: PluginStateReference) => void;
     onSelectSound: (soundId: string) => Promise<unknown>;
+    parameterLinkInstanceId: string;
   }) => ReactNode;
 }
 
@@ -275,6 +276,7 @@ export function RackSlotPopover({
           state: slot.state,
           onStateChange: updateState,
           onSelectSound: selectSound,
+          parameterLinkInstanceId: slot.id,
         })}
         {busy ? (
           <div className="rack-slot-popover-busy" role="status" aria-live="polite">

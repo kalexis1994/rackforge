@@ -5,16 +5,23 @@ use keylab_essential_mk3::{controller as keylab_controller, protocol as keylab_p
 use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 use rackforge_control_api::PluginParameterValue;
 use rackforge_core::{
-    LoadedPlugin, PluginInstance,
+    CompiledParameterLink, LoadedPlugin, PluginInstance,
     isolated_state::parameter_value_is_valid,
     midi_hotplug::{PanicScope, panic_packets},
 };
+use rackforge_midi_api::{
+    IngressMidiEvent, MidiPacket as RoutedMidiPacket, MidiSourceDescriptor, MidiSourceId,
+    MidiSourceKey,
+};
 use rackforge_plugin_api::{
-    ParameterKind, ParameterSchema, PreparedProgram, PresetCatalog, abi::MidiEventV1,
+    ParameterKind, ParameterSchema, PreparedProgram, PresetCatalog,
+    abi::{MidiEventV1, ParameterEventV1},
 };
 use rackforge_session_api::{HostControlTarget, MasterLevel, MasterPan};
+use rackforge_surface_api::{SurfaceActivationRequest, SurfaceActivationResponse};
 use rackforge_surface_runtime::{Input as SurfaceInput, Screen};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -47,6 +54,7 @@ const MIDI_RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
 const MIDI_SUPERVISOR_TICK: Duration = Duration::from_millis(20);
 const MASTER_SMOOTHING_FRAMES: u32 = 480;
 const CONTROL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
+pub(crate) const VIRTUAL_MIDI_SOURCE_KEY: MidiSourceKey = MidiSourceKey::new(u32::MAX);
 
 #[derive(Default)]
 struct AudioTelemetry {
@@ -498,6 +506,8 @@ impl DesktopAudio {
             midi_receiver,
             command_receiver,
             events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
+            parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
+            parameter_links: Vec::new(),
             output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
             device_channels,
             output_gain: db_to_amplitude(preferences.output_gain_db),
@@ -617,6 +627,20 @@ impl DesktopAudio {
         })
     }
 
+    pub fn activate_surface(
+        &self,
+        instance_id: &str,
+        request: SurfaceActivationRequest,
+    ) -> Result<SurfaceActivationResponse> {
+        let (reply, receiver) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::ActivateSurface {
+            instance_id: instance_id.into(),
+            request,
+            reply,
+        })?;
+        receive_control_response(receiver, "activate plugin surface")
+    }
+
     pub fn preview_program(
         &self,
         instance_id: &str,
@@ -685,6 +709,12 @@ impl DesktopAudio {
         receive_control_response(receiver, "set plugin parameter")
     }
 
+    pub fn replace_parameter_links(&self, links: Vec<CompiledParameterLink>) -> Result<()> {
+        let (reply, receiver) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::ReplaceParameterLinks { links, reply })?;
+        receive_control_response(receiver, "replace parameter links")
+    }
+
     pub fn save_active_state(&self) -> Result<Vec<u8>> {
         let (reply, receiver) = mpsc::sync_channel(1);
         self.send_command(AudioCommand::SaveActiveState { reply })?;
@@ -730,6 +760,7 @@ impl DesktopAudio {
 
     pub fn test_note(&self) -> Result<()> {
         self.send_command(AudioCommand::InjectMidi(MidiPacket {
+            source: VIRTUAL_MIDI_SOURCE_KEY,
             length: 3,
             data: [0x90, 60, 100],
         }))?;
@@ -739,6 +770,7 @@ impl DesktopAudio {
             .spawn(move || {
                 thread::sleep(Duration::from_millis(350));
                 let _ = sender.try_send(AudioCommand::InjectMidi(MidiPacket {
+                    source: VIRTUAL_MIDI_SOURCE_KEY,
                     length: 3,
                     data: [0x80, 60, 0],
                 }));
@@ -752,7 +784,11 @@ impl DesktopAudio {
         self.injected_midi.clone()
     }
 
-    pub fn inject_midi_messages(&self, messages: Vec<[u8; 3]>) -> Result<()> {
+    pub fn inject_midi_messages_from(
+        &self,
+        source: MidiSourceKey,
+        messages: Vec<[u8; 3]>,
+    ) -> Result<()> {
         if messages.is_empty() {
             return Ok(());
         }
@@ -763,7 +799,11 @@ impl DesktopAudio {
         // damps it — which is what "the last notes keep ringing" was.
         for data in messages {
             self.injected_midi
-                .try_send(MidiPacket { length: 3, data })
+                .try_send(MidiPacket {
+                    source,
+                    length: 3,
+                    data,
+                })
                 .map_err(|error| {
                     anyhow::anyhow!("MIDI queue rejected an injected note: {error}")
                 })?;
@@ -809,6 +849,11 @@ enum AudioCommand {
         instance_id: String,
         sound_id: String,
     },
+    ActivateSurface {
+        instance_id: String,
+        request: SurfaceActivationRequest,
+        reply: SyncSender<Result<SurfaceActivationResponse, String>>,
+    },
     PreviewProgram {
         instance_id: String,
         prepared: PreparedProgram,
@@ -834,6 +879,10 @@ enum AudioCommand {
         parameter_index: u32,
         value: f64,
         reply: SyncSender<Result<f64, String>>,
+    },
+    ReplaceParameterLinks {
+        links: Vec<CompiledParameterLink>,
+        reply: SyncSender<Result<(), String>>,
     },
     InjectMidi(MidiPacket),
     SetMasterLevel(MasterLevel),
@@ -866,12 +915,32 @@ pub enum DesktopControllerEvent {
     },
     MasterLevel(u8),
     MasterPan(u8),
+    MidiObserved {
+        source: MidiSourceKey,
+        length: u8,
+        data: [u8; 3],
+        observed_at: Instant,
+    },
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct MidiPacket {
+    pub(crate) source: MidiSourceKey,
     pub(crate) length: u8,
     pub(crate) data: [u8; 3],
+}
+
+impl MidiPacket {
+    fn ingress(self) -> IngressMidiEvent {
+        IngressMidiEvent {
+            source: self.source,
+            packet: RoutedMidiPacket {
+                frame: 0,
+                length: self.length,
+                data: self.data,
+            },
+        }
+    }
 }
 
 struct AudioVoice {
@@ -974,6 +1043,8 @@ struct AudioProcessor {
     midi_receiver: Receiver<MidiPacket>,
     command_receiver: Receiver<AudioCommand>,
     events: Vec<MidiEventV1>,
+    parameter_events: Vec<ParameterEventV1>,
+    parameter_links: Vec<CompiledParameterLink>,
     output: Vec<f32>,
     device_channels: usize,
     output_gain: f32,
@@ -990,12 +1061,32 @@ impl AudioProcessor {
             bail!("Windows requested an unsupported audio block of {frames} frames");
         }
         self.events.clear();
+        self.parameter_events.clear();
         self.apply_commands()?;
         while self.events.len() < MAX_MIDI_EVENTS_PER_BLOCK {
             let Ok(packet) = self.midi_receiver.try_recv() else {
                 break;
             };
-            push_midi_event(&mut self.events, packet);
+            let ingress = packet.ingress();
+            let active_instance_id = self.voices[self.active_voice].instance_id.as_str();
+            let mut consume = false;
+            for link in self
+                .parameter_links
+                .iter()
+                .filter(|link| link.link.instance_id == active_instance_id)
+            {
+                let Some(mapped) = link.apply(ingress) else {
+                    continue;
+                };
+                consume |=
+                    mapped.pass_through == rackforge_midi_api::ParameterLinkPassThrough::Consume;
+                if self.parameter_events.len() < MAX_MIDI_EVENTS_PER_BLOCK {
+                    self.parameter_events.push(mapped.event);
+                }
+            }
+            if !consume {
+                push_midi_event(&mut self.events, packet);
+            }
         }
         let samples = frames * PLUGIN_OUTPUT_CHANNELS;
         let output = &mut self.output[..samples];
@@ -1013,7 +1104,7 @@ impl AudioProcessor {
                 0,
                 PLUGIN_OUTPUT_CHANNELS as u32,
                 &self.events,
-                &[],
+                &self.parameter_events,
             )
             .context("processing RackForge plugin audio")?;
         for frame in output.chunks_exact_mut(PLUGIN_OUTPUT_CHANNELS) {
@@ -1062,6 +1153,25 @@ impl AudioProcessor {
                         self.voices[self.active_voice].instance.0.reset()?;
                         self.active_voice = index;
                     }
+                }
+                AudioCommand::ActivateSurface {
+                    instance_id,
+                    request,
+                    reply,
+                } => {
+                    let result = self
+                        .voices
+                        .iter_mut()
+                        .find(|voice| voice.instance_id == instance_id)
+                        .ok_or_else(|| format!("unknown audio plugin instance {instance_id}"))
+                        .and_then(|voice| {
+                            voice
+                                .instance
+                                .0
+                                .activate_surface(&request)
+                                .map_err(|error| error.to_string())
+                        });
+                    let _ = reply.try_send(result);
                 }
                 AudioCommand::PreviewProgram {
                     instance_id,
@@ -1245,6 +1355,10 @@ impl AudioProcessor {
                                 .map_err(|error| error.to_string())
                         });
                     let _ = reply.try_send(result);
+                }
+                AudioCommand::ReplaceParameterLinks { links, reply } => {
+                    self.parameter_links = links;
+                    let _ = reply.try_send(Ok(()));
                 }
                 AudioCommand::InjectMidi(packet) => push_midi_event(&mut self.events, packet),
                 AudioCommand::SetMasterLevel(level) => self.master_gain.set_level(level),
@@ -1458,6 +1572,31 @@ fn discover_midi_inputs() -> Result<Vec<String>> {
     names.sort();
     names.dedup();
     Ok(names)
+}
+
+pub fn midi_source_descriptor(name: &str) -> Result<MidiSourceDescriptor> {
+    Ok(MidiSourceDescriptor {
+        id: stable_midi_source_id(name)?,
+        name: name.to_owned(),
+        primary: false,
+    })
+}
+
+pub fn stable_midi_source_id(name: &str) -> Result<MidiSourceId> {
+    let digest = Sha256::digest(name.trim().to_lowercase().as_bytes());
+    MidiSourceId::new(format!("windows.midir.{:x}", digest)).map_err(|error| anyhow::anyhow!(error))
+}
+
+pub fn stable_midi_source_key(name: &str) -> MidiSourceKey {
+    let id = stable_midi_source_id(name).expect("Windows MIDI names produce valid source ids");
+    stable_midi_source_key_from_id(&id)
+}
+
+pub fn stable_midi_source_key_from_id(id: &MidiSourceId) -> MidiSourceKey {
+    let digest = Sha256::digest(id.as_str().as_bytes());
+    MidiSourceKey::new(u32::from_le_bytes([
+        digest[0], digest[1], digest[2], digest[3],
+    ]))
 }
 
 struct MidiSupervisor {
@@ -1691,10 +1830,21 @@ fn connect_midi_input(
         .find(|port| midi.port_name(port).as_deref() == Ok(name))
         .with_context(|| format!("Windows MIDI input {name:?} disappeared before connection"))?;
     let keylab = keylab_controller::is_keylab_endpoint(name);
+    let source = stable_midi_source_key(name);
     midi.connect(
         &port,
         "rackforge-desktop-input",
         move |_timestamp, message, _| {
+            if !message.is_empty() && message.len() <= 3 {
+                let mut data = [0; 3];
+                data[..message.len()].copy_from_slice(message);
+                let _ = controller_sender.try_send(DesktopControllerEvent::MidiObserved {
+                    source,
+                    length: message.len() as u8,
+                    data,
+                    observed_at: Instant::now(),
+                });
+            }
             if keylab && let Some(event) = keylab_protocol::parse_input(message) {
                 let event = match event {
                     keylab_protocol::ControllerEvent::Surface { input, phase } => {
@@ -1719,6 +1869,7 @@ fn connect_midi_input(
             data[..message.len()].copy_from_slice(message);
             if sender
                 .try_send(MidiPacket {
+                    source,
                     length: message.len() as u8,
                     data,
                 })
@@ -1899,6 +2050,7 @@ fn release_held_notes(sender: &SyncSender<MidiPacket>, telemetry: &AudioTelemetr
     for packet in packets {
         if sender
             .send(MidiPacket {
+                source: VIRTUAL_MIDI_SOURCE_KEY,
                 length: packet.length,
                 data: packet.data,
             })
@@ -2102,5 +2254,19 @@ midi_inputs = []
             assert_eq!(pair[1].data, [0xb0 | channel as u8, 123, 0]);
         }
         assert_eq!(telemetry.midi_panic_count.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn midi_runtime_key_is_derived_from_persistent_identity() {
+        let name = "KL Essential 61 mk3 MIDI";
+        let id = stable_midi_source_id(name).unwrap();
+        assert_eq!(
+            stable_midi_source_key(name),
+            stable_midi_source_key_from_id(&id)
+        );
+        assert_ne!(
+            stable_midi_source_key(name),
+            stable_midi_source_key("Other keyboard")
+        );
     }
 }

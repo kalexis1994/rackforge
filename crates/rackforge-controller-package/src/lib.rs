@@ -1,7 +1,8 @@
 use rackforge_controller_api::{
-    ControllerProfile, HostActionBinding, HostControlBinding, SurfaceImplementation,
+    ControllerProfile, HostActionBinding, HostControlBinding, SemanticControlProfile,
+    SurfaceImplementation,
 };
-use semver::{Version, VersionReq};
+use semver::{BuildMetadata, Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -273,6 +274,8 @@ pub struct ControllerPackageManifest {
     pub host_controls: Vec<HostControlBinding>,
     #[serde(default)]
     pub host_actions: Vec<HostActionBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_profile: Option<SemanticControlProfile>,
     #[serde(default)]
     pub integrity: Option<ArtifactIntegrity>,
     #[serde(default)]
@@ -290,6 +293,8 @@ pub struct ProcessDriverInfo {
     pub host_controls: Vec<HostControlBinding>,
     #[serde(default)]
     pub host_actions: Vec<HostActionBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_profile: Option<SemanticControlProfile>,
 }
 
 impl ProcessDriverInfo {
@@ -344,6 +349,11 @@ impl ProcessDriverInfo {
         if self.host_actions != manifest.host_actions {
             return Err(PackageError::DriverContract(
                 "driver reserved host actions do not match the manifest".into(),
+            ));
+        }
+        if self.semantic_profile != manifest.semantic_profile {
+            return Err(PackageError::DriverContract(
+                "driver semantic control profile does not match the manifest".into(),
             ));
         }
         Ok(())
@@ -420,6 +430,7 @@ impl ControllerPackageManifest {
             surfaces: self.surfaces.clone(),
             host_controls: self.host_controls.clone(),
             host_actions: self.host_actions.clone(),
+            semantic_profile: self.semantic_profile.clone(),
         }
         .validate()
         .map_err(PackageError::InvalidManifest)?;
@@ -448,6 +459,7 @@ impl ControllerPackageManifest {
             surfaces: self.surfaces.clone(),
             host_controls: self.host_controls.clone(),
             host_actions: self.host_actions.clone(),
+            semantic_profile: self.semantic_profile.clone(),
         }
     }
 
@@ -458,6 +470,55 @@ impl ControllerPackageManifest {
             .map(String::as_str)
             .ok_or_else(|| PackageError::MissingEntrypoint(target.into()))
     }
+}
+
+/// Produces an immutable version of a controller manifest for a host-bundled
+/// package. The build metadata changes whenever the source manifest or one of
+/// the bundled artifacts changes, so a new RackForge build can install and
+/// activate its matching controller without overwriting an existing version.
+pub fn stamp_bundled_manifest(
+    manifest_text: &str,
+    artifacts: &[(&str, &[u8])],
+) -> Result<String, PackageError> {
+    let mut manifest: ControllerPackageManifest = toml::from_str(manifest_text)?;
+    manifest.validate()?;
+
+    let mut artifacts = artifacts.to_vec();
+    artifacts.sort_by(|left, right| left.0.cmp(right.0));
+    if artifacts.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+        return Err(PackageError::InvalidManifest(
+            "bundled controller contains duplicate artifact targets".into(),
+        ));
+    }
+
+    let mut package_digest = Sha256::new();
+    package_digest.update(manifest_text.as_bytes());
+    for (target, bytes) in &artifacts {
+        package_digest.update([0]);
+        package_digest.update(target.as_bytes());
+        package_digest.update([0]);
+        package_digest.update(bytes);
+    }
+    let package_digest = format!("{:x}", package_digest.finalize());
+    let mut version = Version::parse(&manifest.version).map_err(|error| {
+        PackageError::InvalidManifest(format!("invalid package version: {error}"))
+    })?;
+    version.build = BuildMetadata::new(&format!("bundled.{}", &package_digest[..12]))
+        .expect("a hexadecimal digest is valid SemVer build metadata");
+    manifest.version = version.to_string();
+
+    if !artifacts.is_empty() {
+        let integrity = manifest.integrity.get_or_insert_with(|| ArtifactIntegrity {
+            sha256: BTreeMap::new(),
+        });
+        for (target, bytes) in artifacts {
+            integrity
+                .sha256
+                .insert(target.to_owned(), format!("{:x}", Sha256::digest(bytes)));
+        }
+    }
+    manifest.validate()?;
+    toml::to_string_pretty(&manifest).map_err(PackageError::TomlSerialize)
 }
 
 #[derive(Clone, Debug)]
@@ -870,6 +931,8 @@ pub enum PackageError {
     Io(#[from] io::Error),
     #[error("invalid TOML manifest: {0}")]
     Toml(#[from] toml::de::Error),
+    #[error("could not serialize TOML manifest: {0}")]
+    TomlSerialize(toml::ser::Error),
     #[error("invalid JSON install record: {0}")]
     Json(#[from] serde_json::Error),
     #[error("invalid controller manifest: {0}")]
@@ -980,7 +1043,9 @@ mod tests {
             }],
             host_controls: Vec::new(),
             host_actions: Vec::new(),
+            semantic_profile: None,
             integrity: None,
+            settings: Vec::new(),
         }
     }
 
@@ -988,6 +1053,37 @@ mod tests {
     fn validates_a_versioned_controller_package() {
         assert!(manifest().validate().is_ok());
         assert_eq!(manifest().profile().surfaces[0].layout_id, "little@1");
+    }
+
+    #[test]
+    fn bundled_manifest_revision_tracks_manifest_and_driver_content() {
+        let source = toml::to_string_pretty(&manifest()).unwrap();
+        let first =
+            stamp_bundled_manifest(&source, &[("linux-aarch64", b"first driver".as_slice())])
+                .unwrap();
+        let repeated =
+            stamp_bundled_manifest(&source, &[("linux-aarch64", b"first driver".as_slice())])
+                .unwrap();
+        let changed =
+            stamp_bundled_manifest(&source, &[("linux-aarch64", b"second driver".as_slice())])
+                .unwrap();
+        let first: ControllerPackageManifest = toml::from_str(&first).unwrap();
+        let repeated: ControllerPackageManifest = toml::from_str(&repeated).unwrap();
+        let changed: ControllerPackageManifest = toml::from_str(&changed).unwrap();
+
+        assert_eq!(first.version, repeated.version);
+        assert_ne!(first.version, changed.version);
+        assert!(first.version.starts_with("1.2.3+bundled."));
+        let expected_driver_digest = format!("{:x}", Sha256::digest(b"first driver"));
+        assert_eq!(
+            first
+                .integrity
+                .unwrap()
+                .sha256
+                .get("linux-aarch64")
+                .map(String::as_str),
+            Some(expected_driver_digest.as_str())
+        );
     }
 
     #[test]
@@ -1113,6 +1209,7 @@ mod tests {
             layouts: vec!["little@1".into()],
             host_controls: Vec::new(),
             host_actions: Vec::new(),
+            semantic_profile: package_manifest.semantic_profile.clone(),
         };
         info.validate_against(&package_manifest).unwrap();
 

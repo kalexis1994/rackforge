@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 rackforge-ui = { path = "../../crates/rackforge-ui" }
 rackforge-control-api = { path = "../../crates/rackforge-control-api" }
+rackforge-control-profile = { path = "../../crates/rackforge-control-profile" }
 rackforge-controller-api = { path = "../../crates/rackforge-controller-api" }
 rackforge-controller-package = { path = "../../crates/rackforge-controller-package" }
 rackforge-session-api = { path = "../../crates/rackforge-session-api" }

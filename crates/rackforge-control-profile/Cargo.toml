@@ -1,0 +1,10 @@
+[package]
+name = "rackforge-control-profile"
+description = "Versioned semantic control vocabulary shared by RackForge controllers and plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true

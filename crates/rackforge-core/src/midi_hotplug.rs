@@ -200,7 +200,9 @@ mod supervisor {
     use midir::{Ignore, MidiInput, MidiInputConnection};
     use rackforge_midi_api::{IngressMidiEvent, MidiSourceKey};
     use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
     use std::sync::mpsc::SyncSender;
+    use std::sync::{Arc, Mutex};
     use std::thread::{self, JoinHandle};
     use std::time::Duration;
 
@@ -217,6 +219,8 @@ mod supervisor {
     /// after a poll interval, so startup connects without an artificial delay.
     pub fn spawn(
         sender: SyncSender<IngressMidiEvent>,
+        observer: Option<SyncSender<IngressMidiEvent>>,
+        connected_sources: Arc<Mutex<BTreeSet<u32>>>,
         mut supervised: Vec<SupervisedSource>,
         interval: Duration,
     ) -> Result<JoinHandle<()>> {
@@ -235,7 +239,15 @@ mod supervisor {
                     match present_source_ids() {
                         Ok(present) => {
                             for action in reconcile(&supervised, &present) {
-                                apply(action, &mut supervised, &mut connections, &sender, scope);
+                                apply(
+                                    action,
+                                    &mut supervised,
+                                    &mut connections,
+                                    &sender,
+                                    observer.as_ref(),
+                                    &connected_sources,
+                                    scope,
+                                );
                             }
                         }
                         // A failed scan must not end the supervisor: the ALSA
@@ -257,6 +269,8 @@ mod supervisor {
         supervised: &mut [SupervisedSource],
         connections: &mut BTreeMap<u32, MidiInputConnection<()>>,
         sender: &SyncSender<IngressMidiEvent>,
+        observer: Option<&SyncSender<IngressMidiEvent>>,
+        connected_sources: &Arc<Mutex<BTreeSet<u32>>>,
         scope: PanicScope,
     ) {
         match action {
@@ -264,10 +278,13 @@ mod supervisor {
                 let Some(source) = supervised.iter_mut().find(|source| source.key == key) else {
                     return;
                 };
-                match connect(key, &source.id, sender.clone()) {
+                match connect(key, &source.id, sender.clone(), observer.cloned()) {
                     Ok(connection) => {
                         connections.insert(key.get(), connection);
                         source.connected = true;
+                        if let Ok(mut connected) = connected_sources.lock() {
+                            connected.insert(key.get());
+                        }
                         println!(
                             "MIDI_SOURCE_CONNECTED source={} id={}",
                             key.get(),
@@ -288,6 +305,9 @@ mod supervisor {
             }
             SupervisorAction::Release(key) => {
                 connections.remove(&key.get());
+                if let Ok(mut connected) = connected_sources.lock() {
+                    connected.remove(&key.get());
+                }
                 if let Some(source) = supervised.iter_mut().find(|source| source.key == key) {
                     source.connected = false;
                     eprintln!("MIDI_SOURCE_LOST source={} id={}", key.get(), source.id);
@@ -341,6 +361,7 @@ mod supervisor {
         key: MidiSourceKey,
         id: &rackforge_midi_api::MidiSourceId,
         sender: SyncSender<IngressMidiEvent>,
+        observer: Option<SyncSender<IngressMidiEvent>>,
     ) -> Result<MidiInputConnection<()>> {
         let mut midi = MidiInput::new(&format!("rackforge-core-live-{}", key.get()))?;
         midi.ignore(Ignore::None);
@@ -362,10 +383,14 @@ mod supervisor {
             &format!("rackforge-core-input-{}", key.get()),
             move |_timestamp, message, _| {
                 if let Ok(packet) = rackforge_midi_api::MidiPacket::new(0, message) {
-                    let _ = sender.try_send(IngressMidiEvent {
+                    let ingress = IngressMidiEvent {
                         source: key,
                         packet,
-                    });
+                    };
+                    if let Some(observer) = &observer {
+                        let _ = observer.try_send(ingress);
+                    }
+                    let _ = sender.try_send(ingress);
                 }
             },
             (),

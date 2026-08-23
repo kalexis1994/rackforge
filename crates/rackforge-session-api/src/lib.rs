@@ -1,3 +1,4 @@
+pub use rackforge_midi_api::{ParameterLink, ParameterLinkId};
 pub use rackforge_performance_api::{
     LiveBrowseMode, LiveLocation, LivePerformanceState, RackDefinition, RackId,
 };
@@ -7,7 +8,7 @@ use std::fmt;
 
 pub use rackforge_controller_api::{
     ButtonPhase, HostActionBinding, HostActionTarget, HostControlBinding, HostControlTarget,
-    MidiButtonBinding, MidiControlChangeBinding,
+    MidiButtonBinding, MidiControlChangeBinding, SemanticControlBinding, SemanticControlProfile,
 };
 pub use rackforge_surface_api::{
     SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
@@ -300,6 +301,8 @@ pub struct SessionState {
     pub audition: Option<AuditionState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program_draft: Option<ProgramDraftState>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameter_links: Vec<ParameterLink>,
 }
 
 impl SessionState {
@@ -316,6 +319,7 @@ impl SessionState {
             instances: Vec::new(),
             audition: None,
             program_draft: None,
+            parameter_links: Vec::new(),
         }
     }
 
@@ -561,6 +565,25 @@ impl SessionState {
                 request.validate().map_err(|error| error.to_string())?;
                 response.validate().map_err(|error| error.to_string())?;
             }
+            SessionEvent::ParameterLinkUpserted { link } => {
+                link.validate().map_err(|error| error.to_string())?;
+                if let Some(existing) = self
+                    .parameter_links
+                    .iter_mut()
+                    .find(|existing| existing.id == link.id)
+                {
+                    *existing = link.clone();
+                } else {
+                    self.parameter_links.push(link.clone());
+                }
+            }
+            SessionEvent::ParameterLinkRemoved { link_id } => {
+                let before = self.parameter_links.len();
+                self.parameter_links.retain(|link| &link.id != link_id);
+                if self.parameter_links.len() == before {
+                    return Err(format!("unknown parameter link {link_id}"));
+                }
+            }
         }
         self.revision = envelope.revision;
         Ok(())
@@ -578,6 +601,12 @@ pub enum SessionCommand {
         controller_id: String,
         controls: Vec<HostControlBinding>,
         actions: Vec<HostActionBinding>,
+        /// Current backend endpoint selected by the driver. Hosts resolve this
+        /// display hint to their own stable MIDI source identity.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        midi_source_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        semantic_profile: Option<SemanticControlProfile>,
     },
     SetMasterLevel {
         level: MasterLevel,
@@ -649,6 +678,12 @@ pub enum SessionCommand {
     ActivateSurface {
         instance_id: InstanceId,
         request: SurfaceActivationRequest,
+    },
+    UpsertParameterLink {
+        link: ParameterLink,
+    },
+    RemoveParameterLink {
+        link_id: ParameterLinkId,
     },
 }
 
@@ -757,6 +792,12 @@ pub enum SessionEvent {
         request: SurfaceActivationRequest,
         response: SurfaceActivationResponse,
     },
+    ParameterLinkUpserted {
+        link: ParameterLink,
+    },
+    ParameterLinkRemoved {
+        link_id: ParameterLinkId,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -786,6 +827,10 @@ fn validate_identifier(value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackforge_midi_api::{
+        MidiSourceId, PARAMETER_LINK_SCHEMA_VERSION, ParameterLinkChannel, ParameterLinkMessage,
+        ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform,
+    };
 
     fn session() -> SessionState {
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
@@ -818,6 +863,7 @@ mod tests {
             }],
             audition: None,
             program_draft: None,
+            parameter_links: Vec::new(),
         }
     }
 
@@ -871,6 +917,60 @@ mod tests {
             },
             dirty,
         }
+    }
+
+    fn parameter_link(id: &str) -> ParameterLink {
+        ParameterLink {
+            schema_version: PARAMETER_LINK_SCHEMA_VERSION,
+            id: ParameterLinkId::new(id).unwrap(),
+            instance_id: DEFAULT_LIVE_INSTANCE_ID.into(),
+            parameter_index: 17,
+            source: ParameterLinkSource {
+                source_id: MidiSourceId::new("usb.controller.main").unwrap(),
+                display_name: "Stage Controller".into(),
+            },
+            channel: ParameterLinkChannel::Omni,
+            message: ParameterLinkMessage::ControlChange { controller: 74 },
+            transform: ParameterLinkTransform::default(),
+            pass_through: ParameterLinkPassThrough::PassThrough,
+        }
+    }
+
+    #[test]
+    fn parameter_links_are_immutable_event_driven_session_state() {
+        let mut state = session();
+        let original = parameter_link("link.cutoff");
+        state
+            .apply(&event(
+                1,
+                SessionEvent::ParameterLinkUpserted {
+                    link: original.clone(),
+                },
+            ))
+            .unwrap();
+        assert_eq!(state.parameter_links, vec![original.clone()]);
+
+        let mut replacement = original.clone();
+        replacement.transform.invert = true;
+        state
+            .apply(&event(
+                2,
+                SessionEvent::ParameterLinkUpserted {
+                    link: replacement.clone(),
+                },
+            ))
+            .unwrap();
+        assert_eq!(state.parameter_links, vec![replacement]);
+
+        state
+            .apply(&event(
+                3,
+                SessionEvent::ParameterLinkRemoved {
+                    link_id: original.id,
+                },
+            ))
+            .unwrap();
+        assert!(state.parameter_links.is_empty());
     }
 
     #[test]

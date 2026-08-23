@@ -3,6 +3,7 @@ use crate::performance::PerformanceRepository;
 use crate::rack_graph::{CompiledRackSlot, compile_instrument_definition, compile_instrument_rack};
 use crate::session::SharedSessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
+use crate::{CompiledParameterLink, compile_semantic_parameter_links};
 use crate::{
     IsolatedPluginStateEditor, LoadedPlugin, PluginInstance, PluginStateStore,
     validate_state_reference,
@@ -11,9 +12,13 @@ use anyhow::{Context, Result, bail};
 use rackforge_audio_api::{AudioOutputDocument, AudioOutputProfile, AudioOutputState};
 use rackforge_control_api::{
     ControlErrorCode, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES,
-    PluginParameterValue, VirtualMidiMessage, decode_request, encode_line,
+    MidiLearnCandidate, MidiSourceStatus, PluginParameterValue, VirtualMidiMessage, decode_request,
+    encode_line,
 };
-use rackforge_midi_api::MidiPacket;
+use rackforge_midi_api::{
+    IngressMidiEvent, MidiMessageKind, MidiPacket, MidiSourceDescriptor, MidiSourceRegistry,
+    ParameterLink, ParameterLinkMessage,
+};
 #[cfg(test)]
 use rackforge_performance_api::PerformanceLibrary;
 use rackforge_performance_api::{
@@ -29,7 +34,7 @@ use rackforge_plugin_api::{
 use rackforge_session_api::{
     AuditionEndReason, ClientId, CommandEnvelope, CommandRef, HostActionBinding,
     HostControlBinding, InstanceId, MasterLevel, MasterPan, ProgramDraftState, Revision,
-    SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SoundSummary,
+    SESSION_SCHEMA_VERSION, SemanticControlProfile, SessionCommand, SessionEvent, SoundSummary,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -75,7 +80,7 @@ pub struct RackSlotRuntimeSpec {
 
 pub enum AudioControlCommand {
     InjectVirtualMidi {
-        packets: Vec<MidiPacket>,
+        events: Vec<IngressMidiEvent>,
     },
     ApplyAudioOutput {
         profile: AudioOutputProfile,
@@ -186,6 +191,10 @@ pub enum AudioControlCommand {
         value: f64,
         reply: SyncSender<Result<f64, String>>,
     },
+    ReplaceParameterLinks {
+        links: Vec<CompiledParameterLink>,
+        reply: SyncSender<Result<(), String>>,
+    },
     ReplaceStandaloneVoice {
         instance_id: InstanceId,
         instance: PreparedPluginInstance,
@@ -208,6 +217,7 @@ pub struct PreparedRackSlot {
     pub instance: PreparedPluginInstance,
     pub output: Vec<f32>,
     pub events: Vec<MidiEventV1>,
+    pub parameter_events: Vec<rackforge_plugin_api::abi::ParameterEventV1>,
 }
 
 // SAFETY: `PreparedRackSlot` is produced only from `PortableControlPlugin`,
@@ -238,10 +248,16 @@ struct LeaseDeadline {
     deadline: Instant,
 }
 
+struct MidiLearnState {
+    id: u64,
+    candidate: Option<MidiLearnCandidate>,
+}
+
 #[derive(Clone, Default)]
 struct VirtualMidiClientState {
     notes: BTreeSet<(u8, u8)>,
     channels: BTreeSet<u8>,
+    source: Option<rackforge_midi_api::MidiSourceKey>,
 }
 
 struct ControlFailure {
@@ -256,6 +272,13 @@ impl ControlFailure {
     }
 }
 
+#[derive(Clone)]
+struct RegisteredSemanticProfile {
+    profile: SemanticControlProfile,
+    runtime_source_id: Option<rackforge_midi_api::MidiSourceId>,
+    runtime_source_name: Option<String>,
+}
+
 struct ControlContext {
     store: SharedSessionStore,
     audio_sender: SyncSender<AudioControlCommand>,
@@ -265,6 +288,11 @@ struct ControlContext {
     state_store: Arc<Mutex<PluginStateStore>>,
     plugin_manifests: BTreeMap<String, PluginManifest>,
     portable_plugins: BTreeMap<String, PortableControlPlugin>,
+    semantic_profiles: Mutex<BTreeMap<String, RegisteredSemanticProfile>>,
+    midi_sources: MidiSourceRegistry,
+    connected_midi_sources: Arc<Mutex<BTreeSet<u32>>>,
+    midi_observer: Mutex<Receiver<IngressMidiEvent>>,
+    midi_learn: Mutex<Option<MidiLearnState>>,
     dynamic_resources: Mutex<BTreeMap<InstanceId, BTreeMap<String, PathBuf>>>,
     virtual_midi: Mutex<BTreeMap<ClientId, VirtualMidiClientState>>,
     plugin_sample_rate: f64,
@@ -275,6 +303,7 @@ struct ControlContext {
     dispatch_lock: Mutex<()>,
     lease_deadline: Mutex<Option<LeaseDeadline>>,
     next_draft_id: AtomicU64,
+    next_midi_learn_id: AtomicU64,
 }
 
 pub struct ControlServer {
@@ -292,6 +321,9 @@ pub fn start(
     state_store: Arc<Mutex<PluginStateStore>>,
     plugin_manifests: BTreeMap<String, PluginManifest>,
     portable_plugins: BTreeMap<String, PortableControlPlugin>,
+    midi_sources: MidiSourceRegistry,
+    midi_observer: Receiver<IngressMidiEvent>,
+    connected_midi_sources: Arc<Mutex<BTreeSet<u32>>>,
     plugin_sample_rate: f64,
     plugin_maximum_frames: u32,
     plugin_output_channels: u32,
@@ -339,6 +371,11 @@ pub fn start(
         state_store,
         plugin_manifests,
         portable_plugins,
+        semantic_profiles: Mutex::new(BTreeMap::new()),
+        midi_sources,
+        connected_midi_sources,
+        midi_observer: Mutex::new(midi_observer),
+        midi_learn: Mutex::new(None),
         dynamic_resources: Mutex::new(BTreeMap::new()),
         virtual_midi: Mutex::new(BTreeMap::new()),
         plugin_sample_rate,
@@ -349,6 +386,7 @@ pub fn start(
         dispatch_lock: Mutex::new(()),
         lease_deadline: Mutex::new(None),
         next_draft_id: AtomicU64::new(1),
+        next_midi_learn_id: AtomicU64::new(1),
     });
     let path = socket_path.to_path_buf();
     let server_context = Arc::clone(&context);
@@ -491,6 +529,33 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             parameter_index,
             value,
         } => set_plugin_state_parameter(context, &state, parameter_index, value),
+        ControlRequest::MidiSources => {
+            let connected = context.connected_midi_sources.lock().ok();
+            let sources: Vec<MidiSourceStatus> = context
+                .midi_sources
+                .descriptors()
+                .filter(|source| source.id.as_str() != "rackforge.virtual.touch")
+                .cloned()
+                .map(|source| {
+                    let key = context.midi_sources.resolve_optional(&source.id);
+                    MidiSourceStatus {
+                        source,
+                        connected: key.is_some_and(|key| {
+                            connected
+                                .as_ref()
+                                .is_some_and(|present| present.contains(&key.get()))
+                        }),
+                    }
+                })
+                .collect();
+            ControlResponse::MidiSources { sources }
+        }
+        ControlRequest::BeginMidiLearn {
+            instance_id,
+            parameter_index,
+        } => begin_midi_learn(context, &instance_id, parameter_index),
+        ControlRequest::MidiLearnStatus { learn_id } => midi_learn_status(context, learn_id),
+        ControlRequest::CancelMidiLearn { learn_id } => cancel_midi_learn(context, learn_id),
         ControlRequest::LoadPluginResource {
             plugin_id,
             instance_id,
@@ -517,9 +582,11 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             edit,
         } => edit_performance(context, expected_revision, edit),
         ControlRequest::ApplyAudioOutput { profile } => apply_audio_output(context, profile),
-        ControlRequest::VirtualMidi { client_id, message } => {
-            accept_virtual_midi(context, client_id, message)
-        }
+        ControlRequest::VirtualMidi {
+            client_id,
+            source_name,
+            message,
+        } => accept_virtual_midi(context, client_id, source_name, message),
         ControlRequest::ReleaseVirtualMidi { client_id } => {
             release_virtual_midi(context, client_id)
         }
@@ -545,6 +612,7 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
 fn accept_virtual_midi(
     context: &ControlContext,
     client_id: ClientId,
+    source_name: Option<String>,
     message: VirtualMidiMessage,
 ) -> ControlResponse {
     if let Err(message) = message.validate() {
@@ -564,10 +632,34 @@ fn accept_virtual_midi(
             );
         }
     };
+    let source = match source_name.as_deref() {
+        Some(name) => match context.midi_sources.resolve_name(name) {
+            Some((source, _)) => source,
+            None => {
+                return error_response(
+                    ControlErrorCode::Unavailable,
+                    format!("MIDI input {name:?} is disabled or unavailable in RackForge settings"),
+                    current_revision(context),
+                );
+            }
+        },
+        None => {
+            let id = rackforge_midi_api::MidiSourceId::new(crate::live::VIRTUAL_MIDI_SOURCE_ID)
+                .expect("the touch MIDI source id is valid");
+            context
+                .midi_sources
+                .resolve_optional(&id)
+                .unwrap_or(rackforge_midi_api::MidiSourceKey::new(u32::MAX))
+        }
+    };
+    let ingress = IngressMidiEvent { source, packet };
+    if source_name.is_some() {
+        observe_forwarded_midi_learn(context, ingress);
+    }
     if let Err(failure) = send_audio(
         context,
         AudioControlCommand::InjectVirtualMidi {
-            packets: vec![packet],
+            events: vec![ingress],
         },
     ) {
         return failure.into_response();
@@ -575,6 +667,7 @@ fn accept_virtual_midi(
     let active_notes = match context.virtual_midi.lock() {
         Ok(mut clients) => {
             let state = clients.entry(client_id.clone()).or_default();
+            state.source = Some(source);
             let channel = message.channel();
             state.channels.insert(channel);
             if let Some(note) = message.note_on() {
@@ -597,10 +690,18 @@ fn release_virtual_midi(context: &ControlContext, client_id: ClientId) -> Contro
         Ok(mut clients) => clients.remove(&client_id).unwrap_or_default(),
         Err(_) => return internal_error("virtual MIDI state lock is poisoned", None),
     };
-    let mut packets = Vec::with_capacity(state.notes.len() + state.channels.len() * 3);
+    let source = state.source.unwrap_or_else(|| {
+        let id = rackforge_midi_api::MidiSourceId::new(crate::live::VIRTUAL_MIDI_SOURCE_ID)
+            .expect("the touch MIDI source id is valid");
+        context
+            .midi_sources
+            .resolve_optional(&id)
+            .unwrap_or(rackforge_midi_api::MidiSourceKey::new(u32::MAX))
+    });
+    let mut events = Vec::with_capacity(state.notes.len() + state.channels.len() * 3);
     for (channel, note) in &state.notes {
         if let Ok(packet) = MidiPacket::new(0, &[0x80 | channel, *note, 0]) {
-            packets.push(packet);
+            events.push(IngressMidiEvent { source, packet });
         }
     }
     let channels = if state.channels.is_empty() {
@@ -611,13 +712,12 @@ fn release_virtual_midi(context: &ControlContext, client_id: ClientId) -> Contro
     for channel in channels {
         for controller in [64, 123, 120] {
             if let Ok(packet) = MidiPacket::new(0, &[0xb0 | channel, controller, 0]) {
-                packets.push(packet);
+                events.push(IngressMidiEvent { source, packet });
             }
         }
     }
-    if !packets.is_empty()
-        && let Err(failure) =
-            send_audio(context, AudioControlCommand::InjectVirtualMidi { packets })
+    if !events.is_empty()
+        && let Err(failure) = send_audio(context, AudioControlCommand::InjectVirtualMidi { events })
     {
         if let Ok(mut clients) = context.virtual_midi.lock() {
             clients.insert(client_id.clone(), state);
@@ -1973,6 +2073,309 @@ fn persist_audio_output(path: &Path, profile: &AudioOutputProfile) -> Result<()>
     Ok(())
 }
 
+fn begin_midi_learn(
+    context: &ControlContext,
+    instance_id: &str,
+    parameter_index: u32,
+) -> ControlResponse {
+    let snapshot = match context.store.lock() {
+        Ok(store) => store.state().clone(),
+        Err(_) => return internal_error("session store lock is poisoned", None),
+    };
+    let repository = match context.performance_repository.lock() {
+        Ok(repository) => repository,
+        Err(_) => {
+            return internal_error(
+                "performance repository lock is poisoned",
+                Some(snapshot.revision),
+            );
+        }
+    };
+    let plugin_id = snapshot
+        .instances
+        .iter()
+        .find(|instance| instance.instance_id.as_str() == instance_id)
+        .map(|instance| instance.plugin_id.as_str())
+        .or_else(|| {
+            repository
+                .library()
+                .racks
+                .iter()
+                .flat_map(|rack| rack.slots.iter())
+                .find(|slot| slot.id.as_str() == instance_id)
+                .map(|slot| slot.plugin_id.as_str())
+        });
+    let Some(plugin_id) = plugin_id else {
+        return error_response(
+            ControlErrorCode::NotFound,
+            format!("MIDI Learn targets unknown instance {instance_id}"),
+            Some(snapshot.revision),
+        );
+    };
+    let Some(plugin) = context.portable_plugins.get(plugin_id) else {
+        return error_response(
+            ControlErrorCode::Unavailable,
+            format!("plugin {plugin_id} does not expose a portable parameter runtime"),
+            Some(snapshot.revision),
+        );
+    };
+    let Some(parameter) = plugin
+        .0
+        .parameters()
+        .parameters
+        .iter()
+        .find(|parameter| parameter.index == parameter_index)
+    else {
+        return error_response(
+            ControlErrorCode::NotFound,
+            format!("unknown plugin parameter {parameter_index}"),
+            Some(snapshot.revision),
+        );
+    };
+    if parameter.flags.read_only
+        || matches!(
+            parameter.kind,
+            rackforge_plugin_api::ParameterKind::Meter { .. }
+        )
+    {
+        return error_response(
+            ControlErrorCode::Rejected,
+            format!("plugin parameter {} is read-only", parameter.id),
+            Some(snapshot.revision),
+        );
+    }
+    drop(repository);
+    if let Ok(observer) = context.midi_observer.lock() {
+        while observer.try_recv().is_ok() {}
+    }
+    let learn_id = context
+        .next_midi_learn_id
+        .fetch_add(1, Ordering::Relaxed)
+        .max(1);
+    match context.midi_learn.lock() {
+        Ok(mut learn) => {
+            *learn = Some(MidiLearnState {
+                id: learn_id,
+                candidate: None,
+            });
+            ControlResponse::MidiLearnStarted { learn_id }
+        }
+        Err(_) => internal_error("MIDI Learn state lock is poisoned", Some(snapshot.revision)),
+    }
+}
+
+fn midi_learn_candidate(
+    sources: &MidiSourceRegistry,
+    ingress: IngressMidiEvent,
+) -> Option<MidiLearnCandidate> {
+    let message = match ingress.packet.kind() {
+        MidiMessageKind::ControlChange => Some(ParameterLinkMessage::ControlChange {
+            controller: ingress.packet.data[1],
+        }),
+        MidiMessageKind::PitchBend => Some(ParameterLinkMessage::PitchBend),
+        MidiMessageKind::Note => Some(ParameterLinkMessage::Note {
+            note: ingress.packet.data[1],
+        }),
+        MidiMessageKind::ChannelPressure => Some(ParameterLinkMessage::ChannelPressure),
+        MidiMessageKind::PolyPressure => Some(ParameterLinkMessage::PolyPressure {
+            note: ingress.packet.data[1],
+        }),
+        MidiMessageKind::ProgramChange => None,
+    }?;
+    Some(MidiLearnCandidate {
+        source: sources.descriptor(ingress.source)?.clone(),
+        channel: ingress.packet.channel(),
+        message,
+    })
+}
+
+fn observe_forwarded_midi_learn(context: &ControlContext, ingress: IngressMidiEvent) {
+    let Some(candidate) = midi_learn_candidate(&context.midi_sources, ingress) else {
+        return;
+    };
+    if let Ok(mut learn) = context.midi_learn.lock()
+        && let Some(active) = learn.as_mut()
+        && active.candidate.is_none()
+    {
+        active.candidate = Some(candidate);
+    }
+}
+
+fn midi_learn_status(context: &ControlContext, learn_id: u64) -> ControlResponse {
+    let mut learn = match context.midi_learn.lock() {
+        Ok(learn) => learn,
+        Err(_) => {
+            return internal_error(
+                "MIDI Learn state lock is poisoned",
+                current_revision(context),
+            );
+        }
+    };
+    let Some(active) = learn.as_mut() else {
+        return error_response(
+            ControlErrorCode::NotFound,
+            format!("MIDI Learn session {learn_id} does not exist"),
+            current_revision(context),
+        );
+    };
+    if active.id != learn_id {
+        return error_response(
+            ControlErrorCode::NotFound,
+            format!("MIDI Learn session {learn_id} does not exist"),
+            current_revision(context),
+        );
+    }
+    if active.candidate.is_none()
+        && let Ok(observer) = context.midi_observer.lock()
+    {
+        while let Ok(ingress) = observer.try_recv() {
+            if let Some(candidate) = midi_learn_candidate(&context.midi_sources, ingress) {
+                active.candidate = Some(candidate);
+                break;
+            }
+        }
+    }
+    ControlResponse::MidiLearnStatus {
+        learn_id,
+        candidate: active.candidate.clone(),
+    }
+}
+
+fn cancel_midi_learn(context: &ControlContext, learn_id: u64) -> ControlResponse {
+    match context.midi_learn.lock() {
+        Ok(mut learn) if learn.as_ref().is_some_and(|active| active.id == learn_id) => {
+            *learn = None;
+            ControlResponse::MidiLearnCancelled { learn_id }
+        }
+        Ok(_) => error_response(
+            ControlErrorCode::NotFound,
+            format!("MIDI Learn session {learn_id} does not exist"),
+            current_revision(context),
+        ),
+        Err(_) => internal_error(
+            "MIDI Learn state lock is poisoned",
+            current_revision(context),
+        ),
+    }
+}
+
+fn compile_parameter_links(
+    context: &ControlContext,
+    snapshot: &rackforge_session_api::SessionState,
+    links: &[ParameterLink],
+) -> Result<Vec<CompiledParameterLink>, ControlFailure> {
+    let repository = context.performance_repository.lock().map_err(|_| {
+        control_failure(
+            ControlErrorCode::Internal,
+            "performance repository lock is poisoned",
+            Some(snapshot.revision),
+        )
+    })?;
+    let mut compiled = Vec::with_capacity(links.len());
+    for link in links {
+        let plugin_id = snapshot
+            .instances
+            .iter()
+            .find(|instance| instance.instance_id.as_str() == link.instance_id)
+            .map(|instance| instance.plugin_id.as_str())
+            .or_else(|| {
+                repository
+                    .library()
+                    .racks
+                    .iter()
+                    .flat_map(|rack| rack.slots.iter())
+                    .find(|slot| slot.id.as_str() == link.instance_id)
+                    .map(|slot| slot.plugin_id.as_str())
+            })
+            .ok_or_else(|| {
+                control_failure(
+                    ControlErrorCode::NotFound,
+                    format!(
+                        "parameter link {} targets unknown instance {}",
+                        link.id, link.instance_id
+                    ),
+                    Some(snapshot.revision),
+                )
+            })?;
+        let plugin = context.portable_plugins.get(plugin_id).ok_or_else(|| {
+            control_failure(
+                ControlErrorCode::Unavailable,
+                format!("plugin {plugin_id} does not expose a portable parameter runtime"),
+                Some(snapshot.revision),
+            )
+        })?;
+        // A missing source is a valid pending link. It will compile again when
+        // the stable endpoint identity reconnects.
+        let source_key = context
+            .midi_sources
+            .resolve_optional(&link.source.source_id);
+        let runtime = CompiledParameterLink::new(
+            link.clone(),
+            source_key.unwrap_or_else(|| rackforge_midi_api::MidiSourceKey::new(u32::MAX)),
+            plugin.0.parameters(),
+        )
+        .map_err(|error| {
+            control_failure(
+                ControlErrorCode::InvalidRequest,
+                format!("invalid parameter link {}: {error:#}", link.id),
+                Some(snapshot.revision),
+            )
+        })?;
+        if source_key.is_some() {
+            compiled.push(runtime);
+        }
+    }
+
+    let semantic_profiles = context.semantic_profiles.lock().map_err(|_| {
+        control_failure(
+            ControlErrorCode::Internal,
+            "semantic controller profile lock is poisoned",
+            Some(snapshot.revision),
+        )
+    })?;
+    for (controller_id, registered) in semantic_profiles.iter() {
+        let Some(source_id) = &registered.runtime_source_id else {
+            continue;
+        };
+        let profile = &registered.profile;
+        let Some(source_key) = context.midi_sources.resolve_optional(source_id) else {
+            // The package remains registered while its device is absent.
+            continue;
+        };
+        for instance in &snapshot.instances {
+            let Some(plugin) = context.portable_plugins.get(&instance.plugin_id) else {
+                continue;
+            };
+            compiled.extend(
+                compile_semantic_parameter_links(
+                    controller_id,
+                    registered
+                        .runtime_source_name
+                        .as_deref()
+                        .unwrap_or(controller_id),
+                    profile,
+                    source_id,
+                    source_key,
+                    instance.instance_id.as_str(),
+                    plugin.0.parameters(),
+                    links,
+                )
+                .map_err(|error| {
+                    control_failure(
+                        ControlErrorCode::InvalidRequest,
+                        format!(
+                            "invalid semantic mapping for controller {controller_id} and plugin {}: {error:#}",
+                            instance.plugin_id
+                        ),
+                        Some(snapshot.revision),
+                    )
+                })?,
+            );
+        }
+    }
+    Ok(compiled)
+}
+
 fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) -> ControlResponse {
     if envelope.schema_version != SESSION_SCHEMA_VERSION || envelope.command_id == 0 {
         return error_response(
@@ -2016,6 +2419,84 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
     };
 
     match envelope.command {
+        SessionCommand::UpsertParameterLink { link } => {
+            if let Err(error) = link.validate() {
+                return error_response(
+                    ControlErrorCode::InvalidRequest,
+                    error.to_string(),
+                    Some(snapshot.revision),
+                );
+            }
+            let mut links = snapshot.parameter_links.clone();
+            if let Some(existing) = links.iter_mut().find(|existing| existing.id == link.id) {
+                *existing = link.clone();
+            } else {
+                links.push(link.clone());
+            }
+            let compiled = match compile_parameter_links(context, &snapshot, &links) {
+                Ok(compiled) => compiled,
+                Err(failure) => return failure.into_response(),
+            };
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::ReplaceParameterLinks {
+                    links: compiled,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "replace parameter links") {
+                Ok(()) => record_command_event(
+                    context,
+                    command_ref,
+                    SessionEvent::ParameterLinkUpserted { link },
+                ),
+                Err(failure) => failure.into_response(),
+            }
+        }
+        SessionCommand::RemoveParameterLink { link_id } => {
+            if !snapshot
+                .parameter_links
+                .iter()
+                .any(|link| link.id == link_id)
+            {
+                return error_response(
+                    ControlErrorCode::NotFound,
+                    format!("unknown parameter link {link_id}"),
+                    Some(snapshot.revision),
+                );
+            }
+            let links = snapshot
+                .parameter_links
+                .iter()
+                .filter(|link| link.id != link_id)
+                .cloned()
+                .collect::<Vec<_>>();
+            let compiled = match compile_parameter_links(context, &snapshot, &links) {
+                Ok(compiled) => compiled,
+                Err(failure) => return failure.into_response(),
+            };
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if let Err(failure) = send_audio(
+                context,
+                AudioControlCommand::ReplaceParameterLinks {
+                    links: compiled,
+                    reply: reply_sender,
+                },
+            ) {
+                return failure.into_response();
+            }
+            match receive_audio(reply_receiver, "replace parameter links") {
+                Ok(()) => record_command_event(
+                    context,
+                    command_ref,
+                    SessionEvent::ParameterLinkRemoved { link_id },
+                ),
+                Err(failure) => failure.into_response(),
+            }
+        }
         SessionCommand::RegisterHostControls {
             controller_id,
             bindings,
@@ -2051,6 +2532,8 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             controller_id,
             controls,
             actions,
+            midi_source_name,
+            semantic_profile,
         } => {
             let invalid = ClientId::new(&controller_id).is_err()
                 || controls
@@ -2058,7 +2541,12 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                     .any(|binding| binding.midi_cc.validate().is_err())
                 || actions
                     .iter()
-                    .any(|binding| binding.midi_cc.validate().is_err());
+                    .any(|binding| binding.midi_cc.validate().is_err())
+                || semantic_profile.as_ref().is_some_and(|profile| {
+                    profile
+                        .validate_against_reserved(&controls, &actions)
+                        .is_err()
+                });
             if invalid {
                 return error_response(
                     ControlErrorCode::InvalidRequest,
@@ -2070,7 +2558,7 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
             if let Err(failure) = send_audio(
                 context,
                 AudioControlCommand::RegisterHostBindings {
-                    controller_id,
+                    controller_id: controller_id.clone(),
                     controls,
                     actions,
                     reply: reply_sender,
@@ -2079,7 +2567,90 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 return failure.into_response();
             }
             match receive_audio(reply_receiver, "register reserved host bindings") {
-                Ok(()) => command_applied_without_events(context, command_ref),
+                Ok(()) => {
+                    let previous = match context.semantic_profiles.lock() {
+                        Ok(mut profiles) => {
+                            let previous = profiles.get(&controller_id).cloned();
+                            match semantic_profile {
+                                Some(profile) => {
+                                    let resolved = midi_source_name
+                                        .as_deref()
+                                        .and_then(|name| context.midi_sources.resolve_name(name))
+                                        .map(|(_, source)| {
+                                            (Some(source.id.clone()), Some(source.name.clone()))
+                                        })
+                                        .unwrap_or_else(|| {
+                                            if midi_source_name.is_none() {
+                                                previous.as_ref().map_or(
+                                                    (None, None),
+                                                    |registered| {
+                                                        (
+                                                            registered.runtime_source_id.clone(),
+                                                            registered.runtime_source_name.clone(),
+                                                        )
+                                                    },
+                                                )
+                                            } else {
+                                                (None, None)
+                                            }
+                                        });
+                                    profiles.insert(
+                                        controller_id.clone(),
+                                        RegisteredSemanticProfile {
+                                            profile,
+                                            runtime_source_id: resolved.0,
+                                            runtime_source_name: resolved.1,
+                                        },
+                                    );
+                                }
+                                None => {
+                                    profiles.remove(&controller_id);
+                                }
+                            }
+                            previous
+                        }
+                        Err(_) => {
+                            return internal_error(
+                                "semantic controller profile lock is poisoned",
+                                Some(snapshot.revision),
+                            );
+                        }
+                    };
+                    let compiled = match compile_parameter_links(
+                        context,
+                        &snapshot,
+                        &snapshot.parameter_links,
+                    ) {
+                        Ok(compiled) => compiled,
+                        Err(failure) => {
+                            if let Ok(mut profiles) = context.semantic_profiles.lock() {
+                                match previous {
+                                    Some(profile) => {
+                                        profiles.insert(controller_id, profile);
+                                    }
+                                    None => {
+                                        profiles.remove(&controller_id);
+                                    }
+                                }
+                            }
+                            return failure.into_response();
+                        }
+                    };
+                    let (links_sender, links_receiver) = sync_channel(1);
+                    if let Err(failure) = send_audio(
+                        context,
+                        AudioControlCommand::ReplaceParameterLinks {
+                            links: compiled,
+                            reply: links_sender,
+                        },
+                    ) {
+                        return failure.into_response();
+                    }
+                    match receive_audio(links_receiver, "apply semantic parameter links") {
+                        Ok(()) => command_applied_without_events(context, command_ref),
+                        Err(failure) => failure.into_response(),
+                    }
+                }
                 Err(failure) => failure.into_response(),
             }
         }
@@ -3358,6 +3929,7 @@ fn prepare_portable_rack_slots(
                     * context.plugin_output_channels as usize
             ],
             events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
+            parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
         });
     }
     Ok(Some(prepared))
@@ -3590,6 +4162,8 @@ fn record_command_events(
                 | SessionEvent::LiveStateReconciled { .. }
                 | SessionEvent::SoundSelected { .. }
                 | SessionEvent::ProgramSaved { .. }
+                | SessionEvent::ParameterLinkUpserted { .. }
+                | SessionEvent::ParameterLinkRemoved { .. }
         )
     });
     let (events, revision, checkpoint_state) = match context.store.lock() {
@@ -3830,8 +4404,10 @@ mod tests {
             }],
             audition: None,
             program_draft: None,
+            parameter_links: Vec::new(),
         };
         let (sender, receiver) = sync_channel(4);
+        let (_midi_sender, midi_receiver) = sync_channel(4);
         let device = AudioDeviceDescriptor {
             schema_version: AUDIO_DEVICE_SCHEMA_VERSION,
             id: AudioDeviceId::new("alsa.card-test.pcm-0").unwrap(),
@@ -3860,6 +4436,28 @@ mod tests {
             period_frames: 128,
             buffer_frames: 384,
         };
+        let mut midi_sources = MidiSourceRegistry::default();
+        midi_sources
+            .register(
+                rackforge_midi_api::MidiSourceKey::new(0),
+                rackforge_midi_api::MidiSourceDescriptor {
+                    id: rackforge_midi_api::MidiSourceId::new("test.enabled-midi").unwrap(),
+                    name: "Enabled Controller".into(),
+                    primary: true,
+                },
+            )
+            .unwrap();
+        midi_sources
+            .register(
+                rackforge_midi_api::MidiSourceKey::new(1),
+                rackforge_midi_api::MidiSourceDescriptor {
+                    id: rackforge_midi_api::MidiSourceId::new(crate::live::VIRTUAL_MIDI_SOURCE_ID)
+                        .unwrap(),
+                    name: "RackForge Touch Controller".into(),
+                    primary: false,
+                },
+            )
+            .unwrap();
         (
             Arc::new(ControlContext {
                 store: SessionStore::shared(state).unwrap(),
@@ -3921,6 +4519,11 @@ mod tests {
                     .unwrap(),
                 )]),
                 portable_plugins: BTreeMap::new(),
+                semantic_profiles: Mutex::new(BTreeMap::new()),
+                midi_sources,
+                connected_midi_sources: Arc::new(Mutex::new(BTreeSet::from([0, 1]))),
+                midi_observer: Mutex::new(midi_receiver),
+                midi_learn: Mutex::new(None),
                 dynamic_resources: Mutex::new(BTreeMap::new()),
                 virtual_midi: Mutex::new(BTreeMap::new()),
                 plugin_sample_rate: 48_000.0,
@@ -3930,6 +4533,7 @@ mod tests {
                 dispatch_lock: Mutex::new(()),
                 lease_deadline: Mutex::new(None),
                 next_draft_id: AtomicU64::new(1),
+                next_midi_learn_id: AtomicU64::new(1),
             }),
             receiver,
         )
@@ -4086,6 +4690,7 @@ mod tests {
             let response = accept_virtual_midi(
                 &context,
                 client_id,
+                None,
                 VirtualMidiMessage {
                     status: 0x90,
                     data1: note,
@@ -4112,13 +4717,78 @@ mod tests {
                 client_id: first.clone()
             }
         );
-        let AudioControlCommand::InjectVirtualMidi { packets } = receiver.recv().unwrap() else {
+        let AudioControlCommand::InjectVirtualMidi { events } = receiver.recv().unwrap() else {
             panic!("expected virtual MIDI release");
         };
-        assert!(packets.iter().any(|packet| packet.data == [0x80, 60, 0]));
-        assert!(!packets.iter().any(|packet| packet.data == [0x80, 64, 0]));
+        assert!(
+            events
+                .iter()
+                .any(|event| event.packet.data == [0x80, 60, 0])
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.packet.data == [0x80, 64, 0])
+        );
         assert!(context.virtual_midi.lock().unwrap().contains_key(&second));
         assert!(!context.virtual_midi.lock().unwrap().contains_key(&first));
+    }
+
+    #[test]
+    fn forwarded_controller_midi_uses_the_approved_source_for_learn() {
+        let (context, receiver) = context();
+        *context.midi_learn.lock().unwrap() = Some(MidiLearnState {
+            id: 77,
+            candidate: None,
+        });
+        let response = accept_virtual_midi(
+            &context,
+            ClientId::new("controller.test.forwarder").unwrap(),
+            Some("Enabled Controller".into()),
+            VirtualMidiMessage {
+                status: 0xb2,
+                data1: 74,
+                data2: 96,
+            },
+        );
+        assert!(matches!(
+            response,
+            ControlResponse::VirtualMidiAccepted { .. }
+        ));
+        let AudioControlCommand::InjectVirtualMidi { events } = receiver.recv().unwrap() else {
+            panic!("expected forwarded MIDI");
+        };
+        assert_eq!(events[0].source, rackforge_midi_api::MidiSourceKey::new(0));
+        assert!(matches!(
+            midi_learn_status(&context, 77),
+            ControlResponse::MidiLearnStatus {
+                candidate: Some(MidiLearnCandidate {
+                    source: MidiSourceDescriptor { ref name, .. },
+                    message: ParameterLinkMessage::ControlChange { controller: 74 },
+                    ..
+                }),
+                ..
+            } if name == "Enabled Controller"
+        ));
+
+        let rejected = accept_virtual_midi(
+            &context,
+            ClientId::new("controller.test.hidden").unwrap(),
+            Some("Hidden Controller".into()),
+            VirtualMidiMessage {
+                status: 0xb0,
+                data1: 1,
+                data2: 1,
+            },
+        );
+        assert!(matches!(
+            rejected,
+            ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                ..
+            }
+        ));
+        assert!(receiver.try_recv().is_err());
     }
 
     #[test]

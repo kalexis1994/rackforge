@@ -2597,6 +2597,7 @@ impl DesktopApp {
             }
             SessionCommand::SetMasterPan { pan } => self.set_master_pan(pan, Some(command_ref)),
             SessionCommand::SetActiveMode { mode } => self.set_active_mode(mode, Some(command_ref)),
+            SessionCommand::EmergencyStop => self.emergency_stop(Some(command_ref)),
             SessionCommand::SelectPlugin { instance_id } => {
                 self.select_plugin(&instance_id, Some(command_ref))
             }
@@ -3851,6 +3852,28 @@ impl DesktopApp {
         Ok(events)
     }
 
+    fn emergency_stop(
+        &mut self,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        #[cfg(windows)]
+        if let Some(audio) = &self.audio {
+            audio
+                .emergency_stop()
+                .map_err(|error| format!("Could not stop Desktop audio: {error:#}"))?;
+        }
+        let events = {
+            let session = self.session.read().expect("session lock poisoned");
+            desktop_emergency_stop_events(&session)
+        };
+        let events = self.apply_program_events(events, command)?;
+        self.menu.sync_program_edit(None, None);
+        self.menu.sync_active_mode(ActiveMode::Idle);
+        self.status = "Emergency HOME · audio stopped".into();
+        self.persist_session_checkpoint();
+        Ok(events)
+    }
+
     fn allocate_program_id(counter: &mut u64) -> u64 {
         let id = (*counter).max(1);
         *counter = id.checked_add(1).unwrap_or(1);
@@ -4806,6 +4829,28 @@ fn validate_desktop_surface_activation(
         ));
     }
     Ok(())
+}
+
+fn desktop_emergency_stop_events(session: &SessionState) -> Vec<SessionEvent> {
+    let mut events = Vec::with_capacity(3);
+    if let Some(draft) = session.program_draft.as_ref() {
+        events.push(SessionEvent::ProgramEditCancelled {
+            draft_id: draft.draft_id,
+            instance_id: draft.instance_id.clone(),
+        });
+    }
+    if let Some(audition) = session.audition.as_ref() {
+        events.push(SessionEvent::AuditionEnded {
+            lease_id: audition.lease_id,
+            instance_id: audition.instance_id.clone(),
+            restored_sound_id: None,
+            reason: AuditionEndReason::Cancelled,
+        });
+    }
+    events.push(SessionEvent::ActiveModeChanged {
+        mode: SurfaceMode::Idle,
+    });
+    events
 }
 
 fn desktop_active_mode_events(session: &SessionState, mode: SurfaceMode) -> Vec<SessionEvent> {
@@ -5801,6 +5846,19 @@ mod tests {
             validate_desktop_surface_activation(&session, &instance_id, &wrong_layout)
                 .unwrap_err()
                 .contains("does not expose layout")
+        );
+    }
+
+    #[test]
+    fn desktop_emergency_home_always_publishes_idle_mode() {
+        let mut session = SessionState::new(SessionId::new("test.desktop-emergency").unwrap());
+        session.active_mode = SurfaceMode::Play;
+
+        assert_eq!(
+            desktop_emergency_stop_events(&session),
+            vec![SessionEvent::ActiveModeChanged {
+                mode: SurfaceMode::Idle
+            }]
         );
     }
 

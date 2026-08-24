@@ -17,7 +17,10 @@ use rackforge_plugin_api::{
     ParameterKind, ParameterSchema, PreparedProgram, PresetCatalog,
     abi::{MidiEventV1, ParameterEventV1},
 };
-use rackforge_session_api::{HostControlTarget, MasterLevel, MasterPan};
+use rackforge_session_api::{
+    MasterLevel, MasterPan, RackForgeParameterInput, SemanticControlInput,
+    rackforge_parameter_input, semantic_control_input,
+};
 use rackforge_surface_api::{SurfaceActivationRequest, SurfaceActivationResponse};
 use rackforge_surface_runtime::{Input as SurfaceInput, Screen};
 use serde::{Deserialize, Serialize};
@@ -905,7 +908,7 @@ fn receive_control_response<T>(receiver: Receiver<Result<T, String>>, action: &s
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DesktopControllerEvent {
     Connected,
     Disconnected,
@@ -913,8 +916,8 @@ pub enum DesktopControllerEvent {
         input: SurfaceInput,
         phase: keylab_protocol::InputPhase,
     },
-    MasterLevel(u8),
-    MasterPan(u8),
+    RackForgeParameter(RackForgeParameterInput),
+    SemanticControl(SemanticControlInput),
     MidiObserved {
         source: MidiSourceKey,
         length: u8,
@@ -1850,17 +1853,27 @@ fn connect_midi_input(
                     keylab_protocol::ControllerEvent::Surface { input, phase } => {
                         DesktopControllerEvent::Surface { input, phase }
                     }
-                    keylab_protocol::ControllerEvent::HostControl {
-                        target: HostControlTarget::MasterLevel,
-                        value,
-                    } => DesktopControllerEvent::MasterLevel(value),
-                    keylab_protocol::ControllerEvent::HostControl {
-                        target: HostControlTarget::MasterPan,
-                        value,
-                    } => DesktopControllerEvent::MasterPan(value),
                 };
                 let _ = controller_sender.try_send(event);
                 return;
+            }
+            if keylab
+                && let Some(input) = keylab_controller::package_profile()
+                    .semantic_profile
+                    .as_ref()
+                    .and_then(|profile| rackforge_parameter_input(profile, message))
+            {
+                let _ =
+                    controller_sender.try_send(DesktopControllerEvent::RackForgeParameter(input));
+                return;
+            }
+            if keylab
+                && let Some(input) = keylab_controller::package_profile()
+                    .semantic_profile
+                    .as_ref()
+                    .and_then(|profile| semantic_control_input(profile, message))
+            {
+                let _ = controller_sender.try_send(DesktopControllerEvent::SemanticControl(input));
             }
             if message.is_empty() || message.len() > 3 {
                 return;

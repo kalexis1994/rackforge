@@ -19,6 +19,67 @@ const SELECTION_TTL_SECONDS: u64 = 30 * 60;
 const MAX_NKI_BUNDLE_ENTRIES: usize = 8_192;
 const MAX_NKI_BUNDLE_EXPANDED_BYTES: u64 = 256 * 1_048_576;
 const MAX_NKI_BUNDLE_BYTES: u64 = 128 * 1_048_576;
+const MAX_INSTRUMENT_MAP_BYTES: u64 = 2 * 1_048_576;
+
+#[derive(Clone, Copy)]
+enum InstrumentBundleFormat {
+    Nki,
+    Sfz,
+}
+
+impl InstrumentBundleFormat {
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Nki => "nki",
+            Self::Sfz => "sfz",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Nki => "NKI",
+            Self::Sfz => "SFZ",
+        }
+    }
+}
+
+fn sfz_bundle_root(selected: &Path) -> Result<PathBuf, ResourceError> {
+    let parent = selected
+        .parent()
+        .ok_or_else(|| ResourceError::InvalidRequest("SFZ has no parent directory".into()))?;
+    let metadata = fs::metadata(selected).map_err(backend)?;
+    if metadata.len() > MAX_INSTRUMENT_MAP_BYTES {
+        return Err(ResourceError::InvalidRequest(
+            "selected SFZ document is too large".into(),
+        ));
+    }
+    let source = String::from_utf8_lossy(&fs::read(selected).map_err(backend)?).replace('\\', "/");
+    let mut ancestor_depth = 0_usize;
+    for (offset, _) in source.match_indices("../") {
+        let bytes = source.as_bytes();
+        let mut cursor = offset;
+        let mut depth = 0;
+        while bytes.get(cursor..cursor + 3) == Some(b"../") {
+            depth += 1;
+            cursor += 3;
+        }
+        ancestor_depth = ancestor_depth.max(depth);
+    }
+    // Relative dependencies are part of the selected instrument, but walking
+    // an arbitrary distance upward could turn one file choice into a broad
+    // filesystem grant. Four library-layout levels covers conventional
+    // Maps/Includes/Samples trees while keeping the authority bounded.
+    if ancestor_depth > 4 {
+        return Err(ResourceError::InvalidRequest(
+            "SFZ dependency paths escape too far above the selected file".into(),
+        ));
+    }
+    let mut root = parent;
+    for _ in 0..ancestor_depth {
+        root = root.parent().ok_or(ResourceError::OutsideMount)?;
+    }
+    fs::canonicalize(root).map_err(backend)
+}
 
 #[derive(Clone, Debug)]
 pub struct NativeMount {
@@ -263,19 +324,51 @@ impl NativeResourceBrowser {
         grant_id: &str,
         entry_id: Option<&str>,
     ) -> Result<ConsumedResourceFile, ResourceError> {
+        self.bundle_granted_instrument(plugin_id, grant_id, entry_id, InstrumentBundleFormat::Nki)
+    }
+
+    /// Builds a portable SFZ resource with its includes and external samples.
+    pub fn bundle_granted_sfz(
+        &self,
+        plugin_id: &str,
+        grant_id: &str,
+        entry_id: Option<&str>,
+    ) -> Result<ConsumedResourceFile, ResourceError> {
+        self.bundle_granted_instrument(plugin_id, grant_id, entry_id, InstrumentBundleFormat::Sfz)
+    }
+
+    fn bundle_granted_instrument(
+        &self,
+        plugin_id: &str,
+        grant_id: &str,
+        entry_id: Option<&str>,
+        format: InstrumentBundleFormat,
+    ) -> Result<ConsumedResourceFile, ResourceError> {
         let selected = self.resolve_granted_file(plugin_id, grant_id, entry_id)?;
         if !selected
             .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("nki"))
+            .is_some_and(|extension| extension.eq_ignore_ascii_case(format.extension()))
         {
-            return Err(ResourceError::InvalidRequest(
-                "NKI dependency bundling requires a selected .nki file".into(),
-            ));
+            return Err(ResourceError::InvalidRequest(format!(
+                "{} dependency bundling requires a selected .{} file",
+                format.label(),
+                format.extension()
+            )));
         }
-        let root = selected
-            .parent()
-            .ok_or_else(|| ResourceError::InvalidRequest("NKI has no parent directory".into()))?;
-        let root = fs::canonicalize(root).map_err(backend)?;
+        let root = match format {
+            InstrumentBundleFormat::Nki => {
+                let parent = selected.parent().ok_or_else(|| {
+                    ResourceError::InvalidRequest("NKI has no parent directory".into())
+                })?;
+                fs::canonicalize(parent).map_err(backend)?
+            }
+            InstrumentBundleFormat::Sfz => sfz_bundle_root(&selected)?,
+        };
+        let selected_relative = selected
+            .strip_prefix(&root)
+            .map_err(|_| ResourceError::OutsideMount)?
+            .to_string_lossy()
+            .replace('\\', "/");
 
         let mut files = Vec::new();
         let mut directories = vec![root.clone()];
@@ -300,20 +393,37 @@ impl NativeResourceBrowser {
                     .map(|value| value.to_string_lossy().to_ascii_lowercase())
                     .unwrap_or_default();
                 let include = match extension.as_str() {
-                    "nki" => fs::canonicalize(&path).map_err(backend)? == selected,
+                    "nki" => {
+                        matches!(format, InstrumentBundleFormat::Nki)
+                            && fs::canonicalize(&path).map_err(backend)? == selected
+                    }
+                    "sfz" => {
+                        matches!(format, InstrumentBundleFormat::Sfz)
+                    }
+                    "txt" | "inc" | "sfzh" => {
+                        matches!(format, InstrumentBundleFormat::Sfz)
+                    }
                     "wav" | "wave" | "flac" | "tga" | "png" | "jpg" | "jpeg" => true,
+                    "" => {
+                        matches!(format, InstrumentBundleFormat::Sfz)
+                            && metadata.len() <= 2 * 1_048_576
+                    }
                     _ => false,
                 };
                 if !include {
                     continue;
                 }
                 expanded_bytes = expanded_bytes.checked_add(metadata.len()).ok_or_else(|| {
-                    ResourceError::InvalidRequest("NKI bundle size overflow".into())
+                    ResourceError::InvalidRequest(format!(
+                        "{} bundle size overflow",
+                        format.label()
+                    ))
                 })?;
                 if expanded_bytes > MAX_NKI_BUNDLE_EXPANDED_BYTES {
-                    return Err(ResourceError::InvalidRequest(
-                        "NKI dependencies exceed the supported size".into(),
-                    ));
+                    return Err(ResourceError::InvalidRequest(format!(
+                        "{} dependencies exceed the supported size",
+                        format.label()
+                    )));
                 }
                 let canonical = fs::canonicalize(path).map_err(backend)?;
                 if !canonical.starts_with(&root) {
@@ -321,16 +431,20 @@ impl NativeResourceBrowser {
                 }
                 files.push(canonical);
                 if files.len() > MAX_NKI_BUNDLE_ENTRIES {
-                    return Err(ResourceError::InvalidRequest(
-                        "NKI has too many dependency files".into(),
-                    ));
+                    return Err(ResourceError::InvalidRequest(format!(
+                        "{} has too many dependency files",
+                        format.label()
+                    )));
                 }
             }
         }
         files.sort();
 
-        let output =
-            std::env::temp_dir().join(format!("rackforge-nki-{}.rfbank", random_handle()?));
+        let output = std::env::temp_dir().join(format!(
+            "rackforge-{}-{}.rfbank",
+            format.extension(),
+            random_handle()?
+        ));
         let staged = ConsumedResourceFile {
             path: output.clone(),
             owned: true,
@@ -347,12 +461,13 @@ impl NativeResourceBrowser {
         let display_name = selected
             .file_stem()
             .map(|value| value.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Kontakt instrument".into());
+            .unwrap_or_else(|| format!("{} instrument", format.label()));
         let manifest = serde_json::to_vec(&serde_json::json!({
             "schema_version": 1,
             "id": display_name,
             "name": display_name,
-            "source_format": "rf-instrument",
+            "source_format": format.extension(),
+            "instrument_path": selected_relative,
         }))
         .map_err(|error| ResourceError::Backend(error.to_string()))?;
         archive
@@ -382,9 +497,10 @@ impl NativeResourceBrowser {
             .finish()
             .map_err(|error| ResourceError::Backend(error.to_string()))?;
         if fs::metadata(&output).map_err(backend)?.len() > MAX_NKI_BUNDLE_BYTES {
-            return Err(ResourceError::InvalidRequest(
-                "compressed NKI bundle exceeds the supported size".into(),
-            ));
+            return Err(ResourceError::InvalidRequest(format!(
+                "compressed {} bundle exceeds the supported size",
+                format.label()
+            )));
         }
         Ok(staged)
     }
@@ -1300,6 +1416,106 @@ mod tests {
         );
         drop(archive);
         drop(direct);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sfz_bundles_include_maps_includes_samples_and_selected_entry() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-resource-sfz-bundle-test-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        let library = root.join("Piano");
+        fs::create_dir_all(library.join("Maps/Parts")).unwrap();
+        fs::create_dir_all(library.join("Samples")).unwrap();
+        fs::write(
+            library.join("Maps/Selected.sfz"),
+            b"<control> default_path=../Samples/\n#include \"Parts/body.inc\"",
+        )
+        .unwrap();
+        fs::write(library.join("Maps/Other.sfz"), b"<region> sample=other.wav").unwrap();
+        fs::write(
+            library.join("Maps/Parts/body.inc"),
+            b"<region> sample=C4.wav key=60",
+        )
+        .unwrap();
+        fs::write(library.join("Samples/C4.wav"), b"wave").unwrap();
+        fs::write(library.join("notes.md"), b"not an SFZ dependency").unwrap();
+
+        let browser = NativeResourceBrowser::new([NativeMount {
+            name: "Test".into(),
+            root: root.clone(),
+            read_only: true,
+        }])
+        .unwrap();
+        let mount = browser.mounts().unwrap().remove(0);
+        let mount_root = browser.mount_root(&mount.id).unwrap();
+        let library_entry = browser
+            .entries(&mount_root.id)
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "Piano")
+            .unwrap();
+        let grant = browser
+            .bind(&BindResourceRequest {
+                plugin_id: "org.rackforge.test".into(),
+                resource_id: "library".into(),
+                entry_id: library_entry.id,
+            })
+            .unwrap();
+        let maps = browser
+            .grant_entries(&BrowseGrantRequest {
+                plugin_id: "org.rackforge.test".into(),
+                grant_id: grant.grant_id.clone(),
+                parent_id: None,
+            })
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "Maps")
+            .unwrap();
+        let selected = browser
+            .grant_entries(&BrowseGrantRequest {
+                plugin_id: "org.rackforge.test".into(),
+                grant_id: grant.grant_id.clone(),
+                parent_id: Some(maps.id),
+            })
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "Selected.sfz")
+            .unwrap();
+        let staged = browser
+            .bundle_granted_sfz("org.rackforge.test", &grant.grant_id, Some(&selected.id))
+            .unwrap();
+        let file = File::open(staged.path()).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut manifest = String::new();
+        archive
+            .by_name("bank.json")
+            .unwrap()
+            .read_to_string(&mut manifest)
+            .unwrap();
+        let manifest: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+        assert_eq!(manifest["source_format"], "sfz");
+        assert_eq!(manifest["instrument_path"], "Maps/Selected.sfz");
+        let mut names = (0..archive.len())
+            .map(|index| archive.by_index(index).unwrap().name().to_string())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "Maps/Other.sfz",
+                "Maps/Parts/body.inc",
+                "Maps/Selected.sfz",
+                "Samples/C4.wav",
+                "bank.json",
+            ]
+        );
+        drop(archive);
+        drop(staged);
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -6,7 +6,10 @@
 //! the returned output plans.
 
 use keylab_essential_mk3::protocol as keylab_protocol;
-use rackforge_session_api::{MasterLevel, MasterPan, SessionState, SurfaceMode};
+use rackforge_session_api::{
+    RackForgeParameterMapper, RackForgeParameterValue, SessionState, SurfaceMode,
+    rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
+};
 use rackforge_surface_runtime::{
     ActiveMode, Input, Menu, MenuCommand, PlayPlugin, PlaySound, Screen,
 };
@@ -26,8 +29,7 @@ pub struct BrowserControllerOutput {
 #[derive(Debug)]
 pub enum BrowserControllerAction {
     Menu(MenuCommand),
-    MasterLevel(MasterLevel),
-    MasterPan(MasterPan),
+    RackForgeParameter(RackForgeParameterValue),
 }
 
 #[derive(Debug, Default)]
@@ -146,9 +148,7 @@ pub struct BrowserKeyLabController {
     last_screen: Option<Screen>,
     output: Vec<BrowserControllerOutput>,
     gestures: GestureTracker,
-    pan_previous: Option<u8>,
-    pan_position: i16,
-    pan_remainder: i32,
+    parameter_mapper: RackForgeParameterMapper,
 }
 
 impl Default for BrowserKeyLabController {
@@ -159,9 +159,7 @@ impl Default for BrowserKeyLabController {
             last_screen: None,
             output: Vec::new(),
             gestures: GestureTracker::default(),
-            pan_previous: None,
-            pan_position: 0,
-            pan_remainder: 0,
+            parameter_mapper: RackForgeParameterMapper::default(),
         }
     }
 }
@@ -173,7 +171,7 @@ impl BrowserKeyLabController {
             SurfaceMode::Live => ActiveMode::Live,
             SurfaceMode::Play => ActiveMode::Play,
         });
-        self.pan_position = session.master_pan.get();
+        self.parameter_mapper.sync_master_pan(session.master_pan);
         self.menu.set_play_plugins(
             session
                 .instances
@@ -232,7 +230,7 @@ impl BrowserKeyLabController {
         self.connected = false;
         self.last_screen = None;
         self.gestures = GestureTracker::default();
-        self.pan_previous = None;
+        self.parameter_mapper.reset_physical_anchors();
     }
 
     pub fn set_ambient_color(&mut self, rgb: [u8; 3]) {
@@ -245,6 +243,42 @@ impl BrowserKeyLabController {
     }
 
     pub fn handle_midi(&mut self, message: &[u8]) -> BrowserControllerOutcome {
+        let profile = keylab_essential_mk3::controller::package_profile();
+        if let Some(input) = profile
+            .semantic_profile
+            .as_ref()
+            .and_then(|profile| rackforge_parameter_input(profile, message))
+        {
+            let mut outcome = BrowserControllerOutcome {
+                consumed: true,
+                actions: Vec::new(),
+            };
+            let current_pan = self
+                .parameter_mapper
+                .apply(input, rackforge_session_api::MasterPan::CENTER);
+            if let Some(value) = current_pan {
+                self.queue_messages(keylab_protocol::transient_header_messages(
+                    &value.little_header(),
+                ));
+                outcome
+                    .actions
+                    .push(BrowserControllerAction::RackForgeParameter(value));
+            }
+            return outcome;
+        }
+        if let Some(input) = profile
+            .semantic_profile
+            .as_ref()
+            .and_then(|profile| semantic_control_input(profile, message))
+        {
+            self.queue_messages(keylab_protocol::transient_header_messages(
+                &semantic_control_little_header(&input),
+            ));
+            return BrowserControllerOutcome {
+                consumed: false,
+                actions: Vec::new(),
+            };
+        }
         let Some(event) = keylab_protocol::parse_input(message) else {
             return BrowserControllerOutcome::default();
         };
@@ -253,30 +287,6 @@ impl BrowserKeyLabController {
             actions: Vec::new(),
         };
         match event {
-            keylab_protocol::ControllerEvent::HostControl { target, value } => {
-                use rackforge_session_api::HostControlTarget;
-                match target {
-                    HostControlTarget::MasterLevel => {
-                        let level = MasterLevel::from_midi(value);
-                        outcome
-                            .actions
-                            .push(BrowserControllerAction::MasterLevel(level));
-                        self.queue_messages(keylab_protocol::transient_header_messages(
-                            &keylab_protocol::host_control_header(target, value),
-                        ));
-                    }
-                    HostControlTarget::MasterPan => {
-                        if let Some(pan) = self.advance_pan(value) {
-                            outcome
-                                .actions
-                                .push(BrowserControllerAction::MasterPan(pan));
-                            self.queue_messages(keylab_protocol::transient_header_messages(
-                                &format_pan_header(pan),
-                            ));
-                        }
-                    }
-                }
-            }
             keylab_protocol::ControllerEvent::Surface { input, phase } => {
                 use keylab_protocol::InputPhase;
                 let now = Instant::now();
@@ -365,32 +375,6 @@ impl BrowserKeyLabController {
                 settle_after_ms: message.settle_after_ms,
             }));
     }
-
-    fn advance_pan(&mut self, value: u8) -> Option<MasterPan> {
-        let previous = self.pan_previous.replace(value)?;
-        let turned = i32::from(value) - i32::from(previous);
-        if turned == 0 {
-            return None;
-        }
-        let span = 2 * i32::from(MasterPan::MAX);
-        let scaled = turned * span + self.pan_remainder;
-        let moved = scaled / 127;
-        self.pan_remainder = scaled % 127;
-        let limit = i32::from(MasterPan::MAX);
-        self.pan_position = (i32::from(self.pan_position) + moved).clamp(-limit, limit) as i16;
-        MasterPan::new(self.pan_position).ok()
-    }
-}
-
-fn format_pan_header(pan: MasterPan) -> String {
-    let value = pan.get();
-    let label = if value == 0 {
-        "CENTER".to_owned()
-    } else {
-        let side = if value < 0 { 'L' } else { 'R' };
-        format!("{side} {}%", (u32::from(value.unsigned_abs()) + 5) / 10)
-    };
-    format!("MASTER PAN {label:>7}")
 }
 
 #[cfg(test)]
@@ -436,5 +420,39 @@ mod tests {
             gestures.release(Input::Button4, now + LONG_PRESS + Duration::from_secs(2)),
             None
         );
+    }
+
+    #[test]
+    fn fader_nine_emits_the_standard_rackforge_master_level() {
+        let mut controller = BrowserKeyLabController::default();
+        let outcome = controller.handle_midi(&[0xb0, 113, 127]);
+        assert!(outcome.consumed);
+        assert!(matches!(
+            outcome.actions.as_slice(),
+            [BrowserControllerAction::RackForgeParameter(
+                RackForgeParameterValue::MasterLevel(level)
+            )] if *level == rackforge_session_api::MasterLevel::UNITY
+        ));
+    }
+
+    #[test]
+    fn encoder_nine_anchors_before_emitting_relative_pan() {
+        let mut controller = BrowserKeyLabController::default();
+        assert!(controller.handle_midi(&[0xb0, 104, 90]).actions.is_empty());
+        assert!(matches!(
+            controller.handle_midi(&[0xb0, 104, 100]).actions.as_slice(),
+            [BrowserControllerAction::RackForgeParameter(
+                RackForgeParameterValue::MasterPan(_)
+            )]
+        ));
+    }
+
+    #[test]
+    fn plugin_semantic_feedback_does_not_consume_the_midi_message() {
+        let mut controller = BrowserKeyLabController::default();
+        let outcome = controller.handle_midi(&[0xb0, 109, 96]);
+        assert!(!outcome.consumed);
+        assert!(outcome.actions.is_empty());
+        assert!(controller.has_output());
     }
 }

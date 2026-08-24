@@ -4242,7 +4242,9 @@ export function PluginFrame({
           entry_id: typeof params.entry_id === "string" ? params.entry_id : null,
           persist: event.data.method !== "plugin.load_resource",
           preview: false,
-          bundle: params.bundle === "nki_dependencies" ? params.bundle : null,
+          bundle: params.bundle === "nki_dependencies" || params.bundle === "sfz_dependencies"
+            ? params.bundle
+            : null,
         })
           .then((result) => respond(true, undefined, result))
           .catch((error: unknown) =>

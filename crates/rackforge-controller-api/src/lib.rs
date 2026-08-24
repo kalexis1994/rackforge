@@ -1,4 +1,4 @@
-use rackforge_control_profile::{CONTROL_PROFILE_SCHEMA_VERSION, SemanticControlId};
+use rackforge_control_profile::{CONTROL_PROFILE_SCHEMA_VERSION, SemanticControlId, roles};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -132,6 +132,139 @@ pub struct SemanticControlBinding {
     pub midi_cc: MidiControlChangeBinding,
     #[serde(default)]
     pub invert: bool,
+    /// How a physical reading changes its semantic destination.
+    ///
+    /// Absolute is appropriate for faders and ordinary knobs. Relative keeps
+    /// the current RackForge value and moves it by the distance travelled by
+    /// an absolute-reporting endless encoder, avoiding jumps after reconnect.
+    #[serde(default)]
+    pub mode: SemanticControlMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticControlMode {
+    #[default]
+    Absolute,
+    Relative,
+}
+
+/// RackForge-owned parameters addressable by the public semantic control
+/// vocabulary. Plugins never own these values and controllers do not receive
+/// a private shortcut for them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RackForgeParameterId {
+    MasterLevel,
+    MasterPan,
+}
+
+impl RackForgeParameterId {
+    pub fn from_role(role: &SemanticControlId) -> Option<Self> {
+        match role.as_str() {
+            roles::RACKFORGE_MASTER_LEVEL => Some(Self::MasterLevel),
+            roles::RACKFORGE_MASTER_PAN => Some(Self::MasterPan),
+            _ => None,
+        }
+    }
+
+    pub const fn role(self) -> &'static str {
+        match self {
+            Self::MasterLevel => roles::RACKFORGE_MASTER_LEVEL,
+            Self::MasterPan => roles::RACKFORGE_MASTER_PAN,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RackForgeParameterInput {
+    pub parameter: RackForgeParameterId,
+    pub value: u8,
+    pub mode: SemanticControlMode,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SemanticControlInput {
+    pub role: SemanticControlId,
+    pub value: u8,
+    pub mode: SemanticControlMode,
+}
+
+/// Observes every semantic control without deciding whether its MIDI message
+/// is consumed. Plugin roles must continue through normal MIDI routing.
+pub fn semantic_control_input(
+    profile: &SemanticControlProfile,
+    message: &[u8],
+) -> Option<SemanticControlInput> {
+    profile.controls.iter().find_map(|binding| {
+        let value = binding.midi_cc.value(message)?;
+        Some(SemanticControlInput {
+            role: binding.role.clone(),
+            value: if binding.invert { 127 - value } else { value },
+            mode: binding.mode,
+        })
+    })
+}
+
+/// Compact, controller-independent feedback for LITTLE's 18-column header.
+pub fn semantic_control_little_header(input: &SemanticControlInput) -> String {
+    let label = match input.role.as_str() {
+        roles::SYNTH_FILTER_CUTOFF => "FILTER CUTOFF",
+        roles::SYNTH_FILTER_RESONANCE => "RESONANCE",
+        roles::SYNTH_FILTER_ENVELOPE_AMOUNT => "FILTER ENV",
+        roles::SYNTH_FILTER_LFO_AMOUNT => "FILTER LFO",
+        roles::SYNTH_FILTER_KEY_TRACKING => "KEY TRACK",
+        roles::SYNTH_AMP_ENVELOPE_ATTACK => "AMP ATTACK",
+        roles::SYNTH_AMP_ENVELOPE_DECAY => "AMP DECAY",
+        roles::SYNTH_AMP_ENVELOPE_SUSTAIN => "AMP SUSTAIN",
+        roles::SYNTH_AMP_ENVELOPE_RELEASE => "AMP RELEASE",
+        roles::SYNTH_LFO_RATE => "LFO RATE",
+        roles::SYNTH_LFO_DEPTH => "LFO DEPTH",
+        roles::SYNTH_LFO_DELAY => "LFO DELAY",
+        roles::SYNTH_OSCILLATOR_PULSE_WIDTH => "PULSE WIDTH",
+        roles::SYNTH_OSCILLATOR_SUB_LEVEL => "SUB LEVEL",
+        roles::SYNTH_OSCILLATOR_NOISE_LEVEL => "NOISE LEVEL",
+        roles::SYNTH_AMPLIFIER_LEVEL => "AMP LEVEL",
+        roles::PLUGIN_OUTPUT_LEVEL => "PLUGIN LEVEL",
+        roles::MIXER_CHANNEL_LEVEL => "CHANNEL LEVEL",
+        roles::MIXER_CHANNEL_PAN => "CHANNEL PAN",
+        roles::PERFORMANCE_MODULATION => "MODULATION",
+        roles::PERFORMANCE_EXPRESSION => "EXPRESSION",
+        roles::PERFORMANCE_SUSTAIN => "SUSTAIN",
+        _ => input.role.as_str().rsplit('.').next().unwrap_or("CONTROL"),
+    };
+    let mut label = label
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || *character == ' ')
+        .flat_map(char::to_uppercase)
+        .take(13)
+        .collect::<String>();
+    if label.is_empty() {
+        label.push_str("CONTROL");
+    }
+    let value = if input.role.as_str() == roles::PERFORMANCE_SUSTAIN {
+        if input.value >= 64 {
+            "ON".into()
+        } else {
+            "OFF".into()
+        }
+    } else {
+        format!("{}%", (u32::from(input.value) * 100 + 63) / 127)
+    };
+    format!("{label:<13}{value:>5}")
+}
+
+/// Resolves a raw MIDI message through the same semantic profile used for
+/// plugin parameters, selecting only roles owned by RackForge itself.
+pub fn rackforge_parameter_input(
+    profile: &SemanticControlProfile,
+    message: &[u8],
+) -> Option<RackForgeParameterInput> {
+    let input = semantic_control_input(profile, message)?;
+    Some(RackForgeParameterInput {
+        parameter: RackForgeParameterId::from_role(&input.role)?,
+        value: input.value,
+        mode: input.mode,
+    })
 }
 
 impl SemanticControlProfile {
@@ -459,9 +592,48 @@ mod tests {
                     controller: 113,
                 },
                 invert: false,
+                mode: SemanticControlMode::Absolute,
             }],
         });
         assert!(controller.validate().is_err());
+    }
+
+    #[test]
+    fn rackforge_parameters_are_resolved_from_the_semantic_profile() {
+        let profile = SemanticControlProfile {
+            schema_version: CONTROL_PROFILE_SCHEMA_VERSION,
+            source_id: "controller.example.midi".into(),
+            controls: vec![SemanticControlBinding {
+                role: SemanticControlId::new(roles::RACKFORGE_MASTER_PAN).unwrap(),
+                midi_cc: MidiControlChangeBinding {
+                    channel: 0,
+                    controller: 104,
+                },
+                invert: true,
+                mode: SemanticControlMode::Relative,
+            }],
+        };
+        assert_eq!(
+            rackforge_parameter_input(&profile, &[0xb0, 104, 27]),
+            Some(RackForgeParameterInput {
+                parameter: RackForgeParameterId::MasterPan,
+                value: 100,
+                mode: SemanticControlMode::Relative,
+            })
+        );
+        assert!(rackforge_parameter_input(&profile, &[0xb0, 103, 27]).is_none());
+    }
+
+    #[test]
+    fn semantic_feedback_is_bounded_for_little() {
+        let input = SemanticControlInput {
+            role: SemanticControlId::new(roles::SYNTH_FILTER_CUTOFF).unwrap(),
+            value: 127,
+            mode: SemanticControlMode::Absolute,
+        };
+        let header = semantic_control_little_header(&input);
+        assert_eq!(header, "FILTER CUTOFF 100%");
+        assert_eq!(header.len(), LITTLE_TEXT_COLUMNS);
     }
 
     #[test]

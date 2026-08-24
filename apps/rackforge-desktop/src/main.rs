@@ -42,9 +42,10 @@ use rackforge_repository::{
 };
 use rackforge_session_api::{
     AuditionEndReason, BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId,
-    MasterLevel, MasterPan, ParameterLink, PluginInstanceState, ProgramDraftState, Revision,
-    SESSION_SCHEMA_VERSION, SemanticControlProfile, SessionCommand, SessionEvent, SessionId,
-    SessionState, SoundSummary,
+    MasterLevel, MasterPan, ParameterLink, PluginInstanceState, ProgramDraftState,
+    RackForgeParameterMapper, RackForgeParameterValue, Revision, SESSION_SCHEMA_VERSION,
+    SemanticControlProfile, SessionCommand, SessionEvent, SessionId, SessionState, SoundSummary,
+    semantic_control_little_header,
 };
 use rackforge_surface_api::{SurfaceActivationRequest, SurfaceMode};
 use rackforge_surface_runtime::{
@@ -432,6 +433,8 @@ struct DesktopApp {
     controller_encoder_down: Option<Instant>,
     #[cfg(windows)]
     controller_header_restore_at: Option<Instant>,
+    #[cfg(windows)]
+    controller_parameter_mapper: RackForgeParameterMapper,
     web_url: String,
     web_servers: web::DesktopWebServers,
     web_control: Receiver<web::DesktopControlCall>,
@@ -738,6 +741,8 @@ impl DesktopApp {
             controller_encoder_down: None,
             #[cfg(windows)]
             controller_header_restore_at: None,
+            #[cfg(windows)]
+            controller_parameter_mapper: RackForgeParameterMapper::default(),
             web_url,
             web_servers,
             web_control,
@@ -1724,31 +1729,30 @@ impl DesktopApp {
                 self.controller_encoder_down = None;
                 self.status = "Arturia KeyLab disconnected · held notes stopped".into();
             }
-            DesktopControllerEvent::MasterLevel(value) => {
-                let level = MasterLevel::from_midi(value);
-                if let Err(error) = self.set_master_level(level, None) {
+            DesktopControllerEvent::RackForgeParameter(input) => {
+                let current_pan = self
+                    .session
+                    .read()
+                    .expect("session lock poisoned")
+                    .master_pan;
+                let Some(parameter) = self.controller_parameter_mapper.apply(input, current_pan)
+                else {
+                    return;
+                };
+                let result = match parameter {
+                    RackForgeParameterValue::MasterLevel(level) => {
+                        self.set_master_level(level, None)
+                    }
+                    RackForgeParameterValue::MasterPan(pan) => self.set_master_pan(pan, None),
+                };
+                if let Err(error) = result {
                     self.status = error;
                     return;
                 }
-                self.show_controller_host_value(
-                    keylab_essential_mk3::protocol::host_control_header(
-                        rackforge_session_api::HostControlTarget::MasterLevel,
-                        value,
-                    ),
-                );
+                self.show_controller_host_value(parameter.little_header());
             }
-            DesktopControllerEvent::MasterPan(value) => {
-                let pan = MasterPan::from_midi_with_center_snap(value);
-                if let Err(error) = self.set_master_pan(pan, None) {
-                    self.status = error;
-                    return;
-                }
-                self.show_controller_host_value(
-                    keylab_essential_mk3::protocol::host_control_header(
-                        rackforge_session_api::HostControlTarget::MasterPan,
-                        value,
-                    ),
-                );
+            DesktopControllerEvent::SemanticControl(input) => {
+                self.show_controller_host_value(semantic_control_little_header(&input));
             }
             DesktopControllerEvent::Surface { input, phase } => match input {
                 Input::Button1 | Input::Button2 | Input::Button3 | Input::Button4 => {

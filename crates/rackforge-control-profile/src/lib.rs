@@ -45,6 +45,11 @@ impl fmt::Display for SemanticControlId {
 /// String constants keep manifests and generated SDKs language-neutral. New
 /// roles may be appended, but an existing role never changes meaning.
 pub mod roles {
+    /// RackForge-owned output level. Unlike `plugin.output.level`, this affects
+    /// the complete host mix and is available even when no plugin is active.
+    pub const RACKFORGE_MASTER_LEVEL: &str = "rackforge.master.level";
+    /// RackForge-owned output balance for the complete host mix.
+    pub const RACKFORGE_MASTER_PAN: &str = "rackforge.master.pan";
     pub const SYNTH_FILTER_CUTOFF: &str = "synth.filter.cutoff";
     pub const SYNTH_FILTER_RESONANCE: &str = "synth.filter.resonance";
     pub const SYNTH_FILTER_ENVELOPE_AMOUNT: &str = "synth.filter.envelope.amount";
@@ -69,6 +74,8 @@ pub mod roles {
     pub const PERFORMANCE_SUSTAIN: &str = "performance.sustain";
 
     pub const V1: &[&str] = &[
+        RACKFORGE_MASTER_LEVEL,
+        RACKFORGE_MASTER_PAN,
         SYNTH_FILTER_CUTOFF,
         SYNTH_FILTER_RESONANCE,
         SYNTH_FILTER_ENVELOPE_AMOUNT,

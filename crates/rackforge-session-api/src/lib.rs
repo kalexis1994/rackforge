@@ -8,7 +8,9 @@ use std::fmt;
 
 pub use rackforge_controller_api::{
     ButtonPhase, HostActionBinding, HostActionTarget, HostControlBinding, HostControlTarget,
-    MidiButtonBinding, MidiControlChangeBinding, SemanticControlBinding, SemanticControlProfile,
+    MidiButtonBinding, MidiControlChangeBinding, RackForgeParameterId, RackForgeParameterInput,
+    SemanticControlBinding, SemanticControlInput, SemanticControlMode, SemanticControlProfile,
+    rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
 };
 pub use rackforge_surface_api::{
     SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
@@ -165,6 +167,132 @@ impl<'de> Deserialize<'de> for MasterPan {
     {
         let value = i16::deserialize(deserializer)?;
         Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Canonical value of a RackForge-owned parameter after interpreting one
+/// semantic controller input. This is deliberately separate from plugin
+/// parameters: it changes host state through the normal session/audio path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RackForgeParameterValue {
+    MasterLevel(MasterLevel),
+    MasterPan(MasterPan),
+}
+
+impl RackForgeParameterValue {
+    pub const fn parameter(self) -> RackForgeParameterId {
+        match self {
+            Self::MasterLevel(_) => RackForgeParameterId::MasterLevel,
+            Self::MasterPan(_) => RackForgeParameterId::MasterPan,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::MasterLevel(_) => "MASTER VOL",
+            Self::MasterPan(_) => "MASTER PAN",
+        }
+    }
+
+    pub fn display_value(self) -> String {
+        match self {
+            Self::MasterLevel(level) => {
+                format!("{}%", (u32::from(level.get()) + 5) / 10)
+            }
+            Self::MasterPan(pan) => {
+                let value = pan.get();
+                if value == 0 {
+                    "CENTER".to_owned()
+                } else {
+                    let side = if value < 0 { 'L' } else { 'R' };
+                    format!("{side} {}%", (u32::from(value.unsigned_abs()) + 5) / 10)
+                }
+            }
+        }
+    }
+
+    /// Generic LITTLE feedback for any RackForge-owned parameter.
+    pub fn little_header(self) -> String {
+        format!("{} {:>7}", self.label(), self.display_value())
+    }
+}
+
+/// Stateful interpreter for semantic RackForge parameters.
+///
+/// Relative controls remember their previous physical reading and move from
+/// the canonical host value. The first reading therefore anchors an endless
+/// encoder instead of making the mix jump after startup or reconnection.
+#[derive(Clone, Debug, Default)]
+pub struct RackForgeParameterMapper {
+    pan_previous: Option<u8>,
+    pan_position: Option<i16>,
+    pan_remainder: i32,
+}
+
+const RELATIVE_PAN_DETENT: i16 = 60;
+
+fn relative_pan_through_detent(position: i16) -> i16 {
+    let limit = i32::from(MasterPan::MAX);
+    let detent = i32::from(RELATIVE_PAN_DETENT);
+    let magnitude = i32::from(position.abs());
+    if magnitude <= detent {
+        return 0;
+    }
+    let scaled = ((magnitude - detent) * limit / (limit - detent)).min(limit) as i16;
+    if position < 0 { -scaled } else { scaled }
+}
+
+impl RackForgeParameterMapper {
+    pub fn sync_master_pan(&mut self, pan: MasterPan) {
+        // Session refreshes happen after every command. Do not overwrite the
+        // encoder's unsnapped internal position while it is being followed;
+        // doing so would make it stick inside the virtual centre detent.
+        if self.pan_previous.is_none() {
+            self.pan_position = Some(pan.get());
+        }
+    }
+
+    pub fn reset_physical_anchors(&mut self) {
+        self.pan_previous = None;
+        self.pan_remainder = 0;
+    }
+
+    pub fn apply(
+        &mut self,
+        input: RackForgeParameterInput,
+        current_pan: MasterPan,
+    ) -> Option<RackForgeParameterValue> {
+        match (input.parameter, input.mode) {
+            (RackForgeParameterId::MasterLevel, _) => Some(RackForgeParameterValue::MasterLevel(
+                MasterLevel::from_midi(input.value),
+            )),
+            (RackForgeParameterId::MasterPan, SemanticControlMode::Absolute) => {
+                let pan = MasterPan::from_midi_with_center_snap(input.value);
+                self.pan_position = Some(pan.get());
+                Some(RackForgeParameterValue::MasterPan(pan))
+            }
+            (RackForgeParameterId::MasterPan, SemanticControlMode::Relative) => {
+                let Some(previous) = self.pan_previous.replace(input.value) else {
+                    self.pan_position = Some(current_pan.get());
+                    return None;
+                };
+                let turned = i32::from(input.value) - i32::from(previous);
+                if turned == 0 {
+                    return None;
+                }
+                let span = 2 * i32::from(MasterPan::MAX);
+                let scaled = turned * span + self.pan_remainder;
+                let moved = scaled / 127;
+                self.pan_remainder = scaled % 127;
+                let limit = i32::from(MasterPan::MAX);
+                let current = self.pan_position.unwrap_or(current_pan.get());
+                let next = (i32::from(current) + moved).clamp(-limit, limit) as i16;
+                self.pan_position = Some(next);
+                MasterPan::new(relative_pan_through_detent(next))
+                    .ok()
+                    .map(RackForgeParameterValue::MasterPan)
+            }
+        }
     }
 }
 
@@ -831,6 +959,43 @@ mod tests {
         MidiSourceId, PARAMETER_LINK_SCHEMA_VERSION, ParameterLinkChannel, ParameterLinkMessage,
         ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform,
     };
+
+    #[test]
+    fn semantic_master_level_maps_to_a_canonical_global_value() {
+        let mut mapper = RackForgeParameterMapper::default();
+        let value = mapper
+            .apply(
+                RackForgeParameterInput {
+                    parameter: RackForgeParameterId::MasterLevel,
+                    value: 127,
+                    mode: SemanticControlMode::Absolute,
+                },
+                MasterPan::CENTER,
+            )
+            .unwrap();
+        assert_eq!(
+            value,
+            RackForgeParameterValue::MasterLevel(MasterLevel::UNITY)
+        );
+        assert_eq!(value.little_header(), "MASTER VOL    100%");
+    }
+
+    #[test]
+    fn relative_master_pan_anchors_then_moves_from_the_host_value() {
+        let mut mapper = RackForgeParameterMapper::default();
+        let input = |value| RackForgeParameterInput {
+            parameter: RackForgeParameterId::MasterPan,
+            value,
+            mode: SemanticControlMode::Relative,
+        };
+        let starting = MasterPan::new(-300).unwrap();
+        assert!(mapper.apply(input(90), starting).is_none());
+        let RackForgeParameterValue::MasterPan(moved) = mapper.apply(input(91), starting).unwrap()
+        else {
+            panic!("pan input returned the wrong RackForge parameter")
+        };
+        assert!(moved.get() > starting.get());
+    }
 
     fn session() -> SessionState {
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();

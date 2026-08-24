@@ -1232,12 +1232,13 @@ impl BrowserHost {
     fn apply_controller_actions(&mut self, actions: Vec<BrowserControllerAction>) {
         for action in actions {
             match action {
-                BrowserControllerAction::MasterLevel(level) => {
-                    self.apply_controller_session_command(SessionCommand::SetMasterLevel { level });
-                }
-                BrowserControllerAction::MasterPan(pan) => {
-                    self.apply_controller_session_command(SessionCommand::SetMasterPan { pan });
-                }
+                BrowserControllerAction::RackForgeParameter(parameter) => match parameter {
+                    rackforge_session_api::RackForgeParameterValue::MasterLevel(level) => self
+                        .apply_controller_session_command(SessionCommand::SetMasterLevel { level }),
+                    rackforge_session_api::RackForgeParameterValue::MasterPan(pan) => {
+                        self.apply_controller_session_command(SessionCommand::SetMasterPan { pan })
+                    }
+                },
                 BrowserControllerAction::Menu(command) => {
                     self.apply_controller_menu_command(command);
                 }

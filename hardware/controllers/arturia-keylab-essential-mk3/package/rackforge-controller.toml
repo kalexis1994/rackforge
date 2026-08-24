@@ -2,7 +2,7 @@ schema_version = 1
 kind = "controller"
 id = "org.rackforge.arturia-keylab-essential-mk3"
 name = "Arturia KeyLab Essential 61 mk3"
-version = "0.2.36"
+version = "0.2.37"
 controller_api = "^1.0"
 
 [runtime]
@@ -22,20 +22,6 @@ firmware_write = false
 filesystem = false
 network = false
 
-[[host_controls]]
-target = "master_level"
-
-[host_controls.midi_cc]
-channel = 0
-controller = 113
-
-[[host_controls]]
-target = "master_pan"
-
-[host_controls.midi_cc]
-channel = 0
-controller = 104
-
 [[host_actions]]
 target = "keyboard_parts"
 
@@ -46,9 +32,9 @@ press_value = 127
 release_value = 0
 
 # RackForge Control Profile v1. The first eight DAW-preset encoders and faders
-# are transport-independent synth controls. Encoder 9 and fader 9 remain the
-# reserved RackForge master pan and level above. Plugins opt in by publishing
-# matching semantic roles.
+# are transport-independent controls. Encoder 9 and fader 9 use the same
+# semantic vocabulary for RackForge's global pan and level; they are not
+# private controller shortcuts. Plugins opt in by publishing matching roles.
 [semantic_profile]
 schema_version = 1
 source_id = "controller.arturia.keylab-essential-mk3.midi"
@@ -148,6 +134,19 @@ role = "synth.lfo.depth"
 [semantic_profile.controls.midi_cc]
 channel = 0
 controller = 112
+
+[[semantic_profile.controls]]
+role = "rackforge.master.level"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 113
+
+[[semantic_profile.controls]]
+role = "rackforge.master.pan"
+mode = "relative"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 104
 
 [[devices]]
 id = "arturia.keylab-essential-mk3"

@@ -4560,7 +4560,11 @@ public final class MainActivity extends Activity {
             if (keyLabSurface && (messageStatus & 0xF0) == 0xB0) {
                 String response = keyLabHandleMidi(messageStatus, data1, data2);
                 if (response != null) {
-                    consumed = true;
+                    try {
+                        consumed = new JSONObject(response).optBoolean("consume", true);
+                    } catch (Exception error) {
+                        consumed = true;
+                    }
                     handleKeyLabResponse(response, generation);
                     if (data1 >= 44 && data1 <= 47 && data2 == 127) {
                         scheduleKeyLabLongPress(generation);

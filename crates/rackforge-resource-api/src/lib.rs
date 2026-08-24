@@ -147,6 +147,8 @@ pub struct LoadGrantedResourceRequest {
 pub enum ResourceBundleKind {
     /// Packages one NKI plus ordinary audio and artwork below its directory.
     NkiDependencies,
+    /// Packages one SFZ plus include documents, audio and artwork below its directory.
+    SfzDependencies,
 }
 
 /// Removes one installed private resource so the package default plays again.

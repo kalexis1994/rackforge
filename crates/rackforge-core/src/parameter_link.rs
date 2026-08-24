@@ -6,7 +6,7 @@ use rackforge_midi_api::{
 };
 use rackforge_plugin_api::abi::ParameterEventV1;
 use rackforge_plugin_api::{ParameterDescriptor, ParameterKind, ParameterSchema};
-use rackforge_session_api::SemanticControlProfile;
+use rackforge_session_api::{RackForgeParameterId, SemanticControlProfile};
 
 use crate::validate_parameter_write;
 
@@ -88,6 +88,11 @@ pub fn compile_semantic_parameter_links(
     schema.validate().map_err(anyhow::Error::msg)?;
     let mut compiled = Vec::new();
     for control in &profile.controls {
+        // RackForge-owned parameters share the semantic controller profile,
+        // but they are never candidates for a plugin ParameterEvent.
+        if RackForgeParameterId::from_role(&control.role).is_some() {
+            continue;
+        }
         let Some(parameter) = schema.parameter_for_semantic_role(&control.role) else {
             continue;
         };
@@ -482,6 +487,7 @@ mod tests {
                     controller: 109,
                 },
                 invert: false,
+                mode: rackforge_session_api::SemanticControlMode::Absolute,
             }],
         };
         let runtime_source_id = MidiSourceId::new("windows.endpoint.42").unwrap();

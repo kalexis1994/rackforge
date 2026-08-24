@@ -103,6 +103,8 @@ numbers. A `.rfcontroller` maps a physical message to a stable meaning, while
 the plugin parameter schema maps that meaning to one writable public
 parameter. RackForge joins both declarations at runtime and emits the same
 validated `ParameterEventV1` used by MIDI Learn and the Web parameter bridge.
+When a semantic control moves, RackForge also publishes compact transient
+feedback to LITTLE without consuming the MIDI message destined for the plugin.
 
 For example, the bundled KeyLab profile declares CC 109 as
 `synth.filter.cutoff`. A synth can opt into that default by adding this to its
@@ -128,17 +130,21 @@ These generated links are ephemeral defaults:
 - they always pass the original MIDI message through;
 - a user-created link for the same parameter or physical message wins;
 - a plugin that does not publish a role receives no automatic mapping;
-- reserved LITTLE and host-control messages cannot also be semantic controls.
+- RackForge-owned global roles are handled by the host and never compiled into
+  plugin parameter links;
+- reserved LITTLE action messages cannot also be semantic controls.
 
 The v1 vocabulary is versioned independently from controller and plugin
 package formats. Official roles include oscillator pulse width/sub/noise,
 filter cutoff/resonance/envelope/LFO/key tracking, amplifier ADSR/level, LFO
-rate/depth/delay, plugin output level, mixer level/pan, modulation, expression,
-and sustain. Third-party extensions use namespaced identifiers such as
+rate/depth/delay, plugin output level, mixer level/pan, RackForge master
+level/pan, modulation, expression, and sustain. Third-party extensions use namespaced identifiers such as
 `vendor.example.filter.color`; official role meanings never change in place.
 
 The bundled KeyLab uses its first eight DAW-preset faders for amplifier ADSR,
 filter cutoff/resonance, and LFO rate/depth. Its first eight encoders control
 oscillator pulse width/sub/noise, filter envelope/LFO/key tracking, LFO delay,
-and amplifier level. Fader 9 and encoder 9 remain reserved for RackForge master
-level and pan, and LITTLE buttons remain on the controller plane.
+and amplifier level. Fader 9 publishes `rackforge.master.level`; encoder 9
+publishes `rackforge.master.pan` with relative interpretation. They travel
+through the same semantic profile rather than private Arturia bindings. LITTLE
+buttons remain on the controller action plane.

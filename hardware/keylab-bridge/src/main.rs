@@ -1,7 +1,7 @@
 mod controller;
-mod host_controls;
+mod rackforge_parameters;
 
-use host_controls::{HostControlEvent, PanFollower, coalesce_host_control_events, pan_header_text};
+use rackforge_parameters::coalesce_rackforge_parameters;
 
 use midir::{
     Ignore, MidiInput, MidiInputConnection, MidiInputPort, MidiOutput, MidiOutputConnection,
@@ -12,8 +12,10 @@ use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_control_api::{
     ControlRequest, ControlResponse, VirtualMidiMessage, transport::ControlConnection,
 };
-use rackforge_controller_api::LITTLE_V1;
 use rackforge_controller_api::{ButtonPhase, HostActionBinding, HostActionTarget};
+use rackforge_controller_api::{
+    LITTLE_V1, rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
+};
 use rackforge_controller_arturia_keylab_essential_mk3::protocol as keylab_protocol;
 use rackforge_controller_package::{
     CONTROLLER_DRIVER_API_VERSION, PROCESS_DRIVER_PROTOCOL_VERSION, ProcessDriverInfo,
@@ -25,10 +27,10 @@ use rackforge_platform_api::{
 };
 use rackforge_session_api::SurfaceMode;
 use rackforge_session_api::{
-    ClientId, CommandEnvelope, EventEnvelope, InstanceId, MasterLevel, PluginInstanceState,
-    SessionCommand, SessionState,
+    ClientId, CommandEnvelope, EventEnvelope, InstanceId, PluginInstanceState,
+    RackForgeParameterInput, RackForgeParameterMapper, RackForgeParameterValue,
+    SemanticControlInput, SessionCommand, SessionState,
 };
-use rackforge_session_api::{HostControlBinding, HostControlTarget, MasterPan};
 use rackforge_session_api::{SessionEvent, SurfaceActivationRequest};
 use rackforge_surface_runtime as menu;
 use serde_json::Value;
@@ -388,7 +390,8 @@ struct KeyLabInput {
     source_name: String,
     ack_receiver: Receiver<()>,
     input_receiver: Receiver<PhysicalInputEvent>,
-    host_control_receiver: Receiver<HostControlEvent>,
+    rackforge_parameter_receiver: Receiver<RackForgeParameterInput>,
+    semantic_feedback_receiver: Receiver<SemanticControlInput>,
 }
 
 struct MidiForwarder {
@@ -1168,7 +1171,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
             }
         };
         let usb_generation = keylab_usb_generation();
-        if let Err(error) = register_host_controls(None) {
+        if let Err(error) = register_controller_bindings(None) {
             // A host that does not know the registration yet is not a host
             // to boycott: without the reservation the surface still works,
             // only the master-control CCs lack a formal claim.
@@ -1200,7 +1203,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 continue;
             }
         };
-        if let Err(error) = register_host_controls(Some(&input.source_name)) {
+        if let Err(error) = register_controller_bindings(Some(&input.source_name)) {
             eprintln!("Core no pudo asociar el perfil al endpoint MIDI: {error}");
             thread::sleep(Duration::from_millis(500));
             continue;
@@ -1243,7 +1246,7 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let mut audio_task: Option<AudioTask> = None;
         let mut next_spinner_frame = Instant::now();
         let mut next_settings_check = Instant::now();
-        let mut pan_follower = PanFollower::default();
+        let mut parameter_mapper = RackForgeParameterMapper::default();
         'surface: loop {
             if control_socket_generation() != control_generation {
                 eprintln!("Core cambió; cerrando MIDI para renovar los controles reservados...");
@@ -1254,31 +1257,30 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 break;
             }
 
-            let host_control_events =
-                coalesce_host_control_events(input.host_control_receiver.try_iter());
+            let parameter_events =
+                coalesce_rackforge_parameters(input.rackforge_parameter_receiver.try_iter());
             let mut latest_feedback = None;
-            for event in host_control_events {
-                // The pan encoder is followed rather than obeyed, so its
-                // event carries a distance turned and not a destination.
-                if event.target == HostControlTarget::MasterPan {
-                    match pan_follower.advance(event.value) {
-                        Some(pan) => match apply_master_pan(pan) {
-                            Ok(()) => latest_feedback = Some(pan_header_text(pan)),
-                            Err(error) => eprintln!("No se pudo aplicar el pan: {error}"),
-                        },
-                        None => println!("PAN_ANCHOR value={}", event.value),
-                    }
+            for event in parameter_events {
+                let current_pan = live_snapshot()
+                    .map(|snapshot| snapshot.master_pan)
+                    .unwrap_or_default();
+                let Some(parameter) = parameter_mapper.apply(event, current_pan) else {
                     continue;
-                }
-                match apply_host_control(event) {
+                };
+                match apply_rackforge_parameter(parameter) {
                     Ok(()) => {
-                        latest_feedback = Some(event.header_text());
-                        println!("HOST_CONTROL {event:?}");
+                        latest_feedback = Some(parameter.little_header());
+                        println!(
+                            "RACKFORGE_PARAMETER role={} value={}",
+                            parameter.parameter().role(),
+                            parameter.display_value()
+                        );
                     }
-                    Err(error) => {
-                        eprintln!("No se pudo aplicar el control reservado del host: {error}")
-                    }
+                    Err(error) => eprintln!("No se pudo aplicar el parámetro global: {error}"),
                 }
+            }
+            for feedback in input.semantic_feedback_receiver.try_iter() {
+                latest_feedback = Some(semantic_control_little_header(&feedback));
             }
             if let Some(feedback) = latest_feedback {
                 match transient_header.show(&feedback, Instant::now()) {
@@ -1632,7 +1634,7 @@ fn dispatch_session_command(command: SessionCommand) -> Result<Vec<EventEnvelope
     }
 }
 
-fn register_host_controls(midi_source_name: Option<&str>) -> Result<(), String> {
+fn register_controller_bindings(midi_source_name: Option<&str>) -> Result<(), String> {
     let profile = controller::package_profile();
     dispatch_session_command(SessionCommand::RegisterHostBindings {
         controller_id: profile.driver_id.clone(),
@@ -1654,39 +1656,14 @@ fn register_host_controls(midi_source_name: Option<&str>) -> Result<(), String> 
     Ok(())
 }
 
-fn apply_master_pan(pan: MasterPan) -> Result<(), String> {
-    dispatch_session_command(SessionCommand::SetMasterPan { pan })?;
-    println!("MASTER_PAN normalized={}/{}", pan.get(), MasterPan::MAX);
-    Ok(())
-}
-
-/// Where the host's pan stands right now.
-fn current_pan() -> Option<i16> {
-    Some(live_snapshot().ok()?.master_pan.get())
-}
-
-fn apply_host_control(event: HostControlEvent) -> Result<(), String> {
-    match event.target {
-        HostControlTarget::MasterLevel => {
-            let level = MasterLevel::from_midi(event.value);
+fn apply_rackforge_parameter(parameter: RackForgeParameterValue) -> Result<(), String> {
+    match parameter {
+        RackForgeParameterValue::MasterLevel(level) => {
             dispatch_session_command(SessionCommand::SetMasterLevel { level })?;
-            println!(
-                "MASTER_LEVEL value={} normalized={}/{}",
-                event.value,
-                level.get(),
-                MasterLevel::MAX
-            );
             Ok(())
         }
-        HostControlTarget::MasterPan => {
-            let pan = MasterPan::from_midi_with_center_snap(event.value);
+        RackForgeParameterValue::MasterPan(pan) => {
             dispatch_session_command(SessionCommand::SetMasterPan { pan })?;
-            println!(
-                "MASTER_PAN value={} normalized={}/{}",
-                event.value,
-                pan.get(),
-                MasterPan::MAX
-            );
             Ok(())
         }
     }
@@ -2553,8 +2530,9 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
     let port = select_input_port(&ports, selector)?;
     let (ack_sender, ack_receiver) = mpsc::channel();
     let (input_sender, input_receiver) = mpsc::channel();
-    let (host_control_sender, host_control_receiver) = mpsc::channel();
-    let host_controls = controller::package_profile().host_controls.clone();
+    let (rackforge_parameter_sender, rackforge_parameter_receiver) = mpsc::channel();
+    let (semantic_feedback_sender, semantic_feedback_receiver) = mpsc::channel();
+    let semantic_profile = controller::package_profile().semantic_profile.clone();
     let host_actions = controller::package_profile().host_actions.clone();
     let midi_forwarder = MidiForwarder::from_environment(&port.name)?;
     let midi_forward_sender = midi_forwarder.as_ref().and_then(MidiForwarder::sender);
@@ -2593,9 +2571,19 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
                     InputPhase::Turn,
                 ));
             }
-            if let Some(input) = parse_host_control(message, &host_controls) {
-                let _ = host_control_sender.send(input);
-                consumed_by_surface = true;
+            if let Some(input) = semantic_profile
+                .as_ref()
+                .and_then(|profile| semantic_control_input(profile, message))
+            {
+                if let Some(parameter) = semantic_profile
+                    .as_ref()
+                    .and_then(|profile| rackforge_parameter_input(profile, message))
+                {
+                    let _ = rackforge_parameter_sender.send(parameter);
+                    consumed_by_surface = true;
+                } else {
+                    let _ = semantic_feedback_sender.send(input);
+                }
             }
             if let Some(message) = forwardable_performance_message(message, consumed_by_surface)
                 && let Some(sender) = midi_forward_sender.as_ref()
@@ -2612,7 +2600,8 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
         source_name: port.name.clone(),
         ack_receiver,
         input_receiver,
-        host_control_receiver,
+        rackforge_parameter_receiver,
+        semantic_feedback_receiver,
     })
 }
 
@@ -2648,18 +2637,6 @@ fn parse_host_action(message: &[u8], bindings: &[HostActionBinding]) -> Option<P
             ButtonPhase::Release => InputPhase::Release,
         };
         Some(input_event(input, phase))
-    })
-}
-
-fn parse_host_control(message: &[u8], bindings: &[HostControlBinding]) -> Option<HostControlEvent> {
-    bindings.iter().find_map(|binding| {
-        binding
-            .midi_cc
-            .value(message)
-            .map(|value| HostControlEvent {
-                target: binding.target,
-                value,
-            })
     })
 }
 
@@ -3274,82 +3251,35 @@ mod tests {
     }
 
     #[test]
-    fn reserved_host_control_is_separate_from_surface_navigation() {
-        let bindings = [
-            HostControlBinding {
-                target: HostControlTarget::MasterLevel,
-                midi_cc: rackforge_session_api::MidiControlChangeBinding {
-                    channel: 0,
-                    controller: 82,
-                },
-            },
-            HostControlBinding {
-                target: HostControlTarget::MasterPan,
-                midi_cc: rackforge_session_api::MidiControlChangeBinding {
-                    channel: 0,
-                    controller: 104,
-                },
-            },
-        ];
+    fn semantic_global_parameter_is_separate_from_surface_navigation() {
+        let profile = controller::package_profile()
+            .semantic_profile
+            .as_ref()
+            .unwrap();
+        let input = rackforge_parameter_input(profile, &[0xb0, 113, 91]).unwrap();
         assert_eq!(
-            parse_host_control(&[0xb0, 82, 91], &bindings),
-            Some(HostControlEvent {
-                target: HostControlTarget::MasterLevel,
-                value: 91,
-            })
+            input.parameter,
+            rackforge_session_api::RackForgeParameterId::MasterLevel
         );
-        assert_eq!(
-            parse_host_control(&[0xb0, 104, 64], &bindings),
-            Some(HostControlEvent {
-                target: HostControlTarget::MasterPan,
-                value: 64,
-            })
-        );
-        assert_eq!(parse_host_control(&[0xb0, 83, 91], &bindings), None);
-        assert_eq!(parse_physical_input(&[0xb0, 82, 91]), None);
+        assert_eq!(input.value, 91);
+        assert!(rackforge_parameter_input(profile, &[0xb0, 83, 91]).is_none());
+        assert_eq!(parse_physical_input(&[0xb0, 113, 91]), None);
     }
 
     #[test]
-    fn host_control_feedback_fits_the_native_header_and_snaps_pan_to_center() {
+    fn global_parameter_feedback_fits_the_native_header() {
+        use rackforge_session_api::{MasterLevel, MasterPan};
         assert_eq!(
-            HostControlEvent {
-                target: HostControlTarget::MasterLevel,
-                value: 0,
-            }
-            .header_text(),
+            RackForgeParameterValue::MasterLevel(MasterLevel::SILENT).little_header(),
             "MASTER VOL      0%"
         );
         assert_eq!(
-            HostControlEvent {
-                target: HostControlTarget::MasterLevel,
-                value: 127,
-            }
-            .header_text(),
+            RackForgeParameterValue::MasterLevel(MasterLevel::UNITY).little_header(),
             "MASTER VOL    100%"
         );
         assert_eq!(
-            HostControlEvent {
-                target: HostControlTarget::MasterPan,
-                value: 64,
-            }
-            .header_text(),
+            RackForgeParameterValue::MasterPan(MasterPan::CENTER).little_header(),
             "MASTER PAN  CENTER"
-        );
-        assert_eq!(
-            HostControlEvent {
-                target: HostControlTarget::MasterPan,
-                value: 0,
-            }
-            .header_text(),
-            "MASTER PAN  L 100%"
-        );
-        assert_eq!(
-            HostControlEvent {
-                target: HostControlTarget::MasterPan,
-                value: 127,
-            }
-            .header_text(),
-            "MASTER PAN  R 100%"
         );
     }
 
@@ -3380,31 +3310,37 @@ mod tests {
     }
 
     #[test]
-    fn rapid_host_controls_keep_the_latest_value_of_each_target() {
+    fn rapid_global_parameters_keep_the_latest_value_of_each_target() {
+        use rackforge_session_api::{RackForgeParameterId, SemanticControlMode};
         let events = [
-            HostControlEvent {
-                target: HostControlTarget::MasterLevel,
+            RackForgeParameterInput {
+                parameter: RackForgeParameterId::MasterLevel,
                 value: 10,
+                mode: SemanticControlMode::Absolute,
             },
-            HostControlEvent {
-                target: HostControlTarget::MasterPan,
+            RackForgeParameterInput {
+                parameter: RackForgeParameterId::MasterPan,
                 value: 20,
+                mode: SemanticControlMode::Relative,
             },
-            HostControlEvent {
-                target: HostControlTarget::MasterLevel,
+            RackForgeParameterInput {
+                parameter: RackForgeParameterId::MasterLevel,
                 value: 30,
+                mode: SemanticControlMode::Absolute,
             },
         ];
         assert_eq!(
-            coalesce_host_control_events(events),
+            coalesce_rackforge_parameters(events),
             vec![
-                HostControlEvent {
-                    target: HostControlTarget::MasterPan,
+                RackForgeParameterInput {
+                    parameter: RackForgeParameterId::MasterPan,
                     value: 20,
+                    mode: SemanticControlMode::Relative,
                 },
-                HostControlEvent {
-                    target: HostControlTarget::MasterLevel,
+                RackForgeParameterInput {
+                    parameter: RackForgeParameterId::MasterLevel,
                     value: 30,
+                    mode: SemanticControlMode::Absolute,
                 },
             ]
         );

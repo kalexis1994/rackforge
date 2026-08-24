@@ -33,8 +33,9 @@ use rackforge_repository::{
     set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
-    HostControlTarget, InstanceId, MasterLevel, MasterPan, ProgramDraftState,
-    SemanticControlProfile,
+    InstanceId, MasterPan, ProgramDraftState, RackForgeParameterMapper, RackForgeParameterValue,
+    SemanticControlInput, SemanticControlProfile, rackforge_parameter_input,
+    semantic_control_input, semantic_control_little_header,
 };
 use rackforge_surface_runtime::{
     ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayPlugin, PlaySound,
@@ -81,6 +82,7 @@ static MASTER_PAN_LEFT_TARGET_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits()
 static MASTER_PAN_LEFT_CURRENT_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
 static MASTER_PAN_RIGHT_TARGET_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
 static MASTER_PAN_RIGHT_CURRENT_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
+static MASTER_PAN_VALUE: AtomicI32 = AtomicI32::new(0);
 static AUDIO_ERROR: AtomicI32 = AtomicI32::new(AAUDIO_OK);
 static MIDI_DROPPED_EVENTS: AtomicU64 = AtomicU64::new(0);
 static MIDI_PANIC_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -159,11 +161,22 @@ impl AndroidControllerMenu {
         .to_string())
     }
 
-    fn render_host_control(&self, target: HostControlTarget, value: u8) -> Result<String> {
-        let header = keylab_protocol::host_control_header(target, value);
+    fn render_rackforge_parameter(&self, parameter: RackForgeParameterValue) -> Result<String> {
+        let header = parameter.little_header();
         Ok(serde_json::json!({
             "plan": controller_plan_value(keylab_protocol::transient_header_messages(&header))?,
             "command": null,
+            "restore_header_after_ms": HOST_CONTROL_HEADER_MS,
+        })
+        .to_string())
+    }
+
+    fn render_semantic_control(&self, input: &SemanticControlInput) -> Result<String> {
+        let header = semantic_control_little_header(input);
+        Ok(serde_json::json!({
+            "plan": controller_plan_value(keylab_protocol::transient_header_messages(&header))?,
+            "command": null,
+            "consume": false,
             "restore_header_after_ms": HOST_CONTROL_HEADER_MS,
         })
         .to_string())
@@ -1588,16 +1601,19 @@ fn controller_menu() -> &'static Mutex<AndroidControllerMenu> {
     CONTROLLER_MENU.get_or_init(|| Mutex::new(AndroidControllerMenu::default()))
 }
 
-fn apply_master_control(target: HostControlTarget, value: u8) {
-    match target {
-        HostControlTarget::MasterLevel => {
-            MASTER_LEVEL_TARGET_BITS.store(
-                MasterLevel::from_midi(value).amplitude().to_bits(),
-                Ordering::Relaxed,
-            );
+fn controller_parameter_mapper() -> &'static Mutex<RackForgeParameterMapper> {
+    static MAPPER: OnceLock<Mutex<RackForgeParameterMapper>> = OnceLock::new();
+    MAPPER.get_or_init(|| Mutex::new(RackForgeParameterMapper::default()))
+}
+
+fn apply_rackforge_parameter(parameter: RackForgeParameterValue) {
+    match parameter {
+        RackForgeParameterValue::MasterLevel(level) => {
+            MASTER_LEVEL_TARGET_BITS.store(level.amplitude().to_bits(), Ordering::Relaxed);
         }
-        HostControlTarget::MasterPan => {
-            let (left, right) = MasterPan::from_midi_with_center_snap(value).balance();
+        RackForgeParameterValue::MasterPan(pan) => {
+            MASTER_PAN_VALUE.store(i32::from(pan.get()), Ordering::Relaxed);
+            let (left, right) = pan.balance();
             MASTER_PAN_LEFT_TARGET_BITS.store(left.to_bits(), Ordering::Relaxed);
             MASTER_PAN_RIGHT_TARGET_BITS.store(right.to_bits(), Ordering::Relaxed);
         }
@@ -2722,6 +2738,47 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabHandleMidi(
     data_2: jint,
 ) -> jstring {
     let message = [status as u8, data_1 as u8, data_2 as u8];
+    let profile = keylab_essential_mk3::controller::package_profile();
+    if let Some(input) = profile
+        .semantic_profile
+        .as_ref()
+        .and_then(|profile| rackforge_parameter_input(profile, &message))
+    {
+        let current_pan = MasterPan::new(MASTER_PAN_VALUE.load(Ordering::Relaxed) as i16)
+            .unwrap_or(MasterPan::CENTER);
+        let result = controller_parameter_mapper()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("RackForge parameter mapper lock poisoned"))
+            .and_then(|mut mapper| {
+                Ok(mapper.apply(input, current_pan).map(|parameter| {
+                    apply_rackforge_parameter(parameter);
+                    parameter
+                }))
+            })
+            .and_then(|parameter| match parameter {
+                Some(parameter) => controller_menu()
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
+                    .and_then(|controller| controller.render_rackforge_parameter(parameter)),
+                None => Ok(serde_json::json!({
+                    "plan": [],
+                    "command": null,
+                })
+                .to_string()),
+            });
+        return result_string(&mut env, result);
+    }
+    if let Some(input) = profile
+        .semantic_profile
+        .as_ref()
+        .and_then(|profile| semantic_control_input(profile, &message))
+    {
+        let result = controller_menu()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
+            .and_then(|controller| controller.render_semantic_control(&input));
+        return result_string(&mut env, result);
+    }
     let Some(event) = keylab_protocol::parse_input(&message) else {
         return ptr::null_mut();
     };
@@ -2730,13 +2787,6 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabHandleMidi(
             .lock()
             .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
             .and_then(|mut controller| controller.handle_surface(input, phase)),
-        keylab_protocol::ControllerEvent::HostControl { target, value } => {
-            apply_master_control(target, value);
-            controller_menu()
-                .lock()
-                .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
-                .and_then(|controller| controller.render_host_control(target, value))
-        }
     };
     result_string(&mut env, result)
 }

@@ -175,11 +175,14 @@ restricted transient protocol prevents a remote UI from smuggling program
 changes or arbitrary host-reserved controls through the MIDI path. These
 messages never advance the session revision or enter its persistent event log.
 
-Continuous `host_controls` (for example master level and pan) and momentary
-`host_actions` (for example a hardware keyboard-parts shortcut) are declared
-separately by controller packages. An action binding includes explicit press
-and release values; both are reserved before plugin routing so its physical CC
-can never accidentally modulate a plugin.
+Continuous RackForge-owned parameters use official semantic roles such as
+`rackforge.master.level` and `rackforge.master.pan`. They share the public
+control profile with plugin roles, but the host resolves them before plugin
+routing and applies them through the canonical session/audio commands. Their
+canonical label and value can therefore be shown generically by LITTLE.
+Momentary `host_actions` (for example a hardware keyboard-parts shortcut)
+remain controller actions. An action binding includes explicit press and
+release values and is reserved before plugin routing.
 
 An optional Rack-level `keyboard_parts` configuration owns `PART 1`, `PART 2`,
 their output channels, octave transforms and the shared split key. The split

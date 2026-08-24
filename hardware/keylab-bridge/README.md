@@ -66,10 +66,13 @@ tree and opaque field IDs; the controller never assumes plugin JSON paths.
 Audition leases are renewed while editing and restored on cancel, timeout, or
 disconnect.
 
-## Reserved controls
+## Semantic RackForge parameters
 
-- Fader 9: `master_level`.
-- Encoder 9: `master_pan`, followed relatively to prevent reconnect jumps.
+- Fader 9: `rackforge.master.level`.
+- Encoder 9: `rackforge.master.pan`, interpreted relatively to prevent reconnect jumps.
+
+## Reserved action
+
 - PART: open keyboard parts, set a split with a held note, or clear the split
   after a long hold.
 
@@ -79,8 +82,8 @@ removed from the plugin MIDI stream.
 ## Display and LEDs
 
 The screen uses the native header, two-line body, and four-button footer.
-Transient master-control feedback replaces only the header and restores it
-after inactivity.
+Transient global-parameter feedback replaces only the header and restores it
+after inactivity. Formatting is owned by RackForge, not by the Arturia driver.
 
 The shared controller runtime applies a dim blue profile to mode buttons,
 transport, contextual buttons, and pads. Context buttons may temporarily

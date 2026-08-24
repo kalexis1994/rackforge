@@ -1530,6 +1530,20 @@ async fn load_granted_resource(
                 Err(error) => return resource_error(error),
             }
         }
+        Some(ResourceBundleKind::SfzDependencies) => {
+            match state.resource_browser.bundle_granted_sfz(
+                &request.plugin_id,
+                &request.grant_id,
+                request.entry_id.as_deref(),
+            ) {
+                Ok(staged) => {
+                    let path = staged.path().to_path_buf();
+                    bundled = Some(staged);
+                    path
+                }
+                Err(error) => return resource_error(error),
+            }
+        }
         None => match state.resource_browser.resolve_granted_file(
             &request.plugin_id,
             &request.grant_id,

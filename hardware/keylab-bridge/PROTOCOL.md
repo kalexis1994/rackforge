@@ -246,10 +246,11 @@ Short and long presses are mutually exclusive. Long press begins at 650 ms.
 - The emergency chord has priority and never also emits OK LONG or BACK LONG.
 - Plugins cannot consume or block either host-owned escape route.
 
-### Reserved master controls
+### Semantic RackForge parameters
 
 In DAW Program, Fader 9 is MIDI channel 1 CC 113 and maps to
-`master_level`. Encoder 9 is CC 104 and maps to `master_pan`.
+`rackforge.master.level`. Encoder 9 is CC 104 and maps to
+`rackforge.master.pan`.
 
 The pan encoder is treated as relative movement from authoritative session
 state to avoid jumps after reconnect. A virtual center detent keeps center easy
@@ -257,8 +258,9 @@ to find while preserving both ends of the range.
 
 The latest value temporarily replaces the header for 1.5 seconds:
 `MASTER VOL n%`, `MASTER PAN L n%`, `MASTER PAN R n%`, or
-`MASTER PAN CENTER`. The driver sends typed commands and Core removes the
-reserved CC before plugin routing.
+`MASTER PAN CENTER`. The `.rfcontroller` declares both through the public
+semantic profile. The host sends typed commands and removes the global-role CC
+before plugin routing.
 
 ### Reserved PART action
 

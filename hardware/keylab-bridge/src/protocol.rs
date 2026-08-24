@@ -1,4 +1,3 @@
-use rackforge_session_api::{HostControlTarget, MasterLevel, MasterPan};
 use rackforge_surface_runtime::{FooterButton, Header, Input, Screen};
 use rackforge_ui::VisualState;
 
@@ -80,14 +79,7 @@ pub enum InputPhase {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ControllerEvent {
-    Surface {
-        input: Input,
-        phase: InputPhase,
-    },
-    HostControl {
-        target: HostControlTarget,
-        value: u8,
-    },
+    Surface { input: Input, phase: InputPhase },
 }
 
 pub fn parse_input(message: &[u8]) -> Option<ControllerEvent> {
@@ -114,38 +106,7 @@ pub fn parse_input(message: &[u8]) -> Option<ControllerEvent> {
         (119, 0) => Some((Input::KeyboardParts, InputPhase::Release)),
         _ => None,
     };
-    if let Some((input, phase)) = surface {
-        return Some(ControllerEvent::Surface { input, phase });
-    }
-    let target = match *controller {
-        113 => HostControlTarget::MasterLevel,
-        104 => HostControlTarget::MasterPan,
-        _ => return None,
-    };
-    Some(ControllerEvent::HostControl {
-        target,
-        value: *value,
-    })
-}
-
-pub fn host_control_header(target: HostControlTarget, value: u8) -> String {
-    match target {
-        HostControlTarget::MasterLevel => {
-            let percent = (u32::from(MasterLevel::from_midi(value).get()) + 5) / 10;
-            format!("MASTER VOL {:>7}", format!("{percent}%"))
-        }
-        HostControlTarget::MasterPan => {
-            let pan = MasterPan::from_midi_with_center_snap(value).get();
-            let label = if pan == 0 {
-                "CENTER".to_owned()
-            } else {
-                let side = if pan < 0 { 'L' } else { 'R' };
-                let percent = (u32::from(pan.unsigned_abs()) + 5) / 10;
-                format!("{side} {percent}%")
-            };
-            format!("MASTER PAN {:>7}", label)
-        }
-    }
+    surface.map(|(input, phase)| ControllerEvent::Surface { input, phase })
 }
 
 pub fn select_preset(index: u8) -> Result<Vec<u8>, String> {
@@ -326,14 +287,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_reserved_host_controls_and_surface_inputs() {
-        assert_eq!(
-            parse_input(&[0xB0, 113, 64]),
-            Some(ControllerEvent::HostControl {
-                target: HostControlTarget::MasterLevel,
-                value: 64,
-            })
-        );
+    fn parses_only_surface_inputs() {
+        assert_eq!(parse_input(&[0xB0, 113, 64]), None);
         assert_eq!(
             parse_input(&[0xB0, 44, 127]),
             Some(ControllerEvent::Surface {

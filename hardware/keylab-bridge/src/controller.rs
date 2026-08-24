@@ -1,8 +1,8 @@
 use rackforge_control_profile::{CONTROL_PROFILE_SCHEMA_VERSION, SemanticControlId, roles};
 use rackforge_controller_api::{
     ControllerDriver, ControllerProfile, GestureCapabilities, HostActionBinding, HostActionTarget,
-    HostControlBinding, HostControlTarget, LITTLE_V1, MidiButtonBinding, MidiControlChangeBinding,
-    SemanticControlBinding, SemanticControlProfile, SurfaceImplementation, SurfaceQuality,
+    LITTLE_V1, MidiButtonBinding, MidiControlChangeBinding, SemanticControlBinding,
+    SemanticControlMode, SemanticControlProfile, SurfaceImplementation, SurfaceQuality,
     negotiate_surface,
 };
 use rackforge_controller_package::{ControllerPackageManifest, DeviceMatcher};
@@ -30,22 +30,7 @@ impl ControllerDriver for KeyLabEssentialMk3 {
                     emergency_home_chord: true,
                 },
             }],
-            host_controls: vec![
-                HostControlBinding {
-                    target: HostControlTarget::MasterLevel,
-                    midi_cc: MidiControlChangeBinding {
-                        channel: 0,
-                        controller: 113,
-                    },
-                },
-                HostControlBinding {
-                    target: HostControlTarget::MasterPan,
-                    midi_cc: MidiControlChangeBinding {
-                        channel: 0,
-                        controller: 104,
-                    },
-                },
-            ],
+            host_controls: Vec::new(),
             host_actions: vec![HostActionBinding {
                 target: HostActionTarget::KeyboardParts,
                 midi_cc: MidiButtonBinding {
@@ -75,6 +60,7 @@ impl ControllerDriver for KeyLabEssentialMk3 {
                     (roles::SYNTH_FILTER_RESONANCE, 110),
                     (roles::SYNTH_LFO_RATE, 111),
                     (roles::SYNTH_LFO_DEPTH, 112),
+                    (roles::RACKFORGE_MASTER_LEVEL, 113),
                 ]
                 .into_iter()
                 .map(|(role, controller)| SemanticControlBinding {
@@ -84,7 +70,18 @@ impl ControllerDriver for KeyLabEssentialMk3 {
                         controller,
                     },
                     invert: false,
+                    mode: SemanticControlMode::Absolute,
                 })
+                .chain(std::iter::once(SemanticControlBinding {
+                    role: SemanticControlId::new(roles::RACKFORGE_MASTER_PAN)
+                        .expect("built-in semantic role is valid"),
+                    midi_cc: MidiControlChangeBinding {
+                        channel: 0,
+                        controller: 104,
+                    },
+                    invert: false,
+                    mode: SemanticControlMode::Relative,
+                }))
                 .collect(),
             }),
         })
@@ -222,25 +219,7 @@ mod tests {
         assert_eq!(driver.profile().surfaces[0].quality, SurfaceQuality::Native);
         assert!(driver.profile().surfaces[0].gestures.soft_key_long_press);
         assert!(driver.profile().surfaces[0].gestures.emergency_home_chord);
-        assert_eq!(
-            driver.profile().host_controls,
-            vec![
-                HostControlBinding {
-                    target: HostControlTarget::MasterLevel,
-                    midi_cc: MidiControlChangeBinding {
-                        channel: 0,
-                        controller: 113,
-                    },
-                },
-                HostControlBinding {
-                    target: HostControlTarget::MasterPan,
-                    midi_cc: MidiControlChangeBinding {
-                        channel: 0,
-                        controller: 104,
-                    },
-                },
-            ]
-        );
+        assert!(driver.profile().host_controls.is_empty());
         assert_eq!(
             driver.profile().host_actions,
             vec![HostActionBinding {
@@ -263,14 +242,14 @@ mod tests {
     }
 
     #[test]
-    fn rackforge_profile_maps_all_eight_encoders_and_faders() {
+    fn rackforge_profile_maps_all_nine_encoders_and_faders() {
         let semantic = package_profile().semantic_profile.as_ref().unwrap();
         let controls = semantic
             .controls
             .iter()
             .map(|binding| (binding.midi_cc.controller, binding.role.as_str()))
             .collect::<BTreeMap<_, _>>();
-        assert_eq!(controls.len(), 16);
+        assert_eq!(controls.len(), 18);
         assert_eq!(
             controls.get(&96),
             Some(&roles::SYNTH_OSCILLATOR_PULSE_WIDTH)
@@ -278,13 +257,16 @@ mod tests {
         assert_eq!(controls.get(&103), Some(&roles::SYNTH_AMPLIFIER_LEVEL));
         assert_eq!(controls.get(&105), Some(&roles::SYNTH_AMP_ENVELOPE_ATTACK));
         assert_eq!(controls.get(&112), Some(&roles::SYNTH_LFO_DEPTH));
-        assert!(
-            !controls.contains_key(&104),
-            "encoder 9 is reserved for master pan"
-        );
-        assert!(
-            !controls.contains_key(&113),
-            "fader 9 is reserved for master level"
+        assert_eq!(controls.get(&104), Some(&roles::RACKFORGE_MASTER_PAN));
+        assert_eq!(controls.get(&113), Some(&roles::RACKFORGE_MASTER_LEVEL));
+        assert_eq!(
+            semantic
+                .controls
+                .iter()
+                .find(|binding| binding.midi_cc.controller == 104)
+                .unwrap()
+                .mode,
+            SemanticControlMode::Relative
         );
     }
 

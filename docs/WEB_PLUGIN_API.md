@@ -145,7 +145,10 @@ from plugin JavaScript.
   opaque. Passing no `parent_id` lists the grant root.
 - `plugin.load_resource`: available to `CONFIG`; loads one granted file into a
   file resource declared by the active plugin. It accepts
-  `target_resource_id`, `grant_id` and `entry_id`. RackForge prepares a new
+  `target_resource_id`, `grant_id`, `entry_id` and an optional `bundle`.
+  `nki_dependencies` packages the selected NKI with nearby samples and artwork;
+  `sfz_dependencies` packages the selected SFZ with its include documents,
+  samples and artwork. RackForge prepares a new
   plugin instance away from the real-time audio callback and swaps it at an
   audio block boundary.
 - `plugin.preview_resource`: available to `CONFIG`; accepts a declared file

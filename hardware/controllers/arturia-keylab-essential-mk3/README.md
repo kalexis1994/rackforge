@@ -18,13 +18,16 @@ Raspberry Pi while the same I/O-free state machine is prepared for
 native host adapters, and the Web build embeds it in the WASI browser host
 while JavaScript retains ownership of the browser's MIDI input/output handles.
 
-Reserved controls:
+Semantic RackForge parameters:
 
-- Fader 9, MIDI channel 1 CC 113: `master_level`.
-- Encoder 9, MIDI channel 1 CC 104: `master_pan`.
-- PART, MIDI channel 1 CC 119: `keyboard_parts` host action.
+- Fader 9, MIDI channel 1 CC 113: `rackforge.master.level`.
+- Encoder 9, MIDI channel 1 CC 104: `rackforge.master.pan` (relative).
 
-The host consumes these messages before plugin MIDI routing. The package
+Reserved action:
+
+- PART, MIDI channel 1 CC 119: `keyboard_parts`.
+
+The host resolves global parameter roles and actions before plugin MIDI routing. The package
 implements only `little@1`; other layouts require an explicit certified
 implementation.
 

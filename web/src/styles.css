@@ -8398,6 +8398,7 @@ body {
 }
 
 .rack-flow-node.midi_input,
+.rack-flow-node.audio_input,
 .rack-flow-node.audio_output {
   width: 155px;
   background: linear-gradient(145deg, #152932, #0b1920);
@@ -8464,6 +8465,8 @@ body {
 
 .rack-flow-node .midi-handle { background: #62dff1; }
 .rack-flow-node .audio-handle { background: #f4b860; }
+.rack-flow-node .rack-midi-input-handle { top: 34%; }
+.rack-flow-node .rack-audio-input-handle { top: 66%; }
 
 .rack-flow-label {
   width: 100%;
@@ -10127,6 +10130,16 @@ body {
 .plugin-kind-tag.instrument {
   color: #0a1418;
   background: #3ad8e0;
+}
+
+.plugin-kind-tag.effect {
+  color: #f5efff;
+  background: #7540ad;
+}
+
+.plugin-kind-tag.midi-processor {
+  color: #08140d;
+  background: #55d98a;
 }
 
 .plugin-kind-tag.controller {

@@ -25,11 +25,12 @@ use rackforge_surface_api::{SurfaceActivationRequest, SurfaceActivationResponse}
 use rackforge_surface_runtime::{Input as SurfaceInput, Screen};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -37,6 +38,8 @@ use std::time::{Duration, Instant};
 
 const AUDIO_SCHEMA_VERSION: u32 = 1;
 const PLUGIN_OUTPUT_CHANNELS: usize = 2;
+const MAX_STANDALONE_INPUT_CHANNELS: usize = 2;
+const CAPTURE_RING_FRAMES: usize = 16_384;
 const MAX_AUDIO_FRAMES: usize = 4_096;
 const MIDI_QUEUE_CAPACITY: usize = 4_096;
 const COMMAND_QUEUE_CAPACITY: usize = 64;
@@ -53,6 +56,9 @@ const COMMON_SAMPLE_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 
 const COMMON_BUFFER_FRAMES: [u32; 8] = [32, 64, 128, 256, 512, 1_024, 2_048, 4_096];
 const DEFAULT_OUTPUT_GAIN_DB: i8 = 6;
 const MAX_OUTPUT_GAIN_DB: i8 = 12;
+const DEFAULT_INPUT_GAIN_DB: i8 = 0;
+const MIN_INPUT_GAIN_DB: i8 = -60;
+const MAX_INPUT_GAIN_DB: i8 = 24;
 const MIDI_RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
 const MIDI_SUPERVISOR_TICK: Duration = Duration::from_millis(20);
 const MASTER_SMOOTHING_FRAMES: u32 = 480;
@@ -83,6 +89,8 @@ pub struct AudioRuntimeStatus {
     pub midi_dropped_events: u64,
     pub midi_panic_count: u64,
     pub stream_error_count: u64,
+    pub capture_overruns: u64,
+    pub capture_underruns: u64,
 }
 
 impl AudioTelemetry {
@@ -134,7 +142,74 @@ impl AudioTelemetry {
             midi_dropped_events: self.midi_dropped_events.load(Ordering::Relaxed),
             midi_panic_count: self.midi_panic_count.load(Ordering::Relaxed),
             stream_error_count: self.stream_error_count.load(Ordering::Relaxed),
+            capture_overruns: 0,
+            capture_underruns: 0,
         }
+    }
+}
+
+/// Bounded single-producer/single-consumer handoff between CPAL's capture and
+/// playback callbacks. Neither side allocates, waits or locks. When a driver
+/// falls behind, new capture samples are dropped and telemetry makes the
+/// failure visible instead of blocking the real-time output callback.
+struct CaptureRing {
+    samples: Box<[UnsafeCell<f32>]>,
+    write: AtomicUsize,
+    read: AtomicUsize,
+    overruns: AtomicU64,
+    underruns: AtomicU64,
+}
+
+// SAFETY: there is exactly one capture producer and one playback consumer.
+// A slot is written before `write` is released and read only after it is
+// acquired. A full slot is never overwritten until the consumer advances.
+unsafe impl Sync for CaptureRing {}
+
+impl CaptureRing {
+    fn new(capacity: usize) -> Self {
+        Self {
+            samples: (0..capacity).map(|_| UnsafeCell::new(0.0)).collect(),
+            write: AtomicUsize::new(0),
+            read: AtomicUsize::new(0),
+            overruns: AtomicU64::new(0),
+            underruns: AtomicU64::new(0),
+        }
+    }
+
+    fn push_frame(&self, frame: &[f32]) {
+        if frame.is_empty() {
+            return;
+        }
+        let write = self.write.load(Ordering::Relaxed);
+        let read = self.read.load(Ordering::Acquire);
+        if write.wrapping_sub(read).saturating_add(frame.len()) > self.samples.len() {
+            self.overruns.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        for (offset, sample) in frame.iter().copied().enumerate() {
+            // SAFETY: this producer exclusively owns every unpublished slot
+            // in this complete frame. The write cursor is released once, so
+            // the consumer can never observe half a stereo frame.
+            unsafe {
+                *self.samples[(write + offset) % self.samples.len()].get() = sample;
+            }
+        }
+        self.write
+            .store(write.wrapping_add(frame.len()), Ordering::Release);
+    }
+
+    fn pop(&self) -> f32 {
+        let read = self.read.load(Ordering::Relaxed);
+        let write = self.write.load(Ordering::Acquire);
+        if read == write {
+            self.underruns.fetch_add(1, Ordering::Relaxed);
+            return 0.0;
+        }
+        // SAFETY: the producer published this slot and cannot reuse it until
+        // this consumer advances `read` below.
+        let sample = unsafe { *self.samples[read % self.samples.len()].get() };
+        self.read.store(read.wrapping_add(1), Ordering::Release);
+        sample
     }
 }
 
@@ -159,6 +234,15 @@ pub struct AudioPreferences {
     pub buffer_frames: Option<u32>,
     #[serde(default = "default_output_gain_db")]
     pub output_gain_db: i8,
+    /// None keeps capture closed. Audio input is opt-in so connecting a
+    /// microphone never starts monitoring it unexpectedly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_device: Option<String>,
+    /// One-based physical channel numbers, in the order exposed to plugins.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_channels: Vec<u16>,
+    #[serde(default = "default_input_gain_db")]
+    pub input_gain_db: i8,
     pub midi_inputs: Vec<String>,
 }
 
@@ -181,9 +265,21 @@ pub struct AudioOutputInfo {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct AudioInputInfo {
+    pub driver: String,
+    pub name: String,
+    pub is_default: bool,
+    pub channels: u16,
+    pub default_sample_rate: u32,
+    pub sample_rates: Vec<u32>,
+    pub buffer_frames: Vec<u32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct AudioInventory {
     pub drivers: Vec<AudioDriverInfo>,
     pub outputs: Vec<AudioOutputInfo>,
+    pub inputs: Vec<AudioInputInfo>,
     pub midi_inputs: Vec<String>,
 }
 
@@ -200,6 +296,7 @@ impl AudioInventory {
     pub fn scan_skipping(skip_driver: Option<&str>) -> Result<Self> {
         let mut drivers = Vec::new();
         let mut outputs = Vec::new();
+        let mut inputs = Vec::new();
         for host_id in cpal::available_hosts() {
             if skip_driver == Some(host_id.name()) {
                 continue;
@@ -219,7 +316,11 @@ impl AudioInventory {
             let default_name = host
                 .default_output_device()
                 .and_then(|device| device.name().ok());
+            let default_input_name = host
+                .default_input_device()
+                .and_then(|device| device.name().ok());
             let mut driver_outputs = 0usize;
+            let mut driver_inputs = 0usize;
             if let Ok(devices) = host.output_devices() {
                 for device in devices {
                     let Ok(name) = device.name() else { continue };
@@ -244,13 +345,37 @@ impl AudioInventory {
                     driver_outputs += 1;
                 }
             }
+            if let Ok(devices) = host.input_devices() {
+                for device in devices {
+                    let Ok(name) = device.name() else { continue };
+                    let Ok(default) = device.default_input_config() else {
+                        continue;
+                    };
+                    let supported = device
+                        .supported_input_configs()
+                        .map(|configs| configs.collect::<Vec<_>>())
+                        .unwrap_or_default();
+                    let sample_rates = supported_sample_rates(&supported, default.sample_rate().0);
+                    let buffer_frames = supported_buffer_frames(&supported);
+                    inputs.push(AudioInputInfo {
+                        driver: driver.clone(),
+                        is_default: default_input_name.as_deref() == Some(name.as_str()),
+                        name,
+                        channels: default.channels(),
+                        default_sample_rate: default.sample_rate().0,
+                        sample_rates,
+                        buffer_frames,
+                    });
+                    driver_inputs += 1;
+                }
+            }
             drivers.push(AudioDriverInfo {
                 name: driver,
                 available: driver_outputs > 0,
                 detail: if driver_outputs == 0 {
                     "No output devices found".into()
                 } else {
-                    format!("{driver_outputs} output device(s)")
+                    format!("{driver_outputs} output device(s) · {driver_inputs} input device(s)")
                 },
             });
         }
@@ -269,10 +394,17 @@ impl AudioInventory {
                 .then_with(|| right.is_default.cmp(&left.is_default))
                 .then_with(|| left.name.cmp(&right.name))
         });
+        inputs.sort_by(|left, right| {
+            left.driver
+                .cmp(&right.driver)
+                .then_with(|| right.is_default.cmp(&left.is_default))
+                .then_with(|| left.name.cmp(&right.name))
+        });
         let midi_inputs = discover_midi_inputs()?;
         Ok(Self {
             drivers,
             outputs,
+            inputs,
             midi_inputs,
         })
     }
@@ -293,6 +425,9 @@ impl AudioInventory {
             sample_rate_hz: output.default_sample_rate,
             buffer_frames: None,
             output_gain_db: DEFAULT_OUTPUT_GAIN_DB,
+            input_device: None,
+            input_channels: Vec::new(),
+            input_gain_db: DEFAULT_INPUT_GAIN_DB,
             midi_inputs: self.midi_inputs.clone(),
         })
     }
@@ -301,6 +436,13 @@ impl AudioInventory {
         self.outputs.iter().find(|output| {
             output.driver == preferences.driver && output.name == preferences.output_device
         })
+    }
+
+    pub fn input(&self, preferences: &AudioPreferences) -> Option<&AudioInputInfo> {
+        let name = preferences.input_device.as_deref()?;
+        self.inputs
+            .iter()
+            .find(|input| input.driver == preferences.driver && input.name == name)
     }
 
     pub fn validate(&self, preferences: &AudioPreferences) -> Result<()> {
@@ -341,6 +483,58 @@ impl AudioInventory {
         }
         if !(0..=MAX_OUTPUT_GAIN_DB).contains(&preferences.output_gain_db) {
             bail!("output gain must be between 0 and {MAX_OUTPUT_GAIN_DB} dB");
+        }
+        if !(MIN_INPUT_GAIN_DB..=MAX_INPUT_GAIN_DB).contains(&preferences.input_gain_db) {
+            bail!("input gain must be between {MIN_INPUT_GAIN_DB} and {MAX_INPUT_GAIN_DB} dB");
+        }
+        if let Some(input_name) = preferences.input_device.as_deref() {
+            let input = self.input(preferences).with_context(|| {
+                format!(
+                    "audio input {input_name:?} is unavailable on {}",
+                    preferences.driver
+                )
+            })?;
+            if !input.sample_rates.contains(&preferences.sample_rate_hz) {
+                bail!(
+                    "{} Hz is not supported by input {:?}",
+                    preferences.sample_rate_hz,
+                    input.name
+                );
+            }
+            if let Some(frames) = preferences.buffer_frames
+                && !input.buffer_frames.contains(&frames)
+            {
+                bail!(
+                    "a {frames}-frame buffer is not supported by input {:?}",
+                    input.name
+                );
+            }
+            if preferences.input_channels.is_empty() {
+                bail!("select at least one channel for audio input {input_name:?}");
+            }
+            if preferences.input_channels.len() > MAX_STANDALONE_INPUT_CHANNELS {
+                bail!(
+                    "Desktop supports at most {MAX_STANDALONE_INPUT_CHANNELS} simultaneous input channels"
+                );
+            }
+            let selected = preferences
+                .input_channels
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>();
+            if selected.len() != preferences.input_channels.len()
+                || selected
+                    .iter()
+                    .any(|channel| !(1..=input.channels).contains(channel))
+            {
+                bail!(
+                    "input channels must be unique and between 1 and {} for {:?}",
+                    input.channels,
+                    input.name
+                );
+            }
+        } else if !preferences.input_channels.is_empty() {
+            bail!("audio input channels require an input device");
         }
         Ok(())
     }
@@ -390,8 +584,135 @@ pub(crate) fn fallback_preserving_midi(
     defaults
 }
 
+struct PreparedCapture {
+    stream: cpal::Stream,
+    ring: Arc<CaptureRing>,
+    channels: usize,
+    summary: String,
+}
+
+fn prepare_capture_stream(
+    host: &cpal::Host,
+    preferences: &AudioPreferences,
+    errors: Arc<Mutex<Option<String>>>,
+    telemetry: Arc<AudioTelemetry>,
+) -> Result<Option<PreparedCapture>> {
+    let Some(input_name) = preferences.input_device.as_deref() else {
+        return Ok(None);
+    };
+    if preferences.input_channels.is_empty() {
+        bail!("audio input {input_name:?} has no selected channels");
+    }
+    if preferences.input_channels.len() > MAX_STANDALONE_INPUT_CHANNELS {
+        bail!(
+            "Desktop supports at most {MAX_STANDALONE_INPUT_CHANNELS} simultaneous input channels"
+        );
+    }
+    if preferences.input_channels.contains(&0) {
+        bail!("audio input channels are one-based and cannot contain zero");
+    }
+    let highest_channel = preferences
+        .input_channels
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(0);
+    let device = host
+        .input_devices()
+        .context("enumerating audio inputs")?
+        .find(|device| device.name().as_deref() == Ok(input_name))
+        .with_context(|| format!("audio input {input_name:?} is unavailable"))?;
+    let supported = device
+        .supported_input_configs()
+        .context("reading supported input formats")?
+        .filter(|config| {
+            config.channels() >= highest_channel
+                && config.min_sample_rate().0 <= preferences.sample_rate_hz
+                && preferences.sample_rate_hz <= config.max_sample_rate().0
+                && buffer_supported(config.buffer_size(), preferences.buffer_frames)
+        })
+        .min_by_key(|config| {
+            (
+                config.sample_format() != SampleFormat::F32,
+                config.channels(),
+            )
+        })
+        .with_context(|| {
+            format!(
+                "{} Hz with the selected buffer and channels is unsupported by input {input_name:?}",
+                preferences.sample_rate_hz
+            )
+        })?;
+    let sample_format = supported.sample_format();
+    let mut config: cpal::StreamConfig = supported
+        .with_sample_rate(cpal::SampleRate(preferences.sample_rate_hz))
+        .into();
+    config.buffer_size = preferences
+        .buffer_frames
+        .map_or(BufferSize::Default, BufferSize::Fixed);
+    let device_channels = usize::from(config.channels);
+    let selected_channels = preferences
+        .input_channels
+        .iter()
+        .map(|channel| usize::from(*channel - 1))
+        .collect::<Vec<_>>();
+    let exposed_channels = selected_channels.len();
+    let ring = Arc::new(CaptureRing::new(
+        CAPTURE_RING_FRAMES.saturating_mul(exposed_channels),
+    ));
+    let callback_ring = Arc::clone(&ring);
+    let input_gain = db_to_amplitude(preferences.input_gain_db);
+    let callback_errors = Arc::clone(&errors);
+    let stream_errors = errors;
+    let stream_telemetry = telemetry;
+    let stream = device
+        .build_input_stream_raw(
+            &config,
+            sample_format,
+            move |data, _| {
+                if let Err(error) = capture_input(
+                    data,
+                    sample_format,
+                    device_channels,
+                    &selected_channels,
+                    input_gain,
+                    &callback_ring,
+                ) {
+                    publish_error(&callback_errors, format!("Audio capture failed: {error:#}"));
+                }
+            },
+            move |error| {
+                stream_telemetry
+                    .stream_error_count
+                    .fetch_add(1, Ordering::Relaxed);
+                publish_error(
+                    &stream_errors,
+                    format!("Audio input stream failed: {error}"),
+                );
+            },
+            None,
+        )
+        .with_context(|| format!("opening audio input {input_name:?}"))?;
+    let selected = preferences
+        .input_channels
+        .iter()
+        .map(u16::to_string)
+        .collect::<Vec<_>>()
+        .join("+");
+    Ok(Some(PreparedCapture {
+        stream,
+        ring,
+        channels: exposed_channels,
+        summary: format!(
+            "input {input_name} ch {selected} {:+} dB",
+            preferences.input_gain_db
+        ),
+    }))
+}
+
 pub struct DesktopAudio {
     _stream: cpal::Stream,
+    _input_stream: Option<cpal::Stream>,
     _midi_supervisor: MidiSupervisor,
     command_sender: SyncSender<AudioCommand>,
     /// Notes played on a surface, sharing the hardware MIDI queue.
@@ -400,6 +721,7 @@ pub struct DesktopAudio {
     display_sender: SyncSender<Screen>,
     errors: Arc<Mutex<Option<String>>>,
     telemetry: Arc<AudioTelemetry>,
+    capture_ring: Option<Arc<CaptureRing>>,
     sample_rate: u32,
     summary: String,
     _voice_reclaimer: thread::JoinHandle<()>,
@@ -413,7 +735,7 @@ impl DesktopAudio {
         external_controller: bool,
     ) -> Result<Self> {
         if specs.is_empty() {
-            bail!("no instrument plugin is available for the audio engine");
+            bail!("no playable plugin is available for the audio engine");
         }
 
         let host_id = cpal::available_hosts()
@@ -497,6 +819,18 @@ impl DesktopAudio {
             .name("rackforge-audio-voice-reclaimer".into())
             .spawn(move || while retired_voice_receiver.recv().is_ok() {})?;
         let errors = Arc::new(Mutex::new(None));
+        let prepared_capture = prepare_capture_stream(
+            &host,
+            preferences,
+            Arc::clone(&errors),
+            Arc::clone(&telemetry),
+        )?;
+        let capture_ring = prepared_capture
+            .as_ref()
+            .map(|capture| Arc::clone(&capture.ring));
+        let capture_channels = prepared_capture
+            .as_ref()
+            .map_or(0, |capture| capture.channels);
         let callback_errors = Arc::clone(&errors);
         let stream_errors = Arc::clone(&errors);
         let callback_telemetry = Arc::clone(&telemetry);
@@ -512,6 +846,10 @@ impl DesktopAudio {
             parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
             parameter_links: Vec::new(),
             output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
+            plugin_input: vec![0.0; MAX_AUDIO_FRAMES * MAX_STANDALONE_INPUT_CHANNELS],
+            plugin_output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
+            capture: capture_ring.clone(),
+            capture_channels,
             device_channels,
             output_gain: db_to_amplitude(preferences.output_gain_db),
             master_gain: MasterGain::new(MasterLevel::UNITY),
@@ -550,6 +888,12 @@ impl DesktopAudio {
             )
             .with_context(|| format!("opening audio output {:?}", preferences.output_device))?;
         stream.play().context("starting audio playback")?;
+        let (input_stream, input_summary) = if let Some(capture) = prepared_capture {
+            capture.stream.play().context("starting audio capture")?;
+            (Some(capture.stream), capture.summary)
+        } else {
+            (None, "input disabled".into())
+        };
 
         let midi_summary = if midi_names.is_empty() {
             "no MIDI inputs".into()
@@ -561,7 +905,7 @@ impl DesktopAudio {
             |frames| format!("{frames} frames"),
         );
         let summary = format!(
-            "{} · {} · {} Hz · {buffer} · {} ch · {:+} dB · MIDI: {midi_summary}",
+            "{} · {} · {} Hz · {buffer} · {} ch · {:+} dB · {input_summary} · MIDI: {midi_summary}",
             preferences.driver,
             preferences.output_device,
             config.sample_rate.0,
@@ -571,6 +915,7 @@ impl DesktopAudio {
         println!("DESKTOP_AUDIO_READY {summary}");
         Ok(Self {
             _stream: stream,
+            _input_stream: input_stream,
             _midi_supervisor: midi_supervisor,
             command_sender,
             injected_midi,
@@ -578,6 +923,7 @@ impl DesktopAudio {
             display_sender,
             errors,
             telemetry,
+            capture_ring,
             sample_rate: config.sample_rate.0,
             summary,
             _voice_reclaimer: voice_reclaimer,
@@ -589,7 +935,12 @@ impl DesktopAudio {
     }
 
     pub fn runtime_status(&self) -> AudioRuntimeStatus {
-        self.telemetry.snapshot(self.sample_rate)
+        let mut status = self.telemetry.snapshot(self.sample_rate);
+        if let Some(capture) = &self.capture_ring {
+            status.capture_overruns = capture.overruns.load(Ordering::Relaxed);
+            status.capture_underruns = capture.underruns.load(Ordering::Relaxed);
+        }
+        status
     }
 
     /// Raw callback count, for the stall watchdog: a healthy stream renders
@@ -604,7 +955,7 @@ impl DesktopAudio {
     pub fn diagnostics(&self) -> String {
         let status = self.runtime_status();
         format!(
-            "{}\nCallback: {} blocks · {:.1}% CPU · avg {:.1} µs · max {:.1} µs · budget {:.1} µs · {:.0} frames\nDeadlines missed: {} · MIDI dropped: {} · disconnect panics: {} · stream errors: {}",
+            "{}\nCallback: {} blocks · {:.1}% CPU · avg {:.1} µs · max {:.1} µs · budget {:.1} µs · {:.0} frames\nDeadlines missed: {} · MIDI dropped: {} · disconnect panics: {} · stream errors: {} · input overruns: {} · input underruns: {}",
             self.summary,
             status.callback_count,
             status.callback_load_percent,
@@ -616,6 +967,8 @@ impl DesktopAudio {
             status.midi_dropped_events,
             status.midi_panic_count,
             status.stream_error_count,
+            status.capture_overruns,
+            status.capture_underruns,
         )
     }
 
@@ -964,6 +1317,8 @@ impl MidiPacket {
 struct AudioVoice {
     instance_id: String,
     parameters: ParameterSchema,
+    input_channels: usize,
+    output_channels: usize,
     instance: SendablePluginInstance,
 }
 
@@ -1064,6 +1419,10 @@ struct AudioProcessor {
     parameter_events: Vec<ParameterEventV1>,
     parameter_links: Vec<CompiledParameterLink>,
     output: Vec<f32>,
+    plugin_input: Vec<f32>,
+    plugin_output: Vec<f32>,
+    capture: Option<Arc<CaptureRing>>,
+    capture_channels: usize,
     device_channels: usize,
     output_gain: f32,
     master_gain: MasterGain,
@@ -1107,24 +1466,39 @@ impl AudioProcessor {
             }
         }
         let samples = frames * PLUGIN_OUTPUT_CHANNELS;
-        let output = &mut self.output[..samples];
-        output.fill(0.0);
+        self.output[..samples].fill(0.0);
         if self.stopped {
-            return Ok(output);
+            self.discard_capture(frames);
+            return Ok(&self.output[..samples]);
         }
+        let input_channels = self.voices[self.active_voice].input_channels;
+        let output_channels = self.voices[self.active_voice].output_channels;
+        self.prepare_plugin_input(frames, input_channels);
+        let plugin_input = &self.plugin_input[..frames * input_channels];
+        let plugin_output = &mut self.plugin_output[..frames * output_channels];
+        plugin_output.fill(0.0);
         self.voices[self.active_voice]
             .instance
             .0
             .process_interleaved(
-                &[],
-                output,
+                plugin_input,
+                plugin_output,
                 frames as u32,
-                0,
-                PLUGIN_OUTPUT_CHANNELS as u32,
+                input_channels as u32,
+                output_channels as u32,
                 &self.events,
                 &self.parameter_events,
             )
             .context("processing RackForge plugin audio")?;
+        let output = &mut self.output[..samples];
+        for frame in 0..frames {
+            output[frame * 2] = plugin_output[frame * output_channels];
+            output[frame * 2 + 1] = if output_channels > 1 {
+                plugin_output[frame * output_channels + 1]
+            } else {
+                plugin_output[frame * output_channels]
+            };
+        }
         for frame in output.chunks_exact_mut(PLUGIN_OUTPUT_CHANNELS) {
             let gain = self.master_gain.next();
             let (left, right) = self.master_balance.next();
@@ -1132,6 +1506,41 @@ impl AudioProcessor {
             frame[1] *= gain * right;
         }
         Ok(output)
+    }
+
+    fn discard_capture(&self, frames: usize) {
+        let Some(capture) = &self.capture else { return };
+        for _ in 0..frames.saturating_mul(self.capture_channels) {
+            let _ = capture.pop();
+        }
+    }
+
+    fn prepare_plugin_input(&mut self, frames: usize, plugin_channels: usize) {
+        if plugin_channels == 0 {
+            self.discard_capture(frames);
+            return;
+        }
+        let destination = &mut self.plugin_input[..frames * plugin_channels];
+        destination.fill(0.0);
+        let Some(capture) = &self.capture else { return };
+        for frame in 0..frames {
+            let mut captured = [0.0_f32; MAX_STANDALONE_INPUT_CHANNELS];
+            for channel in 0..self.capture_channels {
+                let sample = capture.pop();
+                if channel < captured.len() {
+                    captured[channel] = sample;
+                }
+            }
+            for channel in 0..plugin_channels {
+                destination[frame * plugin_channels + channel] = if self.capture_channels == 1 {
+                    captured[0]
+                } else if plugin_channels == 1 {
+                    (captured[0] + captured[1]) * 0.5
+                } else {
+                    captured.get(channel).copied().unwrap_or(0.0)
+                };
+            }
+        }
     }
 
     fn apply_commands(&mut self) -> Result<()> {
@@ -1452,6 +1861,21 @@ impl AudioProcessor {
 }
 
 fn prepare_audio_voice(spec: VoiceSpec, sample_rate: u32) -> Result<AudioVoice> {
+    let audio = spec.plugin.manifest().resolved_audio_contract();
+    let input_channels = audio.input_channels() as usize;
+    let output_channels = audio.output_channels() as usize;
+    if input_channels > MAX_STANDALONE_INPUT_CHANNELS {
+        bail!(
+            "Desktop PLAY supports at most {MAX_STANDALONE_INPUT_CHANNELS} plugin input channels, {} declares {input_channels}",
+            spec.instance_id
+        );
+    }
+    if !(1..=PLUGIN_OUTPUT_CHANNELS).contains(&output_channels) {
+        bail!(
+            "Desktop PLAY requires one or two plugin output channels, {} declares {output_channels}",
+            spec.instance_id
+        );
+    }
     let parameters = spec.plugin.parameters().clone();
     let mut instance = spec
         .plugin
@@ -1476,13 +1900,15 @@ fn prepare_audio_voice(spec: VoiceSpec, sample_rate: u32) -> Result<AudioVoice> 
         .activate(
             f64::from(sample_rate),
             MAX_AUDIO_FRAMES as u32,
-            0,
-            PLUGIN_OUTPUT_CHANNELS as u32,
+            input_channels as u32,
+            output_channels as u32,
         )
         .with_context(|| format!("activating audio instance {}", spec.instance_id))?;
     Ok(AudioVoice {
         instance_id: spec.instance_id,
         parameters,
+        input_channels,
+        output_channels,
         instance: SendablePluginInstance(instance),
     })
 }
@@ -1495,6 +1921,80 @@ fn push_midi_event(events: &mut Vec<MidiEventV1>, packet: MidiPacket) {
             data: packet.data,
         });
     }
+}
+
+fn capture_input(
+    data: &cpal::Data,
+    format: SampleFormat,
+    device_channels: usize,
+    selected_channels: &[usize],
+    input_gain: f32,
+    ring: &CaptureRing,
+) -> Result<()> {
+    match format {
+        SampleFormat::I8 => {
+            capture_samples::<i8>(data, device_channels, selected_channels, input_gain, ring)
+        }
+        SampleFormat::I16 => {
+            capture_samples::<i16>(data, device_channels, selected_channels, input_gain, ring)
+        }
+        SampleFormat::I24 => {
+            capture_samples::<cpal::I24>(data, device_channels, selected_channels, input_gain, ring)
+        }
+        SampleFormat::I32 => {
+            capture_samples::<i32>(data, device_channels, selected_channels, input_gain, ring)
+        }
+        SampleFormat::I64 => {
+            capture_samples::<i64>(data, device_channels, selected_channels, input_gain, ring)
+        }
+        SampleFormat::U8 => {
+            capture_samples::<u8>(data, device_channels, selected_channels, input_gain, ring)
+        }
+        SampleFormat::U16 => {
+            capture_samples::<u16>(data, device_channels, selected_channels, input_gain, ring)
+        }
+        SampleFormat::U32 => {
+            capture_samples::<u32>(data, device_channels, selected_channels, input_gain, ring)
+        }
+        SampleFormat::U64 => {
+            capture_samples::<u64>(data, device_channels, selected_channels, input_gain, ring)
+        }
+        SampleFormat::F32 => {
+            capture_samples::<f32>(data, device_channels, selected_channels, input_gain, ring)
+        }
+        SampleFormat::F64 => {
+            capture_samples::<f64>(data, device_channels, selected_channels, input_gain, ring)
+        }
+        _ => bail!("unsupported Windows input sample format {format:?}"),
+    }
+}
+
+fn capture_samples<T>(
+    data: &cpal::Data,
+    device_channels: usize,
+    selected_channels: &[usize],
+    input_gain: f32,
+    ring: &CaptureRing,
+) -> Result<()>
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    let input = data
+        .as_slice::<T>()
+        .context("Windows returned an audio input buffer with the wrong sample type")?;
+    if device_channels == 0 || input.len() % device_channels != 0 {
+        bail!("Windows audio input buffer changed channel layout during capture");
+    }
+    for frame in input.chunks_exact(device_channels) {
+        let mut selected = [0.0_f32; MAX_STANDALONE_INPUT_CHANNELS];
+        for (target, &channel) in selected_channels.iter().enumerate() {
+            let sample = frame.get(channel).copied().unwrap_or(T::EQUILIBRIUM);
+            selected[target] = clean_sample(f32::from_sample(sample) * input_gain);
+        }
+        ring.push_frame(&selected[..selected_channels.len()]);
+    }
+    Ok(())
 }
 
 fn render_output(
@@ -1571,6 +2071,10 @@ where
 
 fn default_output_gain_db() -> i8 {
     DEFAULT_OUTPUT_GAIN_DB
+}
+
+fn default_input_gain_db() -> i8 {
+    DEFAULT_INPUT_GAIN_DB
 }
 
 fn db_to_amplitude(db: i8) -> f32 {
@@ -2180,6 +2684,9 @@ mod tests {
             sample_rate_hz: 48_000,
             buffer_frames: Some(256),
             output_gain_db: DEFAULT_OUTPUT_GAIN_DB,
+            input_device: Some("Guitar interface".into()),
+            input_channels: vec![1],
+            input_gain_db: 3,
             midi_inputs: vec!["Keyboard".into()],
         };
         let text = toml::to_string(&preferences).unwrap();
@@ -2204,6 +2711,9 @@ mod tests {
             sample_rate_hz: 48_000,
             buffer_frames: None,
             output_gain_db: DEFAULT_OUTPUT_GAIN_DB,
+            input_device: None,
+            input_channels: Vec::new(),
+            input_gain_db: DEFAULT_INPUT_GAIN_DB,
             midi_inputs: vec!["Test MIDI".into()],
         };
         preferences.persist(&path).unwrap();
@@ -2249,6 +2759,9 @@ midi_inputs = []
             sample_rate_hz: 48_000,
             buffer_frames: None,
             output_gain_db: DEFAULT_OUTPUT_GAIN_DB,
+            input_device: None,
+            input_channels: Vec::new(),
+            input_gain_db: DEFAULT_INPUT_GAIN_DB,
             midi_inputs: Vec::new(),
         };
         let saved = AudioPreferences {
@@ -2258,6 +2771,9 @@ midi_inputs = []
             sample_rate_hz: 44_100,
             buffer_frames: Some(128),
             output_gain_db: DEFAULT_OUTPUT_GAIN_DB,
+            input_device: Some("Disconnected interface".into()),
+            input_channels: vec![1],
+            input_gain_db: 0,
             midi_inputs: vec!["KL Essential 61 mk3 MIDI".into()],
         };
 
@@ -2266,6 +2782,22 @@ midi_inputs = []
         assert_eq!(fallback.driver, "WASAPI");
         assert_eq!(fallback.output_device, "System speakers");
         assert_eq!(fallback.midi_inputs, saved.midi_inputs);
+        assert_eq!(fallback.input_device, None);
+    }
+
+    #[test]
+    fn capture_ring_publishes_complete_frames_and_reports_pressure() {
+        let ring = CaptureRing::new(4);
+        ring.push_frame(&[0.1, 0.2]);
+        ring.push_frame(&[0.3, 0.4]);
+        ring.push_frame(&[0.5, 0.6]);
+        assert_eq!(ring.overruns.load(Ordering::Relaxed), 1);
+        assert_eq!(ring.pop(), 0.1);
+        assert_eq!(ring.pop(), 0.2);
+        assert_eq!(ring.pop(), 0.3);
+        assert_eq!(ring.pop(), 0.4);
+        assert_eq!(ring.pop(), 0.0);
+        assert_eq!(ring.underruns.load(Ordering::Relaxed), 1);
     }
 
     #[test]

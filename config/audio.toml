@@ -1,4 +1,4 @@
-schema_version = 2
+schema_version = 3
 package = "plugins/rf-dls"
 data_root = "data"
 preset = "gm.piano-1"
@@ -18,3 +18,21 @@ buffer_frames = 384
 mode = "usb"
 vendor_id = 0x1235
 product_id = 0x8211
+
+# Audio capture is opt-in. Uncomment this section for a mono guitar connected
+# to physical input 1 of the same interface. Keep rate and period equal to the
+# output profile so both streams remain in one clock domain.
+#
+# [audio.input]
+# fallback = "none"
+# sample_format = "s32_le"
+# sample_rate_hz = 48000
+# channels = [1]
+# period_frames = 128
+# buffer_frames = 384
+# gain_db = 0
+#
+# [audio.input.device]
+# mode = "usb"
+# vendor_id = 0x1235
+# product_id = 0x8211

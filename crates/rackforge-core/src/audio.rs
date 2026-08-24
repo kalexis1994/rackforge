@@ -5,8 +5,9 @@ use alsa::{Direction, ValueOr};
 use anyhow::{Context, Result, bail};
 use rackforge_audio_api::{
     AUDIO_DEVICE_SCHEMA_VERSION, AudioBackend, AudioDeviceDescriptor, AudioDeviceId,
-    AudioFallbackPolicy, AudioOutputProfile, AudioSampleFormat, AudioStreamCapabilities,
-    AudioTransport, AudioValueRange, COMMON_SAMPLE_RATES, UsbAudioIdentity,
+    AudioFallbackPolicy, AudioInputProfile, AudioOutputProfile, AudioSampleFormat,
+    AudioStreamCapabilities, AudioTransport, AudioValueRange, COMMON_SAMPLE_RATES,
+    UsbAudioIdentity,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -16,6 +17,12 @@ pub struct OpenedAudioOutput {
     pub pcm: PCM,
     pub device: AudioDeviceDescriptor,
     pub profile: AudioOutputProfile,
+}
+
+pub struct OpenedAudioInput {
+    pub pcm: PCM,
+    pub device: AudioDeviceDescriptor,
+    pub profile: AudioInputProfile,
 }
 
 pub fn discover_audio_devices() -> Result<Vec<AudioDeviceDescriptor>> {
@@ -164,6 +171,65 @@ pub fn open_audio_output_from_inventory(
     })
 }
 
+pub fn open_audio_input(profile: &AudioInputProfile) -> Result<OpenedAudioInput> {
+    profile
+        .validate()
+        .context("validating audio input profile")?;
+    let devices = discover_audio_devices()?;
+    open_audio_input_from_inventory(profile, &devices)
+}
+
+pub fn open_audio_input_from_inventory(
+    profile: &AudioInputProfile,
+    devices: &[AudioDeviceDescriptor],
+) -> Result<OpenedAudioInput> {
+    profile
+        .validate()
+        .context("validating audio input profile")?;
+    let device = resolve_input_device(profile, devices)?.clone();
+    profile
+        .validate_against(&device)
+        .with_context(|| format!("validating input profile against {}", device.id))?;
+
+    let pcm = PCM::new(&device.backend_address, Direction::Capture, false)
+        .with_context(|| format!("opening ALSA capture {}", device.backend_address))?;
+    {
+        let parameters = HwParams::any(&pcm)?;
+        parameters.set_access(Access::RWInterleaved)?;
+        parameters.set_format(to_alsa_format(profile.sample_format))?;
+        parameters.set_channels(profile.stream_channels())?;
+        parameters.set_rate(profile.sample_rate_hz, ValueOr::Nearest)?;
+        parameters.set_period_size(i64::from(profile.period_frames), ValueOr::Nearest)?;
+        parameters.set_buffer_size(i64::from(profile.buffer_frames))?;
+        pcm.hw_params(&parameters)?;
+    }
+    let actual = pcm.hw_params_current()?;
+    let actual_format = actual.get_format()?;
+    let actual_rate = actual.get_rate()?;
+    let actual_channels = actual.get_channels()?;
+    let actual_period = actual.get_period_size()?;
+    let actual_buffer = actual.get_buffer_size()?;
+    let expected_format = to_alsa_format(profile.sample_format);
+    if actual_format != expected_format
+        || actual_rate != profile.sample_rate_hz
+        || actual_channels != profile.stream_channels()
+        || actual_period != i64::from(profile.period_frames)
+        || actual_buffer != i64::from(profile.buffer_frames)
+    {
+        bail!(
+            "ALSA negotiated a different input profile: format={actual_format:?} rate={actual_rate} \
+             channels={actual_channels} period={actual_period} buffer={actual_buffer}"
+        );
+    }
+    drop(actual);
+    pcm.prepare()?;
+    Ok(OpenedAudioInput {
+        pcm,
+        device,
+        profile: profile.clone(),
+    })
+}
+
 fn resolve_output_device<'a>(
     profile: &AudioOutputProfile,
     devices: &'a [AudioDeviceDescriptor],
@@ -219,6 +285,63 @@ fn resolve_output_device<'a>(
         .collect::<Vec<_>>()
         .join(", ");
     bail!("configured audio output was not found; available playback devices: {available}")
+}
+
+fn resolve_input_device<'a>(
+    profile: &AudioInputProfile,
+    devices: &'a [AudioDeviceDescriptor],
+) -> Result<&'a AudioDeviceDescriptor> {
+    let matching = devices
+        .iter()
+        .filter(|device| device.capture.is_some() && profile.device.matches(device))
+        .collect::<Vec<_>>();
+    match matching.as_slice() {
+        [device] => return Ok(device),
+        [] => {}
+        _ => {
+            bail!(
+                "audio input selector is ambiguous; matching devices: {}",
+                matching
+                    .iter()
+                    .map(|device| device.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+    }
+
+    if profile.fallback == AudioFallbackPolicy::UniqueCompatible {
+        let compatible = devices
+            .iter()
+            .filter(|device| profile.validate_against(device).is_ok())
+            .collect::<Vec<_>>();
+        match compatible.as_slice() {
+            [device] => {
+                eprintln!(
+                    "AUDIO_INPUT_FALLBACK selected={} reason=configured-device-missing",
+                    device.id
+                );
+                return Ok(device);
+            }
+            [] => {}
+            _ => bail!(
+                "audio input fallback is ambiguous; compatible devices: {}",
+                compatible
+                    .iter()
+                    .map(|device| device.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    }
+
+    let available = devices
+        .iter()
+        .filter(|device| device.capture.is_some())
+        .map(|device| device.id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!("configured audio input was not found; available capture devices: {available}")
 }
 
 fn probe_stream(address: &str, direction: Direction) -> Result<AudioStreamCapabilities> {

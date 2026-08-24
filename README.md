@@ -8,10 +8,10 @@
   <strong>Turn a computer, phone, or Raspberry Pi into a portable musical instrument.</strong>
 </p>
 
-RackForge is a cross-platform instrument host for Windows, Android, and
-Raspberry Pi. Connect a MIDI controller and an audio interface, install a
-portable `.rfplugin`, and play without a DAW. The same runtime is also being
-packaged as a Windows VST3 instrument for DAW sessions.
+RackForge is a cross-platform instrument host for Windows, Linux x86-64,
+Android, and Raspberry Pi. Connect a MIDI controller and an audio interface,
+install a portable `.rfplugin`, and play without a DAW. The same runtime is also
+being packaged as a Windows VST3 instrument for DAW sessions.
 
 New installations include the RackForge Concert Grand — a physically
 modelled piano developed in this repository, with no samples and a
@@ -76,6 +76,7 @@ operating system's — for a controller on a stage, install RackForge below.
 | --- | --- | --- |
 | Windows x86-64 | Creating and editing performances | WASAPI, ASIO, and Windows MIDI |
 | Windows VST3 x86-64 | Using RackForge inside a DAW | DAW-provided MIDI and stereo audio |
+| Linux x86-64 | A PC-based headless or Web-controlled instrument | ALSA, Linux MIDI, Web control, and boot services |
 | Android ARM64 | A compact touchscreen instrument | Low-latency native audio and USB MIDI |
 | Raspberry Pi OS ARM64 | A dedicated headless instrument | ALSA, USB MIDI, Web control, and boot services |
 
@@ -98,6 +99,20 @@ Windows builds are currently unsigned, so Windows may ask you to confirm that
 you trust the application. See the
 [Desktop guide](apps/rackforge-desktop/README.md) for ASIO setup, portable mode,
 and troubleshooting.
+
+### Linux x86-64
+
+1. Download `RackForge-Linux-x86_64.tar.gz` from the latest release.
+2. Extract it and enter the `rackforge` directory.
+3. Run `bash platforms/linux-x86_64/install.sh` as the ordinary user who will
+   run RackForge.
+4. Open `http://localhost:8787`, then select the MIDI input and ALSA audio
+   interface.
+
+The Linux package uses the same headless Core, adaptive Web interface,
+`.rfplugin` runtime, and controller host as Raspberry Pi, but is built natively
+for 64-bit Intel and AMD machines. See the
+[Linux x86-64 guide](platforms/linux-x86_64/README.md).
 
 ### Windows VST3 (preview)
 
@@ -199,7 +214,8 @@ official `.rfcontroller` package provides:
 - long-press return to the active instrument;
 - a hardware escape chord that stops sound and returns to the main menu.
 
-The controller package is portable across Windows, Android, and Raspberry Pi.
+The controller package is portable across Windows, Linux x86-64, Android, and
+Raspberry Pi.
 RackForge's core owns the musical state, while each platform adapter handles
 the native MIDI and audio APIs.
 
@@ -209,12 +225,14 @@ RackForge already provides cross-platform PLAY/LIVE state, portable plugin
 installation, embedded PLAY and CONFIG interfaces, plugin-private storage, a
 host-owned resource explorer, program editing, MIDI hotplug recovery, session
 restoration, and protection against concurrent audio engines on Windows and
-Raspberry Pi.
+Linux hosts.
 
 Current preview limitations:
 
 - Windows packages are not code-signed.
 - Android packages are ARM64 and debug-signed.
+- Linux x86-64 is currently distributed as a systemd-based headless/Web host,
+  not as a native desktop window.
 - Raspberry Pi packages require a 64-bit Raspberry Pi OS userspace.
 - RF-Soundfonts and other optional `.rfplugin` instruments remain separate
   downloads.
@@ -241,8 +259,8 @@ pipeline; RackForge pins its version and SHA-256 so builds stay reproducible.
 
 Every push to `main` runs the cross-platform GitHub Actions workflow. It
 packages the Concert Grand from the same commit, verifies the pinned RF-106
-release, then builds the Windows executable, Android APK, and Raspberry Pi
-ARM64 archive. Release
+release, then builds the Windows executable and VST3, Linux x86-64 archive,
+Android APK, and Raspberry Pi ARM64 archive. Release
 packages and `SHA256SUMS.txt` are published from those artifacts.
 
 <details>
@@ -276,7 +294,7 @@ Built-in audio / USB interface
 | Area | Responsibility |
 | --- | --- |
 | `crates/` | Core, APIs, SDK, and portable plugin runtime |
-| `apps/` | Windows Desktop, Android, and headless/Web hosts |
+| `apps/` | Windows Desktop, Android, VST3, and headless/Web hosts |
 | `platforms/` | Platform adapters, installation, and deployment |
 | `hardware/` | Drivers and packages for supported MIDI controllers |
 | `plugins/` | Minimal conformance fixtures |

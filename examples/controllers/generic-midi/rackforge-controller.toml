@@ -1,0 +1,76 @@
+schema_version = 1
+kind = "controller"
+id = "org.example.my-midi-controller"
+name = "My MIDI Controller"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[runtime]
+kind = "declarative-v1"
+
+[permissions]
+midi_input = true
+midi_output = false
+sysex = false
+usb_metadata = false
+raw_usb = false
+firmware_write = false
+filesystem = false
+network = false
+
+[[devices]]
+id = "my-midi-controller.v1"
+
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["my midi controller"]
+exclude_contains = ["daw", "mcu", "hui", "dinthru"]
+
+[[host_actions]]
+target = "keyboard_parts"
+
+[host_actions.midi_cc]
+channel = 0
+controller = 119
+press_value = 127
+release_value = 0
+
+[semantic_profile]
+schema_version = 1
+source_id = "controller.example.my-midi-controller.main"
+
+[[semantic_profile.controls]]
+role = "synth.filter.cutoff"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 74
+
+[[semantic_profile.controls]]
+role = "synth.filter.resonance"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 71
+
+[[semantic_profile.controls]]
+role = "synth.envelope.amp.attack"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 73
+
+[[semantic_profile.controls]]
+role = "synth.envelope.amp.release"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 72
+
+[[semantic_profile.controls]]
+role = "rackforge.master.level"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 7
+
+[[semantic_profile.controls]]
+role = "rackforge.master.pan"
+[semantic_profile.controls.midi_cc]
+channel = 0
+controller = 10

@@ -1,0 +1,22 @@
+[Unit]
+Description=RackForge local web interface
+After=local-fs.target
+
+[Service]
+Type=simple
+User=@RACKFORGE_USER@
+Group=@RACKFORGE_GROUP@
+Environment=RACKFORGE_ROOT=@RACKFORGE_ROOT@
+Environment=RACKFORGE_WEB_ROOT=@RACKFORGE_ROOT@/web
+ExecStart=@RACKFORGE_ROOT@/bin/rackforge-web
+Restart=on-failure
+RestartSec=1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@RACKFORGE_ROOT@/config @RACKFORGE_ROOT@/state @RACKFORGE_ROOT@/plugin-store @RACKFORGE_ROOT@/plugins @RACKFORGE_ROOT@/controllers
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

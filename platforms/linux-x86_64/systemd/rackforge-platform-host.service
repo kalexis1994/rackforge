@@ -1,0 +1,27 @@
+[Unit]
+Description=RackForge allowlisted platform capability host
+After=local-fs.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+Group=rackforge
+RuntimeDirectory=rackforge
+RuntimeDirectoryMode=0750
+UMask=0007
+ExecStart=@RACKFORGE_ROOT@/bin/rackforge-platform-host serve /run/rackforge/platform-control.sock
+Restart=on-failure
+RestartSec=1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

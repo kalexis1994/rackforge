@@ -354,6 +354,7 @@ struct PublicPluginWeb {
     plugin_id: String,
     plugin_name: String,
     version: String,
+    kind: rackforge_plugin_api::PluginKind,
     active: bool,
     managed: bool,
     api_version: u16,
@@ -2299,6 +2300,7 @@ fn discover_web_packages(state: &WebState) -> anyhow::Result<BTreeMap<String, Pl
                 plugin_id: manifest.id.clone(),
                 plugin_name: manifest.name.clone(),
                 version: manifest.version.clone(),
+                kind: manifest.kind,
                 active: if managed {
                     state.plugin_store_root.as_ref().is_some_and(|store| {
                         rackforge_repository::plugin_is_enabled(store, &manifest.id)

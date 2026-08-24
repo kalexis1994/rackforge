@@ -14,6 +14,7 @@ futures-util = "0.3"
 include_dir = "0.7"
 mime_guess = "2.0"
 rackforge-control-api = { path = "../../crates/rackforge-control-api" }
+rackforge-controller-api = { path = "../../crates/rackforge-controller-api" }
 keylab-essential-mk3 = { package = "rackforge-controller-arturia-keylab-essential-mk3", path = "../../hardware/keylab-bridge" }
 rackforge-controller-package = { path = "../../crates/rackforge-controller-package" }
 rackforge-core = { path = "../../crates/rackforge-core" }

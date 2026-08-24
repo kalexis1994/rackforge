@@ -15,7 +15,7 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures_util::{SinkExt, StreamExt};
 use rackforge_control_api::CONTROL_SOCKET_NAME;
-use rackforge_plugin_api::{PluginManifest, WebSurfaceKind};
+use rackforge_plugin_api::{PluginKind, PluginManifest, WebSurfaceKind};
 use rackforge_repository::{
     InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions,
     RepositoryError, cleanup_uninstall_tombstones, inspect_local_archive,
@@ -184,6 +184,7 @@ struct PublicPluginWeb {
     plugin_id: String,
     plugin_name: String,
     version: String,
+    kind: PluginKind,
     active: bool,
     managed: bool,
     api_version: u16,
@@ -964,6 +965,7 @@ impl PluginWebRegistry {
                 plugin_id: manifest.id,
                 plugin_name: manifest.name,
                 version: manifest.version,
+                kind: manifest.kind,
                 active,
                 // Raspberry Pi packages may still live in the legacy
                 // `plugins/` directory. They are host-managed installations

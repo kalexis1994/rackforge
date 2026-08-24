@@ -20,6 +20,12 @@ use rackforge_control_api::{
     ClientId, ControlErrorCode, ControlRequest, ControlResponse, MidiLearnCandidate,
     MidiSourceStatus, ParameterLinkMessage, VirtualMidiMessage,
 };
+#[cfg(windows)]
+use rackforge_controller_api::{
+    ButtonPhase, DeclarativeControllerInput, HostActionTarget, HostControlTarget,
+    rackforge_parameter_input, semantic_control_input,
+};
+use rackforge_controller_api::{HostActionBinding, HostControlBinding};
 use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{
@@ -140,9 +146,11 @@ struct DesktopPlugin {
 
 #[derive(Clone)]
 struct RegisteredSemanticProfile {
-    profile: SemanticControlProfile,
+    profile: Option<SemanticControlProfile>,
     runtime_source_id: Option<String>,
     runtime_source_name: Option<String>,
+    host_controls: Vec<HostControlBinding>,
+    host_actions: Vec<HostActionBinding>,
 }
 
 #[cfg(windows)]
@@ -193,7 +201,9 @@ fn compile_desktop_parameter_links(
         let Some(runtime_source_id) = &registered.runtime_source_id else {
             continue;
         };
-        let profile = &registered.profile;
+        let Some(profile) = &registered.profile else {
+            continue;
+        };
         let source_id = MidiSourceId::new(runtime_source_id.clone())?;
         let source_key = desktop_audio::stable_midi_source_key_from_id(&source_id);
         for plugin in plugins {
@@ -687,13 +697,28 @@ impl DesktopApp {
             menu.sync_active_mode(active_mode_from_surface(state.active_mode));
         }
         #[cfg(windows)]
+        let controller_semantic_profiles = match audio_preferences.as_ref().map(|preferences| {
+            declarative_semantic_profiles(&options.rackforge_root, &preferences.midi_inputs)
+        }) {
+            Some(Ok(profiles)) => profiles,
+            Some(Err(error)) => {
+                warnings.push(format!(
+                    "Declarative controller mappings were disabled: {error:#}"
+                ));
+                BTreeMap::new()
+            }
+            None => BTreeMap::new(),
+        };
+        #[cfg(not(windows))]
+        let controller_semantic_profiles = BTreeMap::new();
+        #[cfg(windows)]
         if let Some(audio) = &audio {
             sync_desktop_audio(audio, &session, &menu)?;
             audio.replace_parameter_links(compile_desktop_parameter_links(
                 &restored_parameter_links,
                 &plugins,
                 &performance_repository,
-                &BTreeMap::new(),
+                &controller_semantic_profiles,
             )?)?;
         }
         if let Err(error) =
@@ -758,7 +783,7 @@ impl DesktopApp {
             performance_repository,
             state_store,
             live_state_dirty: None,
-            controller_semantic_profiles: BTreeMap::new(),
+            controller_semantic_profiles,
             virtual_midi: BTreeMap::new(),
             next_program_draft_id: 1,
             next_audition_lease_id: 1,
@@ -1087,6 +1112,9 @@ impl DesktopApp {
                         fresh
                             .outputs
                             .extend(cached.outputs.iter().filter(|o| o.driver == live).cloned());
+                        fresh
+                            .inputs
+                            .extend(cached.inputs.iter().filter(|i| i.driver == live).cloned());
                     }
                     None => fresh.drivers.push(desktop_audio::AudioDriverInfo {
                         name: live.to_owned(),
@@ -1095,6 +1123,12 @@ impl DesktopApp {
                     }),
                 }
                 fresh.outputs.sort_by(|left, right| {
+                    left.driver
+                        .cmp(&right.driver)
+                        .then_with(|| right.is_default.cmp(&left.is_default))
+                        .then_with(|| left.name.cmp(&right.name))
+                });
+                fresh.inputs.sort_by(|left, right| {
                     left.driver
                         .cmp(&right.driver)
                         .then_with(|| right.is_default.cmp(&left.is_default))
@@ -1718,6 +1752,76 @@ impl DesktopApp {
                 observed_at,
             } => {
                 self.observe_midi_learn(source, length, data, observed_at);
+                let message = &data[..usize::from(length)];
+                let registered = self
+                    .controller_semantic_profiles
+                    .values()
+                    .find(|registered| {
+                        let source_matches =
+                            registered
+                                .runtime_source_id
+                                .as_ref()
+                                .is_some_and(|source_id| {
+                                    desktop_audio::stable_midi_source_key_from_id(
+                                        &MidiSourceId::new(source_id.clone())
+                                            .expect("stored declarative source id is valid"),
+                                    ) == source
+                                });
+                        source_matches
+                    })
+                    .cloned();
+                if let Some(registered) = registered {
+                    let declarative = registered
+                        .host_controls
+                        .iter()
+                        .find_map(|binding| {
+                            Some(DeclarativeControllerInput::HostControl {
+                                target: binding.target,
+                                value: binding.midi_cc.value(message)?,
+                            })
+                        })
+                        .or_else(|| {
+                            registered.host_actions.iter().find_map(|binding| {
+                                Some(DeclarativeControllerInput::HostAction {
+                                    target: binding.target,
+                                    phase: binding.midi_cc.phase(message)?,
+                                })
+                            })
+                        });
+                    match declarative {
+                        Some(DeclarativeControllerInput::HostControl {
+                            target: HostControlTarget::MasterLevel,
+                            value,
+                        }) => {
+                            let _ = self.set_master_level(MasterLevel::from_midi(value), None);
+                        }
+                        Some(DeclarativeControllerInput::HostControl {
+                            target: HostControlTarget::MasterPan,
+                            value,
+                        }) => {
+                            let _ = self
+                                .set_master_pan(MasterPan::from_midi_with_center_snap(value), None);
+                        }
+                        Some(DeclarativeControllerInput::HostAction {
+                            target: HostActionTarget::KeyboardParts,
+                            phase: ButtonPhase::Press,
+                        }) => self.apply_input(Input::KeyboardParts),
+                        Some(DeclarativeControllerInput::HostAction { .. }) => {}
+                        Some(DeclarativeControllerInput::Semantic(_)) => unreachable!(),
+                        None => {}
+                    }
+                    if let Some(profile) = registered.profile.as_ref() {
+                        if let Some(input) = rackforge_parameter_input(profile, message) {
+                            self.handle_controller_event(
+                                DesktopControllerEvent::RackForgeParameter(input),
+                            );
+                        } else if let Some(input) = semantic_control_input(profile, message) {
+                            self.handle_controller_event(DesktopControllerEvent::SemanticControl(
+                                input,
+                            ));
+                        }
+                    }
+                }
             }
             DesktopControllerEvent::Connected => {
                 self.status = "Arturia KeyLab connected · LITTLE active".into();
@@ -2723,46 +2827,45 @@ impl DesktopApp {
                             .controller_semantic_profiles
                             .get(&controller_id)
                             .cloned();
-                        match semantic_profile {
-                            Some(profile) => {
-                                #[cfg(windows)]
-                                let resolved_source =
-                                    midi_source_name.as_deref().and_then(|name| {
-                                        self.approved_midi_source(name).ok().map(|source| {
-                                            (source.id.as_str().to_owned(), source.name)
+                        if semantic_profile.is_some() || !controls.is_empty() || !actions.is_empty()
+                        {
+                            #[cfg(windows)]
+                            let resolved_source = midi_source_name.as_deref().and_then(|name| {
+                                self.approved_midi_source(name)
+                                    .ok()
+                                    .map(|source| (source.id.as_str().to_owned(), source.name))
+                            });
+                            #[cfg(not(windows))]
+                            let resolved_source: Option<(
+                                String,
+                                String,
+                            )> = None;
+                            let (runtime_source_id, runtime_source_name) = resolved_source
+                                .map(|(id, name)| (Some(id), Some(name)))
+                                .unwrap_or_else(|| {
+                                    if midi_source_name.is_none() {
+                                        previous.as_ref().map_or((None, None), |registered| {
+                                            (
+                                                registered.runtime_source_id.clone(),
+                                                registered.runtime_source_name.clone(),
+                                            )
                                         })
-                                    });
-                                #[cfg(not(windows))]
-                                let resolved_source: Option<(
-                                    String,
-                                    String,
-                                )> = None;
-                                let (runtime_source_id, runtime_source_name) = resolved_source
-                                    .map(|(id, name)| (Some(id), Some(name)))
-                                    .unwrap_or_else(|| {
-                                        if midi_source_name.is_none() {
-                                            previous.as_ref().map_or((None, None), |registered| {
-                                                (
-                                                    registered.runtime_source_id.clone(),
-                                                    registered.runtime_source_name.clone(),
-                                                )
-                                            })
-                                        } else {
-                                            (None, None)
-                                        }
-                                    });
-                                self.controller_semantic_profiles.insert(
-                                    controller_id.clone(),
-                                    RegisteredSemanticProfile {
-                                        profile,
-                                        runtime_source_id,
-                                        runtime_source_name,
-                                    },
-                                );
-                            }
-                            None => {
-                                self.controller_semantic_profiles.remove(&controller_id);
-                            }
+                                    } else {
+                                        (None, None)
+                                    }
+                                });
+                            self.controller_semantic_profiles.insert(
+                                controller_id.clone(),
+                                RegisteredSemanticProfile {
+                                    profile: semantic_profile,
+                                    runtime_source_id,
+                                    runtime_source_name,
+                                    host_controls: controls.clone(),
+                                    host_actions: actions.clone(),
+                                },
+                            );
+                        } else {
+                            self.controller_semantic_profiles.remove(&controller_id);
                         }
                         let explicit_links = self
                             .session
@@ -2791,7 +2894,8 @@ impl DesktopApp {
                             actions.len(),
                             self.controller_semantic_profiles
                                 .get(&controller_id)
-                                .map_or(0, |registered| registered.profile.controls.len())
+                                .and_then(|registered| registered.profile.as_ref())
+                                .map_or(0, |profile| profile.controls.len())
                         );
                         Ok(Vec::new())
                     })()
@@ -5416,6 +5520,41 @@ fn external_controller_enabled(rackforge_root: &Path) -> bool {
 }
 
 #[cfg(windows)]
+fn declarative_semantic_profiles(
+    rackforge_root: &Path,
+    approved_midi_inputs: &[String],
+) -> Result<BTreeMap<String, RegisteredSemanticProfile>> {
+    let store = rackforge_controller_package::PackageStore::new(rackforge_root.join("controllers"));
+    let mut profiles = BTreeMap::new();
+    for endpoint_name in approved_midi_inputs {
+        let Some(binding) = store
+            .resolve_declarative_input(endpoint_name)
+            .with_context(|| format!("resolving declarative controller for {endpoint_name:?}"))?
+        else {
+            continue;
+        };
+        let descriptor = desktop_audio::midi_source_descriptor(endpoint_name)?;
+        if profiles.contains_key(&binding.controller_id) {
+            bail!(
+                "declarative controller {} matches more than one enabled MIDI input; make its endpoint matcher more specific",
+                binding.controller_id
+            );
+        }
+        profiles.insert(
+            binding.controller_id,
+            RegisteredSemanticProfile {
+                profile: binding.semantic_profile,
+                runtime_source_id: Some(descriptor.id.as_str().into()),
+                runtime_source_name: Some(descriptor.name),
+                host_controls: binding.host_controls,
+                host_actions: binding.host_actions,
+            },
+        );
+    }
+    Ok(profiles)
+}
+
+#[cfg(windows)]
 fn sync_desktop_audio(
     audio: &desktop_audio::DesktopAudio,
     session: &Arc<RwLock<SessionState>>,
@@ -5551,9 +5690,12 @@ fn versioned_package_roots_with_activation(
 }
 
 fn load_desktop_plugin(package: &PluginPackage, data_root: &Path) -> Result<DesktopPlugin> {
-    if package.manifest().kind != PluginKind::Instrument {
+    if !matches!(
+        package.manifest().kind,
+        PluginKind::Instrument | PluginKind::Effect
+    ) {
         bail!(
-            "Desktop PLAY currently accepts instrument plugins, found {:?}",
+            "Desktop PLAY accepts instrument and effect plugins, found {:?}",
             package.manifest().kind
         );
     }
@@ -6269,6 +6411,9 @@ mod tests {
             sample_rate_hz: 48_000,
             buffer_frames: None,
             output_gain_db: 0,
+            input_device: None,
+            input_channels: Vec::new(),
+            input_gain_db: 0,
             midi_inputs: vec!["Enabled Keyboard".into(), "Disconnected Keyboard".into()],
         };
         let present = BTreeSet::from(["Enabled Keyboard".into(), "Hidden Keyboard".into()]);
@@ -6296,6 +6441,9 @@ mod tests {
             sample_rate_hz: 48_000,
             buffer_frames: None,
             output_gain_db: 0,
+            input_device: None,
+            input_channels: Vec::new(),
+            input_gain_db: 0,
             midi_inputs: vec!["KL Essential 61 mk3 MIDI".into()],
         };
         let physical =

@@ -16,6 +16,8 @@ export interface HostAudioOutput {
   buffer_frames: number[];
 }
 
+export interface HostAudioInput extends HostAudioOutput {}
+
 export interface HostAudioPreferences {
   schema_version: number;
   driver: string;
@@ -23,6 +25,9 @@ export interface HostAudioPreferences {
   sample_rate_hz: number;
   buffer_frames?: number;
   output_gain_db: number;
+  input_device?: string;
+  input_channels?: number[];
+  input_gain_db?: number;
   midi_inputs: string[];
 }
 
@@ -32,6 +37,7 @@ export interface HostAudioSettings {
   inventory: {
     drivers: HostAudioDriver[];
     outputs: HostAudioOutput[];
+    inputs?: HostAudioInput[];
     midi_inputs: string[];
   };
   preferences: HostAudioPreferences;
@@ -484,6 +490,7 @@ export interface PluginWebDescriptor {
   plugin_id: string;
   plugin_name: string;
   version: string;
+  kind: "instrument" | "effect" | "midi_processor";
   active: boolean;
   managed: boolean;
   api_version: number;

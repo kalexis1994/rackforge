@@ -1,6 +1,8 @@
 # DSP and effects policy
 
-Status: accepted for the native prototype.
+Status: effect ABI and explicit audio-bus manifests implemented; full-duplex
+PLAY input implemented on Desktop; Rack graph chains implemented in Core for
+Raspberry Pi.
 
 ## Separation of responsibilities
 
@@ -32,6 +34,28 @@ history, operating-system handles or implementation-specific pointers.
 - test silence, reset, invalid parameters, finite output and bounded response.
 
 These rules apply equally to native and future WebAssembly processors.
+
+## Host audio contract
+
+An effect declares `kind = "effect"`, the `audio_input` and `audio_output`
+capabilities, and explicit buses when it needs a layout other than the legacy
+stereo main bus:
+
+```toml
+[audio]
+input_buses = [{ id = "main", name = "Input", channels = 1, layout = "mono" }]
+output_buses = [{ id = "main", name = "Output", channels = 2, layout = "stereo" }]
+```
+
+This declaration requires Plugin API `1.9`. RackForge validates bus identity,
+layout, channel totals and capability consistency before loading code. The host
+activates the plugin with those channel counts and passes silence when no
+physical or upstream source is connected.
+
+A guitar pedalboard is an ordinary effect plugin, not a privileged device
+driver. It owns DSP, parameters, state, presets and its Web UI. RackForge owns
+Focusrite/USB discovery, permissions, physical channel selection, capture,
+clock/buffer negotiation, graph routing, diagnostics and recovery.
 
 ## Source and license policy
 

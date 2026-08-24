@@ -28,12 +28,17 @@ const MAX_PACKAGE_BYTES: u64 = 256 * 1024 * 1024;
 pub enum DriverRuntimeKind {
     ProcessV1,
     WasmV1,
+    /// A manifest-only controller interpreted by RackForge itself. It cannot
+    /// send SysEx or own a display, and therefore runs unchanged on every
+    /// host without loading community code.
+    DeclarativeV1,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DriverRuntime {
     pub kind: DriverRuntimeKind,
+    #[serde(default)]
     pub entrypoints: BTreeMap<String, String>,
 }
 
@@ -110,7 +115,9 @@ impl EndpointMatcher {
 #[serde(deny_unknown_fields)]
 pub struct DeviceMatcher {
     pub id: String,
+    #[serde(default)]
     pub usb_vendor_id: u16,
+    #[serde(default)]
     pub usb_product_ids: Vec<u16>,
     #[serde(default)]
     pub product_names: Vec<String>,
@@ -118,14 +125,31 @@ pub struct DeviceMatcher {
 }
 
 impl DeviceMatcher {
-    fn validate(&self) -> Result<(), PackageError> {
+    fn validate(&self, runtime: DriverRuntimeKind) -> Result<(), PackageError> {
         validate_identifier(&self.id)?;
-        if self.usb_vendor_id == 0
-            || self.usb_product_ids.is_empty()
-            || self.usb_product_ids.contains(&0)
+        let has_usb_identity = self.usb_vendor_id != 0 || !self.usb_product_ids.is_empty();
+        if has_usb_identity
+            && (self.usb_vendor_id == 0
+                || self.usb_product_ids.is_empty()
+                || self.usb_product_ids.contains(&0))
         {
             return Err(PackageError::InvalidManifest(
-                "device matcher requires non-zero USB VID and PID values".into(),
+                "device matcher USB identity requires a non-zero VID and at least one non-zero PID"
+                    .into(),
+            ));
+        }
+        if runtime != DriverRuntimeKind::DeclarativeV1 && !has_usb_identity {
+            return Err(PackageError::InvalidManifest(
+                "executable controller device matchers require USB VID and PID values".into(),
+            ));
+        }
+        if self
+            .product_names
+            .iter()
+            .any(|name| name.trim().is_empty() || name.contains('\0'))
+        {
+            return Err(PackageError::InvalidManifest(
+                "device matcher contains an empty or NUL product name".into(),
             ));
         }
         if self.endpoints.is_empty() {
@@ -141,7 +165,17 @@ impl DeviceMatcher {
             .iter()
             .map(|endpoint| endpoint.role)
             .collect::<BTreeSet<_>>();
-        if !roles.contains(&EndpointRole::SurfaceInput)
+        if runtime == DriverRuntimeKind::DeclarativeV1 {
+            if roles.contains(&EndpointRole::DisplayOutput)
+                || !(roles.contains(&EndpointRole::SurfaceInput)
+                    || roles.contains(&EndpointRole::PerformanceInput))
+            {
+                return Err(PackageError::InvalidManifest(
+                    "declarative controllers require an input endpoint and cannot declare display outputs"
+                        .into(),
+                ));
+            }
+        } else if !roles.contains(&EndpointRole::SurfaceInput)
             || !roles.contains(&EndpointRole::DisplayOutput)
         {
             return Err(PackageError::InvalidManifest(
@@ -149,6 +183,15 @@ impl DeviceMatcher {
             ));
         }
         Ok(())
+    }
+
+    fn matches_input_endpoint(&self, endpoint_name: &str) -> bool {
+        self.endpoints.iter().any(|endpoint| {
+            matches!(
+                endpoint.role,
+                EndpointRole::SurfaceInput | EndpointRole::PerformanceInput
+            ) && endpoint.matches(endpoint_name)
+        })
     }
 }
 
@@ -178,10 +221,10 @@ pub struct ControllerPermissions {
 }
 
 impl ControllerPermissions {
-    fn validate(self) -> Result<(), PackageError> {
-        if !self.midi_input || !self.midi_output {
+    fn validate(self, runtime: DriverRuntimeKind) -> Result<(), PackageError> {
+        if !self.midi_input {
             return Err(PackageError::InvalidManifest(
-                "controller packages require MIDI input and output".into(),
+                "controller packages require MIDI input".into(),
             ));
         }
         if self.raw_usb || self.firmware_write || self.filesystem || self.network {
@@ -190,7 +233,71 @@ impl ControllerPermissions {
                     .into(),
             ));
         }
+        if runtime == DriverRuntimeKind::DeclarativeV1
+            && (self.midi_output || self.sysex || self.usb_metadata)
+        {
+            return Err(PackageError::InvalidManifest(
+                "declarative-v1 is input-only and cannot request MIDI output, SysEx or USB metadata"
+                    .into(),
+            ));
+        }
+        if runtime != DriverRuntimeKind::DeclarativeV1 && !self.midi_output {
+            return Err(PackageError::InvalidManifest(
+                "executable controller packages require MIDI output".into(),
+            ));
+        }
         Ok(())
+    }
+}
+
+/// An enabled declarative controller resolved against one physical MIDI
+/// input. Hosts use the physical source id for routing; the package's
+/// `semantic_profile.source_id` remains the stable vocabulary identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclarativeControllerBinding {
+    pub controller_id: String,
+    pub controller_name: String,
+    pub endpoint_name: String,
+    pub host_controls: Vec<HostControlBinding>,
+    pub host_actions: Vec<HostActionBinding>,
+    pub semantic_profile: Option<SemanticControlProfile>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeclarativeMidiDevice<'a> {
+    pub endpoint_name: &'a str,
+    pub product_name: Option<&'a str>,
+    pub usb_vendor_id: Option<u16>,
+    pub usb_product_id: Option<u16>,
+}
+
+impl DeviceMatcher {
+    fn matches_declarative_device(&self, device: DeclarativeMidiDevice<'_>) -> bool {
+        if !self.matches_input_endpoint(device.endpoint_name) {
+            return false;
+        }
+        if let (Some(expected), Some(actual)) = (device.usb_vendor_id, Some(self.usb_vendor_id))
+            && actual != 0
+            && expected != actual
+        {
+            return false;
+        }
+        if let Some(product_id) = device.usb_product_id
+            && !self.usb_product_ids.is_empty()
+            && !self.usb_product_ids.contains(&product_id)
+        {
+            return false;
+        }
+        if let Some(product_name) = device.product_name
+            && !self.product_names.is_empty()
+            && !self
+                .product_names
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(product_name.trim()))
+        {
+            return false;
+        }
+        true
     }
 }
 
@@ -269,6 +376,7 @@ pub struct ControllerPackageManifest {
     pub runtime: DriverRuntime,
     pub permissions: ControllerPermissions,
     pub devices: Vec<DeviceMatcher>,
+    #[serde(default)]
     pub surfaces: Vec<SurfaceImplementation>,
     #[serde(default)]
     pub host_controls: Vec<HostControlBinding>,
@@ -393,23 +501,57 @@ impl ControllerPackageManifest {
                 available: CONTROLLER_DRIVER_API_VERSION.into(),
             });
         }
-        if self.runtime.entrypoints.is_empty() {
-            return Err(PackageError::InvalidManifest(
-                "controller runtime has no platform entrypoints".into(),
-            ));
+        match self.runtime.kind {
+            DriverRuntimeKind::DeclarativeV1 if !self.runtime.entrypoints.is_empty() => {
+                return Err(PackageError::InvalidManifest(
+                    "declarative-v1 cannot declare binary entrypoints".into(),
+                ));
+            }
+            DriverRuntimeKind::ProcessV1 | DriverRuntimeKind::WasmV1
+                if self.runtime.entrypoints.is_empty() =>
+            {
+                return Err(PackageError::InvalidManifest(
+                    "executable controller runtime has no platform entrypoints".into(),
+                ));
+            }
+            _ => {}
         }
         for (target, entrypoint) in &self.runtime.entrypoints {
             validate_target(target)?;
             validate_relative_path(entrypoint)?;
         }
-        self.permissions.validate()?;
-        if self.devices.is_empty() || self.surfaces.is_empty() {
+        self.permissions.validate(self.runtime.kind)?;
+        if self.devices.is_empty() {
             return Err(PackageError::InvalidManifest(
-                "controller package requires devices and surfaces".into(),
+                "controller package requires at least one device matcher".into(),
+            ));
+        }
+        if self.runtime.kind == DriverRuntimeKind::DeclarativeV1 {
+            if !self.surfaces.is_empty() {
+                return Err(PackageError::InvalidManifest(
+                    "declarative-v1 cannot own LITTLE or another display surface".into(),
+                ));
+            }
+            if !self.settings.is_empty() {
+                return Err(PackageError::InvalidManifest(
+                    "declarative-v1 has no executable settings handler".into(),
+                ));
+            }
+            if self.host_controls.is_empty()
+                && self.host_actions.is_empty()
+                && self.semantic_profile.is_none()
+            {
+                return Err(PackageError::InvalidManifest(
+                    "declarative-v1 must declare at least one host or semantic MIDI mapping".into(),
+                ));
+            }
+        } else if self.surfaces.is_empty() {
+            return Err(PackageError::InvalidManifest(
+                "executable controller package requires at least one display surface".into(),
             ));
         }
         for device in &self.devices {
-            device.validate()?;
+            device.validate(self.runtime.kind)?;
         }
         for setting in &self.settings {
             setting.validate()?;
@@ -423,7 +565,7 @@ impl ControllerPackageManifest {
                 )));
             }
         }
-        ControllerProfile {
+        let profile = ControllerProfile {
             id: self.id.clone(),
             name: self.name.clone(),
             driver_id: self.id.clone(),
@@ -431,10 +573,20 @@ impl ControllerPackageManifest {
             host_controls: self.host_controls.clone(),
             host_actions: self.host_actions.clone(),
             semantic_profile: self.semantic_profile.clone(),
+        };
+        if self.runtime.kind == DriverRuntimeKind::DeclarativeV1 {
+            profile.validate_declarative()
+        } else {
+            profile.validate()
         }
-        .validate()
         .map_err(PackageError::InvalidManifest)?;
         if let Some(integrity) = &self.integrity {
+            if self.runtime.kind == DriverRuntimeKind::DeclarativeV1 && !integrity.sha256.is_empty()
+            {
+                return Err(PackageError::InvalidManifest(
+                    "declarative-v1 has no executable artifacts to hash".into(),
+                ));
+            }
             for (target, digest) in &integrity.sha256 {
                 if !self.runtime.entrypoints.contains_key(target) {
                     return Err(PackageError::InvalidManifest(format!(
@@ -469,6 +621,10 @@ impl ControllerPackageManifest {
             .get(target)
             .map(String::as_str)
             .ok_or_else(|| PackageError::MissingEntrypoint(target.into()))
+    }
+
+    pub fn is_declarative(&self) -> bool {
+        self.runtime.kind == DriverRuntimeKind::DeclarativeV1
     }
 }
 
@@ -777,6 +933,67 @@ impl PackageStore {
         Ok(controllers)
     }
 
+    /// Resolves one approved/present MIDI input to a manifest-only
+    /// controller. Disabled packages are ignored and ambiguous matches are
+    /// rejected instead of silently assigning hardware to the wrong profile.
+    pub fn resolve_declarative_input(
+        &self,
+        endpoint_name: &str,
+    ) -> Result<Option<DeclarativeControllerBinding>, PackageError> {
+        self.resolve_declarative_device(DeclarativeMidiDevice {
+            endpoint_name,
+            product_name: None,
+            usb_vendor_id: None,
+            usb_product_id: None,
+        })
+    }
+
+    pub fn resolve_declarative_device(
+        &self,
+        device: DeclarativeMidiDevice<'_>,
+    ) -> Result<Option<DeclarativeControllerBinding>, PackageError> {
+        let endpoint_name = device.endpoint_name.trim();
+        if endpoint_name.is_empty() || endpoint_name.contains('\0') {
+            return Err(PackageError::InvalidEndpointName);
+        }
+        let mut matches = self
+            .list()?
+            .into_iter()
+            .filter(|installed| {
+                installed.record.enabled && installed.package.manifest().is_declarative()
+            })
+            .filter(|installed| {
+                installed.package.manifest().devices.iter().any(|matcher| {
+                    matcher.matches_declarative_device(DeclarativeMidiDevice {
+                        endpoint_name,
+                        ..device
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        if matches.len() > 1 {
+            matches.sort_by(|left, right| left.record.id.cmp(&right.record.id));
+            return Err(PackageError::AmbiguousDeviceMatch {
+                endpoint: endpoint_name.into(),
+                controllers: matches
+                    .iter()
+                    .map(|installed| installed.record.id.clone())
+                    .collect(),
+            });
+        }
+        Ok(matches.pop().map(|installed| {
+            let manifest = installed.package.manifest();
+            DeclarativeControllerBinding {
+                controller_id: manifest.id.clone(),
+                controller_name: manifest.name.clone(),
+                endpoint_name: endpoint_name.into(),
+                host_controls: manifest.host_controls.clone(),
+                host_actions: manifest.host_actions.clone(),
+                semantic_profile: manifest.semantic_profile.clone(),
+            }
+        }))
+    }
+
     fn write_active_record(&self, record: &InstallRecord) -> Result<(), PackageError> {
         let path = self.root.join("active").join(format!("{}.json", record.id));
         let temporary = path.with_extension(format!("json.new-{}", std::process::id()));
@@ -955,12 +1172,23 @@ pub enum PackageError {
     AlreadyInstalled { id: String, version: String },
     #[error("controller driver contract failed: {0}")]
     DriverContract(String),
+    #[error("invalid MIDI endpoint name")]
+    InvalidEndpointName,
+    #[error(
+        "MIDI endpoint {endpoint:?} matches more than one declarative controller: {controllers:?}"
+    )]
+    AmbiguousDeviceMatch {
+        endpoint: String,
+        controllers: Vec<String>,
+    },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rackforge_controller_api::{GestureCapabilities, SurfaceQuality};
+    use rackforge_controller_api::{
+        GestureCapabilities, HostControlTarget, MidiControlChangeBinding, SurfaceQuality,
+    };
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(1);
@@ -1049,10 +1277,131 @@ mod tests {
         }
     }
 
+    fn declarative_manifest(id: &str, endpoint: &str) -> ControllerPackageManifest {
+        ControllerPackageManifest {
+            schema_version: CONTROLLER_PACKAGE_SCHEMA_VERSION,
+            kind: "controller".into(),
+            id: id.into(),
+            name: "Declarative MIDI Controller".into(),
+            version: "1.0.0".into(),
+            controller_api: "^1.0".into(),
+            runtime: DriverRuntime {
+                kind: DriverRuntimeKind::DeclarativeV1,
+                entrypoints: BTreeMap::new(),
+            },
+            permissions: ControllerPermissions {
+                midi_input: true,
+                ..ControllerPermissions::default()
+            },
+            devices: vec![DeviceMatcher {
+                id: "generic-midi.v1".into(),
+                usb_vendor_id: 0x1234,
+                usb_product_ids: vec![0x5678],
+                product_names: Vec::new(),
+                endpoints: vec![EndpointMatcher {
+                    role: EndpointRole::PerformanceInput,
+                    name_contains: vec![endpoint.into()],
+                    name_contains_any: Vec::new(),
+                    name_ends_with: None,
+                    exclude_contains: Vec::new(),
+                }],
+            }],
+            surfaces: Vec::new(),
+            host_controls: vec![HostControlBinding {
+                target: HostControlTarget::MasterLevel,
+                midi_cc: MidiControlChangeBinding {
+                    channel: 0,
+                    controller: 7,
+                },
+            }],
+            host_actions: Vec::new(),
+            semantic_profile: None,
+            integrity: None,
+            settings: Vec::new(),
+        }
+    }
+
     #[test]
     fn validates_a_versioned_controller_package() {
         assert!(manifest().validate().is_ok());
         assert_eq!(manifest().profile().surfaces[0].layout_id, "little@1");
+    }
+
+    #[test]
+    fn validates_manifest_only_declarative_controller() {
+        let declarative = declarative_manifest("org.rackforge.generic-midi", "generic midi");
+        declarative.validate().unwrap();
+        assert!(declarative.runtime.entrypoints.is_empty());
+        assert!(declarative.surfaces.is_empty());
+
+        let mut unsafe_permissions = declarative.clone();
+        unsafe_permissions.permissions.midi_output = true;
+        assert!(unsafe_permissions.validate().is_err());
+
+        let mut binary = declarative.clone();
+        binary
+            .runtime
+            .entrypoints
+            .insert("windows-x86-64".into(), "driver.exe".into());
+        assert!(binary.validate().is_err());
+    }
+
+    #[test]
+    fn declarative_resolution_is_enabled_case_insensitive_and_unambiguous() {
+        fn install(store: &PackageStore, parent: &Path, manifest: &ControllerPackageManifest) {
+            let root = parent.join(&manifest.id);
+            fs::create_dir(&root).unwrap();
+            fs::write(
+                root.join(CONTROLLER_MANIFEST_FILE),
+                toml::to_string_pretty(manifest).unwrap(),
+            )
+            .unwrap();
+            store
+                .install_directory(root, PackageTrust::Community)
+                .unwrap();
+        }
+
+        let sources = TestDirectory::new("declarative-sources");
+        let store_root = TestDirectory::new("declarative-store");
+        let store = PackageStore::new(&store_root.0);
+        install(
+            &store,
+            &sources.0,
+            &declarative_manifest("org.rackforge.generic-midi", "generic midi"),
+        );
+        let resolved = store
+            .resolve_declarative_input("Generic MIDI Port 1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.controller_id, "org.rackforge.generic-midi");
+        assert_eq!(resolved.host_controls.len(), 1);
+        assert!(
+            store
+                .resolve_declarative_device(DeclarativeMidiDevice {
+                    endpoint_name: "Generic MIDI Port 1",
+                    product_name: None,
+                    usb_vendor_id: Some(0xabcd),
+                    usb_product_id: Some(0x5678),
+                })
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .resolve_declarative_input("Unrelated Keyboard")
+                .unwrap()
+                .is_none()
+        );
+
+        install(
+            &store,
+            &sources.0,
+            &declarative_manifest("org.rackforge.generic-midi-two", "generic midi"),
+        );
+        assert!(matches!(
+            store.resolve_declarative_input("Generic MIDI Port 1"),
+            Err(PackageError::AmbiguousDeviceMatch { .. })
+        ));
     }
 
     #[test]

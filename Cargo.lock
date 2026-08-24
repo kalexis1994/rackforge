@@ -3712,7 +3712,10 @@ name = "rackforge-controller-host"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "midir",
+ "rackforge-control-api",
  "rackforge-controller-package",
+ "rackforge-session-api",
  "serde_json",
 ]
 
@@ -3777,6 +3780,7 @@ dependencies = [
  "midir",
  "mime_guess",
  "rackforge-control-api",
+ "rackforge-controller-api",
  "rackforge-controller-arturia-keylab-essential-mk3",
  "rackforge-controller-package",
  "rackforge-core",

@@ -1,4 +1,7 @@
-use crate::audio::{OpenedAudioOutput, discover_audio_devices, open_audio_output_from_inventory};
+use crate::audio::{
+    OpenedAudioInput, OpenedAudioOutput, discover_audio_devices, open_audio_input_from_inventory,
+    open_audio_output_from_inventory,
+};
 use crate::control::{
     self, AudioControlCommand, MAX_EVENTS_PER_BLOCK, RackMidiStageRuntimeSpec, RackSlotRuntimeSpec,
     RackSlotStateLoad,
@@ -21,7 +24,8 @@ use alsa::pcm::PCM;
 use anyhow::{Context, Result, bail};
 use midir::MidiInput;
 use rackforge_audio_api::{
-    AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioOutputProfile, AudioOutputState, AudioSampleFormat,
+    AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioInputProfile, AudioOutputProfile, AudioOutputState,
+    AudioSampleFormat,
 };
 use rackforge_control_api::{CONTROL_SOCKET_NAME, PluginParameterValue};
 use rackforge_midi_api::{
@@ -131,8 +135,12 @@ struct RackSlotVoice<'plugin> {
     plugin: &'plugin LoadedPlugin,
     instance: PluginInstance<'plugin>,
     midi_stages: Vec<RackMidiStageRuntimeSpec>,
+    audio_sources: Vec<crate::rack_graph::CompiledAudioSource>,
+    sends_to_main: bool,
+    input_channels: usize,
     level: f32,
     pan: f32,
+    input: Vec<f32>,
     output: Vec<f32>,
     events: Vec<MidiEventV1>,
     parameter_events: Vec<ParameterEventV1>,
@@ -429,10 +437,10 @@ fn process_rack_voice(voice: &mut RackSlotVoice<'_>, period_frames: u32, channel
         return;
     }
     let process_result = voice.instance.process_interleaved(
-        &[],
+        &voice.input,
         &mut voice.output,
         period_frames,
-        0,
+        voice.input_channels as u32,
         channels,
         &voice.events,
         &voice.parameter_events,
@@ -447,10 +455,105 @@ fn process_rack_voice(voice: &mut RackSlotVoice<'_>, period_frames: u32, channel
     }
 }
 
+fn process_rack_audio_graph(
+    voices: &mut [RackSlotVoice<'static>],
+    capture: &[f32],
+    capture_channels: usize,
+    frames: usize,
+    output_channels: usize,
+) {
+    for index in 0..voices.len() {
+        let (completed, pending) = voices.split_at_mut(index);
+        let voice = &mut pending[0];
+        voice.input.fill(0.0);
+        for source in &voice.audio_sources {
+            match source {
+                crate::rack_graph::CompiledAudioSource::HardwareInput { .. } => {
+                    mix_capture_into_plugin(
+                        capture,
+                        capture_channels,
+                        &mut voice.input,
+                        voice.input_channels,
+                        frames,
+                    );
+                }
+                crate::rack_graph::CompiledAudioSource::Slot { runtime_slot_id } => {
+                    if let Some(source) = completed
+                        .iter()
+                        .find(|candidate| candidate.slot_id == *runtime_slot_id)
+                        .filter(|source| !source.process_faulted)
+                    {
+                        mix_slot_into_plugin(
+                            source,
+                            &mut voice.input,
+                            voice.input_channels,
+                            frames,
+                            output_channels,
+                        );
+                    }
+                }
+            }
+        }
+        process_rack_voice(voice, frames as u32, output_channels as u32);
+    }
+}
+
+fn mix_capture_into_plugin(
+    capture: &[f32],
+    capture_channels: usize,
+    plugin: &mut [f32],
+    plugin_channels: usize,
+    frames: usize,
+) {
+    if capture_channels == 0 || plugin_channels == 0 {
+        return;
+    }
+    for frame in 0..frames {
+        for channel in 0..plugin_channels {
+            let sample = if capture_channels == 1 {
+                capture[frame]
+            } else if plugin_channels == 1 {
+                (capture[frame * capture_channels] + capture[frame * capture_channels + 1]) * 0.5
+            } else {
+                capture
+                    .get(frame * capture_channels + channel)
+                    .copied()
+                    .unwrap_or(0.0)
+            };
+            plugin[frame * plugin_channels + channel] += sample;
+        }
+    }
+}
+
+fn mix_slot_into_plugin(
+    source: &RackSlotVoice<'_>,
+    plugin: &mut [f32],
+    plugin_channels: usize,
+    frames: usize,
+    source_channels: usize,
+) {
+    if plugin_channels == 0 || source_channels == 0 {
+        return;
+    }
+    let left_gain = source.level * (1.0 - source.pan.max(0.0));
+    let right_gain = source.level * (1.0 + source.pan.min(0.0));
+    for frame in 0..frames {
+        let left = source.output[frame * source_channels] * left_gain;
+        let right = source.output[frame * source_channels + 1] * right_gain;
+        if plugin_channels == 1 {
+            plugin[frame] += (left + right) * 0.5;
+        } else {
+            plugin[frame * plugin_channels] += left;
+            plugin[frame * plugin_channels + 1] += right;
+        }
+    }
+}
+
 struct StandaloneVoice<'plugin> {
     instance_id: InstanceId,
     plugin: &'plugin LoadedPlugin,
     instance: PluginInstance<'plugin>,
+    input_channels: usize,
 }
 
 fn create_rack_voices<'plugin>(
@@ -465,6 +568,20 @@ fn create_rack_voices<'plugin>(
         let plugin = plugins
             .get(&spec.plugin_id)
             .with_context(|| format!("plugin {} is not loaded", spec.plugin_id))?;
+        let (input_channels, output_channels) = plugin_audio_channels(plugin)?;
+        if output_channels != channels as usize {
+            bail!(
+                "Rack Slot {} exposes {output_channels} output channels; runtime requires {channels}",
+                spec.slot_id
+            );
+        }
+        if !spec.audio_sources.is_empty() && input_channels == 0 {
+            bail!(
+                "Rack Slot {} has an audio input cable but plugin {} declares no audio input",
+                spec.slot_id,
+                spec.plugin_id
+            );
+        }
         let mut instance = plugin.create_instance()?;
         match &spec.state {
             RackSlotStateLoad::Default => {}
@@ -481,15 +598,24 @@ fn create_rack_voices<'plugin>(
             }
         }
         instance
-            .activate(f64::from(sample_rate_hz), period_frames, 0, channels)
+            .activate(
+                f64::from(sample_rate_hz),
+                period_frames,
+                input_channels as u32,
+                output_channels as u32,
+            )
             .with_context(|| format!("activating Rack Slot {}", spec.slot_id))?;
         voices.push(RackSlotVoice {
             slot_id: spec.slot_id.clone(),
             plugin,
             instance,
             midi_stages: spec.midi_stages.clone(),
+            audio_sources: spec.audio_sources.clone(),
+            sends_to_main: spec.sends_to_main,
+            input_channels,
             level: f32::from(spec.level_per_mille) / 1_000.0,
             pan: f32::from(spec.pan_per_mille) / 1_000.0,
+            input: vec![0.0; period_frames as usize * input_channels],
             output: vec![0.0; period_frames as usize * channels as usize],
             events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
@@ -509,8 +635,12 @@ fn rack_voices_from_prepared(
             plugin: prepared.plugin,
             instance: prepared.instance.0,
             midi_stages: prepared.midi_stages,
+            audio_sources: prepared.audio_sources,
+            sends_to_main: prepared.sends_to_main,
+            input_channels: prepared.input_channels,
             level: f32::from(prepared.level_per_mille) / 1_000.0,
             pan: f32::from(prepared.pan_per_mille) / 1_000.0,
+            input: prepared.input,
             output: prepared.output,
             events: prepared.events,
             parameter_events: prepared.parameter_events,
@@ -567,6 +697,7 @@ pub struct LiveConfig {
     pub preset: Option<String>,
     pub data_root: Option<PathBuf>,
     pub audio_output: AudioOutputProfile,
+    pub audio_input: Option<AudioInputProfile>,
     pub audio_state_path: PathBuf,
 }
 
@@ -646,6 +777,9 @@ fn plugin_instance_id(plugin_id: &str, primary: bool) -> Result<InstanceId> {
 
 pub fn run(config: LiveConfig) -> Result<()> {
     ensure_supported_engine_profile(&config.audio_output)?;
+    if let Some(input) = &config.audio_input {
+        ensure_supported_input_profile(input, &config.audio_output)?;
+    }
     let output_rate = config.audio_output.sample_rate_hz;
     let period_frames = config.audio_output.period_frames as usize;
     let channels = config.audio_output.channels as usize;
@@ -727,7 +861,10 @@ pub fn run(config: LiveConfig) -> Result<()> {
     let mut plugins = BTreeMap::<String, &'static LoadedPlugin>::new();
     for package in packages {
         let is_primary = package.manifest().id == primary_id;
-        if package.manifest().kind != PluginKind::Instrument {
+        if !matches!(
+            package.manifest().kind,
+            PluginKind::Instrument | PluginKind::Effect
+        ) {
             eprintln!(
                 "PLUGIN_PACKAGE_IGNORED id={} reason=kind:{:?}",
                 package.manifest().id,
@@ -774,6 +911,13 @@ pub fn run(config: LiveConfig) -> Result<()> {
         let is_primary = plugin_id == &primary_id;
         let instance_id = plugin_instance_id(plugin_id, is_primary)?;
         let mut instance = plugin.create_instance()?;
+        let (input_channels, plugin_output_channels) = plugin_audio_channels(plugin)?;
+        if plugin_output_channels != channels {
+            bail!(
+                "plugin {} exposes {plugin_output_channels} output channels; Raspberry runtime currently requires {channels}",
+                plugin.manifest().id
+            );
+        }
         let presets = instance.preset_catalog()?;
         let secondary_persisted = (!is_primary)
             .then(|| {
@@ -808,8 +952,8 @@ pub fn run(config: LiveConfig) -> Result<()> {
         instance.activate(
             f64::from(output_rate),
             period_frames as u32,
-            0,
-            channels as u32,
+            input_channels as u32,
+            plugin_output_channels as u32,
         )?;
         session_instances.push(PluginInstanceState {
             instance_id: instance_id.clone(),
@@ -859,6 +1003,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
             instance_id,
             plugin,
             instance,
+            input_channels,
         });
     }
     let mut state_store = PluginStateStore::new(config.data_root.as_deref())?;
@@ -942,6 +1087,8 @@ pub fn run(config: LiveConfig) -> Result<()> {
                         keyboard_parts: stage.keyboard_parts,
                     })
                     .collect(),
+                audio_sources: compiled.audio_sources.clone(),
+                sends_to_main: compiled.sends_to_main,
                 level_per_mille: slot.level_per_mille,
                 pan_per_mille: slot.pan_per_mille,
             });
@@ -1006,6 +1153,11 @@ pub fn run(config: LiveConfig) -> Result<()> {
     );
     let audio_devices = discover_audio_devices()?;
     let output = open_audio_output_from_inventory(&config.audio_output, &audio_devices)?;
+    let input = config
+        .audio_input
+        .as_ref()
+        .map(|profile| open_audio_input_from_inventory(profile, &audio_devices))
+        .transpose()?;
     println!(
         "AUDIO_READY id={} name={:?} backend={} rate={} channels={} format={:?} \
          period={} buffer={} nominal_buffer_ms={:.2}",
@@ -1019,6 +1171,24 @@ pub fn run(config: LiveConfig) -> Result<()> {
         output.profile.buffer_frames,
         output.profile.nominal_buffer_latency_ms(),
     );
+    if let Some(input) = &input {
+        println!(
+            "AUDIO_INPUT_READY id={} name={:?} backend={} rate={} channels={:?} format={:?} \
+             period={} buffer={} gain_db={} nominal_buffer_ms={:.2}",
+            input.device.id,
+            input.device.name,
+            input.device.backend_address,
+            input.profile.sample_rate_hz,
+            input.profile.channels,
+            input.profile.sample_format,
+            input.profile.period_frames,
+            input.profile.buffer_frames,
+            input.profile.gain_db,
+            input.profile.nominal_buffer_latency_ms(),
+        );
+    } else {
+        println!("AUDIO_INPUT_DISABLED");
+    }
     let primary_instance_id =
         InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).map_err(|message| anyhow::anyhow!(message))?;
     let active_instance_id = persisted_active_instance_id
@@ -1097,6 +1267,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
     println!("READY_TO_PLAY");
     audio_loop(
         output,
+        input,
         &receiver,
         &control_receiver,
         &plugins,
@@ -1262,6 +1433,47 @@ fn ensure_supported_engine_profile(profile: &AudioOutputProfile) -> Result<()> {
     Ok(())
 }
 
+fn ensure_supported_input_profile(
+    input: &AudioInputProfile,
+    output: &AudioOutputProfile,
+) -> Result<()> {
+    input.validate()?;
+    if input.sample_format != AudioSampleFormat::S32Le {
+        bail!(
+            "audio engine currently captures S32_LE only, requested {:?}",
+            input.sample_format
+        );
+    }
+    if input.sample_rate_hz != output.sample_rate_hz || input.period_frames != output.period_frames
+    {
+        bail!(
+            "audio input and output must share sample rate and period (input {} Hz/{} frames, output {} Hz/{} frames)",
+            input.sample_rate_hz,
+            input.period_frames,
+            output.sample_rate_hz,
+            output.period_frames
+        );
+    }
+    Ok(())
+}
+
+fn plugin_audio_channels(plugin: &LoadedPlugin) -> Result<(usize, usize)> {
+    let audio = plugin.manifest().resolved_audio_contract();
+    let input_channels = audio.input_channels() as usize;
+    let output_channels = audio.output_channels() as usize;
+    if input_channels > rackforge_audio_api::MAX_ACTIVE_INPUT_CHANNELS {
+        bail!(
+            "plugin {} exposes {input_channels} input channels; this runtime supports at most {}",
+            plugin.manifest().id,
+            rackforge_audio_api::MAX_ACTIVE_INPUT_CHANNELS
+        );
+    }
+    if output_channels == 0 {
+        bail!("plugin {} exposes no audio output", plugin.manifest().id);
+    }
+    Ok((input_channels, output_channels))
+}
+
 fn standalone_voice_mut<'voices, 'plugin>(
     voices: &'voices mut [StandaloneVoice<'plugin>],
     instance_id: &InstanceId,
@@ -1330,6 +1542,7 @@ fn apply_parameter_links(
 
 fn audio_loop(
     initial_output: OpenedAudioOutput,
+    initial_input: Option<OpenedAudioInput>,
     receiver: &Receiver<IngressMidiEvent>,
     control_receiver: &Receiver<AudioControlCommand>,
     plugins: &BTreeMap<String, &'static LoadedPlugin>,
@@ -1347,10 +1560,34 @@ fn audio_loop(
     audio_state: Arc<Mutex<AudioOutputState>>,
 ) -> Result<()> {
     let mut output = Some(initial_output);
+    let mut input = initial_input;
     let mut period_frames = output.as_ref().unwrap().profile.period_frames as usize;
     let mut channels = output.as_ref().unwrap().profile.channels as usize;
     let mut output_rate = output.as_ref().unwrap().profile.sample_rate_hz as usize;
-    let input = Vec::new();
+    let capture_channels = input
+        .as_ref()
+        .map_or(0, |capture| capture.profile.channels.len());
+    let capture_stream_channels = input
+        .as_ref()
+        .map_or(0, |capture| capture.profile.stream_channels() as usize);
+    let capture_gain = input.as_ref().map_or(1.0, |capture| {
+        10.0_f32.powf(f32::from(capture.profile.gain_db) / 20.0)
+    });
+    let capture_indices = input
+        .as_ref()
+        .map(|capture| {
+            capture
+                .profile
+                .channels
+                .iter()
+                .map(|channel| *channel as usize - 1)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut device_input = vec![0_i32; period_frames * capture_stream_channels];
+    let mut captured_input = vec![0.0_f32; period_frames * capture_channels];
+    let mut plugin_input =
+        vec![0.0_f32; period_frames * rackforge_audio_api::MAX_ACTIVE_INPUT_CHANNELS];
     let mut plugin_output = vec![0.0_f32; period_frames * channels];
     let mut mix_output = vec![0.0_f32; period_frames * channels];
     let mut device_output = vec![0_i32; period_frames * channels];
@@ -1392,6 +1629,7 @@ fn audio_loop(
     }
     let mut rack_renderer = RackRenderPool::automatic();
     let mut xruns = XrunMonitor::new(output_rate as u32, period_frames);
+    let mut input_xruns = XrunMonitor::new(output_rate as u32, period_frames);
 
     loop {
         while let Some(instance) = deferred_retire.pop() {
@@ -1413,13 +1651,22 @@ fn audio_loop(
                     dropped_events += omitted;
                 }
                 AudioControlCommand::ApplyAudioOutput { profile, reply } => {
-                    let result = reconfigure_audio_output(
-                        &mut output,
-                        standalone_voices,
-                        &mut rack_voices,
-                        profile,
-                        &audio_state,
-                    );
+                    let result = if input.as_ref().is_some_and(|capture| {
+                        capture.profile.sample_rate_hz != profile.sample_rate_hz
+                            || capture.profile.period_frames != profile.period_frames
+                    }) {
+                        Err(anyhow::anyhow!(
+                            "audio output rate/period cannot change while capture is active; disable or reconfigure the input first"
+                        ))
+                    } else {
+                        reconfigure_audio_output(
+                            &mut output,
+                            standalone_voices,
+                            &mut rack_voices,
+                            profile,
+                            &audio_state,
+                        )
+                    };
                     if let Ok(snapshot) = &result {
                         period_frames = snapshot.active_profile.period_frames as usize;
                         channels = snapshot.active_profile.channels as usize;
@@ -1428,6 +1675,9 @@ fn audio_loop(
                         plugin_output.resize(period_frames * channels, 0.0);
                         mix_output.resize(period_frames * channels, 0.0);
                         for voice in &mut rack_voices {
+                            voice
+                                .input
+                                .resize(period_frames * voice.input_channels, 0.0);
                             voice.output.resize(period_frames * channels, 0.0);
                         }
                         device_output.resize(period_frames * channels, 0);
@@ -2127,23 +2377,52 @@ fn audio_loop(
             }
         }
 
+        captured_input.fill(0.0);
+        if let Some(capture) = input.as_mut() {
+            let io = capture.pcm.io_i32()?;
+            read_period(
+                &capture.pcm,
+                &io,
+                &mut device_input,
+                period_frames,
+                capture_stream_channels,
+                &mut input_xruns,
+            )?;
+            map_capture_channels(
+                &device_input,
+                capture_stream_channels,
+                &capture_indices,
+                capture_gain,
+                &mut captured_input,
+            );
+            if let Some(report) = input_xruns.tick() {
+                eprintln!("AUDIO_INPUT_{report}");
+            }
+        }
+
         mix_output.fill(0.0);
         match render_mode {
             AudioRenderMode::Silent => {}
             AudioRenderMode::Plugin => {
                 plugin_output.fill(0.0);
-                let process_result = standalone_voice_mut(standalone_voices, &active_instance_id)
-                    .map_err(anyhow::Error::msg)?
-                    .instance
-                    .process_interleaved(
-                        &input,
-                        &mut plugin_output,
-                        period_frames as u32,
-                        0,
-                        channels as u32,
-                        &events,
-                        &parameter_events,
-                    );
+                let voice = standalone_voice_mut(standalone_voices, &active_instance_id)
+                    .map_err(anyhow::Error::msg)?;
+                prepare_plugin_capture(
+                    &captured_input,
+                    capture_channels,
+                    &mut plugin_input,
+                    voice.input_channels,
+                    period_frames,
+                );
+                let process_result = voice.instance.process_interleaved(
+                    &plugin_input[..period_frames * voice.input_channels],
+                    &mut plugin_output,
+                    period_frames as u32,
+                    voice.input_channels as u32,
+                    channels as u32,
+                    &events,
+                    &parameter_events,
+                );
                 if quarantine_failed_process(
                     process_result,
                     &mut plugin_output,
@@ -2155,13 +2434,28 @@ fn audio_loop(
                 }
             }
             AudioRenderMode::Rack => {
-                if !rack_renderer.process(&mut rack_voices, period_frames as u32, channels as u32) {
+                let graph_audio = rack_voices
+                    .iter()
+                    .any(|voice| !voice.audio_sources.is_empty());
+                if graph_audio {
+                    process_rack_audio_graph(
+                        &mut rack_voices,
+                        &captured_input,
+                        capture_channels,
+                        period_frames,
+                        channels,
+                    );
+                } else if !rack_renderer.process(
+                    &mut rack_voices,
+                    period_frames as u32,
+                    channels as u32,
+                ) {
                     for voice in &mut rack_voices {
                         process_rack_voice(voice, period_frames as u32, channels as u32);
                     }
                 }
                 for voice in &rack_voices {
-                    if voice.process_faulted {
+                    if voice.process_faulted || !voice.sends_to_main {
                         continue;
                     }
                     mix_rack_slot(
@@ -2301,17 +2595,30 @@ fn restart_render_target(
 ) -> Result<(), String> {
     match mode {
         AudioRenderMode::Silent => Ok(()),
-        AudioRenderMode::Plugin => standalone_voice_mut(standalone_voices, active_instance_id)?
-            .instance
-            .activate(sample_rate, maximum_frames, 0, output_channels)
-            .map_err(|error| error.to_string()),
+        AudioRenderMode::Plugin => {
+            let voice = standalone_voice_mut(standalone_voices, active_instance_id)?;
+            voice
+                .instance
+                .activate(
+                    sample_rate,
+                    maximum_frames,
+                    voice.input_channels as u32,
+                    output_channels,
+                )
+                .map_err(|error| error.to_string())
+        }
         AudioRenderMode::Rack => {
             for index in 0..rack_voices.len() {
                 let activation = {
                     let voice = &mut rack_voices[index];
                     voice
                         .instance
-                        .activate(sample_rate, maximum_frames, 0, output_channels)
+                        .activate(
+                            sample_rate,
+                            maximum_frames,
+                            voice.input_channels as u32,
+                            output_channels,
+                        )
                         .map_err(|error| format!("reactivating slot {}: {error:#}", voice.slot_id))
                 };
                 if let Err(error) = activation {
@@ -2381,7 +2688,7 @@ fn reconfigure_audio_output(
                 .activate(
                     f64::from(requested.sample_rate_hz),
                     requested.period_frames,
-                    0,
+                    voice.input_channels as u32,
                     requested.channels,
                 )
                 .with_context(|| format!("activating plugin instance {}", voice.instance_id))?;
@@ -2392,7 +2699,7 @@ fn reconfigure_audio_output(
                 .activate(
                     f64::from(requested.sample_rate_hz),
                     requested.period_frames,
-                    0,
+                    voice.input_channels as u32,
                     requested.channels,
                 )
                 .with_context(|| format!("activating Rack Slot {}", voice.slot_id))?;
@@ -2431,7 +2738,7 @@ fn reconfigure_audio_output(
                     voice.instance.activate(
                         f64::from(previous_profile.sample_rate_hz),
                         previous_profile.period_frames,
-                        0,
+                        voice.input_channels as u32,
                         previous_profile.channels,
                     )?;
                 }
@@ -2439,7 +2746,7 @@ fn reconfigure_audio_output(
                     voice.instance.activate(
                         f64::from(previous_profile.sample_rate_hz),
                         previous_profile.period_frames,
-                        0,
+                        voice.input_channels as u32,
                         previous_profile.channels,
                     )?;
                 }
@@ -2708,6 +3015,86 @@ fn restore_after_audition(instance: &mut PluginInstance<'_>, lease: &AuditionLea
     Ok(())
 }
 
+fn read_period(
+    pcm: &PCM,
+    io: &alsa::pcm::IO<'_, i32>,
+    input: &mut [i32],
+    period_frames: usize,
+    channels: usize,
+    xruns: &mut XrunMonitor,
+) -> Result<()> {
+    if channels == 0 || input.len() != period_frames * channels {
+        bail!("invalid audio capture buffer layout");
+    }
+    let mut frame_offset = 0;
+    while frame_offset < period_frames {
+        match io.readi(&mut input[frame_offset * channels..]) {
+            Ok(0) => bail!("audio input returned zero frames"),
+            Ok(frames) => frame_offset += frames,
+            Err(error) if error.errno() == libc::EPIPE => {
+                xruns.record();
+                pcm.prepare()?;
+                frame_offset = 0;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+fn map_capture_channels(
+    device: &[i32],
+    device_channels: usize,
+    selected: &[usize],
+    gain: f32,
+    output: &mut [f32],
+) {
+    if selected.is_empty() || device_channels == 0 {
+        output.fill(0.0);
+        return;
+    }
+    let frames = device.len() / device_channels;
+    debug_assert_eq!(output.len(), frames * selected.len());
+    for frame in 0..frames {
+        for (target, source) in selected.iter().copied().enumerate() {
+            let sample = device[frame * device_channels + source] as f32 / i32::MAX as f32;
+            output[frame * selected.len() + target] = if sample.is_finite() {
+                (sample * gain).clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
+        }
+    }
+}
+
+fn prepare_plugin_capture(
+    captured: &[f32],
+    capture_channels: usize,
+    plugin: &mut [f32],
+    plugin_channels: usize,
+    frames: usize,
+) {
+    let destination = &mut plugin[..frames * plugin_channels];
+    destination.fill(0.0);
+    if capture_channels == 0 || plugin_channels == 0 {
+        return;
+    }
+    for frame in 0..frames {
+        for channel in 0..plugin_channels {
+            destination[frame * plugin_channels + channel] = if capture_channels == 1 {
+                captured[frame * capture_channels]
+            } else if plugin_channels == 1 {
+                (captured[frame * capture_channels] + captured[frame * capture_channels + 1]) * 0.5
+            } else {
+                captured
+                    .get(frame * capture_channels + channel)
+                    .copied()
+                    .unwrap_or(0.0)
+            };
+        }
+    }
+}
+
 fn write_period(
     pcm: &PCM,
     io: &alsa::pcm::IO<'_, i32>,
@@ -2776,6 +3163,30 @@ mod tests {
                 assert!(covered.into_iter().all(|visits| visits == 1));
             }
         }
+    }
+
+    #[test]
+    fn physical_capture_mapping_preserves_selection_order_and_gain() {
+        let device = [i32::MAX / 4, i32::MAX / 2, -(i32::MAX / 4), -(i32::MAX / 2)];
+        let mut mapped = [0.0_f32; 4];
+        map_capture_channels(&device, 2, &[1, 0], 2.0, &mut mapped);
+        assert!((mapped[0] - 1.0).abs() < 1e-6);
+        assert!((mapped[1] - 0.5).abs() < 1e-6);
+        assert!((mapped[2] + 1.0).abs() < 1e-6);
+        assert!((mapped[3] + 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mono_capture_duplicates_to_stereo_and_stereo_averages_to_mono() {
+        let mono = [0.25_f32, -0.5];
+        let mut stereo = [0.0_f32; 4];
+        prepare_plugin_capture(&mono, 1, &mut stereo, 2, 2);
+        assert_eq!(stereo, [0.25, 0.25, -0.5, -0.5]);
+
+        let stereo = [0.25_f32, 0.75, -0.5, 0.25];
+        let mut mono = [0.0_f32; 2];
+        prepare_plugin_capture(&stereo, 2, &mut mono, 1, 2);
+        assert_eq!(mono, [0.5, -0.125]);
     }
 
     #[test]

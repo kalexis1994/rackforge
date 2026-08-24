@@ -10,6 +10,7 @@ kind = "process-v1"
 
 [runtime.entrypoints]
 linux-aarch64 = "bin/linux-aarch64/rackforge-arturia-keylab-essential-mk3-driver"
+linux-x86-64 = "bin/linux-x86-64/rackforge-arturia-keylab-essential-mk3-driver"
 windows-x86-64 = "bin/windows-x86-64/rackforge-arturia-keylab-essential-mk3-driver.exe"
 
 [permissions]

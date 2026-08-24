@@ -1,0 +1,30 @@
+[Unit]
+Description=RackForge supervised low-latency audio engine
+After=local-fs.target sound.target
+Wants=sound.target
+StartLimitIntervalSec=0
+ConditionPathExists=@RACKFORGE_ROOT@/config/audio.toml
+
+[Service]
+Type=simple
+User=@RACKFORGE_USER@
+Group=@RACKFORGE_GROUP@
+SupplementaryGroups=audio rackforge
+Environment=RACKFORGE_ROOT=@RACKFORGE_ROOT@
+WorkingDirectory=@RACKFORGE_ROOT@
+ExecCondition=/usr/bin/test -f @RACKFORGE_ROOT@/config/audio.toml
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+ExecStart=@RACKFORGE_ROOT@/bin/rackforge-core resume @RACKFORGE_ROOT@/config/audio.toml
+Restart=always
+RestartSec=1
+TimeoutStopSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@RACKFORGE_ROOT@/data @RACKFORGE_ROOT@/state @RACKFORGE_ROOT@/logs
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

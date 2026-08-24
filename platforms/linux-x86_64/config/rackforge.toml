@@ -1,0 +1,4 @@
+[web]
+enabled = true
+access = "lan"
+port = 8787

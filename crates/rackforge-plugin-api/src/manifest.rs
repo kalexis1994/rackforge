@@ -36,6 +36,54 @@ pub enum Capability {
     SampleAccurateAutomation,
 }
 
+pub const MAIN_AUDIO_BUS_ID: &str = "main";
+pub const MAX_PLUGIN_AUDIO_CHANNELS: u16 = 64;
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioBusLayout {
+    Mono,
+    #[default]
+    Stereo,
+    /// Discrete channels have no speaker-position semantics.
+    Discrete,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioBus {
+    pub id: String,
+    pub name: String,
+    pub channels: u16,
+    #[serde(default)]
+    pub layout: AudioBusLayout,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginAudioContract {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_buses: Vec<AudioBus>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub output_buses: Vec<AudioBus>,
+}
+
+impl PluginAudioContract {
+    pub fn input_channels(&self) -> u32 {
+        self.input_buses
+            .iter()
+            .map(|bus| u32::from(bus.channels))
+            .sum()
+    }
+
+    pub fn output_channels(&self) -> u32 {
+        self.output_buses
+            .iter()
+            .map(|bus| u32::from(bus.channels))
+            .sum()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceKind {
@@ -416,6 +464,11 @@ pub struct PluginManifest {
     pub web_ui: Option<WebUi>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub midi: Option<PluginMidiContract>,
+    /// Named audio buses, flattened in declaration order at the ABI boundary.
+    /// Legacy packages omit this and retain RackForge's historical stereo
+    /// contract inferred from their capabilities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<PluginAudioContract>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component: Option<PortableComponent>,
     #[serde(default)]
@@ -605,7 +658,47 @@ impl PluginManifest {
                 return Err(ManifestError::InstrumentMissingMainMidiBus);
             }
         }
+        if let Some(audio) = &self.audio {
+            validate_audio_buses(
+                &audio.input_buses,
+                Capability::AudioInput,
+                &self.capabilities,
+            )?;
+            validate_audio_buses(
+                &audio.output_buses,
+                Capability::AudioOutput,
+                &self.capabilities,
+            )?;
+        }
         Ok(())
+    }
+
+    /// Returns the explicit contract or the stereo convention used by legacy
+    /// RackForge packages before audio buses became manifest data.
+    pub fn resolved_audio_contract(&self) -> PluginAudioContract {
+        if let Some(audio) = &self.audio {
+            return audio.clone();
+        }
+        let stereo = || AudioBus {
+            id: MAIN_AUDIO_BUS_ID.into(),
+            name: "Main".into(),
+            channels: 2,
+            layout: AudioBusLayout::Stereo,
+        };
+        PluginAudioContract {
+            input_buses: self
+                .capabilities
+                .contains(&Capability::AudioInput)
+                .then(stereo)
+                .into_iter()
+                .collect(),
+            output_buses: self
+                .capabilities
+                .contains(&Capability::AudioOutput)
+                .then(stereo)
+                .into_iter()
+                .collect(),
+        }
     }
 
     pub fn binary_for(&self, platform: &str) -> Result<&str, ManifestError> {
@@ -618,6 +711,54 @@ impl PluginManifest {
     pub fn portable_component(&self) -> Option<&PortableComponent> {
         self.component.as_ref()
     }
+}
+
+fn validate_audio_buses(
+    buses: &[AudioBus],
+    capability: Capability,
+    capabilities: &[Capability],
+) -> Result<(), ManifestError> {
+    if buses.is_empty() {
+        if capabilities.contains(&capability) {
+            return Err(ManifestError::AudioCapabilityWithoutBuses(capability));
+        }
+        return Ok(());
+    }
+    if !capabilities.contains(&capability) {
+        return Err(ManifestError::AudioBusesWithoutCapability(capability));
+    }
+    let mut ids = BTreeSet::new();
+    let mut total = 0_u16;
+    for bus in buses {
+        validate_identifier(&bus.id, false)
+            .map_err(|_| ManifestError::InvalidAudioBusId(bus.id.clone()))?;
+        if bus.name.trim().is_empty() {
+            return Err(ManifestError::EmptyAudioBusName(bus.id.clone()));
+        }
+        if !ids.insert(bus.id.as_str()) {
+            return Err(ManifestError::DuplicateAudioBus(bus.id.clone()));
+        }
+        let layout_valid = match bus.layout {
+            AudioBusLayout::Mono => bus.channels == 1,
+            AudioBusLayout::Stereo => bus.channels == 2,
+            AudioBusLayout::Discrete => bus.channels > 0,
+        };
+        if !layout_valid {
+            return Err(ManifestError::InvalidAudioBusChannels {
+                id: bus.id.clone(),
+                channels: bus.channels,
+                layout: bus.layout,
+            });
+        }
+        total = total
+            .checked_add(bus.channels)
+            .filter(|total| *total <= MAX_PLUGIN_AUDIO_CHANNELS)
+            .ok_or(ManifestError::TooManyAudioChannels)?;
+    }
+    if !ids.contains(MAIN_AUDIO_BUS_ID) {
+        return Err(ManifestError::MissingMainAudioBus(capability));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -767,6 +908,26 @@ pub enum ManifestError {
     DuplicateMidiInputBus(String),
     #[error("instrument MIDI contract must declare the main input bus")]
     InstrumentMissingMainMidiBus,
+    #[error("{0:?} capability requires at least one declared audio bus")]
+    AudioCapabilityWithoutBuses(Capability),
+    #[error("audio buses require the {0:?} capability")]
+    AudioBusesWithoutCapability(Capability),
+    #[error("invalid audio bus id {0:?}")]
+    InvalidAudioBusId(String),
+    #[error("audio bus {0} has an empty display name")]
+    EmptyAudioBusName(String),
+    #[error("audio bus {0} appears more than once")]
+    DuplicateAudioBus(String),
+    #[error("audio bus {id} has {channels} channels, incompatible with {layout:?}")]
+    InvalidAudioBusChannels {
+        id: String,
+        channels: u16,
+        layout: AudioBusLayout,
+    },
+    #[error("plugin audio buses exceed the maximum channel count")]
+    TooManyAudioChannels,
+    #[error("{0:?} buses must include the main bus")]
+    MissingMainAudioBus(Capability),
     #[error("plugin has no binary for platform {0}")]
     MissingPlatform(String),
     #[error("runtime descriptor does not match manifest field {0}")]
@@ -795,6 +956,7 @@ mod tests {
             config_mode: false,
             web_ui: None,
             midi: None,
+            audio: None,
             component: None,
             binaries: BTreeMap::from([("linux-aarch64".into(), "lib/librackforge_gain.so".into())]),
         }
@@ -803,6 +965,69 @@ mod tests {
     #[test]
     fn validates_a_well_formed_manifest() {
         assert_eq!(manifest().validate(), Ok(()));
+    }
+
+    #[test]
+    fn legacy_effects_resolve_to_stereo_input_and_output() {
+        let contract = manifest().resolved_audio_contract();
+        assert_eq!(contract.input_channels(), 2);
+        assert_eq!(contract.output_channels(), 2);
+        assert_eq!(contract.input_buses[0].id, MAIN_AUDIO_BUS_ID);
+        assert_eq!(contract.output_buses[0].layout, AudioBusLayout::Stereo);
+    }
+
+    #[test]
+    fn validates_explicit_mono_to_stereo_effect_buses() {
+        let mut candidate = manifest();
+        candidate.audio = Some(PluginAudioContract {
+            input_buses: vec![AudioBus {
+                id: MAIN_AUDIO_BUS_ID.into(),
+                name: "Guitar".into(),
+                channels: 1,
+                layout: AudioBusLayout::Mono,
+            }],
+            output_buses: vec![AudioBus {
+                id: MAIN_AUDIO_BUS_ID.into(),
+                name: "Amplifier".into(),
+                channels: 2,
+                layout: AudioBusLayout::Stereo,
+            }],
+        });
+        assert_eq!(candidate.validate(), Ok(()));
+        assert_eq!(candidate.resolved_audio_contract().input_channels(), 1);
+        candidate.audio.as_mut().unwrap().input_buses[0].channels = 2;
+        assert!(matches!(
+            candidate.validate(),
+            Err(ManifestError::InvalidAudioBusChannels { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_audio_bus_contracts_that_disagree_with_capabilities() {
+        let mut candidate = manifest();
+        candidate
+            .capabilities
+            .retain(|capability| *capability != Capability::AudioInput);
+        candidate.audio = Some(PluginAudioContract {
+            input_buses: vec![AudioBus {
+                id: MAIN_AUDIO_BUS_ID.into(),
+                name: "Input".into(),
+                channels: 1,
+                layout: AudioBusLayout::Mono,
+            }],
+            output_buses: vec![AudioBus {
+                id: MAIN_AUDIO_BUS_ID.into(),
+                name: "Output".into(),
+                channels: 2,
+                layout: AudioBusLayout::Stereo,
+            }],
+        });
+        assert_eq!(
+            candidate.validate(),
+            Err(ManifestError::AudioBusesWithoutCapability(
+                Capability::AudioInput
+            ))
+        );
     }
 
     fn branding() -> PluginBranding {

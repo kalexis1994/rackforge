@@ -9,32 +9,32 @@ cannot go stale. Do not edit it by hand — change the declaration and run
 `yes` means implemented, `planned` means a known gap with a reason below, `no` means it
 cannot exist on that host, and `unaudited` means nobody has checked yet.
 
-| Capability | Windows | Android | Raspberry Pi | Browser |
-| --- | --- | --- | --- | --- |
-| Choose an instrument and play it | yes | yes | yes | yes |
-| Choose the program an instrument plays | yes | yes | yes | yes |
-| Set master level and pan | yes | yes | yes | yes |
-| Play from an on-screen keyboard or pads | yes | yes | yes | yes |
-| Play from a connected MIDI controller | yes | yes | yes | yes |
-| Send MIDI to hardware | unaudited | unaudited | yes | unaudited |
-| Notice controllers connecting while running | unaudited | unaudited | yes | yes |
-| Read and write plugin parameters | yes | yes | yes | yes |
-| Save, load, rename, delete, import and export host presets | yes | yes | yes | yes |
-| Create, preview and save Custom Programs | yes | unaudited | yes | planned |
-| Audition a program and keep the selected one | yes | unaudited | yes | planned |
-| Create and edit Racks, Songs and Setlists | yes | yes | yes | yes |
-| Play a Rack, with every slot rendered | unaudited | unaudited | yes | planned |
-| Edit one Rack slot without disturbing PLAY | yes | unaudited | yes | planned |
-| Install a portable .rfplugin package | yes | yes | yes | yes |
-| Remove an installed plugin and its data | yes | yes | yes | yes |
-| Give a plugin a sound library or ROM it declares | yes | yes | yes | planned |
-| Show a plugin's own PLAY and CONFIG interfaces | yes | yes | yes | yes |
-| Drive hardware surfaces from a .rfcontroller | unaudited | unaudited | yes | unaudited |
-| Choose the audio device and buffer size | yes | yes | yes | no |
-| Keep instruments and performances between runs | yes | yes | yes | yes |
-| Restore the previous session on the next start | yes | yes | yes | yes |
-| Work with no network connection | yes | yes | yes | yes |
-| Survive a plugin that stops responding | yes | yes | yes | no |
+| Capability | Windows | Linux x86-64 | Android | Raspberry Pi | Browser |
+| --- | --- | --- | --- | --- | --- |
+| Choose an instrument and play it | yes | yes | yes | yes | yes |
+| Choose the program an instrument plays | yes | yes | yes | yes | yes |
+| Set master level and pan | yes | yes | yes | yes | yes |
+| Play from an on-screen keyboard or pads | yes | yes | yes | yes | yes |
+| Play from a connected MIDI controller | yes | yes | yes | yes | yes |
+| Send MIDI to hardware | unaudited | yes | unaudited | yes | unaudited |
+| Notice controllers connecting while running | unaudited | yes | unaudited | yes | yes |
+| Read and write plugin parameters | yes | yes | yes | yes | yes |
+| Save, load, rename, delete, import and export host presets | yes | yes | yes | yes | yes |
+| Create, preview and save Custom Programs | yes | yes | unaudited | yes | planned |
+| Audition a program and keep the selected one | yes | yes | unaudited | yes | planned |
+| Create and edit Racks, Songs and Setlists | yes | yes | yes | yes | yes |
+| Play a Rack, with every slot rendered | unaudited | yes | unaudited | yes | planned |
+| Edit one Rack slot without disturbing PLAY | yes | yes | unaudited | yes | planned |
+| Install a portable .rfplugin package | yes | yes | yes | yes | yes |
+| Remove an installed plugin and its data | yes | yes | yes | yes | yes |
+| Give a plugin a sound library or ROM it declares | yes | yes | yes | yes | planned |
+| Show a plugin's own PLAY and CONFIG interfaces | yes | yes | yes | yes | yes |
+| Drive hardware surfaces from a .rfcontroller | unaudited | yes | unaudited | yes | unaudited |
+| Choose the audio device and buffer size | yes | yes | yes | yes | no |
+| Keep instruments and performances between runs | yes | yes | yes | yes | yes |
+| Restore the previous session on the next start | yes | yes | yes | yes | yes |
+| Work with no network connection | yes | yes | yes | yes | yes |
+| Survive a plugin that stops responding | yes | yes | yes | yes | no |
 
 ## Why a capability is missing
 

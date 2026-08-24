@@ -19,6 +19,18 @@ pub struct CompiledRackSlot {
     /// important: channel filters, velocity curves and note ranges are not in
     /// general losslessly composable into one transform.
     pub midi_stages: Vec<CompiledMidiStage>,
+    /// Audio sources are mixed before this node is processed. An empty list
+    /// denotes an instrument/source plugin. Ordering is topological.
+    pub audio_sources: Vec<CompiledAudioSource>,
+    /// Whether this node contributes to the Rack's main output in addition to
+    /// feeding any downstream effect nodes.
+    pub sends_to_main: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CompiledAudioSource {
+    HardwareInput { bus_id: String },
+    Slot { runtime_slot_id: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -90,32 +102,22 @@ fn compile_rack(
         .map(|slot| (slot.id.as_str(), slot))
         .collect::<BTreeMap<_, _>>();
 
+    compile_plugin_nodes(
+        rack,
+        path,
+        upstream_midi,
+        &nodes,
+        &slots,
+        &graph.edges,
+        compiled,
+    )?;
+
     for node in &graph.nodes {
         match &node.kind {
-            RackGraphNodeKind::MidiInput { .. } | RackGraphNodeKind::AudioOutput { .. } => {}
-            RackGraphNodeKind::Plugin { slot_id } => {
-                let slot = slots
-                    .get(slot_id.as_str())
-                    .expect("validated Rack graph references an existing Slot");
-                if !slot.enabled {
-                    continue;
-                }
-                let midi_edge = require_parallel_instrument_path(rack, node, &nodes, &graph.edges)?;
-                let mut midi_stages = upstream_midi.to_vec();
-                midi_stages.push(CompiledMidiStage {
-                    transform: midi_edge
-                        .midi_transform
-                        .clone()
-                        .unwrap_or_else(|| RackMidiTransform::from_slot(slot)),
-                    keyboard_parts: rack.keyboard_parts,
-                });
-                compiled.push(CompiledRackSlot {
-                    runtime_slot_id: format!("{path}/{}", slot.id),
-                    rack_id: rack.id.clone(),
-                    slot: (*slot).clone(),
-                    midi_stages,
-                });
-            }
+            RackGraphNodeKind::MidiInput { .. }
+            | RackGraphNodeKind::AudioInput { .. }
+            | RackGraphNodeKind::AudioOutput { .. }
+            | RackGraphNodeKind::Plugin { .. } => {}
             RackGraphNodeKind::Rack { rack_id } => {
                 let midi_edge = require_parallel_instrument_path(rack, node, &nodes, &graph.edges)?;
                 let child = library
@@ -129,19 +131,170 @@ fn compile_rack(
                 });
                 compile_rack(library, child, &child_path, &child_midi, compiled)?;
             }
-            RackGraphNodeKind::AudioInput { .. } => {
-                return unsupported(
-                    rack,
-                    node,
-                    "audio-input/effect graphs are not implemented yet",
-                );
-            }
             RackGraphNodeKind::MidiOutput { .. } => {
                 return unsupported(rack, node, "MIDI output graphs are not implemented yet");
             }
         }
     }
     Ok(())
+}
+
+fn compile_plugin_nodes(
+    rack: &RackDefinition,
+    path: &str,
+    upstream_midi: &[CompiledMidiStage],
+    nodes: &BTreeMap<&str, &RackGraphNode>,
+    slots: &BTreeMap<&str, &RackSlot>,
+    edges: &[RackGraphEdge],
+    compiled: &mut Vec<CompiledRackSlot>,
+) -> Result<(), RackGraphCompileError> {
+    let mut pending = nodes
+        .values()
+        .filter(|node| matches!(node.kind, RackGraphNodeKind::Plugin { .. }))
+        .copied()
+        .collect::<Vec<_>>();
+    let mut runtime_ids = BTreeMap::<String, String>::new();
+
+    while !pending.is_empty() {
+        let mut progressed = false;
+        let mut index = 0;
+        while index < pending.len() {
+            let node = pending[index];
+            let dependencies = edges
+                .iter()
+                .filter(|edge| {
+                    edge.signal == RackGraphSignal::Audio && edge.target.node_id == node.id
+                })
+                .filter_map(|edge| match &nodes[edge.source.node_id.as_str()].kind {
+                    RackGraphNodeKind::Plugin { .. } => Some(edge.source.node_id.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if dependencies
+                .iter()
+                .any(|dependency| !runtime_ids.contains_key(*dependency))
+            {
+                index += 1;
+                continue;
+            }
+
+            let RackGraphNodeKind::Plugin { slot_id } = &node.kind else {
+                unreachable!();
+            };
+            let slot = slots[slot_id.as_str()];
+            let runtime_slot_id = format!("{path}/{}", slot.id);
+            runtime_ids.insert(node.id.as_str().to_owned(), runtime_slot_id.clone());
+            pending.remove(index);
+            progressed = true;
+            if !slot.enabled {
+                continue;
+            }
+
+            let mut midi_stages = upstream_midi.to_vec();
+            if let Some(midi_edge) = optional_direct_midi_path(rack, node, nodes, edges)? {
+                midi_stages.push(CompiledMidiStage {
+                    transform: midi_edge
+                        .midi_transform
+                        .clone()
+                        .unwrap_or_else(|| RackMidiTransform::from_slot(slot)),
+                    keyboard_parts: rack.keyboard_parts,
+                });
+            }
+
+            let mut audio_sources = Vec::new();
+            for edge in edges.iter().filter(|edge| {
+                edge.signal == RackGraphSignal::Audio && edge.target.node_id == node.id
+            }) {
+                match &nodes[edge.source.node_id.as_str()].kind {
+                    RackGraphNodeKind::AudioInput { bus_id } => {
+                        audio_sources.push(CompiledAudioSource::HardwareInput {
+                            bus_id: bus_id.clone(),
+                        });
+                    }
+                    RackGraphNodeKind::Plugin { .. } => {
+                        audio_sources.push(CompiledAudioSource::Slot {
+                            runtime_slot_id: runtime_ids[edge.source.node_id.as_str()].clone(),
+                        });
+                    }
+                    _ => {
+                        return unsupported(
+                            rack,
+                            node,
+                            "audio input must come from a hardware input or plugin node",
+                        );
+                    }
+                }
+            }
+            let outgoing = edges
+                .iter()
+                .filter(|edge| {
+                    edge.signal == RackGraphSignal::Audio && edge.source.node_id == node.id
+                })
+                .collect::<Vec<_>>();
+            if outgoing.is_empty()
+                || outgoing.iter().any(|edge| {
+                    !matches!(
+                        nodes[edge.target.node_id.as_str()].kind,
+                        RackGraphNodeKind::Plugin { .. } | RackGraphNodeKind::AudioOutput { .. }
+                    )
+                })
+            {
+                return unsupported(
+                    rack,
+                    node,
+                    "plugin audio must feed another plugin or an audio output",
+                );
+            }
+            let sends_to_main = outgoing.iter().any(|edge| {
+                matches!(
+                    &nodes[edge.target.node_id.as_str()].kind,
+                    RackGraphNodeKind::AudioOutput { bus_id } if bus_id == "main"
+                )
+            });
+            compiled.push(CompiledRackSlot {
+                runtime_slot_id,
+                rack_id: rack.id.clone(),
+                slot: slot.clone(),
+                midi_stages,
+                audio_sources,
+                sends_to_main,
+            });
+        }
+        if !progressed {
+            let node = pending[0];
+            return unsupported(rack, node, "audio dependency order could not be resolved");
+        }
+    }
+    Ok(())
+}
+
+fn optional_direct_midi_path<'edge>(
+    rack: &RackDefinition,
+    node: &RackGraphNode,
+    nodes: &BTreeMap<&str, &RackGraphNode>,
+    edges: &'edge [RackGraphEdge],
+) -> Result<Option<&'edge RackGraphEdge>, RackGraphCompileError> {
+    let incoming = edges
+        .iter()
+        .filter(|edge| edge.signal == RackGraphSignal::Midi && edge.target.node_id == node.id)
+        .collect::<Vec<_>>();
+    match incoming.as_slice() {
+        [] => Ok(None),
+        [edge]
+            if edge.target.port_id == "midi_in"
+                && matches!(
+                    nodes[edge.source.node_id.as_str()].kind,
+                    RackGraphNodeKind::MidiInput { .. }
+                ) =>
+        {
+            Ok(Some(*edge))
+        }
+        _ => unsupported(
+            rack,
+            node,
+            "plugin nodes support at most one direct MIDI-input connection",
+        ),
+    }
 }
 
 fn require_parallel_instrument_path<'edge>(
@@ -300,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_plugin_chains_until_the_effect_engine_exists() {
+    fn compiles_plugin_chains_in_audio_dependency_order() {
         let mut rack = rack("rack.main", "piano");
         rack.slots.push(slot("effect"));
         rack.graph = Some(RackGraph::from_slots(&rack.slots));
@@ -322,10 +475,56 @@ mod tests {
             midi_transform: None,
         });
         let library = library(vec![rack]);
-        assert!(matches!(
-            compile_instrument_rack(&library, &RackId::new("rack.main").unwrap()),
-            Err(RackGraphCompileError::UnsupportedNode { .. })
-        ));
+        let compiled =
+            compile_instrument_rack(&library, &RackId::new("rack.main").unwrap()).unwrap();
+        assert_eq!(compiled.len(), 2);
+        assert!(!compiled[0].sends_to_main);
+        assert_eq!(
+            compiled[1].audio_sources,
+            vec![CompiledAudioSource::Slot {
+                runtime_slot_id: "rack.main/piano".into()
+            }]
+        );
+        assert!(compiled[1].sends_to_main);
+    }
+
+    #[test]
+    fn compiles_hardware_audio_input_into_an_effect() {
+        let mut rack = rack("rack.guitar", "pedalboard");
+        let graph = rack.graph.as_mut().unwrap();
+        graph
+            .edges
+            .retain(|edge| edge.signal != RackGraphSignal::Midi);
+        graph.nodes.push(RackGraphNode {
+            id: RackGraphNodeId::new("input.audio.00").unwrap(),
+            kind: RackGraphNodeKind::AudioInput {
+                bus_id: "main".into(),
+            },
+            position: RackGraphPosition { x: 0, y: 180 },
+        });
+        graph.edges.push(RackGraphEdge {
+            id: RackGraphEdgeId::new("audio.input").unwrap(),
+            signal: RackGraphSignal::Audio,
+            source: RackGraphEndpoint {
+                node_id: RackGraphNodeId::new("input.audio.00").unwrap(),
+                port_id: "out".into(),
+            },
+            target: RackGraphEndpoint {
+                node_id: RackGraphNodeId::new("plugin.01").unwrap(),
+                port_id: "audio_in".into(),
+            },
+            midi_transform: None,
+        });
+        let compiled =
+            compile_instrument_rack(&library(vec![rack]), &RackId::new("rack.guitar").unwrap())
+                .unwrap();
+        assert_eq!(
+            compiled[0].audio_sources,
+            vec![CompiledAudioSource::HardwareInput {
+                bus_id: "main".into()
+            }]
+        );
+        assert!(compiled[0].midi_stages.is_empty());
     }
 
     #[test]

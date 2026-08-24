@@ -82,6 +82,27 @@ background_color = "#07131C"
 accent_color = "#55E7FF"
 ```
 
+Instrument and effect packages can declare their main audio layout with Plugin
+API `1.9`:
+
+```toml
+kind = "effect"
+capabilities = ["audio_input", "audio_output", "presets", "state"]
+
+[api]
+major = 1
+minor = 9
+
+[audio]
+input_buses = [{ id = "main", name = "Guitar In", channels = 1, layout = "mono" }]
+output_buses = [{ id = "main", name = "Pedalboard Out", channels = 2, layout = "stereo" }]
+```
+
+RackForge owns physical interfaces and maps selected channels into these buses.
+A plugin must never enumerate ALSA, ASIO, WASAPI or USB devices. It allocates
+all delay/reverb work memory during activation and performs no allocation,
+locking, logging or filesystem access in its audio callback.
+
 All three files are static, 8-bit RGB or RGBA PNGs. The exact dimensions are
 512×512 for the icon, 1600×400 for the banner, and 1920×1080 for the splash.
 RackForge fully decodes them while validating the package, rejects filesystem

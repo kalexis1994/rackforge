@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, bail};
 #[cfg(target_os = "linux")]
 use rackforge_audio_api::{
-    AudioDeviceSelector, AudioFallbackPolicy, AudioOutputDocument, AudioOutputProfile,
-    AudioSampleFormat,
+    AudioDeviceSelector, AudioFallbackPolicy, AudioInputDocument, AudioInputProfile,
+    AudioOutputDocument, AudioOutputProfile, AudioSampleFormat,
 };
 use rackforge_core::{LoadedPlugin, PluginPackage, PluginStorage};
 use rackforge_plugin_api::abi::MidiEventV1;
@@ -103,7 +103,7 @@ fn validate_resource(package_path: &Path, resource_id: &str, path: &Path) -> Res
 }
 
 #[cfg(target_os = "linux")]
-const AUDIO_STARTUP_SCHEMA_VERSION: u32 = 2;
+const AUDIO_STARTUP_SCHEMA_VERSION: u32 = 3;
 
 #[cfg(target_os = "linux")]
 #[derive(Clone, Debug, Deserialize)]
@@ -125,6 +125,8 @@ struct AudioStartupConfig {
 #[serde(deny_unknown_fields)]
 struct AudioStartupSection {
     output: AudioOutputProfile,
+    #[serde(default)]
+    input: Option<AudioInputProfile>,
 }
 
 #[cfg(target_os = "linux")]
@@ -134,7 +136,7 @@ fn resume(path: &Path) -> Result<()> {
         .with_context(|| format!("reading audio startup config {}", path.display()))?;
     let config: AudioStartupConfig = toml::from_str(&text)
         .with_context(|| format!("parsing audio startup config {}", path.display()))?;
-    if !matches!(config.schema_version, 1 | AUDIO_STARTUP_SCHEMA_VERSION) {
+    if !matches!(config.schema_version, 1 | 2 | AUDIO_STARTUP_SCHEMA_VERSION) {
         bail!(
             "unsupported audio startup schema {} in {}",
             config.schema_version,
@@ -147,21 +149,29 @@ fn resume(path: &Path) -> Result<()> {
     if config.resources.values().any(|path| !path.is_absolute()) {
         bail!("audio startup resource paths must be absolute");
     }
-    let configured_audio_output = match (config.schema_version, config.audio) {
-        (1, None) => {
-            eprintln!("AUDIO_CONFIG_MIGRATED from_schema=1 to_schema=2");
-            legacy_scarlett_profile()
-        }
-        (AUDIO_STARTUP_SCHEMA_VERSION, Some(audio)) | (1, Some(audio)) => audio.output,
-        (_, None) => bail!("audio startup schema 2 requires [audio.output]"),
-        _ => unreachable!(),
-    };
+    let (configured_audio_output, configured_audio_input) =
+        match (config.schema_version, config.audio) {
+            (1, None) => {
+                eprintln!("AUDIO_CONFIG_MIGRATED from_schema=1 to_schema=3");
+                (legacy_scarlett_profile(), None)
+            }
+            (AUDIO_STARTUP_SCHEMA_VERSION, Some(audio)) | (2, Some(audio)) | (1, Some(audio)) => {
+                (audio.output, audio.input)
+            }
+            (_, None) => bail!("audio startup schema 2 or 3 requires [audio.output]"),
+            _ => unreachable!(),
+        };
     let audio_state_path = audio_output_state_path();
     let audio_output =
         load_persisted_audio_output(&audio_state_path).unwrap_or(configured_audio_output);
     audio_output
         .validate()
         .context("validating [audio.output]")?;
+    let audio_input =
+        load_persisted_audio_input(&audio_input_state_path()).or(configured_audio_input);
+    if let Some(input) = &audio_input {
+        input.validate().context("validating [audio.input]")?;
+    }
     rackforge_core::live::run(rackforge_core::live::LiveConfig {
         package: config.package,
         binary: None,
@@ -169,6 +179,7 @@ fn resume(path: &Path) -> Result<()> {
         preset: config.preset,
         data_root: Some(config.data_root),
         audio_output,
+        audio_input,
         audio_state_path,
     })
 }
@@ -185,6 +196,11 @@ fn audio_output_state_path() -> PathBuf {
         })
         .join("state")
         .join("audio-output.toml")
+}
+
+#[cfg(target_os = "linux")]
+fn audio_input_state_path() -> PathBuf {
+    audio_output_state_path().with_file_name("audio-input.toml")
 }
 
 #[cfg(target_os = "linux")]
@@ -217,6 +233,41 @@ fn load_persisted_audio_output(path: &Path) -> Option<AudioOutputProfile> {
         Err(error) => {
             eprintln!(
                 "AUDIO_STATE_IGNORED path={} reason={error:#}",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn load_persisted_audio_input(path: &Path) -> Option<AudioInputProfile> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            eprintln!(
+                "AUDIO_INPUT_STATE_IGNORED path={} reason={error}",
+                path.display()
+            );
+            return None;
+        }
+    };
+    match toml::from_str::<AudioInputDocument>(&text)
+        .context("parsing persisted audio input")
+        .and_then(|document| {
+            document
+                .validate()
+                .context("validating persisted audio input")?;
+            Ok(document.input)
+        }) {
+        Ok(profile) => {
+            println!("AUDIO_INPUT_STATE_RESTORED path={}", path.display());
+            Some(profile)
+        }
+        Err(error) => {
+            eprintln!(
+                "AUDIO_INPUT_STATE_IGNORED path={} reason={error:#}",
                 path.display()
             );
             None
@@ -621,6 +672,7 @@ fn run_live(arguments: &[String]) -> Result<()> {
         preset,
         data_root,
         audio_output: legacy_scarlett_profile(),
+        audio_input: None,
         audio_state_path: audio_output_state_path(),
     })
 }
@@ -661,6 +713,49 @@ product_id = 0x8211
         output.validate().unwrap();
         assert_eq!(output.sample_rate_hz, 48_000);
         assert_eq!(output.fallback, AudioFallbackPolicy::None);
+    }
+
+    #[test]
+    fn schema_three_parses_opt_in_capture_with_physical_channels() {
+        let config: AudioStartupConfig = toml::from_str(
+            r#"
+schema_version = 3
+package = "/opt/rackforge/plugin"
+data_root = "/var/lib/rackforge"
+
+[audio.output]
+fallback = "none"
+sample_format = "s32_le"
+sample_rate_hz = 48000
+channels = 2
+period_frames = 128
+buffer_frames = 384
+
+[audio.output.device]
+mode = "usb"
+vendor_id = 0x1235
+product_id = 0x8211
+
+[audio.input]
+fallback = "none"
+sample_format = "s32_le"
+sample_rate_hz = 48000
+channels = [2]
+period_frames = 128
+buffer_frames = 384
+gain_db = 3
+
+[audio.input.device]
+mode = "usb"
+vendor_id = 0x1235
+product_id = 0x8211
+"#,
+        )
+        .unwrap();
+        let input = config.audio.unwrap().input.unwrap();
+        input.validate().unwrap();
+        assert_eq!(input.channels, vec![2]);
+        assert_eq!(input.gain_db, 3);
     }
 
     #[test]

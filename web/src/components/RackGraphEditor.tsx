@@ -88,6 +88,7 @@ type CanvasBounds = {
 const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<CanvasNode>) {
   const acceptsMidi = data.kind === "plugin" || data.kind === "rack";
   const emitsAudio = acceptsMidi;
+  const acceptsAudio = data.kind === "plugin" || data.kind === "rack";
   return (
     <div className={`rack-flow-node ${data.kind} ${selected ? "selected" : ""}`}>
       {acceptsMidi ? (
@@ -95,7 +96,7 @@ const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<Ca
           id="midi:midi_in"
           type="target"
           position={Position.Left}
-          className="midi-handle"
+          className="midi-handle rack-midi-input-handle"
         />
       ) : null}
       {data.kind === "audio_output" ? (
@@ -106,9 +107,19 @@ const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<Ca
           className="audio-handle"
         />
       ) : null}
+      {acceptsAudio ? (
+        <Handle
+          id="audio:audio_in"
+          type="target"
+          position={Position.Left}
+          className="audio-handle rack-audio-input-handle"
+        />
+      ) : null}
       <span className="rack-flow-node-icon">
         {data.kind === "midi_input"
           ? "MIDI"
+          : data.kind === "audio_input"
+            ? "IN"
           : data.kind === "audio_output"
             ? "OUT"
             : data.kind === "rack"
@@ -125,6 +136,14 @@ const RackNodeCard = memo(function RackNodeCard({ data, selected }: NodeProps<Ca
           type="source"
           position={Position.Right}
           className="midi-handle"
+        />
+      ) : null}
+      {data.kind === "audio_input" ? (
+        <Handle
+          id="audio:out"
+          type="source"
+          position={Position.Right}
+          className="audio-handle"
         />
       ) : null}
       {emitsAudio ? (
@@ -755,6 +774,24 @@ export default function RackGraphEditor({
     },
     [updateGraph],
   );
+  const addAudioInput = useCallback((position: RackGraphPosition) => {
+    updateGraph((graph) => {
+      if (graph.nodes.some(
+        (node) => node.kind.kind === "audio_input" && node.kind.bus_id === "main",
+      )) return graph;
+      return {
+        ...graph,
+        nodes: [
+          ...graph.nodes,
+          {
+            id: rackGraphId("input.audio"),
+            kind: { kind: "audio_input", bus_id: "main" },
+            position: normalizeRackGraphPosition(position),
+          },
+        ],
+      };
+    });
+  }, [updateGraph]);
 
   const addChildRack = useCallback((position: RackGraphPosition) => {
     if (!activeChildRackId) return;
@@ -993,6 +1030,12 @@ export default function RackGraphEditor({
                 onAddInstrument(paneMenu.position);
                 setPaneMenu(null);
               }}>Instrument</button>
+              <button type="button" role="menuitem" disabled={materialized.graph!.nodes.some(
+                (node) => node.kind.kind === "audio_input" && node.kind.bus_id === "main",
+              )} onClick={() => {
+                addAudioInput(paneMenu.position);
+                setPaneMenu(null);
+              }}>Audio Input</button>
               <button type="button" role="menuitem" onClick={() => {
                 addLabel("note", paneMenu.position);
                 setPaneMenu(null);
@@ -1030,7 +1073,7 @@ export default function RackGraphEditor({
               aria-label="Node actions"
             >
               <header>
-                <span>{menuNode.kind.kind === "plugin" ? "Instrument" : "Node"}</span>
+                <span>{menuNode.kind.kind === "plugin" ? "Plugin" : "Node"}</span>
                 <strong>{menuSlot?.name ?? nodeTitle(menuNode, materialized, racks)[0]}</strong>
               </header>
               {menuSlot ? (
@@ -1038,7 +1081,7 @@ export default function RackGraphEditor({
                   <button type="button" role="menuitem" onClick={() => {
                     setNodeMenu(null);
                     setEditorSlotId(menuSlot.id);
-                  }}>Edit instrument</button>
+                  }}>Edit plugin</button>
                 </>
               ) : null}
               <button type="button" role="menuitem" onClick={() => {

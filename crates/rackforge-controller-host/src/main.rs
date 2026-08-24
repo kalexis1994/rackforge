@@ -1,10 +1,20 @@
 use anyhow::{Context, Result, bail};
+#[cfg(target_os = "linux")]
+use rackforge_control_api::{ControlRequest, ControlResponse};
 use rackforge_controller_package::{
-    ControllerPackage, InstalledController, PackageStore, PackageTrust, ProcessDriverInfo,
+    ControllerPackage, DriverRuntimeKind, InstalledController, PackageStore, PackageTrust,
+    ProcessDriverInfo,
 };
+#[cfg(target_os = "linux")]
+use rackforge_session_api::{ClientId, CommandEnvelope, SessionCommand};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(target_os = "linux")]
+static NEXT_DECLARATIVE_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
 
 enum HostCommand {
     Verify {
@@ -163,6 +173,59 @@ fn execute_controller(
 }
 
 fn serve_controllers(root: &Path, allow_community: bool) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    let declarative_packages = PackageStore::new(root)
+        .list()?
+        .into_iter()
+        .filter(|installed| {
+            installed.record.enabled
+                && installed.package.manifest().runtime.kind == DriverRuntimeKind::DeclarativeV1
+        })
+        .count();
+    #[cfg(not(target_os = "linux"))]
+    let declarative_packages = 0;
+    let executable = PackageStore::new(root)
+        .list()?
+        .into_iter()
+        .filter(|installed| {
+            installed.record.enabled
+                && installed.package.manifest().runtime.kind == DriverRuntimeKind::ProcessV1
+        })
+        .count();
+    if executable == 0 {
+        if declarative_packages == 0 {
+            bail!(
+                "no active controller packages are available in {}",
+                root.display()
+            );
+        }
+        println!(
+            "CONTROLLER_HOST_READY declarative={} root={}",
+            declarative_packages,
+            root.display()
+        );
+        loop {
+            #[cfg(target_os = "linux")]
+            if let Err(error) = register_declarative_controllers(root) {
+                eprintln!("DECLARATIVE_CONTROLLER_REFRESH_FAILED error={error:#}");
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if declarative_packages > 0 {
+        let declarative_root = root.to_path_buf();
+        std::thread::Builder::new()
+            .name("rackforge-declarative-controllers".into())
+            .spawn(move || {
+                loop {
+                    if let Err(error) = register_declarative_controllers(&declarative_root) {
+                        eprintln!("DECLARATIVE_CONTROLLER_REFRESH_FAILED error={error:#}");
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+            })?;
+    }
     // The loop itself lives in the package crate now, shared with every
     // platform host; the CLI's contract stays: zero runnable packages is an
     // error, because the user explicitly asked to serve.
@@ -173,7 +236,7 @@ fn serve_controllers(root: &Path, allow_community: bool) -> Result<()> {
     };
     let count = rackforge_controller_package::supervise::supervise(root, &options)
         .map_err(|error| anyhow::anyhow!(error))?;
-    if count == 0 {
+    if count == 0 && declarative_packages == 0 {
         bail!(
             "no executable controller packages are active in {}",
             root.display()
@@ -182,10 +245,79 @@ fn serve_controllers(root: &Path, allow_community: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn register_declarative_controllers(root: &Path) -> Result<usize> {
+    use midir::MidiInput;
+
+    let midi = MidiInput::new("rackforge-declarative-controller-discovery")?;
+    let store = PackageStore::new(root);
+    let mut registered = std::collections::BTreeSet::new();
+    for port in midi.ports() {
+        let endpoint_name = midi.port_name(&port)?;
+        let Some(binding) = store.resolve_declarative_input(&endpoint_name)? else {
+            continue;
+        };
+        if !registered.insert(binding.controller_id.clone()) {
+            bail!(
+                "declarative controller {} matches more than one MIDI input; refine its endpoint matcher",
+                binding.controller_id
+            );
+        }
+        let command = SessionCommand::RegisterHostBindings {
+            controller_id: binding.controller_id.clone(),
+            // Declarative input remains part of the normal musical stream.
+            // Process-driver reservations are consuming by design, so do not
+            // reuse them here merely to publish the semantic profile.
+            controls: Vec::new(),
+            actions: Vec::new(),
+            midi_source_name: Some(endpoint_name.clone()),
+            semantic_profile: binding.semantic_profile,
+        };
+        let request = ControlRequest::Dispatch {
+            envelope: CommandEnvelope::new(
+                ClientId::new(format!("controller.{}", binding.controller_id))
+                    .map_err(anyhow::Error::msg)?,
+                NEXT_DECLARATIVE_COMMAND_ID.fetch_add(1, Ordering::Relaxed),
+                command,
+            ),
+        };
+        let endpoint = rackforge_control_api::transport::endpoint_from_env(default_control_socket)?;
+        match rackforge_control_api::transport::exchange(&endpoint, &request)? {
+            ControlResponse::CommandApplied { .. } => println!(
+                "DECLARATIVE_CONTROLLER_REGISTERED id={} endpoint={:?}",
+                binding.controller_id, endpoint_name
+            ),
+            ControlResponse::Error { message, .. } => {
+                bail!(
+                    "registering declarative controller {}: {message}",
+                    binding.controller_id
+                )
+            }
+            response => bail!(
+                "registering declarative controller {} returned {response:?}",
+                binding.controller_id
+            ),
+        }
+    }
+    Ok(registered.len())
+}
+
+#[cfg(target_os = "linux")]
+fn default_control_socket() -> PathBuf {
+    env::var_os("RACKFORGE_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join("rackforge")))
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("state/live-control.sock")
+}
+
 fn restore_all(root: &Path, allow_community: bool) -> Result<()> {
     let mut failures = Vec::new();
     for installed in PackageStore::new(root).list()? {
         if !installed.record.enabled {
+            continue;
+        }
+        if installed.package.manifest().runtime.kind == DriverRuntimeKind::DeclarativeV1 {
             continue;
         }
         if let Err(error) = ensure_executable(&installed, allow_community).and_then(|()| {
@@ -211,6 +343,22 @@ fn verify_conformance(root: &Path, id: &str, allow_community: bool) -> Result<()
     let installed = PackageStore::new(root)
         .resolve(id)
         .with_context(|| format!("resolving installed controller {id:?}"))?;
+    if installed.package.manifest().runtime.kind == DriverRuntimeKind::DeclarativeV1 {
+        println!(
+            "CONTROLLER_CONFORMANCE_OK id={} version={} runtime=declarative-v1 mappings={}",
+            installed.record.id,
+            installed.record.version,
+            installed.package.manifest().host_controls.len()
+                + installed.package.manifest().host_actions.len()
+                + installed
+                    .package
+                    .manifest()
+                    .semantic_profile
+                    .as_ref()
+                    .map_or(0, |profile| profile.controls.len())
+        );
+        return Ok(());
+    }
     ensure_executable(&installed, allow_community)?;
     let output = controller_command(&installed, &["driver-info".into()])?
         .stdout(Stdio::piped())

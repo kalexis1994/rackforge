@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch RackForge audio configuration
+
+[Path]
+PathChanged=@RACKFORGE_ROOT@/config/audio.toml
+Unit=rackforge-audio.service
+
+[Install]
+WantedBy=multi-user.target

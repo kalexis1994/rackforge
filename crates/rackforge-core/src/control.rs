@@ -1,6 +1,8 @@
 use crate::PluginStorage;
 use crate::performance::PerformanceRepository;
-use crate::rack_graph::{CompiledRackSlot, compile_instrument_definition, compile_instrument_rack};
+use crate::rack_graph::{
+    CompiledAudioSource, CompiledRackSlot, compile_instrument_definition, compile_instrument_rack,
+};
 use crate::session::SharedSessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
 use crate::{CompiledParameterLink, compile_semantic_parameter_links};
@@ -74,6 +76,8 @@ pub struct RackSlotRuntimeSpec {
     pub plugin_id: String,
     pub state: RackSlotStateLoad,
     pub midi_stages: Vec<RackMidiStageRuntimeSpec>,
+    pub audio_sources: Vec<CompiledAudioSource>,
+    pub sends_to_main: bool,
     pub level_per_mille: u16,
     pub pan_per_mille: i16,
 }
@@ -211,10 +215,14 @@ unsafe impl Send for PreparedPluginInstance {}
 pub struct PreparedRackSlot {
     pub slot_id: String,
     pub midi_stages: Vec<RackMidiStageRuntimeSpec>,
+    pub audio_sources: Vec<CompiledAudioSource>,
+    pub sends_to_main: bool,
     pub level_per_mille: u16,
     pub pan_per_mille: i16,
     pub plugin: &'static LoadedPlugin,
     pub instance: PreparedPluginInstance,
+    pub input_channels: usize,
+    pub input: Vec<f32>,
     pub output: Vec<f32>,
     pub events: Vec<MidiEventV1>,
     pub parameter_events: Vec<rackforge_plugin_api::abi::ParameterEventV1>,
@@ -959,10 +967,15 @@ fn load_plugin_resource(
             Some(snapshot.revision),
         );
     }
+    let input_channels = context
+        .plugin_manifests
+        .get(plugin_id)
+        .map(|manifest| manifest.resolved_audio_contract().input_channels())
+        .unwrap_or(0);
     if let Err(error) = replacement.activate(
         context.plugin_sample_rate,
         context.plugin_maximum_frames,
-        0,
+        input_channels,
         context.plugin_output_channels,
     ) {
         if persist {
@@ -1104,10 +1117,15 @@ fn clear_plugin_resource(
     if let Some(sound_id) = instance_state.selected_sound_id.as_deref() {
         let _ = replacement.load_preset(sound_id);
     }
+    let input_channels = context
+        .plugin_manifests
+        .get(plugin_id)
+        .map(|manifest| manifest.resolved_audio_contract().input_channels())
+        .unwrap_or(0);
     if let Err(error) = replacement.activate(
         context.plugin_sample_rate,
         context.plugin_maximum_frames,
-        0,
+        input_channels,
         context.plugin_output_channels,
     ) {
         return error_response(
@@ -3983,6 +4001,22 @@ fn prepare_portable_rack_slots(
     ];
     for spec in specs {
         let plugin = context.portable_plugins[&spec.plugin_id].0;
+        let audio = plugin.manifest().resolved_audio_contract();
+        let input_channels = audio.input_channels() as usize;
+        if input_channels > rackforge_audio_api::MAX_ACTIVE_INPUT_CHANNELS
+            || audio.output_channels() != context.plugin_output_channels
+        {
+            return Err(control_failure(
+                ControlErrorCode::Rejected,
+                format!(
+                    "Rack Slot {} has unsupported audio layout: {} input / {} output channels",
+                    spec.slot_id,
+                    input_channels,
+                    audio.output_channels()
+                ),
+                Some(revision),
+            ));
+        }
         let mut instance = plugin.create_instance().map_err(|error| {
             control_failure(
                 ControlErrorCode::Internal,
@@ -4016,7 +4050,7 @@ fn prepare_portable_rack_slots(
             .activate(
                 context.plugin_sample_rate,
                 context.plugin_maximum_frames,
-                0,
+                input_channels as u32,
                 context.plugin_output_channels,
             )
             .map_err(|error| {
@@ -4032,12 +4066,13 @@ fn prepare_portable_rack_slots(
         // intentionally discarded; it prevents first-use work from becoming
         // an audible graph-transition XRUN.
         warmup_output.fill(0.0);
+        let warmup_input = vec![0.0_f32; context.plugin_maximum_frames as usize * input_channels];
         instance
             .process_interleaved(
-                &[],
+                &warmup_input,
                 &mut warmup_output,
                 context.plugin_maximum_frames,
-                0,
+                input_channels as u32,
                 context.plugin_output_channels,
                 &[],
                 &[],
@@ -4052,10 +4087,14 @@ fn prepare_portable_rack_slots(
         prepared.push(PreparedRackSlot {
             slot_id: spec.slot_id.clone(),
             midi_stages: spec.midi_stages.clone(),
+            audio_sources: spec.audio_sources.clone(),
+            sends_to_main: spec.sends_to_main,
             level_per_mille: spec.level_per_mille,
             pan_per_mille: spec.pan_per_mille,
             plugin,
             instance: PreparedPluginInstance(instance),
+            input_channels,
+            input: vec![0.0; context.plugin_maximum_frames as usize * input_channels],
             output: vec![
                 0.0;
                 context.plugin_maximum_frames as usize
@@ -4150,6 +4189,8 @@ fn prepare_compiled_rack_runtime(
                     keyboard_parts: stage.keyboard_parts,
                 })
                 .collect(),
+            audio_sources: compiled.audio_sources.clone(),
+            sends_to_main: compiled.sends_to_main,
             level_per_mille: slot.level_per_mille,
             pan_per_mille: slot.pan_per_mille,
         });

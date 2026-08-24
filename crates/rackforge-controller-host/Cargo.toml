@@ -8,4 +8,9 @@ description = "Hardware-agnostic controller package host for RackForge"
 [dependencies]
 anyhow.workspace = true
 rackforge-controller-package = { path = "../rackforge-controller-package" }
+rackforge-control-api = { path = "../rackforge-control-api" }
+rackforge-session-api = { path = "../rackforge-session-api" }
 serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+midir = "0.11"

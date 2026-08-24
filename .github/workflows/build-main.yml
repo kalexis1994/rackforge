@@ -137,6 +137,65 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  linux-x86-64:
+    name: Linux x86-64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out RackForge
+        uses: actions/checkout@v6
+
+      - name: Install native build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
+            libudev-dev \
+            pkg-config
+
+      - name: Set up Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Set up pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.9.0 --activate
+
+      - name: Package the bundled Concert Grand
+        shell: bash
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
+          mkdir -p dist/bundled-plugins
+          cargo run --release -p rackforge-store -- pack-wasm \
+            plugins/concert-grand/package \
+            target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm \
+            dist/bundled-plugins/RackForge-Concert-Grand.rfplugin
+          printf 'RACKFORGE_BUNDLED_PLUGIN=%s/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin\n' \
+            "$GITHUB_WORKSPACE" >>"$GITHUB_ENV"
+
+      - name: Build Linux x86-64 release bundle
+        shell: bash
+        run: bash tools/build-linux-x86_64.sh
+
+      - name: Upload Linux x86-64 bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: RackForge-Linux-x86_64-${{ github.sha }}
+          path: dist/linux-x86_64/RackForge-Linux-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
   android:
     name: Android ARM64
     runs-on: ubuntu-24.04

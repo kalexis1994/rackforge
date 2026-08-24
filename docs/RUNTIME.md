@@ -47,6 +47,7 @@ instrument-0.1.0.rfplugin
     ├── branding/              # schema 2 icon, banner, and splash PNGs
     ├── lib/
     │   ├── windows-x86_64/
+    │   ├── linux-x86_64/
     │   ├── linux-aarch64/
     │   └── android-aarch64/
     ├── component/

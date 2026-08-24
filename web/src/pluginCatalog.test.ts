@@ -14,6 +14,7 @@ function plugin(active = true): PluginWebDescriptor {
     plugin_id: "org.rackforge.synth",
     plugin_name: "Synth",
     version: "1.0.0",
+    kind: "instrument",
     active,
     managed: true,
     api_version: 1,

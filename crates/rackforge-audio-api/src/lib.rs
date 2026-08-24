@@ -4,6 +4,8 @@ use thiserror::Error;
 
 pub const AUDIO_DEVICE_SCHEMA_VERSION: u32 = 1;
 pub const AUDIO_OUTPUT_STATE_SCHEMA_VERSION: u32 = 1;
+pub const AUDIO_INPUT_STATE_SCHEMA_VERSION: u32 = 1;
+pub const MAX_ACTIVE_INPUT_CHANNELS: usize = 2;
 pub const COMMON_SAMPLE_RATES: [u32; 8] = [
     32_000, 44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 384_000,
 ];
@@ -256,6 +258,79 @@ pub struct AudioOutputProfile {
     pub buffer_frames: u32,
 }
 
+/// Persisted capture selection. Physical channel numbers are one-based and
+/// ordered: `[2]` exposes input 2 as plugin channel 1, while `[2, 1]` swaps a
+/// stereo pair. The host owns this mapping; plugins receive only normalized
+/// interleaved samples.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioInputProfile {
+    pub device: AudioDeviceSelector,
+    #[serde(default)]
+    pub fallback: AudioFallbackPolicy,
+    pub sample_format: AudioSampleFormat,
+    pub sample_rate_hz: u32,
+    pub channels: Vec<u32>,
+    pub period_frames: u32,
+    pub buffer_frames: u32,
+    #[serde(default)]
+    pub gain_db: i8,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioInputState {
+    pub schema_version: u32,
+    pub active_device: AudioDeviceDescriptor,
+    pub active_profile: AudioInputProfile,
+    pub devices: Vec<AudioDeviceDescriptor>,
+}
+
+impl AudioInputState {
+    pub fn validate(&self) -> Result<(), AudioError> {
+        if self.schema_version != AUDIO_INPUT_STATE_SCHEMA_VERSION {
+            return Err(AudioError::UnsupportedInputStateSchema(self.schema_version));
+        }
+        self.active_device.validate()?;
+        self.active_profile.validate_against(&self.active_device)?;
+        if self.devices.is_empty()
+            || !self
+                .devices
+                .iter()
+                .any(|device| device.id == self.active_device.id)
+        {
+            return Err(AudioError::ActiveDeviceMissing);
+        }
+        for device in &self.devices {
+            device.validate()?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioInputDocument {
+    pub schema_version: u32,
+    pub input: AudioInputProfile,
+}
+
+impl AudioInputDocument {
+    pub fn new(input: AudioInputProfile) -> Self {
+        Self {
+            schema_version: AUDIO_INPUT_STATE_SCHEMA_VERSION,
+            input,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), AudioError> {
+        if self.schema_version != AUDIO_INPUT_STATE_SCHEMA_VERSION {
+            return Err(AudioError::UnsupportedInputStateSchema(self.schema_version));
+        }
+        self.input.validate()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AudioOutputState {
@@ -367,6 +442,76 @@ impl AudioOutputProfile {
     }
 }
 
+impl AudioInputProfile {
+    pub fn validate(&self) -> Result<(), AudioError> {
+        self.device.validate()?;
+        if self.sample_rate_hz < 8_000 || self.sample_rate_hz > 768_000 {
+            return Err(AudioError::InvalidSampleRate(self.sample_rate_hz));
+        }
+        if self.channels.is_empty()
+            || self.channels.len() > MAX_ACTIVE_INPUT_CHANNELS
+            || self.channels.contains(&0)
+        {
+            return Err(AudioError::InvalidInputChannels(self.channels.clone()));
+        }
+        let mut ordered = self.channels.clone();
+        ordered.sort_unstable();
+        ordered.dedup();
+        if ordered.len() != self.channels.len() {
+            return Err(AudioError::InvalidInputChannels(self.channels.clone()));
+        }
+        if self.period_frames < 16 || self.period_frames > 65_536 {
+            return Err(AudioError::InvalidPeriod(self.period_frames));
+        }
+        if self.buffer_frames < self.period_frames * 2
+            || self.buffer_frames > self.period_frames.saturating_mul(32)
+        {
+            return Err(AudioError::InvalidBuffer {
+                period: self.period_frames,
+                buffer: self.buffer_frames,
+            });
+        }
+        if !(-60..=24).contains(&self.gain_db) {
+            return Err(AudioError::InvalidInputGain(self.gain_db));
+        }
+        Ok(())
+    }
+
+    pub fn validate_against(&self, device: &AudioDeviceDescriptor) -> Result<(), AudioError> {
+        self.validate()?;
+        device.validate()?;
+        let capabilities = device
+            .capture
+            .as_ref()
+            .ok_or_else(|| AudioError::CaptureUnavailable(device.id.clone()))?;
+        if !capabilities.sample_formats.contains(&self.sample_format) {
+            return Err(AudioError::UnsupportedFormat(self.sample_format));
+        }
+        if !capabilities.sample_rates_hz.contains(&self.sample_rate_hz) {
+            return Err(AudioError::UnsupportedSampleRate(self.sample_rate_hz));
+        }
+        let stream_channels = self.channels.iter().copied().max().unwrap_or(0);
+        if !capabilities.channels.contains(stream_channels) {
+            return Err(AudioError::UnsupportedChannels(stream_channels));
+        }
+        if !capabilities.period_frames.contains(self.period_frames) {
+            return Err(AudioError::UnsupportedPeriod(self.period_frames));
+        }
+        if !capabilities.buffer_frames.contains(self.buffer_frames) {
+            return Err(AudioError::UnsupportedBuffer(self.buffer_frames));
+        }
+        Ok(())
+    }
+
+    pub fn stream_channels(&self) -> u32 {
+        self.channels.iter().copied().max().unwrap_or(0)
+    }
+
+    pub fn nominal_buffer_latency_ms(&self) -> f64 {
+        f64::from(self.buffer_frames) * 1_000.0 / f64::from(self.sample_rate_hz)
+    }
+}
+
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum AudioError {
     #[error("invalid audio device id {0:?}")]
@@ -375,8 +520,14 @@ pub enum AudioError {
     UnsupportedSchema(u32),
     #[error("unsupported audio output state schema {0}")]
     UnsupportedOutputStateSchema(u32),
+    #[error("unsupported audio input state schema {0}")]
+    UnsupportedInputStateSchema(u32),
     #[error("active audio device is missing from the device inventory")]
     ActiveDeviceMissing,
+    #[error("invalid physical audio input channels {0:?}")]
+    InvalidInputChannels(Vec<u32>),
+    #[error("audio input gain {0} dB is outside -60..24 dB")]
+    InvalidInputGain(i8),
     #[error("audio device name or backend address is empty")]
     EmptyDeviceField,
     #[error("USB vendor and product ids must be non-zero")]
@@ -403,6 +554,8 @@ pub enum AudioError {
     InvalidBuffer { period: u32, buffer: u32 },
     #[error("device {0} has no playback stream")]
     PlaybackUnavailable(AudioDeviceId),
+    #[error("audio capture is unavailable on device {0}")]
+    CaptureUnavailable(AudioDeviceId),
     #[error("sample format {0:?} is not supported")]
     UnsupportedFormat(AudioSampleFormat),
     #[error("sample rate {0} is not supported")]
@@ -443,7 +596,13 @@ mod tests {
                 period_frames: AudioValueRange::new(32, 8_192).unwrap(),
                 buffer_frames: AudioValueRange::new(64, 16_384).unwrap(),
             }),
-            capture: None,
+            capture: Some(AudioStreamCapabilities {
+                sample_formats: vec![AudioSampleFormat::S32Le],
+                sample_rates_hz: vec![44_100, 48_000, 96_000],
+                channels: AudioValueRange::new(1, 2).unwrap(),
+                period_frames: AudioValueRange::new(32, 8_192).unwrap(),
+                buffer_frames: AudioValueRange::new(64, 16_384).unwrap(),
+            }),
         }
     }
 
@@ -460,6 +619,19 @@ mod tests {
             channels: 2,
             period_frames: 128,
             buffer_frames: 384,
+        }
+    }
+
+    fn input_profile() -> AudioInputProfile {
+        AudioInputProfile {
+            device: profile().device,
+            fallback: AudioFallbackPolicy::None,
+            sample_format: AudioSampleFormat::S32Le,
+            sample_rate_hz: 48_000,
+            channels: vec![2],
+            period_frames: 128,
+            buffer_frames: 384,
+            gain_db: 0,
         }
     }
 
@@ -530,5 +702,33 @@ mod tests {
             toml::from_str::<AudioOutputDocument>(&text).unwrap(),
             document
         );
+    }
+
+    #[test]
+    fn input_profile_preserves_ordered_physical_channels() {
+        let mut profile = input_profile();
+        profile.channels = vec![2, 1];
+        profile.validate_against(&device()).unwrap();
+        assert_eq!(profile.stream_channels(), 2);
+
+        let document = AudioInputDocument::new(profile);
+        let text = toml::to_string(&document).unwrap();
+        assert_eq!(
+            toml::from_str::<AudioInputDocument>(&text).unwrap(),
+            document
+        );
+    }
+
+    #[test]
+    fn input_profile_rejects_duplicates_and_unsafe_gain() {
+        let mut profile = input_profile();
+        profile.channels = vec![1, 1];
+        assert!(matches!(
+            profile.validate(),
+            Err(AudioError::InvalidInputChannels(_))
+        ));
+        profile.channels = vec![1];
+        profile.gain_db = 25;
+        assert_eq!(profile.validate(), Err(AudioError::InvalidInputGain(25)));
     }
 }

@@ -13,9 +13,13 @@ capabilities = [
     "sample_accurate_automation",
 ]
 
+[audio]
+input_buses = [{ id = "main", name = "Input", channels = 2, layout = "stereo" }]
+output_buses = [{ id = "main", name = "Output", channels = 2, layout = "stereo" }]
+
 [api]
 major = 1
-minor = 4
+minor = 9
 
 [binaries]
 linux-aarch64 = "lib/librackforge_gain.so"

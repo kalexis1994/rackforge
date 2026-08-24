@@ -152,6 +152,17 @@ function PluginIcon({
   );
 }
 
+function pluginKindPresentation(kind: PluginWebDescriptor["kind"] | undefined) {
+  switch (kind) {
+    case "effect":
+      return { label: "Effect", className: "effect" };
+    case "midi_processor":
+      return { label: "MIDI Processor", className: "midi-processor" };
+    default:
+      return { label: "Instrument", className: "instrument" };
+  }
+}
+
 async function postResourceApi<T>(url: string, body: unknown): Promise<T> {
   return hostJson<T>(url, {
     method: "POST",
@@ -2670,7 +2681,7 @@ function PluginPickerModal({
             </button>
           </div>
         ) : (
-        <div className="play-plugin-selector modal-list" role="list" aria-label="Instrument plugins">
+        <div className="play-plugin-selector modal-list" role="list" aria-label="Playable plugins">
           {catalogStatus === "loading" ? (
             <RfLoader
               className="plugin-catalog-refresh"
@@ -3505,7 +3516,7 @@ function PluginsPage({
         </button>
       </div>
       <div className="plugin-section-heading">
-        <span className="card-kicker">Instrument plugins</span>
+        <span className="card-kicker">Audio plugins</span>
         <small>Installation and runtime activation are managed separately</small>
       </div>
       {removalMessage ? <p className="plugin-removal-message">{removalMessage}</p> : null}
@@ -3542,6 +3553,7 @@ function PluginsPage({
           const instance = running.find((candidate) => candidate.plugin_id === plugin.plugin_id);
           const busy = changingPluginId === plugin.plugin_id;
           const configAvailable = plugin.surfaces.some((surface) => surface.kind === "config");
+          const kind = pluginKindPresentation(plugin.kind);
           return (
             <article
               className={`plugin-card installed-plugin-card plugin-manager-card${plugin.active ? "" : " inactive"}`}
@@ -3554,7 +3566,7 @@ function PluginsPage({
               <div className="plugin-manager-card-copy">
                 <span className="card-kicker">
                   {plugin.active ? "Active" : "Inactive"}{" "}
-                  <span className="plugin-kind-tag instrument">Instrument</span>
+                  <span className={`plugin-kind-tag ${kind.className}`}>{kind.label}</span>
                 </span>
                 <h3>{plugin.plugin_name}{formatPluginVersion(plugin.version)}</h3>
                 <PluginRuntimeStatus status={pluginCatalog.runtime[plugin.plugin_id]} />
@@ -3693,12 +3705,12 @@ function PluginGrid({
     return (
       <RfLoader
         className="plugin-grid-loader"
-        label="Loading instruments"
+        label="Loading plugins"
         detail="Waiting for installed plugins and their runtime instances…"
       />
     );
   }
-  if (instances.length === 0) return <EmptyState title="No instruments available" />;
+  if (instances.length === 0) return <EmptyState title="No plugins available" />;
   return (
     <div className={`plugin-grid${expanded ? " expanded" : ""}`}>
       {instances.map((instance, index) => {
@@ -3706,6 +3718,7 @@ function PluginGrid({
         const selected = instance.sounds.find(
           (sound) => sound.id === instance.selected_sound_id,
         );
+        const kind = pluginKindPresentation(plugin?.kind);
         return (
           <div className="plugin-card-shell" key={instance.instance_id}>
             <button
@@ -3720,7 +3733,7 @@ function PluginGrid({
               </div>
               <div>
                 <span className="card-kicker">
-                  Plugin <span className="plugin-kind-tag instrument">Instrument</span>
+                  Plugin <span className={`plugin-kind-tag ${kind.className}`}>{kind.label}</span>
                 </span>
                 <h3>{instance.plugin_name}</h3>
                 <p>{selected?.name ?? `${instance.sounds.length} programs`}</p>
@@ -5357,6 +5370,8 @@ function SettingsPage({
       output_device: output.name,
       sample_rate_hz: output.default_sample_rate,
       buffer_frames: undefined,
+      input_device: undefined,
+      input_channels: [],
     });
   };
   const selectAudioOutput = (name: string) => {
@@ -5372,6 +5387,29 @@ function SettingsPage({
         ? audioDraft.sample_rate_hz
         : output.default_sample_rate,
       buffer_frames: output.buffer_frames.includes(audioDraft.buffer_frames ?? -1)
+        ? audioDraft.buffer_frames
+        : undefined,
+    });
+  };
+  const selectAudioInput = (name: string) => {
+    if (!audioSettings || !audioDraft) return;
+    if (!name) {
+      setAudioDraft({ ...audioDraft, input_device: undefined, input_channels: [] });
+      return;
+    }
+    const input = (audioSettings.inventory.inputs ?? []).find(
+      (candidate) => candidate.driver === audioDraft.driver && candidate.name === name,
+    );
+    if (!input) return;
+    setAudioDraft({
+      ...audioDraft,
+      input_device: input.name,
+      input_channels: input.channels > 0 ? [1] : [],
+      input_gain_db: audioDraft.input_gain_db ?? 0,
+      sample_rate_hz: input.sample_rates.includes(audioDraft.sample_rate_hz)
+        ? audioDraft.sample_rate_hz
+        : input.default_sample_rate,
+      buffer_frames: input.buffer_frames.includes(audioDraft.buffer_frames ?? -1)
         ? audioDraft.buffer_frames
         : undefined,
     });
@@ -5488,6 +5526,68 @@ function SettingsPage({
                     ))}
                 </select>
               </label>
+              <label>
+                <span>Audio input</span>
+                <select
+                  value={audioDraft.input_device ?? ""}
+                  onChange={(event) => selectAudioInput(event.target.value)}
+                >
+                  <option value="">Disabled</option>
+                  {(audioSettings.inventory.inputs ?? [])
+                    .filter((input) => input.driver === audioDraft.driver)
+                    .map((input) => (
+                      <option key={input.name} value={input.name}>
+                        {input.name}{input.is_default ? " (default)" : ""}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {(() => {
+                const input = (audioSettings.inventory.inputs ?? []).find(
+                  (candidate) => candidate.driver === audioDraft.driver
+                    && candidate.name === audioDraft.input_device,
+                );
+                if (!input) return null;
+                const selected = audioDraft.input_channels ?? [];
+                return (
+                  <fieldset>
+                    <legend>Audio input channels</legend>
+                    {Array.from({ length: input.channels }, (_, index) => index + 1).map((channel) => (
+                      <label className="host-audio-check" key={channel}>
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(channel)}
+                          disabled={!selected.includes(channel) && selected.length >= 2}
+                          onChange={(event) => setAudioDraft({
+                            ...audioDraft,
+                            input_channels: event.target.checked
+                              ? [...selected, channel].sort((left, right) => left - right)
+                              : selected.filter((candidate) => candidate !== channel),
+                          })}
+                        />
+                        <span>Input {channel}</span>
+                      </label>
+                    ))}
+                    <small>Choose one channel for a mono source such as a guitar, or two for stereo.</small>
+                  </fieldset>
+                );
+              })()}
+              {audioDraft.input_device ? (
+                <label>
+                  <span>Input trim</span>
+                  <select
+                    value={audioDraft.input_gain_db ?? 0}
+                    onChange={(event) => setAudioDraft({
+                      ...audioDraft,
+                      input_gain_db: Number(event.target.value),
+                    })}
+                  >
+                    {[-24, -18, -12, -6, 0, 3, 6, 9, 12, 18, 24].map((gain) => (
+                      <option key={gain} value={gain}>{gain > 0 ? "+" : ""}{gain} dB</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               {(() => {
                 const output = audioSettings.inventory.outputs.find(
                   (candidate) => candidate.driver === audioDraft.driver && candidate.name === audioDraft.output_device,

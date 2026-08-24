@@ -111,6 +111,19 @@ pub struct HostActionBinding {
     pub midi_cc: MidiButtonBinding,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeclarativeControllerInput {
+    HostControl {
+        target: HostControlTarget,
+        value: u8,
+    },
+    HostAction {
+        target: HostActionTarget,
+        phase: ButtonPhase,
+    },
+    Semantic(SemanticControlInput),
+}
+
 /// The semantic controls exposed by one stable MIDI endpoint of a controller.
 ///
 /// This declaration maps the device's physical MIDI dialect to RackForge's
@@ -430,10 +443,29 @@ pub struct ControllerProfile {
 
 impl ControllerProfile {
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_with_surface_requirement(true)
+    }
+
+    /// Validates a host-owned, manifest-only controller profile.
+    ///
+    /// Declarative controllers deliberately have no display surface: they
+    /// translate ordinary MIDI controls into RackForge's semantic vocabulary
+    /// and host actions without loading executable code.
+    pub fn validate_declarative(&self) -> Result<(), String> {
+        if !self.surfaces.is_empty() {
+            return Err("declarative controller profiles cannot declare display surfaces".into());
+        }
+        self.validate_with_surface_requirement(false)
+    }
+
+    fn validate_with_surface_requirement(&self, require_surface: bool) -> Result<(), String> {
         validate_identifier(&self.id)?;
         validate_identifier(&self.driver_id)?;
-        if self.name.trim().is_empty() || self.surfaces.is_empty() {
-            return Err("controller profile needs a name and at least one surface".into());
+        if self.name.trim().is_empty() {
+            return Err("controller profile needs a name".into());
+        }
+        if require_surface && self.surfaces.is_empty() {
+            return Err("controller profile needs at least one surface".into());
         }
         let mut ids = BTreeSet::new();
         let mut priorities = BTreeSet::new();
@@ -484,6 +516,28 @@ impl ControllerProfile {
             profile.validate_against_reserved(&self.host_controls, &self.host_actions)?;
         }
         Ok(())
+    }
+
+    /// Interprets one short MIDI message without allocating or retaining
+    /// device state. Profile validation guarantees that a MIDI binding cannot
+    /// collide, so at most one semantic or host-owned input is returned.
+    pub fn declarative_input(&self, message: &[u8]) -> Option<DeclarativeControllerInput> {
+        if let Some((target, value)) = self
+            .host_controls
+            .iter()
+            .find_map(|binding| Some((binding.target, binding.midi_cc.value(message)?)))
+        {
+            return Some(DeclarativeControllerInput::HostControl { target, value });
+        }
+        if let Some((target, phase)) = self
+            .host_actions
+            .iter()
+            .find_map(|binding| Some((binding.target, binding.midi_cc.phase(message)?)))
+        {
+            return Some(DeclarativeControllerInput::HostAction { target, phase });
+        }
+        semantic_control_input(self.semantic_profile.as_ref()?, message)
+            .map(DeclarativeControllerInput::Semantic)
     }
 }
 
@@ -714,5 +768,63 @@ mod tests {
             .validate()
             .is_err()
         );
+    }
+
+    #[test]
+    fn declarative_profile_interprets_host_and_semantic_cc_without_a_surface() {
+        let profile = ControllerProfile {
+            id: "example.declarative".into(),
+            name: "Example Declarative".into(),
+            driver_id: "org.example.declarative".into(),
+            surfaces: Vec::new(),
+            host_controls: vec![HostControlBinding {
+                target: HostControlTarget::MasterLevel,
+                midi_cc: MidiControlChangeBinding {
+                    channel: 0,
+                    controller: 7,
+                },
+            }],
+            host_actions: vec![HostActionBinding {
+                target: HostActionTarget::KeyboardParts,
+                midi_cc: MidiButtonBinding {
+                    channel: 0,
+                    controller: 119,
+                    press_value: 127,
+                    release_value: 0,
+                },
+            }],
+            semantic_profile: Some(SemanticControlProfile {
+                schema_version: CONTROL_PROFILE_SCHEMA_VERSION,
+                source_id: "controller.example.declarative.main".into(),
+                controls: vec![SemanticControlBinding {
+                    role: SemanticControlId::new(roles::SYNTH_FILTER_CUTOFF).unwrap(),
+                    midi_cc: MidiControlChangeBinding {
+                        channel: 0,
+                        controller: 74,
+                    },
+                    invert: false,
+                    mode: SemanticControlMode::Absolute,
+                }],
+            }),
+        };
+        profile.validate_declarative().unwrap();
+        assert_eq!(
+            profile.declarative_input(&[0xb0, 7, 99]),
+            Some(DeclarativeControllerInput::HostControl {
+                target: HostControlTarget::MasterLevel,
+                value: 99,
+            })
+        );
+        assert_eq!(
+            profile.declarative_input(&[0xb0, 119, 127]),
+            Some(DeclarativeControllerInput::HostAction {
+                target: HostActionTarget::KeyboardParts,
+                phase: ButtonPhase::Press,
+            })
+        );
+        assert!(matches!(
+            profile.declarative_input(&[0xb0, 74, 64]),
+            Some(DeclarativeControllerInput::Semantic(_))
+        ));
     }
 }

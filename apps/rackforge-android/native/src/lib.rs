@@ -73,6 +73,7 @@ static MIDI_SOURCES: OnceLock<Mutex<MidiSourceRegistry>> = OnceLock::new();
 static MIDI_SEMANTIC_PROFILES: OnceLock<
     Mutex<BTreeMap<MidiSourceId, (String, SemanticControlProfile)>>,
 > = OnceLock::new();
+static CONTROLLER_STORE_ROOT: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 static NEXT_MIDI_SOURCE_KEY: AtomicU32 = AtomicU32::new(1);
 static CONTROLLER_MENU: OnceLock<Mutex<AndroidControllerMenu>> = OnceLock::new();
 static PERFORMANCE: OnceLock<Mutex<Option<AndroidPerformance>>> = OnceLock::new();
@@ -1698,11 +1699,35 @@ fn midi_semantic_profiles()
     MIDI_SEMANTIC_PROFILES.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-fn bundled_semantic_profile(controller_id: &str) -> Option<SemanticControlProfile> {
+fn installed_semantic_profile(
+    controller_id: &str,
+    endpoint_name: &str,
+) -> Option<(String, SemanticControlProfile)> {
     let profile = keylab_essential_mk3::controller::package_profile();
-    (profile.driver_id == controller_id)
-        .then(|| profile.semantic_profile.clone())
-        .flatten()
+    if profile.driver_id == controller_id {
+        return profile
+            .semantic_profile
+            .clone()
+            .map(|semantic| (profile.driver_id.clone(), semantic));
+    }
+    let root = CONTROLLER_STORE_ROOT
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .ok()?
+        .clone()?;
+    let store = rackforge_controller_package::PackageStore::new(root);
+    let binding = match store.resolve_declarative_input(endpoint_name) {
+        Ok(binding) => binding?,
+        Err(error) => {
+            eprintln!(
+                "ANDROID_DECLARATIVE_CONTROLLER_SKIPPED endpoint={endpoint_name:?} error={error}"
+            );
+            return None;
+        }
+    };
+    binding
+        .semantic_profile
+        .map(|semantic| (binding.controller_id, semantic))
 }
 
 fn controller_menu() -> &'static Mutex<AndroidControllerMenu> {
@@ -1756,6 +1781,36 @@ fn enqueue_midi(source: MidiSourceKey, bytes: &[u8]) {
                 data,
             },
         });
+    }
+}
+
+fn apply_declarative_rackforge_parameter(source: MidiSourceKey, message: &[u8]) {
+    let profile = midi_sources()
+        .lock()
+        .ok()
+        .and_then(|sources| {
+            sources
+                .descriptor(source)
+                .map(|descriptor| descriptor.id.clone())
+        })
+        .and_then(|source_id| {
+            midi_semantic_profiles()
+                .lock()
+                .ok()
+                .and_then(|profiles| profiles.get(&source_id).map(|(_, profile)| profile.clone()))
+        });
+    let Some(input) = profile
+        .as_ref()
+        .and_then(|profile| rackforge_parameter_input(profile, message))
+    else {
+        return;
+    };
+    let current_pan = MasterPan::new(MASTER_PAN_VALUE.load(Ordering::Relaxed) as i16)
+        .unwrap_or(MasterPan::CENTER);
+    if let Ok(mut mapper) = controller_parameter_mapper().lock()
+        && let Some(parameter) = mapper.apply(input, current_pan)
+    {
+        apply_rackforge_parameter(parameter);
     }
 }
 
@@ -2474,6 +2529,11 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_ensureBundledCont
             .context("reading controller store root")?
             .into();
         let store_root = PathBuf::from(store_root);
+        *CONTROLLER_STORE_ROOT
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller store root lock poisoned"))? =
+            Some(store_root.clone());
         let store = rackforge_controller_package::PackageStore::new(&store_root);
         let manifest = rackforge_controller_package::stamp_bundled_manifest(
             keylab_essential_mk3::controller::PACKAGE_MANIFEST,
@@ -2605,7 +2665,11 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_controllerCatalog
                     "version": controller.record.version,
                     "enabled": controller.record.enabled,
                     "trust": format!("{:?}", controller.record.trust).to_ascii_lowercase(),
-                    "runtime": "InProcess",
+                    "runtime": if manifest.is_declarative() {
+                        "DeclarativeV1"
+                    } else {
+                        "InProcess"
+                    },
                     "devices": manifest.devices.len(),
                     "settings": settings,
                 })
@@ -3196,10 +3260,9 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_sendMidiMessageFr
 ) {
     let bytes = [status as u8, data_1 as u8, data_2 as u8];
     if source_key > 0 && (1..=3).contains(&length) {
-        enqueue_midi(
-            MidiSourceKey::new(source_key as u32),
-            &bytes[..length as usize],
-        );
+        let source = MidiSourceKey::new(source_key as u32);
+        apply_declarative_rackforge_parameter(source, &bytes[..length as usize]);
+        enqueue_midi(source, &bytes[..length as usize]);
     }
 }
 
@@ -3249,6 +3312,7 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_registerMidiSourc
             primary: primary == JNI_TRUE,
         };
         let source_id = descriptor.id.clone();
+        let endpoint_name = descriptor.name.clone();
         let mut sources = midi_sources()
             .lock()
             .map_err(|_| anyhow::anyhow!("MIDI source registry lock poisoned"))?;
@@ -3264,9 +3328,9 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_registerMidiSourc
             let mut profiles = midi_semantic_profiles()
                 .lock()
                 .map_err(|_| anyhow::anyhow!("semantic MIDI profile lock poisoned"))?;
-            match bundled_semantic_profile(&controller_id) {
-                Some(profile) => {
-                    profiles.insert(source_id, (controller_id, profile));
+            match installed_semantic_profile(&controller_id, &endpoint_name) {
+                Some((resolved_controller_id, profile)) => {
+                    profiles.insert(source_id, (resolved_controller_id, profile));
                 }
                 None => {
                     profiles.remove(&source_id);

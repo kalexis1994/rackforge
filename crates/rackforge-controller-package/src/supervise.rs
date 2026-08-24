@@ -40,15 +40,22 @@ pub fn ensure_executable(
     if !installed.record.enabled {
         return Err(format!("controller {id:?} is disabled"));
     }
+    match installed.package.manifest().runtime.kind {
+        DriverRuntimeKind::ProcessV1 => {}
+        DriverRuntimeKind::DeclarativeV1 => {
+            return Err(format!(
+                "controller {id:?} is declarative-v1 and must be interpreted by the host, not executed"
+            ));
+        }
+        DriverRuntimeKind::WasmV1 => {
+            return Err(format!(
+                "controller {id:?} uses wasm-v1, which is reserved but not implemented"
+            ));
+        }
+    }
     if installed.record.trust == PackageTrust::Community && !allow_community {
         return Err(format!(
             "controller {id:?} is community code; enable community packages after reviewing it"
-        ));
-    }
-    if installed.package.manifest().runtime.kind != DriverRuntimeKind::ProcessV1 {
-        return Err(format!(
-            "runtime {:?} is not available in this host build",
-            installed.package.manifest().runtime.kind
         ));
     }
     Ok(())

@@ -1543,6 +1543,7 @@ fn plugin_catalog_entry(
         "plugin_id": manifest.id,
         "plugin_name": manifest.name,
         "version": manifest.version,
+        "kind": plugin_kind_name(manifest.kind),
         "active": active,
         "managed": managed,
         "api_version": manifest.api.major,

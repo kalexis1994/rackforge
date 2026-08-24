@@ -13,6 +13,15 @@ template="$source_root/hardware/controllers/arturia-keylab-essential-mk3/package
 target_root="${CARGO_TARGET_DIR:-$source_root/target}"
 binary="$target_root/release/rackforge-arturia-keylab-essential-mk3-driver"
 
+case "$(uname -m)" in
+  aarch64|arm64) platform="linux-aarch64" ;;
+  x86_64|amd64) platform="linux-x86-64" ;;
+  *)
+    printf 'Unsupported Linux controller package architecture: %s\n' "$(uname -m)" >&2
+    exit 2
+    ;;
+esac
+
 test -f "$template"
 test -x "$binary"
 if [[ "$output" != *.rfcontroller ]]; then
@@ -24,19 +33,19 @@ if [[ -e "$output" ]]; then
   exit 2
 fi
 
-install -d "$output/bin/linux-aarch64"
+install -d "$output/bin/$platform"
 install -m 0755 \
   "$binary" \
-  "$output/bin/linux-aarch64/rackforge-arturia-keylab-essential-mk3-driver"
+  "$output/bin/$platform/rackforge-arturia-keylab-essential-mk3-driver"
 
 driver_digest="$(
-  sha256sum "$output/bin/linux-aarch64/rackforge-arturia-keylab-essential-mk3-driver" |
+  sha256sum "$output/bin/$platform/rackforge-arturia-keylab-essential-mk3-driver" |
     awk '{print $1}'
 )"
 package_digest="$(
   {
     cat "$template"
-    printf '\0linux-aarch64\0'
+    printf '\0%s\0' "$platform"
     cat "$binary"
   } | sha256sum | awk '{print $1}'
 )"
@@ -48,7 +57,7 @@ sed \
   "$template" > "$output/rackforge-controller.toml"
 {
   printf '\n[integrity.sha256]\n'
-  printf 'linux-aarch64 = "%s"\n' "$driver_digest"
+  printf '%s = "%s"\n' "$platform" "$driver_digest"
 } >>"$output/rackforge-controller.toml"
 
 printf 'CONTROLLER_PACKAGE_BUILT path=%s version=%s sha256=%s\n' \

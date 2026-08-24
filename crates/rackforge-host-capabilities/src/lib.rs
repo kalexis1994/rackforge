@@ -1,7 +1,7 @@
 //! What each RackForge host can do, declared once and checked.
 //!
 //! RackForge runs the same instruments and the same performances on Windows,
-//! Android, a Raspberry Pi and, now, a web page. Keeping that promise is
+//! Linux x86-64, Android, Raspberry Pi and a web page. Keeping that promise is
 //! harder than making it: a feature added to one host is easy to forget on the
 //! others, and the gap is usually discovered by a performer rather than by a
 //! developer.
@@ -239,6 +239,7 @@ impl Support {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Host {
     Windows,
+    LinuxX86_64,
     Android,
     RaspberryPi,
     Browser,
@@ -247,6 +248,7 @@ pub enum Host {
 impl Host {
     pub const ALL: &'static [Self] = &[
         Self::Windows,
+        Self::LinuxX86_64,
         Self::Android,
         Self::RaspberryPi,
         Self::Browser,
@@ -255,6 +257,7 @@ impl Host {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Windows => "Windows",
+            Self::LinuxX86_64 => "Linux x86-64",
             Self::Android => "Android",
             Self::RaspberryPi => "Raspberry Pi",
             Self::Browser => "Browser",
@@ -265,6 +268,7 @@ impl Host {
     pub fn profile(self) -> &'static [(Capability, Support)] {
         match self {
             Self::Windows => WINDOWS,
+            Self::LinuxX86_64 => LINUX_X86_64,
             Self::Android => ANDROID,
             Self::RaspberryPi => RASPBERRY_PI,
             Self::Browser => BROWSER,
@@ -350,6 +354,12 @@ const ANDROID: &[(Capability, Support)] = &[
     (Capability::OfflineOperation, Support::Yes),
     (Capability::RuntimeMetering, Support::Yes),
 ];
+
+// The x86-64 Linux distribution uses the same Core, Web host, ALSA runtime,
+// controller host and systemd supervision as the Raspberry Pi distribution.
+// Keep a separate declaration so platform parity cannot silently lose Linux
+// while changing Raspberry Pi packaging later.
+const LINUX_X86_64: &[(Capability, Support)] = RASPBERRY_PI;
 
 const RASPBERRY_PI: &[(Capability, Support)] = &[
     (Capability::PlayInstrument, Support::Yes),

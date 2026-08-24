@@ -7,9 +7,13 @@ kind = "effect"
 state_version = 1
 capabilities = ["audio_input", "audio_output", "presets", "state"]
 
+[audio]
+input_buses = [{ id = "main", name = "Input", channels = 2, layout = "stereo" }]
+output_buses = [{ id = "main", name = "Output", channels = 2, layout = "stereo" }]
+
 [api]
 major = 1
-minor = 5
+minor = 9
 
 [component]
 abi = "wasm-v1"

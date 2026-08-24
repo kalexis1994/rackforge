@@ -58,6 +58,7 @@ import {
 } from "./gateway";
 import { RfLoader } from "./components/RfLoader";
 import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
+import { PluginRuntimeStatus } from "./components/PluginRuntimeStatus";
 import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
 import { ModalDialog } from "./components/ModalDialog";
 import { ParameterLinkHost } from "./components/ParameterLinkHost";
@@ -74,7 +75,10 @@ import {
   syncNativeRoute,
 } from "./host";
 import {
+  beginPluginOperation,
   invalidatePluginCatalog,
+  refreshPluginCatalog,
+  synchronizePluginRuntime,
   usePluginCatalog,
   usePluginDescriptor,
 } from "./pluginCatalog";
@@ -87,6 +91,7 @@ import { TouchControllerPage } from "./TouchControllerPage";
 import type { RootState } from "./store";
 import type {
   PluginInstance,
+  ConnectionStatus,
   HostPresetSummary,
   HostAudioPreferences,
   HostAudioSettings,
@@ -415,8 +420,13 @@ function RackForgeApp() {
 
   useEffect(() => {
     connectGateway();
+    void refreshPluginCatalog().catch(() => undefined);
     return stopGateway;
   }, []);
+
+  useEffect(() => {
+    synchronizePluginRuntime(snapshot, connection);
+  }, [connection, snapshot]);
 
   useEffect(() => {
     let active = true;
@@ -591,7 +601,7 @@ function RackForgeApp() {
             />
             <Route
               path="/plugins/:instanceId"
-              element={<PluginPage snapshot={snapshot} />}
+              element={<PluginPage snapshot={snapshot} connection={connection} />}
             />
             <Route path="/controllers/:controllerId" element={<ControllerPage />} />
             <Route
@@ -1413,63 +1423,81 @@ async function synchronizePluginEnvironment() {
 async function activateInstalledPlugin(
   result: InstalledPluginResult,
 ): Promise<PluginWebDescriptor> {
-  const activation = await hostJson<{ status?: string }>(
-    `/api/v1/plugins/${encodeURIComponent(result.plugin_id)}/activate`,
-    { method: "POST" },
+  const finishOperation = beginPluginOperation(
+    result.plugin_id,
+    "activate",
+    "Activating plugin…",
   );
-  if (activation.status === "active") {
-    const descriptor = await hostJson<PluginWebDescriptor>(
-      `/api/v1/plugins/${encodeURIComponent(result.plugin_id)}`,
+  try {
+    const activation = await hostJson<{ status?: string }>(
+      `/api/v1/plugins/${encodeURIComponent(result.plugin_id)}/activate`,
+      { method: "POST" },
     );
-    await synchronizePluginEnvironment();
-    return descriptor;
-  }
-  const startedAt = performance.now();
-  let lastError: unknown;
-  while (performance.now() - startedAt < PLUGIN_ACTIVATION_TIMEOUT_MS) {
-    try {
+    if (activation.status === "active") {
       const descriptor = await hostJson<PluginWebDescriptor>(
         `/api/v1/plugins/${encodeURIComponent(result.plugin_id)}`,
       );
-      if (descriptor.active) {
-        await synchronizePluginEnvironment();
-        return descriptor;
-      }
-    } catch (error) {
-      lastError = error;
+      await synchronizePluginEnvironment();
+      return descriptor;
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
+    const startedAt = performance.now();
+    let lastError: unknown;
+    while (performance.now() - startedAt < PLUGIN_ACTIVATION_TIMEOUT_MS) {
+      try {
+        const descriptor = await hostJson<PluginWebDescriptor>(
+          `/api/v1/plugins/${encodeURIComponent(result.plugin_id)}`,
+        );
+        if (descriptor.active) {
+          await synchronizePluginEnvironment();
+          return descriptor;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("RackForge installed the plugin but activation did not finish in time.");
+  } finally {
+    finishOperation();
   }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("RackForge installed the plugin but activation did not finish in time.");
 }
 
 async function setInstalledPluginActive(pluginId: string, active: boolean) {
   const action = active ? "activate" : "deactivate";
-  const response = await hostJson<{ status?: string; plugin_id?: string }>(
-    `/api/v1/plugins/${encodeURIComponent(pluginId)}/${action}`,
-    { method: "POST" },
+  const finishOperation = beginPluginOperation(
+    pluginId,
+    action,
+    active ? "Activating plugin…" : "Deactivating plugin…",
   );
-  const startedAt = performance.now();
-  let lastError: unknown;
-  while (performance.now() - startedAt < PLUGIN_ACTIVATION_TIMEOUT_MS) {
-    try {
-      const descriptor = await hostJson<PluginWebDescriptor>(
-        `/api/v1/plugins/${encodeURIComponent(pluginId)}`,
-      );
-      if (descriptor.active === active) {
-        await synchronizePluginEnvironment();
-        return response;
+  try {
+    const response = await hostJson<{ status?: string; plugin_id?: string }>(
+      `/api/v1/plugins/${encodeURIComponent(pluginId)}/${action}`,
+      { method: "POST" },
+    );
+    const startedAt = performance.now();
+    let lastError: unknown;
+    while (performance.now() - startedAt < PLUGIN_ACTIVATION_TIMEOUT_MS) {
+      try {
+        const descriptor = await hostJson<PluginWebDescriptor>(
+          `/api/v1/plugins/${encodeURIComponent(pluginId)}`,
+        );
+        if (descriptor.active === active) {
+          await synchronizePluginEnvironment();
+          return response;
+        }
+      } catch (error) {
+        lastError = error;
       }
-    } catch (error) {
-      lastError = error;
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`RackForge did not finish ${active ? "activating" : "deactivating"} the plugin.`);
+  } finally {
+    finishOperation();
   }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error(`RackForge did not finish ${active ? "activating" : "deactivating"} the plugin.`);
 }
 
 const MAX_CLIENT_RESOURCE_BYTES = 512 * 1024 * 1024;
@@ -1545,6 +1573,11 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
   const installPreview = async () => {
     if (!preview) return;
     const selectionId = preview.selection_id;
+    const finishOperation = beginPluginOperation(
+      preview.plugin_id,
+      "install",
+      `Installing ${preview.plugin_name}…`,
+    );
     cancellationRequestedRef.current = false;
     setCancelled(false);
     setCancelling(false);
@@ -1571,6 +1604,7 @@ function InstallPluginDialog({ onClose }: { onClose: () => void }) {
         setError(reason instanceof Error ? reason.message : "Could not install this plugin.");
       }
     } finally {
+      finishOperation();
       setBusy(false);
       setCancelling(false);
     }
@@ -2317,7 +2351,8 @@ function PlayPage({
     label: string;
     value: string;
   } | null>(null);
-  const { plugins: installedPlugins } = usePluginCatalog();
+  const pluginCatalog = usePluginCatalog();
+  const { plugins: installedPlugins } = pluginCatalog;
   const activeVersion = installedPlugins.find(
     (plugin) => plugin.plugin_id === active?.plugin_id,
   )?.version;
@@ -2396,6 +2431,13 @@ function PlayPage({
           surface="play"
           onSurfaceInfoChange={handleSurfaceInfo}
         />
+      ) : pluginCatalog.status === "idle" || pluginCatalog.status === "loading" ? (
+        <RfLoader
+          className="plugin-play-loader"
+          label="Loading PLAY instruments"
+          detail="Waiting for the plugin catalog and audio runtime…"
+          size="large"
+        />
       ) : (
         <PluginSurfaceState
           title="No instrument active"
@@ -2431,6 +2473,7 @@ function PluginPickerModal({
   programDraft: SessionSnapshot["program_draft"];
   onClose: () => void;
 }) {
+  const { status: catalogStatus, error: catalogError, runtime } = usePluginCatalog();
   const [activatingId, setActivatingId] = useState<string | null>(null);
   const [activationError, setActivationError] = useState<string | null>(null);
   const [pendingPlugin, setPendingPlugin] = useState<PluginWebDescriptor | null>(null);
@@ -2471,6 +2514,11 @@ function PluginPickerModal({
     }
     setPendingPlugin(null);
     setActivatingId(plugin.plugin_id);
+    const finishOperation = beginPluginOperation(
+      plugin.plugin_id,
+      "open",
+      `Opening ${plugin.plugin_name} in PLAY…`,
+    );
     try {
       await commitPlayPluginSelection(request, {
         dispatch: dispatchCommandAwait,
@@ -2486,6 +2534,7 @@ function PluginPickerModal({
         error instanceof Error ? error.message : "Could not activate the plugin.",
       );
     } finally {
+      finishOperation();
       setActivatingId(null);
     }
   };
@@ -2543,11 +2592,33 @@ function PluginPickerModal({
           </section>
         )}
         {activationError && <p className="form-error">{activationError}</p>}
+        {(catalogStatus === "idle" || catalogStatus === "loading") && plugins.length === 0 ? (
+          <RfLoader
+            className="plugin-catalog-loader"
+            label="Loading plugins"
+            detail="Discovering installed instruments and checking their runtimes…"
+          />
+        ) : catalogStatus === "error" && plugins.length === 0 ? (
+          <div className="plugin-catalog-error" role="alert">
+            <PluginSurfaceState
+              title="Plugin library unavailable"
+              detail={catalogError ?? "RackForge could not load the plugin catalog."}
+            />
+            <button className="secondary-button" onClick={() => void invalidatePluginCatalog()}>
+              Retry
+            </button>
+          </div>
+        ) : (
         <div className="play-plugin-selector modal-list" role="list" aria-label="Instrument plugins">
+          {catalogStatus === "loading" ? (
+            <RfLoader
+              className="plugin-catalog-refresh"
+              label="Refreshing plugins"
+              detail="Keeping runtime state synchronized…"
+              size="compact"
+            />
+          ) : null}
           {orderedPlugins.map((plugin, index) => {
-            const instance = instances.find(
-              (candidate) => candidate.plugin_id === plugin.plugin_id,
-            );
             const selected = plugin.plugin_id === activePluginId;
             const activating = activatingId === plugin.plugin_id;
             return (
@@ -2572,13 +2643,7 @@ function PluginPickerModal({
                 <PluginIcon plugin={plugin} name={plugin.plugin_name} className="plugin-picker-icon" />
                 <span className="play-plugin-copy">
                   <strong>{plugin.plugin_name}{formatPluginVersion(plugin.version)}</strong>
-                  <small>
-                    {!plugin.active
-                      ? "Installed · Activation required"
-                      : instance
-                      ? `${instance.sounds.length} programs · Ready`
-                      : "Active · Preparing runtime"}
-                  </small>
+                  <PluginRuntimeStatus status={runtime[plugin.plugin_id]} />
                 </span>
                 <span className="play-plugin-status">
                   {activating ? (
@@ -2597,6 +2662,7 @@ function PluginPickerModal({
             />
           )}
         </div>
+        )}
       </ModalDialog>
       {pendingActivation ? (
         <ModalDialog
@@ -3054,15 +3120,22 @@ function PluginsPage({
 }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { plugins: installed } = usePluginCatalog();
+  const pluginCatalog = usePluginCatalog();
+  const { plugins: installed } = pluginCatalog;
   const [controllers, setControllers] = useState<ControllerSummary[]>([]);
+  const [controllersStatus, setControllersStatus] = useState<"loading" | "ready" | "error">("loading");
   useEffect(() => {
     let cancelled = false;
     hostJson<{ controllers: ControllerSummary[] }>("/api/v1/controllers")
       .then((response) => {
-        if (!cancelled) setControllers(response.controllers ?? []);
+        if (!cancelled) {
+          setControllers(response.controllers ?? []);
+          setControllersStatus("ready");
+        }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) setControllersStatus("error");
+      });
     return () => {
       cancelled = true;
     };
@@ -3081,6 +3154,11 @@ function PluginsPage({
 
   const removePlugin = async (options: PluginRemovalOptions) => {
     if (!pendingRemoval) return;
+    const finishOperation = beginPluginOperation(
+      pendingRemoval.plugin_id,
+      "remove",
+      `Removing ${pendingRemoval.plugin_name}…`,
+    );
     setRemoving(true);
     setRemovalError(null);
     setRemovalMessage(null);
@@ -3101,6 +3179,7 @@ function PluginsPage({
         error instanceof Error ? error.message : "Could not remove the plugin.",
       );
     } finally {
+      finishOperation();
       setRemoving(false);
     }
   };
@@ -3132,6 +3211,11 @@ function PluginsPage({
   };
   const openInPlay = async (plugin: PluginWebDescriptor) => {
     if (!plugin.active) return;
+    const finishOperation = beginPluginOperation(
+      plugin.plugin_id,
+      "open",
+      `Opening ${plugin.plugin_name} in PLAY…`,
+    );
     setChangingPluginId(plugin.plugin_id);
     setActivationError(null);
     try {
@@ -3162,9 +3246,15 @@ function PluginsPage({
         error instanceof Error ? error.message : "Could not open the plugin in PLAY.",
       );
     } finally {
+      finishOperation();
       setChangingPluginId(null);
     }
   };
+
+  const initialCatalogLoading =
+    (pluginCatalog.status === "idle" || pluginCatalog.status === "loading") &&
+    installed.length === 0;
+  const pluginManagerLoading = initialCatalogLoading || controllersStatus === "loading";
 
   return (
     <>
@@ -3185,6 +3275,33 @@ function PluginsPage({
       </div>
       {removalMessage ? <p className="plugin-removal-message">{removalMessage}</p> : null}
       {activationError ? <p className="form-error plugin-manager-error">{activationError}</p> : null}
+      {pluginManagerLoading ? (
+        <RfLoader
+          className="plugin-manager-loader"
+          label="Loading Plugin Manager"
+          detail="Discovering packages and checking the audio runtime…"
+          size="large"
+        />
+      ) : pluginCatalog.status === "error" && installed.length === 0 ? (
+        <div className="plugin-catalog-error" role="alert">
+          <PluginSurfaceState
+            title="Plugin library unavailable"
+            detail={pluginCatalog.error ?? "RackForge could not load installed plugins."}
+          />
+          <button className="secondary-button" onClick={() => void invalidatePluginCatalog()}>
+            Retry
+          </button>
+        </div>
+      ) : (
+      <>
+      {pluginCatalog.status === "loading" ? (
+        <RfLoader
+          className="plugin-catalog-refresh"
+          label="Refreshing plugins"
+          detail="Synchronizing package and runtime state…"
+          size="compact"
+        />
+      ) : null}
       <div className="plugin-grid expanded plugin-manager-grid">
         {installed.map((plugin, index) => {
           const instance = running.find((candidate) => candidate.plugin_id === plugin.plugin_id);
@@ -3205,10 +3322,8 @@ function PluginsPage({
                   <span className="plugin-kind-tag instrument">Instrument</span>
                 </span>
                 <h3>{plugin.plugin_name}{formatPluginVersion(plugin.version)}</h3>
-                <p>
-                  {plugin.surfaces.length === 0 ? "No Web interface" : "Web interface ready"}
-                  {instance ? ` · ${instance.sounds.length} programs` : ""}
-                </p>
+                <PluginRuntimeStatus status={pluginCatalog.runtime[plugin.plugin_id]} />
+                <p>{plugin.surfaces.length === 0 ? "No Web interface" : "Web interface ready"}</p>
               </div>
               <div className="plugin-manager-card-actions" aria-label={`${plugin.plugin_name} actions`}>
                 <button
@@ -3258,6 +3373,16 @@ function PluginsPage({
       {installed.length === 0 ? (
         <EmptyState title="No plugins installed" />
       ) : null}
+      </>
+      )}
+      {controllersStatus === "loading" && !pluginManagerLoading ? (
+        <RfLoader
+          className="plugin-controller-loader"
+          label="Loading controllers"
+          detail="Discovering installed hardware profiles…"
+          size="compact"
+        />
+      ) : null}
       {controllers.length > 0 && (
         <>
           <div className="plugin-section-heading">
@@ -3293,6 +3418,9 @@ function PluginsPage({
           </div>
         </>
       )}
+      {controllersStatus === "error" ? (
+        <p className="form-error plugin-manager-error">Controller packages could not be loaded.</p>
+      ) : null}
       {pendingRemoval ? (
         <PluginRemovalDialog
           pluginName={pendingRemoval.plugin_name}
@@ -3318,10 +3446,22 @@ function PluginGrid({
   expanded?: boolean;
   onRemove?: (plugin: PluginWebDescriptor) => void;
 }) {
-  const { plugins: loadedCatalog } = usePluginCatalog();
+  const pluginCatalog = usePluginCatalog();
+  const { plugins: loadedCatalog } = pluginCatalog;
   const catalog = plugins ?? loadedCatalog;
-  if (instances.length === 0)
-    return <EmptyState title="Waiting for installed plugins" />;
+  if (
+    instances.length === 0 &&
+    (pluginCatalog.status === "idle" || pluginCatalog.status === "loading")
+  ) {
+    return (
+      <RfLoader
+        className="plugin-grid-loader"
+        label="Loading instruments"
+        detail="Waiting for installed plugins and their runtime instances…"
+      />
+    );
+  }
+  if (instances.length === 0) return <EmptyState title="No instruments available" />;
   return (
     <div className={`plugin-grid${expanded ? " expanded" : ""}`}>
       {instances.map((instance, index) => {
@@ -3359,12 +3499,32 @@ function PluginGrid({
   );
 }
 
-function PluginPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
+function PluginPage({
+  snapshot,
+  connection,
+}: {
+  snapshot: SessionSnapshot | null;
+  connection: ConnectionStatus;
+}) {
   const { instanceId } = useParams();
-  const { plugins, status: catalogStatus } = usePluginCatalog();
+  const { plugins, status: catalogStatus, error: catalogError } = usePluginCatalog();
   const instance = snapshot?.instances.find(
     (item) => item.instance_id === decodeURIComponent(instanceId ?? ""),
   );
+  if (
+    !instance &&
+    (connection === "connecting" || catalogStatus === "idle" || catalogStatus === "loading")
+  ) {
+    return (
+      <section className="plugin-surface-shell direct-surface plugin-surface-loading">
+        <RfLoader
+          label="Opening plugin configuration"
+          detail="Loading the plugin catalog and runtime instance…"
+          size="large"
+        />
+      </section>
+    );
+  }
   if (!instance)
     return (
       <section className="plugin-surface-shell direct-surface">
@@ -3374,12 +3534,23 @@ function PluginPage({ snapshot }: { snapshot: SessionSnapshot | null }) {
         />
       </section>
     );
-  if (catalogStatus !== "ready") {
+  if (catalogStatus === "idle" || catalogStatus === "loading") {
+    return (
+      <section className="plugin-surface-shell direct-surface plugin-surface-loading">
+        <RfLoader
+          label="Checking plugin activation"
+          detail="RackForge is verifying the plugin before opening Config…"
+          size="large"
+        />
+      </section>
+    );
+  }
+  if (catalogStatus === "error") {
     return (
       <section className="plugin-surface-shell direct-surface">
         <PluginSurfaceState
-          title="Checking plugin activation"
-          detail="RackForge is verifying that this plugin is active before opening Config."
+          title="Plugin library unavailable"
+          detail={catalogError ?? "RackForge could not verify the plugin catalog."}
         />
       </section>
     );
@@ -3425,6 +3596,11 @@ function PluginConfigSurface({ instance }: { instance: PluginInstance }) {
 
   const removePlugin = async (options: PluginRemovalOptions) => {
     if (!descriptor) return;
+    const finishOperation = beginPluginOperation(
+      descriptor.plugin_id,
+      "remove",
+      `Removing ${descriptor.plugin_name}…`,
+    );
     setRemoving(true);
     setRemoveError(null);
     try {
@@ -3446,6 +3622,7 @@ function PluginConfigSurface({ instance }: { instance: PluginInstance }) {
         error instanceof Error ? error.message : "Could not remove the plugin.",
       );
     } finally {
+      finishOperation();
       setRemoving(false);
     }
   };

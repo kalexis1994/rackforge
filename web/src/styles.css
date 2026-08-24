@@ -1531,7 +1531,7 @@ body {
 
 .compact-control {
   display: grid;
-  grid-template-columns: 48px 116px 36px;
+  grid-template-columns: 48px 124px 38px;
   align-items: center;
   gap: 8px;
   color: var(--muted);
@@ -1541,9 +1541,117 @@ body {
   text-transform: uppercase;
 }
 
-.compact-control input {
+.compact-control > input {
   width: 100%;
   accent-color: var(--ink);
+}
+
+.compact-control-label {
+  color: #a9c1cb;
+}
+
+.compact-fader {
+  height: 26px;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.compact-fader-rail {
+  height: 7px;
+  position: absolute;
+  right: 0;
+  left: 0;
+  overflow: hidden;
+  background: linear-gradient(180deg, #02080d, #122631);
+  border: 1px solid rgba(137, 220, 235, 0.2);
+  border-radius: 999px;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.9),
+    0 1px 0 rgba(255, 255, 255, 0.035);
+  pointer-events: none;
+}
+
+.compact-fader-fill {
+  height: 100%;
+  position: absolute;
+  left: var(--fader-start);
+  width: var(--fader-span);
+  background: linear-gradient(90deg, #3bc7df, #8ef1ff);
+  border-radius: inherit;
+  box-shadow: 0 0 9px rgba(78, 221, 244, 0.5);
+}
+
+.compact-fader-center {
+  width: 1px;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  z-index: 1;
+  background: rgba(221, 248, 252, 0.56);
+}
+
+.compact-fader input[type="range"] {
+  width: 100%;
+  height: 26px;
+  margin: 0;
+  position: relative;
+  z-index: 2;
+  appearance: none;
+  background: transparent;
+  cursor: ew-resize;
+}
+
+.compact-fader input[type="range"]::-webkit-slider-runnable-track {
+  height: 7px;
+  background: transparent;
+  border: 0;
+}
+
+.compact-fader input[type="range"]::-webkit-slider-thumb {
+  width: 14px;
+  height: 18px;
+  margin-top: -6px;
+  appearance: none;
+  background:
+    linear-gradient(90deg, transparent 44%, rgba(4, 18, 24, 0.82) 45% 55%, transparent 56%),
+    linear-gradient(145deg, #effcff, #7ddfec 62%, #3b9fb1);
+  border: 1px solid rgba(219, 251, 255, 0.88);
+  border-radius: 4px;
+  box-shadow:
+    0 2px 7px rgba(0, 0, 0, 0.62),
+    0 0 0 1px rgba(4, 17, 23, 0.7),
+    0 0 10px rgba(77, 222, 244, 0.2);
+  transition: filter 120ms ease, box-shadow 120ms ease;
+}
+
+.compact-fader input[type="range"]::-moz-range-track {
+  height: 7px;
+  background: transparent;
+  border: 0;
+}
+
+.compact-fader input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 18px;
+  background: linear-gradient(145deg, #effcff, #7ddfec 62%, #3b9fb1);
+  border: 1px solid rgba(219, 251, 255, 0.88);
+  border-radius: 4px;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.62), 0 0 10px rgba(77, 222, 244, 0.2);
+}
+
+.compact-fader input[type="range"]:hover::-webkit-slider-thumb,
+.compact-fader input[type="range"]:focus-visible::-webkit-slider-thumb {
+  filter: brightness(1.12);
+  box-shadow:
+    0 2px 7px rgba(0, 0, 0, 0.62),
+    0 0 0 2px rgba(83, 226, 247, 0.24),
+    0 0 14px rgba(77, 222, 244, 0.42);
+}
+
+.compact-fader input[type="range"]:focus-visible {
+  outline: none;
 }
 
 .compact-control output {
@@ -3522,7 +3630,7 @@ body {
 
   .now-playing .muted-inline,
   .pan-control,
-  .compact-control > span {
+  .compact-control > .compact-control-label {
     display: none;
   }
 
@@ -10130,6 +10238,119 @@ body {
 .plugin-kind-tag.instrument {
   color: #0a1418;
   background: #3ad8e0;
+}
+
+.rf-switch {
+  min-width: 210px;
+  min-height: 58px;
+  padding: 10px 12px 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--ink);
+  background: linear-gradient(145deg, rgba(15, 36, 48, 0.86), rgba(5, 17, 25, 0.96));
+  border: 1px solid rgba(130, 216, 232, 0.2);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.055);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.rf-switch:hover:not(:disabled) {
+  border-color: rgba(91, 223, 243, 0.46);
+  background: linear-gradient(145deg, rgba(19, 45, 59, 0.92), rgba(6, 21, 30, 0.98));
+}
+
+.rf-switch:focus-visible {
+  border-color: var(--acid);
+  outline: 2px solid rgba(85, 231, 255, 0.2);
+  outline-offset: 2px;
+}
+
+.rf-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.rf-switch-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.rf-switch-copy strong {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rf-switch-copy small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.25;
+}
+
+.rf-switch-state {
+  flex: 0 0 auto;
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+
+.rf-switch-state > span {
+  color: #78919b;
+  font: 750 8px/1 "Cascadia Mono", "Consolas", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rf-switch-state i {
+  width: 44px;
+  height: 24px;
+  padding: 3px;
+  position: relative;
+  display: block;
+  background: #07131a;
+  border: 1px solid rgba(129, 195, 208, 0.22);
+  border-radius: 999px;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.62);
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.rf-switch-state b {
+  width: 16px;
+  height: 16px;
+  display: block;
+  background: linear-gradient(145deg, #a6bac2, #5f737c);
+  border-radius: 50%;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.55);
+  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1), background 160ms ease;
+}
+
+.rf-switch[aria-checked="true"] {
+  border-color: rgba(85, 231, 255, 0.38);
+  box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.07), 0 0 24px rgba(53, 205, 230, 0.07);
+}
+
+.rf-switch[aria-checked="true"] .rf-switch-state > span {
+  color: #8cebf8;
+}
+
+.rf-switch[aria-checked="true"] .rf-switch-state i {
+  background: rgba(42, 178, 200, 0.24);
+  border-color: rgba(85, 231, 255, 0.62);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.5), 0 0 12px rgba(54, 211, 235, 0.2);
+}
+
+.rf-switch[aria-checked="true"] .rf-switch-state b {
+  background: linear-gradient(145deg, #e4fdff, #65dff0);
+  transform: translateX(20px);
+}
+
+.typing-keyboard-switch {
+  margin-left: auto;
 }
 
 .plugin-kind-tag.effect {

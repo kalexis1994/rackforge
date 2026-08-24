@@ -66,6 +66,7 @@ import { PluginRuntimeStatus } from "./components/PluginRuntimeStatus";
 import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
 import { ModalDialog } from "./components/ModalDialog";
 import { ParameterLinkHost } from "./components/ParameterLinkHost";
+import { ToggleSwitch } from "./components/ToggleSwitch";
 import {
   bindNativePluginResource,
   hostHaptic,
@@ -2210,27 +2211,23 @@ function MasterLevel({ value }: { value: number }) {
   const [dragging, setDragging] = useState(false);
   const displayedValue = dragging ? localValue : value;
   return (
-    <label className="compact-control">
-      <span>Master</span>
-      <input
-        type="range"
-        min="0"
-        max="1000"
-        value={displayedValue}
-        onPointerDown={() => {
-          setLocalValue(value);
-          setDragging(true);
-        }}
-        onPointerUp={() => setDragging(false)}
-        onPointerCancel={() => setDragging(false)}
-        onChange={(event) => {
-          const level = Number(event.target.value);
-          setLocalValue(level);
-          dispatchCommand({ type: "set_master_level", level });
-        }}
-      />
-      <output>{Math.round(displayedValue / 10)}%</output>
-    </label>
+    <MasterFader
+      label="Volume"
+      ariaLabel="Master volume"
+      minimum={0}
+      maximum={1000}
+      value={displayedValue}
+      output={`${Math.round(displayedValue / 10)}%`}
+      onPointerStart={() => {
+        setLocalValue(value);
+        setDragging(true);
+      }}
+      onPointerEnd={() => setDragging(false)}
+      onChange={(level) => {
+        setLocalValue(level);
+        dispatchCommand({ type: "set_master_level", level });
+      }}
+    />
   );
 }
 
@@ -2243,32 +2240,93 @@ function MasterPan({ value }: { value: number }) {
       ? "C"
       : `${displayedValue < 0 ? "L" : "R"}${Math.round(Math.abs(displayedValue) / 10)}`;
   return (
-    <label className="compact-control pan-control">
-      <span>Pan</span>
-      <input
-        type="range"
-        min="-1000"
-        max="1000"
-        step="10"
-        value={displayedValue}
-        onPointerDown={() => {
-          setLocalValue(value);
-          setDragging(true);
-        }}
-        onPointerUp={() => setDragging(false)}
-        onPointerCancel={() => setDragging(false)}
-        onDoubleClick={() => {
-          setLocalValue(0);
-          dispatchCommand({ type: "set_master_pan", pan: 0 });
-        }}
-        onChange={(event) => {
-          let pan = Number(event.target.value);
-          if (Math.abs(pan) <= 70) pan = 0;
-          setLocalValue(pan);
-          dispatchCommand({ type: "set_master_pan", pan });
-        }}
-      />
-      <output>{display}</output>
+    <MasterFader
+      label="Pan"
+      ariaLabel="Master pan"
+      minimum={-1000}
+      maximum={1000}
+      step={10}
+      value={displayedValue}
+      output={display}
+      centered
+      onPointerStart={() => {
+        setLocalValue(value);
+        setDragging(true);
+      }}
+      onPointerEnd={() => setDragging(false)}
+      onDoubleClick={() => {
+        setLocalValue(0);
+        dispatchCommand({ type: "set_master_pan", pan: 0 });
+      }}
+      onChange={(nextPan) => {
+        const pan = Math.abs(nextPan) <= 70 ? 0 : nextPan;
+        setLocalValue(pan);
+        dispatchCommand({ type: "set_master_pan", pan });
+      }}
+    />
+  );
+}
+
+function MasterFader({
+  label,
+  ariaLabel,
+  minimum,
+  maximum,
+  step = 1,
+  value,
+  output,
+  centered = false,
+  onPointerStart,
+  onPointerEnd,
+  onDoubleClick,
+  onChange,
+}: {
+  label: string;
+  ariaLabel: string;
+  minimum: number;
+  maximum: number;
+  step?: number;
+  value: number;
+  output: string;
+  centered?: boolean;
+  onPointerStart: () => void;
+  onPointerEnd: () => void;
+  onDoubleClick?: () => void;
+  onChange: (value: number) => void;
+}) {
+  const position = ((value - minimum) / (maximum - minimum)) * 100;
+  const start = centered ? Math.min(50, position) : 0;
+  const span = centered ? Math.abs(position - 50) : position;
+  const style = {
+    "--fader-position": `${position}%`,
+    "--fader-start": `${start}%`,
+    "--fader-span": `${span}%`,
+  } as CSSProperties;
+  return (
+    <label className={`compact-control${centered ? " is-centered pan-control" : ""}`}>
+      <span className="compact-control-label">{label}</span>
+      <span className="compact-fader" style={style}>
+        <i className="compact-fader-rail" aria-hidden="true">
+          <b className="compact-fader-fill" />
+          {centered ? <b className="compact-fader-center" /> : null}
+        </i>
+        <input
+          type="range"
+          aria-label={ariaLabel}
+          min={minimum}
+          max={maximum}
+          step={step}
+          value={value}
+          onPointerDown={onPointerStart}
+          onPointerUp={onPointerEnd}
+          onPointerCancel={onPointerEnd}
+          onLostPointerCapture={onPointerEnd}
+          onBlur={onPointerEnd}
+          onDoubleClick={onDoubleClick}
+          onChange={(event) => onChange(Number(event.target.value))}
+        />
+      </span>
+      <output>{output}</output>
     </label>
   );
 }
@@ -5308,14 +5366,15 @@ function TypingKeyboardCard() {
           Text fields always take priority.
         </p>
       </div>
-      <label className="settings-check">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(event) => toggle(event.target.checked)}
-        />
-        <span>{enabled ? "Enabled" : "Disabled (default)"}</span>
-      </label>
+      <ToggleSwitch
+        className="typing-keyboard-switch"
+        checked={enabled}
+        label="Typing input"
+        description={enabled ? "Computer keys play notes" : "Computer keys are ignored"}
+        checkedLabel="Enabled"
+        uncheckedLabel="Disabled"
+        onChange={toggle}
+      />
     </article>
   );
 }

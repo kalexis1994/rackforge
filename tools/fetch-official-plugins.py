@@ -27,12 +27,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-106.rfplugin",
         "plugin_id": "org.rackforge.rf-106",
-        "version": "0.2.8",
+        "version": "0.2.9",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-106/"
-            "releases/download/v0.2.8/RF-106.rfplugin"
+            "releases/download/v0.2.9/RF-106.rfplugin"
         ),
-        "sha256": "9772cb93996b235c27b857b6be460b2e4d686445b82d13fa275659a2a3cf6fb5",
+        "sha256": "32bc827c770471c50e13e4443059d44f7fb9b6c30da8c477a0b20266d5fb6815",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",

@@ -11,7 +11,7 @@ RackForge suggests the portable filename `Plugin name - Preset name.rfpreset`, r
 {
   "format": "org.rackforge.preset",
   "schema_version": 1,
-  "exported_by": "RackForge 0.1.4",
+  "exported_by": "RackForge 0.1.5",
   "exported_unix_ms": 1787539200000,
   "preset": {
     "schema_version": 1,

@@ -102,7 +102,7 @@ if [[ -f "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
 fi
 official_plugin=none
 if [[ -f "$release/bundled-plugins/RF-106.rfplugin" ]]; then
-  official_plugin=org.rackforge.rf-106@0.2.8
+  official_plugin=org.rackforge.rf-106@0.2.9
 fi
 printf 'revision=%s\narchitecture=linux-aarch64\ndefault_plugin=%s\nofficial_plugin=%s\n' \
   "$revision" "$default_plugin" "$official_plugin" >"$release/build-info.txt"

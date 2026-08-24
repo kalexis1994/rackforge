@@ -114,11 +114,26 @@ jobs:
         shell: pwsh
         run: ./tools/build-windows-desktop.ps1 -RunTests
 
+      - name: Build RackForge VST3
+        shell: pwsh
+        run: ./tools/build-windows-vst3.ps1 -RunTests
+
       - name: Upload Windows executable
         uses: actions/upload-artifact@v4
         with:
           name: RackForge-Windows-x86_64-${{ github.sha }}
           path: dist/windows-x86_64/rackforge.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: RackForge-VST3-Windows-x86_64-${{ github.sha }}
+          path: |
+            dist/windows-x86_64/rackforge-vst3.dll
+            dist/windows-x86_64/RackForge.vst3
+            dist/windows-x86_64/THIRD_PARTY_NOTICES.md
           if-no-files-found: error
           retention-days: 14
 

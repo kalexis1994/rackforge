@@ -1,0 +1,25 @@
+[package]
+name = "rackforge-vst3"
+description = "RackForge instrument host for VST3-compatible DAWs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow.workspace = true
+rackforge-core = { path = "../../crates/rackforge-core" }
+rackforge-plugin-api = { path = "../../crates/rackforge-plugin-api" }
+rackforge-repository = { path = "../../crates/rackforge-repository" }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+vst3 = "=0.3.0"
+
+[target.'cfg(windows)'.dependencies]
+mime_guess = "2.0"
+raw-window-handle = "0.6"
+wry = { version = "0.56.0", default-features = false, features = ["os-webview"] }

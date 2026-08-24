@@ -10,8 +10,8 @@
 
 RackForge is a cross-platform instrument host for Windows, Android, and
 Raspberry Pi. Connect a MIDI controller and an audio interface, install a
-portable `.rfplugin`, and play without a DAW. The same instruments and
-portable plugin packages can run across all three platforms.
+portable `.rfplugin`, and play without a DAW. The same runtime is also being
+packaged as a Windows VST3 instrument for DAW sessions.
 
 New installations include the RackForge Concert Grand — a physically
 modelled piano developed in this repository, with no samples and a
@@ -75,6 +75,7 @@ operating system's — for a controller on a stage, install RackForge below.
 | Platform | Best for | Audio and MIDI |
 | --- | --- | --- |
 | Windows x86-64 | Creating and editing performances | WASAPI, ASIO, and Windows MIDI |
+| Windows VST3 x86-64 | Using RackForge inside a DAW | DAW-provided MIDI and stereo audio |
 | Android ARM64 | A compact touchscreen instrument | Low-latency native audio and USB MIDI |
 | Raspberry Pi OS ARM64 | A dedicated headless instrument | ALSA, USB MIDI, Web control, and boot services |
 
@@ -97,6 +98,21 @@ Windows builds are currently unsigned, so Windows may ask you to confirm that
 you trust the application. See the
 [Desktop guide](apps/rackforge-desktop/README.md) for ASIO setup, portable mode,
 and troubleshooting.
+
+### Windows VST3 (preview)
+
+The Windows CI build also publishes an installable `RackForge.vst3` bundle and
+a raw `rackforge-vst3.dll` module. Copy the complete `RackForge.vst3` directory
+to a VST3 location scanned by the DAW; the directory, not the loose diagnostic
+DLL, is the user-facing plugin.
+
+The VST edition receives MIDI and audio timing from the DAW and stores its
+instrument state in the DAW project. It does not open a second audio device.
+RackForge controller packages and LITTLE remain part of the VST architecture:
+because a physical surface is unique while a DAW can create many instances,
+one focused RackForge instance owns the controller at a time. See the
+[VST3 host architecture](docs/architecture/vst3-host.md) for the lifecycle and
+current integration boundary.
 
 ### Android
 

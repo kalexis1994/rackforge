@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root { color-scheme:dark; --accent:__PLUGIN_ACCENT__; --shell:#04121a; --line:#183844; --text:#e8f6f9; --muted:#8299a3; }
+    * { box-sizing:border-box; user-select:none; -webkit-user-select:none; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; }
+    body { background:var(--shell); color:var(--text); font:13px/1.3 "Segoe UI",sans-serif; }
+    .app { height:100%; display:grid; grid-template-rows:48px minmax(0,1fr); }
+    .statusbar { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:20px; padding:0 14px; background:linear-gradient(180deg,#081d27 0%,#05151d 100%); border-bottom:1px solid var(--line); box-shadow:0 5px 18px #0007; z-index:2; }
+    .identity { min-width:0; display:flex; align-items:center; gap:11px; }
+    .mark { width:30px; height:30px; flex:0 0 auto; display:grid; place-items:center; border:1px solid color-mix(in srgb,var(--accent) 62%,#143746); border-radius:7px; color:#001016; background:var(--accent); box-shadow:0 0 15px color-mix(in srgb,var(--accent) 24%,transparent); font:800 10px/1 ui-monospace,monospace; }
+    .mode { flex:0 0 auto; color:var(--accent); font:800 9px/1 ui-monospace,monospace; letter-spacing:.18em; }
+    .plugin { min-width:0; display:flex; align-items:baseline; gap:7px; }
+    .plugin strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; letter-spacing:.025em; }
+    .plugin span { flex:0 0 auto; color:var(--muted); font:10px/1 ui-monospace,monospace; }
+    .master { display:flex; align-items:center; gap:9px; color:var(--muted); font:800 9px/1 ui-monospace,monospace; letter-spacing:.12em; }
+    .master input { width:116px; accent-color:var(--accent); cursor:pointer; }
+    .master output { width:32px; color:var(--text); text-align:right; letter-spacing:0; }
+    .surface { min-height:0; position:relative; background:#02090d; }
+    .surface iframe { width:100%; height:100%; display:block; border:0; background:#02090d; }
+    .loading { position:absolute; inset:0; display:grid; place-items:center; pointer-events:none; color:var(--muted); background:radial-gradient(circle at 50% 35%,#0d2732,#02090d 58%); font:10px/1 ui-monospace,monospace; letter-spacing:.15em; transition:opacity 180ms ease; }
+    .loading.hidden { opacity:0; }
+    @media(max-width:690px) { .statusbar{gap:8px;padding:0 9px}.mode{display:none}.plugin span{display:none}.master input{width:78px} }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="statusbar">
+      <div class="identity"><span class="mark">RF</span><span class="mode">PLAY</span><div class="plugin"><strong>__PLUGIN_NAME__</strong><span>v__PLUGIN_VERSION__</span></div></div>
+      <label class="master"><span>MASTER</span><input id="master" type="range" min="0" max="1" step="0.001"><output id="masterText">100%</output></label>
+    </header>
+    <main class="surface"><iframe id="plugin" title="__PLUGIN_NAME__ PLAY"></iframe><div class="loading" id="loading">LOADING PLAY SURFACE…</div></main>
+  </div>
+  <script>
+    window.__RACKFORGE_HOST_SHELL__ = 'vst3';
+    const PROTOCOL = 'rackforge.plugin.web@1';
+    const pluginId = __PLUGIN_ID_JSON__;
+    const pluginEntry = __PLUGIN_ENTRY_JSON__;
+    const schema = __PLUGIN_SCHEMA_JSON__;
+    const presetValues = __PLUGIN_PRESETS_JSON__;
+    let values = __PLUGIN_VALUES_JSON__;
+    let selectedSoundId = null;
+    const frame = document.getElementById('plugin');
+    const loading = document.getElementById('loading');
+    const master = document.getElementById('master');
+    const masterText = document.getElementById('masterText');
+    const setMaster = raw => { const value=Math.max(0,Math.min(1,Number(raw))); master.value=String(value); masterText.textContent=`${Math.round(value*100)}%`; };
+    setMaster(__RACKFORGE_INITIAL_LEVEL__);
+    master.addEventListener('input',()=>{ setMaster(master.value); window.ipc.postMessage(JSON.stringify({op:'set_master_level',value:Number(master.value)})); });
+    const respond=(target,requestId,ok,result,error)=>target?.postMessage({protocol:PROTOCOL,kind:'response',request_id:requestId,ok,...(ok?{result}:{error})},'*');
+    const context=()=>frame.contentWindow?.postMessage({protocol:PROTOCOL,kind:'context',surface:'play',instance:{instance_id:'vst3-main',plugin_id:pluginId,selected_sound_id:selectedSoundId}},'*');
+    window.addEventListener('message',event=>{
+      const message=event.data;
+      if(!message||message.protocol!==PROTOCOL)return;
+      if(message.kind==='ready'){loading.classList.add('hidden');context();return;}
+      if(message.kind!=='request')return;
+      const params=message.params??{};
+      if(message.method==='plugin.parameters'){
+        respond(event.source,message.request_id,true,{schema,values});
+      }else if(message.method==='plugin.set_parameter'&&Number.isInteger(params.parameter_index)&&Number.isFinite(params.value)){
+        values=values.filter(item=>item.index!==params.parameter_index); values.push({index:params.parameter_index,value:params.value});
+        window.ipc.postMessage(JSON.stringify({op:'set_plugin_parameter',parameter_index:params.parameter_index,value:params.value}));
+        respond(event.source,message.request_id,true,{parameter_index:params.parameter_index,value:params.value});
+      }else if(message.method==='plugin.select_sound'&&typeof params.sound_id==='string'&&Array.isArray(presetValues[params.sound_id])){
+        selectedSoundId=params.sound_id; values=presetValues[params.sound_id].map(item=>({...item}));
+        window.ipc.postMessage(JSON.stringify({op:'select_sound',sound_id:selectedSoundId}));
+        respond(event.source,message.request_id,true,{sound_id:selectedSoundId});
+      }else{
+        respond(event.source,message.request_id,false,undefined,`Unsupported VST3 host request: ${message.method}`);
+      }
+    });
+    frame.addEventListener('load',context);
+    frame.src=pluginEntry;
+  </script>
+</body>
+</html>

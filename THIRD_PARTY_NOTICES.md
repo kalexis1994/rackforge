@@ -24,6 +24,16 @@ Copyright 2018 The Chakra Petch Project Authors.
 The complete license is distributed with the Web and Android assets at
 `fonts/OFL.txt`.
 
+RackForge VST3 uses the `vst3` Rust bindings generated from the VST 3 API.
+
+## vst3-rs
+
+- Project: <https://github.com/coupler-rs/vst3-rs>
+- Version: 0.3.0
+- License: MIT OR Apache-2.0
+
+Copyright (c) the vst3-rs contributors.
+
 RackForge's Web resource explorer includes the SVAR React File Manager and its
 SVAR UI support packages.
 

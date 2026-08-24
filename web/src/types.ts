@@ -77,6 +77,16 @@ export interface SessionSnapshot {
   parameter_links?: ParameterLink[];
 }
 
+export interface OutputMeterSnapshot {
+  left_peak: number;
+  right_peak: number;
+}
+
+export interface OutputMeterMessage {
+  status: "output_meter";
+  meter: OutputMeterSnapshot;
+}
+
 export interface MidiSourceDescriptor {
   id: string;
   name: string;

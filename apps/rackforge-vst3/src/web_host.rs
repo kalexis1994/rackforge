@@ -231,6 +231,10 @@ fn handle_session_command(
         .ok_or_else(|| "VST session request has no operation".to_owned())?;
     match operation {
         "snapshot" => Ok(vec![snapshot(shared)?]),
+        "output_meter" => Ok(vec![json!({
+            "status": "output_meter",
+            "meter": { "left_peak": 0.0, "right_peak": 0.0 },
+        })]),
         "performance_snapshot" => Ok(vec![json!({
             "status": "performance_snapshot",
             "snapshot": empty_performance_snapshot(),

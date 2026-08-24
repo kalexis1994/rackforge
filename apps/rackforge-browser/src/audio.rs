@@ -6,6 +6,7 @@
 //! and smooths master changes across a block the way the appliance host does
 //! rather than stepping them at a block boundary.
 
+use rackforge_audio_api::{OutputMeter, OutputMeterSnapshot};
 use rackforge_core::PluginInstance;
 use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use rackforge_session_api::{MasterLevel, MasterPan};
@@ -70,6 +71,7 @@ pub struct AudioEngine {
     level: Smoothed,
     left: Smoothed,
     right: Smoothed,
+    output_meter: OutputMeter,
 }
 
 impl AudioEngine {
@@ -92,6 +94,7 @@ impl AudioEngine {
             level: Smoothed::new(level.amplitude()),
             left: Smoothed::new(left),
             right: Smoothed::new(right),
+            output_meter: OutputMeter::default(),
         }
     }
 
@@ -138,6 +141,10 @@ impl AudioEngine {
         &self.output[..samples]
     }
 
+    pub fn take_output_meter(&self) -> OutputMeterSnapshot {
+        self.output_meter.take()
+    }
+
     /// Renders the active instrument, then applies master level and balance.
     ///
     /// A plugin that fails mid-performance yields silence rather than the
@@ -179,6 +186,8 @@ impl AudioEngine {
                 };
                 *sample *= level * balance;
             }
+            self.output_meter
+                .observe_stereo(frame[0], frame.get(1).copied().unwrap_or(frame[0]));
         }
         &self.output[..samples]
     }

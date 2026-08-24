@@ -3,6 +3,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, FromSample, Sample, SampleFormat, SizedSample, SupportedBufferSize};
 use keylab_essential_mk3::{controller as keylab_controller, protocol as keylab_protocol};
 use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
+use rackforge_audio_api::{OutputMeter, OutputMeterSnapshot};
 use rackforge_control_api::PluginParameterValue;
 use rackforge_core::{
     CompiledParameterLink, LoadedPlugin, PluginInstance,
@@ -721,6 +722,7 @@ pub struct DesktopAudio {
     display_sender: SyncSender<Screen>,
     errors: Arc<Mutex<Option<String>>>,
     telemetry: Arc<AudioTelemetry>,
+    output_meter: Arc<OutputMeter>,
     capture_ring: Option<Arc<CaptureRing>>,
     sample_rate: u32,
     summary: String,
@@ -797,6 +799,7 @@ impl DesktopAudio {
             .unwrap_or(0);
 
         let telemetry = Arc::new(AudioTelemetry::default());
+        let output_meter = Arc::new(OutputMeter::default());
         let (midi_sender, midi_receiver) = mpsc::sync_channel(MIDI_QUEUE_CAPACITY);
         // Notes played on a surface deserve the same queue as notes played on
         // a keyboard: 4096 deep, and anything that does not fit in this block
@@ -852,6 +855,7 @@ impl DesktopAudio {
             capture_channels,
             device_channels,
             output_gain: db_to_amplitude(preferences.output_gain_db),
+            output_meter: Arc::clone(&output_meter),
             master_gain: MasterGain::new(MasterLevel::UNITY),
             master_balance: MasterBalance::new(MasterPan::CENTER),
             stopped: false,
@@ -923,6 +927,7 @@ impl DesktopAudio {
             display_sender,
             errors,
             telemetry,
+            output_meter,
             capture_ring,
             sample_rate: config.sample_rate.0,
             summary,
@@ -941,6 +946,10 @@ impl DesktopAudio {
             status.capture_underruns = capture.underruns.load(Ordering::Relaxed);
         }
         status
+    }
+
+    pub fn take_output_meter(&self) -> OutputMeterSnapshot {
+        self.output_meter.take()
     }
 
     /// Raw callback count, for the stall watchdog: a healthy stream renders
@@ -1425,6 +1434,7 @@ struct AudioProcessor {
     capture_channels: usize,
     device_channels: usize,
     output_gain: f32,
+    output_meter: Arc<OutputMeter>,
     master_gain: MasterGain,
     master_balance: MasterBalance,
     stopped: bool,
@@ -2005,7 +2015,11 @@ fn render_output(
     let frames = data.len() / processor.device_channels;
     let device_channels = processor.device_channels;
     let output_gain = processor.output_gain;
+    let output_meter = Arc::clone(&processor.output_meter);
     let rendered = processor.render(frames)?;
+    for frame in rendered.chunks_exact(PLUGIN_OUTPUT_CHANNELS) {
+        output_meter.observe_stereo(frame[0] * output_gain, frame[1] * output_gain);
+    }
     match format {
         SampleFormat::I8 => copy_samples::<i8>(data, rendered, device_channels, output_gain),
         SampleFormat::I16 => copy_samples::<i16>(data, rendered, device_channels, output_gain),

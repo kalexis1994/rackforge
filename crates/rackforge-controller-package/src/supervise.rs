@@ -16,8 +16,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const GRACEFUL_SHUTDOWN_POLL: Duration = Duration::from_millis(25);
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// How a host runs the supervision loop.
 pub struct SuperviseOptions {
@@ -104,6 +109,11 @@ pub fn controller_command(
     for (key, value) in extra_env {
         command.env(key, value);
     }
+    // Controller packages are console executables so they remain convenient
+    // to diagnose when run directly. When RackForge supervises them from the
+    // Windows GUI, however, they must not create a separate console window.
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
     Ok(command)
 }
 

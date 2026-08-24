@@ -59,6 +59,7 @@ import {
   setPluginStateParameter,
   stopGateway,
   sendVirtualMidi,
+  subscribeOutputMeter,
 } from "./gateway";
 import { RfLoader } from "./components/RfLoader";
 import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
@@ -99,6 +100,7 @@ import { TouchControllerPage } from "./TouchControllerPage";
 import type { RootState } from "./store";
 import type {
   PluginInstance,
+  OutputMeterSnapshot,
   ConnectionStatus,
   HostPresetSummary,
   HostAudioPreferences,
@@ -2201,8 +2203,75 @@ function TopBar({
       <div className="top-controls">
         {!isVstHost() ? <MasterPan value={snapshot?.master_pan ?? 0} /> : null}
         <MasterLevel value={snapshot?.master_level ?? 0} />
+        {!isVstHost() ? <MasterOutputMeter /> : null}
       </div>
     </header>
+  );
+}
+
+const METER_FLOOR_DB = -60;
+
+function amplitudeToMeterDb(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return METER_FLOOR_DB;
+  return Math.max(METER_FLOOR_DB, Math.min(3, 20 * Math.log10(value)));
+}
+
+function meterPercent(db: number) {
+  return Math.max(0, Math.min(100, ((db - METER_FLOOR_DB) / -METER_FLOOR_DB) * 100));
+}
+
+function MasterOutputMeter() {
+  const [sample, setSample] = useState({
+    meter: { left_peak: 0, right_peak: 0 } as OutputMeterSnapshot,
+    sequence: 0,
+  });
+  const incoming = [
+    amplitudeToMeterDb(sample.meter.left_peak),
+    amplitudeToMeterDb(sample.meter.right_peak),
+  ] as const;
+  const [levels, setLevels] = useState<[number, number]>([METER_FLOOR_DB, METER_FLOOR_DB]);
+  const [holds, setHolds] = useState<[number, number]>([METER_FLOOR_DB, METER_FLOOR_DB]);
+  const holdUntil = useRef<[number, number]>([0, 0]);
+
+  useEffect(() => subscribeOutputMeter((meter) => {
+    setSample((previous) => ({ meter, sequence: previous.sequence + 1 }));
+  }), []);
+
+  useEffect(() => {
+    const now = performance.now();
+    setLevels((previous) => [
+      Math.max(incoming[0], previous[0] - 2.4),
+      Math.max(incoming[1], previous[1] - 2.4),
+    ]);
+    setHolds((previous) => previous.map((held, channel) => {
+      const next = incoming[channel];
+      if (next >= held) {
+        holdUntil.current[channel] = now + 800;
+        return next;
+      }
+      return now < holdUntil.current[channel]
+        ? held
+        : Math.max(next, held - 1.2);
+    }) as [number, number]);
+  }, [sample.sequence]);
+
+  const maximum = Math.max(...levels);
+  const readable = maximum <= METER_FLOOR_DB
+    ? "silent"
+    : `${maximum.toFixed(1)} dBFS${maximum >= 0 ? ", clipping" : ""}`;
+  return (
+    <div className="master-output-meter" role="meter" aria-label={`Master output ${readable}`}>
+      <span className="master-output-meter-label">Out</span>
+      <span className="master-output-meter-bars" aria-hidden="true">
+        {levels.map((level, channel) => (
+          <i className="master-output-meter-track" key={channel}>
+            <b style={{ height: `${meterPercent(level)}%` }} />
+            <em style={{ bottom: `${meterPercent(holds[channel])}%` }} />
+          </i>
+        ))}
+      </span>
+      <span className="master-output-meter-channels" aria-hidden="true">L R</span>
+    </div>
   );
 }
 

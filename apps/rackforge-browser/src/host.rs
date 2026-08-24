@@ -471,6 +471,9 @@ impl BrowserHost {
             ControlRequest::AudioSnapshot => Ok(ControlResponse::AudioSnapshot {
                 snapshot: Box::new(self.audio_state.clone()),
             }),
+            ControlRequest::OutputMeter => Ok(ControlResponse::OutputMeter {
+                meter: self.audio.take_output_meter(),
+            }),
             ControlRequest::ApplyAudioOutput { .. } => Err(Failure::new(
                 ControlErrorCode::Unavailable,
                 "the browser host plays through the page's audio output, which it cannot reconfigure",

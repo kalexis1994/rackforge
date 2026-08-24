@@ -25,7 +25,7 @@ use anyhow::{Context, Result, bail};
 use midir::MidiInput;
 use rackforge_audio_api::{
     AUDIO_OUTPUT_STATE_SCHEMA_VERSION, AudioInputProfile, AudioOutputProfile, AudioOutputState,
-    AudioSampleFormat,
+    AudioSampleFormat, OutputMeter,
 };
 use rackforge_control_api::{CONTROL_SOCKET_NAME, PluginParameterValue};
 use rackforge_midi_api::{
@@ -1228,6 +1228,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         active_profile: output.profile.clone(),
         devices: audio_devices,
     }));
+    let output_meter = Arc::new(OutputMeter::default());
     let (control_sender, control_receiver) = mpsc::sync_channel(AUDIO_CONTROL_QUEUE_CAPACITY);
     let control_path = control_socket_path();
     let control_storage = config
@@ -1240,6 +1241,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         session_store,
         control_sender,
         Arc::clone(&audio_state),
+        Arc::clone(&output_meter),
         config.audio_state_path,
         Arc::new(Mutex::new(performance_repository)),
         state_store,
@@ -1283,6 +1285,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         initial_master_pan,
         resolve_render_mode(initial_surface_mode, initial_rack_specs.len()),
         audio_state,
+        output_meter,
     )
 }
 
@@ -1558,6 +1561,7 @@ fn audio_loop(
     initial_master_pan: MasterPan,
     mut render_mode: AudioRenderMode,
     audio_state: Arc<Mutex<AudioOutputState>>,
+    output_meter: Arc<OutputMeter>,
 ) -> Result<()> {
     let mut output = Some(initial_output);
     let mut input = initial_input;
@@ -2468,6 +2472,8 @@ fn audio_loop(
                 }
             }
         }
+        let mut block_left_peak = 0.0_f32;
+        let mut block_right_peak = 0.0_f32;
         for (source_frame, target_frame) in mix_output
             .chunks_exact(channels)
             .zip(device_output.chunks_exact_mut(channels))
@@ -2481,11 +2487,20 @@ fn audio_loop(
                     right_balance
                 };
                 let mastered = sample * gain * balance;
+                if channel == 0 {
+                    block_left_peak = block_left_peak.max(mastered.abs());
+                } else if channel == 1 {
+                    block_right_peak = block_right_peak.max(mastered.abs());
+                }
                 meter_peak = meter_peak.max(mastered.abs());
                 meter_clipped += usize::from(mastered.abs() > 0.95);
                 *target = (mastered.clamp(-0.95, 0.95) * i32::MAX as f32) as i32;
             }
         }
+        if channels == 1 {
+            block_right_peak = block_left_peak;
+        }
+        output_meter.observe_stereo(block_left_peak, block_right_peak);
         meter_frames += period_frames;
         let current_output = output
             .as_ref()

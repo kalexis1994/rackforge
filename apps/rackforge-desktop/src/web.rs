@@ -2135,7 +2135,8 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         | ControlRequest::MidiSources
         | ControlRequest::BeginMidiLearn { .. }
         | ControlRequest::MidiLearnStatus { .. }
-        | ControlRequest::CancelMidiLearn { .. }) => {
+        | ControlRequest::CancelMidiLearn { .. }
+        | ControlRequest::OutputMeter) => {
             let (response_sender, response_receiver) = mpsc::channel();
             if state
                 .control

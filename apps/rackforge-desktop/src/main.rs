@@ -43,8 +43,8 @@ use rackforge_plugin_api::{
 };
 use rackforge_repository::{
     InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions,
-    cleanup_uninstall_tombstones, inspect_local_archive, install_local_archive, plugin_is_enabled,
-    remove_plugin_user_data, set_plugin_enabled, uninstall_plugin,
+    RepositoryError, cleanup_uninstall_tombstones, inspect_local_archive, install_local_archive,
+    plugin_is_enabled, remove_plugin_user_data, set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
     AuditionEndReason, BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId,
@@ -3060,6 +3060,24 @@ impl DesktopApp {
 
     fn handle_performance_control(&mut self, request: ControlRequest) -> ControlResponse {
         match request {
+            ControlRequest::OutputMeter => {
+                #[cfg(windows)]
+                {
+                    ControlResponse::OutputMeter {
+                        meter: self
+                            .audio
+                            .as_ref()
+                            .map(desktop_audio::DesktopAudio::take_output_meter)
+                            .unwrap_or_default(),
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    ControlResponse::OutputMeter {
+                        meter: Default::default(),
+                    }
+                }
+            }
             ControlRequest::MidiSources => {
                 #[cfg(windows)]
                 {
@@ -5866,8 +5884,25 @@ fn install_bundled_official_plugins(options: &Options) -> Result<()> {
             .join("packages")
             .join(&inspection.plugin_id)
             .is_dir();
-        let installed = install_local_archive(store_root, bytes)
-            .with_context(|| format!("installing bundled official plugin {archive_name}"))?;
+        let installed = match install_local_archive(store_root, bytes) {
+            Ok(installed) => installed,
+            Err(RepositoryError::ImmutableConflict) => {
+                // A published plugin version is immutable. A locally installed
+                // build with the same version but different bytes must win:
+                // replacing it would violate repository guarantees, while
+                // refusing to start RackForge turns a harmless packaging
+                // mismatch into a total application outage.
+                eprintln!(
+                    "DESKTOP_OFFICIAL_PLUGIN_CONFLICT id={} version={} archive={} action=keep-installed",
+                    inspection.plugin_id, inspection.version, archive_name
+                );
+                continue;
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("installing bundled official plugin {archive_name}"));
+            }
+        };
         if !known_plugin {
             set_plugin_enabled(store_root, &inspection.plugin_id, true).with_context(|| {
                 format!("enabling bundled official plugin {}", inspection.plugin_id)

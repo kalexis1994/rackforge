@@ -1,3 +1,4 @@
+pub use rackforge_audio_api::OutputMeterSnapshot;
 pub use rackforge_audio_api::{AudioOutputProfile, AudioOutputState};
 pub use rackforge_midi_api::{
     MidiChannel, MidiSourceDescriptor, ParameterLink, ParameterLinkChannel, ParameterLinkId,
@@ -17,7 +18,7 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 15;
+pub const CONTROL_SCHEMA_VERSION: u32 = 16;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
 /// Includes a complete base64-encoded 1 MiB plugin state inside `.rfpreset`.
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
@@ -233,6 +234,9 @@ pub enum ControlRequest {
         resource_id: String,
     },
     AudioSnapshot,
+    /// Drains the post-master peaks accumulated since the previous request.
+    /// This is transient telemetry and never advances the session revision.
+    OutputMeter,
     ApplyAudioOutput {
         profile: AudioOutputProfile,
     },
@@ -368,6 +372,9 @@ pub enum ControlResponse {
     },
     AudioSnapshot {
         snapshot: Box<AudioOutputState>,
+    },
+    OutputMeter {
+        meter: OutputMeterSnapshot,
     },
     AudioApplied {
         snapshot: Box<AudioOutputState>,
@@ -776,6 +783,24 @@ mod tests {
         assert_eq!(
             decode_request(&encode_line(&request).unwrap()).unwrap(),
             request
+        );
+        let meter_request = ControlRequest::OutputMeter;
+        assert_eq!(
+            decode_request(&encode_line(&meter_request).unwrap()).unwrap(),
+            meter_request
+        );
+        let meter_response = ControlResponse::OutputMeter {
+            meter: OutputMeterSnapshot {
+                left_peak: 0.75,
+                right_peak: 1.02,
+            },
+        };
+        assert_eq!(
+            serde_json::from_slice::<ControlResponse>(
+                &serde_json::to_vec(&meter_response).unwrap()
+            )
+            .unwrap(),
+            meter_response
         );
     }
 

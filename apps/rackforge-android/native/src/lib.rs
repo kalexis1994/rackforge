@@ -4,6 +4,7 @@ use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
 use keylab_essential_mk3::protocol as keylab_protocol;
+use rackforge_audio_api::OutputMeter;
 use rackforge_control_api::{
     ControlResponse, PluginParameterControlCommand, PresetImportConflictPolicy, RfPresetFile,
     parse_plugin_parameter_control_command,
@@ -66,6 +67,7 @@ const BALANCED_RENDER_AHEAD_FRAMES: usize = 1_152;
 
 static ENGINE: OnceLock<Mutex<Option<AndroidEngine>>> = OnceLock::new();
 static AUDIO: OnceLock<Mutex<Option<NativeAudioOutput>>> = OnceLock::new();
+static OUTPUT_METER: OutputMeter = OutputMeter::new();
 static MIDI_QUEUE: OnceLock<Mutex<VecDeque<AndroidMidiIngress>>> = OnceLock::new();
 static MIDI_SOURCES: OnceLock<Mutex<MidiSourceRegistry>> = OnceLock::new();
 /// Associates Android's runtime-assigned source identity with the signed
@@ -2041,6 +2043,8 @@ unsafe extern "C" fn render_callback(
     let recovery_frames = output.len().div_ceil(2).min(DROPOUT_FADE_FRAMES).max(1);
     let mut nonfinite = 0_u64;
     let mut clipped = 0_u64;
+    let mut left_peak = 0.0_f32;
+    let mut right_peak = 0.0_f32;
     for (index, frame) in output.chunks_exact_mut(2).enumerate() {
         smooth_master_sample(&mut level, level_target);
         smooth_master_sample(&mut pan_left, pan_left_target);
@@ -2061,6 +2065,12 @@ unsafe extern "C" fn render_callback(
         } else {
             frame[1]
         };
+        if left.is_finite() {
+            left_peak = left_peak.max(left.abs());
+        }
+        if right.is_finite() {
+            right_peak = right_peak.max(right.abs());
+        }
         for (sample, value) in frame.iter_mut().zip([left, right]) {
             if !value.is_finite() {
                 *sample = 0.0;
@@ -2075,6 +2085,7 @@ unsafe extern "C" fn render_callback(
     }
     AUDIO_NONFINITE_SAMPLES.fetch_add(nonfinite, Ordering::Relaxed);
     AUDIO_CLIPPED_SAMPLES.fetch_add(clipped, Ordering::Relaxed);
+    OUTPUT_METER.observe_stereo(left_peak, right_peak);
     MASTER_LEVEL_CURRENT_BITS.store(level.to_bits(), Ordering::Relaxed);
     MASTER_PAN_LEFT_CURRENT_BITS.store(pan_left.to_bits(), Ordering::Relaxed);
     MASTER_PAN_RIGHT_CURRENT_BITS.store(pan_right.to_bits(), Ordering::Relaxed);
@@ -3432,6 +3443,23 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginWebContext(
     _class: JClass,
 ) -> jstring {
     engine_string(&mut env, AndroidEngine::web_context_json)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_outputMeterSnapshot(
+    mut env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let result = serde_json::to_string(&OUTPUT_METER.take())
+        .context("serializing Android output meter")
+        .and_then(|value| Ok(env.new_string(value)?.into_raw()));
+    match result {
+        Ok(value) => value,
+        Err(error) => {
+            report(&mut env, error);
+            ptr::null_mut()
+        }
+    }
 }
 
 #[unsafe(no_mangle)]

@@ -225,6 +225,7 @@ public final class MainActivity extends Activity {
     private static native String pluginPackageRoot();
     private static native String pluginWebEntry();
     private static native String pluginWebContext();
+    private static native String outputMeterSnapshot();
     private static native boolean selectPluginSound(String soundId);
     private static native String pluginProgramCommand(String method, String paramsJson);
     private static native String pluginParameterCommand(String method, String paramsJson);
@@ -1486,6 +1487,13 @@ public final class MainActivity extends Activity {
             String operation = request.optString("op");
             if ("snapshot".equals(operation)) {
                 emitSessionSnapshot();
+                return;
+            }
+            if ("output_meter".equals(operation)) {
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "output_meter")
+                        .put("meter", new JSONObject(outputMeterSnapshot()))
+                        .toString());
                 return;
             }
             if ("virtual_midi".equals(operation)) {

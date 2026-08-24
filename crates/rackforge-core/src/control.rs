@@ -11,7 +11,7 @@ use crate::{
     validate_state_reference,
 };
 use anyhow::{Context, Result, bail};
-use rackforge_audio_api::{AudioOutputDocument, AudioOutputProfile, AudioOutputState};
+use rackforge_audio_api::{AudioOutputDocument, AudioOutputProfile, AudioOutputState, OutputMeter};
 use rackforge_control_api::{
     ControlErrorCode, ControlRequest, ControlResponse, MAX_CONTROL_MESSAGE_BYTES,
     MidiLearnCandidate, MidiSourceStatus, PluginParameterValue, VirtualMidiMessage, decode_request,
@@ -291,6 +291,7 @@ struct ControlContext {
     store: SharedSessionStore,
     audio_sender: SyncSender<AudioControlCommand>,
     audio_state: Arc<Mutex<AudioOutputState>>,
+    output_meter: Arc<OutputMeter>,
     audio_state_path: PathBuf,
     performance_repository: Arc<Mutex<PerformanceRepository>>,
     state_store: Arc<Mutex<PluginStateStore>>,
@@ -324,6 +325,7 @@ pub fn start(
     store: SharedSessionStore,
     audio_sender: SyncSender<AudioControlCommand>,
     audio_state: Arc<Mutex<AudioOutputState>>,
+    output_meter: Arc<OutputMeter>,
     audio_state_path: PathBuf,
     performance_repository: Arc<Mutex<PerformanceRepository>>,
     state_store: Arc<Mutex<PluginStateStore>>,
@@ -374,6 +376,7 @@ pub fn start(
         store,
         audio_sender,
         audio_state,
+        output_meter,
         audio_state_path,
         performance_repository,
         state_store,
@@ -474,6 +477,9 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
                 snapshot: Box::new(snapshot.clone()),
             },
             Err(_) => internal_error("audio state lock is poisoned", current_revision(context)),
+        },
+        ControlRequest::OutputMeter => ControlResponse::OutputMeter {
+            meter: context.output_meter.take(),
         },
         ControlRequest::PerformanceSnapshot => {
             match (context.store.lock(), context.performance_repository.lock()) {

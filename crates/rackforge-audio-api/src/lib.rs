@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::atomic::{AtomicU32, Ordering};
 use thiserror::Error;
 
 pub const AUDIO_DEVICE_SCHEMA_VERSION: u32 = 1;
@@ -9,6 +10,90 @@ pub const MAX_ACTIVE_INPUT_CHANNELS: usize = 2;
 pub const COMMON_SAMPLE_RATES: [u32; 8] = [
     32_000, 44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 384_000,
 ];
+
+/// One non-persistent, post-master peak measurement.
+///
+/// Values are linear full-scale amplitudes. `1.0` is 0 dBFS; values above
+/// one are intentionally preserved so a UI can report clipping even when the
+/// device conversion clamps the actual sample.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutputMeterSnapshot {
+    pub left_peak: f32,
+    pub right_peak: f32,
+}
+
+impl OutputMeterSnapshot {
+    pub fn validate(self) -> Result<(), AudioError> {
+        if !self.left_peak.is_finite()
+            || !self.right_peak.is_finite()
+            || self.left_peak < 0.0
+            || self.right_peak < 0.0
+        {
+            return Err(AudioError::InvalidMeterSnapshot);
+        }
+        Ok(())
+    }
+}
+
+/// Lock-free peak accumulator shared by an audio callback and the control UI.
+///
+/// The callback publishes only the greatest non-negative sample seen since
+/// the last `take`; the control side atomically drains both channels. No
+/// allocation, mutex, system call, or wake-up occurs on the audio thread.
+#[derive(Default)]
+pub struct OutputMeter {
+    left_peak_bits: AtomicU32,
+    right_peak_bits: AtomicU32,
+}
+
+impl OutputMeter {
+    pub const fn new() -> Self {
+        Self {
+            left_peak_bits: AtomicU32::new(0),
+            right_peak_bits: AtomicU32::new(0),
+        }
+    }
+
+    pub fn observe_stereo(&self, left: f32, right: f32) {
+        publish_peak(&self.left_peak_bits, left.abs());
+        publish_peak(&self.right_peak_bits, right.abs());
+    }
+
+    pub fn observe_interleaved(&self, samples: &[f32], channels: usize) {
+        if channels == 0 {
+            return;
+        }
+        let mut left = 0.0_f32;
+        let mut right = 0.0_f32;
+        for frame in samples.chunks_exact(channels) {
+            let left_sample = frame[0].abs();
+            let right_sample = frame.get(1).copied().unwrap_or(frame[0]).abs();
+            if left_sample.is_finite() {
+                left = left.max(left_sample);
+            }
+            if right_sample.is_finite() {
+                right = right.max(right_sample);
+            }
+        }
+        self.observe_stereo(left, right);
+    }
+
+    pub fn take(&self) -> OutputMeterSnapshot {
+        OutputMeterSnapshot {
+            left_peak: f32::from_bits(self.left_peak_bits.swap(0, Ordering::AcqRel)),
+            right_peak: f32::from_bits(self.right_peak_bits.swap(0, Ordering::AcqRel)),
+        }
+    }
+}
+
+fn publish_peak(target: &AtomicU32, peak: f32) {
+    if !peak.is_finite() {
+        return;
+    }
+    // IEEE-754 bit ordering matches numeric ordering for non-negative floats.
+    target.fetch_max(peak.to_bits(), Ordering::Relaxed);
+}
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -514,6 +599,8 @@ impl AudioInputProfile {
 
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum AudioError {
+    #[error("output meter peaks must be finite and non-negative")]
+    InvalidMeterSnapshot,
     #[error("invalid audio device id {0:?}")]
     InvalidDeviceId(String),
     #[error("unsupported audio schema {0}")]
@@ -633,6 +720,35 @@ mod tests {
             buffer_frames: 384,
             gain_db: 0,
         }
+    }
+
+    #[test]
+    fn output_meter_keeps_peaks_until_they_are_drained() {
+        let meter = OutputMeter::default();
+        meter.observe_interleaved(&[0.1, -0.2, -0.8, 0.4], 2);
+        meter.observe_stereo(0.3, 1.1);
+
+        assert_eq!(
+            meter.take(),
+            OutputMeterSnapshot {
+                left_peak: 0.8,
+                right_peak: 1.1,
+            }
+        );
+        assert_eq!(meter.take(), OutputMeterSnapshot::default());
+    }
+
+    #[test]
+    fn output_meter_mirrors_mono_and_ignores_non_finite_samples() {
+        let meter = OutputMeter::default();
+        meter.observe_interleaved(&[f32::NAN, -0.5, f32::INFINITY], 1);
+        assert_eq!(
+            meter.take(),
+            OutputMeterSnapshot {
+                left_peak: 0.5,
+                right_peak: 0.5,
+            }
+        );
     }
 
     #[test]

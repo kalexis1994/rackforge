@@ -7,7 +7,7 @@ import {
   snapshotReceived,
   store,
 } from "./store";
-import { openSessionChannel, type SessionChannel } from "./host";
+import { isVstHost, openSessionChannel, type SessionChannel } from "./host";
 import { randomIdToken } from "./ids";
 import { invalidatePluginCatalog } from "./pluginCatalog";
 import { serializeSessionCommand } from "./sessionCommandProtocol";
@@ -26,6 +26,8 @@ import type {
   PluginStateReference,
   MidiLearnCandidate,
   MidiSourceStatus,
+  OutputMeterMessage,
+  OutputMeterSnapshot,
   ParameterLink,
   SessionSnapshot,
   SessionCommand,
@@ -38,6 +40,7 @@ function createClientId() {
 const CLIENT_ID = createClientId();
 const RECONNECT_DELAY_MS = 1200;
 const PERFORMANCE_REFRESH_MS = 2000;
+const OUTPUT_METER_REFRESH_MS = 50;
 const COMMAND_TIMEOUT_MS = 8_000;
 
 let socket: SessionChannel | null = null;
@@ -47,8 +50,10 @@ let coreReady = false;
 let commandId = 0;
 let reconnectTimer: number | null = null;
 let performanceTimer: number | null = null;
+let outputMeterTimer: number | null = null;
 let gatewayGeneration = 0;
 let performanceSnapshotInFlight = false;
+let outputMeterInFlight = false;
 let intentionallyStopped = false;
 let pendingPerformanceEdit:
   | {
@@ -86,6 +91,7 @@ const pendingSnapshotRefreshes = new Set<{
   reject: (error: Error) => void;
   timeout: number;
 }>();
+const outputMeterListeners = new Set<(meter: OutputMeterSnapshot) => void>();
 
 function resolveSnapshotRefreshes(snapshot: SessionSnapshot) {
   for (const pending of pendingSnapshotRefreshes) {
@@ -181,12 +187,18 @@ export function connectGateway() {
       sessionConnecting = false;
       sessionConnected = true;
       performanceSnapshotInFlight = false;
+      outputMeterInFlight = false;
       store.dispatch(connectionChanged("online"));
       void invalidatePluginCatalog().catch(() => undefined);
       if (performanceTimer !== null) window.clearInterval(performanceTimer);
       performanceTimer = window.setInterval(
         sendPerformanceSnapshotRequest,
         PERFORMANCE_REFRESH_MS,
+      );
+      if (outputMeterTimer !== null) window.clearInterval(outputMeterTimer);
+      outputMeterTimer = window.setInterval(
+        sendOutputMeterRequest,
+        OUTPUT_METER_REFRESH_MS,
       );
     },
     onMessage: (payload) => {
@@ -219,6 +231,10 @@ export function connectGateway() {
         } else if (message.status === "host_idle") {
           coreReady = false;
           store.dispatch(hostIdleReceived());
+        } else if (message.status === "output_meter" && "meter" in message) {
+          outputMeterInFlight = false;
+          const meterMessage = message as unknown as OutputMeterMessage;
+          for (const listener of outputMeterListeners) listener(meterMessage.meter);
         } else if (message.status === "core_restarting") {
           coreReady = false;
           store.dispatch(connectionChanged("connecting"));
@@ -285,8 +301,11 @@ export function connectGateway() {
       sessionConnecting = false;
       coreReady = false;
       performanceSnapshotInFlight = false;
+      outputMeterInFlight = false;
       if (performanceTimer !== null) window.clearInterval(performanceTimer);
+      if (outputMeterTimer !== null) window.clearInterval(outputMeterTimer);
       performanceTimer = null;
+      outputMeterTimer = null;
       pendingPerformanceEdit?.reject(
         new Error("The RackForge Core connection was interrupted."),
       );
@@ -492,8 +511,10 @@ export function stopGateway() {
   gatewayGeneration += 1;
   if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
   if (performanceTimer !== null) window.clearInterval(performanceTimer);
+  if (outputMeterTimer !== null) window.clearInterval(outputMeterTimer);
   reconnectTimer = null;
   performanceTimer = null;
+  outputMeterTimer = null;
   releaseVirtualMidi();
   const closingSocket = socket;
   socket = null;
@@ -501,6 +522,10 @@ export function stopGateway() {
   sessionConnecting = false;
   coreReady = false;
   performanceSnapshotInFlight = false;
+  outputMeterInFlight = false;
+  for (const listener of outputMeterListeners) {
+    listener({ left_peak: 0, right_peak: 0 });
+  }
   const interruption = new Error("The RackForge Core connection was interrupted.");
   pendingPerformanceEdit?.reject(interruption);
   pendingPerformanceEdit = null;
@@ -589,6 +614,20 @@ export function dispatchCommand(command: SessionCommand) {
 
 function commandPayload(id: number, command: SessionCommand) {
   return serializeSessionCommand(CLIENT_ID, id, command);
+}
+
+function sendOutputMeterRequest() {
+  if (!isVstHost() && socket && sessionConnected && coreReady && !outputMeterInFlight) {
+    outputMeterInFlight = true;
+    socket.send(JSON.stringify({ op: "output_meter" }));
+  }
+}
+
+export function subscribeOutputMeter(listener: (meter: OutputMeterSnapshot) => void) {
+  outputMeterListeners.add(listener);
+  return () => {
+    outputMeterListeners.delete(listener);
+  };
 }
 
 export function exportPluginPreset(

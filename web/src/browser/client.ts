@@ -43,6 +43,21 @@ const OUTPUT_CHANNELS = 2;
 const STORAGE_MANIFEST = "demo/storage.json";
 const HOST_MODULE = "demo/rackforge-browser.wasm";
 
+/**
+ * Gives every file that defines the bundled browser host a deployment-stable
+ * cache key.
+ *
+ * The offline worker intentionally caches ordinary public files. Without a
+ * revision on the storage manifest, the first visit after a deployment boots
+ * from yesterday's plugin list while the worker refreshes it in the
+ * background. The UI and host module are already tied to this revision; the
+ * packaged filesystem must be tied to it as well.
+ */
+export function versionedBrowserAsset(path: string): string {
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}v=${encodeURIComponent(__UI_REVISION__)}`;
+}
+
 interface StorageManifest {
   /** Paths below the RackForge data root, relative to the storage image. */
   files: string[];
@@ -127,12 +142,14 @@ async function fetchBytes(path: string): Promise<Uint8Array> {
 let packagedFiles: SeedFile[] = [];
 
 async function loadStorage(): Promise<SeedFile[]> {
-  const manifest = (await (await fetch(assetUrl(STORAGE_MANIFEST))).json()) as StorageManifest;
+  const manifest = (await (
+    await fetch(assetUrl(versionedBrowserAsset(STORAGE_MANIFEST)))
+  ).json()) as StorageManifest;
   const [packaged, stored] = await Promise.all([
     Promise.all(
       manifest.files.map(async (path) => ({
         path,
-        bytes: await fetchBytes(`demo/rackforge/${path}`),
+        bytes: await fetchBytes(versionedBrowserAsset(`demo/rackforge/${path}`)),
       })),
     ),
     readStoredFiles(),
@@ -267,7 +284,7 @@ export async function startBrowserHost(): Promise<void> {
     // the hashed UI build so a deployment can never pair a new worklet with
     // yesterday's cached WebAssembly exports.
     const [wasm, files] = await Promise.all([
-      fetchBytes(`${HOST_MODULE}?v=${encodeURIComponent(__UI_REVISION__)}`),
+      fetchBytes(versionedBrowserAsset(HOST_MODULE)),
       loadStorage(),
     ]);
 

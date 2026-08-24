@@ -179,7 +179,7 @@ To install a specific release or enable the optional reversible appliance
 optimizations:
 
 ```bash
-RACKFORGE_VERSION=v0.1.1 bash install-rackforge.sh
+RACKFORGE_VERSION=v0.1.4 bash install-rackforge.sh
 RACKFORGE_OPTIMIZE=1 bash install-rackforge.sh
 ```
 

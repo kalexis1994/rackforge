@@ -48,7 +48,8 @@ use std::os::unix::fs::MetadataExt;
 #[cfg(target_os = "linux")]
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -1142,15 +1143,18 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
     // A driver must never outlive its supervisor: when the host hands us a
     // piped stdin (RACKFORGE_SUPERVISOR_PIPE=1), EOF on it means the
     // supervisor died -- orphaned drivers were holding MIDI ports hostage.
+    let shutdown_requested = Arc::new(AtomicBool::new(false));
     if env::var_os("RACKFORGE_SUPERVISOR_PIPE").is_some() {
-        thread::spawn(|| {
+        let shutdown_requested = Arc::clone(&shutdown_requested);
+        thread::spawn(move || {
             use std::io::Read;
             let mut byte = [0u8; 1];
             loop {
                 match std::io::stdin().read(&mut byte) {
                     Ok(0) | Err(_) => {
-                        eprintln!("Supervisor cerrado; el driver se retira.");
-                        std::process::exit(0);
+                        eprintln!("Supervisor cerrado; restaurando el controlador...");
+                        shutdown_requested.store(true, Ordering::Release);
+                        break;
                     }
                     Ok(_) => {}
                 }
@@ -1161,6 +1165,9 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
     refresh_controller_settings(&mut settings_modified);
     println!("Esperando el KeyLab Essential mk3...");
     loop {
+        if shutdown_requested.load(Ordering::Acquire) {
+            return Ok(());
+        }
         let midi = MidiOutput::new("rackforge KeyLab Display")?;
         let ports = enumerate_ports(&midi)?;
         let port = match select_port(&ports, selector) {
@@ -1248,6 +1255,10 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let mut next_settings_check = Instant::now();
         let mut parameter_mapper = RackForgeParameterMapper::default();
         'surface: loop {
+            if shutdown_requested.load(Ordering::Acquire) {
+                eprintln!("Restaurando OLED, LEDs y preset Arturia antes de salir...");
+                return Ok(());
+            }
             if control_socket_generation() != control_generation {
                 eprintln!("Core cambió; cerrando MIDI para renovar los controles reservados...");
                 break;

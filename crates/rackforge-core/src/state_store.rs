@@ -1,4 +1,9 @@
 use anyhow::{Context, Result, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use rackforge_control_api::{
+    PresetImportConflictKind, PresetImportConflictPolicy, RFPRESET_FORMAT, RFPRESET_SCHEMA_VERSION,
+    RfPresetFile, RfPresetImportPreview, RfPresetStateEncoding,
+};
 use rackforge_plugin_api::{
     HOST_PRESET_SCHEMA_VERSION, HostPreset, HostPresetSummary,
     PLUGIN_STATE_REFERENCE_SCHEMA_VERSION, PluginStateReference, validate_plugin_identifier,
@@ -241,6 +246,150 @@ impl PluginStateStore {
         Ok(preset)
     }
 
+    pub fn export_preset_file(
+        &self,
+        plugin_id: &str,
+        preset_id: &str,
+        plugin_name: &str,
+    ) -> Result<(String, RfPresetFile)> {
+        let preset = self.preset(plugin_id, preset_id)?;
+        let state = self.read(&preset.state)?;
+        let file = RfPresetFile {
+            format: RFPRESET_FORMAT.into(),
+            schema_version: RFPRESET_SCHEMA_VERSION,
+            exported_by: format!("RackForge {}", env!("CARGO_PKG_VERSION")),
+            exported_unix_ms: unix_milliseconds()?,
+            preset,
+            state_encoding: RfPresetStateEncoding::Base64,
+            state_base64: BASE64.encode(state),
+        };
+        Ok((
+            portable_preset_file_name(plugin_name, &file.preset.name),
+            file,
+        ))
+    }
+
+    pub fn inspect_preset_file(
+        &self,
+        target_plugin_id: &str,
+        current_plugin_version: &str,
+        current_state_version: u32,
+        file: &RfPresetFile,
+    ) -> Result<RfPresetImportPreview> {
+        validate_plugin_identifier(target_plugin_id).context("validating preset import target")?;
+        let state = decode_preset_file(file)?;
+        let mut warnings = Vec::new();
+        let plugin_matches = file.preset.plugin_id == target_plugin_id;
+        if !plugin_matches {
+            warnings.push(format!(
+                "This preset belongs to {}, not {}.",
+                file.preset.plugin_id, target_plugin_id
+            ));
+        }
+        let state_matches = file.preset.state.state_version == current_state_version;
+        if !state_matches {
+            warnings.push(format!(
+                "Preset state v{} is incompatible with the installed state v{}.",
+                file.preset.state.state_version, current_state_version
+            ));
+        }
+        if file.preset.state.plugin_version != current_plugin_version {
+            warnings.push(format!(
+                "Created with plugin v{}; installed plugin is v{}.",
+                file.preset.state.plugin_version, current_plugin_version
+            ));
+        }
+        let presets = self.load_presets(target_plugin_id)?;
+        let conflict = preset_conflict(&presets, &file.preset);
+        Ok(RfPresetImportPreview {
+            preset: HostPresetSummary::from(&file.preset),
+            byte_length: u32::try_from(state.len()).context("portable preset state length")?,
+            conflict,
+            compatible: plugin_matches && state_matches,
+            warnings,
+        })
+    }
+
+    pub fn import_preset_file(
+        &mut self,
+        target_plugin_id: &str,
+        current_plugin_version: &str,
+        current_state_version: u32,
+        file: &RfPresetFile,
+        conflict_policy: PresetImportConflictPolicy,
+    ) -> Result<HostPreset> {
+        let preview = self.inspect_preset_file(
+            target_plugin_id,
+            current_plugin_version,
+            current_state_version,
+            file,
+        )?;
+        if !preview.compatible {
+            bail!("portable preset is not compatible with the target plugin");
+        }
+        if preview.conflict.is_some() && conflict_policy == PresetImportConflictPolicy::Reject {
+            bail!("a RackForge preset with this id or name already exists");
+        }
+        if preview.conflict == Some(PresetImportConflictKind::Ambiguous)
+            && conflict_policy == PresetImportConflictPolicy::Replace
+        {
+            bail!(
+                "preset id and name conflict with different local presets; import as a copy instead"
+            );
+        }
+
+        let bytes = decode_preset_file(file)?;
+        let stored_state = self.put(
+            &file.preset.state.plugin_id,
+            &file.preset.state.plugin_version,
+            file.preset.state.state_version,
+            file.preset.state.selected_sound_id.clone(),
+            &bytes,
+        )?;
+        if stored_state != file.preset.state {
+            bail!("portable preset state identity does not match its payload");
+        }
+
+        let existing = self.load_presets(target_plugin_id)?;
+        let mut imported = file.preset.clone();
+        if preview.conflict.is_some() && conflict_policy == PresetImportConflictPolicy::KeepBoth {
+            let now = unix_milliseconds()?;
+            imported.name = unique_import_name(&existing, &imported.name);
+            imported.id = unique_preset_id(&imported.name, &stored_state, now);
+            imported.created_unix_ms = now;
+            imported.updated_unix_ms = now;
+        }
+        imported.state = stored_state;
+        imported.validate()?;
+        self.store_preset_document(&imported)?;
+
+        if preview.conflict.is_some() && conflict_policy == PresetImportConflictPolicy::Replace {
+            for local in existing {
+                if local.id != imported.id && local.name.eq_ignore_ascii_case(&imported.name) {
+                    self.delete_preset(target_plugin_id, &local.id)?;
+                }
+            }
+        }
+        Ok(imported)
+    }
+
+    fn store_preset_document(&mut self, preset: &HostPreset) -> Result<()> {
+        preset.validate()?;
+        if let Some(root) = &self.root {
+            let destination =
+                preset_directory(root, &preset.plugin_id)?.join(format!("{}.json", preset.id));
+            let mut bytes = serde_json::to_vec_pretty(preset)?;
+            bytes.push(b'\n');
+            write_replace_atomic(&destination, &bytes)?;
+        } else {
+            self.memory_presets.insert(
+                (preset.plugin_id.clone(), preset.id.clone()),
+                preset.clone(),
+            );
+        }
+        Ok(())
+    }
+
     fn load_presets(&self, plugin_id: &str) -> Result<Vec<HostPreset>> {
         if let Some(root) = &self.root {
             let directory = preset_directory(root, plugin_id)?;
@@ -278,6 +427,106 @@ impl PluginStateStore {
                 .collect())
         }
     }
+}
+
+fn decode_preset_file(file: &RfPresetFile) -> Result<Vec<u8>> {
+    if file.format != RFPRESET_FORMAT {
+        bail!("file is not a RackForge preset");
+    }
+    if file.schema_version != RFPRESET_SCHEMA_VERSION {
+        bail!("unsupported .rfpreset schema {}", file.schema_version);
+    }
+    if file.exported_by.trim().is_empty() || file.exported_by.len() > 128 {
+        bail!("portable preset exporter identity is invalid");
+    }
+    file.preset
+        .validate()
+        .context("validating portable preset metadata")?;
+    if file.state_encoding != RfPresetStateEncoding::Base64 {
+        bail!("unsupported portable preset state encoding");
+    }
+    let maximum_encoded = MAX_PLUGIN_STATE_BYTES.div_ceil(3) * 4 + 4;
+    if file.state_base64.is_empty() || file.state_base64.len() > maximum_encoded {
+        bail!("portable preset state payload is outside the supported size");
+    }
+    let bytes = BASE64
+        .decode(&file.state_base64)
+        .context("decoding portable preset state")?;
+    if bytes.is_empty() || bytes.len() > MAX_PLUGIN_STATE_BYTES {
+        bail!("portable preset state payload is outside the supported size");
+    }
+    if bytes.len() != file.preset.state.byte_length as usize {
+        bail!("portable preset state length does not match its metadata");
+    }
+    let digest = state_digest(
+        &file.preset.state.plugin_id,
+        &file.preset.state.plugin_version,
+        file.preset.state.state_version,
+        &bytes,
+    );
+    if digest != file.preset.state.blob_sha256 {
+        bail!("portable preset state checksum does not match its metadata");
+    }
+    Ok(bytes)
+}
+
+fn preset_conflict(
+    existing: &[HostPreset],
+    incoming: &HostPreset,
+) -> Option<PresetImportConflictKind> {
+    let id = existing.iter().position(|preset| preset.id == incoming.id);
+    let name = existing
+        .iter()
+        .position(|preset| preset.name.eq_ignore_ascii_case(&incoming.name));
+    match (id, name) {
+        (None, None) => None,
+        (Some(_), None) => Some(PresetImportConflictKind::Id),
+        (None, Some(_)) => Some(PresetImportConflictKind::Name),
+        (Some(left), Some(right)) if left == right => Some(PresetImportConflictKind::IdAndName),
+        (Some(_), Some(_)) => Some(PresetImportConflictKind::Ambiguous),
+    }
+}
+
+fn unique_import_name(existing: &[HostPreset], source: &str) -> String {
+    let mut candidate = format!("{source} (Imported)");
+    let mut suffix = 2u32;
+    while existing
+        .iter()
+        .any(|preset| preset.name.eq_ignore_ascii_case(&candidate))
+    {
+        candidate = format!("{source} (Imported {suffix})");
+        suffix += 1;
+    }
+    candidate
+}
+
+fn portable_preset_file_name(plugin_name: &str, preset_name: &str) -> String {
+    fn component(value: &str, fallback: &str) -> String {
+        let mut output = String::new();
+        for character in value.trim().chars().take(80) {
+            if character.is_alphanumeric() || matches!(character, '-' | '.' | '_') {
+                output.push(character);
+            } else if character.is_whitespace() {
+                if !output.is_empty() && !output.ends_with(' ') {
+                    output.push(' ');
+                }
+            } else if !output.is_empty() && !output.ends_with('_') {
+                output.push('_');
+            }
+        }
+        let output = output.trim_matches(['.', '_', ' ']);
+        if output.is_empty() {
+            fallback.into()
+        } else {
+            output.into()
+        }
+    }
+
+    format!(
+        "{} - {}.rfpreset",
+        component(plugin_name, "RackForge_Plugin"),
+        component(preset_name, "Preset")
+    )
 }
 
 fn state_digest(plugin_id: &str, plugin_version: &str, state_version: u32, bytes: &[u8]) -> String {
@@ -533,5 +782,113 @@ mod tests {
         fs::write(blob, b"tampered").unwrap();
         assert!(store.read(&second).is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn portable_preset_round_trips_with_immutable_state_and_version_metadata() {
+        let mut source = PluginStateStore::new(None).unwrap();
+        let state = source
+            .put(
+                "org.rackforge.rf-dls",
+                "1.2.3",
+                4,
+                Some("grand.piano".into()),
+                b"portable opaque state",
+            )
+            .unwrap();
+        let saved = source.save_preset("Stage Grand", state).unwrap();
+        let (file_name, file) = source
+            .export_preset_file(&saved.plugin_id, &saved.id, "RackForge Concert Grand")
+            .unwrap();
+        assert_eq!(file_name, "RackForge Concert Grand - Stage Grand.rfpreset");
+        let encoded = serde_json::to_vec(&file).unwrap();
+        let decoded: RfPresetFile = serde_json::from_slice(&encoded).unwrap();
+
+        let mut target = PluginStateStore::new(None).unwrap();
+        let preview = target
+            .inspect_preset_file("org.rackforge.rf-dls", "1.3.0", 4, &decoded)
+            .unwrap();
+        assert!(preview.compatible);
+        assert_eq!(preview.byte_length, 21);
+        assert_eq!(preview.conflict, None);
+        assert_eq!(preview.warnings.len(), 1);
+        let imported = target
+            .import_preset_file(
+                "org.rackforge.rf-dls",
+                "1.3.0",
+                4,
+                &decoded,
+                PresetImportConflictPolicy::Reject,
+            )
+            .unwrap();
+        assert_eq!(imported.id, saved.id);
+        assert_eq!(imported.state, saved.state);
+        assert_eq!(
+            target.read(&imported.state).unwrap(),
+            b"portable opaque state"
+        );
+    }
+
+    #[test]
+    fn portable_preset_rejects_tampering_and_incompatible_plugins() {
+        let mut source = PluginStateStore::new(None).unwrap();
+        let state = source
+            .put("org.rackforge.synth", "2.0.0", 7, None, b"trusted state")
+            .unwrap();
+        let saved = source.save_preset("Lead", state).unwrap();
+        let (_, mut file) = source
+            .export_preset_file(&saved.plugin_id, &saved.id, "RF:106 / Beta")
+            .unwrap();
+        file.state_base64 = BASE64.encode(b"hostile state");
+        assert!(
+            source
+                .inspect_preset_file("org.rackforge.synth", "2.0.0", 7, &file)
+                .is_err()
+        );
+
+        let (_, file) = source
+            .export_preset_file(&saved.plugin_id, &saved.id, "RF:106 / Beta")
+            .unwrap();
+        let preview = source
+            .inspect_preset_file("org.rackforge.other", "1.0.0", 3, &file)
+            .unwrap();
+        assert!(!preview.compatible);
+        assert_eq!(preview.warnings.len(), 3);
+    }
+
+    #[test]
+    fn portable_preset_conflicts_are_explicit_and_keep_both_is_lossless() {
+        let mut store = PluginStateStore::new(None).unwrap();
+        let state = store
+            .put("org.rackforge.synth", "1.0.0", 1, None, b"state one")
+            .unwrap();
+        let original = store.save_preset("Lead", state).unwrap();
+        let (_, file) = store
+            .export_preset_file(&original.plugin_id, &original.id, "RF-106")
+            .unwrap();
+        assert!(
+            store
+                .import_preset_file(
+                    "org.rackforge.synth",
+                    "1.0.0",
+                    1,
+                    &file,
+                    PresetImportConflictPolicy::Reject,
+                )
+                .is_err()
+        );
+        let copy = store
+            .import_preset_file(
+                "org.rackforge.synth",
+                "1.0.0",
+                1,
+                &file,
+                PresetImportConflictPolicy::KeepBoth,
+            )
+            .unwrap();
+        assert_ne!(copy.id, original.id);
+        assert_eq!(copy.name, "Lead (Imported)");
+        assert_eq!(copy.state, original.state);
+        assert_eq!(store.list_presets("org.rackforge.synth").unwrap().len(), 2);
     }
 }

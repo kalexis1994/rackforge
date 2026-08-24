@@ -76,6 +76,7 @@ interface BrowserMidiInput extends BrowserMidiEndpoint {
 
 interface BrowserMidiOutput extends BrowserMidiEndpoint {
   send(data: Uint8Array, timestamp?: number): void;
+  clear?(): void;
 }
 
 interface BrowserMidiAccess {
@@ -91,6 +92,10 @@ let keyLabConnected = false;
 let keyLabInputId: string | null = null;
 let keyLabDisplayConnected = false;
 let keyLabOutput: BrowserMidiOutput | null = null;
+let keyLabRestorePlan: Array<{ bytes: number[]; settle_after_ms: number }> = [];
+let keyLabReleaseSent = false;
+let webMidiReconcile: (() => void) | null = null;
+let controllerLifecycleInstalled = false;
 const CONTROLLER_COLOR_KEY = "rackforge.controller.arturia-keylab-essential-mk3.color";
 const DEFAULT_CONTROLLER_COLOR = "#145080";
 
@@ -467,6 +472,67 @@ function rejectPending(error: Error) {
   pending.clear();
 }
 
+export function sendControllerRestorePlan(
+  output: Pick<BrowserMidiOutput, "send" | "clear">,
+  plan: ReadonlyArray<{ bytes: number[] }>,
+): boolean {
+  try {
+    output.clear?.();
+    // Unload handlers cannot wait for cosmetic settle delays. Immediate
+    // writes preserve packet order and maximize the chance that the browser
+    // hands the complete reset to its MIDI stack before page teardown.
+    for (const message of plan) {
+      output.send(new Uint8Array(message.bytes));
+    }
+    return true;
+  } catch (error) {
+    console.warn("RackForge could not restore the Arturia controller", error);
+    return false;
+  }
+}
+
+function releaseKeyLabForPageExit() {
+  if (!keyLabConnected || keyLabReleaseSent) return;
+  keyLabReleaseSent = true;
+  // Keep the worklet coherent when it receives a final timeslice, but do not
+  // depend on it: the direct Web MIDI path owns page teardown.
+  engine?.port.postMessage({ kind: "controller_connection", connected: false });
+  if (keyLabOutput && keyLabRestorePlan.length > 0) {
+    sendControllerRestorePlan(keyLabOutput, keyLabRestorePlan);
+  }
+  keyLabConnected = false;
+  keyLabDisplayConnected = false;
+}
+
+function installControllerLifecycleRelease() {
+  if (controllerLifecycleInstalled) return;
+  controllerLifecycleInstalled = true;
+  window.addEventListener("pagehide", releaseKeyLabForPageExit, { capture: true });
+  window.addEventListener("beforeunload", releaseKeyLabForPageExit, { capture: true });
+  window.addEventListener("pageshow", () => {
+    keyLabReleaseSent = false;
+    webMidiReconcile?.();
+  });
+}
+
+function requestControllerRestorePlan(
+  node: AudioWorkletNode,
+): Promise<Array<{ bytes: number[]; settle_after_ms: number }>> {
+  const id = nextRequestId++;
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      pending.delete(id);
+      reject(new Error("RackForge did not provide the controller release plan."));
+    }, 10_000);
+    pending.set(id, {
+      resolve: (response) => resolve(JSON.parse(response)),
+      reject,
+      timeout,
+    });
+    node.port.postMessage({ kind: "controller_restore_plan", id });
+  });
+}
+
 /**
  * Forwards Web MIDI straight to the engine. Browsers that do not implement it,
  * or a person who declines the permission, simply play with the on-screen
@@ -480,6 +546,12 @@ function attachWebMidi(node: AudioWorkletNode) {
   ).requestMIDIAccess;
   webMidiSupported = Boolean(midi);
   if (!midi) return;
+  installControllerLifecycleRelease();
+  void requestControllerRestorePlan(node)
+    .then((plan) => {
+      keyLabRestorePlan = plan;
+    })
+    .catch((error) => console.warn(error));
 
   const connect = (access: BrowserMidiAccess, sysex: boolean) => {
     webMidiSysex = sysex;
@@ -525,6 +597,7 @@ function attachWebMidi(node: AudioWorkletNode) {
       keyLabConnected = nextController;
       keyLabDisplayConnected = Boolean(controllerInput && controllerOutput && sysex);
       if (pairChanged && nextController) {
+        keyLabReleaseSent = false;
         node.port.postMessage({
           kind: "controller_setting",
           color: parseControllerColor(savedControllerColor()),
@@ -532,6 +605,7 @@ function attachWebMidi(node: AudioWorkletNode) {
         node.port.postMessage({ kind: "controller_connection", connected: true });
       }
     };
+    webMidiReconcile = reconcile;
     reconcile();
     access.onstatechange = reconcile;
   };

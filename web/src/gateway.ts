@@ -65,6 +65,7 @@ let pendingPresetRequest:
       expected: string;
       resolve: (message: Record<string, unknown>) => void;
       reject: (error: Error) => void;
+      timeout?: number;
     }
   | null = null;
 const presetRequestQueue: Array<{
@@ -72,6 +73,7 @@ const presetRequestQueue: Array<{
   expected: string;
   resolve: (message: Record<string, unknown>) => void;
   reject: (error: Error) => void;
+  timeout?: number;
 }> = [];
 const pendingCommands = new Map<number, {
   resolve: (message: CoreCommandAppliedMessage) => void;
@@ -123,6 +125,12 @@ function pumpPresetRequests() {
   const next = presetRequestQueue.shift();
   if (!next) return;
   pendingPresetRequest = next;
+  next.timeout = window.setTimeout(() => {
+    if (pendingPresetRequest !== next) return;
+    pendingPresetRequest = null;
+    next.reject(new Error("RackForge did not complete the preset operation in time."));
+    pumpPresetRequests();
+  }, 30_000);
   socket.send(JSON.stringify(next.request));
 }
 
@@ -220,6 +228,9 @@ export function connectGateway() {
           typeof message.status === "string" &&
           pendingPresetRequest?.expected === message.status
         ) {
+          if (pendingPresetRequest.timeout !== undefined) {
+            window.clearTimeout(pendingPresetRequest.timeout);
+          }
           pendingPresetRequest.resolve(message);
           pendingPresetRequest = null;
           pumpPresetRequests();
@@ -255,6 +266,9 @@ export function connectGateway() {
           pendingPerformanceEdit?.reject(new Error(errorMessage.message));
           pendingPerformanceEdit = null;
           performanceSnapshotInFlight = false;
+          if (pendingPresetRequest?.timeout !== undefined) {
+            window.clearTimeout(pendingPresetRequest.timeout);
+          }
           pendingPresetRequest?.reject(new Error(errorMessage.message));
           pendingPresetRequest = null;
           pumpPresetRequests();
@@ -277,6 +291,9 @@ export function connectGateway() {
         new Error("The RackForge Core connection was interrupted."),
       );
       pendingPerformanceEdit = null;
+      if (pendingPresetRequest?.timeout !== undefined) {
+        window.clearTimeout(pendingPresetRequest.timeout);
+      }
       pendingPresetRequest?.reject(
         new Error("The RackForge Core connection was interrupted."),
       );
@@ -487,6 +504,9 @@ export function stopGateway() {
   const interruption = new Error("The RackForge Core connection was interrupted.");
   pendingPerformanceEdit?.reject(interruption);
   pendingPerformanceEdit = null;
+  if (pendingPresetRequest?.timeout !== undefined) {
+    window.clearTimeout(pendingPresetRequest.timeout);
+  }
   pendingPresetRequest?.reject(interruption);
   pendingPresetRequest = null;
   for (const queued of presetRequestQueue.splice(0)) queued.reject(interruption);
@@ -569,6 +589,48 @@ export function dispatchCommand(command: SessionCommand) {
 
 function commandPayload(id: number, command: SessionCommand) {
   return serializeSessionCommand(CLIENT_ID, id, command);
+}
+
+export function exportPluginPreset(
+  pluginId: string,
+  presetId: string,
+): Promise<{ file_name: string; file: import("./types").RfPresetFile }> {
+  return requestPresetOperation(
+    { op: "export_plugin_preset", plugin_id: pluginId, preset_id: presetId },
+    "plugin_preset_exported",
+    (message) => ({
+      file_name: String(message.file_name),
+      file: message.file as import("./types").RfPresetFile,
+    }),
+  );
+}
+
+export function inspectPluginPreset(
+  targetPluginId: string,
+  file: import("./types").RfPresetFile,
+): Promise<import("./types").RfPresetImportPreview> {
+  return requestPresetOperation(
+    { op: "inspect_plugin_preset", target_plugin_id: targetPluginId, file },
+    "plugin_preset_inspected",
+    (message) => message.preview as import("./types").RfPresetImportPreview,
+  );
+}
+
+export function importPluginPreset(
+  targetPluginId: string,
+  file: import("./types").RfPresetFile,
+  conflictPolicy: import("./types").PresetImportConflictPolicy,
+): Promise<HostPreset> {
+  return requestPresetOperation(
+    {
+      op: "import_plugin_preset",
+      target_plugin_id: targetPluginId,
+      file,
+      conflict_policy: conflictPolicy,
+    },
+    "plugin_preset_imported",
+    (message) => message.preset as HostPreset,
+  );
 }
 
 export function requestMidiSources(): Promise<MidiSourceStatus[]> {

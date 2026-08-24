@@ -86,6 +86,11 @@ export interface ControllerCatalogMessage {
   id: number;
 }
 
+export interface ControllerRestorePlanMessage {
+  kind: "controller_restore_plan";
+  id: number;
+}
+
 export type EngineCommand =
   | BootMessage
   | RequestMessage
@@ -94,7 +99,8 @@ export type EngineCommand =
   | ControllerMidiMessage
   | ControllerConnectionMessage
   | ControllerSettingMessage
-  | ControllerCatalogMessage;
+  | ControllerCatalogMessage
+  | ControllerRestorePlanMessage;
 
 /**
  * Sent as soon as the processor exists. A port message posted before that is
@@ -177,6 +183,13 @@ export function engineFailureEvent(
       kind: "response",
       id: command.id,
       response: JSON.stringify({ controllers: [], error: message }),
+    };
+  }
+  if (command.kind === "controller_restore_plan") {
+    return {
+      kind: "response",
+      id: command.id,
+      response: JSON.stringify([]),
     };
   }
   if (command.kind === "boot") {

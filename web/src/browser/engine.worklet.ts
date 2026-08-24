@@ -63,6 +63,7 @@ interface HostExports {
   ) => void;
   rf_controller_output_pending: () => number;
   rf_controller_output: () => number;
+  rf_controller_restore_plan: () => number;
   rf_controller_set_color: (red: number, green: number, blue: number) => void;
   rf_controller_catalog: () => number;
   rf_session_revision: () => number;
@@ -87,6 +88,8 @@ const READ_ONLY_OPERATIONS = new Set([
   "audio_snapshot",
   "plugin_presets",
   "plugin_preset",
+  "export_plugin_preset",
+  "inspect_plugin_preset",
   "plugin_parameters",
   "plugin_state_parameters",
 ]);
@@ -214,6 +217,13 @@ class RackForgeEngine extends AudioWorkletProcessor {
           kind: "response",
           id: command.id,
           response: this.#readResponse(this.#host?.rf_controller_catalog() ?? 0),
+        });
+        break;
+      case "controller_restore_plan":
+        this.#post({
+          kind: "response",
+          id: command.id,
+          response: this.#readResponse(this.#host?.rf_controller_restore_plan() ?? 0),
         });
         break;
     }

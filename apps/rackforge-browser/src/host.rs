@@ -28,7 +28,7 @@ use rackforge_control_api::{
     VirtualMidiMessage,
 };
 use rackforge_controller_package::ControllerPackageManifest;
-use rackforge_core::performance::{PerformanceBootstrap, PerformanceRepository};
+use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session::SessionStore;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{
@@ -162,24 +162,8 @@ impl BrowserHost {
             );
         }
 
-        let mut state_store = PluginStateStore::new(Some(&data_root))?;
-        let primary = plugins.first_mut().expect("at least one plugin");
-        let bootstrap_state = state_store.put(
-            &primary.runtime.manifest().id,
-            &primary.runtime.manifest().version,
-            primary.runtime.manifest().state_version,
-            primary.selected_sound_id.clone(),
-            &primary
-                .instance
-                .save_state()
-                .context("capturing the initial plugin state")?,
-        )?;
-        let bootstrap = PerformanceBootstrap {
-            plugin_id: primary.plugin_id.clone(),
-            state: bootstrap_state,
-            name: primary.runtime.manifest().name.clone(),
-        };
-        let performance = PerformanceRepository::load_or_bootstrap(Some(&data_root), bootstrap)?;
+        let state_store = PluginStateStore::new(Some(&data_root))?;
+        let performance = PerformanceRepository::load_or_empty(Some(&data_root))?;
 
         let session_id = SessionId::new("browser").map_err(|message| anyhow!(message))?;
         let checkpoint = SessionCheckpointStore::live(&data_root);
@@ -327,6 +311,90 @@ impl BrowserHost {
                     preset: Box::new(preset),
                 })
                 .map_err(|error| Failure::new(ControlErrorCode::NotFound, format!("{error:#}"))),
+            ControlRequest::ExportPluginPreset {
+                plugin_id,
+                preset_id,
+            } => {
+                let plugin_name = self
+                    .plugins
+                    .iter()
+                    .find(|plugin| plugin.plugin_id == plugin_id)
+                    .map(|plugin| plugin.runtime.manifest().name.as_str())
+                    .unwrap_or(&plugin_id);
+                self.state_store
+                    .export_preset_file(&plugin_id, &preset_id, plugin_name)
+                    .map(|(file_name, file)| ControlResponse::PluginPresetExported {
+                        file_name,
+                        file: Box::new(file),
+                    })
+                    .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))
+            }
+            ControlRequest::InspectPluginPreset {
+                target_plugin_id,
+                file,
+            } => {
+                let plugin = self
+                    .plugins
+                    .iter()
+                    .find(|plugin| plugin.plugin_id == target_plugin_id)
+                    .ok_or_else(|| {
+                        Failure::new(
+                            ControlErrorCode::Unavailable,
+                            format!("plugin {target_plugin_id} is not active in the browser"),
+                        )
+                    })?;
+                self.state_store
+                    .inspect_preset_file(
+                        &target_plugin_id,
+                        &plugin.runtime.manifest().version,
+                        plugin.runtime.manifest().state_version,
+                        &file,
+                    )
+                    .map(|preview| ControlResponse::PluginPresetInspected {
+                        preview: Box::new(preview),
+                    })
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::InvalidRequest, format!("{error:#}"))
+                    })
+            }
+            ControlRequest::ImportPluginPreset {
+                target_plugin_id,
+                file,
+                conflict_policy,
+            } => {
+                let (version, state_version) = self
+                    .plugins
+                    .iter()
+                    .find(|plugin| plugin.plugin_id == target_plugin_id)
+                    .map(|plugin| {
+                        (
+                            plugin.runtime.manifest().version.clone(),
+                            plugin.runtime.manifest().state_version,
+                        )
+                    })
+                    .ok_or_else(|| {
+                        Failure::new(
+                            ControlErrorCode::Unavailable,
+                            format!("plugin {target_plugin_id} is not active in the browser"),
+                        )
+                    })?;
+                let preset = self
+                    .state_store
+                    .import_preset_file(
+                        &target_plugin_id,
+                        &version,
+                        state_version,
+                        &file,
+                        conflict_policy,
+                    )
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                Ok(ControlResponse::PluginPresetImported {
+                    preset: Box::new(preset),
+                    presets: self.host_presets(&target_plugin_id)?,
+                })
+            }
             ControlRequest::SavePluginPreset { instance_id, name } => {
                 self.save_plugin_preset(&instance_id, &name)
             }
@@ -540,6 +608,20 @@ impl BrowserHost {
             .state_store
             .preset(&plugin_id, preset_id)
             .map_err(|error| Failure::new(ControlErrorCode::NotFound, format!("{error:#}")))?;
+        let installed_state_version = self
+            .plugin_mut(instance_id)?
+            .runtime
+            .manifest()
+            .state_version;
+        if preset.state.state_version != installed_state_version {
+            return Err(Failure::new(
+                ControlErrorCode::Rejected,
+                format!(
+                    "preset state v{} is incompatible with installed state v{}",
+                    preset.state.state_version, installed_state_version
+                ),
+            ));
+        }
         let bytes = self
             .state_store
             .read(&preset.state)

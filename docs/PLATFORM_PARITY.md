@@ -19,7 +19,7 @@ cannot exist on that host, and `unaudited` means nobody has checked yet.
 | Send MIDI to hardware | unaudited | unaudited | yes | unaudited |
 | Notice controllers connecting while running | unaudited | unaudited | yes | yes |
 | Read and write plugin parameters | yes | yes | yes | yes |
-| Save, load, rename and delete host presets | yes | yes | yes | yes |
+| Save, load, rename, delete, import and export host presets | yes | yes | yes | yes |
 | Create, preview and save Custom Programs | yes | unaudited | yes | planned |
 | Audition a program and keep the selected one | yes | unaudited | yes | planned |
 | Create and edit Racks, Songs and Setlists | yes | yes | yes | yes |

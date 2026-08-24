@@ -272,6 +272,57 @@ export function selectNativeResource(options: {
   );
 }
 
+export function readNativeTextFile(options: {
+  extensions?: string[];
+  maximum_bytes?: number;
+}): Promise<{ file_name: string; text: string }> {
+  if (nativeBridge()) {
+    return requestNative("resource.read_text", options, 10 * 60_000);
+  }
+  if (isDesktopHost()) {
+    return hostJson("/api/v1/resources/native-read-text", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(options),
+    });
+  }
+  return Promise.reject(
+    new HostRequestError("The native text-file picker is unavailable."),
+  );
+}
+
+export async function savePortableTextFile(options: {
+  file_name: string;
+  mime_type: string;
+  text: string;
+}): Promise<void> {
+  if (nativeBridge()) {
+    await requestNative("resource.write_text", options, 10 * 60_000);
+    return;
+  }
+  if (isDesktopHost()) {
+    await hostJson("/api/v1/resources/native-write-text", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(options),
+    });
+    return;
+  }
+  const blob = new Blob([options.text], { type: options.mime_type });
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = options.file_name;
+    link.style.display = "none";
+    document.body.append(link);
+    link.click();
+    link.remove();
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
+}
+
 export function bindNativePluginResource(options: {
   plugin_id: string;
   resource_id: string;

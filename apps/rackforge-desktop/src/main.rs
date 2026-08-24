@@ -484,6 +484,9 @@ struct DesktopApp {
     next_midi_learn_id: u64,
     /// Raised on exit so the controller supervisor reaps its drivers.
     controller_shutdown: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Joined on exit so the controller driver can restore its hardware
+    /// before Desktop releases the process and MIDI stack.
+    controller_supervisor: Option<std::thread::JoinHandle<()>>,
 }
 
 impl DesktopApp {
@@ -780,6 +783,7 @@ impl DesktopApp {
             #[cfg(windows)]
             next_midi_learn_id: 1,
             controller_shutdown: None,
+            controller_supervisor: None,
         })
     }
 
@@ -3187,6 +3191,44 @@ impl DesktopApp {
                     },
                 }
             }
+            ControlRequest::SavePluginPreset { instance_id, name } => {
+                self.save_host_preset(&instance_id, &name)
+            }
+            ControlRequest::LoadPluginPreset {
+                instance_id,
+                preset_id,
+            } => self.load_host_preset(&instance_id, &preset_id),
+            ControlRequest::RenamePluginPreset {
+                plugin_id,
+                preset_id,
+                name,
+            } => match self
+                .state_store
+                .rename_preset(&plugin_id, &preset_id, &name)
+            {
+                Ok(preset) => match self.state_store.list_presets(&plugin_id) {
+                    Ok(presets) => ControlResponse::PluginPresetRenamed {
+                        preset: Box::new(preset),
+                        presets,
+                    },
+                    Err(error) => self.preset_error(ControlErrorCode::Internal, error),
+                },
+                Err(error) => self.preset_error(ControlErrorCode::InvalidRequest, error),
+            },
+            ControlRequest::DeletePluginPreset {
+                plugin_id,
+                preset_id,
+            } => match self.state_store.delete_preset(&plugin_id, &preset_id) {
+                Ok(_) => match self.state_store.list_presets(&plugin_id) {
+                    Ok(presets) => ControlResponse::PluginPresetDeleted {
+                        plugin_id,
+                        preset_id,
+                        presets,
+                    },
+                    Err(error) => self.preset_error(ControlErrorCode::Internal, error),
+                },
+                Err(error) => self.preset_error(ControlErrorCode::Rejected, error),
+            },
             ControlRequest::PluginPreset {
                 plugin_id,
                 preset_id,
@@ -3202,6 +3244,121 @@ impl DesktopApp {
                     ),
                 },
             },
+            ControlRequest::ExportPluginPreset {
+                plugin_id,
+                preset_id,
+            } => {
+                let plugin_name = self
+                    .plugins
+                    .iter()
+                    .find(|plugin| plugin.plugin_id == plugin_id)
+                    .map(|plugin| plugin.name.as_str())
+                    .unwrap_or(&plugin_id);
+                match self
+                    .state_store
+                    .export_preset_file(&plugin_id, &preset_id, plugin_name)
+                {
+                    Ok((file_name, file)) => ControlResponse::PluginPresetExported {
+                        file_name,
+                        file: Box::new(file),
+                    },
+                    Err(error) => ControlResponse::Error {
+                        code: ControlErrorCode::Rejected,
+                        message: format!("Could not export RackForge preset: {error:#}"),
+                        current_revision: Some(
+                            self.session.read().expect("session lock poisoned").revision,
+                        ),
+                    },
+                }
+            }
+            ControlRequest::InspectPluginPreset {
+                target_plugin_id,
+                file,
+            } => {
+                let plugin = self
+                    .plugins
+                    .iter()
+                    .find(|plugin| plugin.plugin_id == target_plugin_id);
+                match plugin {
+                    Some(plugin) => match self.state_store.inspect_preset_file(
+                        &target_plugin_id,
+                        &plugin.version.to_string(),
+                        plugin.runtime.manifest().state_version,
+                        &file,
+                    ) {
+                        Ok(preview) => ControlResponse::PluginPresetInspected {
+                            preview: Box::new(preview),
+                        },
+                        Err(error) => ControlResponse::Error {
+                            code: ControlErrorCode::InvalidRequest,
+                            message: format!("Could not validate .rfpreset: {error:#}"),
+                            current_revision: Some(
+                                self.session.read().expect("session lock poisoned").revision,
+                            ),
+                        },
+                    },
+                    None => ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message: format!("Plugin {target_plugin_id} is not active on Desktop"),
+                        current_revision: Some(
+                            self.session.read().expect("session lock poisoned").revision,
+                        ),
+                    },
+                }
+            }
+            ControlRequest::ImportPluginPreset {
+                target_plugin_id,
+                file,
+                conflict_policy,
+            } => {
+                let compatibility = self
+                    .plugins
+                    .iter()
+                    .find(|plugin| plugin.plugin_id == target_plugin_id)
+                    .map(|plugin| {
+                        (
+                            plugin.version.to_string(),
+                            plugin.runtime.manifest().state_version,
+                        )
+                    });
+                match compatibility {
+                    Some((version, state_version)) => match self.state_store.import_preset_file(
+                        &target_plugin_id,
+                        &version,
+                        state_version,
+                        &file,
+                        conflict_policy,
+                    ) {
+                        Ok(preset) => match self.state_store.list_presets(&target_plugin_id) {
+                            Ok(presets) => ControlResponse::PluginPresetImported {
+                                preset: Box::new(preset),
+                                presets,
+                            },
+                            Err(error) => ControlResponse::Error {
+                                code: ControlErrorCode::Internal,
+                                message: error.to_string(),
+                                current_revision: Some(
+                                    self.session.read().expect("session lock poisoned").revision,
+                                ),
+                            },
+                        },
+                        Err(error) => ControlResponse::Error {
+                            code: ControlErrorCode::Rejected,
+                            message: format!("Could not import .rfpreset: {error:#}"),
+                            current_revision: Some(
+                                self.session.read().expect("session lock poisoned").revision,
+                            ),
+                        },
+                    },
+                    None => ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message: format!("Plugin {target_plugin_id} is not active on Desktop"),
+                        current_revision: Some(
+                            self.session.read().expect("session lock poisoned").revision,
+                        ),
+                    },
+                }
+            }
             ControlRequest::MaterializePluginState {
                 plugin_id,
                 sound_id,
@@ -3289,6 +3446,159 @@ impl DesktopApp {
                     self.session.read().expect("session lock poisoned").revision,
                 ),
             },
+        }
+    }
+
+    fn preset_error(
+        &self,
+        code: ControlErrorCode,
+        error: impl std::fmt::Display,
+    ) -> ControlResponse {
+        ControlResponse::Error {
+            code,
+            message: format!("RackForge preset operation failed: {error}"),
+            current_revision: Some(self.session.read().expect("session lock poisoned").revision),
+        }
+    }
+
+    fn save_host_preset(&mut self, instance_id: &InstanceId, name: &str) -> ControlResponse {
+        let state = self.session.read().expect("session lock poisoned").clone();
+        if state.active_instance_id.as_ref() != Some(instance_id) {
+            return self.preset_error(
+                ControlErrorCode::Rejected,
+                format!("plugin instance {instance_id} is not active in PLAY"),
+            );
+        }
+        let Some(plugin) = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.instance_id == instance_id.as_str())
+        else {
+            return self.preset_error(ControlErrorCode::NotFound, "plugin instance is missing");
+        };
+        #[cfg(windows)]
+        let bytes = match self
+            .audio
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Desktop audio is unavailable"))
+            .and_then(|audio| audio.save_active_state())
+        {
+            Ok(bytes) => bytes,
+            Err(error) => return self.preset_error(ControlErrorCode::Unavailable, error),
+        };
+        #[cfg(not(windows))]
+        let bytes = match plugin.instance.save_state() {
+            Ok(bytes) => bytes,
+            Err(error) => return self.preset_error(ControlErrorCode::Rejected, error),
+        };
+        let reference = match self.state_store.put(
+            &plugin.plugin_id,
+            &plugin.version.to_string(),
+            plugin.runtime.manifest().state_version,
+            plugin.selected_sound_id.clone(),
+            &bytes,
+        ) {
+            Ok(reference) => reference,
+            Err(error) => return self.preset_error(ControlErrorCode::Rejected, error),
+        };
+        let plugin_id = plugin.plugin_id.clone();
+        match self.state_store.save_preset(name, reference) {
+            Ok(preset) => match self.state_store.list_presets(&plugin_id) {
+                Ok(presets) => ControlResponse::PluginPresetSaved {
+                    preset: Box::new(preset),
+                    presets,
+                },
+                Err(error) => self.preset_error(ControlErrorCode::Internal, error),
+            },
+            Err(error) => self.preset_error(ControlErrorCode::InvalidRequest, error),
+        }
+    }
+
+    fn load_host_preset(&mut self, instance_id: &InstanceId, preset_id: &str) -> ControlResponse {
+        let active = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .active_instance_id
+            .clone();
+        if active.as_ref() != Some(instance_id) {
+            return self.preset_error(
+                ControlErrorCode::Rejected,
+                format!("plugin instance {instance_id} is not active in PLAY"),
+            );
+        }
+        let Some(index) = self
+            .plugins
+            .iter()
+            .position(|plugin| plugin.instance_id == instance_id.as_str())
+        else {
+            return self.preset_error(ControlErrorCode::NotFound, "plugin instance is missing");
+        };
+        let plugin_id = self.plugins[index].plugin_id.clone();
+        let preset = match self.state_store.preset(&plugin_id, preset_id) {
+            Ok(preset) => preset,
+            Err(error) => return self.preset_error(ControlErrorCode::NotFound, error),
+        };
+        let installed_state_version = self.plugins[index].runtime.manifest().state_version;
+        if preset.state.state_version != installed_state_version {
+            return self.preset_error(
+                ControlErrorCode::Rejected,
+                format!(
+                    "preset state v{} is incompatible with installed state v{}",
+                    preset.state.state_version, installed_state_version
+                ),
+            );
+        }
+        let bytes = match self.state_store.read(&preset.state) {
+            Ok(bytes) => bytes,
+            Err(error) => return self.preset_error(ControlErrorCode::Rejected, error),
+        };
+        let validation = self.plugins[index]
+            .runtime
+            .create_instance_with_resource_overrides(&self.plugins[index].resources)
+            .and_then(|mut instance| instance.load_state(&bytes));
+        if let Err(error) = validation {
+            return self.preset_error(ControlErrorCode::Rejected, error);
+        }
+        #[cfg(windows)]
+        if let Err(error) = self
+            .audio
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Desktop audio is unavailable"))
+            .and_then(|audio| audio.restore_state(instance_id.as_str(), bytes.clone()))
+        {
+            return self.preset_error(ControlErrorCode::Unavailable, error);
+        }
+        if let Err(error) = self.plugins[index].instance.load_state(&bytes) {
+            return self.preset_error(ControlErrorCode::Rejected, error);
+        }
+        self.plugins[index].selected_sound_id = preset.state.selected_sound_id.clone();
+        let revision = {
+            let mut session = self.session.write().expect("session lock poisoned");
+            let revision = Revision::new(session.revision.get().saturating_add(1));
+            let event = EventEnvelope {
+                schema_version: SESSION_SCHEMA_VERSION,
+                revision,
+                command: None,
+                event: SessionEvent::PluginStateRestored {
+                    instance_id: instance_id.clone(),
+                    selected_sound_id: preset.state.selected_sound_id.clone(),
+                },
+            };
+            if let Err(error) = session.apply(&event) {
+                return self.preset_error(ControlErrorCode::Internal, error);
+            }
+            revision
+        };
+        self.menu.set_play_sounds(
+            self.plugins[index].sounds.clone(),
+            preset.state.selected_sound_id.as_deref(),
+        );
+        self.live_state_dirty = Some(Instant::now());
+        self.persist_session_checkpoint();
+        ControlResponse::PluginPresetLoaded {
+            preset: Box::new(preset),
+            revision,
         }
     }
 
@@ -5326,11 +5636,11 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
     // its driver, pointed back at this host through the TCP control bridge.
     // The loop exits on its own when the store holds nothing runnable.
     let controller_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    {
+    let controller_supervisor = {
         let root = options.rackforge_root.join("controllers");
         let address = web_servers.control_bridge_addr().to_string();
         let shutdown = Arc::clone(&controller_shutdown);
-        std::thread::Builder::new()
+        let supervisor = std::thread::Builder::new()
             .name("rackforge-controller-supervisor".into())
             .spawn(move || {
                 if !root.join("packages").exists() {
@@ -5354,9 +5664,11 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
                 }
             })
             .context("starting the controller supervisor")?;
-    }
+        supervisor
+    };
     let mut app = DesktopApp::new(Arc::clone(&session), &options, web_servers, web_control)?;
     app.controller_shutdown = Some(controller_shutdown);
+    app.controller_supervisor = Some(controller_supervisor);
     Ok(app)
 }
 
@@ -5473,7 +5785,12 @@ impl eframe::App for RackForgeApp {
                 app.flush_live_state();
             }
             if let Some(shutdown) = &app.controller_shutdown {
-                shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+                shutdown.store(true, std::sync::atomic::Ordering::Release);
+            }
+            if let Some(supervisor) = app.controller_supervisor.take()
+                && supervisor.join().is_err()
+            {
+                eprintln!("DESKTOP_CONTROLLERS_JOIN_FAILED");
             }
         }
     }

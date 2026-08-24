@@ -189,6 +189,32 @@ export interface HostPreset {
   state: PluginStateReference;
 }
 
+export interface RfPresetFile {
+  format: "org.rackforge.preset";
+  schema_version: number;
+  exported_by: string;
+  exported_unix_ms: number;
+  preset: HostPreset;
+  state_encoding: "base64";
+  state_base64: string;
+}
+
+export type PresetImportConflictPolicy = "reject" | "replace" | "keep_both";
+
+export type PresetImportConflictKind =
+  | "id"
+  | "name"
+  | "id_and_name"
+  | "ambiguous";
+
+export interface RfPresetImportPreview {
+  preset: HostPresetSummary;
+  byte_length: number;
+  conflict?: PresetImportConflictKind | null;
+  compatible: boolean;
+  warnings: string[];
+}
+
 export interface RackGraphPosition {
   x: number;
   y: number;

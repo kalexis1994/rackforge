@@ -103,6 +103,29 @@ struct NativeResourcePickRequest {
     extensions: Vec<String>,
 }
 
+const MAX_PORTABLE_TEXT_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeTextReadRequest {
+    #[serde(default)]
+    extensions: Vec<String>,
+    #[serde(default = "default_portable_text_limit")]
+    maximum_bytes: usize,
+}
+
+fn default_portable_text_limit() -> usize {
+    MAX_PORTABLE_TEXT_BYTES
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeTextWriteRequest {
+    file_name: String,
+    mime_type: String,
+    text: String,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct UninstallPluginRequest {
@@ -630,6 +653,14 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
             .route("/api/v1/resources/selections", post(select_host_resource))
             .route("/api/v1/resources/native-pick", post(pick_native_resource))
             .route(
+                "/api/v1/resources/native-read-text",
+                post(read_native_text_file).layer(DefaultBodyLimit::max(MAX_PORTABLE_TEXT_BYTES)),
+            )
+            .route(
+                "/api/v1/resources/native-write-text",
+                post(write_native_text_file).layer(DefaultBodyLimit::max(MAX_PORTABLE_TEXT_BYTES)),
+            )
+            .route(
                 "/api/v1/resources/selections/release",
                 post(release_resource_selection),
             )
@@ -1139,6 +1170,102 @@ async fn pick_native_resource(
         let _ = (state, request);
         resource_error(ResourceError::Backend(
             "The native resource picker is unavailable on this Desktop build".into(),
+        ))
+    }
+}
+
+async fn read_native_text_file(Json(request): Json<NativeTextReadRequest>) -> Response {
+    #[cfg(target_os = "windows")]
+    {
+        let maximum = request.maximum_bytes.clamp(1, MAX_PORTABLE_TEXT_BYTES);
+        match tokio::task::spawn_blocking(move || -> Result<Value, String> {
+            let mut dialog = rfd::FileDialog::new().set_title("Import RackForge preset");
+            let extensions = request
+                .extensions
+                .iter()
+                .map(|extension| extension.trim().trim_start_matches('.'))
+                .filter(|extension| {
+                    !extension.is_empty() && extension.chars().all(|c| c.is_ascii_alphanumeric())
+                })
+                .collect::<Vec<_>>();
+            if !extensions.is_empty() {
+                dialog = dialog.add_filter("RackForge preset", &extensions);
+            }
+            let path = dialog
+                .pick_file()
+                .ok_or_else(|| "File selection was cancelled.".to_owned())?;
+            let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+            if metadata.file_type().is_symlink()
+                || !metadata.is_file()
+                || metadata.len() == 0
+                || metadata.len() > maximum as u64
+            {
+                return Err("Selected preset has an invalid size or file type.".into());
+            }
+            let text = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+            Ok(json!({
+                "file_name": path.file_name().unwrap_or_default().to_string_lossy(),
+                "text": text,
+            }))
+        })
+        .await
+        {
+            Ok(Ok(value)) => Json(value).into_response(),
+            Ok(Err(message)) => {
+                (StatusCode::BAD_REQUEST, Json(json!({"message": message}))).into_response()
+            }
+            Err(error) => internal_error(error),
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = request;
+        resource_error(ResourceError::Backend(
+            "Native preset import is unavailable.".into(),
+        ))
+    }
+}
+
+async fn write_native_text_file(Json(request): Json<NativeTextWriteRequest>) -> Response {
+    #[cfg(target_os = "windows")]
+    {
+        if request.text.is_empty() || request.text.len() > MAX_PORTABLE_TEXT_BYTES {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"message":"Preset file has an invalid size."})),
+            )
+                .into_response();
+        }
+        if request.file_name.contains(['/', '\\']) || !request.file_name.ends_with(".rfpreset") {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"message":"Preset file name is invalid."})),
+            )
+                .into_response();
+        }
+        let result = tokio::task::spawn_blocking(move || -> Result<Value, String> {
+            let path = rfd::FileDialog::new()
+                .set_title("Export RackForge preset")
+                .set_file_name(&request.file_name)
+                .add_filter("RackForge preset", &["rfpreset"])
+                .save_file()
+                .ok_or_else(|| "Preset export was cancelled.".to_owned())?;
+            std::fs::write(&path, request.text.as_bytes()).map_err(|error| error.to_string())?;
+            Ok(json!({"saved": true, "path": path.to_string_lossy(), "mime_type": request.mime_type}))
+        }).await;
+        match result {
+            Ok(Ok(value)) => Json(value).into_response(),
+            Ok(Err(message)) => {
+                (StatusCode::BAD_REQUEST, Json(json!({"message": message}))).into_response()
+            }
+            Err(error) => internal_error(error),
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = request;
+        resource_error(ResourceError::Backend(
+            "Native preset export is unavailable.".into(),
         ))
     }
 }
@@ -1992,6 +2119,13 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         | ControlRequest::EditPerformance { .. }
         | ControlRequest::PluginPresets { .. }
         | ControlRequest::PluginPreset { .. }
+        | ControlRequest::SavePluginPreset { .. }
+        | ControlRequest::LoadPluginPreset { .. }
+        | ControlRequest::RenamePluginPreset { .. }
+        | ControlRequest::DeletePluginPreset { .. }
+        | ControlRequest::ExportPluginPreset { .. }
+        | ControlRequest::InspectPluginPreset { .. }
+        | ControlRequest::ImportPluginPreset { .. }
         | ControlRequest::MaterializePluginState { .. }
         | ControlRequest::PluginParameters { .. }
         | ControlRequest::SetPluginParameter { .. }
@@ -2592,6 +2726,59 @@ mod tests {
         assert_eq!(
             response.get("status").and_then(Value::as_str),
             Some("command_applied")
+        );
+    }
+
+    #[test]
+    fn dispatches_preset_mutations_to_the_desktop_runtime() {
+        let (control, receiver) = control_channel();
+        let state = WebState {
+            session: Arc::new(RwLock::new(SessionState::new(
+                SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
+            ))),
+            plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
+            legacy_plugins_root: PathBuf::new(),
+            plugin_store_root: None,
+            data_root: PathBuf::new(),
+            public_server: Arc::new(RwLock::new(WebServerPreferences::default())),
+            control,
+            resource_browser: Arc::new(NativeResourceBrowser::new([]).unwrap()),
+            resource_upload_root: PathBuf::new(),
+            web_packages_cache: Arc::new(Mutex::new(None)),
+            package_scan_revision: Arc::new(AtomicU64::new(0)),
+            controllers_root: PathBuf::new(),
+            injected_midi: Arc::new(Mutex::new(None)),
+        };
+        let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
+        let responder = std::thread::spawn(move || {
+            let DesktopControlCall::Performance { request, response } = receiver.recv().unwrap()
+            else {
+                panic!("preset mutation must reach Desktop performance control");
+            };
+            assert!(matches!(
+                request,
+                ControlRequest::SavePluginPreset { ref name, .. } if name == "Warm Strings"
+            ));
+            response
+                .send(ControlResponse::Error {
+                    code: ControlErrorCode::Rejected,
+                    message: "routed to Desktop preset control".into(),
+                    current_revision: None,
+                })
+                .unwrap();
+        });
+
+        let response = response_for(
+            ControlRequest::SavePluginPreset {
+                instance_id,
+                name: "Warm Strings".into(),
+            },
+            &state,
+        );
+        responder.join().unwrap();
+        assert_eq!(
+            response.get("message").and_then(Value::as_str),
+            Some("routed to Desktop preset control")
         );
     }
 

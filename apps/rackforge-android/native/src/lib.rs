@@ -5,7 +5,8 @@ use jni::objects::{JClass, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jstring};
 use keylab_essential_mk3::protocol as keylab_protocol;
 use rackforge_control_api::{
-    ControlResponse, PluginParameterControlCommand, parse_plugin_parameter_control_command,
+    ControlResponse, PluginParameterControlCommand, PresetImportConflictPolicy, RfPresetFile,
+    parse_plugin_parameter_control_command,
 };
 use rackforge_core::{
     CompiledParameterLink, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
@@ -1082,7 +1083,7 @@ impl AndroidEngine {
     }
 
     fn plugin_state_command(
-        &self,
+        &mut self,
         method: &str,
         params: &serde_json::Value,
     ) -> Result<serde_json::Value> {
@@ -1128,6 +1129,113 @@ impl AndroidEngine {
                     &bytes,
                 )?;
                 Ok(serde_json::to_value(state)?)
+            }
+            "save_preset" => {
+                let name = params
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .context("save preset command is missing name")?;
+                let bytes = self.instance.0.save_state()?;
+                let state = store.put(
+                    &self.plugin_id,
+                    &self.plugin_version,
+                    self.runtime.0.manifest().state_version,
+                    Some(self.selected_sound_id.clone()),
+                    &bytes,
+                )?;
+                Ok(serde_json::to_value(store.save_preset(name, state)?)?)
+            }
+            "load_preset" => {
+                let preset_id = params
+                    .get("preset_id")
+                    .and_then(serde_json::Value::as_str)
+                    .context("load preset command is missing preset_id")?;
+                let preset = store.preset(&self.plugin_id, preset_id)?;
+                let installed_state_version = self.runtime.0.manifest().state_version;
+                if preset.state.state_version != installed_state_version {
+                    bail!(
+                        "preset state v{} is incompatible with installed state v{}",
+                        preset.state.state_version,
+                        installed_state_version
+                    );
+                }
+                let bytes = store.read(&preset.state)?;
+                self.instance.0.load_state(&bytes)?;
+                if let Some(sound_id) = preset.state.selected_sound_id.as_ref() {
+                    self.selected_sound_id = sound_id.clone();
+                }
+                Ok(serde_json::to_value(preset)?)
+            }
+            "rename_preset" => {
+                let preset_id = params
+                    .get("preset_id")
+                    .and_then(serde_json::Value::as_str)
+                    .context("rename preset command is missing preset_id")?;
+                let name = params
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .context("rename preset command is missing name")?;
+                Ok(serde_json::to_value(store.rename_preset(
+                    &self.plugin_id,
+                    preset_id,
+                    name,
+                )?)?)
+            }
+            "delete_preset" => {
+                let preset_id = params
+                    .get("preset_id")
+                    .and_then(serde_json::Value::as_str)
+                    .context("delete preset command is missing preset_id")?;
+                Ok(serde_json::to_value(
+                    store.delete_preset(&self.plugin_id, preset_id)?,
+                )?)
+            }
+            "export_preset" => {
+                let preset_id = params
+                    .get("preset_id")
+                    .and_then(serde_json::Value::as_str)
+                    .context("export preset command is missing preset_id")?;
+                let (file_name, file) = store.export_preset_file(
+                    &self.plugin_id,
+                    preset_id,
+                    &self.runtime.0.manifest().name,
+                )?;
+                Ok(serde_json::json!({ "file_name": file_name, "file": file }))
+            }
+            "inspect_preset" => {
+                let file: RfPresetFile = serde_json::from_value(
+                    params
+                        .get("file")
+                        .cloned()
+                        .context("inspect preset command is missing file")?,
+                )?;
+                Ok(serde_json::to_value(store.inspect_preset_file(
+                    &self.plugin_id,
+                    &self.plugin_version,
+                    self.runtime.0.manifest().state_version,
+                    &file,
+                )?)?)
+            }
+            "import_preset" => {
+                let file: RfPresetFile = serde_json::from_value(
+                    params
+                        .get("file")
+                        .cloned()
+                        .context("import preset command is missing file")?,
+                )?;
+                let policy: PresetImportConflictPolicy = serde_json::from_value(
+                    params
+                        .get("conflict_policy")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!("reject")),
+                )?;
+                Ok(serde_json::to_value(store.import_preset_file(
+                    &self.plugin_id,
+                    &self.plugin_version,
+                    self.runtime.0.manifest().state_version,
+                    &file,
+                    policy,
+                )?)?)
             }
             _ => bail!("unknown plugin state command {method:?}"),
         }
@@ -2188,11 +2296,11 @@ fn engine_call(act: impl FnOnce(&mut AndroidEngine) -> Result<()>) -> Result<()>
 /// and the draft -- the exact refresh the process-driver bridge performs.
 fn sync_menu_program_state(menu: &mut SurfaceMenu) -> Result<()> {
     let (plugin_id, name, sounds, selected_sound_id, draft) = {
-        let guard = engine()
+        let mut guard = engine()
             .lock()
             .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
         let engine = guard
-            .as_ref()
+            .as_mut()
             .context("RackForge engine is not initialized")?;
         (
             engine.plugin_id.clone(),
@@ -3345,11 +3453,11 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginStateComman
         let method = java_string(&mut env, method)?;
         let params: serde_json::Value = serde_json::from_str(&java_string(&mut env, params_json)?)
             .context("parsing plugin state command parameters")?;
-        let guard = engine()
+        let mut guard = engine()
             .lock()
             .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
         let engine = guard
-            .as_ref()
+            .as_mut()
             .context("RackForge engine is not initialized")?;
         Ok(engine.plugin_state_command(&method, &params)?.to_string())
     })();

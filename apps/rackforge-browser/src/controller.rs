@@ -26,6 +26,17 @@ pub struct BrowserControllerOutput {
     pub settle_after_ms: u16,
 }
 
+pub fn restore_plan() -> Vec<BrowserControllerOutput> {
+    keylab_protocol::restore_messages()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|message| BrowserControllerOutput {
+            bytes: message.bytes,
+            settle_after_ms: message.settle_after_ms,
+        })
+        .collect()
+}
+
 #[derive(Debug)]
 pub enum BrowserControllerAction {
     Menu(MenuCommand),
@@ -454,5 +465,17 @@ mod tests {
         assert!(!outcome.consumed);
         assert!(outcome.actions.is_empty());
         assert!(controller.has_output());
+    }
+
+    #[test]
+    fn browser_release_plan_clears_little_before_returning_to_arturia() {
+        let plan = restore_plan();
+        assert!(plan.len() > 3);
+        assert_eq!(plan[plan.len() - 3].bytes, keylab_protocol::CLEAR_SCREEN);
+        assert_eq!(plan[plan.len() - 2].bytes, keylab_protocol::DISCONNECT);
+        assert_eq!(
+            plan.last().unwrap().bytes,
+            keylab_protocol::select_preset(0).unwrap()
+        );
     }
 }

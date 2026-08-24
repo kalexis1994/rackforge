@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
 rackforge-audio-api = { path = "../rackforge-audio-api" }
 rackforge-plugin-api = { path = "../rackforge-plugin-api", features = ["package-validation"] }
 rackforge-plugin-runtime = { path = "../rackforge-plugin-runtime" }

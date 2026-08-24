@@ -16,6 +16,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+const GRACEFUL_SHUTDOWN_POLL: Duration = Duration::from_millis(25);
+
 /// How a host runs the supervision loop.
 pub struct SuperviseOptions {
     /// Community-trust packages refuse to run unless the person explicitly
@@ -101,6 +104,52 @@ struct ManagedController {
     installed: InstalledController,
     child: Option<Child>,
     restart_at: Instant,
+}
+
+fn stop_controllers(managed: &mut [ManagedController]) {
+    // Closing the supervisor pipe is the portable shutdown request promised
+    // to controller processes. It gives drivers a chance to restore hardware
+    // state (OLED, LEDs, presets) before their MIDI handles disappear.
+    for controller in managed.iter_mut() {
+        if let Some(child) = &mut controller.child {
+            child.stdin.take();
+        }
+    }
+
+    let deadline = Instant::now() + GRACEFUL_SHUTDOWN_TIMEOUT;
+    loop {
+        let mut running = false;
+        for controller in managed.iter_mut() {
+            let Some(child) = &mut controller.child else {
+                continue;
+            };
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    println!(
+                        "CONTROLLER_STOPPED_GRACEFULLY id={} status={status}",
+                        controller.installed.record.id
+                    );
+                    controller.child = None;
+                }
+                Ok(None) | Err(_) => running = true,
+            }
+        }
+        if !running || Instant::now() >= deadline {
+            break;
+        }
+        thread::sleep(GRACEFUL_SHUTDOWN_POLL);
+    }
+
+    for controller in managed {
+        if let Some(mut child) = controller.child.take() {
+            eprintln!(
+                "CONTROLLER_STOP_FORCED id={} reason=grace-timeout",
+                controller.installed.record.id
+            );
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
 }
 
 /// Runs every enabled, executable controller package under `root` until
@@ -208,11 +257,6 @@ pub fn supervise(root: &Path, options: &SuperviseOptions) -> Result<usize, Strin
         }
         thread::sleep(Duration::from_millis(250));
     }
-    for controller in &mut managed {
-        if let Some(mut child) = controller.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
+    stop_controllers(&mut managed);
     Ok(count)
 }

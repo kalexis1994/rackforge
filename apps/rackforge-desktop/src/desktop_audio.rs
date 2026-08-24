@@ -724,6 +724,16 @@ impl DesktopAudio {
         receive_control_response(receiver, "save plugin state")
     }
 
+    pub fn restore_state(&self, instance_id: &str, state: Vec<u8>) -> Result<()> {
+        let (reply, receiver) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::RestoreState {
+            instance_id: instance_id.into(),
+            state,
+            reply,
+        })?;
+        receive_control_response(receiver, "restore plugin state")
+    }
+
     pub fn replace_voice(&self, spec: VoiceSpec) -> Result<()> {
         let voice = prepare_audio_voice(spec, self.sample_rate)?;
         self.send_command(AudioCommand::ReplaceVoice(voice))
@@ -847,6 +857,11 @@ enum AudioCommand {
     SelectPlugin(String),
     SaveActiveState {
         reply: SyncSender<std::result::Result<Vec<u8>, String>>,
+    },
+    RestoreState {
+        instance_id: String,
+        state: Vec<u8>,
+        reply: SyncSender<std::result::Result<(), String>>,
     },
     SelectSound {
         instance_id: String,
@@ -1140,6 +1155,36 @@ impl AudioProcessor {
                         .0
                         .save_state()
                         .map_err(|error| error.to_string());
+                    let _ = reply.try_send(result);
+                }
+                AudioCommand::RestoreState {
+                    instance_id,
+                    state,
+                    reply,
+                } => {
+                    let result = (|| -> std::result::Result<(), String> {
+                        let index = self
+                            .voices
+                            .iter()
+                            .position(|voice| voice.instance_id == instance_id)
+                            .ok_or_else(|| {
+                                format!("unknown audio plugin instance {instance_id}")
+                            })?;
+                        self.voices[index]
+                            .instance
+                            .0
+                            .load_state(&state)
+                            .map_err(|error| error.to_string())?;
+                        if index != self.active_voice {
+                            self.voices[self.active_voice]
+                                .instance
+                                .0
+                                .reset()
+                                .map_err(|error| error.to_string())?;
+                            self.active_voice = index;
+                        }
+                        Ok(())
+                    })();
                     let _ = reply.try_send(result);
                 }
                 AudioCommand::SelectSound {

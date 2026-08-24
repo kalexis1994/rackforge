@@ -277,4 +277,5 @@ with the platform guides and the documents below:
 
 - [Runtime layout and process model](docs/RUNTIME.md)
 - [LIVE performance and rack graphs](docs/architecture/live-performance.md)
+- [Portable `.rfpreset` format](docs/RFPRESET.md)
 - [Technical roadmap](ROADMAP.md)

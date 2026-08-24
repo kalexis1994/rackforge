@@ -17,9 +17,61 @@ pub use rackforge_session_api::{
     SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
 };
 
-pub const CONTROL_SCHEMA_VERSION: u32 = 14;
+pub const CONTROL_SCHEMA_VERSION: u32 = 15;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
-pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
+/// Includes a complete base64-encoded 1 MiB plugin state inside `.rfpreset`.
+pub const MAX_CONTROL_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
+
+pub const RFPRESET_FORMAT: &str = "org.rackforge.preset";
+pub const RFPRESET_SCHEMA_VERSION: u32 = 1;
+
+/// Portable, self-contained preset file. The opaque state remains owned by
+/// the plugin; RackForge only authenticates and transports it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RfPresetFile {
+    pub format: String,
+    pub schema_version: u32,
+    pub exported_by: String,
+    pub exported_unix_ms: u64,
+    pub preset: HostPreset,
+    pub state_encoding: RfPresetStateEncoding,
+    pub state_base64: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RfPresetStateEncoding {
+    Base64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresetImportConflictPolicy {
+    #[default]
+    Reject,
+    Replace,
+    KeepBoth,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresetImportConflictKind {
+    Id,
+    Name,
+    IdAndName,
+    Ambiguous,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RfPresetImportPreview {
+    pub preset: HostPresetSummary,
+    pub byte_length: u32,
+    pub conflict: Option<PresetImportConflictKind>,
+    pub compatible: bool,
+    pub warnings: Vec<String>,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PluginParameterControlCommand {
@@ -105,6 +157,20 @@ pub enum ControlRequest {
     PluginPreset {
         plugin_id: String,
         preset_id: String,
+    },
+    ExportPluginPreset {
+        plugin_id: String,
+        preset_id: String,
+    },
+    InspectPluginPreset {
+        target_plugin_id: String,
+        file: Box<RfPresetFile>,
+    },
+    ImportPluginPreset {
+        target_plugin_id: String,
+        file: Box<RfPresetFile>,
+        #[serde(default)]
+        conflict_policy: PresetImportConflictPolicy,
     },
     /// Creates an immutable state snapshot in an isolated plugin instance.
     ///
@@ -243,6 +309,17 @@ pub enum ControlResponse {
     },
     PluginPreset {
         preset: Box<HostPreset>,
+    },
+    PluginPresetExported {
+        file_name: String,
+        file: Box<RfPresetFile>,
+    },
+    PluginPresetInspected {
+        preview: Box<RfPresetImportPreview>,
+    },
+    PluginPresetImported {
+        preset: Box<HostPreset>,
+        presets: Vec<HostPresetSummary>,
     },
     PluginStateMaterialized {
         state: Box<PluginStateReference>,
@@ -721,6 +798,54 @@ mod tests {
         assert_eq!(
             decode_request(&encode_line(&delete).unwrap()).unwrap(),
             delete
+        );
+    }
+
+    #[test]
+    fn portable_preset_requests_are_strict_and_round_trip() {
+        let state = PluginStateReference {
+            schema_version: 1,
+            plugin_id: "org.rackforge.rf-dls".into(),
+            plugin_version: "1.2.3".into(),
+            state_version: 4,
+            blob_sha256: "a".repeat(64),
+            byte_length: 3,
+            selected_sound_id: Some("grand.piano".into()),
+        };
+        let preset = HostPreset {
+            schema_version: 1,
+            id: "stage-grand".into(),
+            name: "Stage Grand".into(),
+            plugin_id: state.plugin_id.clone(),
+            created_unix_ms: 1,
+            updated_unix_ms: 2,
+            state,
+        };
+        let file = RfPresetFile {
+            format: RFPRESET_FORMAT.into(),
+            schema_version: RFPRESET_SCHEMA_VERSION,
+            exported_by: "RackForge test".into(),
+            exported_unix_ms: 3,
+            preset,
+            state_encoding: RfPresetStateEncoding::Base64,
+            state_base64: "YWJj".into(),
+        };
+        let inspect = ControlRequest::InspectPluginPreset {
+            target_plugin_id: "org.rackforge.rf-dls".into(),
+            file: Box::new(file.clone()),
+        };
+        assert_eq!(
+            decode_request(&encode_line(&inspect).unwrap()).unwrap(),
+            inspect
+        );
+        let import = ControlRequest::ImportPluginPreset {
+            target_plugin_id: "org.rackforge.rf-dls".into(),
+            file: Box::new(file),
+            conflict_policy: PresetImportConflictPolicy::KeepBoth,
+        };
+        assert_eq!(
+            decode_request(&encode_line(&import).unwrap()).unwrap(),
+            import
         );
     }
 

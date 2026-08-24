@@ -62,6 +62,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -90,6 +91,8 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_INSTALL_PLUGIN = 4101;
     private static final int REQUEST_SELECT_PLUGIN_RESOURCE = 4102;
     private static final int REQUEST_SELECT_CLIENT_RESOURCE = 4103;
+    private static final int REQUEST_READ_TEXT_FILE = 4104;
+    private static final int REQUEST_WRITE_TEXT_FILE = 4105;
     private static final long MAX_PLUGIN_BYTES = 512L * 1024L * 1024L;
     private static final long MAX_CLIENT_RESOURCE_BYTES = 2L * 1024L * 1024L * 1024L;
     private static final long CLIENT_RESOURCE_TTL_MS = 30L * 60L * 1000L;
@@ -98,6 +101,7 @@ public final class MainActivity extends Activity {
     private static final String HOST_PROTOCOL = "rackforge.host@1";
     private static final String APP_HOST = "rackforge.local";
     private static final String PLUGIN_HOST = "plugins.rackforge.local";
+    private static volatile MainActivity activeActivity;
     private final String nativeHostToken = UUID.randomUUID().toString();
     private WebView webView;
     private Spinner audioOutputSpinner;
@@ -145,6 +149,9 @@ public final class MainActivity extends Activity {
     private String pendingResourceKind;
     private boolean pendingResourceNativeHost;
     private String pendingClientResourceRequestId;
+    private String pendingTextReadRequestId;
+    private String pendingTextWriteRequestId;
+    private String pendingTextWriteContent;
     private final Map<String, ClientResourceSelection> clientResourceSelections =
             new ConcurrentHashMap<>();
     private String activePluginName = "No plugin";
@@ -281,6 +288,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        activeActivity = this;
         configureSystemBarBackdrop();
         preferences = getSharedPreferences("rackforge-settings", MODE_PRIVATE);
         currentPage = "live".equals(preferences.getString("session.active_mode", "play"))
@@ -425,6 +433,9 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         releaseAllVirtualMidi();
+        // Restore LITTLE while Android still owns every MIDI destination.
+        // Audio and the foreground service are stopped only afterwards.
+        closeMidi();
         audioRunning = false;
         stopNativeAudio();
         stopService(new Intent(this, AudioEngineService.class));
@@ -437,9 +448,14 @@ public final class MainActivity extends Activity {
             midiManager.unregisterDeviceCallback(midiDeviceCallback);
         }
         if (thermalMonitor != null) thermalMonitor.stop();
-        closeMidi();
         webView.destroy();
+        if (activeActivity == this) activeActivity = null;
         super.onDestroy();
+    }
+
+    static void releaseControllerHardware() {
+        MainActivity activity = activeActivity;
+        if (activity != null) activity.closeMidi();
     }
 
     private WebViewClient pluginWebViewClient() {
@@ -905,6 +921,10 @@ public final class MainActivity extends Activity {
                     });
                     case "resource.pick" -> runOnUiThread(
                             () -> chooseClientResource(requestId, params));
+                    case "resource.read_text" -> runOnUiThread(
+                            () -> chooseTextFile(requestId));
+                    case "resource.write_text" -> runOnUiThread(
+                            () -> chooseTextFileDestination(requestId, params));
                     case "resource.bind" -> runOnUiThread(
                             () -> chooseNativePluginResource(requestId, params));
                     case "plugin.select_sound" -> selectNativePluginSound(requestId, params);
@@ -1510,6 +1530,91 @@ public final class MainActivity extends Activity {
                 emitNativeSessionEvent("message", new JSONObject()
                         .put("status", "plugin_preset")
                         .put("preset", preset)
+                        .toString());
+                return;
+            }
+            if ("save_plugin_preset".equals(operation)) {
+                JSONObject preset = new JSONObject(pluginStateCommand("save_preset", new JSONObject()
+                        .put("name", request.getString("name"))
+                        .toString()));
+                JSONArray presets = new JSONArray(pluginStateCommand("list_presets", "{}"));
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "plugin_preset_saved")
+                        .put("preset", preset)
+                        .put("presets", presets)
+                        .toString());
+                return;
+            }
+            if ("load_plugin_preset".equals(operation)) {
+                JSONObject preset = new JSONObject(pluginStateCommand("load_preset", new JSONObject()
+                        .put("preset_id", request.getString("preset_id"))
+                        .toString()));
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "plugin_preset_loaded")
+                        .put("preset", preset)
+                        .put("revision", 0)
+                        .toString());
+                emitSessionSnapshot();
+                return;
+            }
+            if ("rename_plugin_preset".equals(operation)) {
+                JSONObject preset = new JSONObject(pluginStateCommand("rename_preset", new JSONObject()
+                        .put("preset_id", request.getString("preset_id"))
+                        .put("name", request.getString("name"))
+                        .toString()));
+                JSONArray presets = new JSONArray(pluginStateCommand("list_presets", "{}"));
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "plugin_preset_renamed")
+                        .put("preset", preset)
+                        .put("presets", presets)
+                        .toString());
+                return;
+            }
+            if ("delete_plugin_preset".equals(operation)) {
+                String presetId = request.getString("preset_id");
+                pluginStateCommand("delete_preset", new JSONObject()
+                        .put("preset_id", presetId)
+                        .toString());
+                JSONArray presets = new JSONArray(pluginStateCommand("list_presets", "{}"));
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "plugin_preset_deleted")
+                        .put("plugin_id", request.getString("plugin_id"))
+                        .put("preset_id", presetId)
+                        .put("presets", presets)
+                        .toString());
+                return;
+            }
+            if ("export_plugin_preset".equals(operation)) {
+                JSONObject exported = new JSONObject(pluginStateCommand("export_preset", new JSONObject()
+                        .put("preset_id", request.getString("preset_id"))
+                        .toString()));
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "plugin_preset_exported")
+                        .put("file_name", exported.getString("file_name"))
+                        .put("file", exported.getJSONObject("file"))
+                        .toString());
+                return;
+            }
+            if ("inspect_plugin_preset".equals(operation)) {
+                JSONObject preview = new JSONObject(pluginStateCommand("inspect_preset", new JSONObject()
+                        .put("file", request.getJSONObject("file"))
+                        .toString()));
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "plugin_preset_inspected")
+                        .put("preview", preview)
+                        .toString());
+                return;
+            }
+            if ("import_plugin_preset".equals(operation)) {
+                JSONObject preset = new JSONObject(pluginStateCommand("import_preset", new JSONObject()
+                        .put("file", request.getJSONObject("file"))
+                        .put("conflict_policy", request.optString("conflict_policy", "reject"))
+                        .toString()));
+                JSONArray presets = new JSONArray(pluginStateCommand("list_presets", "{}"));
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "plugin_preset_imported")
+                        .put("preset", preset)
+                        .put("presets", presets)
                         .toString());
                 return;
             }
@@ -2435,6 +2540,52 @@ public final class MainActivity extends Activity {
         startActivityForResult(intent, REQUEST_SELECT_CLIENT_RESOURCE);
     }
 
+    private void chooseTextFile(String requestId) {
+        if (pendingTextReadRequestId != null) {
+            respondNativeHost(requestId, false, 409,
+                    "Another preset import is already open.", null);
+            return;
+        }
+        pendingTextReadRequestId = requestId;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
+                "application/vnd.rackforge.preset+json", "application/json",
+                "text/plain", "application/octet-stream"
+        });
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(intent, REQUEST_READ_TEXT_FILE);
+    }
+
+    private void chooseTextFileDestination(String requestId, JSONObject params) {
+        if (pendingTextWriteRequestId != null) {
+            respondNativeHost(requestId, false, 409,
+                    "Another preset export is already open.", null);
+            return;
+        }
+        try {
+            String fileName = params.getString("file_name");
+            String content = params.getString("text");
+            if (!fileName.endsWith(".rfpreset") || fileName.contains("/") || fileName.contains("\\")
+                    || content.isEmpty()
+                    || content.getBytes(StandardCharsets.UTF_8).length > 2 * 1024 * 1024) {
+                throw new IllegalArgumentException("Preset export has an invalid name or size.");
+            }
+            pendingTextWriteRequestId = requestId;
+            pendingTextWriteContent = content;
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType(params.optString(
+                    "mime_type", "application/vnd.rackforge.preset+json"));
+            intent.putExtra(Intent.EXTRA_TITLE, fileName);
+            startActivityForResult(intent, REQUEST_WRITE_TEXT_FILE);
+        } catch (Throwable error) {
+            respondNativeHost(requestId, false, 400,
+                    error.getMessage() == null ? error.toString() : error.getMessage(), null);
+        }
+    }
+
     private void chooseNativePluginResource(String requestId, JSONObject params) {
         try {
             requireCurrentPlugin(params.getString("plugin_id"));
@@ -2483,6 +2634,14 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_READ_TEXT_FILE) {
+            finishTextFileRead(resultCode, data);
+            return;
+        }
+        if (requestCode == REQUEST_WRITE_TEXT_FILE) {
+            finishTextFileWrite(resultCode, data);
+            return;
+        }
         if (requestCode == REQUEST_SELECT_CLIENT_RESOURCE) {
             finishClientResourceSelection(resultCode, data);
             return;
@@ -2505,6 +2664,70 @@ public final class MainActivity extends Activity {
             // The temporary read grant remains valid for this immediate import.
         }
         importPlugin(uri);
+    }
+
+    private void finishTextFileRead(int resultCode, Intent data) {
+        String requestId = pendingTextReadRequestId;
+        pendingTextReadRequestId = null;
+        if (requestId == null) return;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            respondNativeHost(requestId, false, 400, "Preset import was cancelled.", null);
+            return;
+        }
+        Uri uri = data.getData();
+        new Thread(() -> {
+            try (InputStream input = getContentResolver().openInputStream(uri);
+                 ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                if (input == null) {
+                    throw new IllegalArgumentException("Selected preset cannot be opened.");
+                }
+                byte[] buffer = new byte[16 * 1024];
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    output.write(buffer, 0, read);
+                    if (output.size() > 2 * 1024 * 1024) {
+                        throw new IllegalArgumentException("Selected preset is larger than 2 MiB.");
+                    }
+                }
+                if (output.size() == 0) {
+                    throw new IllegalArgumentException("Selected preset is empty.");
+                }
+                JSONObject result = new JSONObject()
+                        .put("file_name", selectedFileName(uri))
+                        .put("text", new String(output.toByteArray(), StandardCharsets.UTF_8));
+                respondNativeHost(requestId, true, 200, null, result);
+            } catch (Throwable error) {
+                respondNativeHost(requestId, false, 400,
+                        error.getMessage() == null ? error.toString() : error.getMessage(), null);
+            }
+        }, "rackforge-preset-reader").start();
+    }
+
+    private void finishTextFileWrite(int resultCode, Intent data) {
+        String requestId = pendingTextWriteRequestId;
+        String content = pendingTextWriteContent;
+        pendingTextWriteRequestId = null;
+        pendingTextWriteContent = null;
+        if (requestId == null) return;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null || content == null) {
+            respondNativeHost(requestId, false, 400, "Preset export was cancelled.", null);
+            return;
+        }
+        Uri uri = data.getData();
+        new Thread(() -> {
+            try (java.io.OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
+                if (output == null) {
+                    throw new IllegalArgumentException("Preset destination cannot be opened.");
+                }
+                output.write(content.getBytes(StandardCharsets.UTF_8));
+                output.flush();
+                respondNativeHost(requestId, true, 200, null,
+                        new JSONObject().put("saved", true));
+            } catch (Throwable error) {
+                respondNativeHost(requestId, false, 400,
+                        error.getMessage() == null ? error.toString() : error.getMessage(), null);
+            }
+        }, "rackforge-preset-writer").start();
     }
 
     private void finishClientResourceSelection(int resultCode, Intent data) {

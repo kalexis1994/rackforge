@@ -41,6 +41,9 @@ import {
 import {
   connectGateway,
   deletePluginPreset,
+  exportPluginPreset,
+  importPluginPreset,
+  inspectPluginPreset,
   dispatchCommand,
   dispatchCommandAwait,
   loadPluginPreset,
@@ -70,6 +73,8 @@ import {
   isDesktopHost,
   isNativeHost,
   isRemoteWebClient,
+  readNativeTextFile,
+  savePortableTextFile,
   selectNativePluginSound,
   selectNativeResource,
   syncNativeRoute,
@@ -108,6 +113,9 @@ import type {
   SessionSnapshot,
   WebAuthStatus,
   WebPublicConfig,
+  PresetImportConflictPolicy,
+  RfPresetFile,
+  RfPresetImportPreview,
 } from "./types";
 
 const ResourceExplorerDialog = lazy(() =>
@@ -371,6 +379,8 @@ function RackForgeApp() {
   const [liveWorkspace, setLiveWorkspace] = useState<PerformanceGraphWorkspace | null>(null);
   const [rackGraphOverlayOpen, setRackGraphOverlayOpen] = useState(false);
   const [playTransitionOpen, setPlayTransitionOpen] = useState(false);
+  const [preferredPlayInstanceId, setPreferredPlayInstanceId] = useState<string | null>(null);
+  const pendingPlayInstance = useRef<PluginInstance | null>(null);
   const [settingsBootstrap, setSettingsBootstrap] = useState<HostSettingsBootstrap | null>(null);
   const [controllerDockOpen, setControllerDockOpen] = useState(false);
   const roomyController = useMediaQuery(ROOMY_CONTROLLER_QUERY);
@@ -461,18 +471,46 @@ function RackForgeApp() {
   }, [location.pathname, navigate, roomyController]);
 
   const showControllerDock = roomyController && controllerDockOpen;
-  const requestPlayNavigation = useCallback(() => {
+  const completePlayNavigation = useCallback(async (instance?: PluginInstance) => {
+    setPreferredPlayInstanceId(instance?.instance_id ?? null);
+    if (instance) {
+      try {
+        await dispatchCommandAwait({ type: "set_active_mode", mode: "play" });
+        await dispatchCommandAwait({
+          type: "select_plugin",
+          instance_id: instance.instance_id,
+        });
+      } catch {
+        // Command failures are published through the shared RackForge banner.
+        return;
+      }
+    }
+    navigate("/play");
+  }, [navigate]);
+
+  const requestPlayNavigation = useCallback((instance?: PluginInstance) => {
     setMobileMenuOpen(false);
-    if (location.pathname === "/play") return;
+    if (location.pathname === "/play" && !instance) return;
     const liveOutputActive = snapshot?.active_mode === "live" && (
       snapshot.live.active !== undefined || liveWorkspace !== null
     );
     if (liveOutputActive) {
+      pendingPlayInstance.current = instance ?? null;
       setPlayTransitionOpen(true);
       return;
     }
-    navigate("/play");
-  }, [liveWorkspace, location.pathname, navigate, snapshot]);
+    void completePlayNavigation(instance);
+  }, [completePlayNavigation, liveWorkspace, location.pathname, snapshot]);
+
+  useEffect(() => {
+    if (
+      preferredPlayInstanceId &&
+      snapshot?.active_mode === "play" &&
+      snapshot.active_instance_id === preferredPlayInstanceId
+    ) {
+      setPreferredPlayInstanceId(null);
+    }
+  }, [preferredPlayInstanceId, snapshot]);
 
   return (
     <div className={`app-shell${isPluginSurface ? " plugin-surface-active" : ""}${
@@ -576,6 +614,7 @@ function RackForgeApp() {
                   snapshot={snapshot}
                   overlay={playOverlay}
                   onOverlayChange={setPlayOverlay}
+                  preferredInstanceId={preferredPlayInstanceId}
                 />
               }
             />
@@ -681,10 +720,15 @@ function RackForgeApp() {
       ) : null}
       {playTransitionOpen ? (
         <PlayModeTransitionDialog
-          onCancel={() => setPlayTransitionOpen(false)}
-          onConfirm={() => {
+          onCancel={() => {
+            pendingPlayInstance.current = null;
             setPlayTransitionOpen(false);
-            navigate("/play");
+          }}
+          onConfirm={() => {
+            const instance = pendingPlayInstance.current ?? undefined;
+            pendingPlayInstance.current = null;
+            setPlayTransitionOpen(false);
+            void completePlayNavigation(instance);
           }}
         />
       ) : null}
@@ -2230,7 +2274,7 @@ function HomePage({
   onOpenPlay,
 }: {
   snapshot: SessionSnapshot | null;
-  onOpenPlay: () => void;
+  onOpenPlay: (instance?: PluginInstance) => void;
 }) {
   const active = snapshot?.instances.find(
     (instance) => instance.instance_id === snapshot.active_instance_id,
@@ -2258,7 +2302,7 @@ function HomePage({
             <h2>{selected?.name ?? "No program selected"}</h2>
             <p>{selected?.detail ?? active?.plugin_name ?? "Connect RackForge Core"}</p>
           </div>
-          <button className="primary-button" onClick={onOpenPlay}>
+          <button className="primary-button" onClick={() => onOpenPlay()}>
             Open instrument <span>→</span>
           </button>
         </article>
@@ -2294,7 +2338,10 @@ function HomePage({
             Browse →
           </button>
         </div>
-        <PluginGrid instances={snapshot?.instances ?? []} />
+        <PluginGrid
+          instances={snapshot?.instances ?? []}
+          onOpenPlay={onOpenPlay}
+        />
       </section>
     </>
   );
@@ -2304,13 +2351,16 @@ function PlayPage({
   snapshot,
   overlay,
   onOverlayChange,
+  preferredInstanceId,
 }: {
   snapshot: SessionSnapshot | null;
   overlay: "plugins" | "presets" | null;
   onOverlayChange: (overlay: "plugins" | "presets" | null) => void;
+  preferredInstanceId?: string | null;
 }) {
   const instances = snapshot?.instances ?? [];
   const active =
+    instances.find((instance) => instance.instance_id === preferredInstanceId) ??
     instances.find(
       (instance) => instance.instance_id === snapshot?.active_instance_id,
     ) ?? instances[0];
@@ -2717,6 +2767,12 @@ function formatPluginVersion(version: string | undefined) {
   return ` v${version.replace(/^[vV]/, "")}`;
 }
 
+function formatFileSize(bytes: number) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${bytes} bytes`;
+}
+
 function PresetModal({
   instance,
   onClose,
@@ -2725,21 +2781,31 @@ function PresetModal({
   onClose: () => void;
 }) {
   const [presets, setPresets] = useState<HostPresetSummary[]>([]);
+  const [loadingPresets, setLoadingPresets] = useState(true);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameName, setRenameName] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [importCandidate, setImportCandidate] = useState<{
+    fileName: string;
+    file: RfPresetFile;
+    preview: RfPresetImportPreview;
+  } | null>(null);
   const [busyAction, setBusyAction] = useState<{
-    kind: "load" | "save" | "rename" | "delete";
+    kind: "load" | "save" | "rename" | "delete" | "export" | "inspect" | "import";
     presetId?: string;
   } | null>(null);
   const busy = busyAction !== null;
   const [message, setMessage] = useState<string | null>(null);
-  const refresh = useCallback(() =>
-    requestPluginPresets(instance.plugin_id)
+  const refresh = useCallback(() => {
+    setLoadingPresets(true);
+    return requestPluginPresets(instance.plugin_id)
       .then(setPresets)
-      .catch((error: Error) => setMessage(error.message)), [instance.plugin_id]);
+      .catch((error: Error) => setMessage(error.message))
+      .finally(() => setLoadingPresets(false));
+  }, [instance.plugin_id]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -2793,6 +2859,63 @@ function PresetModal({
       .catch((error: Error) => setMessage(error.message))
       .finally(() => setBusyAction(null));
   };
+  const inspectImportText = async (fileName: string, text: string) => {
+    setBusyAction({ kind: "inspect" });
+    setMessage(null);
+    try {
+      if (!fileName.toLowerCase().endsWith(".rfpreset")) {
+        throw new Error("Choose a .rfpreset file.");
+      }
+      if (!text || new TextEncoder().encode(text).byteLength > 2 * 1024 * 1024) {
+        throw new Error("The preset file is empty or larger than 2 MiB.");
+      }
+      const file = JSON.parse(text) as RfPresetFile;
+      const preview = await inspectPluginPreset(instance.plugin_id, file);
+      setImportCandidate({ fileName, file, preview });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not validate the preset file.");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+  const chooseImport = () => {
+    if (isNativeHost() || isDesktopHost()) {
+      setBusyAction({ kind: "inspect" });
+      setMessage(null);
+      readNativeTextFile({ extensions: ["rfpreset"], maximum_bytes: 2 * 1024 * 1024 })
+        .then(({ file_name, text }) => inspectImportText(file_name, text))
+        .catch((error: Error) => setMessage(error.message))
+        .finally(() => setBusyAction((current) => current?.kind === "inspect" ? null : current));
+      return;
+    }
+    importInputRef.current?.click();
+  };
+  const exportPresetFile = (preset: HostPresetSummary) => {
+    setBusyAction({ kind: "export", presetId: preset.id });
+    setMessage(null);
+    exportPluginPreset(instance.plugin_id, preset.id)
+      .then(({ file_name, file }) => savePortableTextFile({
+        file_name,
+        mime_type: "application/vnd.rackforge.preset+json",
+        text: `${JSON.stringify(file, null, 2)}\n`,
+      }))
+      .then(() => setMessage(`Exported ${preset.name}.`))
+      .catch((error: Error) => setMessage(error.message))
+      .finally(() => setBusyAction(null));
+  };
+  const commitImport = (policy: PresetImportConflictPolicy) => {
+    if (!importCandidate) return;
+    setBusyAction({ kind: "import" });
+    setMessage(null);
+    importPluginPreset(instance.plugin_id, importCandidate.file, policy)
+      .then((preset) => {
+        setImportCandidate(null);
+        setMessage(`Imported ${preset.name}.`);
+        return refresh();
+      })
+      .catch((error: Error) => setMessage(error.message))
+      .finally(() => setBusyAction(null));
+  };
   return (
     <ModalDialog
       eyebrow={`${instance.plugin_name} · Complete states`}
@@ -2801,11 +2924,89 @@ function PresetModal({
       dismissible={!busy}
       closeLabel="Close presets"
     >
+      {importCandidate ? (
+        <section className="preset-import-stage" aria-label="Portable preset preview">
+          <header className="preset-import-stage-header">
+            <div>
+              <span>Portable preset · Preview</span>
+              <h3>Import {importCandidate.preview.preset.name}?</h3>
+            </div>
+            <button
+              className="preset-modal-close modal-dialog-close"
+              type="button"
+              aria-label="Cancel preset import"
+              disabled={busy}
+              onClick={() => setImportCandidate(null)}
+            >
+              <X aria-hidden="true" />
+            </button>
+          </header>
+          <div className="preset-import-summary">
+            <dl>
+              <div><dt>Plugin</dt><dd>{importCandidate.preview.preset.plugin_id}</dd></div>
+              <div><dt>Plugin version</dt><dd>v{importCandidate.preview.preset.plugin_version}</dd></div>
+              <div><dt>State format</dt><dd>v{importCandidate.preview.preset.state_version}</dd></div>
+              <div><dt>State size</dt><dd>{formatFileSize(importCandidate.preview.byte_length)}</dd></div>
+              <div><dt>File</dt><dd>{importCandidate.fileName}</dd></div>
+            </dl>
+            {importCandidate.preview.conflict ? (
+              <p className="preset-import-conflict">A local preset already uses this name or identity.</p>
+            ) : null}
+            {importCandidate.preview.warnings.map((warning) => (
+              <p className="preset-import-warning" key={warning}>{warning}</p>
+            ))}
+          </div>
+          <footer className="preset-import-actions">
+            <button className="secondary-button" disabled={busy} onClick={() => setImportCandidate(null)}>
+              Cancel
+            </button>
+            {importCandidate.preview.conflict ? (
+              <button className="secondary-button" disabled={busy || !importCandidate.preview.compatible} onClick={() => commitImport("keep_both")}>
+                Import as copy
+              </button>
+            ) : null}
+            {importCandidate.preview.conflict !== "ambiguous" ? (
+              <button
+                className="primary-button"
+                disabled={busy || !importCandidate.preview.compatible}
+                onClick={() => commitImport(importCandidate.preview.conflict ? "replace" : "reject")}
+              >
+                <AsyncActionLabel active={busyAction?.kind === "import"} activeLabel="Importing…">
+                  {importCandidate.preview.conflict ? "Replace existing" : "Import preset"}
+                </AsyncActionLabel>
+              </button>
+            ) : null}
+          </footer>
+        </section>
+      ) : (
+        <>
         <div className="preset-modal-toolbar">
           <p>Load a captured state or save the instrument exactly as it sounds now.</p>
-          <button className="preset-create-button" onClick={() => setCreating((value) => !value)}>
-            <span aria-hidden="true">＋</span> New preset
-          </button>
+          <div className="preset-toolbar-actions">
+            <button className="preset-import-button" disabled={busy} onClick={chooseImport}>
+              <FileUp aria-hidden="true" />
+              <AsyncActionLabel active={busyAction?.kind === "inspect"} activeLabel="Validating…">
+                Import .rfpreset
+              </AsyncActionLabel>
+            </button>
+            <button className="preset-create-button" disabled={busy} onClick={() => setCreating((value) => !value)}>
+              <span aria-hidden="true">＋</span> New preset
+            </button>
+          </div>
+          <input
+            ref={importInputRef}
+            className="visually-hidden"
+            type="file"
+            accept=".rfpreset,application/vnd.rackforge.preset+json,application/json"
+            onChange={(event) => {
+              const selected = event.currentTarget.files?.[0];
+              event.currentTarget.value = "";
+              if (!selected) return;
+              void selected.text()
+                .then((text) => inspectImportText(selected.name, text))
+                .catch((error: Error) => setMessage(error.message));
+            }}
+          />
         </div>
         {creating && (
           <form className="preset-create-form" onSubmit={save}>
@@ -2822,7 +3023,13 @@ function PresetModal({
         )}
         {message && <p className="preset-message">{message}</p>}
         <div className="preset-list modal-list">
-          {presets.length === 0 ? (
+          {loadingPresets && presets.length === 0 ? (
+            <RfLoader
+              label="Loading presets"
+              detail="Reading complete instrument states…"
+              size="compact"
+            />
+          ) : presets.length === 0 ? (
             <div className="preset-empty"><span>00</span><strong>No presets yet</strong><small>Capture the current plugin state to create the first one.</small></div>
           ) : presets.map((preset) => (
             <article className="preset-row" key={preset.id}>
@@ -2853,6 +3060,14 @@ function PresetModal({
                     </i>
                   </button>
                   <div className="preset-row-actions">
+                    <button disabled={busy} onClick={() => exportPresetFile(preset)}>
+                      <AsyncActionLabel
+                        active={busyAction?.kind === "export" && busyAction.presetId === preset.id}
+                        activeLabel="Exporting…"
+                      >
+                        Export
+                      </AsyncActionLabel>
+                    </button>
                     <button disabled={busy} onClick={() => {
                       setDeletingId(null);
                       setRenamingId(preset.id);
@@ -2879,6 +3094,8 @@ function PresetModal({
             </article>
           ))}
         </div>
+        </>
+      )}
     </ModalDialog>
   );
 }
@@ -3440,11 +3657,13 @@ function PluginGrid({
   plugins,
   expanded = false,
   onRemove,
+  onOpenPlay,
 }: {
   instances: PluginInstance[];
   plugins?: PluginWebDescriptor[];
   expanded?: boolean;
   onRemove?: (plugin: PluginWebDescriptor) => void;
+  onOpenPlay: (instance: PluginInstance) => void;
 }) {
   const pluginCatalog = usePluginCatalog();
   const { plugins: loadedCatalog } = pluginCatalog;
@@ -3471,9 +3690,11 @@ function PluginGrid({
         );
         return (
           <div className="plugin-card-shell" key={instance.instance_id}>
-            <NavLink
-              className="plugin-card"
-              to={`/plugins/${encodeURIComponent(instance.instance_id)}`}
+            <button
+              type="button"
+              className="plugin-card plugin-card-button"
+              onClick={() => onOpenPlay(instance)}
+              aria-label={`Open ${instance.plugin_name} in PLAY`}
             >
               <div className={`plugin-tile tile-${index % 4}${plugin?.branding ? " branded" : ""}`}>
                 <PluginIcon plugin={plugin} name={instance.plugin_name} />
@@ -3486,7 +3707,7 @@ function PluginGrid({
                 <h3>{instance.plugin_name}</h3>
                 <p>{selected?.name ?? `${instance.sounds.length} programs`}</p>
               </div>
-            </NavLink>
+            </button>
             {plugin?.managed && onRemove ? (
               <button className="plugin-card-remove" onClick={() => onRemove(plugin)} aria-label={`Remove ${plugin.plugin_name}`} title="Remove plugin">
                 <Trash2 aria-hidden="true" />

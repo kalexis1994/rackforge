@@ -56,6 +56,7 @@ public final class AudioEngineService extends Service {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
+        MainActivity.releaseControllerHardware();
         MainActivity.stopNativeAudio();
         stopSelf();
         super.onTaskRemoved(rootIntent);
@@ -63,6 +64,7 @@ public final class AudioEngineService extends Service {
 
     @Override
     public void onDestroy() {
+        MainActivity.releaseControllerHardware();
         MainActivity.stopNativeAudio();
         super.onDestroy();
     }

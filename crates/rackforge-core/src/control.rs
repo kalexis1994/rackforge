@@ -511,6 +511,19 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             plugin_id,
             preset_id,
         } => get_plugin_preset(context, &plugin_id, &preset_id),
+        ControlRequest::ExportPluginPreset {
+            plugin_id,
+            preset_id,
+        } => export_plugin_preset(context, &plugin_id, &preset_id),
+        ControlRequest::InspectPluginPreset {
+            target_plugin_id,
+            file,
+        } => inspect_plugin_preset(context, &target_plugin_id, &file),
+        ControlRequest::ImportPluginPreset {
+            target_plugin_id,
+            file,
+            conflict_policy,
+        } => import_plugin_preset(context, &target_plugin_id, &file, conflict_policy),
         ControlRequest::MaterializePluginState {
             plugin_id,
             sound_id,
@@ -1728,6 +1741,109 @@ fn get_plugin_preset(
     }
 }
 
+fn export_plugin_preset(
+    context: &ControlContext,
+    plugin_id: &str,
+    preset_id: &str,
+) -> ControlResponse {
+    let revision = current_revision(context);
+    let plugin_name = context
+        .plugin_manifests
+        .get(plugin_id)
+        .map(|manifest| manifest.name.as_str())
+        .unwrap_or(plugin_id);
+    match context.state_store.lock() {
+        Ok(store) => match store.export_preset_file(plugin_id, preset_id, plugin_name) {
+            Ok((file_name, file)) => ControlResponse::PluginPresetExported {
+                file_name,
+                file: Box::new(file),
+            },
+            Err(error) => error_response(
+                ControlErrorCode::Rejected,
+                format!("exporting RackForge preset: {error:#}"),
+                revision,
+            ),
+        },
+        Err(_) => internal_error("plugin state store lock is poisoned", revision),
+    }
+}
+
+fn inspect_plugin_preset(
+    context: &ControlContext,
+    target_plugin_id: &str,
+    file: &rackforge_control_api::RfPresetFile,
+) -> ControlResponse {
+    let revision = current_revision(context);
+    let Some(manifest) = context.plugin_manifests.get(target_plugin_id) else {
+        return error_response(
+            ControlErrorCode::Unavailable,
+            format!("plugin {target_plugin_id} is not hosted by this runtime"),
+            revision,
+        );
+    };
+    match context.state_store.lock() {
+        Ok(store) => match store.inspect_preset_file(
+            target_plugin_id,
+            &manifest.version,
+            manifest.state_version,
+            file,
+        ) {
+            Ok(preview) => ControlResponse::PluginPresetInspected {
+                preview: Box::new(preview),
+            },
+            Err(error) => error_response(
+                ControlErrorCode::InvalidRequest,
+                format!("validating .rfpreset: {error:#}"),
+                revision,
+            ),
+        },
+        Err(_) => internal_error("plugin state store lock is poisoned", revision),
+    }
+}
+
+fn import_plugin_preset(
+    context: &ControlContext,
+    target_plugin_id: &str,
+    file: &rackforge_control_api::RfPresetFile,
+    conflict_policy: rackforge_control_api::PresetImportConflictPolicy,
+) -> ControlResponse {
+    let revision = current_revision(context);
+    let Some(manifest) = context.plugin_manifests.get(target_plugin_id) else {
+        return error_response(
+            ControlErrorCode::Unavailable,
+            format!("plugin {target_plugin_id} is not hosted by this runtime"),
+            revision,
+        );
+    };
+    let mut store = match context.state_store.lock() {
+        Ok(store) => store,
+        Err(_) => return internal_error("plugin state store lock is poisoned", revision),
+    };
+    let preset = match store.import_preset_file(
+        target_plugin_id,
+        &manifest.version,
+        manifest.state_version,
+        file,
+        conflict_policy,
+    ) {
+        Ok(preset) => preset,
+        Err(error) => {
+            return error_response(
+                ControlErrorCode::Rejected,
+                format!("importing .rfpreset: {error:#}"),
+                revision,
+            );
+        }
+    };
+    match store.list_presets(target_plugin_id) {
+        Ok(presets) => ControlResponse::PluginPresetImported {
+            preset: Box::new(preset),
+            presets,
+        },
+        Err(error) => internal_error(error.to_string(), revision),
+    }
+}
+
 fn materialize_plugin_state(
     context: &ControlContext,
     plugin_id: &str,
@@ -1993,6 +2109,23 @@ fn load_plugin_preset(
                 );
             }
         };
+        let Some(manifest) = context.plugin_manifests.get(&instance.plugin_id) else {
+            return error_response(
+                ControlErrorCode::Unavailable,
+                "the active plugin is not hosted by this runtime",
+                Some(snapshot.revision),
+            );
+        };
+        if preset.state.state_version != manifest.state_version {
+            return error_response(
+                ControlErrorCode::Rejected,
+                format!(
+                    "preset state v{} is incompatible with installed state v{}",
+                    preset.state.state_version, manifest.state_version
+                ),
+                Some(snapshot.revision),
+            );
+        }
         let bytes = match store.read(&preset.state) {
             Ok(bytes) => bytes,
             Err(error) => {

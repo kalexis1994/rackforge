@@ -3,6 +3,7 @@ import {
   isKeyLabMainEndpoint,
   parseControllerColor,
   resolveKeyLabTransport,
+  sendControllerRestorePlan,
 } from "./client";
 
 describe("browser Arturia controller transport", () => {
@@ -42,5 +43,29 @@ describe("browser Arturia controller transport", () => {
   it("validates saved colors before handing them to the controller", () => {
     expect(parseControllerColor("#145080")).toEqual([20, 80, 128]);
     expect(parseControllerColor("not-a-color")).toEqual([20, 80, 128]);
+  });
+
+  it("flushes queued Web MIDI before sending the cached release plan", () => {
+    const calls: string[] = [];
+    const sent: number[][] = [];
+    const output = {
+      clear: () => calls.push("clear"),
+      send: (bytes: Uint8Array) => {
+        calls.push("send");
+        sent.push([...bytes]);
+      },
+    };
+
+    expect(
+      sendControllerRestorePlan(output, [
+        { bytes: [0xf0, 1, 0xf7] },
+        { bytes: [0xf0, 2, 0xf7] },
+      ]),
+    ).toBe(true);
+    expect(calls).toEqual(["clear", "send", "send"]);
+    expect(sent).toEqual([
+      [0xf0, 1, 0xf7],
+      [0xf0, 2, 0xf7],
+    ]);
   });
 });

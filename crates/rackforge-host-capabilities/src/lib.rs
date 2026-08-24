@@ -39,7 +39,7 @@ pub enum Capability {
     SelectProgram,
     /// Set master level and pan while playing.
     MasterLevelAndPan,
-    /// Save, load, rename and delete host presets of a plugin's state.
+    /// Save, load, rename, delete, import and export host presets.
     HostPresets,
     /// Read and write a plugin's parameters.
     PluginParameters,
@@ -152,7 +152,7 @@ impl Capability {
             Self::PlayInstrument => "Choose an instrument and play it",
             Self::SelectProgram => "Choose the program an instrument plays",
             Self::MasterLevelAndPan => "Set master level and pan",
-            Self::HostPresets => "Save, load, rename and delete host presets",
+            Self::HostPresets => "Save, load, rename, delete, import and export host presets",
             Self::PluginParameters => "Read and write plugin parameters",
             Self::PerformanceLibrary => "Create and edit Racks, Songs and Setlists",
             Self::RackRendering => "Play a Rack, with every slot rendered",

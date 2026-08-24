@@ -423,6 +423,14 @@ pub extern "C" fn rf_controller_output() -> i32 {
     })
 }
 
+/// Returns a host-authored plan the page can keep on the main thread and
+/// write synchronously during `pagehide`, after the AudioWorklet may no longer
+/// be scheduled reliably.
+#[unsafe(no_mangle)]
+pub extern "C" fn rf_controller_restore_plan() -> i32 {
+    publish(&controller::restore_plan())
+}
+
 /// Applies the one setting currently exposed by the bundled controller.
 #[unsafe(no_mangle)]
 pub extern "C" fn rf_controller_set_color(red: u8, green: u8, blue: u8) {

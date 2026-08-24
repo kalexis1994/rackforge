@@ -3729,6 +3729,7 @@ version = "0.1.2"
 dependencies = [
  "alsa 0.10.0",
  "anyhow",
+ "base64",
  "libc",
  "libloading 0.8.9",
  "midir",

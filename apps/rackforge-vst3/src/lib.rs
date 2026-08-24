@@ -3,6 +3,8 @@
 mod diagnostic;
 mod engine;
 mod view;
+#[cfg(windows)]
+mod web_host;
 
 use engine::{RackForgeEngine, VstPluginModel};
 use rackforge_plugin_api::{
@@ -23,16 +25,18 @@ use vst3::{Class, ComPtr, ComRef, ComWrapper, Steinberg::Vst::*, Steinberg::*, u
 
 const PLUGIN_NAME: &str = "RackForge";
 const MASTER_LEVEL: ParamID = 0;
+const PLUGIN_SELECTION: ParamID = 1;
 const PLUGIN_PARAMETER_BASE: ParamID = 0x1_0000;
 const MIDI_PARAMETER_BASE: ParamID = 0x1000;
 const MIDI_CONTROLLERS_PER_CHANNEL: u32 = 130;
 const MIDI_CHANNELS: u32 = 16;
 const MIDI_PARAMETER_COUNT: u32 = MIDI_CONTROLLERS_PER_CHANNEL * MIDI_CHANNELS;
 const STATE_MAGIC: &[u8; 8] = b"RFVST3\0\0";
-const STATE_VERSION: u32 = 1;
+const STATE_VERSION: u32 = 2;
 
 struct ProcessorInner {
-    engine: Option<RackForgeEngine>,
+    engines: Vec<RackForgeEngine>,
+    active_engine: usize,
     sample_rate: f64,
     maximum_frames: usize,
     pending_state: Vec<u8>,
@@ -41,7 +45,7 @@ struct ProcessorInner {
 struct RackForgeProcessor {
     inner: Mutex<ProcessorInner>,
     level: AtomicU64,
-    model: Option<Arc<VstPluginModel>>,
+    models: Vec<Arc<VstPluginModel>>,
 }
 
 impl Class for RackForgeProcessor {
@@ -52,21 +56,22 @@ impl RackForgeProcessor {
     const CID: TUID = uid(0x6D4E5B5A, 0x41014BE2, 0x9D8B31E2, 0xF63CA701);
 
     fn new() -> Self {
-        let model = engine::load_plugin_model()
-            .map(Arc::new)
+        let models = engine::load_bundled_plugin_models()
+            .map(|models| models.into_iter().map(Arc::new).collect())
             .inspect_err(|error| {
-                diagnostic::write(format!("processor plugin model unavailable: {error:#}"));
+                diagnostic::write(format!("processor plugin models unavailable: {error:#}"));
             })
-            .ok();
+            .unwrap_or_default();
         Self {
             inner: Mutex::new(ProcessorInner {
-                engine: None,
+                engines: Vec::new(),
+                active_engine: 0,
                 sample_rate: 48_000.0,
                 maximum_frames: 2048,
                 pending_state: Vec::new(),
             }),
             level: AtomicU64::new(1.0_f64.to_bits()),
-            model,
+            models,
         }
     }
 
@@ -82,7 +87,7 @@ impl IPluginBaseTrait for RackForgeProcessor {
 
     unsafe fn terminate(&self) -> tresult {
         if let Ok(mut inner) = self.inner.lock() {
-            inner.engine = None;
+            inner.engines.clear();
         }
         kResultOk
     }
@@ -166,18 +171,33 @@ impl IComponentTrait for RackForgeProcessor {
             return kInternalError;
         };
         if active == 0 {
-            inner.engine = None;
+            inner.engines.clear();
             return kResultOk;
         }
-        if inner.engine.is_none() {
-            let Ok(mut engine) = RackForgeEngine::open(inner.sample_rate, inner.maximum_frames)
-            else {
-                return kResultFalse;
-            };
-            if !inner.pending_state.is_empty() && engine.load_state(&inner.pending_state).is_err() {
+        if inner.engines.is_empty() {
+            let mut engines = Vec::with_capacity(self.models.len());
+            for model in &self.models {
+                let Ok(engine) = RackForgeEngine::open_plugin(
+                    &model.plugin_id,
+                    inner.sample_rate,
+                    inner.maximum_frames,
+                ) else {
+                    return kResultFalse;
+                };
+                engines.push(engine);
+            }
+            if engines.is_empty() {
                 return kResultFalse;
             }
-            inner.engine = Some(engine);
+            let pending_engine = inner.active_engine.min(engines.len() - 1);
+            if !inner.pending_state.is_empty()
+                && engines[pending_engine]
+                    .load_state(&inner.pending_state)
+                    .is_err()
+            {
+                return kResultFalse;
+            }
+            inner.engines = engines;
         }
         kResultOk
     }
@@ -186,20 +206,31 @@ impl IComponentTrait for RackForgeProcessor {
         let Ok(bytes) = (unsafe { read_stream(stream) }) else {
             return kResultFalse;
         };
-        let Ok((level, plugin_state)) = decode_state(&bytes) else {
+        let Ok(state) = decode_state(&bytes) else {
             return kResultFalse;
         };
-        self.level.store(level.to_bits(), Ordering::Relaxed);
+        self.level.store(state.level.to_bits(), Ordering::Relaxed);
         let Ok(mut inner) = self.inner.lock() else {
             return kInternalError;
         };
-        if let Some(engine) = &mut inner.engine
-            && engine.load_state(plugin_state).is_err()
+        if let Some(plugin_id) = state.plugin_id {
+            let Some(index) = self
+                .models
+                .iter()
+                .position(|model| model.plugin_id == plugin_id)
+            else {
+                return kResultFalse;
+            };
+            inner.active_engine = index;
+        }
+        let active_engine = inner.active_engine;
+        if let Some(engine) = inner.engines.get_mut(active_engine)
+            && engine.load_state(state.plugin_state).is_err()
         {
             return kResultFalse;
         }
         inner.pending_state.clear();
-        inner.pending_state.extend_from_slice(plugin_state);
+        inner.pending_state.extend_from_slice(state.plugin_state);
         kResultOk
     }
 
@@ -207,14 +238,20 @@ impl IComponentTrait for RackForgeProcessor {
         let Ok(mut inner) = self.inner.lock() else {
             return kInternalError;
         };
-        let plugin_state = match &mut inner.engine {
+        let active_engine = inner.active_engine;
+        let plugin_state = match inner.engines.get_mut(active_engine) {
             Some(engine) => match engine.save_state() {
                 Ok(state) => state,
                 Err(_) => return kResultFalse,
             },
             None => inner.pending_state.clone(),
         };
-        let bytes = encode_state(self.level(), &plugin_state);
+        let plugin_id = self
+            .models
+            .get(active_engine)
+            .map(|model| model.plugin_id.as_str())
+            .unwrap_or_default();
+        let bytes = encode_state(self.level(), plugin_id, &plugin_state);
         if unsafe { write_stream(stream, &bytes) }.is_ok() {
             kResultOk
         } else {
@@ -285,7 +322,7 @@ impl IAudioProcessorTrait for RackForgeProcessor {
         };
         inner.sample_rate = setup.sampleRate;
         inner.maximum_frames = setup.maxSamplesPerBlock as usize;
-        inner.engine = None;
+        inner.engines.clear();
         kResultOk
     }
 
@@ -306,6 +343,7 @@ impl IAudioProcessorTrait for RackForgeProcessor {
             return kInvalidArgument;
         }
         update_level(data.inputParameterChanges, &self.level);
+        let selected_engine = selected_plugin_index(data.inputParameterChanges, self.models.len());
         let frames = data.numSamples as usize;
         let output_bus = unsafe { &mut *data.outputs };
         if output_bus.numChannels != 2 {
@@ -325,7 +363,11 @@ impl IAudioProcessorTrait for RackForgeProcessor {
         let Ok(mut inner) = self.inner.try_lock() else {
             return kResultOk;
         };
-        let Some(engine) = &mut inner.engine else {
+        if let Some(selected_engine) = selected_engine {
+            inner.active_engine = selected_engine;
+        }
+        let active_engine = inner.active_engine;
+        let Some(engine) = inner.engines.get_mut(active_engine) else {
             return kResultOk;
         };
         let events = VstMidiEvents::new(data.inputEvents, frames as u32).chain(
@@ -334,7 +376,7 @@ impl IAudioProcessorTrait for RackForgeProcessor {
         let parameter_events = VstPluginParameterEvents::new(
             data.inputParameterChanges,
             frames as u32,
-            self.model.as_deref(),
+            self.models.get(active_engine).map(Arc::as_ref),
         );
         if engine
             .process(
@@ -461,12 +503,20 @@ fn midi_event(frame: u32, status: u8, channel: i16, note: i16, value: f32) -> Mi
 #[derive(Clone)]
 struct RackForgeControllerShared {
     level: Arc<AtomicU64>,
+    revision: Arc<AtomicU64>,
     handler: Arc<Mutex<Option<ComPtr<IComponentHandler>>>>,
-    model: Option<Arc<VstPluginModel>>,
+    model: Arc<RwLock<Option<Arc<VstPluginModel>>>>,
+    catalog: Arc<Vec<Arc<VstPluginModel>>>,
     values: Arc<RwLock<BTreeMap<u32, f64>>>,
+    selected_sound_id: Arc<RwLock<Option<String>>>,
+    ui_route: Arc<RwLock<String>>,
 }
 
 impl RackForgeControllerShared {
+    fn model(&self) -> Option<Arc<VstPluginModel>> {
+        self.model.read().ok()?.clone()
+    }
+
     fn level(&self) -> f64 {
         f64::from_bits(self.level.load(Ordering::Relaxed)).clamp(0.0, 1.0)
     }
@@ -474,6 +524,55 @@ impl RackForgeControllerShared {
     fn set_level(&self, level: f64) {
         self.level
             .store(level.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        self.revision.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Relaxed)
+    }
+
+    fn selected_sound_id(&self) -> Option<String> {
+        self.selected_sound_id.read().ok()?.clone()
+    }
+
+    fn ui_route(&self) -> String {
+        self.ui_route
+            .read()
+            .map(|route| route.clone())
+            .unwrap_or_else(|_| "/".to_owned())
+    }
+
+    fn set_ui_route(&self, route: &str) -> Result<(), String> {
+        if route.is_empty()
+            || route.len() > 512
+            || !route.starts_with('/')
+            || route.contains(['#', '?', '\r', '\n'])
+        {
+            return Err("invalid RackForge VST3 UI route".to_owned());
+        }
+        *self
+            .ui_route
+            .write()
+            .map_err(|_| "RackForge VST3 UI route is unavailable".to_owned())? = route.to_owned();
+        Ok(())
+    }
+
+    fn editor_url(&self) -> String {
+        format!("rackforge://localhost/index.html#{}", self.ui_route())
+    }
+
+    fn plugin_selection_normalized(&self) -> f64 {
+        let Some(current) = self.model() else {
+            return 0.0;
+        };
+        if self.catalog.len() <= 1 {
+            return 0.0;
+        }
+        self.catalog
+            .iter()
+            .position(|model| model.plugin_id == current.plugin_id)
+            .map(|index| index as f64 / (self.catalog.len() - 1) as f64)
+            .unwrap_or(0.0)
     }
 
     fn set_level_from_ui(&self, level: f64) {
@@ -496,19 +595,19 @@ impl RackForgeControllerShared {
     }
 
     fn plugin_parameter_count(&self) -> usize {
-        self.model
-            .as_ref()
+        self.model()
+            .as_deref()
             .map(|model| model.schema.parameters.len())
             .unwrap_or(0)
     }
 
-    fn parameter(&self, index: u32) -> Option<&ParameterDescriptor> {
-        self.model
-            .as_ref()?
+    fn parameter(&self, index: u32) -> Option<ParameterDescriptor> {
+        self.model()?
             .schema
             .parameters
             .iter()
             .find(|parameter| parameter.index == index)
+            .cloned()
     }
 
     fn plugin_value(&self, index: u32) -> Option<f64> {
@@ -520,11 +619,12 @@ impl RackForgeControllerShared {
         if parameter.flags.read_only || matches!(parameter.kind, ParameterKind::Meter { .. }) {
             return None;
         }
-        let normalized = parameter_plain_to_normalized(parameter, value)?;
-        let canonical = parameter_normalized_to_plain(parameter, normalized);
+        let normalized = parameter_plain_to_normalized(&parameter, value)?;
+        let canonical = parameter_normalized_to_plain(&parameter, normalized);
         if let Ok(mut values) = self.values.write() {
             values.insert(index, canonical);
         }
+        self.revision.fetch_add(1, Ordering::Relaxed);
         let handler = self.handler.lock().ok()?;
         let handler = handler.as_ref()?;
         let parameter_id = plugin_parameter_id(index)?;
@@ -537,7 +637,7 @@ impl RackForgeControllerShared {
     }
 
     fn apply_preset_from_ui(&self, preset_id: &str) -> Option<Vec<engine::VstParameterValue>> {
-        let values = self.model.as_ref()?.preset_values.get(preset_id)?.clone();
+        let values = self.model()?.preset_values.get(preset_id)?.clone();
         for value in &values {
             if self.parameter(value.index).is_some_and(|parameter| {
                 !parameter.flags.read_only && !matches!(parameter.kind, ParameterKind::Meter { .. })
@@ -545,7 +645,65 @@ impl RackForgeControllerShared {
                 let _ = self.set_plugin_parameter_from_ui(value.index, value.value);
             }
         }
+        if let Ok(mut selected) = self.selected_sound_id.write() {
+            *selected = Some(preset_id.to_owned());
+        }
+        self.revision.fetch_add(1, Ordering::Relaxed);
         Some(values)
+    }
+
+    fn apply_plugin_selection(&self, catalog_index: usize) -> Result<Arc<VstPluginModel>, String> {
+        let model = self
+            .catalog
+            .get(catalog_index)
+            .cloned()
+            .ok_or_else(|| format!("VST3 plugin index {catalog_index} is unavailable"))?;
+        if let Ok(mut values) = self.values.write() {
+            values.clear();
+            values.extend(
+                model
+                    .initial_values
+                    .iter()
+                    .map(|value| (value.index, value.value)),
+            );
+        }
+        if let Ok(mut selected) = self.selected_sound_id.write() {
+            *selected = model.initial_sound_id.clone();
+        }
+        if let Ok(mut current) = self.model.write() {
+            *current = Some(model.clone());
+        }
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        Ok(model)
+    }
+
+    fn select_plugin_from_ui(&self, plugin_id: &str) -> Result<Arc<VstPluginModel>, String> {
+        let catalog_index = self
+            .catalog
+            .iter()
+            .position(|model| model.plugin_id == plugin_id)
+            .ok_or_else(|| format!("Plugin {plugin_id} is not bundled with RackForge VST3"))?;
+        let model = self.apply_plugin_selection(catalog_index)?;
+        let handler = self
+            .handler
+            .lock()
+            .map_err(|_| "VST3 component handler is unavailable".to_owned())?;
+        if let Some(handler) = handler.as_ref() {
+            let normalized = if self.catalog.len() <= 1 {
+                0.0
+            } else {
+                catalog_index as f64 / (self.catalog.len() - 1) as f64
+            };
+            unsafe {
+                let _ = handler.beginEdit(PLUGIN_SELECTION);
+                let _ = handler.performEdit(PLUGIN_SELECTION, normalized);
+                let _ = handler.endEdit(PLUGIN_SELECTION);
+                let _ = handler.restartComponent(
+                    RestartFlags_::kParamTitlesChanged | RestartFlags_::kParamValuesChanged,
+                );
+            }
+        }
+        Ok(model)
     }
 }
 
@@ -560,12 +718,13 @@ impl Class for RackForgeController {
 impl RackForgeController {
     const CID: TUID = uid(0xA9E488B2, 0xF36E4B52, 0xB1FD8D9B, 0xAF4016CC);
     fn new() -> Self {
-        let model = engine::load_plugin_model()
-            .map(Arc::new)
+        let catalog: Vec<Arc<VstPluginModel>> = engine::load_bundled_plugin_models()
+            .map(|models| models.into_iter().map(Arc::new).collect())
             .inspect_err(|error| {
-                diagnostic::write(format!("controller plugin model unavailable: {error:#}"));
+                diagnostic::write(format!("controller plugin models unavailable: {error:#}"));
             })
-            .ok();
+            .unwrap_or_default();
+        let model = catalog.first().cloned();
         let values = model
             .as_ref()
             .map(|model| {
@@ -579,8 +738,16 @@ impl RackForgeController {
         Self {
             shared: RackForgeControllerShared {
                 level: Arc::new(AtomicU64::new(1.0_f64.to_bits())),
+                revision: Arc::new(AtomicU64::new(0)),
                 handler: Arc::new(Mutex::new(None)),
-                model,
+                catalog: Arc::new(catalog),
+                selected_sound_id: Arc::new(RwLock::new(
+                    model
+                        .as_ref()
+                        .and_then(|model| model.initial_sound_id.clone()),
+                )),
+                ui_route: Arc::new(RwLock::new("/".to_owned())),
+                model: Arc::new(RwLock::new(model)),
                 values: Arc::new(RwLock::new(values)),
             },
         }
@@ -601,10 +768,23 @@ impl IEditControllerTrait for RackForgeController {
         let Ok(bytes) = (unsafe { read_stream(stream) }) else {
             return kResultFalse;
         };
-        let Ok((level, _)) = decode_state(&bytes) else {
+        let Ok(state) = decode_state(&bytes) else {
             return kResultFalse;
         };
-        self.shared.set_level(level);
+        if let Some(plugin_id) = state.plugin_id {
+            let Some(index) = self
+                .shared
+                .catalog
+                .iter()
+                .position(|model| model.plugin_id == plugin_id)
+            else {
+                return kResultFalse;
+            };
+            if self.shared.apply_plugin_selection(index).is_err() {
+                return kResultFalse;
+            }
+        }
+        self.shared.set_level(state.level);
         kResultOk
     }
     unsafe fn setState(&self, stream: *mut IBStream) -> tresult {
@@ -626,11 +806,11 @@ impl IEditControllerTrait for RackForgeController {
         }
     }
     unsafe fn getParameterCount(&self) -> i32 {
-        (1 + self.shared.plugin_parameter_count() as u32 + MIDI_PARAMETER_COUNT) as i32
+        (2 + self.shared.plugin_parameter_count() as u32 + MIDI_PARAMETER_COUNT) as i32
     }
     unsafe fn getParameterInfo(&self, index: i32, info: *mut ParameterInfo) -> tresult {
         let plugin_count = self.shared.plugin_parameter_count();
-        let total = 1 + plugin_count + MIDI_PARAMETER_COUNT as usize;
+        let total = 2 + plugin_count + MIDI_PARAMETER_COUNT as usize;
         if index < 0 || index as usize >= total || info.is_null() {
             return kInvalidArgument;
         }
@@ -644,13 +824,20 @@ impl IEditControllerTrait for RackForgeController {
             info.defaultNormalizedValue = 1.0;
             info.unitId = kRootUnitId;
             info.flags = ParameterInfo_::ParameterFlags_::kCanAutomate;
-        } else if (index as usize) <= plugin_count {
-            let Some(parameter) = self
-                .shared
-                .model
-                .as_ref()
-                .and_then(|model| model.schema.parameters.get(index as usize - 1))
-            else {
+        } else if index == 1 {
+            info.id = PLUGIN_SELECTION;
+            copy_wstring("RackForge Instrument", &mut info.title);
+            copy_wstring("Instrument", &mut info.shortTitle);
+            copy_wstring("", &mut info.units);
+            info.stepCount = self.shared.catalog.len().saturating_sub(1) as i32;
+            info.defaultNormalizedValue = 0.0;
+            info.unitId = kRootUnitId;
+            info.flags = ParameterInfo_::ParameterFlags_::kIsHidden;
+        } else if (index as usize) <= plugin_count + 1 {
+            let Some(model) = self.shared.model() else {
+                return kInvalidArgument;
+            };
+            let Some(parameter) = model.schema.parameters.get(index as usize - 2) else {
                 return kInvalidArgument;
             };
             let Some(id) = plugin_parameter_id(parameter.index) else {
@@ -669,7 +856,7 @@ impl IEditControllerTrait for RackForgeController {
                 ParameterInfo_::ParameterFlags_::kIsReadOnly
             };
         } else {
-            let midi_index = index as usize - 1 - plugin_count;
+            let midi_index = index as usize - 2 - plugin_count;
             let (channel, controller) = midi_parameter_from_index(midi_index as u32);
             info.id = midi_parameter_id(channel, controller);
             let label = midi_controller_label(channel, controller);
@@ -695,9 +882,18 @@ impl IEditControllerTrait for RackForgeController {
         if text.is_null() {
             return kInvalidArgument;
         }
+        let model = self.shared.model();
         let rendered = if id == MASTER_LEVEL {
             format!("{:.0}", value.clamp(0.0, 1.0) * 100.0)
-        } else if let Some(parameter) = decode_plugin_parameter(self.shared.model.as_deref(), id) {
+        } else if id == PLUGIN_SELECTION {
+            let index = (value.clamp(0.0, 1.0) * self.shared.catalog.len().saturating_sub(1) as f64)
+                .round() as usize;
+            self.shared
+                .catalog
+                .get(index)
+                .map(|model| model.name.clone())
+                .unwrap_or_else(|| "Instrument".to_owned())
+        } else if let Some(parameter) = decode_plugin_parameter(model.as_deref(), id) {
             format_parameter_value(parameter, parameter_normalized_to_plain(parameter, value))
         } else if decode_midi_parameter(id).is_some() {
             format!("{:.0}", value.clamp(0.0, 1.0) * 127.0)
@@ -718,9 +914,12 @@ impl IEditControllerTrait for RackForgeController {
         let Ok(parsed) = f64::from_str(text.trim_end_matches('%').trim()) else {
             return kInvalidArgument;
         };
+        let model = self.shared.model();
         let normalized = if id == MASTER_LEVEL {
             if parsed > 1.0 { parsed / 100.0 } else { parsed }.clamp(0.0, 1.0)
-        } else if let Some(parameter) = decode_plugin_parameter(self.shared.model.as_deref(), id) {
+        } else if id == PLUGIN_SELECTION {
+            parsed.clamp(0.0, 1.0)
+        } else if let Some(parameter) = decode_plugin_parameter(model.as_deref(), id) {
             let Some(normalized) = parameter_plain_to_normalized(parameter, parsed) else {
                 return kInvalidArgument;
             };
@@ -734,27 +933,32 @@ impl IEditControllerTrait for RackForgeController {
         kResultOk
     }
     unsafe fn normalizedParamToPlain(&self, id: u32, value: f64) -> f64 {
-        if id == MASTER_LEVEL || decode_midi_parameter(id).is_some() {
+        let model = self.shared.model();
+        if id == MASTER_LEVEL || id == PLUGIN_SELECTION || decode_midi_parameter(id).is_some() {
             value.clamp(0.0, 1.0)
-        } else if let Some(parameter) = decode_plugin_parameter(self.shared.model.as_deref(), id) {
+        } else if let Some(parameter) = decode_plugin_parameter(model.as_deref(), id) {
             parameter_normalized_to_plain(parameter, value)
         } else {
             0.0
         }
     }
     unsafe fn plainParamToNormalized(&self, id: u32, value: f64) -> f64 {
-        if id == MASTER_LEVEL || decode_midi_parameter(id).is_some() {
+        let model = self.shared.model();
+        if id == MASTER_LEVEL || id == PLUGIN_SELECTION || decode_midi_parameter(id).is_some() {
             value.clamp(0.0, 1.0)
-        } else if let Some(parameter) = decode_plugin_parameter(self.shared.model.as_deref(), id) {
+        } else if let Some(parameter) = decode_plugin_parameter(model.as_deref(), id) {
             parameter_plain_to_normalized(parameter, value).unwrap_or(0.0)
         } else {
             0.0
         }
     }
     unsafe fn getParamNormalized(&self, id: u32) -> f64 {
+        let model = self.shared.model();
         if id == MASTER_LEVEL {
             self.shared.level()
-        } else if let Some(parameter) = decode_plugin_parameter(self.shared.model.as_deref(), id) {
+        } else if id == PLUGIN_SELECTION {
+            self.shared.plugin_selection_normalized()
+        } else if let Some(parameter) = decode_plugin_parameter(model.as_deref(), id) {
             self.shared
                 .plugin_value(parameter.index)
                 .and_then(|value| parameter_plain_to_normalized(parameter, value))
@@ -773,9 +977,19 @@ impl IEditControllerTrait for RackForgeController {
         if !value.is_finite() {
             return kInvalidArgument;
         }
+        let model = self.shared.model();
         if id == MASTER_LEVEL {
             self.shared.set_level(value);
-        } else if let Some(parameter) = decode_plugin_parameter(self.shared.model.as_deref(), id) {
+        } else if id == PLUGIN_SELECTION {
+            let index = (value.clamp(0.0, 1.0) * self.shared.catalog.len().saturating_sub(1) as f64)
+                .round() as usize;
+            if self.shared.catalog.get(index).is_none() {
+                return kInvalidArgument;
+            }
+            if self.shared.apply_plugin_selection(index).is_err() {
+                return kResultFalse;
+            }
+        } else if let Some(parameter) = decode_plugin_parameter(model.as_deref(), id) {
             if parameter.flags.read_only || matches!(parameter.kind, ParameterKind::Meter { .. }) {
                 return kInvalidArgument;
             }
@@ -1325,30 +1539,93 @@ fn update_level(changes: *mut IParameterChanges, level: &AtomicU64) {
     }
 }
 
-fn encode_state(level: f64, plugin_state: &[u8]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(20 + plugin_state.len());
+fn selected_plugin_index(changes: *mut IParameterChanges, plugin_count: usize) -> Option<usize> {
+    if plugin_count < 2 {
+        return None;
+    }
+    let changes = unsafe { ComRef::from_raw(changes) }?;
+    let count = unsafe { changes.getParameterCount() };
+    for index in 0..count {
+        let Some(queue) = (unsafe { ComRef::from_raw(changes.getParameterData(index)) }) else {
+            continue;
+        };
+        if unsafe { queue.getParameterId() } != PLUGIN_SELECTION {
+            continue;
+        }
+        let point_count = unsafe { queue.getPointCount() };
+        if point_count <= 0 {
+            continue;
+        }
+        let (mut offset, mut value) = (0, 0.0);
+        if unsafe { queue.getPoint(point_count - 1, &mut offset, &mut value) } == kResultTrue
+            && value.is_finite()
+        {
+            return Some((value.clamp(0.0, 1.0) * (plugin_count - 1) as f64).round() as usize);
+        }
+    }
+    None
+}
+
+struct DecodedState<'a> {
+    level: f64,
+    plugin_id: Option<&'a str>,
+    plugin_state: &'a [u8],
+}
+
+fn encode_state(level: f64, plugin_id: &str, plugin_state: &[u8]) -> Vec<u8> {
+    let plugin_id = plugin_id.as_bytes();
+    let plugin_id_length = u16::try_from(plugin_id.len()).unwrap_or(u16::MAX);
+    let plugin_id = &plugin_id[..plugin_id_length as usize];
+    let mut bytes = Vec::with_capacity(26 + plugin_id.len() + plugin_state.len());
     bytes.extend_from_slice(STATE_MAGIC);
     bytes.extend_from_slice(&STATE_VERSION.to_le_bytes());
     bytes.extend_from_slice(&level.clamp(0.0, 1.0).to_le_bytes());
+    bytes.extend_from_slice(&plugin_id_length.to_le_bytes());
     bytes.extend_from_slice(&(plugin_state.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(plugin_id);
     bytes.extend_from_slice(plugin_state);
     bytes
 }
 
-fn decode_state(bytes: &[u8]) -> Result<(f64, &[u8]), ()> {
+fn decode_state(bytes: &[u8]) -> Result<DecodedState<'_>, ()> {
     if bytes.len() < 24 || &bytes[..8] != STATE_MAGIC {
         return Err(());
     }
     let version = u32::from_le_bytes(bytes[8..12].try_into().map_err(|_| ())?);
-    if version != STATE_VERSION {
-        return Err(());
-    }
     let level = f64::from_le_bytes(bytes[12..20].try_into().map_err(|_| ())?);
-    let length = u32::from_le_bytes(bytes[20..24].try_into().map_err(|_| ())?) as usize;
-    if !level.is_finite() || bytes.len() != 24 + length {
+    if !level.is_finite() {
         return Err(());
     }
-    Ok((level.clamp(0.0, 1.0), &bytes[24..]))
+    if version == 1 {
+        let length = u32::from_le_bytes(bytes[20..24].try_into().map_err(|_| ())?) as usize;
+        if bytes.len() != 24 + length {
+            return Err(());
+        }
+        return Ok(DecodedState {
+            level: level.clamp(0.0, 1.0),
+            plugin_id: None,
+            plugin_state: &bytes[24..],
+        });
+    }
+    if version != STATE_VERSION || bytes.len() < 26 {
+        return Err(());
+    }
+    let plugin_id_length = u16::from_le_bytes(bytes[20..22].try_into().map_err(|_| ())?) as usize;
+    let state_length = u32::from_le_bytes(bytes[22..26].try_into().map_err(|_| ())?) as usize;
+    let plugin_id_end = 26usize.checked_add(plugin_id_length).ok_or(())?;
+    let state_end = plugin_id_end.checked_add(state_length).ok_or(())?;
+    if bytes.len() != state_end {
+        return Err(());
+    }
+    let plugin_id = std::str::from_utf8(&bytes[26..plugin_id_end]).map_err(|_| ())?;
+    if plugin_id.is_empty() {
+        return Err(());
+    }
+    Ok(DecodedState {
+        level: level.clamp(0.0, 1.0),
+        plugin_id: Some(plugin_id),
+        plugin_state: &bytes[plugin_id_end..],
+    })
 }
 
 unsafe fn read_stream(stream: *mut IBStream) -> Result<Vec<u8>, ()> {
@@ -1472,18 +1749,33 @@ mod tests {
 
     #[test]
     fn state_round_trip_preserves_plugin_blob_and_level() {
-        let state = encode_state(0.625, &[1, 2, 3, 4]);
-        let (level, plugin) = decode_state(&state).unwrap();
-        assert_eq!(level, 0.625);
-        assert_eq!(plugin, &[1, 2, 3, 4]);
+        let state = encode_state(0.625, "org.rackforge.rf-106", &[1, 2, 3, 4]);
+        let decoded = decode_state(&state).unwrap();
+        assert_eq!(decoded.level, 0.625);
+        assert_eq!(decoded.plugin_id, Some("org.rackforge.rf-106"));
+        assert_eq!(decoded.plugin_state, &[1, 2, 3, 4]);
     }
 
     #[test]
     fn state_rejects_truncation_and_unknown_versions() {
-        let mut state = encode_state(1.0, &[1]);
+        let mut state = encode_state(1.0, "org.rackforge.test", &[1]);
         assert!(decode_state(&state[..state.len() - 1]).is_err());
-        state[8] = 2;
+        state[8] = 3;
         assert!(decode_state(&state).is_err());
+    }
+
+    #[test]
+    fn state_decoder_keeps_version_one_projects_compatible() {
+        let mut state = Vec::new();
+        state.extend_from_slice(STATE_MAGIC);
+        state.extend_from_slice(&1_u32.to_le_bytes());
+        state.extend_from_slice(&0.75_f64.to_le_bytes());
+        state.extend_from_slice(&3_u32.to_le_bytes());
+        state.extend_from_slice(&[7, 8, 9]);
+        let decoded = decode_state(&state).unwrap();
+        assert_eq!(decoded.level, 0.75);
+        assert_eq!(decoded.plugin_id, None);
+        assert_eq!(decoded.plugin_state, &[7, 8, 9]);
     }
 
     #[test]

@@ -87,13 +87,13 @@ impl IPlugViewTrait for RackForgeView {
             let Some(parent) = RawParentWindow::new(parent) else {
                 return kInvalidArgument;
             };
-            let Some(model) = self.shared.model.clone() else {
+            if self.shared.model().is_none() {
                 diagnostic::write("view.attached has no active plugin model");
                 return kResultFalse;
-            };
-            let html = render_shell(&self.shared, &model);
-            let package_root = model.package_root.clone();
-            let shared = self.shared.clone();
+            }
+            let protocol_shared = self.shared.clone();
+            let ipc_shared = self.shared.clone();
+            let editor_url = self.shared.editor_url();
             let data_directory = webview_data_directory();
             if let Err(error) = std::fs::create_dir_all(&data_directory) {
                 diagnostic::write(format!(
@@ -103,36 +103,65 @@ impl IPlugViewTrait for RackForgeView {
                 return kResultFalse;
             }
             diagnostic::write(format!(
-                "view.attached WebView2 data directory={}",
-                data_directory.display()
+                "view.attached WebView2 data directory={} route={:?}",
+                data_directory.display(),
+                self.shared.ui_route()
             ));
             let mut context = wry::WebContext::new(Some(data_directory));
             let builder = wry::WebViewBuilder::new_with_web_context(&mut context)
                 .with_custom_protocol(
                     "rackforge".into(),
                     move |_webview_id, request| {
-                        protocol_response(request.uri().path(), html.as_bytes(), &package_root)
+                        super::web_host::protocol_response(&request, &protocol_shared)
                     },
                 )
-                .with_url("rackforge://localhost/index.html")
+                .with_url(&editor_url)
                 .with_initialization_script(
+                    format!(
+                    "{}{}",
+                    super::web_host::INITIALIZATION_SCRIPT,
                     r#"
                     (() => {
                       const report = (phase, detail) => {
+                        const payload = { op: 'diagnostic', phase, detail };
                         try {
-                          window.ipc.postMessage(JSON.stringify({ op: 'diagnostic', phase, detail }));
-                        } catch (_) {}
+                          if (window === window.top) {
+                            window.ipc.postMessage(JSON.stringify(payload));
+                          } else {
+                            window.top.postMessage({ __rackforge_vst_diagnostic__: payload }, '*');
+                          }
+                        } catch (_) {
+                          try { window.ipc.postMessage(JSON.stringify(payload)); } catch (_) {}
+                        }
                       };
+                      if (window === window.top) {
+                        window.addEventListener('message', event => {
+                          const payload = event.data?.__rackforge_vst_diagnostic__;
+                          if (!payload || typeof payload.phase !== 'string') return;
+                          try { window.ipc.postMessage(JSON.stringify(payload)); } catch (_) {}
+                        });
+                      }
                       window.addEventListener('DOMContentLoaded', () => report(
                         'dom_content_loaded',
-                        `${document.body?.children.length ?? -1} children; ${window.innerWidth}x${window.innerHeight}`
+                        `${location.href}; ${document.body?.children.length ?? -1} children; ${window.innerWidth}x${window.innerHeight}`
                       ));
-                      window.addEventListener('error', event => report(
-                        'javascript_error',
-                        `${event.message || 'unknown error'} @ ${event.filename || 'inline'}:${event.lineno || 0}`
+                      window.addEventListener('error', event => {
+                        const resource = event.target?.src || event.target?.href;
+                        report(
+                          resource ? 'resource_error' : 'javascript_error',
+                          resource || `${event.message || 'unknown error'} @ ${event.filename || 'inline'}:${event.lineno || 0}`
+                        );
+                      }, true);
+                      window.addEventListener('unhandledrejection', event => report(
+                        'javascript_rejection',
+                        event.reason?.stack || event.reason?.message || String(event.reason || 'unknown rejection')
+                      ));
+                      window.addEventListener('securitypolicyviolation', event => report(
+                        'security_policy_violation',
+                        `${event.violatedDirective || 'unknown directive'} blocked ${event.blockedURI || 'unknown resource'}`
                       ));
                     })();
-                    "#,
+                    "#),
                 )
                 .with_bounds(wry::Rect {
                     position: wry::dpi::LogicalPosition::new(0, 0).into(),
@@ -150,12 +179,12 @@ impl IPlugViewTrait for RackForgeView {
                         return;
                     };
                     match message {
-                        UiMessage::SetMasterLevel { value } => shared.set_level_from_ui(value),
+                        UiMessage::SetMasterLevel { value } => ipc_shared.set_level_from_ui(value),
                         UiMessage::SetPluginParameter {
                             parameter_index,
                             value,
                         } => {
-                            if shared
+                            if ipc_shared
                                 .set_plugin_parameter_from_ui(parameter_index, value)
                                 .is_none()
                             {
@@ -165,7 +194,7 @@ impl IPlugViewTrait for RackForgeView {
                             }
                         }
                         UiMessage::SelectSound { sound_id } => {
-                            if shared.apply_preset_from_ui(&sound_id).is_none() {
+                            if ipc_shared.apply_preset_from_ui(&sound_id).is_none() {
                                 diagnostic::write(format!(
                                     "view rejected plugin sound {sound_id:?}"
                                 ));
@@ -315,116 +344,6 @@ enum UiMessage {
     SetPluginParameter { parameter_index: u32, value: f64 },
     SelectSound { sound_id: String },
     Diagnostic { phase: String, detail: String },
-}
-
-#[cfg(windows)]
-fn render_shell(shared: &RackForgeControllerShared, model: &super::VstPluginModel) -> String {
-    let values = shared
-        .values
-        .read()
-        .map(|values| {
-            values
-                .iter()
-                .map(|(index, value)| super::engine::VstParameterValue {
-                    index: *index,
-                    value: *value,
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_else(|_| model.initial_values.clone());
-    include_str!("ui.html")
-        .replace("__PLUGIN_NAME__", &html_escape(&model.name))
-        .replace("__PLUGIN_VERSION__", &html_escape(&model.version))
-        .replace("__PLUGIN_DESCRIPTION__", &html_escape(&model.description))
-        .replace("__PLUGIN_ACCENT__", &html_escape(&model.accent_color))
-        .replace(
-            "__PLUGIN_ENTRY_JSON__",
-            &serde_json::to_string(&format!("/plugin/{}", model.play_entry)).unwrap(),
-        )
-        .replace(
-            "__PLUGIN_ID_JSON__",
-            &serde_json::to_string(&model.plugin_id).unwrap(),
-        )
-        .replace(
-            "__PLUGIN_SCHEMA_JSON__",
-            &serde_json::to_string(&model.schema).unwrap(),
-        )
-        .replace(
-            "__PLUGIN_VALUES_JSON__",
-            &serde_json::to_string(&values).unwrap(),
-        )
-        .replace(
-            "__PLUGIN_PRESETS_JSON__",
-            &serde_json::to_string(&model.preset_values).unwrap(),
-        )
-        .replace("__RACKFORGE_INITIAL_LEVEL__", &shared.level().to_string())
-}
-
-#[cfg(windows)]
-fn protocol_response(
-    request_path: &str,
-    shell: &[u8],
-    package_root: &std::path::Path,
-) -> wry::http::Response<std::borrow::Cow<'static, [u8]>> {
-    use std::path::Component;
-    use wry::http::{Response, StatusCode, header};
-
-    if matches!(request_path, "/" | "/index.html") {
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-            .header(header::CACHE_CONTROL, "no-store")
-            .body(std::borrow::Cow::Owned(shell.to_vec()))
-            .unwrap();
-    }
-    let Some(relative) = request_path.strip_prefix("/plugin/") else {
-        return protocol_error(StatusCode::NOT_FOUND, "asset not found");
-    };
-    let relative = std::path::Path::new(relative);
-    if relative
-        .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return protocol_error(StatusCode::BAD_REQUEST, "invalid plugin asset path");
-    }
-    let path = package_root.join(relative);
-    let Ok(bytes) = std::fs::read(&path) else {
-        diagnostic::write(format!("view plugin asset not found: {}", path.display()));
-        return protocol_error(StatusCode::NOT_FOUND, "plugin asset not found");
-    };
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(
-            header::CONTENT_TYPE,
-            mime_guess::from_path(&path)
-                .first_or_octet_stream()
-                .as_ref(),
-        )
-        .header(header::CACHE_CONTROL, "no-store")
-        .body(std::borrow::Cow::Owned(bytes))
-        .unwrap()
-}
-
-#[cfg(windows)]
-fn protocol_error(
-    status: wry::http::StatusCode,
-    message: &'static str,
-) -> wry::http::Response<std::borrow::Cow<'static, [u8]>> {
-    wry::http::Response::builder()
-        .status(status)
-        .header(wry::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
-        .body(std::borrow::Cow::Borrowed(message.as_bytes()))
-        .unwrap()
-}
-
-#[cfg(windows)]
-fn html_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
 }
 
 #[cfg(windows)]

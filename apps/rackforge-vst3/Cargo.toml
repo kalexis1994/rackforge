@@ -20,6 +20,7 @@ toml.workspace = true
 vst3 = "=0.3.0"
 
 [target.'cfg(windows)'.dependencies]
+include_dir = "0.7"
 mime_guess = "2.0"
 raw-window-handle = "0.6"
 wry = { version = "0.56.0", default-features = false, features = ["os-webview"] }

@@ -1,0 +1,60 @@
+:where(:root) {
+  --rackforge-scrollbar-track: rgba(2, 12, 19, 0.72);
+  --rackforge-scrollbar-thumb-start: rgba(102, 229, 245, 0.82);
+  --rackforge-scrollbar-thumb-end: rgba(35, 137, 164, 0.84);
+  --rackforge-scrollbar-thumb-hover-start: rgba(137, 241, 252, 0.96);
+  --rackforge-scrollbar-thumb-hover-end: rgba(48, 180, 207, 0.94);
+  --rackforge-scrollbar-outline: rgba(115, 229, 244, 0.16);
+}
+
+:where(*) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rackforge-scrollbar-thumb-end) var(--rackforge-scrollbar-track);
+}
+
+:where(*)::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+:where(*)::-webkit-scrollbar-track {
+  background: var(--rackforge-scrollbar-track);
+  box-shadow: inset 0 0 0 1px var(--rackforge-scrollbar-outline);
+}
+
+:where(*)::-webkit-scrollbar-thumb {
+  min-width: 36px;
+  min-height: 36px;
+  background: linear-gradient(
+    180deg,
+    var(--rackforge-scrollbar-thumb-start),
+    var(--rackforge-scrollbar-thumb-end)
+  );
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+
+:where(*)::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    var(--rackforge-scrollbar-thumb-hover-start),
+    var(--rackforge-scrollbar-thumb-hover-end)
+  );
+  background-clip: padding-box;
+}
+
+:where(*)::-webkit-scrollbar-thumb:active {
+  background: var(--rackforge-scrollbar-thumb-hover-start);
+  background-clip: padding-box;
+}
+
+:where(*)::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+:where(*)::-webkit-scrollbar-corner {
+  background: transparent;
+}

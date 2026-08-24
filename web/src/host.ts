@@ -38,7 +38,7 @@ declare global {
   interface Window {
     RackForgeNativeHost?: NativeHostBridge;
     __RACKFORGE_NATIVE_HOST_TOKEN__?: string;
-    __RACKFORGE_HOST_SHELL__?: "desktop";
+    __RACKFORGE_HOST_SHELL__?: "desktop" | "vst3";
   }
 }
 
@@ -90,8 +90,17 @@ export function isDesktopHost() {
   return window.__RACKFORGE_HOST_SHELL__ === "desktop";
 }
 
+/**
+ * The VST3 edition runs the same RackForge interface inside the DAW, but its
+ * host owns audio and MIDI. UI features are therefore selected by capability
+ * instead of maintaining a separate VST-only frontend.
+ */
+export function isVstHost() {
+  return window.__RACKFORGE_HOST_SHELL__ === "vst3";
+}
+
 export function isRemoteWebClient() {
-  return !isNativeHost() && !isDesktopHost() && !IS_BROWSER_HOST;
+  return !isNativeHost() && !isDesktopHost() && !isVstHost() && !IS_BROWSER_HOST;
 }
 
 function installNativeListener() {

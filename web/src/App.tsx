@@ -3,6 +3,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -73,6 +74,7 @@ import {
   isDesktopHost,
   isNativeHost,
   isRemoteWebClient,
+  isVstHost,
   readNativeTextFile,
   savePortableTextFile,
   selectNativePluginSound,
@@ -266,6 +268,8 @@ const aboutItem = {
   icon: Info,
 };
 
+const vstNavItems = [navItems[0], navItems[2], navItems[4], aboutItem] as typeof navItems;
+
 const ROOMY_CONTROLLER_QUERY = "(min-width: 1100px) and (min-height: 620px)";
 
 function useMediaQuery(query: string) {
@@ -372,6 +376,7 @@ function RackForgeApp() {
   );
   const location = useLocation();
   const navigate = useNavigate();
+  const vstHost = isVstHost();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [installPluginOpen, setInstallPluginOpen] = useState(false);
   const [playOverlay, setPlayOverlay] = useState<"plugins" | "presets" | null>(null);
@@ -439,6 +444,7 @@ function RackForgeApp() {
   }, [connection, snapshot]);
 
   useEffect(() => {
+    if (vstHost) return;
     let active = true;
     requestHostSettingsBootstrap().then((bootstrap) => {
       if (active) setSettingsBootstrap(bootstrap);
@@ -446,7 +452,7 @@ function RackForgeApp() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [vstHost]);
 
   useEffect(() => {
     syncNativeRoute(location.pathname);
@@ -513,7 +519,7 @@ function RackForgeApp() {
   }, [preferredPlayInstanceId, snapshot]);
 
   return (
-    <div className={`app-shell${isPluginSurface ? " plugin-surface-active" : ""}${
+    <div className={`app-shell${vstHost ? " vst-host" : ""}${isPluginSurface ? " plugin-surface-active" : ""}${
       isControllerSurface ? " controller-surface-active" : ""
     }${isPerformanceSurface ? " performance-surface-active" : ""}${
       isLiveSurface ? " live-surface-active" : ""
@@ -526,6 +532,7 @@ function RackForgeApp() {
           <span className="brand-name">RACKFORGE</span>
         </div>
         <NavigationLinks
+          items={vstHost ? vstNavItems : navItems}
           onPlayRequest={requestPlayNavigation}
           controllerDockOpen={showControllerDock}
           onControllerToggle={roomyController
@@ -595,7 +602,7 @@ function RackForgeApp() {
             />
             <Route
               path="/live"
-              element={
+              element={vstHost ? <Navigate to="/play" replace /> :
                 <LivePage
                   session={snapshot}
                   performance={performance}
@@ -620,7 +627,7 @@ function RackForgeApp() {
             />
             <Route
               path="/controller"
-              element={
+              element={vstHost ? <Navigate to="/play" replace /> :
                 <TouchControllerPage
                   snapshot={snapshot}
                   connection={connection}
@@ -635,6 +642,7 @@ function RackForgeApp() {
                 <PluginsPage
                   snapshot={snapshot}
                   onInstall={() => setInstallPluginOpen(true)}
+                  showControllers={!vstHost}
                 />
               }
             />
@@ -645,7 +653,7 @@ function RackForgeApp() {
             <Route path="/controllers/:controllerId" element={<ControllerPage />} />
             <Route
               path="/settings"
-              element={settingsBootstrap ? (
+              element={vstHost ? <Navigate to="/plugins" replace /> : settingsBootstrap ? (
                 <SettingsPage
                   initial={settingsBootstrap}
                   onConfigChange={(config) => setSettingsBootstrap((current) =>
@@ -659,7 +667,7 @@ function RackForgeApp() {
                 <RfLoader label="Settings" detail="Reading host capabilities…" size="medium" />
               )}
             />
-            <Route path="/diagnostics" element={<DiagnosticsPage />} />
+            <Route path="/diagnostics" element={vstHost ? <Navigate to="/play" replace /> : <DiagnosticsPage />} />
             <Route path="/about" element={<AboutPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
@@ -679,6 +687,7 @@ function RackForgeApp() {
       <TypingKeyboardListener />
       {mobileMenuOpen ? (
         <MobileNavigation
+          vstHost={vstHost}
           connection={connection}
           onClose={() => setMobileMenuOpen(false)}
           performanceSurface={
@@ -1184,6 +1193,7 @@ function NavigationLinks({
 }
 
 function MobileNavigation({
+  vstHost,
   connection,
   onClose,
   performanceSurface,
@@ -1193,6 +1203,7 @@ function MobileNavigation({
   onPlayRequest,
   onPerformanceAction,
 }: {
+  vstHost: boolean;
   connection: string;
   onClose: () => void;
   performanceSurface?: "play" | "live";
@@ -1349,14 +1360,14 @@ function MobileNavigation({
           ) : null}
           <span className="mobile-menu-section">Workspace</span>
           <NavigationLinks
-            items={[navItems[2], navItems[1], navItems[3], diagnosticsItem]}
+            items={vstHost ? [navItems[2]] : [navItems[2], navItems[1], navItems[3], diagnosticsItem]}
             detailed
             onNavigate={requestClose}
             onPlayRequest={onPlayRequest}
           />
           <span className="mobile-menu-section">System</span>
           <NavigationLinks
-            items={[audioMidiItem, installedPluginsItem, aboutItem]}
+            items={vstHost ? [installedPluginsItem, aboutItem] : [audioMidiItem, installedPluginsItem, aboutItem]}
             detailed
             onNavigate={requestClose}
           />
@@ -2176,7 +2187,7 @@ function TopBar({
         {active && <span className="muted-inline">{active.plugin_name}</span>}
       </div>
       <div className="top-controls">
-        <MasterPan value={snapshot?.master_pan ?? 0} />
+        {!isVstHost() ? <MasterPan value={snapshot?.master_pan ?? 0} /> : null}
         <MasterLevel value={snapshot?.master_level ?? 0} />
       </div>
     </header>
@@ -3331,17 +3342,22 @@ function ControllerPage() {
 function PluginsPage({
   snapshot,
   onInstall,
+  showControllers = true,
 }: {
   snapshot: SessionSnapshot | null;
   onInstall: () => void;
+  showControllers?: boolean;
 }) {
   const location = useLocation();
   const navigate = useNavigate();
   const pluginCatalog = usePluginCatalog();
   const { plugins: installed } = pluginCatalog;
   const [controllers, setControllers] = useState<ControllerSummary[]>([]);
-  const [controllersStatus, setControllersStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [controllersStatus, setControllersStatus] = useState<"loading" | "ready" | "error">(
+    showControllers ? "loading" : "ready",
+  );
   useEffect(() => {
+    if (!showControllers) return;
     let cancelled = false;
     hostJson<{ controllers: ControllerSummary[] }>("/api/v1/controllers")
       .then((response) => {
@@ -3356,7 +3372,7 @@ function PluginsPage({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [showControllers]);
   const [pendingRemoval, setPendingRemoval] = useState<PluginWebDescriptor | null>(null);
   const [removing, setRemoving] = useState(false);
   const [changingPluginId, setChangingPluginId] = useState<string | null>(null);
@@ -3479,7 +3495,9 @@ function PluginsPage({
         <PageHeading
           eyebrow="Plugin library"
           title="Plugin Manager"
-          detail="Install, configure and remove RackForge plugins: instruments and controllers. Musical controls remain in Play."
+          detail={showControllers
+            ? "Install, configure and remove RackForge plugins: instruments and controllers. Musical controls remain in Play."
+            : "Choose and manage the instruments available to this RackForge VST3 instance."}
         />
         <button className="primary-button plugin-install-button" onClick={onInstall}>
           <Download aria-hidden="true" />
@@ -4184,6 +4202,33 @@ export function PluginFrame({
   const selectedSurface = descriptor?.surfaces.find(
     (candidate) => candidate.kind === surface,
   );
+  const pluginContext = useMemo(() => {
+    const contextInstance = isolated && isolatedContextState?.selected_sound_id
+      ? {
+          ...instance,
+          selected_sound_id: isolatedContextState.selected_sound_id,
+        }
+      : instance;
+    return {
+      protocol: "rackforge.plugin.web@1",
+      kind: "context",
+      surface,
+      instance: contextInstance,
+      program_draft:
+        snapshot?.program_draft?.instance_id === instance.instance_id
+          ? snapshot.program_draft
+          : null,
+      audition:
+        snapshot?.audition?.instance_id === instance.instance_id
+          ? snapshot.audition
+          : null,
+      host: {
+        active_mode: snapshot?.active_mode ?? "play",
+        master_level: snapshot?.master_level ?? 0,
+        master_pan: snapshot?.master_pan ?? 0,
+      },
+    };
+  }, [instance, isolated, isolatedContextState?.selected_sound_id, snapshot, surface]);
 
   // Parameter changes can originate outside the iframe (MIDI Learn links,
   // semantic .rfcontroller profiles, automation, or another RackForge
@@ -4294,31 +4339,6 @@ export function PluginFrame({
 
     const send = (message: unknown) =>
       frame.contentWindow?.postMessage(message, window.location.origin);
-    const contextInstance = isolated && isolatedContextState?.selected_sound_id
-      ? {
-          ...instance,
-          selected_sound_id: isolatedContextState.selected_sound_id,
-        }
-      : instance;
-    const context = {
-      protocol: "rackforge.plugin.web@1",
-      kind: "context",
-      surface,
-      instance: contextInstance,
-      program_draft:
-        snapshot?.program_draft?.instance_id === instance.instance_id
-          ? snapshot.program_draft
-          : null,
-      audition:
-        snapshot?.audition?.instance_id === instance.instance_id
-          ? snapshot.audition
-          : null,
-      host: {
-        active_mode: snapshot?.active_mode ?? "play",
-        master_level: snapshot?.master_level ?? 0,
-        master_pan: snapshot?.master_pan ?? 0,
-      },
-    };
     const onMessage = (event: MessageEvent) => {
       if (
         event.source !== frame.contentWindow ||
@@ -4331,7 +4351,7 @@ export function PluginFrame({
       if (event.data.kind === "ready") {
         setFrameLoaded(true);
         setFrameDocumentGeneration((generation) => generation + 1);
-        send(context);
+        send(pluginContext);
         return;
       }
       if (
@@ -4791,10 +4811,10 @@ export function PluginFrame({
         respond(false, "Method is not available for this plugin surface.");
       }
     };
-    const onLoad = () => send(context);
+    const onLoad = () => send(pluginContext);
     window.addEventListener("message", onMessage);
     frame.addEventListener("load", onLoad);
-    send(context);
+    send(pluginContext);
     return () => {
       window.removeEventListener("message", onMessage);
       frame.removeEventListener("load", onLoad);
@@ -4812,6 +4832,7 @@ export function PluginFrame({
     selectedSurface,
     snapshot,
     surface,
+    pluginContext,
   ]);
 
   const editLease =
@@ -4900,6 +4921,36 @@ export function PluginFrame({
           onLoad={() => {
             setFrameLoaded(true);
             setFrameDocumentGeneration((generation) => generation + 1);
+            // Plugin surfaces are same-origin, sandboxed documents. Give them
+            // RackForge's low-specificity scrollbar defaults while allowing a
+            // plugin stylesheet to replace the theme deliberately.
+            try {
+              const frameDocument = frameRef.current?.contentDocument;
+              if (
+                frameDocument?.head &&
+                !frameDocument.querySelector("link[data-rackforge-scrollbars]")
+              ) {
+                const link = frameDocument.createElement("link");
+                link.rel = "stylesheet";
+                link.href = new URL(
+                  "rackforge-scrollbars.css",
+                  window.document.baseURI,
+                ).href;
+                link.dataset.rackforgeScrollbars = "true";
+                frameDocument.head.append(link);
+              }
+            } catch {
+              // A plugin that intentionally navigates away from the host
+              // origin remains isolated and simply keeps its own scrollbar.
+            }
+            // A cached plugin can post `ready` before React's effect installs
+            // the message listener. The load event happens after the plugin
+            // has installed its own listener, so publishing the idempotent
+            // context here closes that race without plugin-specific timing.
+            frameRef.current?.contentWindow?.postMessage(
+              pluginContext,
+              window.location.origin,
+            );
           }}
         />
         {!splashGone && (

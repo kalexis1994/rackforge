@@ -63,8 +63,26 @@ if (-not $env:RACKFORGE_BUNDLED_PLUGIN) {
     $env:RACKFORGE_BUNDLED_PLUGIN = $bundled
 }
 
+$officialPlugins = Join-Path $repository "dist/bundled-plugins/official"
+& python (Join-Path $repository "tools/fetch-official-plugins.py") `
+    --output-directory $officialPlugins
+if ($LASTEXITCODE -ne 0) {
+    throw "RackForge official plugin download failed."
+}
+$rf106 = Join-Path $officialPlugins "RF-106.rfplugin"
+if (-not (Test-Path -LiteralPath $rf106 -PathType Leaf)) {
+    throw "The pinned RF-106 package was not produced at $rf106"
+}
+$env:RACKFORGE_BUNDLED_RF106_PLUGIN = $rf106
+
 Push-Location $repository
 try {
+    if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+        throw "pnpm is required to build the shared RackForge interface."
+    }
+    & pnpm --dir web build
+    if ($LASTEXITCODE -ne 0) { throw "The shared RackForge interface build failed." }
+
     & rustup run stable-x86_64-pc-windows-msvc rustc --version *> $null
     if ($LASTEXITCODE -ne 0) {
         & rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal

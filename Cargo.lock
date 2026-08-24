@@ -4011,6 +4011,7 @@ name = "rackforge-vst3"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "include_dir",
  "mime_guess",
  "rackforge-core",
  "rackforge-plugin-api",

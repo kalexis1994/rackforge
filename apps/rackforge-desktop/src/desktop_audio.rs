@@ -1081,9 +1081,19 @@ impl DesktopAudio {
     }
 
     pub fn save_active_state(&self) -> Result<Vec<u8>> {
+        let receiver = self.begin_save_active_state()?;
+        receive_control_response(receiver, "save plugin state")
+    }
+
+    /// Starts a state snapshot without blocking the window thread. Desktop's
+    /// close coordinator polls the receiver while continuing to paint its
+    /// shutdown progress instead of freezing for the full audio deadline.
+    pub fn begin_save_active_state(
+        &self,
+    ) -> Result<Receiver<std::result::Result<Vec<u8>, String>>> {
         let (reply, receiver) = mpsc::sync_channel(1);
         self.send_command(AudioCommand::SaveActiveState { reply })?;
-        receive_control_response(receiver, "save plugin state")
+        Ok(receiver)
     }
 
     pub fn restore_state(&self, instance_id: &str, state: Vec<u8>) -> Result<()> {

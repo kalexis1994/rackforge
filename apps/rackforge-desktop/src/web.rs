@@ -269,14 +269,34 @@ struct RunningServer {
     thread: Option<JoinHandle<()>>,
 }
 
-impl Drop for RunningServer {
-    fn drop(&mut self) {
+impl RunningServer {
+    fn request_shutdown(&mut self) {
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
-        if let Some(thread) = self.thread.take() {
+    }
+
+    fn is_finished(&self) -> bool {
+        self.thread.as_ref().is_none_or(JoinHandle::is_finished)
+    }
+
+    fn finish(&mut self, wait: bool) {
+        self.request_shutdown();
+        let Some(thread) = self.thread.take() else {
+            return;
+        };
+        if wait || thread.is_finished() {
             let _ = thread.join();
         }
+        // Dropping an unfinished handle detaches it. The process is already
+        // committed to exit and the server received its shutdown signal; a
+        // broken Tokio task must never freeze the Desktop window forever.
+    }
+}
+
+impl Drop for RunningServer {
+    fn drop(&mut self) {
+        self.finish(true);
     }
 }
 
@@ -333,6 +353,24 @@ impl DesktopWebServers {
             .expect("Web settings lock poisoned") = preferences;
         self.public = replacement;
         Ok(())
+    }
+
+    pub fn request_shutdown(&mut self) {
+        self._local.request_shutdown();
+        if let Some(public) = self.public.as_mut() {
+            public.request_shutdown();
+        }
+    }
+
+    pub fn shutdown_complete(&self) -> bool {
+        self._local.is_finished() && self.public.as_ref().is_none_or(RunningServer::is_finished)
+    }
+
+    pub fn finish_shutdown(&mut self, wait: bool) {
+        self._local.finish(wait);
+        if let Some(public) = self.public.as_mut() {
+            public.finish(wait);
+        }
     }
 }
 

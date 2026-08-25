@@ -6,6 +6,7 @@ mod desktop_audio;
 mod desktop_webview;
 mod paths;
 mod setup;
+mod shutdown;
 #[cfg(windows)]
 mod single_instance;
 mod startup;
@@ -60,6 +61,7 @@ use rackforge_surface_runtime::{
     ProgramExitDestination,
 };
 use semver::Version;
+use shutdown::DesktopShutdown;
 use startup::{Options, Startup, options_from_layout, parse_startup};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
@@ -125,6 +127,7 @@ enum AppMode {
 
 struct RackForgeApp {
     mode: AppMode,
+    shutdown: Option<DesktopShutdown>,
     #[cfg(windows)]
     webview: desktop_webview::DesktopWebView,
 }
@@ -5940,6 +5943,7 @@ impl RackForgeApp {
     fn new(startup: Startup, creation: &eframe::CreationContext<'_>) -> Result<Self> {
         Ok(Self {
             mode: Self::initial_mode(startup)?,
+            shutdown: None,
             webview: desktop_webview::DesktopWebView::new(creation)?,
         })
     }
@@ -5948,12 +5952,16 @@ impl RackForgeApp {
     fn new(startup: Startup, _creation: &eframe::CreationContext<'_>) -> Result<Self> {
         Ok(Self {
             mode: Self::initial_mode(startup)?,
+            shutdown: None,
         })
     }
 }
 
 impl eframe::App for RackForgeApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if self.shutdown.is_some() {
+            return;
+        }
         // The player's last touches survive the window closing.
         if let AppMode::Desktop(app) = &mut self.mode {
             if app.live_state_dirty.is_some() {
@@ -5971,6 +5979,34 @@ impl eframe::App for RackForgeApp {
     }
 
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        let close_requested = context.input(|input| input.viewport().close_requested());
+        if close_requested
+            && self.shutdown.is_none()
+            && let AppMode::Desktop(app) = &mut self.mode
+        {
+            context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            #[cfg(windows)]
+            {
+                let _ = self.webview.hide();
+            }
+            self.shutdown = Some(DesktopShutdown::begin(app));
+        }
+
+        if let Some(shutdown) = self.shutdown.as_mut() {
+            if !shutdown.is_complete() && close_requested {
+                context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+            if let AppMode::Desktop(app) = &mut self.mode {
+                shutdown.poll(app);
+            }
+            shutdown.render(context);
+            context.request_repaint_after(Duration::from_millis(16));
+            if shutdown.is_complete() {
+                context.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            return;
+        }
+
         let transition = match &mut self.mode {
             AppMode::Setup {
                 state,

@@ -30,13 +30,25 @@ jobs:
 
       - name: Lint GitHub Actions workflows
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           actionlint_dir="$RUNNER_TEMP/actionlint"
           mkdir -p "$actionlint_dir"
-          actionlint_archive="$actionlint_dir/actionlint.tar.gz"
-          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
-            "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_$ACTIONLINT_VERSION_linux_amd64.tar.gz" \
-            --output "$actionlint_archive"
+          actionlint_archive="$actionlint_dir/actionlint_$ACTIONLINT_VERSION_linux_amd64.tar.gz"
+          for attempt in 1 2 3; do
+            if gh release download "v$ACTIONLINT_VERSION" \
+              --repo rhysd/actionlint \
+              --pattern "actionlint_$ACTIONLINT_VERSION_linux_amd64.tar.gz" \
+              --dir "$actionlint_dir" \
+              --clobber; then
+              break
+            fi
+            if [[ "$attempt" == 3 ]]; then
+              exit 1
+            fi
+            sleep $((attempt * 2))
+          done
           printf '%s  %s\n' "$ACTIONLINT_LINUX_AMD64_SHA256" "$actionlint_archive" \
             | sha256sum --check --strict
           tar --extract --gzip --file "$actionlint_archive" --directory "$actionlint_dir" actionlint

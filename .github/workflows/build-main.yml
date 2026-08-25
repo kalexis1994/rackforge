@@ -72,7 +72,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -172,7 +172,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -268,7 +268,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -324,7 +324,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -440,7 +440,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm

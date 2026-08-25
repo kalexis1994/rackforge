@@ -77,7 +77,7 @@ jobs:
       - name: Build the self-contained Concert Grand page
         run: python3 tools/build-live-page.py web/dist/concert-grand-live.html
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: web/dist
 

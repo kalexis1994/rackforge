@@ -133,6 +133,7 @@ public final class MainActivity extends Activity {
     private AudioDeviceCallback audioDeviceCallback;
     private MidiManager.DeviceCallback midiDeviceCallback;
     private volatile int midiGeneration;
+    private volatile long midiReconnectAttempts;
     private final AtomicInteger keyLabHeaderGeneration = new AtomicInteger();
     private volatile boolean audioRecoveryInProgress;
     private ThermalMonitor thermalMonitor;
@@ -283,6 +284,7 @@ public final class MainActivity extends Activity {
         if (!audioRunning || engineStarting) return;
         closeMidi();
         openMidiInputs();
+        midiReconnectAttempts++;
         if ("live".equals(currentPage)) showLive();
         else if ("diagnostics".equals(currentPage)) renderDiagnostics();
     };
@@ -487,6 +489,7 @@ public final class MainActivity extends Activity {
                     .put("activity_resumed", activity.activityResumed)
                     .put("audio_recovery_in_progress", activity.audioRecoveryInProgress)
                     .put("midi_generation", activity.midiGeneration)
+                    .put("midi_reconnect_attempts", activity.midiReconnectAttempts)
                     .put("open_midi_devices", openMidiDeviceCount)
                     .put("open_midi_ports", openMidiPortCount)
                     .put("thermal_status", activity.thermalStatus)
@@ -495,6 +498,18 @@ public final class MainActivity extends Activity {
             return "{\"ready\":false,\"error\":"
                     + JSONObject.quote(error.toString()) + "}";
         }
+    }
+
+    static boolean qualificationMidiPulse(int note, int velocity, long durationMs) {
+        MainActivity activity = activeActivity;
+        if (activity == null || !activity.audioRunning) return false;
+        int safeNote = Math.max(0, Math.min(127, note));
+        int safeVelocity = Math.max(1, Math.min(127, velocity));
+        long safeDuration = Math.max(20L, Math.min(2_000L, durationMs));
+        sendMidiMessage(0x90, safeNote, safeVelocity, 3);
+        activity.mainHandler.postDelayed(
+                () -> sendMidiMessage(0x80, safeNote, 0, 3), safeDuration);
+        return true;
     }
 
     private WebViewClient pluginWebViewClient() {
@@ -1418,6 +1433,7 @@ public final class MainActivity extends Activity {
         return new JSONObject()
                 .put("platform", "Android native")
                 .put("version", BuildConfig.VERSION_NAME)
+                .put("revision", BuildConfig.RACKFORGE_REVISION)
                 .put("audio_running", audioRunning)
                 .put("selected_audio_output", selectedAudioOutputLabel())
                 .put("selected_audio_device_id", selectedAudioDeviceId)

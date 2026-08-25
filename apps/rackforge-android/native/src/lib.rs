@@ -97,6 +97,7 @@ static AUDIO_CALLBACK_COUNT: AtomicU64 = AtomicU64::new(0);
 static AUDIO_CALLBACK_FRAMES: AtomicU64 = AtomicU64::new(0);
 static AUDIO_CALLBACK_TOTAL_NANOS: AtomicU64 = AtomicU64::new(0);
 static AUDIO_CALLBACK_MAX_NANOS: AtomicU64 = AtomicU64::new(0);
+static AUDIO_CALLBACK_OVERRUNS: AtomicU64 = AtomicU64::new(0);
 static AUDIO_ENGINE_LOCK_MISSES: AtomicU64 = AtomicU64::new(0);
 static AUDIO_RENDER_ERRORS: AtomicU64 = AtomicU64::new(0);
 static AUDIO_NONFINITE_SAMPLES: AtomicU64 = AtomicU64::new(0);
@@ -1921,6 +1922,7 @@ fn audio_status_json() -> String {
             "callback_count": callback_count,
             "average_callback_us": average_callback_micros,
             "maximum_callback_us": AUDIO_CALLBACK_MAX_NANOS.load(Ordering::Relaxed) as f64 / 1_000.0,
+            "callback_overruns": AUDIO_CALLBACK_OVERRUNS.load(Ordering::Relaxed),
             "callback_budget_us": callback_budget_micros,
             "callback_load_percent": callback_load_percent,
         })
@@ -2018,6 +2020,13 @@ unsafe extern "C" fn render_callback(
     AUDIO_CALLBACK_FRAMES.fetch_add(num_frames as u64, Ordering::Relaxed);
     AUDIO_CALLBACK_TOTAL_NANOS.fetch_add(elapsed, Ordering::Relaxed);
     AUDIO_CALLBACK_MAX_NANOS.fetch_max(elapsed, Ordering::Relaxed);
+    let callback_budget_nanos = (num_frames as u64)
+        .saturating_mul(1_000_000_000)
+        .checked_div(SAMPLE_RATE as u64)
+        .unwrap_or(0);
+    if callback_budget_nanos > 0 && elapsed > callback_budget_nanos {
+        AUDIO_CALLBACK_OVERRUNS.fetch_add(1, Ordering::Relaxed);
+    }
     AAUDIO_CALLBACK_RESULT_CONTINUE
 }
 
@@ -3691,6 +3700,7 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_startNativeAudio(
         AUDIO_CALLBACK_FRAMES.store(0, Ordering::Relaxed);
         AUDIO_CALLBACK_TOTAL_NANOS.store(0, Ordering::Relaxed);
         AUDIO_CALLBACK_MAX_NANOS.store(0, Ordering::Relaxed);
+        AUDIO_CALLBACK_OVERRUNS.store(0, Ordering::Relaxed);
         AUDIO_ENGINE_LOCK_MISSES.store(0, Ordering::Relaxed);
         AUDIO_RENDER_ERRORS.store(0, Ordering::Relaxed);
         AUDIO_NONFINITE_SAMPLES.store(0, Ordering::Relaxed);

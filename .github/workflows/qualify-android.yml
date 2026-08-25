@@ -1,0 +1,68 @@
+name: Qualify Android hardware
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: Soak duration in minutes; 120 is required for qualification
+        required: true
+        default: "120"
+        type: string
+      adb_serial:
+        description: Optional ADB serial when the runner has multiple devices
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qualify-android-hardware
+  cancel-in-progress: false
+
+jobs:
+  android-soak:
+    name: Android native soak
+    runs-on: [self-hosted, Windows, X64, rackforge-android]
+    timeout-minutes: 180
+    steps:
+      - name: Check out RackForge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and install the tested revision
+        shell: pwsh
+        run: |
+          $env:RACKFORGE_REVISION = '${{ github.sha }}'
+          ./tools/build-android.ps1
+          $adbArguments = @('install', '-r', 'dist/android/RackForge-debug.apk')
+          if ('${{ inputs.adb_serial }}') {
+            $adbArguments = @('-s', '${{ inputs.adb_serial }}') + $adbArguments
+          }
+          adb @adbArguments
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Installing the qualification APK failed.'
+          }
+
+      - name: Run native Android soak
+        shell: pwsh
+        run: |
+          $arguments = @(
+            'tools/soak-android.py',
+            '--duration-minutes', '${{ inputs.duration_minutes }}',
+            '--output', 'dist/qualification/android-soak.json'
+          )
+          if ('${{ inputs.adb_serial }}') {
+            $arguments += @('--serial', '${{ inputs.adb_serial }}')
+          }
+          python @arguments
+
+      - name: Retain qualification report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: RackForge-Android-qualification-${{ github.sha }}
+          path: dist/qualification/android-soak.json
+          if-no-files-found: error
+          retention-days: 30

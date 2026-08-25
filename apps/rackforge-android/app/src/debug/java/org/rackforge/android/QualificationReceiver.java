@@ -10,11 +10,26 @@ import java.nio.charset.StandardCharsets;
 /** Debug-only ADB bridge for deterministic hardware qualification snapshots. */
 public final class QualificationReceiver extends BroadcastReceiver {
     static final String ACTION = "org.rackforge.android.action.QUALIFICATION_SNAPSHOT";
+    static final String MIDI_PULSE_ACTION =
+            "org.rackforge.android.action.QUALIFICATION_MIDI_PULSE";
     static final String SNAPSHOT_FILE = "rackforge-qualification.json";
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (intent == null || !ACTION.equals(intent.getAction())) {
+        if (intent == null) {
+            setResultCode(2);
+            return;
+        }
+        if (MIDI_PULSE_ACTION.equals(intent.getAction())) {
+            boolean accepted = MainActivity.qualificationMidiPulse(
+                    intent.getIntExtra("note", 60),
+                    intent.getIntExtra("velocity", 96),
+                    intent.getLongExtra("duration_ms", 250L));
+            setResultCode(accepted ? 0 : 1);
+            setResultData(accepted ? "midi-pulse-accepted" : "audio-not-ready");
+            return;
+        }
+        if (!ACTION.equals(intent.getAction())) {
             setResultCode(2);
             return;
         }

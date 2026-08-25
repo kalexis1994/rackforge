@@ -69,3 +69,15 @@ the actual selected USB device. It writes the complete device metadata,
 counters and stage snapshots to `dist/qualification/` as JSON. A run without
 `--usb-cycle` is useful as a quick lifecycle smoke test, but its USB stage is
 reported as skipped and does not constitute full hardware qualification.
+
+For sustained native-audio qualification, leave the debug APK open with an
+instrument active and run:
+
+```powershell
+python tools/soak-android.py --duration-minutes 120
+```
+
+Use a smaller duration while developing. Runs shorter than two hours are
+recorded as smoke tests rather than release qualifications. The manual
+`Qualify Android hardware` workflow can execute the same command on a dedicated
+self-hosted runner and retain its JSON report as a GitHub Actions artifact.

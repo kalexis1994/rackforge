@@ -1,6 +1,9 @@
 name: Build main artifacts
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
@@ -10,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-main-${{ github.ref }}
+  group: build-main-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -24,7 +27,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out RackForge
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Lint GitHub Actions workflows
         uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
@@ -61,7 +66,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -139,7 +144,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out RackForge
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Rust
         shell: pwsh
@@ -161,7 +168,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -202,7 +209,8 @@ jobs:
         run: ./tools/build-windows-vst3.ps1 -RunTests
 
       - name: Upload Windows executable
-        uses: actions/upload-artifact@v7
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: RackForge-Windows-x86_64-${{ github.sha }}
           path: dist/windows-x86_64/rackforge.exe
@@ -210,7 +218,8 @@ jobs:
           retention-days: 14
 
       - name: Upload Windows VST3
-        uses: actions/upload-artifact@v7
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: RackForge-VST3-Windows-x86_64-${{ github.sha }}
           path: |
@@ -226,7 +235,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out RackForge
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install native build dependencies
         shell: bash
@@ -257,7 +268,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -281,7 +292,8 @@ jobs:
         run: bash tools/build-linux-x86_64.sh
 
       - name: Upload Linux x86-64 bundle
-        uses: actions/upload-artifact@v7
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: RackForge-Linux-x86_64-${{ github.sha }}
           path: dist/linux-x86_64/RackForge-Linux-x86_64.tar.gz
@@ -294,10 +306,12 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out RackForge
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: 17
@@ -313,7 +327,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -376,7 +390,8 @@ jobs:
         run: bash tools/build-android.sh
 
       - name: Upload Android APK
-        uses: actions/upload-artifact@v7
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: RackForge-Android-arm64-${{ github.sha }}
           path: dist/android/RackForge-debug.apk
@@ -389,7 +404,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out RackForge
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install native build dependencies
         shell: bash
@@ -429,7 +446,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -456,7 +473,8 @@ jobs:
         run: bash tools/build-raspberry-pi.sh
 
       - name: Upload Raspberry Pi bundle
-        uses: actions/upload-artifact@v7
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: RackForge-RaspberryPi-arm64-${{ github.sha }}
           path: dist/raspberry-pi/RackForge-RaspberryPi-arm64.tar.gz

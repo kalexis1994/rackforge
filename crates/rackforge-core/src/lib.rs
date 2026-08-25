@@ -16,6 +16,7 @@ pub mod loader;
 #[path = "loader_unavailable.rs"]
 pub mod loader;
 pub mod midi_hotplug;
+pub mod midi_trace;
 pub mod package;
 pub mod parameter_link;
 pub mod performance;

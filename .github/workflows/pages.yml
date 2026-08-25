@@ -23,6 +23,12 @@ jobs:
       - name: Install the WebAssembly targets
         run: rustup target add wasm32-wasip1 wasm32-unknown-unknown
 
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: rackforge-browser-demo
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       # The interface's package manager is pinned in web/package.json, and the
       # repository has no manifest at its root for an action to read one from.
       - name: Enable pnpm
@@ -30,7 +36,7 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.9.0 --activate
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm

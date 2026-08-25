@@ -6,6 +6,9 @@ val generatedRustLibraries = layout.buildDirectory.dir("generated/rust-jni")
 val generatedNotices = layout.buildDirectory.dir("generated/notices")
 val generatedBundledPlugins = layout.buildDirectory.dir("generated/bundled-plugins")
 val generatedWebUi = layout.buildDirectory.dir("generated/web-ui")
+val rackforgeRevision = providers.environmentVariable("RACKFORGE_REVISION")
+    .getOrElse("development")
+    .replace("\"", "")
 val copyThirdPartyNotices by tasks.registering(Copy::class) {
     from(rootProject.layout.projectDirectory.file("../../THIRD_PARTY_NOTICES.md"))
     into(generatedNotices)
@@ -21,6 +24,7 @@ android {
         targetSdk = 36
         versionCode = 7
         versionName = "0.1.5-preview"
+        buildConfigField("String", "RACKFORGE_REVISION", "\"$rackforgeRevision\"")
     }
 
     sourceSets {

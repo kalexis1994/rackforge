@@ -111,10 +111,51 @@ skipped. Every run writes a timestamped JSON report below
 `dist/qualification/`; only a report whose top-level outcome is `passed` is a
 valid qualification result.
 
+## Native Android soak
+
+`tools/soak-android.py` keeps the normal plugin and audio engine active by
+injecting short notes through RackForge's MIDI ingress while sampling the
+debug qualification snapshot. Duration, MIDI cadence, and sampling cadence are
+configurable; a release qualification requires at least 120 uninterrupted
+minutes:
+
+```text
+python tools/soak-android.py --duration-minutes 120
+```
+
+A shorter run is intended for development and receives the explicit outcome
+`passed_with_duration_waiver`. The report accumulates counters across native
+stream restarts rather than allowing a reset to hide a fault. It exports AAudio
+xruns, render-queue underruns, callback deadline misses, MIDI drops, MIDI
+reconnect attempts, disconnect panics, stream losses/recoveries, render errors,
+lock misses, non-finite samples, callback stalls, process restarts, callback
+load, thermal state, and total PSS memory.
+
+The initial release thresholds are deliberately strict:
+
+- zero xruns, queue underruns, missed deadlines, MIDI drops, render errors,
+  lock misses, stream losses/recoveries, invalid samples, callback stalls,
+  process restarts, snapshot failures, or unhealthy samples;
+- maximum measured callback load of 85%;
+- maximum Android thermal status of `MODERATE` (`2`).
+
+Memory and reconnect-attempt counts are retained for trend comparison but do
+not yet have a device-independent limit. The supported Android qualification
+setup is an ARM64 phone on API 26 or newer, a powered USB hub, an Arturia KeyLab
+Essential mk3, and a Focusrite Scarlett USB interface. The report records the
+exact phone, Android build, attached USB identities, and runtime version; a
+hardware result without that metadata is not accepted.
+
+The manual `Qualify Android hardware` GitHub workflow targets a dedicated
+self-hosted Windows runner labelled `rackforge-android`. It does not run on
+ordinary pushes. The runner must have Python, ADB, an authorized phone, the
+Android build toolchain, and the test hardware connected. The workflow builds
+and installs the exact Git commit before testing it, embeds that revision in the
+report, and retains the JSON as a 30-day Actions artifact even when a threshold
+fails.
+
 ## Qualification still required for v0.2.0
 
-- Add a native soak command that runs for at least two hours and exports xruns,
-  dropped MIDI, missed deadlines, reconnects, and stream errors.
 - Record supported test hardware and pass/fail thresholds with every retained
   qualification report.
 

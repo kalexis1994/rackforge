@@ -45,10 +45,27 @@ The suite currently covers dense chords, Control Change, Pitch Bend, Channel
 Pressure, Poly Pressure, stable same-frame ordering, malformed traces, unknown
 devices, and delivery of every Note Off through the normal MIDI route.
 
+## MIDI disconnect and reconnect
+
+The platform-neutral `SupervisedMidiSources` state records a connection only
+after opening the external port succeeds. Failed opens remain pending for the
+next scan. A successful disconnect injects source-aware sustain release and
+All Notes Off messages through the ordinary MIDI ingress and routing path.
+
+Automated scenarios verify that sustained and physically held notes stop before
+reconnection, that an ALSA client/port address change retains the same stable
+identity and compiled route key, and that 10,000 unplug/replug cycles do not
+require a host restart or produce duplicate transitions. Ambiguous source keys
+or identities are rejected before the supervisor thread starts.
+
+Run this layer with:
+
+```text
+cargo test -p rackforge-core midi_hotplug
+```
+
 ## Qualification still required for v0.2.0
 
-- Exercise disconnect and reconnect sequences against the trace runner while
-  proving stable identity and held-note release.
 - Inject queue saturation, stream loss, underruns, and recovery into the native
   audio hosts without adding work to their callbacks.
 - Add a repeatable ADB scenario for screen lock, background, resume, USB MIDI,

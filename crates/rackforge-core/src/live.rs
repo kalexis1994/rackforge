@@ -31,6 +31,7 @@ use rackforge_midi_api::{
     MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry, MidiSourceSelector,
     MidiTargetId, ParameterLink, ParameterLinkPassThrough, PluginChannelModel,
 };
+use rackforge_performance_api::RackKeyboardParts;
 use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use rackforge_plugin_api::{ParameterKind, PluginKind};
 use rackforge_session_api::{
@@ -1570,16 +1571,16 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         control_receiver,
         plugins,
         standalone_voices,
-        active_instance_id: mut active_instance_id,
-        rack_voices: mut rack_voices,
-        parameter_links: mut parameter_links,
+        mut active_instance_id,
+        mut rack_voices,
+        mut parameter_links,
         play_route,
         virtual_play_route,
         virtual_midi_source,
         midi_source_count,
         initial_master_level,
         initial_master_pan,
-        render_mode: mut render_mode,
+        mut render_mode,
         audio_state,
         output_meter,
     } = context;
@@ -3161,7 +3162,7 @@ mod tests {
     use super::*;
     use crate::live_midi_state::{MidiControllerState, matches_midi_input_channel};
     use rackforge_midi_api::{MidiPacket, MidiSourceId};
-    use rackforge_performance_api::{RackKeyboardPart, RackKeyboardParts, RackMidiTransform};
+    use rackforge_performance_api::{RackKeyboardPart, RackMidiTransform};
     use rackforge_session_api::{
         HostActionBinding, HostActionTarget, HostControlBinding, HostControlTarget,
         MidiButtonBinding, MidiControlChangeBinding,

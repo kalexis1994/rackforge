@@ -5,169 +5,181 @@
 </p>
 
 <p align="center">
-  <strong>Turn a computer, phone, or Raspberry Pi into a portable musical instrument.</strong>
+  <strong>Turn a computer, phone, or Raspberry Pi into a playable musical instrument.</strong>
 </p>
 
-RackForge is a cross-platform instrument host for Windows, Linux x86-64,
-Android, and Raspberry Pi. Connect a MIDI controller and an audio interface,
-install a portable `.rfplugin`, and play without a DAW. The same runtime is also
-being packaged as a Windows VST3 instrument for DAW sessions.
+<p align="center">
+  <a href="https://kalexis1994.github.io/rackforge/"><strong>▶ TRY RACKFORGE WEB</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/kalexis1994/rackforge/releases/latest"><strong>DOWNLOAD THE LATEST RELEASE</strong></a>
+</p>
 
-New installations include the RackForge Concert Grand — a physically
-modelled piano developed in this repository, with no samples and a
-[documented model](docs/PIANO_MODEL.md) — plus the portable RF-106 synthesizer.
+RackForge is a cross-platform instrument and live-performance host. Connect a
+MIDI keyboard, choose an instrument, combine sounds into Racks, organize a show
+into Songs and Setlists, and play without building a DAW session first.
 
-Open-source plugins maintained in their own repositories include:
+RackForge uses the same musical model on Windows, Linux, Android, and
+Raspberry Pi. Portable `.rfplugin` instruments bring their sound and interface
+with them, while RackForge owns the audio, MIDI, routing, presets, and live
+performance workflow.
 
-- [RF-106](https://github.com/kalexis1994/rackforge-plugin-rf-106), the portable
-  synthesizer included with RackForge builds.
+> RackForge `v0.1.x` is a public preview. It is ready to explore and play, but
+> native packages are not yet production-signed.
+
+## Try it first
+
+The fastest way to understand RackForge is to play it:
+
+### [Open RackForge Web →](https://kalexis1994.github.io/rackforge/)
+
+It runs locally inside the browser. There is no account, installer, or remote
+audio server, and the instruments and performances you save remain in that
+browser.
+
+To hear your first sound:
+
+1. Open RackForge Web and click or tap once to enable browser audio.
+2. Open **Touch Controller** and play the on-screen keyboard or pads.
+3. Open **PLAY** to choose Concert Grand or RF-106 and select a program.
+4. Optionally connect a USB MIDI keyboard and allow MIDI access when asked.
+
+Chrome and Edge provide the most complete Web MIDI support. Firefox asks for
+explicit permission, while Safari currently does not expose Web MIDI. The
+on-screen controller works without MIDI hardware.
+
+You can install the Web edition from the browser menu and open it like an app.
+It continues to work offline after its files have been cached. Browser audio is
+excellent for exploring RackForge; use a native edition when you need the
+lowest latency or a dedicated audio interface on stage.
+
+## Find your way around RackForge
+
+RackForge separates playing, performance design, and system configuration so
+each screen has a clear job.
+
+| Area | What it is for |
+| --- | --- |
+| **Home** | See what is ready and jump directly into an installed instrument. |
+| **PLAY** | Choose one instrument, browse its programs, and play it immediately. |
+| **LIVE** | Perform with Racks, Songs, Song Parts, and Setlists. |
+| **Touch Controller** | Play a keyboard or pad grid from a mouse or touchscreen. |
+| **Plugin Manager** | Install, activate, configure, or remove instruments. |
+| **Audio & MIDI** | Select interfaces and decide which MIDI inputs RackForge may use. |
+| **Settings** | Configure the features available on the current device. |
+
+The interface adapts to the screen instead of changing the workflow. On a
+phone it prioritizes touch and stage controls; on a desktop it keeps navigation,
+editors, plugins, and the resizable Touch Controller visible together.
+
+## From an instrument to a complete show
+
+RackForge uses a small set of musical building blocks:
+
+```text
+Instrument → Rack → Song Part → Song → Setlist
+```
+
+- An **Instrument** is a plugin you can play, such as Concert Grand or RF-106.
+- A **Rack** layers and routes one or more instruments. It can include MIDI
+  channel maps, key ranges, transposition, and velocity shaping.
+- A **Song Part** is the playable graph for one section of a song. It may use
+  instruments directly, complete Racks, or both at the same time.
+- A **Song** orders its parts so you can move from intro to verse, chorus, solo,
+  or any structure you choose.
+- A **Setlist** orders Songs for a rehearsal or performance.
+
+Use **PLAY** when you want one sound quickly. Use **LIVE** when the arrangement
+itself matters. RackForge keeps instrument state separate from the performance
+graph, so changing stage routing does not rewrite the plugin.
+
+## Instruments and portable plugins
+
+New installations include:
+
+- **RackForge Concert Grand**, a physically modelled piano developed in this
+  repository. It uses no samples and has a [documented model](docs/PIANO_MODEL.md).
+- **RF-106**, a portable virtual-analog synthesizer with its own PLAY interface
+  and RackForge parameter mapping.
+
+Other open-source instruments include:
+
+- [RF-106 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-106)
 - [RF-Soundfonts](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts),
-  a SoundFont instrument that includes the sampled YDP Grand Piano.
+  a SoundFont instrument that includes the sampled YDP Grand Piano
 
-RF-Soundfonts installs separately as a portable `.rfplugin` package.
+A portable `.rfplugin` can carry its engine, Web interface, programs, artwork,
+and resources in one package. Install it from **Plugin Manager** and RackForge
+will validate it before activation. Compatible portable packages can be moved
+between the native platforms without creating a platform-specific preset.
 
-> RackForge `v0.1.x` is a public preview. Packages are functional but not yet
-> production-signed, and additional instrument plugins are distributed
-> separately.
-
-## What you can do
-
-- Use **PLAY** to choose an instrument and its programs.
-- Use **LIVE** to build Racks, Songs, and Setlists for a performance.
-- Route MIDI and audio through a visual node graph with drag, pan, zoom, and
-  labels.
-- Install the same portable `.rfplugin` package on Windows, Android, and
-  Raspberry Pi.
-- Use USB MIDI controllers and built-in or external audio interfaces.
-- Reconnect MIDI hardware without restarting RackForge or leaving stuck notes.
-- Control RackForge from supported hardware displays, buttons, encoders, LEDs,
-  and pads through portable `.rfcontroller` packages.
-- Restore the active mode, instrument, program, master volume, and pan after a
-  restart.
-
-## Try it in a browser
-
-A published build of RackForge runs entirely inside a web page, with no
-installation and no server behind it:
-
-<https://kalexis1994.github.io/rackforge/>
-
-It is the same host as every other platform — the same session, performance
-library and portable plugin runtime, compiled to WebAssembly — playing the
-bundled Concert Grand or RF-106. Play them from the on-screen keyboard in Touch
-Controller, or from a USB MIDI controller in browsers that support Web MIDI
-(Chrome and Edge; Firefox asks for permission; Safari has none). Sound starts
-after the first click or tap, which is a rule browsers apply to every page.
-
-Install it from the browser's menu to keep it: RackForge then opens like any
-other application, starts with no network at all, and keeps what you install in
-it. Portable `.rfplugin` instruments can be installed straight into the page,
-and they, your programs and your performances stay on the device between
-visits.
-
-What a page cannot offer, it does not pretend to: there are no audio devices to
-choose between, no access PIN, and native plugin packages are refused rather
-than installed and then found unplayable. Latency is the browser's, not the
-operating system's — for a controller on a stage, install RackForge below.
-
-## Choose a platform
+## Choose where to play
 
 | Platform | Best for | Audio and MIDI |
 | --- | --- | --- |
-| Windows x86-64 | Creating and editing performances | WASAPI, ASIO, and Windows MIDI |
-| Windows VST3 x86-64 | Using RackForge inside a DAW | DAW-provided MIDI and stereo audio |
-| Linux x86-64 | A PC-based headless or Web-controlled instrument | ALSA, Linux MIDI, Web control, and boot services |
-| Android ARM64 | A compact touchscreen instrument | Low-latency native audio and USB MIDI |
-| Raspberry Pi OS ARM64 | A dedicated headless instrument | ALSA, USB MIDI, Web control, and boot services |
+| **Web** | Trying RackForge instantly or controlling a remote setup | Browser audio, Touch Controller, and Web MIDI where supported |
+| **Windows x86-64** | Creating instruments, Racks, Songs, and Setlists | WASAPI, ASIO, and Windows MIDI |
+| **Android ARM64** | A compact touchscreen instrument | Low-latency native audio and USB MIDI/audio |
+| **Raspberry Pi OS ARM64** | A dedicated instrument that starts at boot | ALSA, USB MIDI, Web control, and system services |
+| **Linux x86-64** | A PC-based headless or Web-controlled instrument | ALSA, Linux MIDI, Web control, and system services |
+| **Windows VST3 x86-64** | Opening RackForge as an instrument inside a DAW | DAW-provided MIDI, timing, state, and stereo audio |
 
-Download the current packages from the
+Native packages are available from the
 [latest RackForge release](https://github.com/kalexis1994/rackforge/releases/latest).
 
-## Quick start
+## Install a native edition
 
 ### Windows
 
 1. Download
    [`RackForge-Windows-x86_64.exe`](https://github.com/kalexis1994/rackforge/releases/latest/download/RackForge-Windows-x86_64.exe).
-2. Run the executable and choose where RackForge should store plugins,
-   performances, and settings.
-3. Open Settings and select the MIDI input and audio output. The Concert
-   Grand and RF-106 are ready on the first run.
-4. Install other `.rfplugin` instruments from the Plugins section as needed.
+2. Run it and choose where RackForge should store its plugins, performances,
+   and settings.
+3. Open **Audio & MIDI**, enable the controller you want to use, and select an
+   audio output.
+4. Open **PLAY** and start with Concert Grand or RF-106.
 
 Windows builds are currently unsigned, so Windows may ask you to confirm that
-you trust the application. See the
-[Desktop guide](apps/rackforge-desktop/README.md) for ASIO setup, portable mode,
-and troubleshooting.
-
-### Linux x86-64
-
-1. Download `RackForge-Linux-x86_64.tar.gz` from the latest release.
-2. Extract it and enter the `rackforge` directory.
-3. Run `bash platforms/linux-x86_64/install.sh` as the ordinary user who will
-   run RackForge.
-4. Open `http://localhost:8787`, then select the MIDI input and ALSA audio
-   interface.
-
-The Linux package uses the same headless Core, adaptive Web interface,
-`.rfplugin` runtime, and controller host as Raspberry Pi, but is built natively
-for 64-bit Intel and AMD machines. See the
-[Linux x86-64 guide](platforms/linux-x86_64/README.md).
-
-### Windows VST3 (preview)
-
-The Windows CI build also publishes an installable `RackForge.vst3` bundle and
-a raw `rackforge-vst3.dll` module. Copy the complete `RackForge.vst3` directory
-to a VST3 location scanned by the DAW; the directory, not the loose diagnostic
-DLL, is the user-facing plugin.
-
-The VST edition receives MIDI and audio timing from the DAW and stores its
-instrument state in the DAW project. It does not open a second audio device.
-RackForge controller packages and LITTLE remain part of the VST architecture:
-because a physical surface is unique while a DAW can create many instances,
-one focused RackForge instance owns the controller at a time. See the
-[VST3 host architecture](docs/architecture/vst3-host.md) for the lifecycle and
-current integration boundary.
+you trust the application. The [Desktop guide](apps/rackforge-desktop/README.md)
+covers ASIO, portable mode, and troubleshooting.
 
 ### Android
 
 1. Download
    [`RackForge-Android-arm64.apk`](https://github.com/kalexis1994/rackforge/releases/latest/download/RackForge-Android-arm64.apk).
-2. Allow installation from your browser or file manager, then install the APK.
-3. Connect the MIDI controller and, optionally, a class-compliant USB audio
-   interface through a powered USB hub.
-4. Select the devices and play Concert Grand or RF-106, or install another
-   `.rfplugin` instrument such as RF-Soundfonts.
+2. Allow installation from your browser or file manager and install the APK.
+3. Connect a MIDI controller and, optionally, a class-compliant USB audio
+   interface through a powered hub.
+4. Select the devices in **Audio & MIDI** and play.
 
-The preview APK is ARM64 and debug-signed. The phone speaker can be used for
-initial testing. See the [Android guide](apps/rackforge-android/README.md) for
-USB audio, background operation, and latency details.
+The preview APK is ARM64 and debug-signed. The phone speaker is enough for a
+first test; an external interface generally provides the best stage latency.
+See the [Android guide](apps/rackforge-android/README.md).
 
 ### Raspberry Pi in one command
 
-Use a Raspberry Pi 4 or 5 with the 64-bit edition of Raspberry Pi OS Lite.
-Run this command as the regular user that will run RackForge, **not** with
-`sudo`:
+Use a Raspberry Pi 4 or 5 with the 64-bit edition of Raspberry Pi OS Lite. Run
+this as the regular user that will run RackForge, not with `sudo`:
 
 ```bash
 bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/kalexis1994/rackforge/main/platforms/raspberry-pi/install-release.sh | bash'
 ```
 
-The installer:
+The installer verifies the architecture and release checksum, preserves the
+previous installation for rollback, installs the Web interface and boot
+services, and enables the bundled instruments. When it finishes, open:
 
-- verifies that the system uses a 64-bit ARM userspace;
-- downloads the latest Raspberry Pi release over HTTPS;
-- verifies the archive against the release's `SHA256SUMS.txt`;
-- preserves the previous release and restores it if installation fails;
-- installs the runtime, Web interface, controller host, and systemd services;
-- installs and enables the pinned Concert Grand and RF-106 packages;
-- enables RackForge automatically at boot and starts its control services.
+```text
+http://RASPBERRY_PI_ADDRESS:8787
+```
 
-When it finishes, open `http://RASPBERRY_PI_ADDRESS:8787` from another device
-on the same network, then select the MIDI and audio devices. The bundled piano
-does not replace or alter plugins already installed by the user.
+from a phone, tablet, or computer on the same network. The
+[Raspberry Pi guide](platforms/raspberry-pi/README.md) covers audio setup,
+service management, and diagnostics.
 
-To review the script before running it:
+<details>
+<summary><strong>Review, pin, or customize the Raspberry Pi installation</strong></summary>
+
+Download and inspect the installer before running it:
 
 ```bash
 curl -fL https://raw.githubusercontent.com/kalexis1994/rackforge/main/platforms/raspberry-pi/install-release.sh -o install-rackforge.sh
@@ -175,7 +187,7 @@ less install-rackforge.sh
 bash install-rackforge.sh
 ```
 
-To install a specific release or enable the optional reversible appliance
+Install a specific release or enable the optional reversible appliance
 optimizations:
 
 ```bash
@@ -183,64 +195,103 @@ RACKFORGE_VERSION=v0.1.5 bash install-rackforge.sh
 RACKFORGE_OPTIMIZE=1 bash install-rackforge.sh
 ```
 
-The installer detects the current user's home directory and never assumes a
-fixed username. Advanced installations may set `RACKFORGE_ROOT`. See the
-[Raspberry Pi guide](platforms/raspberry-pi/README.md) for manual installation,
-service management, audio configuration, and diagnostics.
+The installer detects the current user and never assumes a fixed username.
+Advanced installations may set `RACKFORGE_ROOT`.
 
-## From first sound to a live set
+</details>
 
-The normal workflow is the same on every platform:
+### Linux x86-64
 
-1. Connect the MIDI controller and audio output.
-2. Select the MIDI and audio devices in Settings.
-3. Play Concert Grand or RF-106, or install another `.rfplugin`.
-4. Open PLAY, select the instrument, and choose a program.
-5. Open LIVE to place instruments inside Racks and organize them into Songs
-   and Setlists.
+1. Download `RackForge-Linux-x86_64.tar.gz` from the latest release.
+2. Extract it and enter the `rackforge` directory.
+3. Run `bash platforms/linux-x86_64/install.sh` as the ordinary user who will
+   run RackForge.
+4. Open `http://localhost:8787` and configure **Audio & MIDI**.
 
-RackForge keeps host configuration separate from instrument content. Plugins
-own their programs and resources; LIVE owns layering, routing, splits, songs,
-and the order of a performance.
+This edition uses the same headless Core and adaptive Web interface as
+Raspberry Pi, built natively for 64-bit Intel and AMD computers. See the
+[Linux x86-64 guide](platforms/linux-x86_64/README.md).
 
-## Supported control surfaces
+### Windows VST3 preview
 
-The Arturia KeyLab Essential mk3 is the first reference controller. Its
-official `.rfcontroller` package provides:
+The release includes an installable `RackForge.vst3` bundle. Copy that complete
+directory to a VST3 location scanned by the DAW; the loose
+`rackforge-vst3.dll` is a diagnostic module, not the normal installation.
 
-- the LITTLE display and menu navigation;
+The VST edition receives MIDI, timing, and audio from the DAW and stores its
+state in the DAW project. It never opens a second audio device. A physical
+`.rfcontroller` can be used, but only one focused RackForge instance can own a
+unique controller at a time. See the
+[VST3 host architecture](docs/architecture/vst3-host.md).
+
+## Hardware controllers and LITTLE
+
+RackForge can do more than receive notes. Portable `.rfcontroller` packages
+translate a controller's keys, faders, encoders, pads, lights, and display into
+RackForge actions without placing controller-specific rules inside an
+instrument.
+
+The Arturia KeyLab Essential mk3 is the first reference controller. Its package
+provides:
+
+- the LITTLE display and navigation;
 - dimmed button and pad lighting;
+- standard instrument parameter controls;
 - master volume and pan;
 - long-press return to the active instrument;
 - a hardware escape chord that stops sound and returns to the main menu.
 
-The controller package is portable across Windows, Linux x86-64, Android, and
+The same controller package is used on Windows, Linux x86-64, Android, and
 Raspberry Pi.
-RackForge's core owns the musical state, while each platform adapter handles
-the native MIDI and audio APIs.
 
-## Preview status
+## Save it, move it, play it
 
-RackForge already provides cross-platform PLAY/LIVE state, portable plugin
-installation, embedded PLAY and CONFIG interfaces, plugin-private storage, a
-host-owned resource explorer, program editing, MIDI hotplug recovery, session
-restoration, and protection against concurrent audio engines on Windows and
-Linux hosts.
+RackForge restores the active mode, instrument, program, master controls, and
+performance library between sessions. Portable `.rfpreset` files let you
+export an instrument state with plugin identity and version information, then
+import it on another compatible RackForge host.
 
-Current preview limitations:
+RackForge is being built toward a simple outcome: prepare a performance on a
+desktop, move it to a phone or Raspberry Pi, reconnect the controller and audio
+interface, and keep playing the same show.
+
+## Public preview status
+
+Already available:
+
+- cross-platform PLAY and LIVE state;
+- portable plugin installation, activation, configuration, and removal;
+- Racks, Songs, Song Parts, Setlists, and visual routing graphs;
+- embedded PLAY and CONFIG interfaces;
+- portable presets and plugin-private resource storage;
+- MIDI hotplug recovery and session restoration;
+- Touch Controller keyboard and pads;
+- controller displays, LEDs, encoders, and standard parameter mappings;
+- protection against concurrent native audio engines.
+
+Current limitations:
 
 - Windows packages are not code-signed.
 - Android packages are ARM64 and debug-signed.
-- Linux x86-64 is currently distributed as a systemd-based headless/Web host,
-  not as a native desktop window.
-- Raspberry Pi packages require a 64-bit Raspberry Pi OS userspace.
-- RF-Soundfonts and other optional `.rfplugin` instruments remain separate
-  downloads.
-- Desktop's optional HTTP server is disabled by default.
-- The reliability milestone still includes package conformance gates and
-  measured audio/MIDI stress tests.
+- Linux x86-64 currently uses a headless/Web interface rather than a native
+  desktop window.
+- Raspberry Pi requires a 64-bit Raspberry Pi OS userspace.
+- Optional instruments such as RF-Soundfonts are separate downloads.
+- The optional Desktop HTTP server is disabled by default.
+- Browser latency and MIDI support depend on the browser and device.
 
-## For plugin authors
+## Guides and help
+
+- [Windows Desktop guide](apps/rackforge-desktop/README.md)
+- [Android guide](apps/rackforge-android/README.md)
+- [Raspberry Pi guide](platforms/raspberry-pi/README.md)
+- [Linux x86-64 guide](platforms/linux-x86_64/README.md)
+- [Portable preset format](docs/RFPRESET.md)
+- [LIVE performance model](docs/architecture/live-performance.md)
+- [Runtime and process layout](docs/RUNTIME.md)
+- [Technical roadmap](ROADMAP.md)
+
+## Build instruments for RackForge
 
 RackForge plugins use portable host contracts instead of platform-specific
 audio or filesystem APIs. Start with:
@@ -249,22 +300,16 @@ audio or filesystem APIs. Start with:
 - [Portable plugin runtime](docs/architecture/portable-plugin-runtime.md)
 - [Plugin Web API](docs/WEB_PLUGIN_API.md)
 
-Production instruments with their own assets — sample libraries, firmware —
-maintain their own repositories and release pipelines. This repository carries
-the conformance fixtures and the bundled Concert Grand, which is built from
-the same commit as every host. RF-106 remains in its own repository and release
-pipeline; RackForge pins its version and SHA-256 so builds stay reproducible.
-
-## For contributors
-
-Every push to `main` runs the cross-platform GitHub Actions workflow. It
-packages the Concert Grand from the same commit, verifies the pinned RF-106
-release, then builds the Windows executable and VST3, Linux x86-64 archive,
-Android APK, and Raspberry Pi ARM64 archive. Release
-packages and `SHA256SUMS.txt` are published from those artifacts.
+Instrument repositories own their release pipelines and assets such as sample
+libraries or firmware. RackForge validates their packages against the public
+host contracts before activation.
 
 <details>
-<summary><strong>Architecture and repository layout</strong></summary>
+<summary><strong>Contributing and repository architecture</strong></summary>
+
+Every Pull Request targeting `main` must pass contracts, Web validation,
+Windows, VST3, Linux x86-64, Android, Raspberry Pi, and browser-demo checks.
+Merging to `main` rebuilds the release artifacts and deploys the Web edition.
 
 ```text
 MIDI controller
@@ -297,19 +342,11 @@ Built-in audio / USB interface
 | `apps/` | Windows Desktop, Android, VST3, and headless/Web hosts |
 | `platforms/` | Platform adapters, installation, and deployment |
 | `hardware/` | Drivers and packages for supported MIDI controllers |
-| `plugins/` | Minimal conformance fixtures |
-| `web/` | RackForge's adaptive Web application |
+| `plugins/` | Bundled instruments and conformance fixtures |
+| `web/` | RackForge's adaptive interface |
 
 The host owns authoritative engine, bank, and performance state. Controllers
 send physical events and render the state they receive. A handshake rebuilds
 the control surface after either side restarts.
 
 </details>
-
-Development helpers contain no usernames, passwords, or private keys. Start
-with the platform guides and the documents below:
-
-- [Runtime layout and process model](docs/RUNTIME.md)
-- [LIVE performance and rack graphs](docs/architecture/live-performance.md)
-- [Portable `.rfpreset` format](docs/RFPRESET.md)
-- [Technical roadmap](ROADMAP.md)

@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out RackForge
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Lint GitHub Actions workflows
         uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
@@ -139,7 +139,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out RackForge
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Rust
         shell: pwsh
@@ -226,7 +226,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out RackForge
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install native build dependencies
         shell: bash
@@ -294,7 +294,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out RackForge
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -389,7 +389,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out RackForge
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install native build dependencies
         shell: bash

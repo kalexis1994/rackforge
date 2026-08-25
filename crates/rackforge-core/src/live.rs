@@ -2805,32 +2805,12 @@ fn reconfigure_audio_output(
 #[cfg(test)]
 fn route_rack_event_transformed(
     event: IngressMidiEvent,
-    midi_input_channels: &[u8],
-    midi_note_low: u8,
-    midi_note_high: u8,
-    midi_transpose: i8,
-    midi_target_channel: Option<u8>,
-    midi_notes_only: bool,
-    midi_velocity_input_low: u8,
-    midi_velocity_input_high: u8,
-    midi_velocity_output_low: u8,
-    midi_velocity_output_high: u8,
+    transform: &rackforge_performance_api::RackMidiTransform,
     keyboard_parts: Option<RackKeyboardParts>,
     play_route: &CompiledMidiRoute,
 ) -> Option<MidiEventV1> {
     let stage = RackMidiStageRuntimeSpec {
-        transform: rackforge_performance_api::RackMidiTransform {
-            source_channels: midi_input_channels.to_vec(),
-            target_channel: midi_target_channel,
-            note_low: midi_note_low,
-            note_high: midi_note_high,
-            transpose: midi_transpose,
-            notes_only: midi_notes_only,
-            velocity_input_low: midi_velocity_input_low,
-            velocity_input_high: midi_velocity_input_high,
-            velocity_output_low: midi_velocity_output_low,
-            velocity_output_high: midi_velocity_output_high,
-        },
+        transform: transform.clone(),
         keyboard_parts,
     };
     route_rack_event_through_stages(event, std::slice::from_ref(&stage), play_route)
@@ -3007,22 +2987,19 @@ fn route_rack_event(
     keyboard_parts: Option<RackKeyboardParts>,
     play_route: &CompiledMidiRoute,
 ) -> Option<MidiEventV1> {
-    let channels = midi_input_channel.into_iter().collect::<Vec<_>>();
-    route_rack_event_transformed(
-        event,
-        &channels,
-        midi_note_low,
-        midi_note_high,
-        midi_transpose,
-        None,
-        false,
-        0,
-        127,
-        0,
-        127,
-        keyboard_parts,
-        play_route,
-    )
+    let transform = rackforge_performance_api::RackMidiTransform {
+        source_channels: midi_input_channel.into_iter().collect(),
+        target_channel: None,
+        note_low: midi_note_low,
+        note_high: midi_note_high,
+        transpose: midi_transpose,
+        notes_only: false,
+        velocity_input_low: 0,
+        velocity_input_high: 127,
+        velocity_output_low: 0,
+        velocity_output_high: 127,
+    };
+    route_rack_event_transformed(event, &transform, keyboard_parts, play_route)
 }
 
 fn map_midi_velocity(
@@ -3437,59 +3414,29 @@ mod tests {
             source: MidiSourceKey::new(0),
             packet: MidiPacket::new(0, message).unwrap(),
         };
+        let transform = RackMidiTransform {
+            source_channels: vec![2, 4, 10],
+            target_channel: Some(9),
+            note_low: 36,
+            note_high: 84,
+            transpose: 12,
+            notes_only: true,
+            velocity_input_low: 20,
+            velocity_input_high: 100,
+            velocity_output_low: 40,
+            velocity_output_high: 110,
+        };
 
-        let routed = route_rack_event_transformed(
-            event(&[0x93, 48, 60]),
-            &[2, 4, 10],
-            36,
-            84,
-            12,
-            Some(9),
-            true,
-            20,
-            100,
-            40,
-            110,
-            None,
-            &route,
-        )
-        .expect("selected source channel should reach the connection");
+        let routed = route_rack_event_transformed(event(&[0x93, 48, 60]), &transform, None, &route)
+            .expect("selected source channel should reach the connection");
         assert_eq!(routed.data, [0x98, 60, 75]);
         assert!(
-            route_rack_event_transformed(
-                event(&[0x94, 48, 60]),
-                &[2, 4, 10],
-                36,
-                84,
-                12,
-                Some(9),
-                true,
-                20,
-                100,
-                40,
-                110,
-                None,
-                &route,
-            )
-            .is_none()
+            route_rack_event_transformed(event(&[0x94, 48, 60]), &transform, None, &route,)
+                .is_none()
         );
         assert!(
-            route_rack_event_transformed(
-                event(&[0xb3, 1, 64]),
-                &[2, 4, 10],
-                36,
-                84,
-                12,
-                Some(9),
-                true,
-                20,
-                100,
-                40,
-                110,
-                None,
-                &route,
-            )
-            .is_none()
+            route_rack_event_transformed(event(&[0xb3, 1, 64]), &transform, None, &route,)
+                .is_none()
         );
     }
 

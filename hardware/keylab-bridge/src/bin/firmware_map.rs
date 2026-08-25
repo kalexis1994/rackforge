@@ -59,8 +59,10 @@ fn parse_header(bytes: &[u8]) -> Result<Header, String> {
 
 fn count_aligned_words(bytes: &[u8], needle: u32) -> usize {
     bytes
-        .chunks_exact(4)
-        .filter(|word| u32::from_le_bytes([word[0], word[1], word[2], word[3]]) == needle)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|word| u32::from_le_bytes(**word) == needle)
         .count()
 }
 

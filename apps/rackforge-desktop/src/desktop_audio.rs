@@ -1509,7 +1509,7 @@ impl AudioProcessor {
                 plugin_output[frame * output_channels]
             };
         }
-        for frame in output.chunks_exact_mut(PLUGIN_OUTPUT_CHANNELS) {
+        for frame in output.as_chunks_mut::<PLUGIN_OUTPUT_CHANNELS>().0 {
             let gain = self.master_gain.next();
             let (left, right) = self.master_balance.next();
             frame[0] *= gain * left;
@@ -2017,7 +2017,7 @@ fn render_output(
     let output_gain = processor.output_gain;
     let output_meter = Arc::clone(&processor.output_meter);
     let rendered = processor.render(frames)?;
-    for frame in rendered.chunks_exact(PLUGIN_OUTPUT_CHANNELS) {
+    for frame in rendered.as_chunks::<PLUGIN_OUTPUT_CHANNELS>().0 {
         output_meter.observe_stereo(frame[0] * output_gain, frame[1] * output_gain);
     }
     match format {
@@ -2853,7 +2853,7 @@ midi_inputs = []
         release_held_notes(&sender, &telemetry);
         let packets = receiver.try_iter().collect::<Vec<_>>();
         assert_eq!(packets.len(), 32);
-        for (channel, pair) in packets.chunks_exact(2).enumerate() {
+        for (channel, pair) in packets.as_chunks::<2>().0.iter().enumerate() {
             assert_eq!(pair[0].data, [0xb0 | channel as u8, 64, 0]);
             assert_eq!(pair[1].data, [0xb0 | channel as u8, 123, 0]);
         }

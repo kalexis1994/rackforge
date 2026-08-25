@@ -3854,7 +3854,7 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 6] = self.controls.pedal_noise;
         values[6 + LAB_COUNT + 7] = self.controls.impact;
         let target = destination.get_mut(..values.len() * 4)?;
-        for (chunk, value) in target.chunks_exact_mut(4).zip(values) {
+        for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
         }
         Some(values.len() * 4)
@@ -3903,11 +3903,12 @@ impl Processor for ConcertGrand {
         } else {
             state.len() / 4
         };
-        for (value, chunk) in values.iter_mut().zip(state.chunks_exact(4)).take(readable) {
-            let Ok(bytes) = <[u8; 4]>::try_from(chunk) else {
-                return false;
-            };
-            let decoded = f32::from_le_bytes(bytes);
+        for (value, chunk) in values
+            .iter_mut()
+            .zip(state.as_chunks::<4>().0)
+            .take(readable)
+        {
+            let decoded = f32::from_le_bytes(*chunk);
             if !decoded.is_finite() || !(0.0..=1.0).contains(&decoded) {
                 return false;
             }
@@ -4488,7 +4489,7 @@ mod tests {
         // user dialled in, and the tail of tilt values is ignored.
         let mut legacy = [0u8; 37 * 4];
         legacy[..PARAM_COUNT * 4].copy_from_slice(&state);
-        for chunk in legacy[PARAM_COUNT * 4..].chunks_exact_mut(4) {
+        for chunk in legacy[PARAM_COUNT * 4..].as_chunks_mut::<4>().0 {
             chunk.copy_from_slice(&0.5f32.to_le_bytes());
         }
         let mut migrated = Box::new(ConcertGrand::default());
@@ -4518,7 +4519,7 @@ mod tests {
             let (sine, cosine) = sincosf(w);
             let coefficient = 2.0 * cosine;
             let (mut s1, mut s2) = (0.0f32, 0.0f32);
-            for frame in samples.chunks_exact(2) {
+            for frame in samples.as_chunks::<2>().0 {
                 let s0 = frame[0] + coefficient * s1 - s2;
                 s2 = s1;
                 s1 = s0;
@@ -4604,7 +4605,7 @@ mod tests {
                     let w = 2.0 * core::f32::consts::PI * hz / FS as f32;
                     let (sine, cosine) = sincosf(w);
                     let (mut s1, mut s2) = (0.0f32, 0.0f32);
-                    for frame in slice.chunks_exact(2) {
+                    for frame in slice.as_chunks::<2>().0 {
                         let s0 = frame[0] + 2.0 * cosine * s1 - s2;
                         s2 = s1;
                         s1 = s0;
@@ -4910,7 +4911,9 @@ mod tests {
             let mut output = vec![0.0f32; frames * 2];
             piano.process(&[], &mut output, &chord, &[], frames as u32, 0, 2);
             let mono: Vec<i16> = output
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|f| (((f[0] + f[1]) * 0.5).clamp(-1.0, 1.0) * 32_767.0) as i16)
                 .collect();
             let mut bytes = Vec::with_capacity(44 + mono.len() * 2);
@@ -4982,7 +4985,9 @@ mod tests {
             );
             // Mono mix, 16-bit PCM WAV.
             let mono: Vec<i16> = output
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|f| (((f[0] + f[1]) * 0.5).clamp(-1.0, 1.0) * 32_767.0) as i16)
                 .collect();
             let mut bytes = Vec::with_capacity(44 + mono.len() * 2);

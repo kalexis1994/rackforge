@@ -583,7 +583,7 @@ pub mod transport {
         }
         #[cfg(unix)]
         {
-            return Ok(ControlEndpoint::Unix(default_socket()));
+            Ok(ControlEndpoint::Unix(default_socket()))
         }
         #[cfg(not(unix))]
         {

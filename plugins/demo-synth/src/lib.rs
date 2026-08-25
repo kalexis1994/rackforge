@@ -318,7 +318,7 @@ impl Processor for DemoSynth {
             self.settings.level,
         ];
         let target = destination.get_mut(..values.len() * 4)?;
-        for (chunk, value) in target.chunks_exact_mut(4).zip(values) {
+        for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
         }
         Some(values.len() * 4)
@@ -329,11 +329,8 @@ impl Processor for DemoSynth {
             return false;
         }
         let mut values = [0.0_f32; 5];
-        for (value, chunk) in values.iter_mut().zip(state.chunks_exact(4)) {
-            let Ok(bytes) = <[u8; 4]>::try_from(chunk) else {
-                return false;
-            };
-            let decoded = f32::from_le_bytes(bytes);
+        for (value, chunk) in values.iter_mut().zip(state.as_chunks::<4>().0) {
+            let decoded = f32::from_le_bytes(*chunk);
             if !decoded.is_finite() || !(0.0..=1.0).contains(&decoded) {
                 return false;
             }

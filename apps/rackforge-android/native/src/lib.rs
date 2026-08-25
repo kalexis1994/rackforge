@@ -2036,7 +2036,7 @@ unsafe extern "C" fn render_callback(
     let mut clipped = 0_u64;
     let mut left_peak = 0.0_f32;
     let mut right_peak = 0.0_f32;
-    for (index, frame) in output.chunks_exact_mut(2).enumerate() {
+    for (index, frame) in output.as_chunks_mut::<2>().0.iter_mut().enumerate() {
         smooth_master_sample(&mut level, level_target);
         smooth_master_sample(&mut pan_left, pan_left_target);
         smooth_master_sample(&mut pan_right, pan_right_target);
@@ -2080,7 +2080,7 @@ unsafe extern "C" fn render_callback(
     MASTER_LEVEL_CURRENT_BITS.store(level.to_bits(), Ordering::Relaxed);
     MASTER_PAN_LEFT_CURRENT_BITS.store(pan_left.to_bits(), Ordering::Relaxed);
     MASTER_PAN_RIGHT_CURRENT_BITS.store(pan_right.to_bits(), Ordering::Relaxed);
-    if let Some(last) = output.chunks_exact(2).last() {
+    if let Some(last) = output.as_chunks::<2>().0.last() {
         AUDIO_LAST_LEFT_BITS.store(last[0].to_bits(), Ordering::Relaxed);
         AUDIO_LAST_RIGHT_BITS.store(last[1].to_bits(), Ordering::Relaxed);
     }
@@ -2096,7 +2096,7 @@ fn conceal_audio_dropout(output: &mut [f32]) {
     let left = f32::from_bits(AUDIO_LAST_LEFT_BITS.load(Ordering::Relaxed));
     let right = f32::from_bits(AUDIO_LAST_RIGHT_BITS.load(Ordering::Relaxed));
     let fade_frames = output.len().div_ceil(2).clamp(1, DROPOUT_FADE_FRAMES);
-    for (index, frame) in output.chunks_exact_mut(2).enumerate() {
+    for (index, frame) in output.as_chunks_mut::<2>().0.iter_mut().enumerate() {
         let gain = if index < fade_frames {
             1.0 - (index + 1) as f32 / fade_frames as f32
         } else {

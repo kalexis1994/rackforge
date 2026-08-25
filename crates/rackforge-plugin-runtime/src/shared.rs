@@ -133,13 +133,13 @@ pub(crate) fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool 
 }
 
 pub(crate) fn write_midi(memory: &mut [u8], range: Range<usize>, events: &[MidiEvent]) {
-    for (chunk, event) in memory[range].chunks_exact_mut(8).zip(events) {
+    for (chunk, event) in memory[range].as_chunks_mut::<8>().0.iter_mut().zip(events) {
         chunk.copy_from_slice(&event.packed().to_le_bytes());
     }
 }
 
 pub(crate) fn write_parameters(memory: &mut [u8], range: Range<usize>, events: &[ParameterEvent]) {
-    for (chunk, event) in memory[range].chunks_exact_mut(16).zip(events) {
+    for (chunk, event) in memory[range].as_chunks_mut::<16>().0.iter_mut().zip(events) {
         chunk[0..4].copy_from_slice(&event.frame.to_le_bytes());
         chunk[4..8].copy_from_slice(&event.index.to_le_bytes());
         chunk[8..16].copy_from_slice(&event.value.to_le_bytes());
@@ -147,14 +147,14 @@ pub(crate) fn write_parameters(memory: &mut [u8], range: Range<usize>, events: &
 }
 
 pub(crate) fn write_f32(memory: &mut [u8], range: Range<usize>, samples: &[f32]) {
-    for (chunk, sample) in memory[range].chunks_exact_mut(4).zip(samples) {
+    for (chunk, sample) in memory[range].as_chunks_mut::<4>().0.iter_mut().zip(samples) {
         chunk.copy_from_slice(&sample.to_le_bytes());
     }
 }
 
 pub(crate) fn read_f32(memory: &[u8], range: Range<usize>, samples: &mut [f32]) {
-    for (sample, chunk) in samples.iter_mut().zip(memory[range].chunks_exact(4)) {
-        *sample = f32::from_le_bytes(chunk.try_into().expect("four-byte sample"));
+    for (sample, chunk) in samples.iter_mut().zip(memory[range].as_chunks::<4>().0) {
+        *sample = f32::from_le_bytes(*chunk);
     }
 }
 

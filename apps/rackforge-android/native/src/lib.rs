@@ -11,7 +11,11 @@ use rackforge_control_api::{
 };
 use rackforge_core::{
     CompiledParameterLink, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
-    PluginStorage, SemanticParameterLinkContext, compile_semantic_parameter_links,
+    PluginStorage, SemanticParameterLinkContext,
+    audio_reliability::{
+        AudioStreamHealth, AudioStreamRecovery, StereoDropoutRecovery, StereoRenderQueue,
+    },
+    compile_semantic_parameter_links,
     midi_hotplug::{PanicScope, panic_packets},
     performance::PerformanceRepository,
     plugin_parameters, set_plugin_parameter,
@@ -43,14 +47,13 @@ use rackforge_surface_runtime::{
     ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayPlugin, PlaySound,
     ProgramExitDecision, ProgramExitDestination,
 };
-use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{CStr, c_char, c_void};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::slice;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -98,12 +101,9 @@ static AUDIO_ENGINE_LOCK_MISSES: AtomicU64 = AtomicU64::new(0);
 static AUDIO_RENDER_ERRORS: AtomicU64 = AtomicU64::new(0);
 static AUDIO_NONFINITE_SAMPLES: AtomicU64 = AtomicU64::new(0);
 static AUDIO_CLIPPED_SAMPLES: AtomicU64 = AtomicU64::new(0);
-static AUDIO_RENDER_QUEUE_UNDERRUNS: AtomicU64 = AtomicU64::new(0);
-static AUDIO_RENDER_QUEUE_UNDERRUN_FRAMES: AtomicU64 = AtomicU64::new(0);
 static AUDIO_RENDER_THREAD_PRIORITY_RESULT: AtomicI32 = AtomicI32::new(0);
-static AUDIO_RECOVERY_RAMP_PENDING: AtomicU32 = AtomicU32::new(0);
-static AUDIO_LAST_LEFT_BITS: AtomicU32 = AtomicU32::new(0.0_f32.to_bits());
-static AUDIO_LAST_RIGHT_BITS: AtomicU32 = AtomicU32::new(0.0_f32.to_bits());
+static AUDIO_DROPOUT_RECOVERY: StereoDropoutRecovery = StereoDropoutRecovery::new();
+static AUDIO_STREAM_RECOVERY: AudioStreamRecovery = AudioStreamRecovery::new();
 
 const AAUDIO_OK: i32 = 0;
 const AAUDIO_DIRECTION_OUTPUT: i32 = 0;
@@ -669,86 +669,8 @@ unsafe impl Send for SendablePluginInstance {}
 unsafe impl Send for SendableLoadedPlugin {}
 unsafe impl Sync for SendableLoadedPlugin {}
 
-struct AudioRenderQueue {
-    samples: Box<[UnsafeCell<f32>]>,
-    capacity_frames: usize,
-    read_frame: AtomicUsize,
-    write_frame: AtomicUsize,
-}
-
-// SAFETY: AudioRenderQueue has exactly one producer (the render worker) and
-// one consumer (AAudio's data callback). The producer publishes complete
-// frames with a release store before the consumer reads them, and the
-// consumer publishes released slots before the producer reuses them.
-unsafe impl Send for AudioRenderQueue {}
-unsafe impl Sync for AudioRenderQueue {}
-
-impl AudioRenderQueue {
-    fn new(capacity_frames: usize) -> Self {
-        let samples = (0..capacity_frames * 2)
-            .map(|_| UnsafeCell::new(0.0_f32))
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
-        Self {
-            samples,
-            capacity_frames,
-            read_frame: AtomicUsize::new(0),
-            write_frame: AtomicUsize::new(0),
-        }
-    }
-
-    fn queued_frames(&self) -> usize {
-        self.write_frame
-            .load(Ordering::Acquire)
-            .saturating_sub(self.read_frame.load(Ordering::Acquire))
-    }
-
-    fn push(&self, input: &[f32]) -> bool {
-        if !input.len().is_multiple_of(2) {
-            return false;
-        }
-        let frames = input.len() / 2;
-        let write = self.write_frame.load(Ordering::Relaxed);
-        let read = self.read_frame.load(Ordering::Acquire);
-        if frames
-            > self
-                .capacity_frames
-                .saturating_sub(write.saturating_sub(read))
-        {
-            return false;
-        }
-        for (sample_index, sample) in input.iter().copied().enumerate() {
-            let frame = write + sample_index / 2;
-            let channel = sample_index % 2;
-            let slot = (frame % self.capacity_frames) * 2 + channel;
-            // SAFETY: only the producer writes unpublished ring slots.
-            unsafe { *self.samples[slot].get() = sample };
-        }
-        self.write_frame.store(write + frames, Ordering::Release);
-        true
-    }
-
-    fn pop(&self, output: &mut [f32]) -> usize {
-        debug_assert!(output.len().is_multiple_of(2));
-        let requested_frames = output.len() / 2;
-        let read = self.read_frame.load(Ordering::Relaxed);
-        let write = self.write_frame.load(Ordering::Acquire);
-        let frames = requested_frames.min(write.saturating_sub(read));
-        for (sample_index, output_sample) in output[..frames * 2].iter_mut().enumerate() {
-            let frame = read + sample_index / 2;
-            let channel = sample_index % 2;
-            let slot = (frame % self.capacity_frames) * 2 + channel;
-            // SAFETY: the producer published these slots before advancing
-            // write_frame and cannot reuse them until read_frame advances.
-            *output_sample = unsafe { *self.samples[slot].get() };
-        }
-        self.read_frame.store(read + frames, Ordering::Release);
-        frames
-    }
-}
-
 struct AudioRenderWorker {
-    queue: Arc<AudioRenderQueue>,
+    queue: Arc<StereoRenderQueue>,
     stop: Arc<AtomicBool>,
     thread: thread::Thread,
     handle: Option<JoinHandle<()>>,
@@ -756,7 +678,7 @@ struct AudioRenderWorker {
 
 impl AudioRenderWorker {
     fn start(block_frames: usize, render_ahead_frames: usize) -> Result<Self> {
-        let queue = Arc::new(AudioRenderQueue::new(AUDIO_RENDER_QUEUE_CAPACITY_FRAMES));
+        let queue = Arc::new(StereoRenderQueue::new(AUDIO_RENDER_QUEUE_CAPACITY_FRAMES)?);
         let stop = Arc::new(AtomicBool::new(false));
         let worker_queue = Arc::clone(&queue);
         let worker_stop = Arc::clone(&stop);
@@ -825,7 +747,7 @@ impl Drop for AudioRenderWorker {
 }
 
 struct AudioCallbackContext {
-    queue: Arc<AudioRenderQueue>,
+    queue: Arc<StereoRenderQueue>,
     render_thread: thread::Thread,
 }
 
@@ -1915,9 +1837,16 @@ unsafe extern "C" fn error_callback(
     error: i32,
 ) {
     AUDIO_ERROR.store(error, Ordering::Release);
+    AUDIO_STREAM_RECOVERY.mark_lost();
 }
 
 fn audio_status_json() -> String {
+    let stream_recovery = AUDIO_STREAM_RECOVERY.snapshot();
+    let stream_health = match stream_recovery.health {
+        AudioStreamHealth::Healthy => "healthy",
+        AudioStreamHealth::Lost => "lost",
+        AudioStreamHealth::Recovering => "recovering",
+    };
     let guard = match audio().lock() {
         Ok(guard) => guard,
         Err(_) => {
@@ -1930,9 +1859,14 @@ fn audio_status_json() -> String {
             "running": false,
             "midi_dropped_events": MIDI_DROPPED_EVENTS.load(Ordering::Relaxed),
             "midi_panic_count": MIDI_PANIC_COUNT.load(Ordering::Relaxed),
+            "stream_health": stream_health,
+            "stream_losses": stream_recovery.losses,
+            "stream_recoveries": stream_recovery.recoveries,
         })
         .to_string();
     };
+    let render_queue = output.callback_context.queue.snapshot();
+    let dropout_recovery = AUDIO_DROPOUT_RECOVERY.snapshot();
     let callback_count = AUDIO_CALLBACK_COUNT.load(Ordering::Relaxed);
     let callback_frames = AUDIO_CALLBACK_FRAMES.load(Ordering::Relaxed);
     let callback_nanos = AUDIO_CALLBACK_TOTAL_NANOS.load(Ordering::Relaxed);
@@ -1971,9 +1905,16 @@ fn audio_status_json() -> String {
             "render_errors": AUDIO_RENDER_ERRORS.load(Ordering::Relaxed),
             "nonfinite_samples": AUDIO_NONFINITE_SAMPLES.load(Ordering::Relaxed),
             "clipped_samples": AUDIO_CLIPPED_SAMPLES.load(Ordering::Relaxed),
-            "render_queue_frames": output.callback_context.queue.queued_frames(),
-            "render_queue_underruns": AUDIO_RENDER_QUEUE_UNDERRUNS.load(Ordering::Relaxed),
-            "render_queue_underrun_frames": AUDIO_RENDER_QUEUE_UNDERRUN_FRAMES.load(Ordering::Relaxed),
+            "render_queue_frames": render_queue.queued_frames,
+            "render_queue_underruns": render_queue.underrun_callbacks,
+            "render_queue_underrun_frames": render_queue.underrun_frames,
+            "render_queue_saturated_pushes": render_queue.saturated_pushes,
+            "render_queue_invalid_pushes": render_queue.invalid_pushes,
+            "dropout_concealed_callbacks": dropout_recovery.concealed_callbacks,
+            "dropout_recovered_callbacks": dropout_recovery.recovered_callbacks,
+            "stream_health": stream_health,
+            "stream_losses": stream_recovery.losses,
+            "stream_recoveries": stream_recovery.recoveries,
             "render_thread_priority_result": AUDIO_RENDER_THREAD_PRIORITY_RESULT.load(Ordering::Relaxed),
             "callback_count": callback_count,
             "average_callback_us": average_callback_micros,
@@ -2015,12 +1956,9 @@ unsafe extern "C" fn render_callback(
     };
     let requested_frames = num_frames as usize;
     if rendered_frames < requested_frames {
-        AUDIO_RENDER_QUEUE_UNDERRUNS.fetch_add(1, Ordering::Relaxed);
-        AUDIO_RENDER_QUEUE_UNDERRUN_FRAMES.fetch_add(
-            (requested_frames - rendered_frames) as u64,
-            Ordering::Relaxed,
-        );
-        conceal_audio_dropout(&mut output[rendered_frames * 2..]);
+        AUDIO_DROPOUT_RECOVERY.conceal(&mut output[rendered_frames * 2..], DROPOUT_FADE_FRAMES);
+    } else {
+        AUDIO_DROPOUT_RECOVERY.recover(output, DROPOUT_FADE_FRAMES);
     }
     let output_gain = f32::from_bits(OUTPUT_GAIN_BITS.load(Ordering::Relaxed));
     let level_target = f32::from_bits(MASTER_LEVEL_TARGET_BITS.load(Ordering::Relaxed));
@@ -2029,9 +1967,6 @@ unsafe extern "C" fn render_callback(
     let mut level = f32::from_bits(MASTER_LEVEL_CURRENT_BITS.load(Ordering::Relaxed));
     let mut pan_left = f32::from_bits(MASTER_PAN_LEFT_CURRENT_BITS.load(Ordering::Relaxed));
     let mut pan_right = f32::from_bits(MASTER_PAN_RIGHT_CURRENT_BITS.load(Ordering::Relaxed));
-    let complete = rendered_frames == requested_frames;
-    let recover = complete && AUDIO_RECOVERY_RAMP_PENDING.swap(0, Ordering::AcqRel) != 0;
-    let recovery_frames = output.len().div_ceil(2).clamp(1, DROPOUT_FADE_FRAMES);
     let mut nonfinite = 0_u64;
     let mut clipped = 0_u64;
     let mut left_peak = 0.0_f32;
@@ -2040,12 +1975,7 @@ unsafe extern "C" fn render_callback(
         smooth_master_sample(&mut level, level_target);
         smooth_master_sample(&mut pan_left, pan_left_target);
         smooth_master_sample(&mut pan_right, pan_right_target);
-        let recovery_gain = if recover && index < recovery_frames {
-            (index + 1) as f32 / recovery_frames as f32
-        } else {
-            1.0
-        };
-        let gain = output_gain * level * recovery_gain;
+        let gain = output_gain * level;
         let left = if index < rendered_frames {
             frame[0] * gain * pan_left
         } else {
@@ -2080,32 +2010,13 @@ unsafe extern "C" fn render_callback(
     MASTER_LEVEL_CURRENT_BITS.store(level.to_bits(), Ordering::Relaxed);
     MASTER_PAN_LEFT_CURRENT_BITS.store(pan_left.to_bits(), Ordering::Relaxed);
     MASTER_PAN_RIGHT_CURRENT_BITS.store(pan_right.to_bits(), Ordering::Relaxed);
-    if let Some(last) = output.as_chunks::<2>().0.last() {
-        AUDIO_LAST_LEFT_BITS.store(last[0].to_bits(), Ordering::Relaxed);
-        AUDIO_LAST_RIGHT_BITS.store(last[1].to_bits(), Ordering::Relaxed);
-    }
+    AUDIO_DROPOUT_RECOVERY.remember_last_frame(output);
     let elapsed = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
     AUDIO_CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
     AUDIO_CALLBACK_FRAMES.fetch_add(num_frames as u64, Ordering::Relaxed);
     AUDIO_CALLBACK_TOTAL_NANOS.fetch_add(elapsed, Ordering::Relaxed);
     AUDIO_CALLBACK_MAX_NANOS.fetch_max(elapsed, Ordering::Relaxed);
     AAUDIO_CALLBACK_RESULT_CONTINUE
-}
-
-fn conceal_audio_dropout(output: &mut [f32]) {
-    let left = f32::from_bits(AUDIO_LAST_LEFT_BITS.load(Ordering::Relaxed));
-    let right = f32::from_bits(AUDIO_LAST_RIGHT_BITS.load(Ordering::Relaxed));
-    let fade_frames = output.len().div_ceil(2).clamp(1, DROPOUT_FADE_FRAMES);
-    for (index, frame) in output.as_chunks_mut::<2>().0.iter_mut().enumerate() {
-        let gain = if index < fade_frames {
-            1.0 - (index + 1) as f32 / fade_frames as f32
-        } else {
-            0.0
-        };
-        frame[0] = left * gain;
-        frame[1] = right * gain;
-    }
-    AUDIO_RECOVERY_RAMP_PENDING.store(1, Ordering::Release);
 }
 
 fn java_string(env: &mut JNIEnv<'_>, value: JString<'_>) -> Result<String> {
@@ -3782,16 +3693,22 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_startNativeAudio(
         AUDIO_RENDER_ERRORS.store(0, Ordering::Relaxed);
         AUDIO_NONFINITE_SAMPLES.store(0, Ordering::Relaxed);
         AUDIO_CLIPPED_SAMPLES.store(0, Ordering::Relaxed);
-        AUDIO_RENDER_QUEUE_UNDERRUNS.store(0, Ordering::Relaxed);
-        AUDIO_RENDER_QUEUE_UNDERRUN_FRAMES.store(0, Ordering::Relaxed);
         AUDIO_RENDER_THREAD_PRIORITY_RESULT.store(0, Ordering::Relaxed);
-        AUDIO_RECOVERY_RAMP_PENDING.store(0, Ordering::Relaxed);
-        AUDIO_LAST_LEFT_BITS.store(0.0_f32.to_bits(), Ordering::Relaxed);
-        AUDIO_LAST_RIGHT_BITS.store(0.0_f32.to_bits(), Ordering::Relaxed);
-        let candidate = NativeAudioOutput::open(device_id, latency_mode)?;
+        AUDIO_DROPOUT_RECOVERY.reset();
+        if AUDIO_STREAM_RECOVERY.snapshot().health == AudioStreamHealth::Lost {
+            AUDIO_STREAM_RECOVERY.mark_recovering();
+        }
+        let candidate = match NativeAudioOutput::open(device_id, latency_mode) {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                AUDIO_STREAM_RECOVERY.mark_lost();
+                return Err(error);
+            }
+        };
         *audio()
             .lock()
             .map_err(|_| anyhow::anyhow!("audio lock poisoned"))? = Some(candidate);
+        AUDIO_STREAM_RECOVERY.mark_healthy();
         Ok(())
     })();
     match result {

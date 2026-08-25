@@ -7,9 +7,9 @@
 - [x] Copy-on-load semantics for PLAY and Rack Slots.
 - [x] Automatic migration from legacy program IDs to complete state.
 - [x] RF-DLS state v3 captures layers, synthesis, envelopes, effects, and gain.
-- [ ] Slot-bound editing with automatic recovery snapshots.
-- [ ] Portable manifests for external resources such as samples and banks.
-- [ ] Native-format adapters with explicit complete/partial state reporting.
+- [ ] [Slot-bound editing with automatic recovery snapshots](https://github.com/kalexis1994/rackforge/issues/19).
+- [ ] [Portable manifests for external resources such as samples and banks](https://github.com/kalexis1994/rackforge/issues/20).
+- [ ] [Native-format adapters with explicit complete/partial state reporting](https://github.com/kalexis1994/rackforge/issues/21).
 
 ## Vision
 
@@ -226,19 +226,26 @@ keys. Missing targets fail validation before activation.
 - [x] Authoritative session, commands, events, and monotonic revisions.
 - [x] Plugin package validation and immutable installation.
 - [x] PLAY/LIVE mode shared by desktop, Android, WEB, and LITTLE.
-- [x] Arturia KeyLab Essential mk3 controller package across three platforms.
-- [x] Windows, Android ARM64, and Raspberry Pi ARM64 CI artifacts.
+- [x] Arturia KeyLab Essential mk3 controller package across desktop, Android,
+  Raspberry Pi, and browser-hosted control paths.
+- [x] Windows x86-64 standalone and VST3, Linux x86-64, Android ARM64,
+  Raspberry Pi ARM64, and browser-demo CI artifacts.
 - [x] MIDI disconnect recovery and held-note release.
 
-### Current stabilization milestone: v0.2.0
+### Current stabilization milestone: [v0.2.0](https://github.com/kalexis1994/rackforge/milestone/1)
 
-- [ ] Required CI quality gate: format, lint, unit tests, and package checks.
-- [ ] MIDI burst, hotplug, audio dropout, screen-lock, and soak tests.
-- [ ] Split large orchestration modules along stable responsibility boundaries.
-- [ ] Freeze `.rfplugin v1` and `.rfcontroller v1` conformance rules.
-- [ ] Exportable diagnostics with device inventory and real-time counters.
-- [ ] Release signing, update, and rollback strategy.
-- [ ] Complete English documentation.
+- [x] Required pull-request quality gate covering tests, contracts, and all
+  supported build targets.
+- [ ] [Qualify MIDI burst, hotplug, audio dropout, screen-lock, and soak reliability](https://github.com/kalexis1994/rackforge/issues/12).
+- [ ] [Add Android bridge and lifecycle regression coverage](https://github.com/kalexis1994/rackforge/issues/13).
+- [ ] [Split large orchestration modules along stable responsibility boundaries](https://github.com/kalexis1994/rackforge/issues/14).
+- [ ] [Freeze `.rfplugin v1` and `.rfcontroller v1` conformance rules](https://github.com/kalexis1994/rackforge/issues/15).
+- [ ] [Export privacy-safe diagnostics with device inventory and real-time counters](https://github.com/kalexis1994/rackforge/issues/16).
+- [ ] [Define release signing, update, rollback, and key-rotation strategy](https://github.com/kalexis1994/rackforge/issues/17).
+- [ ] [Complete the English documentation audit](https://github.com/kalexis1994/rackforge/issues/18).
+
+The milestone and its linked issues are the authoritative operational status;
+this document summarizes product direction and delivery order.
 
 ### Portable ecosystem
 

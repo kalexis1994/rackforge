@@ -64,10 +64,30 @@ Run this layer with:
 cargo test -p rackforge-core midi_hotplug
 ```
 
+## Audio fault injection and recovery
+
+`rackforge_core::audio_reliability` owns the bounded stereo render queue and
+the dropout/stream recovery state used by Android. The queue allocates its
+complete ring during construction. Push, pop, concealment, recovery, and
+telemetry use only preallocated memory and atomics after startup, so fault
+handling adds no allocation, mutex, channel, sleep, or system call to the audio
+callback.
+
+The deterministic suite fills the queue to saturation, verifies that rejected
+writes cannot expose partial stereo frames, forces partial and empty reads,
+fades the last valid sample to silence, records a stream loss, and verifies a
+finite click-reduced fade-in after restart. Android exposes the same counters
+through its native audio status: saturated pushes, underrun callbacks and
+frames, concealed/recovered callbacks, stream health, losses, and recoveries.
+
+Run this layer with:
+
+```text
+cargo test -p rackforge-core audio_reliability
+```
+
 ## Qualification still required for v0.2.0
 
-- Inject queue saturation, stream loss, underruns, and recovery into the native
-  audio hosts without adding work to their callbacks.
 - Add a repeatable ADB scenario for screen lock, background, resume, USB MIDI,
   and USB audio recovery.
 - Add a native soak command that runs for at least two hours and exports xruns,

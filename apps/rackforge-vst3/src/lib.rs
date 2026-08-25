@@ -48,6 +48,16 @@ const fn vst3_enum_i32(value: u32) -> i32 {
     value as i32
 }
 
+#[cfg(windows)]
+const fn vst3_enum_u32(value: i32) -> u32 {
+    value as u32
+}
+
+#[cfg(not(windows))]
+const fn vst3_enum_u32(value: u32) -> u32 {
+    value
+}
+
 struct ProcessorInner {
     engines: Vec<RackForgeEngine>,
     active_engine: usize,
@@ -158,7 +168,7 @@ impl IComponentTrait for RackForgeProcessor {
             _ => return kInvalidArgument,
         }
         info.busType = BusTypes_::kMain as BusType;
-        info.flags = BusInfo_::BusFlags_::kDefaultActive as u32;
+        info.flags = vst3_enum_u32(BusInfo_::BusFlags_::kDefaultActive);
         kResultOk
     }
 
@@ -523,6 +533,7 @@ struct RackForgeControllerShared {
     catalog: Arc<Vec<Arc<VstPluginModel>>>,
     values: Arc<RwLock<BTreeMap<u32, f64>>>,
     selected_sound_id: Arc<RwLock<Option<String>>>,
+    #[cfg(windows)]
     ui_route: Arc<RwLock<String>>,
 }
 
@@ -541,14 +552,17 @@ impl RackForgeControllerShared {
         self.revision.fetch_add(1, Ordering::Relaxed);
     }
 
+    #[cfg(windows)]
     fn revision(&self) -> u64 {
         self.revision.load(Ordering::Relaxed)
     }
 
+    #[cfg(windows)]
     fn selected_sound_id(&self) -> Option<String> {
         self.selected_sound_id.read().ok()?.clone()
     }
 
+    #[cfg(windows)]
     fn ui_route(&self) -> String {
         self.ui_route
             .read()
@@ -556,6 +570,7 @@ impl RackForgeControllerShared {
             .unwrap_or_else(|_| "/".to_owned())
     }
 
+    #[cfg(windows)]
     fn set_ui_route(&self, route: &str) -> Result<(), String> {
         if route.is_empty()
             || route.len() > 512
@@ -571,6 +586,7 @@ impl RackForgeControllerShared {
         Ok(())
     }
 
+    #[cfg(windows)]
     fn editor_url(&self) -> String {
         format!("rackforge://localhost/index.html#{}", self.ui_route())
     }
@@ -589,6 +605,7 @@ impl RackForgeControllerShared {
             .unwrap_or(0.0)
     }
 
+    #[cfg(windows)]
     fn set_level_from_ui(&self, level: f64) {
         if !level.is_finite() {
             return;
@@ -615,6 +632,7 @@ impl RackForgeControllerShared {
             .unwrap_or(0)
     }
 
+    #[cfg(windows)]
     fn parameter(&self, index: u32) -> Option<ParameterDescriptor> {
         self.model()?
             .schema
@@ -628,6 +646,7 @@ impl RackForgeControllerShared {
         self.values.read().ok()?.get(&index).copied()
     }
 
+    #[cfg(windows)]
     fn set_plugin_parameter_from_ui(&self, index: u32, value: f64) -> Option<f64> {
         let parameter = self.parameter(index)?;
         if parameter.flags.read_only || matches!(parameter.kind, ParameterKind::Meter { .. }) {
@@ -650,6 +669,7 @@ impl RackForgeControllerShared {
         Some(canonical)
     }
 
+    #[cfg(windows)]
     fn apply_preset_from_ui(&self, preset_id: &str) -> Option<Vec<engine::VstParameterValue>> {
         let values = self.model()?.preset_values.get(preset_id)?.clone();
         for value in &values {
@@ -691,6 +711,7 @@ impl RackForgeControllerShared {
         Ok(model)
     }
 
+    #[cfg(windows)]
     fn select_plugin_from_ui(&self, plugin_id: &str) -> Result<Arc<VstPluginModel>, String> {
         let catalog_index = self
             .catalog
@@ -760,6 +781,7 @@ impl RackForgeController {
                         .as_ref()
                         .and_then(|model| model.initial_sound_id.clone()),
                 )),
+                #[cfg(windows)]
                 ui_route: Arc::new(RwLock::new("/".to_owned())),
                 model: Arc::new(RwLock::new(model)),
                 values: Arc::new(RwLock::new(values)),

@@ -130,6 +130,13 @@ pub struct VstParameterValue {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(
+    not(windows),
+    allow(
+        dead_code,
+        reason = "these package metadata fields feed the Windows WebView UI"
+    )
+)]
 pub struct VstPluginModel {
     pub package_root: PathBuf,
     pub plugin_id: String,

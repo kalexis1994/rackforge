@@ -12,6 +12,7 @@ const MAXIMUM_WIDTH: i32 = 1800;
 const MAXIMUM_HEIGHT: i32 = 1200;
 
 pub struct RackForgeView {
+    #[cfg(windows)]
     shared: RackForgeControllerShared,
     size: Mutex<ViewRect>,
     frame: Mutex<Option<ComPtr<IPlugFrame>>>,
@@ -23,7 +24,10 @@ pub struct RackForgeView {
 
 impl RackForgeView {
     pub fn new(shared: RackForgeControllerShared) -> Self {
+        #[cfg(not(windows))]
+        let _ = shared;
         Self {
+            #[cfg(windows)]
             shared,
             size: Mutex::new(ViewRect {
                 left: 0,
@@ -341,6 +345,7 @@ fn constrain(rect: &mut ViewRect) {
 
 #[derive(serde::Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+#[cfg(windows)]
 enum UiMessage {
     SetMasterLevel { value: f64 },
     SetPluginParameter { parameter_index: u32, value: f64 },

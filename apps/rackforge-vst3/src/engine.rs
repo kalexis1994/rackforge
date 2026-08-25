@@ -10,7 +10,7 @@ use std::{
     collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
-    sync::OnceLock,
+    sync::{Mutex, OnceLock},
 };
 
 include!(concat!(env!("OUT_DIR"), "/bundled_plugin.rs"));
@@ -26,7 +26,9 @@ struct RootDocument {
 }
 
 static BUNDLED_PACKAGES: OnceLock<Vec<PathBuf>> = OnceLock::new();
+static BUNDLED_PACKAGES_INIT: Mutex<()> = Mutex::new(());
 static BUNDLED_MODELS: OnceLock<Vec<VstPluginModel>> = OnceLock::new();
+static BUNDLED_MODELS_INIT: Mutex<()> = Mutex::new(());
 
 pub struct RackForgeEngine {
     instance: PluginInstance<'static>,
@@ -156,23 +158,16 @@ pub struct VstPluginModel {
 }
 
 pub fn load_bundled_plugin_models() -> Result<Vec<VstPluginModel>> {
-    if let Some(models) = BUNDLED_MODELS.get() {
-        return Ok(models.clone());
-    }
-    let models = bundled_package_roots()?
-        .iter()
-        .cloned()
-        .map(load_plugin_model_at)
-        .collect::<Result<Vec<_>>>()?;
-    let _ = BUNDLED_MODELS.set(models);
-    Ok(BUNDLED_MODELS
-        .get()
-        .expect("bundled VST3 models initialized")
-        .clone())
+    get_or_try_init_cloned(&BUNDLED_MODELS, &BUNDLED_MODELS_INIT, || {
+        let root = rackforge_root()?;
+        bundled_package_roots()?
+            .into_iter()
+            .map(|package_root| load_plugin_model_at(&root, package_root))
+            .collect::<Result<Vec<_>>>()
+    })
 }
 
-fn load_plugin_model_at(package_root: PathBuf) -> Result<VstPluginModel> {
-    let root = rackforge_root()?;
+fn load_plugin_model_at(root: &Path, package_root: PathBuf) -> Result<VstPluginModel> {
     let package = PluginPackage::open(&package_root)?;
     let manifest = package.manifest();
     let component = manifest
@@ -263,11 +258,30 @@ fn parameter_values(
         .collect()
 }
 
-fn bundled_package_roots() -> Result<&'static Vec<PathBuf>> {
-    if let Some(paths) = BUNDLED_PACKAGES.get() {
-        return Ok(paths);
+fn get_or_try_init_cloned<T, F>(cache: &OnceLock<T>, gate: &Mutex<()>, initialize: F) -> Result<T>
+where
+    T: Clone,
+    F: FnOnce() -> Result<T>,
+{
+    if let Some(value) = cache.get() {
+        return Ok(value.clone());
     }
-    let root = rackforge_root()?;
+    let _guard = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(value) = cache.get() {
+        return Ok(value.clone());
+    }
+    let value = initialize()?;
+    let _ = cache.set(value);
+    Ok(cache.get().expect("guarded VST3 cache initialized").clone())
+}
+
+fn bundled_package_roots() -> Result<Vec<PathBuf>> {
+    get_or_try_init_cloned(&BUNDLED_PACKAGES, &BUNDLED_PACKAGES_INIT, || {
+        install_bundled_packages_at(&rackforge_root()?)
+    })
+}
+
+fn install_bundled_packages_at(root: &Path) -> Result<Vec<PathBuf>> {
     let store = root.join("plugin-store");
     let data = root.join("data");
     for path in [
@@ -290,10 +304,15 @@ fn bundled_package_roots() -> Result<&'static Vec<PathBuf>> {
             );
         }
     }
-    let _ = BUNDLED_PACKAGES.set(installed);
-    Ok(BUNDLED_PACKAGES
-        .get()
-        .expect("bundled VST3 packages initialized"))
+    Ok(installed)
+}
+
+#[cfg(test)]
+fn load_bundled_plugin_models_at(root: &Path) -> Result<Vec<VstPluginModel>> {
+    install_bundled_packages_at(root)?
+        .into_iter()
+        .map(|package_root| load_plugin_model_at(root, package_root))
+        .collect()
 }
 
 fn package_root_for_id(plugin_id: &str) -> Result<PathBuf> {
@@ -369,14 +388,82 @@ fn newest_installed_instrument(store: &Path) -> Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        sync::{
+            Arc, Barrier,
+            atomic::{AtomicU64, AtomicUsize, Ordering},
+        },
+        thread,
+        time::Duration,
+    };
+
+    static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(0);
+
+    struct TestRoot(PathBuf);
+
+    impl TestRoot {
+        fn create() -> Self {
+            loop {
+                let sequence = NEXT_TEST_ROOT.fetch_add(1, Ordering::Relaxed);
+                let path = env::temp_dir().join(format!(
+                    "rackforge-vst3-test-{}-{sequence}",
+                    std::process::id()
+                ));
+                match fs::create_dir(&path) {
+                    Ok(()) => return Self(path),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => panic!("creating isolated VST3 test root: {error}"),
+                }
+            }
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn fallible_cache_initializes_once_under_contention() {
+        const THREADS: usize = 8;
+        let cache = Arc::new(OnceLock::new());
+        let gate = Arc::new(Mutex::new(()));
+        let barrier = Arc::new(Barrier::new(THREADS));
+        let initializations = Arc::new(AtomicUsize::new(0));
+        let handles = (0..THREADS)
+            .map(|_| {
+                let cache = Arc::clone(&cache);
+                let gate = Arc::clone(&gate);
+                let barrier = Arc::clone(&barrier);
+                let initializations = Arc::clone(&initializations);
+                thread::spawn(move || {
+                    barrier.wait();
+                    get_or_try_init_cloned(&cache, &gate, || {
+                        initializations.fetch_add(1, Ordering::SeqCst);
+                        thread::sleep(Duration::from_millis(20));
+                        Ok(42_u32)
+                    })
+                    .unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for handle in handles {
+            assert_eq!(handle.join().unwrap(), 42);
+        }
+        assert_eq!(initializations.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn missing_store_has_no_fallback_instrument() {
-        let root = env::temp_dir().join(format!("rackforge-vst3-test-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("packages")).unwrap();
-        assert_eq!(newest_installed_instrument(&root).unwrap(), None);
-        let _ = fs::remove_dir_all(root);
+        let root = TestRoot::create();
+        fs::create_dir_all(root.path().join("packages")).unwrap();
+        assert_eq!(newest_installed_instrument(root.path()).unwrap(), None);
     }
 
     #[test]
@@ -384,7 +471,8 @@ mod tests {
         if BUNDLED_PLUGIN.is_none() || BUNDLED_RF106_PLUGIN.is_none() {
             return;
         }
-        let ids = load_bundled_plugin_models()
+        let root = TestRoot::create();
+        let ids = load_bundled_plugin_models_at(root.path())
             .unwrap()
             .into_iter()
             .map(|model| model.plugin_id)
@@ -397,7 +485,8 @@ mod tests {
         if BUNDLED_RF106_PLUGIN.is_none() {
             return;
         }
-        let model = load_bundled_plugin_models()
+        let root = TestRoot::create();
+        let model = load_bundled_plugin_models_at(root.path())
             .unwrap()
             .into_iter()
             .find(|model| model.plugin_id == "org.rackforge.rf-106")

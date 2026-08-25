@@ -1008,6 +1008,12 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
         output_gain_db: 0,
         midi_inputs: [...midiInputNames],
       },
+      runtime: {
+        running: Boolean(engine),
+        stream_health: engine ? "healthy" : "lost",
+        sample_rate: rate,
+        buffer_size_frames: RENDER_FRAMES,
+      },
       runtime_status: engine ? "running" : "stopped",
     } satisfies HostAudioSettings as T;
   }

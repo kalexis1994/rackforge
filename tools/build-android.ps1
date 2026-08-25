@@ -127,7 +127,7 @@ Copy-Item -Path (Join-Path $officialPlugins "*.rfplugin") `
 
 Push-Location $androidProject
 try {
-    & $gradle assembleDebug --no-daemon
+    & $gradle testDebugUnitTest assembleDebug --no-daemon
     if ($LASTEXITCODE -ne 0) {
         throw "Android build failed."
     }

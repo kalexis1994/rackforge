@@ -18,6 +18,17 @@ export interface HostAudioOutput {
 
 export type HostAudioInput = HostAudioOutput;
 
+export interface HostAudioRuntimeStatus {
+  running?: boolean;
+  stream_health?: "healthy" | "recovering" | "lost" | string;
+  sample_rate?: number;
+  buffer_size_frames?: number;
+  frames_per_burst?: number;
+  xruns?: number;
+  callback_load_percent?: number;
+  midi_dropped_events?: number;
+}
+
 export interface HostAudioPreferences {
   schema_version: number;
   driver: string;
@@ -41,6 +52,7 @@ export interface HostAudioSettings {
     midi_inputs: string[];
   };
   preferences: HostAudioPreferences;
+  runtime?: HostAudioRuntimeStatus;
   runtime_status: string;
 }
 
@@ -502,6 +514,8 @@ export interface PluginWebDescriptor {
   version: string;
   kind: "instrument" | "effect" | "midi_processor";
   active: boolean;
+  /** Host package state is stable, but its runtime is still being replaced. */
+  transitioning?: boolean;
   managed: boolean;
   api_version: number;
   branding?: PluginBranding | null;

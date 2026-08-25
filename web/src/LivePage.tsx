@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { ChevronLeft, ChevronRight, LogOut, Save } from "lucide-react";
@@ -31,6 +32,7 @@ import {
   songPartAsRack,
   songPartGraphFromRack,
 } from "./rackGraph";
+import { buildRackInstrumentInstances } from "./rackInstrumentSelection";
 import type {
   LiveBrowseMode,
   LiveLocation,
@@ -38,6 +40,7 @@ import type {
   PerformanceEdit,
   PerformanceSnapshot,
   PluginInstance,
+  PluginWebDescriptor,
   PluginStateReference,
   RackDefinition,
   RackGraphPosition,
@@ -77,6 +80,7 @@ interface RackCascadePlan {
 interface LivePageProps {
   session: SessionSnapshot | null;
   performance: PerformanceSnapshot | null;
+  plugins: PluginWebDescriptor[];
   pending: boolean;
   surface: "perform" | "configure";
   onSurfaceChange: (surface: "perform" | "configure") => void;
@@ -227,6 +231,7 @@ function describeLocation(
 export function LivePage({
   session,
   performance,
+  plugins,
   pending,
   surface,
   onSurfaceChange,
@@ -298,6 +303,7 @@ export function LivePage({
         <PerformanceConfig
           session={session}
           performance={performance}
+          plugins={plugins}
           pending={pending}
           onWorkspaceChange={handleWorkspaceChange}
           renderPluginSurface={renderPluginSurface}
@@ -778,12 +784,14 @@ function LiveEmpty({ label }: { label: string }) {
 function PerformanceConfig({
   session,
   performance,
+  plugins,
   pending,
   onWorkspaceChange,
   renderPluginSurface,
 }: {
   session: SessionSnapshot | null;
   performance: PerformanceSnapshot;
+  plugins: PluginWebDescriptor[];
   pending: boolean;
   onWorkspaceChange: (workspace: PerformanceGraphWorkspace | null) => void;
   renderPluginSurface: LivePageProps["renderPluginSurface"];
@@ -798,6 +806,7 @@ function PerformanceConfig({
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deleteBusyRef = useRef(false);
+  const rackInstances = buildRackInstrumentInstances(session?.instances ?? [], plugins);
   const items =
     kind === "rack"
       ? performance.library.racks
@@ -1066,7 +1075,8 @@ function PerformanceConfig({
                 ? newRack()
                 : performance.library.racks.find((item) => item.id === activeSelectedId)
             }
-            instances={session?.instances ?? []}
+            instances={rackInstances}
+            plugins={plugins}
             session={session}
             performance={performance}
             pending={pending}
@@ -1092,7 +1102,8 @@ function PerformanceConfig({
                 : performance.library.songs.find((item) => item.id === activeSelectedId)
             }
             performance={performance}
-            instances={session?.instances ?? []}
+            instances={rackInstances}
+            plugins={plugins}
             session={session}
             pending={pending}
             immersivePartId={activeSongPartWorkspace?.id ?? null}
@@ -1208,13 +1219,12 @@ function PerformanceDeleteDialog({
   );
 }
 
-function defaultSlot(instances: PluginInstance[]): RackSlot {
-  const instance = instances[0];
+function defaultSlot(instance: PluginInstance): RackSlot {
   return {
     id: performanceId("slot"),
-    name: instance?.plugin_name ?? "Instrument",
-    plugin_id: instance?.plugin_id ?? "org.rackforge.missing",
-    legacy_program_id: instance?.selected_sound_id,
+    name: instance.plugin_name,
+    plugin_id: instance.plugin_id,
+    legacy_program_id: instance.selected_sound_id,
     enabled: true,
     midi_note_low: 0,
     midi_note_high: 127,
@@ -1224,6 +1234,84 @@ function defaultSlot(instances: PluginInstance[]): RackSlot {
     level_per_mille: 1000,
     pan_per_mille: 0,
   };
+}
+
+function InstrumentPickerDialog({
+  instances,
+  plugins,
+  onSelect,
+  onClose,
+}: {
+  instances: PluginInstance[];
+  plugins: PluginWebDescriptor[];
+  onSelect: (instance: PluginInstance) => void;
+  onClose: () => void;
+}) {
+  const descriptors = new Map(plugins.map((plugin) => [plugin.plugin_id, plugin]));
+  return (
+    <ModalDialog
+      eyebrow="Rack graph"
+      title="Choose an instrument"
+      onClose={onClose}
+      closeLabel="Close instrument selector"
+      className="rack-instrument-picker-dialog"
+      actions={
+        <button type="button" className="secondary-button" onClick={onClose}>
+          Cancel
+        </button>
+      }
+    >
+      <p className="rack-instrument-picker-help">
+        Select the plugin this node will own. The current PLAY instrument is not changed.
+      </p>
+      <div className="play-plugin-selector modal-list rack-instrument-picker-list" role="list">
+        {instances.map((instance, index) => {
+          const plugin = descriptors.get(instance.plugin_id);
+          const branding = plugin?.branding;
+          return (
+            <button
+              type="button"
+              className={"plugin-picker-card" + (branding ? " branded" : "")}
+              key={instance.plugin_id}
+              onClick={() => onSelect(instance)}
+              style={branding ? {
+                "--plugin-accent": branding.accent_color,
+                "--plugin-background": branding.background_color,
+              } as CSSProperties : undefined}
+            >
+              {branding ? (
+                <>
+                  <img className="plugin-picker-banner" src={branding.banner_url} alt="" />
+                  <span className="plugin-picker-shade" aria-hidden="true" />
+                </>
+              ) : null}
+              <span className="play-plugin-number">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              {branding ? (
+                <img className="plugin-picker-icon" src={branding.icon_url} alt="" />
+              ) : (
+                <span className="plugin-picker-icon rack-instrument-fallback-icon">RF</span>
+              )}
+              <span className="play-plugin-copy">
+                <strong>{instance.plugin_name}</strong>
+                <small>{plugin ? "v" + plugin.version : instance.plugin_id}</small>
+              </span>
+              <span className="play-plugin-status">
+                ADD <i aria-hidden="true">→</i>
+              </span>
+            </button>
+          );
+        })}
+        {instances.length === 0 ? (
+          <div className="config-library-empty">
+            <strong>No active instruments</strong>
+            <p>Activate an instrument from Plugin Manager before adding it to a Rack.</p>
+          </div>
+        ) : null}
+      </div>
+    </ModalDialog>
+  );
 }
 
 function newRack(): RackDefinition {
@@ -1591,6 +1679,7 @@ function useSongPartPreview(
 function RackEditor({
   rack,
   instances,
+  plugins,
   session,
   performance,
   pending,
@@ -1602,6 +1691,7 @@ function RackEditor({
 }: {
   rack?: RackDefinition;
   instances: PluginInstance[];
+  plugins: PluginWebDescriptor[];
   session: SessionSnapshot | null;
   performance: PerformanceSnapshot;
   pending: boolean;
@@ -1618,6 +1708,9 @@ function RackEditor({
   const [baseRevision, setBaseRevision] = useState(performance.revision);
   const [error, setError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [instrumentPicker, setInstrumentPicker] = useState<{
+    position?: RackGraphPosition;
+  } | null>(null);
   const previewSupported = !isNativeHost();
   const initialPreviewMode = session?.active_mode ?? "idle";
   const previewOriginRef = useRef({
@@ -1710,9 +1803,14 @@ function RackEditor({
     return () => window.clearTimeout(timer);
   }, [previewPayload, previewSupported, previewVoiceCount]);
   const addInstrument = useCallback((position?: RackGraphPosition) => {
-    if (!draft) return;
-    setDraft(addSlotToRack(draft, defaultSlot(instances), position));
-  }, [draft, instances]);
+    setInstrumentPicker({ position });
+  }, []);
+  const selectInstrument = useCallback((instance: PluginInstance) => {
+    setDraft((current) => current
+      ? addSlotToRack(current, defaultSlot(instance), instrumentPicker?.position)
+      : current);
+    setInstrumentPicker(null);
+  }, [instrumentPicker]);
   const handleGraphOverlayChange = useCallback((open: boolean) => {
     if (open) setDetailsOpen(false);
     window.dispatchEvent(new CustomEvent("rackforge:rack-graph-overlay", {
@@ -1885,7 +1983,7 @@ function RackEditor({
                 return typeof update === "function" ? update(current) : update;
               })
             }
-            canAddInstrument={draft.slots.length < 32 && instances.length > 0}
+            canAddInstrument={draft.slots.length < 32}
             onAddInstrument={addInstrument}
             instances={instances}
             renderPluginSurface={renderPluginSurface}
@@ -1900,7 +1998,7 @@ function RackEditor({
           <button
             type="button"
             onClick={() => addInstrument()}
-            disabled={draft.slots.length >= 32 || instances.length === 0}
+            disabled={draft.slots.length >= 32}
           >
             ＋ Add Slot
           </button>
@@ -1927,6 +2025,14 @@ function RackEditor({
           />
         ))}
       </EditorSection>
+      {instrumentPicker ? (
+        <InstrumentPickerDialog
+          instances={instances}
+          plugins={plugins}
+          onSelect={selectInstrument}
+          onClose={() => setInstrumentPicker(null)}
+        />
+      ) : null}
     </form>
   );
 }
@@ -2143,6 +2249,7 @@ function SongEditor({
   song,
   performance,
   instances,
+  plugins,
   session,
   pending,
   immersivePartId,
@@ -2156,6 +2263,7 @@ function SongEditor({
   song?: SongDefinition;
   performance: PerformanceSnapshot;
   instances: PluginInstance[];
+  plugins: PluginWebDescriptor[];
   session: SessionSnapshot | null;
   pending: boolean;
   immersivePartId: string | null;
@@ -2172,6 +2280,9 @@ function SongEditor({
   const [error, setError] = useState<string | null>(null);
   const [selectedPartId, setSelectedPartId] = useState(song?.parts[0]?.id);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [instrumentPicker, setInstrumentPicker] = useState<{
+    position?: RackGraphPosition;
+  } | null>(null);
   const immersive = immersivePartId !== null;
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(original);
   const isNew = !!draft && !performance.library.songs.some((item) => item.id === draft.id);
@@ -2439,10 +2550,8 @@ function SongEditor({
                   rack={selectedPartRack}
                   racks={performance.library.racks}
                   onChange={updatePartRack}
-                  canAddInstrument={selectedPartRack.slots.length < 32 && instances.length > 0}
-                  onAddInstrument={(position) => updatePartRack(
-                    addSlotToRack(selectedPartRack, defaultSlot(instances), position),
-                  )}
+                  canAddInstrument={selectedPartRack.slots.length < 32}
+                  onAddInstrument={(position) => setInstrumentPicker({ position })}
                   instances={instances}
                   renderPluginSurface={renderPluginSurface}
                   onOverlayChange={handleGraphOverlayChange}
@@ -2479,6 +2588,23 @@ function SongEditor({
           ) : null}
         </div>
       </EditorSection>
+      {instrumentPicker && selectedPartRack ? (
+        <InstrumentPickerDialog
+          instances={instances}
+          plugins={plugins}
+          onSelect={(instance) => {
+            updatePartRack(
+              addSlotToRack(
+                selectedPartRack,
+                defaultSlot(instance),
+                instrumentPicker.position,
+              ),
+            );
+            setInstrumentPicker(null);
+          }}
+          onClose={() => setInstrumentPicker(null)}
+        />
+      ) : null}
     </form>
   );
 }

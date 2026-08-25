@@ -3509,7 +3509,7 @@ impl DesktopApp {
     fn materialize_plugin_state(
         &mut self,
         plugin_id: &str,
-        sound_id: Option<String>,
+        requested_sound_id: Option<String>,
     ) -> ControlResponse {
         let Some(plugin) = self
             .plugins
@@ -3524,7 +3524,7 @@ impl DesktopApp {
                 ),
             };
         };
-        if let Some(sound_id) = sound_id.as_deref()
+        if let Some(sound_id) = requested_sound_id.as_deref()
             && !plugin
                 .sound_summaries
                 .iter()
@@ -3538,6 +3538,8 @@ impl DesktopApp {
                 ),
             };
         }
+        let sound_id = requested_sound_id
+            .or_else(|| plugin.sound_summaries.first().map(|sound| sound.id.clone()));
         let state = (|| -> Result<_> {
             let mut isolated = plugin
                 .runtime

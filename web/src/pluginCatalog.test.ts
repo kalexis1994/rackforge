@@ -92,6 +92,18 @@ describe("global plugin runtime state", () => {
     expect(activating).toMatchObject({ phase: "loading", detail: "Activating plugin…" });
   });
 
+  it("does not present an enabled plugin as inactive while the host starts it", () => {
+    const transitioning = { ...plugin(), transitioning: true };
+    const state = derivePluginRuntimeStates(
+      [transitioning],
+      "online",
+      session([]),
+    )["org.rackforge.synth"];
+
+    expect(transitioning.active).toBe(true);
+    expect(state).toMatchObject({ phase: "loading", loaded: false, healthy: null });
+  });
+
   it("reports a missing previously loaded instance as unhealthy", () => {
     const state = derivePluginRuntimeStates(
       [plugin()],

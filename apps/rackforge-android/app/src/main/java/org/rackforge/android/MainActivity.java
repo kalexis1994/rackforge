@@ -261,6 +261,10 @@ public final class MainActivity extends Activity {
     private static native String controllerInstallDirectory(String storeRoot, String packageDir);
     private static native boolean startNativeAudio(int deviceId, int latencyMode);
     private static native void setNativeOutputGain(int gainDb);
+    private static native boolean setNativeMasterLevel(int level);
+    private static native int nativeMasterLevel();
+    private static native boolean setNativeMasterPan(int pan);
+    private static native int nativeMasterPan();
     static native void stopNativeAudio();
     private static native String nativeAudioStatus();
     private static native boolean growNativeAudioBuffer();
@@ -303,6 +307,14 @@ public final class MainActivity extends Activity {
         // spikes. Users can still opt into the more aggressive Low profile.
         latencyMode = preferences.getInt("audio.latency", 1);
         outputGainDb = preferences.getInt("audio.gain_db", 0);
+        if (!setNativeMasterLevel(preferences.getInt("session.master_level", 1000))) {
+            preferences.edit().remove("session.master_level").apply();
+            setNativeMasterLevel(1000);
+        }
+        if (!setNativeMasterPan(preferences.getInt("session.master_pan", 0))) {
+            preferences.edit().remove("session.master_pan").apply();
+            setNativeMasterPan(0);
+        }
         try {
             ensureBundledControllers(controllerStoreRoot());
         } catch (Throwable error) {
@@ -313,20 +325,6 @@ public final class MainActivity extends Activity {
         } catch (Throwable error) {
             Log.w("RackForge", "Performance library init failed", error);
         }
-        // Bundled-plugin install and the inbox run after onCreate finishes:
-        // activation touches the WebView, which does not exist yet here.
-        mainHandler.post(() -> {
-            try {
-                processInstallInbox();
-            } catch (Throwable error) {
-                Log.w("RackForge", "Install inbox failed", error);
-            }
-            try {
-                ensureBundledPlugins();
-            } catch (Throwable error) {
-                Log.w("RackForge", "Bundled plugin install failed", error);
-            }
-        });
         setNativeOutputGain(outputGainDb);
         if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
             WebView.setWebContentsDebuggingEnabled(true);
@@ -1006,6 +1004,35 @@ public final class MainActivity extends Activity {
                             .put("pin_state", "set")
                             .put("pin_digits", 4)
                             .put("locked_for", 0);
+                } else if (("GET".equals(method) || "PUT".equals(method))
+                        && "/api/v1/host/audio".equals(path)) {
+                    JSONObject body = "PUT".equals(method)
+                            ? requestBody(params) : null;
+                    runOnUiThread(() -> {
+                        try {
+                            if (body != null) applyAndroidHostAudioSettings(body);
+                            respondNativeHost(requestId, true, 200, null,
+                                    androidHostAudioSettings());
+                        } catch (Throwable error) {
+                            Log.e("RackForge", "Android audio settings failed", error);
+                            respondNativeHost(requestId, false, 400,
+                                    errorMessage(error), null);
+                        }
+                    });
+                    return;
+                } else if ("POST".equals(method)
+                        && "/api/v1/host/audio/test".equals(path)) {
+                    runOnUiThread(() -> {
+                        if (!audioRunning) {
+                            respondNativeHost(requestId, false, 409,
+                                    "The Android audio engine is not ready.", null);
+                            return;
+                        }
+                        playTestNote();
+                        respondNativeHost(requestId, true, 200, null,
+                                new JSONObject());
+                    });
+                    return;
                 } else if ("GET".equals(method) && "/api/v1/config".equals(path)) {
                     result = new JSONObject()
                             .put("enabled", false)
@@ -1247,7 +1274,11 @@ public final class MainActivity extends Activity {
                 .put("plugin_id", pluginId)
                 .put("plugin_name", plugin.getString("plugin_name"))
                 .put("version", plugin.getString("version"))
-                .put("active", plugin.optBoolean("active") && !engineStarting)
+                .put("kind", plugin.getString("kind"))
+                // `active` is the persisted package-enable flag. A runtime replacement is a
+                // separate transient condition and must never make every plugin look disabled.
+                .put("active", plugin.optBoolean("active"))
+                .put("transitioning", engineStarting)
                 .put("managed", true)
                 .put("api_version", plugin.optInt("web_api_version", 0))
                 .put("branding", branding == null ? JSONObject.NULL : branding)
@@ -1351,7 +1382,7 @@ public final class MainActivity extends Activity {
             if (error instanceof Exception) throw (Exception) error;
             throw new IllegalStateException(error);
         } finally {
-            engineStarting = false;
+            finishPluginTransition();
         }
     }
 
@@ -1387,6 +1418,164 @@ public final class MainActivity extends Activity {
             editor.remove("resource.kind." + grantId);
         }
         editor.apply();
+    }
+
+    /**
+     * Publishes Android audio and MIDI through the same host contract consumed by the
+     * Desktop, Raspberry Pi and remote Web settings screen. The shared UI owns the
+     * presentation; Android only describes and applies capabilities of its native host.
+     */
+    private JSONObject androidHostAudioSettings() throws Exception {
+        refreshAudioOutputs();
+        JSONArray outputs = new JSONArray();
+        for (AudioOutputChoice choice : audioOutputChoices) {
+            outputs.put(new JSONObject()
+                    .put("driver", "AAudio")
+                    .put("name", choice.label)
+                    .put("is_default", choice.id == 0)
+                    .put("channels", 2)
+                    .put("default_sample_rate", SAMPLE_RATE)
+                    .put("sample_rates", new JSONArray().put(SAMPLE_RATE))
+                    .put("buffer_frames", new JSONArray()
+                            .put(128).put(256).put(512)));
+        }
+
+        JSONArray midiInputs = new JSONArray();
+        Set<String> connectedMidiInputs = connectedAndroidMidiInputNames();
+        for (String input : connectedMidiInputs) midiInputs.put(input);
+
+        Set<String> enabledMidiInputs = preferences.getStringSet("midi.inputs", null);
+        if (enabledMidiInputs == null) enabledMidiInputs = connectedMidiInputs;
+        JSONArray enabledMidi = new JSONArray();
+        new java.util.TreeSet<>(enabledMidiInputs).forEach(enabledMidi::put);
+
+        JSONObject runtime;
+        try {
+            runtime = new JSONObject(nativeAudioStatus());
+        } catch (Throwable error) {
+            runtime = new JSONObject().put("status", audioRunning ? "running" : "starting");
+        }
+
+        return new JSONObject()
+                .put("status", "ok")
+                .put("host", "Android AAudio")
+                .put("inventory", new JSONObject()
+                        .put("drivers", new JSONArray().put(new JSONObject()
+                                .put("name", "AAudio")
+                                .put("available", true)
+                                .put("detail", "Android native low-latency callback")))
+                        .put("outputs", outputs)
+                        // Audio capture is intentionally not advertised until the Android
+                        // engine can route it into effect plugins without leaving the RT path.
+                        .put("inputs", new JSONArray())
+                        .put("midi_inputs", midiInputs))
+                .put("preferences", new JSONObject()
+                        .put("schema_version", 1)
+                        .put("driver", "AAudio")
+                        .put("output_device", selectedAudioOutputLabel())
+                        .put("sample_rate_hz", SAMPLE_RATE)
+                        .put("buffer_frames", 128 << Math.max(0, Math.min(2, latencyMode)))
+                        .put("output_gain_db", outputGainDb)
+                        .put("midi_inputs", enabledMidi))
+                .put("runtime", runtime)
+                .put("runtime_status", runtime.toString(2));
+    }
+
+    private void applyAndroidHostAudioSettings(JSONObject draft) throws Exception {
+        if (draft.optInt("schema_version", 1) != 1) {
+            throw new IllegalArgumentException("Unsupported audio settings schema.");
+        }
+        if (!"AAudio".equals(draft.optString("driver"))) {
+            throw new IllegalArgumentException("Android supports the AAudio driver only.");
+        }
+        if (draft.optInt("sample_rate_hz", SAMPLE_RATE) != SAMPLE_RATE) {
+            throw new IllegalArgumentException(
+                    "This Android runtime currently operates at " + SAMPLE_RATE + " Hz.");
+        }
+
+        refreshAudioOutputs();
+        String outputName = draft.getString("output_device");
+        AudioOutputChoice selectedOutput = null;
+        for (AudioOutputChoice choice : audioOutputChoices) {
+            if (choice.label.equals(outputName)) {
+                selectedOutput = choice;
+                break;
+            }
+        }
+        if (selectedOutput == null) {
+            throw new IllegalArgumentException("The selected audio output is disconnected.");
+        }
+
+        int requestedBuffer = draft.optInt("buffer_frames", 256);
+        int nextLatencyMode = switch (requestedBuffer) {
+            case 128 -> 0;
+            case 256 -> 1;
+            case 512 -> 2;
+            default -> throw new IllegalArgumentException(
+                    "Android buffer must be 128, 256 or 512 frames.");
+        };
+        int nextGain = draft.optInt("output_gain_db", 0);
+        if (nextGain < 0 || nextGain > 12 || nextGain % 3 != 0) {
+            throw new IllegalArgumentException(
+                    "Android output gain must be 0, 3, 6, 9 or 12 dB.");
+        }
+
+        Set<String> connectedMidiInputs = connectedAndroidMidiInputNames();
+        Set<String> nextMidiInputs = new java.util.HashSet<>();
+        JSONArray requestedMidi = draft.optJSONArray("midi_inputs");
+        if (requestedMidi != null) {
+            for (int index = 0; index < requestedMidi.length(); index++) {
+                String input = requestedMidi.getString(index);
+                if (connectedMidiInputs.contains(input)) nextMidiInputs.add(input);
+            }
+        }
+        // A temporarily disconnected approved device remains approved and will reconnect
+        // by its persisted identity instead of disappearing from the global MIDI filter.
+        Set<String> previousMidiInputs = preferences.getStringSet("midi.inputs", null);
+        if (previousMidiInputs != null) {
+            for (String input : previousMidiInputs) {
+                if (!connectedMidiInputs.contains(input)) nextMidiInputs.add(input);
+            }
+        }
+
+        boolean restartAudio = selectedAudioDeviceId != selectedOutput.id
+                || latencyMode != nextLatencyMode;
+        boolean reopenMidi = previousMidiInputs == null
+                || !previousMidiInputs.equals(nextMidiInputs);
+        selectedAudioDeviceId = selectedOutput.id;
+        selectedAudioDeviceKey = selectedOutput.key;
+        latencyMode = nextLatencyMode;
+        outputGainDb = nextGain;
+        preferences.edit()
+                .putString("audio.output", selectedAudioDeviceKey)
+                .putInt("audio.latency", latencyMode)
+                .putInt("audio.gain_db", outputGainDb)
+                .putStringSet("midi.inputs", new java.util.HashSet<>(nextMidiInputs))
+                .apply();
+        setNativeOutputGain(outputGainDb);
+        if (restartAudio && audioRunning) switchAudioOutput();
+        if (reopenMidi && audioRunning) {
+            closeMidi();
+            openMidiInputs();
+        }
+    }
+
+    private Set<String> connectedAndroidMidiInputNames() {
+        Set<String> inputs = new java.util.TreeSet<>();
+        MidiManager midiManager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
+        if (midiManager == null) return inputs;
+        for (MidiDeviceInfo info : midiManager.getDevices()) {
+            if (info.getType() != MidiDeviceInfo.TYPE_USB) continue;
+            boolean hasOutput = false;
+            for (MidiDeviceInfo.PortInfo port : info.getPorts()) {
+                if (port.getType() == MidiDeviceInfo.PortInfo.TYPE_OUTPUT) {
+                    hasOutput = true;
+                    break;
+                }
+            }
+            if (hasOutput) inputs.add(midiDeviceName(info));
+        }
+        return inputs;
     }
 
     private JSONObject sharedDiagnostics() throws Exception {
@@ -1521,8 +1710,8 @@ public final class MainActivity extends Activity {
                 .put("session_id", "android.main")
                 .put("revision", nativeSessionRevision)
                 .put("active_mode", mode)
-                .put("master_level", 1000)
-                .put("master_pan", 0)
+                .put("master_level", nativeMasterLevel())
+                .put("master_pan", nativeMasterPan())
                 .put("live", new JSONObject().put("mode", "rack"))
                 .put("instances", instances)
                 .put("parameter_links", parameterLinks());
@@ -1682,17 +1871,13 @@ public final class MainActivity extends Activity {
                 return;
             }
             if ("materialize_plugin_state".equals(operation)) {
-                JSONObject params = new JSONObject();
-                if (request.has("sound_id")) params.put("sound_id", request.getString("sound_id"));
-                JSONObject state = new JSONObject(pluginStateCommand("materialize", params.toString()));
-                emitNativeSessionEvent("message", new JSONObject()
-                        .put("status", "plugin_state_materialized")
-                        .put("state", state)
-                        .toString());
+                handleMaterializePluginStateSessionRequest(request);
                 return;
             }
             if ("plugin_parameters".equals(operation)
-                    || "set_plugin_parameter".equals(operation)) {
+                    || "set_plugin_parameter".equals(operation)
+                    || "plugin_state_parameters".equals(operation)
+                    || "set_plugin_state_parameter".equals(operation)) {
                 handlePluginParameterSessionRequest(operation, request);
                 return;
             }
@@ -1753,12 +1938,14 @@ public final class MainActivity extends Activity {
             JSONObject command = envelope.getJSONObject("command");
             String type = command.optString("type");
             switch (type) {
-                case "set_active_mode" -> runOnUiThread(() -> {
-                    String mode = command.optString("mode");
-                    if ("live".equals(mode)) showLive();
-                    else if ("idle".equals(mode)) showIdle();
-                    else showPlay();
-                });
+                case "set_master_level" -> runOnUiThread(() -> runConfirmedSharedCommand(
+                        envelope, () -> setSharedMasterLevel(command.getInt("level"))));
+                case "set_master_pan" -> runOnUiThread(() -> runConfirmedSharedCommand(
+                        envelope, () -> setSharedMasterPan(command.getInt("pan"))));
+                case "set_active_mode" -> runOnUiThread(() -> runConfirmedSharedCommand(
+                        envelope, () -> setSharedActiveMode(command.getString("mode"))));
+                case "select_plugin" -> runOnUiThread(() -> runConfirmedSharedCommand(
+                        envelope, () -> selectSharedPlugin(command.getString("instance_id"))));
                 case "select_sound" -> selectControllerSound(command.optString("sound_id"));
                 case "upsert_parameter_link" -> {
                     upsertParameterLink(command.getJSONObject("link"));
@@ -1877,11 +2064,81 @@ public final class MainActivity extends Activity {
         emitSessionSnapshot();
     }
 
+    private void emitPluginCatalogChanged() {
+        try {
+            emitNativeSessionEvent("message", new JSONObject()
+                    .put("status", "plugin_catalog_changed")
+                    .toString());
+        } catch (Exception error) {
+            Log.e("RackForge", "Could not publish plugin catalog change", error);
+        }
+    }
+
+    private void finishPluginTransition() {
+        engineStarting = false;
+        emitPluginCatalogChanged();
+    }
+
+    private interface SharedCommandAction {
+        void run() throws Exception;
+    }
+
+    private void runConfirmedSharedCommand(
+            JSONObject envelope, SharedCommandAction action) {
+        try {
+            action.run();
+            confirmSharedCommand(envelope);
+        } catch (Throwable error) {
+            Log.e("RackForge", "Shared UI command failed", error);
+            emitSharedSessionError(error);
+        }
+    }
+
+    private void setSharedActiveMode(String mode) {
+        switch (mode) {
+            case "play" -> showPlay();
+            case "live" -> showLive();
+            case "idle" -> showIdle();
+            default -> throw new IllegalArgumentException("Unsupported Android mode " + mode);
+        }
+    }
+
+    private void setSharedMasterLevel(int level) {
+        if (!setNativeMasterLevel(level)) {
+            throw new IllegalArgumentException("Master level must be between 0 and 1000.");
+        }
+        preferences.edit().putInt("session.master_level", level).apply();
+    }
+
+    private void setSharedMasterPan(int pan) {
+        if (!setNativeMasterPan(pan)) {
+            throw new IllegalArgumentException("Master pan must be between -1000 and 1000.");
+        }
+        preferences.edit().putInt("session.master_pan", pan).apply();
+    }
+
+    private void selectSharedPlugin(String instanceId) throws Exception {
+        if (!"android-main".equals(instanceId)) {
+            throw new IllegalArgumentException(
+                    "Plugin instance is not available in this Android session: " + instanceId);
+        }
+        // Android exposes one replaceable PLAY instance. Reading its context validates that the
+        // runtime has actually materialized the instance before acknowledging the selection.
+        new JSONObject(pluginWebContext()).getJSONObject("instance");
+    }
+
     private void handlePluginParameterSessionRequest(
             String operation, JSONObject request) {
         pluginParameterExecutor.execute(() -> {
             try {
-                String response = pluginParameterCommand(operation, request.toString());
+                boolean isolatedState = "plugin_state_parameters".equals(operation)
+                        || "set_plugin_state_parameter".equals(operation);
+                if (isolatedState) {
+                    request.put("plugin_store_root", pluginStoreRoot().getAbsolutePath());
+                }
+                String response = isolatedState
+                        ? pluginStateCommand(operation, request.toString())
+                        : pluginParameterCommand(operation, request.toString());
                 if (response == null || response.isBlank()) {
                     throw new IllegalStateException(
                             "Portable runtime returned an empty parameter response");
@@ -1892,6 +2149,34 @@ public final class MainActivity extends Activity {
                 emitNativeSessionEvent("message", validated.toString());
             } catch (Throwable error) {
                 Log.e("RackForge", "Shared plugin parameter command failed", error);
+                emitSharedSessionError(error);
+            }
+        });
+    }
+
+    private void handleMaterializePluginStateSessionRequest(JSONObject request) {
+        pluginParameterExecutor.execute(() -> {
+            try {
+                String pluginId = request.getString("plugin_id");
+                JSONObject plugin = installedPluginRecord(pluginId);
+                if (plugin == null) {
+                    throw new IllegalArgumentException(
+                            "Rack Slot plugin is not installed: " + pluginId);
+                }
+                JSONObject params = new JSONObject()
+                        .put("plugin_id", pluginId)
+                        .put("package_root", plugin.getString("package_root"));
+                if (request.has("sound_id")) {
+                    params.put("sound_id", request.getString("sound_id"));
+                }
+                JSONObject state = new JSONObject(
+                        pluginStateCommand("materialize", params.toString()));
+                emitNativeSessionEvent("message", new JSONObject()
+                        .put("status", "plugin_state_materialized")
+                        .put("state", state)
+                        .toString());
+            } catch (Throwable error) {
+                Log.e("RackForge", "Materializing Rack Slot plugin state failed", error);
                 emitSharedSessionError(error);
             }
         });
@@ -3255,32 +3540,6 @@ public final class MainActivity extends Activity {
             }
         }
         if (changed) keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
-        activateBundledPluginIfIdle();
-    }
-
-    // A freshly provisioned device should make sound out of the box: if no
-    // plugin is active, the bundled piano steps up.
-    private void activateBundledPluginIfIdle() {
-        try {
-            if (pluginPackageRoot() != null) return;
-            JSONObject catalog = new JSONObject(installedPlugins(pluginStoreRoot().getAbsolutePath()));
-            JSONArray plugins = catalog.getJSONArray("plugins");
-            JSONObject candidate = null;
-            for (int index = 0; index < plugins.length(); index++) {
-                JSONObject plugin = plugins.getJSONObject(index);
-                if (!plugin.optBoolean("active") || !plugin.optBoolean("compatible")) continue;
-                if ("org.rackforge.concert-grand".equals(plugin.optString("plugin_id"))) {
-                    candidate = plugin;
-                    break;
-                }
-                if (candidate == null) candidate = plugin;
-            }
-            if (candidate == null) return;
-            activatePlugin(candidate.getString("package_root"),
-                    candidate.getString("plugin_name"), candidate.getString("version"));
-        } catch (Throwable error) {
-            Log.w("RackForge", "Could not auto-activate the bundled plugin", error);
-        }
     }
 
     // The install inbox: `adb push` a package into
@@ -3726,8 +3985,12 @@ public final class MainActivity extends Activity {
         engineStarting = true;
         currentPage = "play";
         pluginWebSurface = "play";
-        showEngineState("Loading " + name,
-                "Activating portable plugin " + versionLabel(version) + "…");
+        // PLAY owns plugin replacement. Navigating through the generic engine-state page would
+        // overwrite currentSharedRoute with Home, so a successful activation returned there.
+        Log.i("RackForge", "Loading " + name + ": activating portable plugin "
+                + versionLabel(version));
+        navigateSharedUi("/play");
+        emitSessionSnapshot();
         new Thread(() -> {
             File previousRoot = pluginPackageRoot;
             String previousEntry = pluginWebEntry;
@@ -3753,7 +4016,7 @@ public final class MainActivity extends Activity {
                 refreshKeyLabDisplay();
                 preferences.edit().putString("plugin.active_root", pluginPackageRoot.getAbsolutePath()).apply();
                 runOnUiThread(() -> {
-                    engineStarting = false;
+                    finishPluginTransition();
                     if (activePluginLabel != null) activePluginLabel.setText(activePluginDisplayName());
                     restoreVisiblePage();
                     Toast.makeText(this, activePluginDisplayName() + " active",
@@ -3786,7 +4049,7 @@ public final class MainActivity extends Activity {
                 }
                 boolean finalRestored = restored;
                 runOnUiThread(() -> {
-                    engineStarting = false;
+                    finishPluginTransition();
                     if (activePluginLabel != null) activePluginLabel.setText(activePluginDisplayName());
                     if (finalRestored) showPlay();
                     else showEngineState("Plugin activation failed", "The audio engine must be restarted");
@@ -3838,7 +4101,7 @@ public final class MainActivity extends Activity {
                 keyLabSyncPlugins(pluginStoreRoot().getAbsolutePath());
                 boolean finalWasCurrent = wasCurrent;
                 runOnUiThread(() -> {
-                    engineStarting = false;
+                    finishPluginTransition();
                     if (activePluginLabel != null) {
                         activePluginLabel.setText(activePluginDisplayName());
                     }
@@ -3848,7 +4111,7 @@ public final class MainActivity extends Activity {
             } catch (Throwable error) {
                 Log.e("RackForge", "Plugin deactivation failed", error);
                 runOnUiThread(() -> {
-                    engineStarting = false;
+                    finishPluginTransition();
                     new AlertDialog.Builder(this)
                             .setTitle("Could not deactivate plugin")
                             .setMessage(error.getMessage() == null
@@ -4293,7 +4556,11 @@ public final class MainActivity extends Activity {
                 if (!legacyAddons.mkdirs() && !legacyAddons.isDirectory()) {
                     throw new IllegalStateException("Cannot create legacy plugin migration directory");
                 }
-                installBundledDefaultPluginIfEmpty(store);
+                // Package discovery must complete before startup selection. Running these jobs
+                // from a separate main-thread callback raced the engine on fresh installations:
+                // Core observed an empty catalog while the bundled piano was still being copied.
+                processInstallInbox();
+                ensureBundledPlugins();
                 List<String> candidates = startupPluginRoots(store);
                 Throwable activationError = null;
                 boolean activated = false;
@@ -4320,7 +4587,7 @@ public final class MainActivity extends Activity {
                                     ? activationError.toString()
                                     : activationError.getMessage();
                     runOnUiThread(() -> {
-                        engineStarting = false;
+                        finishPluginTransition();
                         activePluginName = "No plugin";
                         activePluginVersion = "";
                         pluginPackageRoot = null;
@@ -4344,7 +4611,7 @@ public final class MainActivity extends Activity {
                 startAudio();
                 openMidiInputs();
                 runOnUiThread(() -> {
-                    engineStarting = false;
+                    finishPluginTransition();
                     if (activePluginLabel != null) activePluginLabel.setText(activePluginDisplayName());
                     restoreVisiblePage();
                     Toast.makeText(this, activePluginName + " ready · 48 kHz", Toast.LENGTH_SHORT).show();
@@ -4352,7 +4619,7 @@ public final class MainActivity extends Activity {
             } catch (Throwable error) {
                 Log.e("RackForge", "Plugin engine initialization failed", error);
                 runOnUiThread(() -> {
-                    engineStarting = false;
+                    finishPluginTransition();
                     showEngineState("Plugin could not start",
                             error.getMessage() == null ? "Unknown engine error" : error.getMessage());
                     Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
@@ -4410,70 +4677,19 @@ public final class MainActivity extends Activity {
     }
 
     private List<String> startupPluginRoots(File store) throws Exception {
-        List<String> roots = new ArrayList<>();
         String preferred = preferences.getString("plugin.active_root", null);
         JSONObject catalog = new JSONObject(installedPlugins(store.getAbsolutePath()));
         JSONArray plugins = catalog.getJSONArray("plugins");
+        List<StartupPluginOrder.Candidate> candidates = new ArrayList<>();
         for (int index = 0; index < plugins.length(); index++) {
             JSONObject plugin = plugins.getJSONObject(index);
-            if (!plugin.optBoolean("compatible") || !plugin.optBoolean("active")) continue;
-            String root = plugin.optString("package_root", "");
-            if (root.isBlank()) continue;
-            if (root.equals(preferred)) roots.add(0, root);
-            else if (!roots.contains(root)) roots.add(root);
+            candidates.add(new StartupPluginOrder.Candidate(
+                    plugin.optString("plugin_id", ""),
+                    plugin.optString("package_root", ""),
+                    plugin.optBoolean("compatible"),
+                    plugin.optBoolean("active")));
         }
-        return roots;
-    }
-
-    private void installBundledDefaultPluginIfEmpty(File store) throws Exception {
-        if (preferences.getBoolean("plugin.bundled_default_initialized", false)) return;
-        JSONObject catalog = new JSONObject(installedPlugins(store.getAbsolutePath()));
-        if (catalog.getJSONArray("plugins").length() != 0) {
-            preferences.edit().putBoolean("plugin.bundled_default_initialized", true).apply();
-            return;
-        }
-
-        String assetName = "RF-Soundfonts.rfplugin";
-        boolean available = false;
-        String[] bundled = getAssets().list("bundled");
-        if (bundled != null) {
-            for (String name : bundled) {
-                if (assetName.equals(name)) {
-                    available = true;
-                    break;
-                }
-            }
-        }
-        if (!available) return;
-
-        File archive = new File(getCacheDir(), "rackforge-default-plugin.rfplugin");
-        try (InputStream input = getAssets().open("bundled/" + assetName);
-             FileOutputStream output = new FileOutputStream(archive)) {
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
-            output.getFD().sync();
-        }
-        try {
-            String descriptor = installPluginFile(
-                    archive.getAbsolutePath(), store.getAbsolutePath());
-            if (descriptor == null || descriptor.isBlank()) {
-                throw new IllegalStateException("The bundled default instrument was rejected");
-            }
-            JSONObject installed = new JSONObject(descriptor);
-            if (!activateInstalledPlugin(
-                    installed.getString("package_root"),
-                    store.getAbsolutePath(),
-                    pluginDataRoot().getAbsolutePath())) {
-                throw new IllegalStateException(
-                        "The bundled default instrument could not be enabled");
-            }
-            Log.i("RackForge", "Bundled default plugin ready: "
-                    + installed.optString("plugin_name", "RF-Soundfonts"));
-            preferences.edit().putBoolean("plugin.bundled_default_initialized", true).apply();
-        } finally {
-            if (!archive.delete() && archive.exists()) archive.deleteOnExit();
-        }
+        return StartupPluginOrder.roots(candidates, preferred);
     }
 
     private void startAudio() {

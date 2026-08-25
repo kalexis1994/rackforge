@@ -16,6 +16,7 @@ use rackforge_core::{
         AudioStreamHealth, AudioStreamRecovery, StereoDropoutRecovery, StereoRenderQueue,
     },
     compile_semantic_parameter_links,
+    isolated_state::{IsolatedPluginStateEditor, validate_state_reference},
     midi_hotplug::{PanicScope, panic_packets},
     performance::PerformanceRepository,
     plugin_parameters, set_plugin_parameter,
@@ -28,9 +29,9 @@ use rackforge_performance_api::{
     LivePerformanceState, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot,
 };
 use rackforge_plugin_api::{
-    PROGRAM_EDITOR_SCHEMA_VERSION, PluginKind, PreparedProgram, PresetCatalog, ProgramDocument,
-    ProgramEditRequest, ProgramEditorValue, ProgramEditorView, ProgramFieldEditRequest,
-    WebSurfaceKind,
+    PROGRAM_EDITOR_SCHEMA_VERSION, PluginKind, PluginStateReference, PreparedProgram,
+    PresetCatalog, ProgramDocument, ProgramEditRequest, ProgramEditorValue, ProgramEditorView,
+    ProgramFieldEditRequest, WebSurfaceKind,
     abi::{MidiEventV1, ParameterEventV1},
 };
 use rackforge_repository::{
@@ -39,9 +40,9 @@ use rackforge_repository::{
     set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
-    InstanceId, MasterPan, ProgramDraftState, RackForgeParameterMapper, RackForgeParameterValue,
-    SemanticControlInput, SemanticControlProfile, rackforge_parameter_input,
-    semantic_control_input, semantic_control_little_header,
+    InstanceId, MasterLevel, MasterPan, ProgramDraftState, RackForgeParameterMapper,
+    RackForgeParameterValue, SemanticControlInput, SemanticControlProfile,
+    rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
 };
 use rackforge_surface_runtime::{
     ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayPlugin, PlaySound,
@@ -69,6 +70,8 @@ const LOW_RENDER_AHEAD_FRAMES: usize = 384;
 const BALANCED_RENDER_AHEAD_FRAMES: usize = 1_152;
 
 static ENGINE: OnceLock<Mutex<Option<AndroidEngine>>> = OnceLock::new();
+static ISOLATED_PLUGIN_RUNTIMES: OnceLock<Mutex<BTreeMap<String, SendableLoadedPlugin>>> =
+    OnceLock::new();
 static AUDIO: OnceLock<Mutex<Option<NativeAudioOutput>>> = OnceLock::new();
 static OUTPUT_METER: OutputMeter = OutputMeter::new();
 static MIDI_QUEUE: OnceLock<Mutex<VecDeque<AndroidMidiIngress>>> = OnceLock::new();
@@ -83,6 +86,7 @@ static NEXT_MIDI_SOURCE_KEY: AtomicU32 = AtomicU32::new(1);
 static CONTROLLER_MENU: OnceLock<Mutex<AndroidControllerMenu>> = OnceLock::new();
 static PERFORMANCE: OnceLock<Mutex<Option<AndroidPerformance>>> = OnceLock::new();
 static OUTPUT_GAIN_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
+static MASTER_LEVEL_VALUE: AtomicU32 = AtomicU32::new(MasterLevel::MAX as u32);
 static MASTER_LEVEL_TARGET_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
 static MASTER_LEVEL_CURRENT_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
 static MASTER_PAN_LEFT_TARGET_BITS: AtomicU32 = AtomicU32::new(1.0_f32.to_bits());
@@ -661,6 +665,13 @@ struct SendablePluginInstance(PluginInstance<'static>);
 #[derive(Clone, Copy)]
 struct SendableLoadedPlugin(&'static LoadedPlugin);
 
+#[derive(Clone)]
+struct AndroidIsolatedStateContext {
+    runtime: SendableLoadedPlugin,
+    resource_overrides: BTreeMap<String, PathBuf>,
+    data_root: PathBuf,
+}
+
 // SAFETY: access to the plugin instance is serialized by ENGINE's mutex. The
 // JNI bridge never exposes the instance pointer to Java or another callback.
 unsafe impl Send for SendablePluginInstance {}
@@ -1003,6 +1014,12 @@ impl AndroidEngine {
         method: &str,
         params: &serde_json::Value,
     ) -> Result<serde_json::Value> {
+        if matches!(
+            method,
+            "materialize" | "plugin_state_parameters" | "set_plugin_state_parameter"
+        ) {
+            return isolated_plugin_state_command(&self.isolated_state_context(), method, params);
+        }
         let mut store = PluginStateStore::new(Some(&self.data_root))?;
         match method {
             "list_presets" => Ok(serde_json::to_value(store.list_presets(&self.plugin_id)?)?),
@@ -1014,37 +1031,6 @@ impl AndroidEngine {
                 Ok(serde_json::to_value(
                     store.preset(&self.plugin_id, preset_id)?,
                 )?)
-            }
-            "materialize" => {
-                let sound_id = params
-                    .get("sound_id")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned);
-                if let Some(sound_id) = sound_id.as_deref()
-                    && !self
-                        .catalog
-                        .presets
-                        .iter()
-                        .any(|preset| preset.id == sound_id)
-                {
-                    bail!("plugin does not expose sound {sound_id:?}");
-                }
-                let mut isolated = self
-                    .runtime
-                    .0
-                    .create_instance_with_resource_overrides(&self.resource_overrides)?;
-                if let Some(sound_id) = sound_id.as_deref() {
-                    isolated.load_preset(sound_id)?;
-                }
-                let bytes = isolated.save_state()?;
-                let state = store.put(
-                    &self.plugin_id,
-                    &self.plugin_version,
-                    self.runtime.0.manifest().state_version,
-                    sound_id,
-                    &bytes,
-                )?;
-                Ok(serde_json::to_value(state)?)
             }
             "save_preset" => {
                 let name = params
@@ -1154,6 +1140,14 @@ impl AndroidEngine {
                 )?)?)
             }
             _ => bail!("unknown plugin state command {method:?}"),
+        }
+    }
+
+    fn isolated_state_context(&self) -> AndroidIsolatedStateContext {
+        AndroidIsolatedStateContext {
+            runtime: self.runtime,
+            resource_overrides: self.resource_overrides.clone(),
+            data_root: self.data_root.clone(),
         }
     }
 
@@ -1483,8 +1477,8 @@ impl AndroidEngine {
             })),
             "host": {
                 "active_mode": "play",
-                "master_level": 0,
-                "master_pan": 0,
+                "master_level": MASTER_LEVEL_VALUE.load(Ordering::Relaxed),
+                "master_pan": MASTER_PAN_VALUE.load(Ordering::Relaxed),
             },
             "resources": self.resource_requirements,
         })
@@ -1595,6 +1589,202 @@ impl AndroidEngine {
     }
 }
 
+fn isolated_plugin_state_command(
+    context: &AndroidIsolatedStateContext,
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    if method == "materialize" {
+        return materialize_isolated_plugin_state(context, params);
+    }
+    let state: PluginStateReference = serde_json::from_value(
+        params
+            .get("state")
+            .cloned()
+            .context("isolated plugin parameter command is missing state")?,
+    )?;
+    state
+        .validate()
+        .context("validating isolated plugin state")?;
+    let (runtime, resource_overrides) = isolated_plugin_runtime(context, params, &state)?;
+    validate_state_reference(runtime.0, &state)?;
+    let mut store = PluginStateStore::new(Some(&context.data_root))?;
+    let bytes = store.read(&state)?;
+    let mut editor = IsolatedPluginStateEditor::open(runtime.0, &resource_overrides, &bytes)?;
+
+    match method {
+        "plugin_state_parameters" => {
+            let (schema, values) = editor.parameters()?;
+            Ok(serde_json::to_value(
+                ControlResponse::PluginStateParameters {
+                    state: Box::new(state),
+                    schema: Box::new(schema),
+                    values,
+                },
+            )?)
+        }
+        "set_plugin_state_parameter" => {
+            let parameter_index = params
+                .get("parameter_index")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok())
+                .context("set plugin state parameter command has an invalid parameter_index")?;
+            let value = params
+                .get("value")
+                .and_then(serde_json::Value::as_f64)
+                .filter(|value| value.is_finite())
+                .context("set plugin state parameter command requires a finite value")?;
+            let canonical = editor.set_parameter(parameter_index, value)?;
+            let bytes = editor.save_state()?;
+            let manifest = runtime.0.manifest();
+            let next_state = store.put(
+                &manifest.id,
+                &manifest.version,
+                manifest.state_version,
+                state.selected_sound_id.clone(),
+                &bytes,
+            )?;
+            Ok(serde_json::to_value(
+                ControlResponse::PluginStateParameterSet {
+                    state: Box::new(next_state),
+                    parameter_index,
+                    value: canonical,
+                },
+            )?)
+        }
+        _ => bail!("unknown isolated plugin state command {method:?}"),
+    }
+}
+
+fn materialize_isolated_plugin_state(
+    context: &AndroidIsolatedStateContext,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let plugin_id = params
+        .get("plugin_id")
+        .and_then(serde_json::Value::as_str)
+        .context("materialize plugin state command is missing plugin_id")?;
+    let active_manifest = context.runtime.0.manifest();
+    let (runtime, resource_overrides) = if active_manifest.id == plugin_id {
+        (context.runtime, context.resource_overrides.clone())
+    } else {
+        let package_root = PathBuf::from(
+            params
+                .get("package_root")
+                .and_then(serde_json::Value::as_str)
+                .context("materialize plugin state command is missing package_root")?,
+        );
+        let package = PluginPackage::open(&package_root)
+            .with_context(|| format!("opening Rack Slot plugin {}", package_root.display()))?;
+        if package.manifest().id != plugin_id {
+            bail!("Rack Slot plugin package identity does not match the requested plugin");
+        }
+        if package.manifest().kind != PluginKind::Instrument
+            || package.manifest().portable_component().is_none()
+        {
+            bail!("Rack Slot plugin must provide a portable wasm-v1 instrument runtime");
+        }
+        (
+            cached_isolated_plugin_runtime(&package, &context.data_root)?,
+            BTreeMap::new(),
+        )
+    };
+
+    let requested_sound_id = params
+        .get("sound_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let mut isolated = runtime
+        .0
+        .create_instance_with_resource_overrides(&resource_overrides)?;
+    let catalog = isolated.preset_catalog()?;
+    let sound_id = requested_sound_id.or_else(|| {
+        catalog
+            .presets
+            .first()
+            .or_else(|| runtime.0.presets().presets.first())
+            .map(|preset| preset.id.clone())
+    });
+    if let Some(sound_id) = sound_id.as_deref() {
+        isolated
+            .load_preset(sound_id)
+            .with_context(|| format!("loading Rack Slot sound {sound_id:?}"))?;
+    }
+    let bytes = isolated.save_state()?;
+    let manifest = runtime.0.manifest();
+    let mut store = PluginStateStore::new(Some(&context.data_root))?;
+    let state = store.put(
+        &manifest.id,
+        &manifest.version,
+        manifest.state_version,
+        sound_id,
+        &bytes,
+    )?;
+    Ok(serde_json::to_value(state)?)
+}
+
+fn isolated_plugin_runtime(
+    context: &AndroidIsolatedStateContext,
+    params: &serde_json::Value,
+    state: &PluginStateReference,
+) -> Result<(SendableLoadedPlugin, BTreeMap<String, PathBuf>)> {
+    let active_manifest = context.runtime.0.manifest();
+    if active_manifest.id == state.plugin_id && active_manifest.version == state.plugin_version {
+        return Ok((context.runtime, context.resource_overrides.clone()));
+    }
+
+    let store_root = PathBuf::from(
+        params
+            .get("plugin_store_root")
+            .and_then(serde_json::Value::as_str)
+            .context("isolated Rack Slot plugin is not active and plugin_store_root is missing")?,
+    );
+    let package_root = store_root
+        .join("packages")
+        .join(&state.plugin_id)
+        .join(&state.plugin_version);
+    let package = PluginPackage::open(&package_root)
+        .with_context(|| format!("opening Rack Slot plugin {}", package_root.display()))?;
+    let manifest = package.manifest();
+    if manifest.id != state.plugin_id || manifest.version != state.plugin_version {
+        bail!("Rack Slot plugin package identity does not match its state reference");
+    }
+    if manifest.kind != PluginKind::Instrument || manifest.portable_component().is_none() {
+        bail!("Rack Slot plugin must provide a portable wasm-v1 instrument runtime");
+    }
+
+    Ok((
+        cached_isolated_plugin_runtime(&package, &context.data_root)?,
+        BTreeMap::new(),
+    ))
+}
+
+fn cached_isolated_plugin_runtime(
+    package: &PluginPackage,
+    data_root: &Path,
+) -> Result<SendableLoadedPlugin> {
+    let manifest = package.manifest();
+    let cache_key = format!("{}@{}", manifest.id, manifest.version);
+    let mut runtimes = ISOLATED_PLUGIN_RUNTIMES
+        .get_or_init(|| Mutex::new(BTreeMap::new()))
+        .lock()
+        .map_err(|_| anyhow::anyhow!("isolated plugin runtime cache lock poisoned"))?;
+    let runtime = if let Some(runtime) = runtimes.get(&cache_key).copied() {
+        runtime
+    } else {
+        // SAFETY: Android accepts only validated portable wasm-v1 packages here.
+        // The loaded runtime is immutable and retained for the process lifetime so
+        // repeated slider input does not recompile the same Wasm component.
+        let loaded =
+            unsafe { LoadedPlugin::load(package, None, &BTreeMap::new(), Some(data_root)) }
+                .context("loading isolated Rack Slot plugin runtime")?;
+        let runtime = SendableLoadedPlugin(Box::leak(Box::new(loaded)));
+        runtimes.insert(cache_key, runtime);
+        runtime
+    };
+    Ok(runtime)
+}
+
 fn engine() -> &'static Mutex<Option<AndroidEngine>> {
     ENGINE.get_or_init(|| Mutex::new(None))
 }
@@ -1659,6 +1849,7 @@ fn controller_parameter_mapper() -> &'static Mutex<RackForgeParameterMapper> {
 fn apply_rackforge_parameter(parameter: RackForgeParameterValue) {
     match parameter {
         RackForgeParameterValue::MasterLevel(level) => {
+            MASTER_LEVEL_VALUE.store(u32::from(level.get()), Ordering::Relaxed);
             MASTER_LEVEL_TARGET_BITS.store(level.amplitude().to_bits(), Ordering::Relaxed);
         }
         RackForgeParameterValue::MasterPan(pan) => {
@@ -3457,6 +3648,24 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_pluginStateComman
         let method = java_string(&mut env, method)?;
         let params: serde_json::Value = serde_json::from_str(&java_string(&mut env, params_json)?)
             .context("parsing plugin state command parameters")?;
+        if matches!(
+            method.as_str(),
+            "materialize" | "plugin_state_parameters" | "set_plugin_state_parameter"
+        ) {
+            // State inspection creates a separate portable instance. Copy its immutable
+            // context while holding ENGINE, then release the audio lock before Wasm
+            // instantiation, state loading and hashing.
+            let context = {
+                let guard = engine()
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+                guard
+                    .as_ref()
+                    .context("RackForge engine is not initialized")?
+                    .isolated_state_context()
+            };
+            return Ok(isolated_plugin_state_command(&context, &method, &params)?.to_string());
+        }
         let mut guard = engine()
             .lock()
             .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
@@ -3769,6 +3978,54 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_setNativeOutputGa
 ) {
     let gain_db = gain_db.clamp(0, 12) as f32;
     OUTPUT_GAIN_BITS.store(10.0_f32.powf(gain_db / 20.0).to_bits(), Ordering::Relaxed);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_setNativeMasterLevel(
+    _env: JNIEnv,
+    _class: JClass,
+    level: jint,
+) -> jboolean {
+    let Ok(level) = u16::try_from(level) else {
+        return JNI_FALSE;
+    };
+    let Ok(level) = MasterLevel::new(level) else {
+        return JNI_FALSE;
+    };
+    apply_rackforge_parameter(RackForgeParameterValue::MasterLevel(level));
+    JNI_TRUE
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_nativeMasterLevel(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    MASTER_LEVEL_VALUE.load(Ordering::Relaxed) as jint
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_setNativeMasterPan(
+    _env: JNIEnv,
+    _class: JClass,
+    pan: jint,
+) -> jboolean {
+    let Ok(pan) = i16::try_from(pan) else {
+        return JNI_FALSE;
+    };
+    let Ok(pan) = MasterPan::new(pan) else {
+        return JNI_FALSE;
+    };
+    apply_rackforge_parameter(RackForgeParameterValue::MasterPan(pan));
+    JNI_TRUE
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_nativeMasterPan(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    MASTER_PAN_VALUE.load(Ordering::Relaxed) as jint
 }
 
 #[unsafe(no_mangle)]

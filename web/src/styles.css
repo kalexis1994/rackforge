@@ -500,6 +500,29 @@ textarea {
   width: min(520px, 100%);
 }
 
+.rack-instrument-picker-dialog {
+  width: min(940px, 100%);
+}
+
+.rack-instrument-picker-help {
+  margin: 0;
+  padding: 18px clamp(18px, 4vw, 30px) 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rack-instrument-picker-list {
+  width: 100%;
+  margin: 0;
+  padding: 10px clamp(14px, 3vw, 30px) 24px;
+}
+
+.rack-instrument-fallback-icon {
+  color: #031018;
+  background: var(--acid);
+  font: 800 11px/1 "Cascadia Mono", "Consolas", monospace;
+}
+
 .plugin-activation-copy {
   padding: 22px clamp(18px, 4vw, 30px) 8px;
 }
@@ -3188,19 +3211,6 @@ body {
   font-size: 11px;
 }
 
-.host-audio-form pre {
-  grid-column: 1 / -1;
-  max-height: 180px;
-  margin: 0;
-  padding: 14px;
-  overflow: auto;
-  color: var(--muted);
-  background: rgba(0, 0, 0, 0.12);
-  border: 1px solid var(--line);
-  font: 9px/1.55 "Cascadia Mono", "Consolas", monospace;
-  white-space: pre-wrap;
-}
-
 .host-audio-actions {
   grid-column: 1 / -1;
   display: flex;
@@ -3380,6 +3390,7 @@ body {
      edge-to-edge host. Explicit viewport heights would extend the shell below
      the navigation inset (or behind its side edge in landscape). */
   .app-shell.plugin-surface-active,
+  .app-shell.controller-dock-active,
   .app-shell.performance-surface-active,
   .app-shell.live-surface-active,
   .app-shell.graph-workspace-active {
@@ -4713,6 +4724,117 @@ body {
   -webkit-user-select: none;
 }
 
+.host-runtime-health {
+  grid-column: 1 / -1;
+  padding: 13px 14px;
+  display: grid;
+  gap: 12px;
+  background: rgba(6, 20, 28, 0.58);
+  border: 1px solid rgba(92, 226, 245, 0.18);
+  border-radius: 11px;
+}
+
+.host-runtime-health > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.host-runtime-health > header > div {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.host-runtime-health > header span,
+.host-runtime-health dt {
+  color: var(--muted);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.host-runtime-health > header strong,
+.host-runtime-health dd {
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.host-runtime-health > header strong {
+  color: #86efb0;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.host-runtime-health > header i {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  background: #62dc91;
+  border-radius: 50%;
+  box-shadow: 0 0 12px rgba(98, 220, 145, 0.56);
+}
+
+.host-runtime-health.recovering > header strong {
+  color: #ffd477;
+}
+
+.host-runtime-health.recovering > header i {
+  background: #ffc85c;
+  box-shadow: 0 0 12px rgba(255, 200, 92, 0.5);
+}
+
+.host-runtime-health.lost > header strong,
+.host-runtime-health.stopped > header strong {
+  color: #ff9bad;
+}
+
+.host-runtime-health.lost > header i,
+.host-runtime-health.stopped > header i {
+  background: #ff7890;
+  box-shadow: 0 0 12px rgba(255, 120, 144, 0.5);
+}
+
+.host-runtime-health dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 7px;
+}
+
+.host-runtime-health dl > div {
+  min-width: 0;
+  padding: 9px 10px;
+  display: grid;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(140, 242, 255, 0.1);
+  border-radius: 8px;
+}
+
+.host-runtime-health dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.piano-keyboard-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.piano-keyboard.viewport-windowed .piano-keyboard-track {
+  width: calc(100% * var(--keyboard-track-scale, 1));
+  transform: translateX(calc(-1% * var(--keyboard-track-offset, 0)));
+  transform-origin: left center;
+  will-change: transform;
+}
+
 .piano-white-keys {
   height: 100%;
   display: grid;
@@ -5657,6 +5779,336 @@ body {
     max-height: none;
     margin: auto;
     grid-template-rows: repeat(var(--pad-rows, 4), minmax(0, 1fr));
+  }
+}
+
+/* On narrow portrait viewports the controller shares the workspace instead of
+   replacing it. The same persisted height and pointer resize behavior used by
+   the desktop dock applies here, while portrait-specific bounds preserve a
+   useful amount of PLAY/LIVE content above it. */
+@media (max-width: 760px) and (orientation: portrait) and (min-height: 540px) {
+  .app-shell.controller-dock-active {
+    overflow: hidden;
+  }
+
+  .controller-dock-active .workspace {
+    width: 100%;
+    height: 100%;
+  }
+
+  .controller-dock-active .page {
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .global-controller-dock {
+    width: 100%;
+    border-top: 1px solid rgba(85, 231, 255, 0.24);
+    box-shadow: 0 -10px 30px rgba(0, 3, 7, 0.28);
+  }
+
+  .touch-controller.docked {
+    position: relative;
+    width: 100%;
+    height: var(--controller-dock-height, 230px);
+    min-height: 0;
+    gap: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+    background: #030b11;
+  }
+
+  .touch-controller.docked .touch-controller-dock {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    display: grid;
+    grid-template-rows: 42px minmax(0, 1fr);
+  }
+
+  .touch-controller.docked.keyboard-navigator-active .touch-controller-dock {
+    grid-template-rows: 16px 34px 42px minmax(0, 1fr);
+  }
+
+  .touch-keyboard-navigator {
+    min-width: 0;
+    height: 34px;
+    padding: 5px 7px 4px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    background: rgba(3, 11, 17, 0.99);
+    border-bottom: 1px solid rgba(85, 231, 255, 0.16);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .touch-keyboard-navigator-label {
+    color: rgba(153, 190, 201, 0.7);
+    font-family: var(--mono);
+    font-size: 7px;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+  }
+
+  .touch-keyboard-navigator-track {
+    position: relative;
+    min-width: 0;
+    height: 22px;
+    overflow: visible;
+    background: rgba(213, 235, 238, 0.17);
+    border: 1px solid rgba(128, 192, 204, 0.27);
+    border-radius: 5px;
+    touch-action: none;
+  }
+
+  .touch-keyboard-navigator-whites {
+    position: absolute;
+    inset: 0;
+    opacity: 0.46;
+    background: repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent calc(100% / 52 - 1px),
+      rgba(6, 19, 27, 0.78) calc(100% / 52 - 1px),
+      rgba(6, 19, 27, 0.78) calc(100% / 52)
+    );
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  .touch-keyboard-navigator-black {
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    width: max(2px, calc(100% / 52 * 0.6));
+    height: 55%;
+    background: rgba(1, 7, 10, 0.9);
+    border-radius: 0 0 2px 2px;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  .touch-keyboard-navigator-window {
+    position: absolute;
+    z-index: 3;
+    top: -2px;
+    bottom: -2px;
+    min-width: 22px;
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr) 14px;
+    background: linear-gradient(180deg, rgba(91, 231, 251, 0.22), rgba(32, 177, 207, 0.13));
+    border: 1px solid rgba(100, 235, 255, 0.94);
+    border-radius: 7px;
+    box-shadow: 0 0 12px rgba(48, 210, 238, 0.26), inset 0 0 0 1px rgba(2, 14, 20, 0.34);
+  }
+
+  .touch-keyboard-navigator-window button {
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    color: var(--acid);
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    touch-action: none;
+  }
+
+  .touch-keyboard-navigator-handle {
+    cursor: ew-resize;
+  }
+
+  .touch-keyboard-navigator-move {
+    cursor: grab;
+  }
+
+  .touch-keyboard-navigator-move:active {
+    cursor: grabbing;
+  }
+
+  .touch-keyboard-navigator-handle > span {
+    width: 3px;
+    height: 13px;
+    display: block;
+    background: currentColor;
+    border-radius: 999px;
+    box-shadow: 0 0 6px rgba(85, 231, 255, 0.52);
+  }
+
+  .touch-keyboard-navigator-move > span {
+    width: 12px;
+    height: 3px;
+    display: block;
+    background:
+      radial-gradient(circle, currentColor 1px, transparent 1.5px) 0 0 / 4px 3px repeat-x;
+    opacity: 0.86;
+  }
+
+  .touch-keyboard-navigator-window button:focus-visible {
+    outline: 2px solid #d9fbff;
+    outline-offset: -2px;
+  }
+
+  .touch-controller.docked .touch-controller-dock.resizing {
+    user-select: none;
+  }
+
+  .touch-controller.docked .touch-controller-dockbar {
+    min-width: 0;
+    min-height: 42px;
+    padding: 4px 6px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    background: rgba(5, 16, 24, 0.98);
+    border: 0;
+  }
+
+  .touch-controller.docked .touch-controller-dockbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .touch-controller.docked .touch-controller-dockbar .touch-mode-switch {
+    flex: 0 0 auto;
+    padding: 2px;
+  }
+
+  .touch-controller.docked .touch-controller-dockbar .touch-mode-switch button,
+  .touch-controller.docked .touch-controller-dockbar > button {
+    min-width: max-content;
+    min-height: 32px;
+    padding: 5px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 9px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .touch-controller.docked .touch-controller-dockbar .touch-mode-switch button.active,
+  .touch-controller.docked .touch-controller-dockbar > button.active {
+    color: #031017;
+    background: var(--acid);
+    border-color: var(--acid);
+  }
+
+  .touch-controller.docked .touch-controller-dockbar svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .touch-controller.docked .touch-controller-range-summary {
+    display: none;
+  }
+
+  .touch-controller.docked .touch-controller-dock-resizer {
+    position: absolute;
+    z-index: 26;
+    top: -18px;
+    left: 50%;
+    width: 100px;
+    height: 38px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    border: 0;
+    transform: translateX(-50%);
+    cursor: ns-resize;
+    touch-action: none;
+  }
+
+  .touch-controller.docked.keyboard-navigator-active .touch-controller-dock-resizer {
+    position: relative;
+    z-index: 4;
+    top: auto;
+    left: auto;
+    width: 100%;
+    height: 16px;
+    transform: none;
+    background: rgba(3, 11, 17, 0.99);
+  }
+
+  .touch-controller.docked.keyboard-navigator-active .touch-controller-dock-resizer > span {
+    width: 46px;
+    height: 4px;
+  }
+
+  .touch-controller.docked .touch-controller-dock-resizer > span {
+    width: 50px;
+    height: 7px;
+    display: block;
+    background: rgba(104, 169, 184, 0.78);
+    border: 1px solid rgba(158, 225, 238, 0.48);
+    border-radius: 999px;
+    box-shadow: 0 2px 12px rgba(0, 4, 8, 0.54);
+    transition: width 140ms ease, height 140ms ease, background 140ms ease;
+  }
+
+  .touch-controller.docked .touch-controller-dock-resizer:focus-visible > span,
+  .touch-controller.docked .touch-controller-dock.resizing .touch-controller-dock-resizer > span {
+    width: 64px;
+    height: 9px;
+    background: var(--acid);
+  }
+
+  .touch-controller.docked .touch-instrument {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    align-self: end;
+    overflow: hidden;
+    background: #030b11;
+    border: 0;
+    border-top: 1px solid rgba(85, 231, 255, 0.18);
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .touch-controller.docked .piano-keyboard {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .touch-controller.docked.mode-pads .touch-instrument {
+    padding: 7px;
+  }
+
+  .touch-controller.docked.mode-pads .touch-pad-grid {
+    width: min(var(--pad-grid-width), 100%);
+    height: min(var(--pad-grid-height), 100%);
+    min-height: 0;
+    margin: auto;
+    grid-template-rows: repeat(var(--pad-rows, 4), minmax(0, 1fr));
+  }
+
+  .touch-controller.docked .touch-controller-menu-backdrop {
+    position: fixed;
+    inset:
+      var(--rackforge-safe-top)
+      var(--rackforge-safe-right)
+      var(--rackforge-safe-bottom)
+      var(--rackforge-safe-left);
   }
 }
 
@@ -10514,13 +10966,39 @@ body {
 
 /* Settings tabs */
 .settings-tabs {
+  min-width: 0;
   display: flex;
+  flex-wrap: nowrap;
   gap: 4px;
   margin: 4px 0 18px;
+  padding-bottom: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(92, 226, 245, 0.34) transparent;
+  scroll-snap-type: x proximity;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
   border-bottom: 1px solid rgba(140, 242, 255, 0.14);
 }
 
+.settings-tabs::-webkit-scrollbar {
+  height: 3px;
+}
+
+.settings-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-tabs::-webkit-scrollbar-thumb {
+  background: rgba(92, 226, 245, 0.34);
+  border-radius: 999px;
+}
+
 .settings-tabs button {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
   padding: 10px 18px;
   font: inherit;
   font-size: 0.82rem;
@@ -10531,6 +11009,7 @@ body {
   border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .settings-tabs button:hover { color: #c9e8f2; }

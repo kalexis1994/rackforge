@@ -19,9 +19,11 @@ use rackforge_control_api::{
     MidiLearnCandidate, MidiSourceStatus, PluginParameterValue, VirtualMidiMessage, decode_request,
     encode_line,
 };
+#[cfg(test)]
+use rackforge_midi_api::MidiSourceDescriptor;
 use rackforge_midi_api::{
-    IngressMidiEvent, MidiMessageKind, MidiPacket, MidiSourceDescriptor, MidiSourceRegistry,
-    ParameterLink, ParameterLinkMessage,
+    IngressMidiEvent, MidiMessageKind, MidiPacket, MidiSourceRegistry, ParameterLink,
+    ParameterLinkMessage,
 };
 #[cfg(test)]
 use rackforge_performance_api::PerformanceLibrary;
@@ -322,26 +324,27 @@ pub struct ControlServer {
     _watchdog_thread: JoinHandle<()>,
 }
 
-pub fn start(
-    socket_path: &Path,
-    store: SharedSessionStore,
-    audio_sender: SyncSender<AudioControlCommand>,
-    audio_state: Arc<Mutex<AudioOutputState>>,
-    output_meter: Arc<OutputMeter>,
-    audio_state_path: PathBuf,
-    performance_repository: Arc<Mutex<PerformanceRepository>>,
-    state_store: Arc<Mutex<PluginStateStore>>,
-    plugin_manifests: BTreeMap<String, PluginManifest>,
-    portable_plugins: BTreeMap<String, PortableControlPlugin>,
-    midi_sources: MidiSourceRegistry,
-    midi_observer: Receiver<IngressMidiEvent>,
-    connected_midi_sources: Arc<Mutex<BTreeSet<u32>>>,
-    plugin_sample_rate: f64,
-    plugin_maximum_frames: u32,
-    plugin_output_channels: u32,
-    storage: Option<PluginStorage>,
-    checkpoint: Option<SessionCheckpointStore>,
-) -> Result<ControlServer> {
+pub struct ControlServerOptions {
+    pub store: SharedSessionStore,
+    pub audio_sender: SyncSender<AudioControlCommand>,
+    pub audio_state: Arc<Mutex<AudioOutputState>>,
+    pub output_meter: Arc<OutputMeter>,
+    pub audio_state_path: PathBuf,
+    pub performance_repository: Arc<Mutex<PerformanceRepository>>,
+    pub state_store: Arc<Mutex<PluginStateStore>>,
+    pub plugin_manifests: BTreeMap<String, PluginManifest>,
+    pub portable_plugins: BTreeMap<String, PortableControlPlugin>,
+    pub midi_sources: MidiSourceRegistry,
+    pub midi_observer: Receiver<IngressMidiEvent>,
+    pub connected_midi_sources: Arc<Mutex<BTreeSet<u32>>>,
+    pub plugin_sample_rate: f64,
+    pub plugin_maximum_frames: u32,
+    pub plugin_output_channels: u32,
+    pub storage: Option<PluginStorage>,
+    pub checkpoint: Option<SessionCheckpointStore>,
+}
+
+pub fn start(socket_path: &Path, options: ControlServerOptions) -> Result<ControlServer> {
     if let Some(parent) = socket_path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("creating control directory {}", parent.display()))?;
@@ -375,27 +378,27 @@ pub fn start(
     })?;
 
     let context = Arc::new(ControlContext {
-        store,
-        audio_sender,
-        audio_state,
-        output_meter,
-        audio_state_path,
-        performance_repository,
-        state_store,
-        plugin_manifests,
-        portable_plugins,
+        store: options.store,
+        audio_sender: options.audio_sender,
+        audio_state: options.audio_state,
+        output_meter: options.output_meter,
+        audio_state_path: options.audio_state_path,
+        performance_repository: options.performance_repository,
+        state_store: options.state_store,
+        plugin_manifests: options.plugin_manifests,
+        portable_plugins: options.portable_plugins,
         semantic_profiles: Mutex::new(BTreeMap::new()),
-        midi_sources,
-        connected_midi_sources,
-        midi_observer: Mutex::new(midi_observer),
+        midi_sources: options.midi_sources,
+        connected_midi_sources: options.connected_midi_sources,
+        midi_observer: Mutex::new(options.midi_observer),
         midi_learn: Mutex::new(None),
         dynamic_resources: Mutex::new(BTreeMap::new()),
         virtual_midi: Mutex::new(BTreeMap::new()),
-        plugin_sample_rate,
-        plugin_maximum_frames,
-        plugin_output_channels,
-        storage,
-        checkpoint,
+        plugin_sample_rate: options.plugin_sample_rate,
+        plugin_maximum_frames: options.plugin_maximum_frames,
+        plugin_output_channels: options.plugin_output_channels,
+        storage: options.storage,
+        checkpoint: options.checkpoint,
         dispatch_lock: Mutex::new(()),
         lease_deadline: Mutex::new(None),
         next_draft_id: AtomicU64::new(1),
@@ -480,7 +483,7 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             },
             Err(_) => internal_error("audio state lock is poisoned", current_revision(context)),
         },
-        ControlRequest::OutputMeter => output_meter_response(&context),
+        ControlRequest::OutputMeter => output_meter_response(context),
         ControlRequest::PerformanceSnapshot => {
             match (context.store.lock(), context.performance_repository.lock()) {
                 (Ok(store), Ok(repository)) => {
@@ -949,7 +952,7 @@ fn load_plugin_resource(
         .create_instance_with_resource_overrides(&resources)
     {
         Ok(instance) => instance,
-        Err(error) if persist => {
+        Err(_error) if persist => {
             return ControlResponse::PluginResourceLoaded {
                 instance_id: instance_id.clone(),
                 resource_id: resource_id.to_owned(),
@@ -1316,18 +1319,17 @@ fn set_plugin_state_parameter(
     }
 }
 
+type IsolatedPluginState = (
+    &'static LoadedPlugin,
+    Vec<u8>,
+    BTreeMap<String, PathBuf>,
+    Revision,
+);
+
 fn isolated_plugin_state(
     context: &ControlContext,
     state: &rackforge_plugin_api::PluginStateReference,
-) -> Result<
-    (
-        &'static LoadedPlugin,
-        Vec<u8>,
-        BTreeMap<String, PathBuf>,
-        Revision,
-    ),
-    ControlFailure,
-> {
+) -> Result<IsolatedPluginState, ControlFailure> {
     let revision = context
         .store
         .lock()

@@ -124,7 +124,7 @@ pub fn open_audio_output_from_inventory(
     profile
         .validate()
         .context("validating audio output profile")?;
-    let device = resolve_output_device(profile, &devices)?.clone();
+    let device = resolve_output_device(profile, devices)?.clone();
     profile
         .validate_against(&device)
         .with_context(|| format!("validating output profile against {}", device.id))?;

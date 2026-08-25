@@ -7,10 +7,7 @@ use crate::control::{
     RackSlotStateLoad,
 };
 use crate::isolated_state::parameter_value_is_valid;
-use crate::live_midi_state::{
-    MidiControllerState, MidiControllerStates, ReservedMidiControls, matches_midi_input_channel,
-    plugin_midi_event,
-};
+use crate::live_midi_state::{MidiControllerStates, ReservedMidiControls, plugin_midi_event};
 use crate::midi_hotplug::{
     self, SupervisedSource, is_performance_midi_input, stable_alsa_source_id,
 };
@@ -30,19 +27,16 @@ use rackforge_audio_api::{
 use rackforge_control_api::{CONTROL_SOCKET_NAME, PluginParameterValue};
 use rackforge_midi_api::{
     CompiledMidiRoute, DEFAULT_INPUT_BUS_ID, IngressMidiEvent, MIDI_ROUTING_SCHEMA_VERSION,
-    MidiInputBusId, MidiPacket, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget,
-    MidiRouteTransform, MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry,
-    MidiSourceSelector, MidiTargetId, ParameterLink, ParameterLinkPassThrough, PluginChannelModel,
+    MidiInputBusId, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget, MidiRouteTransform,
+    MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry, MidiSourceSelector,
+    MidiTargetId, ParameterLink, ParameterLinkPassThrough, PluginChannelModel,
 };
-#[cfg(test)]
-use rackforge_performance_api::RackKeyboardParts;
 use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use rackforge_plugin_api::{ParameterKind, PluginKind};
 use rackforge_session_api::{
-    BankSummary, ButtonPhase, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, HostActionBinding,
-    HostActionTarget, HostControlBinding, InstanceId, MasterLevel, MasterPan, MidiButtonBinding,
-    PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionId, SessionState, SoundSummary,
-    SurfaceMode,
+    BankSummary, DEFAULT_LIVE_INSTANCE_ID, DEFAULT_LIVE_SESSION_ID, InstanceId, MasterLevel,
+    MasterPan, PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionId, SessionState,
+    SoundSummary, SurfaceMode,
 };
 use semver::Version;
 use std::cell::UnsafeCell;
@@ -1238,55 +1232,57 @@ pub fn run(config: LiveConfig) -> Result<()> {
     let state_store = Arc::new(Mutex::new(state_store));
     let _control_server = control::start(
         &control_path,
-        session_store,
-        control_sender,
-        Arc::clone(&audio_state),
-        Arc::clone(&output_meter),
-        config.audio_state_path,
-        Arc::new(Mutex::new(performance_repository)),
-        state_store,
-        plugins
-            .values()
-            .map(|plugin| (plugin.manifest().id.clone(), plugin.manifest().clone()))
-            .collect(),
-        plugins
-            .values()
-            .filter_map(|plugin| {
-                control::PortableControlPlugin::new(plugin)
-                    .map(|runtime| (plugin.manifest().id.clone(), runtime))
-            })
-            .collect(),
-        midi_sources.clone(),
-        midi_observer,
-        Arc::clone(&connected_midi_sources),
-        f64::from(output_rate),
-        period_frames as u32,
-        channels as u32,
-        control_storage,
-        checkpoint,
+        control::ControlServerOptions {
+            store: session_store,
+            audio_sender: control_sender,
+            audio_state: Arc::clone(&audio_state),
+            output_meter: Arc::clone(&output_meter),
+            audio_state_path: config.audio_state_path,
+            performance_repository: Arc::new(Mutex::new(performance_repository)),
+            state_store,
+            plugin_manifests: plugins
+                .values()
+                .map(|plugin| (plugin.manifest().id.clone(), plugin.manifest().clone()))
+                .collect(),
+            portable_plugins: plugins
+                .values()
+                .filter_map(|plugin| {
+                    control::PortableControlPlugin::new(plugin)
+                        .map(|runtime| (plugin.manifest().id.clone(), runtime))
+                })
+                .collect(),
+            midi_sources: midi_sources.clone(),
+            midi_observer,
+            connected_midi_sources: Arc::clone(&connected_midi_sources),
+            plugin_sample_rate: f64::from(output_rate),
+            plugin_maximum_frames: period_frames as u32,
+            plugin_output_channels: channels as u32,
+            storage: control_storage,
+            checkpoint,
+        },
     )?;
     println!("CONTROL_READY socket={}", control_path.display());
     println!("READY_TO_PLAY");
-    audio_loop(
-        output,
-        input,
-        &receiver,
-        &control_receiver,
-        &plugins,
-        &mut standalone_voices,
+    audio_loop(AudioLoopContext {
+        initial_output: output,
+        initial_input: input,
+        receiver: &receiver,
+        control_receiver: &control_receiver,
+        plugins: &plugins,
+        standalone_voices: &mut standalone_voices,
         active_instance_id,
         rack_voices,
-        initial_parameter_links,
-        &play_route,
-        &virtual_play_route,
+        parameter_links: initial_parameter_links,
+        play_route: &play_route,
+        virtual_play_route: &virtual_play_route,
         virtual_midi_source,
-        midi_port_names.len() + 1,
+        midi_source_count: midi_port_names.len() + 1,
         initial_master_level,
         initial_master_pan,
-        resolve_render_mode(initial_surface_mode, initial_rack_specs.len()),
+        render_mode: resolve_render_mode(initial_surface_mode, initial_rack_specs.len()),
         audio_state,
         output_meter,
-    )
+    })
 }
 
 fn control_socket_path() -> PathBuf {
@@ -1328,14 +1324,14 @@ fn performance_midi_names(midi: &MidiInput) -> Result<Vec<String>> {
 ///
 /// Connections themselves move to [`midi_hotplug`], which keeps them alive
 /// across replugging for the rest of the session.
-fn connect_midi_sources(
-    sender: SyncSender<IngressMidiEvent>,
-) -> Result<(
+type ConnectedMidiSources = (
     Vec<String>,
     MidiSourceRegistry,
     Receiver<IngressMidiEvent>,
     Arc<Mutex<BTreeSet<u32>>>,
-)> {
+);
+
+fn connect_midi_sources(sender: SyncSender<IngressMidiEvent>) -> Result<ConnectedMidiSources> {
     let discovery = MidiInput::new("rackforge-core-discovery")?;
     let names = performance_midi_names(&discovery)?;
     let mut registry = MidiSourceRegistry::default();
@@ -1400,9 +1396,11 @@ fn compile_virtual_play_route(
     source_id: &MidiSourceId,
     channel_model: PluginChannelModel,
 ) -> Result<CompiledMidiRoute> {
-    let mut matches = MidiRouteMatch::default();
-    matches.source = MidiSourceSelector::Source {
-        source_id: source_id.clone(),
+    let matches = MidiRouteMatch {
+        source: MidiSourceSelector::Source {
+            source_id: source_id.clone(),
+        },
+        ..Default::default()
     };
     MidiRoute {
         schema_version: MIDI_ROUTING_SCHEMA_VERSION,
@@ -1543,26 +1541,48 @@ fn apply_parameter_links(
     consume
 }
 
-fn audio_loop(
+struct AudioLoopContext<'a> {
     initial_output: OpenedAudioOutput,
     initial_input: Option<OpenedAudioInput>,
-    receiver: &Receiver<IngressMidiEvent>,
-    control_receiver: &Receiver<AudioControlCommand>,
-    plugins: &BTreeMap<String, &'static LoadedPlugin>,
-    standalone_voices: &mut [StandaloneVoice<'static>],
-    mut active_instance_id: InstanceId,
-    mut rack_voices: Vec<RackSlotVoice<'static>>,
-    mut parameter_links: Vec<CompiledParameterLink>,
-    play_route: &CompiledMidiRoute,
-    virtual_play_route: &CompiledMidiRoute,
+    receiver: &'a Receiver<IngressMidiEvent>,
+    control_receiver: &'a Receiver<AudioControlCommand>,
+    plugins: &'a BTreeMap<String, &'static LoadedPlugin>,
+    standalone_voices: &'a mut [StandaloneVoice<'static>],
+    active_instance_id: InstanceId,
+    rack_voices: Vec<RackSlotVoice<'static>>,
+    parameter_links: Vec<CompiledParameterLink>,
+    play_route: &'a CompiledMidiRoute,
+    virtual_play_route: &'a CompiledMidiRoute,
     virtual_midi_source: MidiSourceKey,
     midi_source_count: usize,
     initial_master_level: MasterLevel,
     initial_master_pan: MasterPan,
-    mut render_mode: AudioRenderMode,
+    render_mode: AudioRenderMode,
     audio_state: Arc<Mutex<AudioOutputState>>,
     output_meter: Arc<OutputMeter>,
-) -> Result<()> {
+}
+
+fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
+    let AudioLoopContext {
+        initial_output,
+        initial_input,
+        receiver,
+        control_receiver,
+        plugins,
+        standalone_voices,
+        active_instance_id: mut active_instance_id,
+        rack_voices: mut rack_voices,
+        parameter_links: mut parameter_links,
+        play_route,
+        virtual_play_route,
+        virtual_midi_source,
+        midi_source_count,
+        initial_master_level,
+        initial_master_pan,
+        render_mode: mut render_mode,
+        audio_state,
+        output_meter,
+    } = context;
     let mut output = Some(initial_output);
     let mut input = initial_input;
     let mut period_frames = output.as_ref().unwrap().profile.period_frames as usize;
@@ -3139,11 +3159,12 @@ fn write_period(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rackforge_midi_api::MidiSourceId;
-    use rackforge_performance_api::{RackKeyboardPart, RackMidiTransform};
+    use crate::live_midi_state::{MidiControllerState, matches_midi_input_channel};
+    use rackforge_midi_api::{MidiPacket, MidiSourceId};
+    use rackforge_performance_api::{RackKeyboardPart, RackKeyboardParts, RackMidiTransform};
     use rackforge_session_api::{
-        HostActionBinding, HostActionTarget, HostControlTarget, MidiButtonBinding,
-        MidiControlChangeBinding,
+        HostActionBinding, HostActionTarget, HostControlBinding, HostControlTarget,
+        MidiButtonBinding, MidiControlChangeBinding,
     };
 
     fn midi(length: u8, data: [u8; 3]) -> MidiEventV1 {

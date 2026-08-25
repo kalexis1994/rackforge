@@ -91,6 +91,7 @@ import {
   usePluginCatalog,
   usePluginDescriptor,
 } from "./pluginCatalog";
+import { pluginContextInstance } from "./pluginContext";
 import {
   commitPlayPluginSelection,
   preflightPlayPluginSelection,
@@ -208,50 +209,48 @@ function isProgramEditorValue(value: unknown): value is ProgramEditorValue {
   }
 }
 
-const navItems = [
-  {
+const homeNavItem = {
     path: "/",
     label: "Home",
     detail: "Current instrument and system overview",
     section: "workspace",
     icon: House,
-  },
-  {
+  } as const;
+const liveNavItem = {
     path: "/live",
     label: "Live",
     detail: "Performance racks, songs and setlists",
     section: "workspace",
     icon: RadioTower,
-  },
-  {
+  } as const;
+const playNavItem = {
     path: "/play",
     label: "Play",
     detail: "Play and edit the active instrument",
     section: "workspace",
     icon: Play,
-  },
-  {
+  } as const;
+const touchControllerNavItem = {
     path: "/controller",
     label: "Touch Controller",
     detail: "On-screen keyboard and pads",
     section: "workspace",
     icon: Piano,
-  },
-  {
+  } as const;
+const pluginManagerNavItem = {
     path: "/plugins",
     label: "Plugin Manager",
     detail: "Install, manage and configure instruments",
     section: "system",
     icon: Blocks,
-  },
-  {
+  } as const;
+const settingsNavItem = {
     path: "/settings",
     label: "Settings",
     detail: "Audio, MIDI and host configuration",
     section: "system",
     icon: Settings2,
-  },
-];
+  } as const;
 
 const diagnosticsItem = {
   path: "/diagnostics",
@@ -259,20 +258,7 @@ const diagnosticsItem = {
   detail: "Connected audio, MIDI and USB devices",
   section: "workspace",
   icon: Activity,
-};
-
-const audioMidiItem = {
-  path: "/settings",
-  label: "Audio & MIDI",
-  detail: "Output, latency, gain and controllers",
-  section: "system",
-  icon: Settings2,
-};
-
-const installedPluginsItem = {
-  ...navItems[4],
-  detail: "Install, manage and configure instruments",
-};
+} as const;
 
 const aboutItem = {
   path: "/about",
@@ -280,11 +266,24 @@ const aboutItem = {
   detail: "Version and runtime information",
   section: "system",
   icon: Info,
-};
+} as const;
 
-const vstNavItems = [navItems[0], navItems[2], navItems[4], aboutItem] as typeof navItems;
+const workspaceNavItems = [
+  homeNavItem,
+  liveNavItem,
+  playNavItem,
+  touchControllerNavItem,
+  diagnosticsItem,
+];
+const systemNavItems = [pluginManagerNavItem, settingsNavItem, aboutItem];
+const navItems = [...workspaceNavItems, ...systemNavItems];
+const vstWorkspaceNavItems = [homeNavItem, playNavItem];
+const vstSystemNavItems = [pluginManagerNavItem, aboutItem];
+const vstNavItems = [...vstWorkspaceNavItems, ...vstSystemNavItems];
 
 const ROOMY_CONTROLLER_QUERY = "(min-width: 1100px) and (min-height: 620px)";
+const PORTRAIT_CONTROLLER_DOCK_QUERY =
+  "(max-width: 760px) and (orientation: portrait) and (min-height: 540px)";
 
 function useMediaQuery(query: string) {
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
@@ -388,6 +387,7 @@ function RackForgeApp() {
   const { connection, snapshot, performance, performancePending, error } = useSelector(
     (state: RootState) => state.rackforge,
   );
+  const pluginCatalog = usePluginCatalog();
   const location = useLocation();
   const navigate = useNavigate();
   const vstHost = isVstHost();
@@ -403,6 +403,8 @@ function RackForgeApp() {
   const [settingsBootstrap, setSettingsBootstrap] = useState<HostSettingsBootstrap | null>(null);
   const [controllerDockOpen, setControllerDockOpen] = useState(false);
   const roomyController = useMediaQuery(ROOMY_CONTROLLER_QUERY);
+  const portraitControllerDock = useMediaQuery(PORTRAIT_CONTROLLER_DOCK_QUERY);
+  const dockableController = roomyController || portraitControllerDock;
   const lastContentRoute = useRef(location.pathname === "/controller" ? "/play" : location.pathname);
   useTactileFeedback();
   useEffect(() => {
@@ -413,7 +415,7 @@ function RackForgeApp() {
     window.addEventListener("rackforge:rack-graph-overlay", updateOverlay);
     return () => window.removeEventListener("rackforge:rack-graph-overlay", updateOverlay);
   }, []);
-  const isControllerSurface = location.pathname === "/controller" && !roomyController;
+  const isControllerSurface = location.pathname === "/controller" && !dockableController;
   const isPluginSurface =
     location.pathname === "/play" ||
     location.pathname.startsWith("/plugins/");
@@ -477,7 +479,7 @@ function RackForgeApp() {
       lastContentRoute.current = location.pathname;
       return;
     }
-    if (roomyController) {
+    if (dockableController) {
       let active = true;
       window.queueMicrotask(() => {
         if (!active) return;
@@ -488,9 +490,9 @@ function RackForgeApp() {
         active = false;
       };
     }
-  }, [location.pathname, navigate, roomyController]);
+  }, [dockableController, location.pathname, navigate]);
 
-  const showControllerDock = roomyController && controllerDockOpen;
+  const showControllerDock = dockableController && controllerDockOpen;
   const completePlayNavigation = useCallback(async (instance?: PluginInstance) => {
     setPreferredPlayInstanceId(instance?.instance_id ?? null);
     if (instance) {
@@ -546,7 +548,7 @@ function RackForgeApp() {
           items={vstHost ? vstNavItems : navItems}
           onPlayRequest={requestPlayNavigation}
           controllerDockOpen={showControllerDock}
-          onControllerToggle={roomyController
+          onControllerToggle={dockableController
             ? () => setControllerDockOpen((open) => !open)
             : undefined}
         />
@@ -617,6 +619,7 @@ function RackForgeApp() {
                 <LivePage
                   session={snapshot}
                   performance={performance}
+                  plugins={pluginCatalog.plugins}
                   pending={performancePending}
                   surface={liveSurface}
                   onSurfaceChange={setLiveSurface}
@@ -1371,14 +1374,14 @@ function MobileNavigation({
           ) : null}
           <span className="mobile-menu-section">Workspace</span>
           <NavigationLinks
-            items={vstHost ? [navItems[2]] : [navItems[2], navItems[1], navItems[3], diagnosticsItem]}
+            items={vstHost ? vstWorkspaceNavItems : workspaceNavItems}
             detailed
             onNavigate={requestClose}
             onPlayRequest={onPlayRequest}
           />
           <span className="mobile-menu-section">System</span>
           <NavigationLinks
-            items={vstHost ? [installedPluginsItem, aboutItem] : [audioMidiItem, installedPluginsItem, aboutItem]}
+            items={vstHost ? vstSystemNavItems : systemNavItems}
             detailed
             onNavigate={requestClose}
           />
@@ -1549,7 +1552,7 @@ async function setInstalledPluginActive(pluginId: string, active: boolean) {
         const descriptor = await hostJson<PluginWebDescriptor>(
           `/api/v1/plugins/${encodeURIComponent(pluginId)}`,
         );
-        if (descriptor.active === active) {
+        if (descriptor.active === active && !descriptor.transitioning) {
           await synchronizePluginEnvironment();
           return response;
         }
@@ -4139,6 +4142,7 @@ export function PluginFrame({
     requestId: string;
     resource: PluginResourceRequirement;
   } | null>(null);
+  const [isolatedBootstrapError, setIsolatedBootstrapError] = useState<string | null>(null);
 
   useEffect(
     () => () => {
@@ -4206,6 +4210,27 @@ export function PluginFrame({
     }
     return isolatedMaterializeRef.current;
   }, [instance.plugin_id, publishIsolatedState]);
+
+  // An isolated Rack Slot is not the global PLAY instance. Build its initial
+  // immutable state before publishing the iframe context; otherwise plugins
+  // that require a selected program can reject the incomplete context and
+  // remain on their static boot screen forever.
+  useEffect(() => {
+    if (!isolated || isolatedStateRef.current) return;
+    let cancelled = false;
+    setIsolatedBootstrapError(null);
+    void ensureIsolatedState().catch((error: unknown) => {
+      if (cancelled) return;
+      setIsolatedBootstrapError(
+        error instanceof Error
+          ? error.message
+          : "Could not initialize the Rack Slot instrument.",
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ensureIsolatedState, isolated]);
 
   const loadParameterSchemaForLink = useCallback(async () => {
     if (isolated) {
@@ -4359,14 +4384,13 @@ export function PluginFrame({
     publishIsolatedState,
   ]);
 
-  const isolatedSelectedSoundId = isolatedContextState?.selected_sound_id;
+  const pluginContextReady = !isolated || isolatedContextState !== undefined;
   const pluginContext = useMemo(() => {
-    const contextInstance = isolated && isolatedSelectedSoundId
-      ? {
-          ...instance,
-          selected_sound_id: isolatedSelectedSoundId,
-        }
-      : instance;
+    const contextInstance = pluginContextInstance(
+      instance,
+      isolated,
+      isolatedContextState,
+    );
     return {
       protocol: "rackforge.plugin.web@1",
       kind: "context",
@@ -4386,7 +4410,7 @@ export function PluginFrame({
         master_pan: snapshot?.master_pan ?? 0,
       },
     };
-  }, [instance, isolated, isolatedSelectedSoundId, snapshot, surface]);
+  }, [instance, isolated, isolatedContextState, snapshot, surface]);
 
   // Parameter changes can originate outside the iframe (MIDI Learn links,
   // semantic .rfcontroller profiles, automation, or another RackForge
@@ -4507,7 +4531,7 @@ export function PluginFrame({
       if (event.data.kind === "ready") {
         setLoadedFrameIdentity(surfaceIdentity);
         setFrameDocumentGeneration((generation) => generation + 1);
-        send(pluginContext);
+        if (pluginContextReady) send(pluginContext);
         return;
       }
       if (
@@ -4967,10 +4991,12 @@ export function PluginFrame({
         respond(false, "Method is not available for this plugin surface.");
       }
     };
-    const onLoad = () => send(pluginContext);
+    const onLoad = () => {
+      if (pluginContextReady) send(pluginContext);
+    };
     window.addEventListener("message", onMessage);
     frame.addEventListener("load", onLoad);
-    send(pluginContext);
+    if (pluginContextReady) send(pluginContext);
     return () => {
       window.removeEventListener("message", onMessage);
       frame.removeEventListener("load", onLoad);
@@ -4990,6 +5016,7 @@ export function PluginFrame({
     surface,
     surfaceIdentity,
     pluginContext,
+    pluginContextReady,
   ]);
 
   const editLease =
@@ -5104,10 +5131,12 @@ export function PluginFrame({
             // the message listener. The load event happens after the plugin
             // has installed its own listener, so publishing the idempotent
             // context here closes that race without plugin-specific timing.
-            frameRef.current?.contentWindow?.postMessage(
-              pluginContext,
-              window.location.origin,
-            );
+            if (pluginContextReady) {
+              frameRef.current?.contentWindow?.postMessage(
+                pluginContext,
+                window.location.origin,
+              );
+            }
           }}
         />
         {!splashGone && (
@@ -5143,6 +5172,12 @@ export function PluginFrame({
             <AsyncSpinner label={resourceBusy} size="large" />
             <strong>{resourceBusy}</strong>
             <small>RackForge is validating and applying the selected file.</small>
+          </div>
+        ) : null}
+        {isolatedBootstrapError ? (
+          <div className="plugin-operation-overlay plugin-operation-error" role="alert">
+            <strong>Rack Slot instrument could not start</strong>
+            <small>{isolatedBootstrapError}</small>
           </div>
         ) : null}
       </div>
@@ -5779,7 +5814,48 @@ function SettingsPage({
                   </label>
                 )) : <p>No MIDI inputs detected.</p>}
               </fieldset>
-              <pre>{audioSettings.runtime_status}</pre>
+              {audioSettings.runtime ? (() => {
+                const runtime = audioSettings.runtime;
+                const health = runtime.stream_health ?? (runtime.running ? "healthy" : "stopped");
+                const metrics = [
+                  runtime.sample_rate
+                    ? ["Actual rate", `${runtime.sample_rate} Hz`]
+                    : null,
+                  runtime.buffer_size_frames
+                    ? ["Active buffer", `${runtime.buffer_size_frames} frames`]
+                    : null,
+                  typeof runtime.callback_load_percent === "number"
+                    ? ["Audio load", `${runtime.callback_load_percent.toFixed(1)}%`]
+                    : null,
+                  typeof runtime.xruns === "number"
+                    ? ["Buffer underruns", String(runtime.xruns)]
+                    : null,
+                  typeof runtime.midi_dropped_events === "number"
+                    ? ["Dropped MIDI", String(runtime.midi_dropped_events)]
+                    : null,
+                ].filter((metric): metric is [string, string] => metric !== null);
+                return (
+                  <section className={`host-runtime-health ${health}`} aria-label="Audio runtime health">
+                    <header>
+                      <div>
+                        <span>Runtime health</span>
+                        <strong>{health}</strong>
+                      </div>
+                      <i aria-hidden="true" />
+                    </header>
+                    {metrics.length ? (
+                      <dl>
+                        {metrics.map(([label, value]) => (
+                          <div key={label}>
+                            <dt>{label}</dt>
+                            <dd>{value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ) : null}
+                  </section>
+                );
+              })() : null}
               <div className="host-audio-actions">
                 <button className="secondary-button" disabled={audioBusy} onClick={() => void loadAudioSettings()}>
                   <AsyncActionLabel active={audioOperation === "refresh"} activeLabel="Refreshing…">
@@ -5797,6 +5873,28 @@ function SettingsPage({
               </div>
               {audioMessage ? <p className="settings-message">{audioMessage}</p> : null}
             </div>
+          </article>
+        ) : null}
+        {settingsTab === "audio" && (!audioSettings || !audioDraft) ? (
+          <article className="settings-card host-audio-settings-card unavailable">
+            <div className="settings-icon">♫</div>
+            <div className="settings-copy">
+              <span className="card-kicker">Host capabilities</span>
+              <h2>Audio & MIDI unavailable</h2>
+              <p>The current host did not publish its audio and MIDI settings.</p>
+            </div>
+            <div className="host-audio-actions">
+              <button
+                className="secondary-button"
+                disabled={audioBusy}
+                onClick={() => void loadAudioSettings()}
+              >
+                <AsyncActionLabel active={audioOperation === "refresh"} activeLabel="Refreshing…">
+                  Try again
+                </AsyncActionLabel>
+              </button>
+            </div>
+            {audioMessage ? <p className="settings-message">{audioMessage}</p> : null}
           </article>
         ) : null}
         {settingsTab === "network" ? (

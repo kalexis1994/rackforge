@@ -21,6 +21,11 @@ interface PadMatrix {
   rows: number;
 }
 
+interface KeyboardViewport {
+  start: number;
+  width: number;
+}
+
 const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
 const WHITE_SEMITONES = new Set([0, 2, 4, 5, 7, 9, 11]);
 const EMPTY_SESSION: SessionSnapshot = {
@@ -34,6 +39,7 @@ const EMPTY_SESSION: SessionSnapshot = {
   instances: [],
 };
 const KEYBOARD_WIDTH_STORAGE_KEY = "rackforge.touch-controller.keyboard-width";
+const KEYBOARD_VIEWPORT_STORAGE_KEY = "rackforge.touch-controller.keyboard-viewport.v1";
 const PAD_MATRIX_STORAGE_KEY = "rackforge.touch-controller.pad-matrix";
 const DOCK_HEIGHT_STORAGE_KEY = "rackforge.touch-controller.dock-heights.v1";
 const MIN_VISIBLE_WHITE_KEYS = 1;
@@ -44,6 +50,10 @@ const FULL_KEYBOARD_WHITE_KEYS = 52;
 const FULL_KEYBOARD_MIN_WHITE_KEY_PX = 22;
 const WINDOWED_KEY_MIN_PX = 42;
 const PAD_ASPECT_RATIO = 1;
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
 
 function storedKeyboardWidth(): KeyboardWidth {
   try {
@@ -79,6 +89,26 @@ function storedPadMatrix(): PadMatrix {
     // Storage can be unavailable in hardened or ephemeral WebViews.
   }
   return { columns: 4, rows: 4 };
+}
+
+function storedKeyboardViewport(): KeyboardViewport | null {
+  try {
+    const stored = JSON.parse(
+      window.localStorage.getItem(KEYBOARD_VIEWPORT_STORAGE_KEY) ?? "null",
+    ) as KeyboardViewport | null;
+    if (
+      Number.isFinite(stored?.start) &&
+      Number.isFinite(stored?.width) &&
+      stored!.start >= 0 &&
+      stored!.width > 0 &&
+      stored!.start + stored!.width <= FULL_KEYBOARD_WHITE_KEYS
+    ) {
+      return { start: stored!.start, width: stored!.width };
+    }
+  } catch {
+    // The default viewport is used when local storage is unavailable or invalid.
+  }
+  return null;
 }
 
 interface DockHeights {
@@ -145,6 +175,26 @@ function keyboardKeys(baseNote: number, whiteCount: number) {
   return keys;
 }
 
+const FULL_KEYBOARD_KEYS = keyboardKeys(FULL_KEYBOARD_START_NOTE, FULL_KEYBOARD_WHITE_KEYS);
+const FULL_KEYBOARD_WHITE_NOTES = FULL_KEYBOARD_KEYS
+  .filter((key) => !key.black)
+  .map((key) => key.note);
+
+function whiteKeyIndexForNote(note: number) {
+  const exact = FULL_KEYBOARD_WHITE_NOTES.indexOf(note);
+  if (exact >= 0) return exact;
+  const next = FULL_KEYBOARD_WHITE_NOTES.findIndex((candidate) => candidate > note);
+  return clamp(next < 0 ? FULL_KEYBOARD_WHITE_KEYS - 1 : next, 0, FULL_KEYBOARD_WHITE_KEYS - 1);
+}
+
+function noteAtWhitePosition(position: number) {
+  return FULL_KEYBOARD_WHITE_NOTES[clamp(
+    Math.floor(position),
+    0,
+    FULL_KEYBOARD_WHITE_KEYS - 1,
+  )];
+}
+
 function padNotes(baseNote: number, matrix: PadMatrix) {
   return Array.from({ length: matrix.rows * matrix.columns }, (_, index) => {
     const row = Math.floor(index / matrix.columns);
@@ -177,6 +227,9 @@ export function TouchControllerPage({
   const [sustain, setSustain] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [keyboardWidth, setKeyboardWidth] = useState<KeyboardWidth>(storedKeyboardWidth);
+  const [keyboardViewport, setKeyboardViewport] = useState<KeyboardViewport | null>(
+    storedKeyboardViewport,
+  );
   const [padMatrix, setPadMatrix] = useState<PadMatrix>(storedPadMatrix);
   const [dockHeights, setDockHeights] = useState<DockHeights>(storedDockHeights);
   const [resizingDock, setResizingDock] = useState(false);
@@ -188,6 +241,13 @@ export function TouchControllerPage({
     pointerId: number;
     startY: number;
     height: number;
+  } | null>(null);
+  const keyboardViewportGestureRef = useRef<{
+    pointerId: number;
+    kind: "move" | "start" | "end";
+    startX: number;
+    trackWidth: number;
+    viewport: KeyboardViewport;
   } | null>(null);
   const controllerSize = useControllerSize(controllerRef);
   const controllerWidth = controllerSize.width;
@@ -213,13 +273,53 @@ export function TouchControllerPage({
     : windowBaseNote;
   const playable = connection === "online" && session.active_mode !== "idle";
   const sizingHeight = docked ? window.innerHeight : controllerSize.height;
-  const minimumDockHeight = mode === "keyboard" ? 190 : 250;
+  const portraitDock = docked && controllerWidth <= 760 && sizingHeight > controllerWidth;
+  const portraitKeyboardNavigator = portraitDock && mode === "keyboard" && !fullKeyboard;
+  const minimumKeyboardViewportWidth = Math.min(
+    FULL_KEYBOARD_WHITE_KEYS,
+    visibleWhiteKeys,
+  );
+  const defaultKeyboardViewport = useMemo<KeyboardViewport>(() => {
+    const width = minimumKeyboardViewportWidth;
+    return {
+      start: clamp(
+        whiteKeyIndexForNote(windowBaseNote),
+        0,
+        FULL_KEYBOARD_WHITE_KEYS - width,
+      ),
+      width,
+    };
+  }, [minimumKeyboardViewportWidth, windowBaseNote]);
+  const resolvedKeyboardViewport = useMemo<KeyboardViewport>(() => {
+    if (!keyboardViewport) return defaultKeyboardViewport;
+    const width = clamp(
+      keyboardViewport.width,
+      minimumKeyboardViewportWidth,
+      FULL_KEYBOARD_WHITE_KEYS,
+    );
+    return {
+      start: clamp(keyboardViewport.start, 0, FULL_KEYBOARD_WHITE_KEYS - width),
+      width,
+    };
+  }, [defaultKeyboardViewport, keyboardViewport, minimumKeyboardViewportWidth]);
+  const minimumDockHeight = mode === "keyboard"
+    ? portraitDock ? 200 : 190
+    : portraitDock ? 190 : 250;
   const maximumDockHeight = mode === "keyboard"
-    ? Math.max(minimumDockHeight, Math.min(440, sizingHeight * 0.48))
-    : Math.max(minimumDockHeight, sizingHeight - 80);
+    ? Math.max(
+      minimumDockHeight,
+      Math.min(440, sizingHeight * (portraitDock ? 0.55 : 0.48)),
+    )
+    : Math.max(
+      minimumDockHeight,
+      portraitDock ? Math.min(540, sizingHeight * 0.66) : sizingHeight - 80,
+    );
   const automaticDockHeight = mode === "keyboard"
-    ? Math.min(300, Math.max(minimumDockHeight, sizingHeight * 0.3))
-    : Math.min(560, Math.max(minimumDockHeight, sizingHeight * 0.52));
+    ? Math.min(300, Math.max(minimumDockHeight, sizingHeight * (portraitDock ? 0.29 : 0.3)))
+    : Math.min(
+      portraitDock ? 420 : 560,
+      Math.max(minimumDockHeight, sizingHeight * (portraitDock ? 0.44 : 0.52)),
+    );
   const dockHeight = Math.min(
     maximumDockHeight,
     Math.max(minimumDockHeight, dockHeights[mode] ?? automaticDockHeight),
@@ -230,9 +330,11 @@ export function TouchControllerPage({
     1,
     Math.min(920, controllerSize.width - (roomyLayout ? 28 : 14)),
   );
+  const dockChromeHeight = docked ? roomyLayout ? 48 : 42 : 0;
+  const padSizingHeight = docked ? dockHeight - dockChromeHeight : controllerSize.height;
   const padAreaHeight = Math.max(
     1,
-    (roomyLayout ? dockHeight - 48 : controllerSize.height) - (roomyLayout ? 28 : 14),
+    padSizingHeight - (roomyLayout ? 28 : 14),
   );
   const padCellHeight = Math.max(1, Math.min(
     (padAreaHeight - padGap * (padMatrix.rows - 1)) / padMatrix.rows,
@@ -306,6 +408,18 @@ export function TouchControllerPage({
       // The controller still works when persistent browser storage is disabled.
     }
   }, [keyboardWidth]);
+
+  useEffect(() => {
+    if (!keyboardViewport) return;
+    try {
+      window.localStorage.setItem(
+        KEYBOARD_VIEWPORT_STORAGE_KEY,
+        JSON.stringify(resolvedKeyboardViewport),
+      );
+    } catch {
+      // The navigator remains usable when persistent storage is unavailable.
+    }
+  }, [keyboardViewport, resolvedKeyboardViewport]);
 
   useEffect(() => {
     try {
@@ -395,7 +509,85 @@ export function TouchControllerPage({
 
   const changeOctave = (amount: number) => {
     panic();
+    setKeyboardViewport(null);
     setOctave((current) => Math.max(1, Math.min(maximumOctave, current + amount)));
+  };
+
+  const setResolvedKeyboardViewport = useCallback((viewport: KeyboardViewport) => {
+    const width = clamp(
+      viewport.width,
+      minimumKeyboardViewportWidth,
+      FULL_KEYBOARD_WHITE_KEYS,
+    );
+    setKeyboardViewport({
+      start: clamp(viewport.start, 0, FULL_KEYBOARD_WHITE_KEYS - width),
+      width,
+    });
+  }, [minimumKeyboardViewportWidth]);
+
+  const beginKeyboardViewportGesture = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    kind: "move" | "start" | "end",
+  ) => {
+    if (event.button !== 0) return;
+    const track = event.currentTarget.closest<HTMLElement>(".touch-keyboard-navigator-track");
+    if (!track) return;
+    event.preventDefault();
+    event.stopPropagation();
+    panic();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    keyboardViewportGestureRef.current = {
+      pointerId: event.pointerId,
+      kind,
+      startX: event.clientX,
+      trackWidth: Math.max(1, track.getBoundingClientRect().width),
+      viewport: resolvedKeyboardViewport,
+    };
+    setKeyboardViewport(resolvedKeyboardViewport);
+    hostHaptic("confirm");
+  };
+
+  const moveKeyboardViewportGesture = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const gesture = keyboardViewportGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const delta = (event.clientX - gesture.startX) /
+      gesture.trackWidth * FULL_KEYBOARD_WHITE_KEYS;
+    const initialEnd = gesture.viewport.start + gesture.viewport.width;
+    if (gesture.kind === "move") {
+      setResolvedKeyboardViewport({
+        ...gesture.viewport,
+        start: gesture.viewport.start + delta,
+      });
+    } else if (gesture.kind === "start") {
+      const nextStart = clamp(
+        gesture.viewport.start + delta,
+        0,
+        initialEnd - minimumKeyboardViewportWidth,
+      );
+      setResolvedKeyboardViewport({ start: nextStart, width: initialEnd - nextStart });
+    } else {
+      const nextEnd = clamp(
+        initialEnd + delta,
+        gesture.viewport.start + minimumKeyboardViewportWidth,
+        FULL_KEYBOARD_WHITE_KEYS,
+      );
+      setResolvedKeyboardViewport({
+        start: gesture.viewport.start,
+        width: nextEnd - gesture.viewport.start,
+      });
+    }
+  };
+
+  const finishKeyboardViewportGesture = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (keyboardViewportGestureRef.current?.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    keyboardViewportGestureRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   const toggleSustain = () => {
@@ -462,6 +654,11 @@ export function TouchControllerPage({
     () => keyboardKeys(baseNote, visibleWhiteKeys),
     [baseNote, visibleWhiteKeys],
   );
+  const displayedKeyboardKeys = portraitKeyboardNavigator ? FULL_KEYBOARD_KEYS : keys;
+  const viewportStartName = noteName(noteAtWhitePosition(resolvedKeyboardViewport.start));
+  const viewportEndName = noteName(noteAtWhitePosition(
+    resolvedKeyboardViewport.start + resolvedKeyboardViewport.width - 0.000001,
+  ));
   const pads = useMemo(() => padNotes(baseNote, padMatrix), [baseNote, padMatrix]);
 
   return (
@@ -469,6 +666,7 @@ export function TouchControllerPage({
       ref={controllerRef}
       className={`touch-controller mode-${mode}${fullKeyboard ? " full-keyboard" : ""}${
         docked ? " docked" : ""
+      }${portraitKeyboardNavigator ? " keyboard-navigator-active" : ""
       }`}
       style={{ "--controller-dock-height": `${dockHeight}px` } as CSSProperties}
       onPointerMove={pointerMove}
@@ -519,6 +717,61 @@ export function TouchControllerPage({
       >
         <span />
       </button>
+      {portraitKeyboardNavigator ? (
+        <div className="touch-keyboard-navigator" aria-label="Visible keyboard range">
+          <span className="touch-keyboard-navigator-label">A0</span>
+          <div className="touch-keyboard-navigator-track">
+            <div className="touch-keyboard-navigator-whites" aria-hidden="true" />
+            {FULL_KEYBOARD_KEYS.filter((key) => key.black).map((key) => (
+              <span
+                key={key.note}
+                className="touch-keyboard-navigator-black"
+                style={{ left: `${key.left}%` }}
+                aria-hidden="true"
+              />
+            ))}
+            <div
+              className="touch-keyboard-navigator-window"
+              style={{
+                left: `${resolvedKeyboardViewport.start / FULL_KEYBOARD_WHITE_KEYS * 100}%`,
+                width: `${resolvedKeyboardViewport.width / FULL_KEYBOARD_WHITE_KEYS * 100}%`,
+              }}
+            >
+              <button
+                type="button"
+                className="touch-keyboard-navigator-handle start"
+                aria-label="Expand visible keyboard range from the left"
+                onPointerDown={(event) => beginKeyboardViewportGesture(event, "start")}
+                onPointerMove={moveKeyboardViewportGesture}
+                onPointerUp={finishKeyboardViewportGesture}
+                onPointerCancel={finishKeyboardViewportGesture}
+                onLostPointerCapture={() => { keyboardViewportGestureRef.current = null; }}
+              ><span /></button>
+              <button
+                type="button"
+                className="touch-keyboard-navigator-move"
+                aria-label={`Move visible keyboard range, ${viewportStartName} to ${viewportEndName}`}
+                onPointerDown={(event) => beginKeyboardViewportGesture(event, "move")}
+                onPointerMove={moveKeyboardViewportGesture}
+                onPointerUp={finishKeyboardViewportGesture}
+                onPointerCancel={finishKeyboardViewportGesture}
+                onLostPointerCapture={() => { keyboardViewportGestureRef.current = null; }}
+              ><span /></button>
+              <button
+                type="button"
+                className="touch-keyboard-navigator-handle end"
+                aria-label="Expand visible keyboard range from the right"
+                onPointerDown={(event) => beginKeyboardViewportGesture(event, "end")}
+                onPointerMove={moveKeyboardViewportGesture}
+                onPointerUp={finishKeyboardViewportGesture}
+                onPointerCancel={finishKeyboardViewportGesture}
+                onLostPointerCapture={() => { keyboardViewportGestureRef.current = null; }}
+              ><span /></button>
+            </div>
+          </div>
+          <span className="touch-keyboard-navigator-label">C8</span>
+        </div>
+      ) : null}
       <div className="touch-controller-dockbar">
         <div className="touch-mode-switch" aria-label="Touch controller layout">
           <button className={mode === "keyboard" ? "active" : ""} onClick={() => changeMode("keyboard")}>
@@ -575,7 +828,7 @@ export function TouchControllerPage({
               </button>
             </div>
 
-            {(mode === "pads" || !fullKeyboard) ? <div className="touch-octave-control">
+            {(mode === "pads" || (!fullKeyboard && !portraitKeyboardNavigator)) ? <div className="touch-octave-control">
               <span>BASE OCTAVE</span>
               <div>
                 <button onClick={() => changeOctave(-1)} disabled={octave <= 1} aria-label="Previous octave">
@@ -599,7 +852,7 @@ export function TouchControllerPage({
               />
             </label>
 
-            {mode === "keyboard" && !fullKeyboard ? <div className="touch-key-width-control">
+            {mode === "keyboard" && !fullKeyboard && !portraitKeyboardNavigator ? <div className="touch-key-width-control">
               <div>
                 <span>VISIBLE WHITE KEYS</span>
                 <output>{keyboardWidth === "auto" ? `AUTO · ${visibleWhiteKeys}` : visibleWhiteKeys}</output>
@@ -607,6 +860,7 @@ export function TouchControllerPage({
                   className={keyboardWidth === "auto" ? "active" : ""}
                   onClick={() => {
                     panic();
+                    setKeyboardViewport(null);
                     setKeyboardWidth("auto");
                   }}
                   aria-pressed={keyboardWidth === "auto"}
@@ -623,6 +877,7 @@ export function TouchControllerPage({
                 value={visibleWhiteKeys}
                 onChange={(event) => {
                   panic();
+                  setKeyboardViewport(null);
                   setKeyboardWidth(Number(event.target.value));
                 }}
                 aria-label="Visible white keys"
@@ -718,12 +973,23 @@ export function TouchControllerPage({
       <div className={`touch-instrument${playable ? "" : " disabled"}`}>
         {mode === "keyboard" ? (
           <div
-            className="piano-keyboard"
-            style={{ "--white-key-count": visibleWhiteKeys } as CSSProperties}
+            className={`piano-keyboard${portraitKeyboardNavigator ? " viewport-windowed" : ""}`}
+            style={{
+              "--white-key-count": portraitKeyboardNavigator
+                ? FULL_KEYBOARD_WHITE_KEYS
+                : visibleWhiteKeys,
+              "--keyboard-track-scale": portraitKeyboardNavigator
+                ? FULL_KEYBOARD_WHITE_KEYS / resolvedKeyboardViewport.width
+                : 1,
+              "--keyboard-track-offset": portraitKeyboardNavigator
+                ? resolvedKeyboardViewport.start / FULL_KEYBOARD_WHITE_KEYS * 100
+                : 0,
+            } as CSSProperties}
             aria-label="On-screen piano keyboard"
           >
+            <div className="piano-keyboard-track">
             <div className="piano-white-keys">
-              {keys.filter((key) => !key.black).map((key) => (
+              {displayedKeyboardKeys.filter((key) => !key.black).map((key) => (
                 <button
                   key={key.note}
                   className={`piano-key white${activeNotes.has(key.note) ? " active" : ""}`}
@@ -736,7 +1002,7 @@ export function TouchControllerPage({
                 </button>
               ))}
             </div>
-            {keys.filter((key) => key.black).map((key) => (
+            {displayedKeyboardKeys.filter((key) => key.black).map((key) => (
               <button
                 key={key.note}
                 className={`piano-key black${activeNotes.has(key.note) ? " active" : ""}`}
@@ -749,6 +1015,7 @@ export function TouchControllerPage({
                 <span>{noteName(key.note)}</span>
               </button>
             ))}
+            </div>
           </div>
         ) : (
           <div

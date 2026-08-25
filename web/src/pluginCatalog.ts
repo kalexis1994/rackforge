@@ -115,6 +115,17 @@ export function derivePluginRuntimeStates(
       };
       continue;
     }
+    if (plugin.transitioning) {
+      runtime[plugin.plugin_id] = {
+        plugin_id: plugin.plugin_id,
+        phase: "loading",
+        loaded: Boolean(instance),
+        healthy: null,
+        detail: "Host is changing the plugin runtime…",
+        instance_id: instance?.instance_id,
+      };
+      continue;
+    }
     if (!plugin.active) {
       runtime[plugin.plugin_id] = {
         plugin_id: plugin.plugin_id,

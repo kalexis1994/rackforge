@@ -1873,7 +1873,7 @@ fn import_plugin_preset(
 fn materialize_plugin_state(
     context: &ControlContext,
     plugin_id: &str,
-    sound_id: Option<String>,
+    requested_sound_id: Option<String>,
 ) -> ControlResponse {
     let snapshot = match context.store.lock() {
         Ok(store) => store.snapshot(),
@@ -1890,7 +1890,7 @@ fn materialize_plugin_state(
             Some(snapshot.revision),
         );
     };
-    if let Some(sound_id) = sound_id.as_deref()
+    if let Some(sound_id) = requested_sound_id.as_deref()
         && !instance.sounds.iter().any(|sound| sound.id == sound_id)
     {
         return error_response(
@@ -1899,6 +1899,13 @@ fn materialize_plugin_state(
             Some(snapshot.revision),
         );
     }
+    // A Rack Slot without an explicit program must still have a complete,
+    // portable initial identity. Plugin Web surfaces commonly require a
+    // selected sound in their host context even before their first parameter
+    // request. Prefer the current runtime selection, then its first sound.
+    let sound_id = requested_sound_id
+        .or_else(|| instance.selected_sound_id.clone())
+        .or_else(|| instance.sounds.first().map(|sound| sound.id.clone()));
     let Some(manifest) = context.plugin_manifests.get(plugin_id) else {
         return error_response(
             ControlErrorCode::Unavailable,

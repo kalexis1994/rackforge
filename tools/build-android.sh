@@ -94,7 +94,7 @@ install -d "$web_output"
 cp -R "$repository/web/dist/." "$web_output/"
 
 cd "$android_project"
-bash ./gradlew assembleDebug --no-daemon
+bash ./gradlew testDebugUnitTest assembleDebug --no-daemon
 
 source_apk="$android_project/app/build/outputs/apk/debug/app-debug.apk"
 [[ -f "$source_apk" ]] || {

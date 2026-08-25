@@ -10,10 +10,8 @@
 /// Absolute error a few parts in 10⁶ for |x| < 100, dominated by f32
 /// argument-reduction rounding rather than by the polynomial.
 pub fn sincosf(x: f32) -> (f32, f32) {
-    const FRAC_2_PI: f32 = 0.636_619_77;
-    const FRAC_PI_2: f32 = 1.570_796_3;
-    let quadrant = roundf(x * FRAC_2_PI);
-    let r = x - quadrant * FRAC_PI_2;
+    let quadrant = roundf(x * core::f32::consts::FRAC_2_PI);
+    let r = x - quadrant * core::f32::consts::FRAC_PI_2;
     let r2 = r * r;
     let sin = r * (1.0 - r2 / 6.0 * (1.0 - r2 / 20.0 * (1.0 - r2 / 42.0)));
     let cos = 1.0 - r2 / 2.0 * (1.0 - r2 / 12.0 * (1.0 - r2 / 30.0));
@@ -28,15 +26,14 @@ pub fn sincosf(x: f32) -> (f32, f32) {
 /// `e^x` via exponent split and a degree-6 polynomial on the remainder.
 /// Relative error below 1e-6 across the range this model uses (|x| < 30).
 pub fn expf(x: f32) -> f32 {
-    const LN_2: f32 = 0.693_147_2;
     if x < -87.0 {
         return 0.0;
     }
     if x > 88.0 {
         return f32::INFINITY;
     }
-    let k = roundf(x / LN_2);
-    let r = x - k * LN_2;
+    let k = roundf(x / core::f32::consts::LN_2);
+    let r = x - k * core::f32::consts::LN_2;
     let mut power = 1.0;
     let mut term = 1.0;
     for n in 1..8 {
@@ -49,15 +46,13 @@ pub fn expf(x: f32) -> f32 {
 /// Natural log from the significand's `atanh` series plus the exponent.
 /// Relative error below 1e-6 for normal positive inputs.
 pub fn lnf(x: f32) -> f32 {
-    const LN_2: f32 = 0.693_147_2;
-    const SQRT_2: f32 = 1.414_213_6;
     if x <= 0.0 {
         return f32::NEG_INFINITY;
     }
     let bits = x.to_bits();
     let mut exponent = ((bits >> 23) & 0xff) as i32 - 127;
     let mut mantissa = f32::from_bits((bits & 0x007f_ffff) | 0x3f80_0000);
-    if mantissa > SQRT_2 {
+    if mantissa > core::f32::consts::SQRT_2 {
         mantissa *= 0.5;
         exponent += 1;
     }
@@ -65,11 +60,11 @@ pub fn lnf(x: f32) -> f32 {
     let t2 = t * t;
     let series =
         t * (2.0 + t2 * (2.0 / 3.0 + t2 * (2.0 / 5.0 + t2 * (2.0 / 7.0 + t2 * (2.0 / 9.0)))));
-    series + exponent as f32 * LN_2
+    series + exponent as f32 * core::f32::consts::LN_2
 }
 
 pub fn log2f(x: f32) -> f32 {
-    lnf(x) * 1.442_695
+    lnf(x) * core::f32::consts::LOG2_E
 }
 
 /// `x^y` for positive `x`, through `exp(y·ln x)`.

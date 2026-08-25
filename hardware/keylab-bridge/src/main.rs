@@ -1,4 +1,3 @@
-mod controller;
 mod rackforge_parameters;
 
 use rackforge_parameters::coalesce_rackforge_parameters;
@@ -16,7 +15,7 @@ use rackforge_controller_api::{ButtonPhase, HostActionBinding, HostActionTarget}
 use rackforge_controller_api::{
     LITTLE_V1, rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
 };
-use rackforge_controller_arturia_keylab_essential_mk3::protocol as keylab_protocol;
+use rackforge_controller_arturia_keylab_essential_mk3::{controller, protocol as keylab_protocol};
 use rackforge_controller_package::{
     CONTROLLER_DRIVER_API_VERSION, PROCESS_DRIVER_PROTOCOL_VERSION, ProcessDriverInfo,
 };
@@ -959,19 +958,20 @@ fn run_monitor(
     let mut session = KeyLabSession::open(midi, port)?;
     session.start()?;
 
-    let mut discovery = MidiInput::new("rackforge KeyLab MIDI monitor discovery")?;
-    discovery.ignore(Ignore::None);
-    let input_names = enumerate_input_ports(&discovery)?
-        .into_iter()
-        .filter(|input| {
-            let folded = input.name.to_ascii_lowercase();
-            (folded.contains("keylab") || folded.contains("kl essential"))
-                && !folded.contains("dinthru")
-                && !folded.contains("alv")
-        })
-        .map(|input| input.name)
-        .collect::<Vec<_>>();
-    drop(discovery);
+    let input_names = {
+        let mut discovery = MidiInput::new("rackforge KeyLab MIDI monitor discovery")?;
+        discovery.ignore(Ignore::None);
+        enumerate_input_ports(&discovery)?
+            .into_iter()
+            .filter(|input| {
+                let folded = input.name.to_ascii_lowercase();
+                (folded.contains("keylab") || folded.contains("kl essential"))
+                    && !folded.contains("dinthru")
+                    && !folded.contains("alv")
+            })
+            .map(|input| input.name)
+            .collect::<Vec<_>>()
+    };
     if input_names.is_empty() {
         return Err("No se encontraron entradas MIDI/MCU del KeyLab".into());
     }
@@ -1445,21 +1445,21 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                     }
                 }
             }
-            if transient_header.expire(now) {
-                if let Err(error) = session.send(&messages.header) {
-                    eprintln!("No se pudo restaurar el header del menú: {error}");
-                    break;
-                }
+            if transient_header.expire(now)
+                && let Err(error) = session.send(&messages.header)
+            {
+                eprintln!("No se pudo restaurar el header del menú: {error}");
+                break;
             }
 
             if now >= next_settings_check {
                 next_settings_check = now + Duration::from_secs(1);
                 if refresh_controller_settings(&mut settings_modified) {
-                    if let Ok(repaint) = keylab_protocol::ambient_repaint_messages() {
-                        if let Err(error) = session.send_messages(repaint) {
-                            eprintln!("No se pudo repintar el color de teclas: {error}");
-                            break 'surface;
-                        }
+                    if let Ok(repaint) = keylab_protocol::ambient_repaint_messages()
+                        && let Err(error) = session.send_messages(repaint)
+                    {
+                        eprintln!("No se pudo repintar el color de teclas: {error}");
+                        break 'surface;
                     }
                     // The footer buttons idle in the ambient too -- and
                     // their LED bytes are baked at render time, so re-render
@@ -2848,6 +2848,7 @@ fn keylab_usb_age() -> Option<Duration> {
     None
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_udev_initialized(data: &str) -> Option<Duration> {
     let micros = data
         .lines()

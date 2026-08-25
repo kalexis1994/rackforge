@@ -148,6 +148,10 @@ pub trait Processor: Default {
         None
     }
 
+    // Keep the v1 source contract stable for existing portable plugins. Grouping
+    // these arguments would be cleaner, but would force every plugin to migrate
+    // even though the exported ABI is unchanged.
+    #[allow(clippy::too_many_arguments)]
     fn process(
         &mut self,
         input: &[f32],

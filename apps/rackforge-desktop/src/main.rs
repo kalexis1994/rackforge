@@ -30,7 +30,8 @@ use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{
     CompiledParameterLink, IsolatedPluginStateEditor, LoadedPlugin, PluginInstance, PluginPackage,
-    PluginStateStore, PluginStorage, compile_semantic_parameter_links, validate_state_reference,
+    PluginStateStore, PluginStorage, SemanticParameterLinkContext,
+    compile_semantic_parameter_links, validate_state_reference,
 };
 #[cfg(windows)]
 use rackforge_midi_api::{
@@ -208,19 +209,19 @@ fn compile_desktop_parameter_links(
         let source_key = desktop_audio::stable_midi_source_key_from_id(&source_id);
         for plugin in plugins {
             compiled.extend(
-                compile_semantic_parameter_links(
+                compile_semantic_parameter_links(SemanticParameterLinkContext {
                     controller_id,
-                    registered
+                    controller_name: registered
                         .runtime_source_name
                         .as_deref()
                         .unwrap_or(controller_id),
                     profile,
-                    &source_id,
+                    runtime_source_id: &source_id,
                     source_key,
-                    &plugin.instance_id,
-                    plugin.runtime.parameters(),
-                    links,
-                )
+                    instance_id: &plugin.instance_id,
+                    schema: plugin.runtime.parameters(),
+                    explicit_links: links,
+                })
                 .with_context(|| {
                     format!(
                         "compiling semantic controller {controller_id} for {}",
@@ -1303,12 +1304,12 @@ impl DesktopApp {
                 return Err(error);
             }
         };
-        if let Some(audio) = &restored {
-            if let Err(error) = sync_desktop_audio(audio, &self.session, &self.menu) {
-                self.audio_recovery_attempts = 0;
-                self.audio_recovery_at = Some(Instant::now() + Duration::from_secs(1));
-                return Err(error);
-            }
+        if let Some(audio) = &restored
+            && let Err(error) = sync_desktop_audio(audio, &self.session, &self.menu)
+        {
+            self.audio_recovery_attempts = 0;
+            self.audio_recovery_at = Some(Instant::now() + Duration::from_secs(1));
+            return Err(error);
         }
         if let Some(audio) = restored {
             self.publish_audio_runtime(audio);
@@ -1757,17 +1758,15 @@ impl DesktopApp {
                     .controller_semantic_profiles
                     .values()
                     .find(|registered| {
-                        let source_matches =
-                            registered
-                                .runtime_source_id
-                                .as_ref()
-                                .is_some_and(|source_id| {
-                                    desktop_audio::stable_midi_source_key_from_id(
-                                        &MidiSourceId::new(source_id.clone())
-                                            .expect("stored declarative source id is valid"),
-                                    ) == source
-                                });
-                        source_matches
+                        registered
+                            .runtime_source_id
+                            .as_ref()
+                            .is_some_and(|source_id| {
+                                desktop_audio::stable_midi_source_key_from_id(
+                                    &MidiSourceId::new(source_id.clone())
+                                        .expect("stored declarative source id is valid"),
+                                ) == source
+                            })
                     })
                     .cloned();
                 if let Some(registered) = registered {
@@ -1916,10 +1915,8 @@ impl DesktopApp {
                     }
                     InputPhase::Turn => {}
                 },
-                Input::KeyboardParts => {
-                    if phase == InputPhase::Press {
-                        self.apply_input(Input::KeyboardParts);
-                    }
+                Input::KeyboardParts if phase == InputPhase::Press => {
+                    self.apply_input(Input::KeyboardParts);
                 }
                 _ => {}
             },
@@ -2873,19 +2870,19 @@ impl DesktopApp {
                             .expect("session lock poisoned")
                             .parameter_links
                             .clone();
-                        if self.audio.is_some() {
-                            if let Err(error) = self.replace_parameter_links(explicit_links) {
-                                match previous {
-                                    Some(profile) => {
-                                        self.controller_semantic_profiles
-                                            .insert(controller_id.clone(), profile);
-                                    }
-                                    None => {
-                                        self.controller_semantic_profiles.remove(&controller_id);
-                                    }
+                        if self.audio.is_some()
+                            && let Err(error) = self.replace_parameter_links(explicit_links)
+                        {
+                            match previous {
+                                Some(profile) => {
+                                    self.controller_semantic_profiles
+                                        .insert(controller_id.clone(), profile);
                                 }
-                                return Err(error);
+                                None => {
+                                    self.controller_semantic_profiles.remove(&controller_id);
+                                }
                             }
+                            return Err(error);
                         }
                         println!(
                             "DESKTOP_HOST_BINDINGS_RESERVED controller={} controls={} actions={} semantic={}",
@@ -5800,7 +5797,7 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
         let root = options.rackforge_root.join("controllers");
         let address = web_servers.control_bridge_addr().to_string();
         let shutdown = Arc::clone(&controller_shutdown);
-        let supervisor = std::thread::Builder::new()
+        std::thread::Builder::new()
             .name("rackforge-controller-supervisor".into())
             .spawn(move || {
                 if !root.join("packages").exists() {
@@ -5823,8 +5820,7 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
                     Err(error) => eprintln!("DESKTOP_CONTROLLERS_ERROR {error}"),
                 }
             })
-            .context("starting the controller supervisor")?;
-        supervisor
+            .context("starting the controller supervisor")?
     };
     let mut app = DesktopApp::new(Arc::clone(&session), &options, web_servers, web_control)?;
     app.controller_shutdown = Some(controller_shutdown);

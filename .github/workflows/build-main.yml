@@ -40,6 +40,8 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+          rustup component add rustfmt clippy
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -68,6 +70,10 @@ jobs:
         shell: bash
         run: cargo fmt --all -- --check
 
+      - name: Lint Rust workspace
+        shell: bash
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
       - name: Test shared runtime contracts
         shell: bash
         run: |
@@ -93,7 +99,19 @@ jobs:
             -p rackforge-surface-runtime \
             -p rackforge-ui \
             -p rackforge-core \
-            -p rackforge-controller-arturia-keylab-essential-mk3
+            -p rackforge-browser \
+            -p rackforge-concert-grand \
+            -p rackforge-demo-synth \
+            -p rackforge-gain \
+            -p rackforge-gain-portable
+
+      # Keep the native driver harness in its own Cargo graph. On Windows GNU,
+      # feature unification with the full plugin-validation graph can produce
+      # an invalid test executable before the harness starts; the driver itself
+      # has no dependency on that graph.
+      - name: Test bundled controller driver
+        shell: bash
+        run: cargo test --locked -p rackforge-controller-arturia-keylab-essential-mk3
 
   windows:
     name: Windows x86-64

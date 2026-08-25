@@ -74,16 +74,30 @@ impl CompiledParameterLink {
 /// These links are runtime defaults, never persisted session objects. An
 /// explicit user link wins when it targets either the same physical control or
 /// the same semantic plugin parameter, preventing double writes.
+pub struct SemanticParameterLinkContext<'a> {
+    pub controller_id: &'a str,
+    pub controller_name: &'a str,
+    pub profile: &'a SemanticControlProfile,
+    pub runtime_source_id: &'a MidiSourceId,
+    pub source_key: MidiSourceKey,
+    pub instance_id: &'a str,
+    pub schema: &'a ParameterSchema,
+    pub explicit_links: &'a [ParameterLink],
+}
+
 pub fn compile_semantic_parameter_links(
-    controller_id: &str,
-    controller_name: &str,
-    profile: &SemanticControlProfile,
-    runtime_source_id: &MidiSourceId,
-    source_key: MidiSourceKey,
-    instance_id: &str,
-    schema: &ParameterSchema,
-    explicit_links: &[ParameterLink],
+    context: SemanticParameterLinkContext<'_>,
 ) -> Result<Vec<CompiledParameterLink>> {
+    let SemanticParameterLinkContext {
+        controller_id,
+        controller_name,
+        profile,
+        runtime_source_id,
+        source_key,
+        instance_id,
+        schema,
+        explicit_links,
+    } = context;
     profile.validate().map_err(anyhow::Error::msg)?;
     schema.validate().map_err(anyhow::Error::msg)?;
     let mut compiled = Vec::new();
@@ -492,16 +506,16 @@ mod tests {
         };
         let runtime_source_id = MidiSourceId::new("windows.endpoint.42").unwrap();
 
-        let automatic = compile_semantic_parameter_links(
-            "org.rackforge.arturia",
-            "Arturia KeyLab",
-            &profile,
-            &runtime_source_id,
-            MidiSourceKey::new(5),
-            "desktop.main",
-            &plugin,
-            &[],
-        )
+        let automatic = compile_semantic_parameter_links(SemanticParameterLinkContext {
+            controller_id: "org.rackforge.arturia",
+            controller_name: "Arturia KeyLab",
+            profile: &profile,
+            runtime_source_id: &runtime_source_id,
+            source_key: MidiSourceKey::new(5),
+            instance_id: "desktop.main",
+            schema: &plugin,
+            explicit_links: &[],
+        })
         .unwrap();
         assert_eq!(automatic.len(), 1);
         assert_eq!(automatic[0].link.parameter_index, 17);
@@ -520,16 +534,16 @@ mod tests {
 
         let explicit_same_parameter = link(ParameterLinkMessage::ControlChange { controller: 74 });
         assert!(
-            compile_semantic_parameter_links(
-                "org.rackforge.arturia",
-                "Arturia KeyLab",
-                &profile,
-                &MidiSourceId::new("windows.endpoint.42").unwrap(),
-                MidiSourceKey::new(5),
-                "desktop.main",
-                &plugin,
-                &[explicit_same_parameter],
-            )
+            compile_semantic_parameter_links(SemanticParameterLinkContext {
+                controller_id: "org.rackforge.arturia",
+                controller_name: "Arturia KeyLab",
+                profile: &profile,
+                runtime_source_id: &MidiSourceId::new("windows.endpoint.42").unwrap(),
+                source_key: MidiSourceKey::new(5),
+                instance_id: "desktop.main",
+                schema: &plugin,
+                explicit_links: &[explicit_same_parameter],
+            })
             .unwrap()
             .is_empty()
         );

@@ -11,7 +11,7 @@ use rackforge_control_api::{
 };
 use rackforge_core::{
     CompiledParameterLink, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
-    PluginStorage, compile_semantic_parameter_links,
+    PluginStorage, SemanticParameterLinkContext, compile_semantic_parameter_links,
     midi_hotplug::{PanicScope, panic_packets},
     performance::PerformanceRepository,
     plugin_parameters, set_plugin_parameter,
@@ -129,6 +129,7 @@ struct AndroidMidiIngress {
     event: MidiEventV1,
 }
 
+#[derive(Default)]
 struct AndroidControllerMenu {
     menu: SurfaceMenu,
     button_down: [Option<Instant>; 4],
@@ -142,18 +143,6 @@ struct ControllerPluginInfo {
     root: String,
     name: String,
     version: String,
-}
-
-impl Default for AndroidControllerMenu {
-    fn default() -> Self {
-        Self {
-            menu: SurfaceMenu::default(),
-            button_down: [None; 4],
-            button_long_fired: [false; 4],
-            installed_plugins: Vec::new(),
-            plugins: BTreeMap::new(),
-        }
-    }
 }
 
 impl AndroidControllerMenu {
@@ -1660,14 +1649,16 @@ impl AndroidEngine {
                 .map(|descriptor| descriptor.name.as_str())
                 .unwrap_or(controller_id);
             compiled.extend(compile_semantic_parameter_links(
-                controller_id,
-                display_name,
-                profile,
-                source_id,
-                source_key,
-                ANDROID_INSTANCE_ID,
-                self.runtime.0.parameters(),
-                &links,
+                SemanticParameterLinkContext {
+                    controller_id,
+                    controller_name: display_name,
+                    profile,
+                    runtime_source_id: source_id,
+                    source_key,
+                    instance_id: ANDROID_INSTANCE_ID,
+                    schema: self.runtime.0.parameters(),
+                    explicit_links: &links,
+                },
             )?);
         }
         self.persisted_parameter_links = links;
@@ -2040,7 +2031,7 @@ unsafe extern "C" fn render_callback(
     let mut pan_right = f32::from_bits(MASTER_PAN_RIGHT_CURRENT_BITS.load(Ordering::Relaxed));
     let complete = rendered_frames == requested_frames;
     let recover = complete && AUDIO_RECOVERY_RAMP_PENDING.swap(0, Ordering::AcqRel) != 0;
-    let recovery_frames = output.len().div_ceil(2).min(DROPOUT_FADE_FRAMES).max(1);
+    let recovery_frames = output.len().div_ceil(2).clamp(1, DROPOUT_FADE_FRAMES);
     let mut nonfinite = 0_u64;
     let mut clipped = 0_u64;
     let mut left_peak = 0.0_f32;
@@ -2104,7 +2095,7 @@ unsafe extern "C" fn render_callback(
 fn conceal_audio_dropout(output: &mut [f32]) {
     let left = f32::from_bits(AUDIO_LAST_LEFT_BITS.load(Ordering::Relaxed));
     let right = f32::from_bits(AUDIO_LAST_RIGHT_BITS.load(Ordering::Relaxed));
-    let fade_frames = output.len().div_ceil(2).min(DROPOUT_FADE_FRAMES).max(1);
+    let fade_frames = output.len().div_ceil(2).clamp(1, DROPOUT_FADE_FRAMES);
     for (index, frame) in output.chunks_exact_mut(2).enumerate() {
         let gain = if index < fade_frames {
             1.0 - (index + 1) as f32 / fade_frames as f32
@@ -2932,11 +2923,10 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabHandleMidi(
         let result = controller_parameter_mapper()
             .lock()
             .map_err(|_| anyhow::anyhow!("RackForge parameter mapper lock poisoned"))
-            .and_then(|mut mapper| {
-                Ok(mapper.apply(input, current_pan).map(|parameter| {
+            .map(|mut mapper| {
+                mapper.apply(input, current_pan).inspect(|&parameter| {
                     apply_rackforge_parameter(parameter);
-                    parameter
-                }))
+                })
             })
             .and_then(|parameter| match parameter {
                 Some(parameter) => controller_menu()

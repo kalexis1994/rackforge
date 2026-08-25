@@ -5,7 +5,9 @@ use crate::rack_graph::{
 };
 use crate::session::SharedSessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
-use crate::{CompiledParameterLink, compile_semantic_parameter_links};
+use crate::{
+    CompiledParameterLink, SemanticParameterLinkContext, compile_semantic_parameter_links,
+};
 use crate::{
     IsolatedPluginStateEditor, LoadedPlugin, PluginInstance, PluginStateStore,
     validate_state_reference,
@@ -2502,19 +2504,19 @@ fn compile_parameter_links(
                 continue;
             };
             compiled.extend(
-                compile_semantic_parameter_links(
+                compile_semantic_parameter_links(SemanticParameterLinkContext {
                     controller_id,
-                    registered
+                    controller_name: registered
                         .runtime_source_name
                         .as_deref()
                         .unwrap_or(controller_id),
                     profile,
-                    source_id,
+                    runtime_source_id: source_id,
                     source_key,
-                    instance.instance_id.as_str(),
-                    plugin.0.parameters(),
-                    links,
-                )
+                    instance_id: instance.instance_id.as_str(),
+                    schema: plugin.0.parameters(),
+                    explicit_links: links,
+                })
                 .map_err(|error| {
                     control_failure(
                         ControlErrorCode::InvalidRequest,

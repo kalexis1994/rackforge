@@ -33,7 +33,8 @@ pub use isolated_state::{
 };
 pub use package::{PluginPackage, platform_key};
 pub use parameter_link::{
-    CompiledParameterLink, ParameterLinkOutput, compile_semantic_parameter_links,
+    CompiledParameterLink, ParameterLinkOutput, SemanticParameterLinkContext,
+    compile_semantic_parameter_links,
 };
 pub use state_store::{MAX_PLUGIN_STATE_BYTES, PluginStateStore};
 pub use storage::{PluginDirectory, PluginStorage, RECOMMENDED_PROGRAM_SUFFIX};

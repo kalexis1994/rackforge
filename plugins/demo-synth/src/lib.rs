@@ -359,7 +359,7 @@ impl Processor for DemoSynth {
         _input_channels: u32,
         output_channels: u32,
     ) {
-        let channels = (output_channels as usize).min(MAX_OUTPUT_CHANNELS).max(1);
+        let channels = (output_channels as usize).clamp(1, MAX_OUTPUT_CHANNELS);
         let mut midi_index = 0;
         let mut parameter_index = 0;
 

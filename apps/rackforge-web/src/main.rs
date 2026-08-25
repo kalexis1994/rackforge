@@ -32,10 +32,12 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+#[cfg(unix)]
+use std::net::UdpSocket;
 use std::{
     collections::BTreeMap,
     env, fs,
-    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Component, Path, PathBuf},
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
     sync::{Arc, Mutex, OnceLock, RwLock},
@@ -221,8 +223,8 @@ struct AuthStore {
     /// pairing would refuse to boot after the update — the service would fail
     /// to parse its own state file and restart forever. It is never written
     /// back, so the first save after an upgrade removes it for good.
-    #[serde(default, skip_serializing)]
-    pending: Option<serde_json::Value>,
+    #[serde(default, rename = "pending", skip_serializing)]
+    _pending: Option<serde_json::Value>,
 }
 
 /// A PIN as it is kept on disk.
@@ -804,6 +806,7 @@ fn start_system_control(
     })
 }
 
+#[cfg(unix)]
 fn persist_web_config(path: &Path, web: &WebConfig) -> Result<()> {
     let mut root = match fs::read_to_string(path) {
         Ok(text) => toml::from_str::<toml::Table>(&text)
@@ -823,6 +826,7 @@ fn persist_web_config(path: &Path, web: &WebConfig) -> Result<()> {
     fs::rename(&temporary, path).with_context(|| format!("installing {}", path.display()))
 }
 
+#[cfg(unix)]
 fn local_lan_ipv4() -> Option<Ipv4Addr> {
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
     socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
@@ -2731,10 +2735,22 @@ async fn handle_session_socket(socket: axum::extract::ws::WebSocket, state: Arc<
                         core_unavailable_since = None;
                         core_notice = None;
                         let current = response.get("current_revision").and_then(Value::as_u64);
-                        if current.is_some_and(|value| value != revision) {
-                            if let Ok(snapshot) = core_request(&state.control_socket, &json!({"op":"snapshot"})).await {
-                                last_revision = snapshot.pointer("/snapshot/revision").and_then(Value::as_u64);
-                                if sender.send(Message::Text(snapshot.to_string().into())).await.is_err() { break; }
+                        if current.is_some_and(|value| value != revision)
+                            && let Ok(snapshot) = core_request(
+                                &state.control_socket,
+                                &json!({"op":"snapshot"}),
+                            )
+                            .await
+                        {
+                            last_revision = snapshot
+                                .pointer("/snapshot/revision")
+                                .and_then(Value::as_u64);
+                            if sender
+                                .send(Message::Text(snapshot.to_string().into()))
+                                .await
+                                .is_err()
+                            {
+                                break;
                             }
                         }
                     }
@@ -2780,10 +2796,21 @@ async fn handle_session_socket(socket: axum::extract::ws::WebSocket, state: Arc<
                                 if matches!(
                                     request.get("op").and_then(Value::as_str),
                                     Some("dispatch" | "load_plugin_preset")
-                                ) {
-                                    if let Ok(snapshot) = core_request(&state.control_socket, &json!({"op":"snapshot"})).await {
-                                        last_revision = snapshot.pointer("/snapshot/revision").and_then(Value::as_u64);
-                                        if sender.send(Message::Text(snapshot.to_string().into())).await.is_err() { break; }
+                                ) && let Ok(snapshot) = core_request(
+                                    &state.control_socket,
+                                    &json!({"op":"snapshot"}),
+                                )
+                                .await
+                                {
+                                    last_revision = snapshot
+                                        .pointer("/snapshot/revision")
+                                        .and_then(Value::as_u64);
+                                    if sender
+                                        .send(Message::Text(snapshot.to_string().into()))
+                                        .await
+                                        .is_err()
+                                    {
+                                        break;
                                     }
                                 }
                             }

@@ -107,7 +107,7 @@ impl LoadedPlugin {
                 PluginInstanceBackend::Native(plugin.create_instance()?)
             }
             LoadedBackend::Portable(plugin) => {
-                PluginInstanceBackend::Portable(plugin.create_instance()?)
+                PluginInstanceBackend::Portable(Box::new(plugin.create_instance()?))
             }
         };
         Ok(PluginInstance { backend })
@@ -124,9 +124,9 @@ impl LoadedPlugin {
             bail!("runtime resource replacement requires a portable wasm-v1 plugin");
         };
         Ok(PluginInstance {
-            backend: PluginInstanceBackend::Portable(
+            backend: PluginInstanceBackend::Portable(Box::new(
                 plugin.create_instance_with_resource_overrides(overrides)?,
-            ),
+            )),
         })
     }
 
@@ -419,7 +419,7 @@ pub struct PluginInstance<'plugin> {
 
 enum PluginInstanceBackend<'plugin> {
     Native(crate::loader::NativePluginInstance<'plugin>),
-    Portable(PortablePluginInstance),
+    Portable(Box<PortablePluginInstance>),
 }
 
 impl PluginInstance<'_> {

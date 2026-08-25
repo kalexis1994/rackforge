@@ -152,7 +152,7 @@ fn gesture_index(input: Input) -> Option<usize> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct BrowserKeyLabController {
     menu: Menu,
     connected: bool,
@@ -160,19 +160,6 @@ pub struct BrowserKeyLabController {
     output: Vec<BrowserControllerOutput>,
     gestures: GestureTracker,
     parameter_mapper: RackForgeParameterMapper,
-}
-
-impl Default for BrowserKeyLabController {
-    fn default() -> Self {
-        Self {
-            menu: Menu::default(),
-            connected: false,
-            last_screen: None,
-            output: Vec::new(),
-            gestures: GestureTracker::default(),
-            parameter_mapper: RackForgeParameterMapper::default(),
-        }
-    }
 }
 
 impl BrowserKeyLabController {

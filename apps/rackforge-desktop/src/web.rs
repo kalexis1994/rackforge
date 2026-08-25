@@ -47,6 +47,8 @@ static CLIENT_UPLOAD_SERIAL: AtomicU64 = AtomicU64::new(1);
 static PLUGIN_INSTALL_CANCELLATIONS: OnceLock<Mutex<BTreeMap<String, Arc<AtomicBool>>>> =
     OnceLock::new();
 
+type PluginWebPackageCache = Arc<Mutex<Option<(u64, BTreeMap<String, PluginWebPackage>)>>>;
+
 fn plugin_install_cancellations() -> &'static Mutex<BTreeMap<String, Arc<AtomicBool>>> {
     PLUGIN_INSTALL_CANCELLATIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
@@ -67,7 +69,7 @@ struct WebState {
     /// ASSET REQUEST made the splash and the icons crawl. The result only
     /// changes when the catalog does, so it is cached against the catalog
     /// revision; `active` flags are refreshed from the session per call.
-    web_packages_cache: Arc<Mutex<Option<(u64, BTreeMap<String, PluginWebPackage>)>>>,
+    web_packages_cache: PluginWebPackageCache,
     /// Bumped only when the set of installed packages actually changes
     /// (install, uninstall). `plugin_catalog_revision` also bumps on
     /// ACTIVATION for the clients' sake, and keying the scan cache on it

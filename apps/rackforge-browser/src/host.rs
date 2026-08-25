@@ -33,7 +33,7 @@ use rackforge_core::session::SessionStore;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{
     CompiledParameterLink, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
-    PluginStorage, compile_semantic_parameter_links,
+    PluginStorage, SemanticParameterLinkContext, compile_semantic_parameter_links,
 };
 use rackforge_midi_api::{
     IngressMidiEvent, MidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
@@ -98,9 +98,6 @@ struct HostedPlugin {
     /// True when the package was installed into the page's plugin store, as
     /// opposed to shipped with the site.
     managed: bool,
-    /// Where the package sits in the host's storage, so the page can publish
-    /// the files a plugin's own interface is made of.
-    package_root: String,
 }
 
 pub struct BrowserHost {
@@ -1275,14 +1272,16 @@ impl BrowserHost {
         let mut compiled = Vec::new();
         for plugin in &self.plugins {
             compiled.extend(compile_semantic_parameter_links(
-                controller.driver_id.as_str(),
-                controller.name.as_str(),
-                profile,
-                &source_id,
-                BROWSER_KEYLAB_SOURCE_KEY,
-                plugin.instance_id.as_str(),
-                plugin.runtime.parameters(),
-                explicit,
+                SemanticParameterLinkContext {
+                    controller_id: controller.driver_id.as_str(),
+                    controller_name: controller.name.as_str(),
+                    profile,
+                    runtime_source_id: &source_id,
+                    source_key: BROWSER_KEYLAB_SOURCE_KEY,
+                    instance_id: plugin.instance_id.as_str(),
+                    schema: plugin.runtime.parameters(),
+                    explicit_links: explicit,
+                },
             )?);
             for link in explicit.iter().filter(|link| {
                 link.instance_id == plugin.instance_id.as_str()
@@ -1647,7 +1646,6 @@ fn load_plugin(root: &Path, data_root: &Path, stream: StreamFormat) -> Result<Ho
     )?;
 
     Ok(HostedPlugin {
-        package_root: root.to_string_lossy().into_owned(),
         instance_id,
         plugin_id: package.manifest().id.clone(),
         runtime: loaded,

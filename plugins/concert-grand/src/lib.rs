@@ -339,23 +339,8 @@ impl Component {
         s
     }
 
-    /// Silences one component for good, so `tick` can skip it.
-    fn retire(&mut self) {
-        self.s = 0.0;
-        self.c = 0.0;
-        self.rc = 0.0;
-        self.rs = 0.0;
-    }
-
     fn magnitude_squared(&self) -> f32 {
         self.s * self.s + self.c * self.c
-    }
-
-    /// Rescales the built-in decay, which is how a damper falls on a string:
-    /// the rotation keeps its angle and loses magnitude faster from now on.
-    fn damp(&mut self, factor: f32) {
-        self.rc *= factor;
-        self.rs *= factor;
     }
 }
 
@@ -438,12 +423,12 @@ impl Partial {
     #[inline(always)]
     fn tick(&mut self) -> f32 {
         let mut out = [0.0f32; LANES];
-        for lane in 0..LANES {
+        for (lane, output) in out.iter_mut().enumerate() {
             let s = self.s[lane] * self.rc[lane] + self.c[lane] * self.rs[lane];
             let c = self.c[lane] * self.rc[lane] - self.s[lane] * self.rs[lane];
             self.s[lane] = s;
             self.c[lane] = c;
-            out[lane] = s;
+            *output = s;
         }
         out[0] + out[1] + out[2] + out[3] + out[4]
     }
@@ -1312,7 +1297,6 @@ impl Default for Controls {
 
 impl Controls {
     /// Lab multiplier i: 0..1 slider -> off..x16, centre = x1.
-
     /// The lab curve for a standalone control: off at the bottom, x1 at
     /// the centre, x16 at the top.
     fn noise_gain(value: f32) -> f32 {
@@ -1708,6 +1692,18 @@ static CONTACT_STEPS: core::sync::atomic::AtomicU32 = core::sync::atomic::Atomic
 /// mode's (position, velocity/ω) state at contact end — amplitudes AND
 /// phases of the attack, emergent instead of scripted (Chaigne & Askenfelt).
 /// Normalised units: string modal masses are 1, the hammer carries `mass`.
+#[derive(Clone, Copy)]
+struct StrikeConfiguration {
+    x0: f32,
+    contact_width: f32,
+    mass: f32,
+    string_mass: f32,
+    stiffness: f32,
+    exponent: f32,
+    velocity: f32,
+    contact_seconds: f32,
+}
+
 /// Integrates the hammer against the string modes during contact.
 ///
 /// KNOWN DEFECT, measured by `how_long_the_hammer_stays`: the hammer does not
@@ -1731,15 +1727,18 @@ static CONTACT_STEPS: core::sync::atomic::AtomicU32 = core::sync::atomic::Atomic
 fn simulate_strike(
     frequencies: &[f32],
     modes: usize,
-    x0: f32,
-    contact_width: f32,
-    mass: f32,
-    string_mass: f32,
-    stiffness: f32,
-    exponent: f32,
-    velocity0: f32,
-    contact_seconds: f32,
+    configuration: StrikeConfiguration,
 ) -> ([f32; SIM_MODES], [f32; SIM_MODES]) {
+    let StrikeConfiguration {
+        x0,
+        contact_width,
+        mass,
+        string_mass,
+        stiffness,
+        exponent,
+        velocity: velocity0,
+        contact_seconds,
+    } = configuration;
     let dt = 4.0e-6_f32;
     // The contact ends when the string throws the hammer off, and not
     // before. This loop used to be CUT at a contact time drawn from a
@@ -2048,11 +2047,10 @@ impl ConcertGrand {
 
     /// Sizes the shimmer's delay lines for the current rate.
     fn tune_halo(&mut self) {
-        for line in 0..4 {
-            self.halo_len[line] =
-                ((HALO_DELAYS_S[line] * self.sample_rate) as usize).clamp(1, HALO_BUFFER - 1);
+        for (line, delay) in HALO_DELAYS_S.iter().copied().enumerate() {
+            self.halo_len[line] = ((delay * self.sample_rate) as usize).clamp(1, HALO_BUFFER - 1);
             self.halo_index[line] %= self.halo_len[line];
-            self.halo_gain[line] = powf(10.0, -3.0 * HALO_DELAYS_S[line] / HALO_RT60_S);
+            self.halo_gain[line] = powf(10.0, -3.0 * delay / HALO_RT60_S);
         }
         self.halo_hp_k = 1.0 - expf(-core::f32::consts::TAU * HALO_HP_HZ / self.sample_rate);
     }
@@ -2085,8 +2083,8 @@ impl ConcertGrand {
         let rt_mid = rt(alpha_mid, 0.0002);
         let rt_high = rt(alpha_high, AIR_ABSORB_4K_PER_M);
 
-        for line in 0..ROOM_LINES {
-            let seconds = mean_free_path / SOUND_SPEED * ROOM_SPREAD[line];
+        for (line, spread) in ROOM_SPREAD.iter().copied().enumerate() {
+            let seconds = mean_free_path / SOUND_SPEED * spread;
             let samples = ((seconds * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
             self.room_len[line] = samples;
             self.room_index[line] %= samples;
@@ -2687,18 +2685,20 @@ impl ConcertGrand {
                 let (q, over_omega) = simulate_strike(
                     &frequencies,
                     sim_modes,
-                    x0,
-                    // Hard blows compress the felt and narrow the contact, the
-                    // same law the recipe used.
-                    width * (1.05 - 0.45 * velocity),
-                    mass,
-                    string_mass,
-                    stiffness,
-                    exponent,
-                    velocity0,
-                    // A cap only: the hammer leaves when the string throws it
-                    // off. 20 ms is several times any physical contact.
-                    0.020 * CONTACT_STRETCH,
+                    StrikeConfiguration {
+                        x0,
+                        // Hard blows compress the felt and narrow the contact,
+                        // the same law the recipe used.
+                        contact_width: width * (1.05 - 0.45 * velocity),
+                        mass,
+                        string_mass,
+                        stiffness,
+                        exponent,
+                        velocity: velocity0,
+                        // A cap only: the hammer leaves when the string throws
+                        // it off. 20 ms is several times any physical contact.
+                        contact_seconds: 0.020 * CONTACT_STRETCH,
+                    },
                 );
                 // Scale the simulated strike to the recipe's level.
                 //
@@ -2830,9 +2830,9 @@ impl ConcertGrand {
         // Energy normalisation, then the velocity curve: level roughly
         // velocity^1.7 (sound pressure grows faster than hammer speed).
         let mut energy = 0.0;
-        for n in 0..count {
-            if amplitudes[n].abs() >= floor {
-                energy += amplitudes[n] * amplitudes[n];
+        for amplitude in amplitudes.iter().take(count).copied() {
+            if amplitude.abs() >= floor {
+                energy += amplitude * amplitude;
             }
         }
         let scale =
@@ -3873,7 +3873,7 @@ impl Processor for ConcertGrand {
         // values is deliberately ignored rather than the whole state -- the
         // controls the user dialled in are all in the head.
         const LEGACY_PARAM_COUNT: usize = 37;
-        if state.len() % 4 != 0 || state.len() > LEGACY_PARAM_COUNT * 4 {
+        if !state.len().is_multiple_of(4) || state.len() > LEGACY_PARAM_COUNT * 4 {
             return false;
         }
         // Every parameter's own default, so a shorter (older) state leaves
@@ -3903,12 +3903,7 @@ impl Processor for ConcertGrand {
         } else {
             state.len() / 4
         };
-        for (value, chunk) in values
-            .iter_mut()
-            .zip(state.chunks_exact(4))
-            .take(readable)
-            .map(|(value, chunk)| (value, chunk))
-        {
+        for (value, chunk) in values.iter_mut().zip(state.chunks_exact(4)).take(readable) {
             let Ok(bytes) = <[u8; 4]>::try_from(chunk) else {
                 return false;
             };
@@ -4064,13 +4059,13 @@ impl Processor for ConcertGrand {
             let bright = excitation - self.halo_lp;
             let mut halo_outs = [0.0f32; 4];
             let mut halo_sum = 0.0;
-            for line in 0..4 {
-                halo_outs[line] = self.halo[line][self.halo_index[line]];
-                halo_sum += halo_outs[line];
+            for (line, output) in halo_outs.iter_mut().enumerate() {
+                *output = self.halo[line][self.halo_index[line]];
+                halo_sum += *output;
             }
             let halo_householder = halo_sum * 0.5;
-            for line in 0..4 {
-                let feedback = (halo_outs[line] - halo_householder) * self.halo_gain[line];
+            for (line, output) in halo_outs.iter().copied().enumerate() {
+                let feedback = (output - halo_householder) * self.halo_gain[line];
                 let index = self.halo_index[line];
                 self.halo[line][index] = bright * 0.5 + feedback;
                 let next = index + 1;
@@ -4155,13 +4150,13 @@ impl Processor for ConcertGrand {
             // lives in a room; the tail is part of the piano the ear knows.
             let mut outs = [0.0f32; ROOM_LINES];
             let mut outs_sum = 0.0;
-            for line in 0..ROOM_LINES {
-                outs[line] = self.room[line][self.room_index[line]];
-                outs_sum += outs[line];
+            for (line, output) in outs.iter_mut().enumerate() {
+                *output = self.room[line][self.room_index[line]];
+                outs_sum += *output;
             }
             let householder = outs_sum * (2.0 / ROOM_LINES as f32);
-            for line in 0..ROOM_LINES {
-                let feedback = outs[line] - householder;
+            for (line, output) in outs.iter().copied().enumerate() {
+                let feedback = output - householder;
                 self.room_lp[line] += self.room_damp * (feedback - self.room_lp[line]);
                 // The low shelf: hard rooms let the bottom ring past the
                 // mids, soft ones take it down with everything else.
@@ -5038,7 +5033,7 @@ mod tests {
             let mut den = 0.0f64;
             let mut rows = String::new();
             for p in &voice.partials[..voice.partial_count] {
-                let f = (p.rs[0].atan2(p.rc[0]) as f64).abs() * FS as f64 / core::f64::consts::TAU;
+                let f = (p.rs[0].atan2(p.rc[0]) as f64).abs() * FS / core::f64::consts::TAU;
                 if f < 20.0 {
                     continue;
                 }
@@ -5466,13 +5461,13 @@ mod tests {
             decay_squared(&voice.duplex[0]) > 0.0,
             "treble note grew no duplex"
         );
-        let string_before = (voice.partials[0].rc[0] * voice.partials[0].rc[0]
-            + voice.partials[0].rs[0] * voice.partials[0].rs[0]);
+        let string_before = voice.partials[0].rc[0] * voice.partials[0].rc[0]
+            + voice.partials[0].rs[0] * voice.partials[0].rs[0];
         let duplex_before = decay_squared(&voice.duplex[0]);
         render(&mut piano, 8, &[note_off(84)]);
         let voice = piano.voices.iter().find(|v| v.active).unwrap();
-        let string_after = (voice.partials[0].rc[0] * voice.partials[0].rc[0]
-            + voice.partials[0].rs[0] * voice.partials[0].rs[0]);
+        let string_after = voice.partials[0].rc[0] * voice.partials[0].rc[0]
+            + voice.partials[0].rs[0] * voice.partials[0].rs[0];
         let duplex_after = decay_squared(&voice.duplex[0]);
         assert!(
             string_after < string_before * 0.9999,

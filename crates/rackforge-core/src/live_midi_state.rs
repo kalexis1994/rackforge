@@ -74,10 +74,12 @@ impl ReservedMidiControls {
             }
             return true;
         }
-        if event.length == 3 && event.data[0] & 0xf0 == 0xb0 && event.data[1] <= 119 {
-            if self.control_changes[(event.data[0] & 0x0f) as usize][event.data[1] as usize] {
-                return true;
-            }
+        if event.length == 3
+            && event.data[0] & 0xf0 == 0xb0
+            && event.data[1] <= 119
+            && self.control_changes[(event.data[0] & 0x0f) as usize][event.data[1] as usize]
+        {
+            return true;
         }
         let Some(state) = self.sources.get_mut(source.get() as usize) else {
             return false;

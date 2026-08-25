@@ -56,20 +56,42 @@ jobs:
         shell: bash
         run: pnpm --dir web test
 
+      - name: Lint Web workspace
+        shell: bash
+        run: pnpm --dir web lint --max-warnings=0
+
       - name: Build Web workspace
         shell: bash
         run: pnpm --dir web build
+
+      - name: Check Rust formatting
+        shell: bash
+        run: cargo fmt --all -- --check
 
       - name: Test shared runtime contracts
         shell: bash
         run: |
           cargo test --locked \
+            -p rackforge-audio-api \
+            -p rackforge-control-profile \
             -p rackforge-control-api \
+            -p rackforge-controller-api \
+            -p rackforge-controller-package \
+            -p rackforge-dsp \
+            -p rackforge-host-capabilities \
+            -p rackforge-midi-api \
+            -p rackforge-platform-api \
+            -p rackforge-plugin-api \
+            -p rackforge-plugin-runtime \
+            -p rackforge-program-api \
+            -p rackforge-resource-api \
             -p rackforge-session-api \
+            -p rackforge-surface-api \
             -p rackforge-performance-api \
             -p rackforge-repository \
             -p rackforge-resource-host \
             -p rackforge-surface-runtime \
+            -p rackforge-ui \
             -p rackforge-core \
             -p rackforge-controller-arturia-keylab-essential-mk3
 
@@ -159,6 +181,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+          rustup component add rustfmt
 
       - name: Set up Node.js
         uses: actions/setup-node@v6

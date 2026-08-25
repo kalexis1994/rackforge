@@ -230,10 +230,11 @@ impl Component for SecretEditor {
         if area.width == 0 || area.height == 0 {
             return;
         }
-        let counter = self
-            .is_editing()
-            .then(|| format!(" {}/{}", self.cursor + 1, self.maximum_length))
-            .unwrap_or_default();
+        let counter = if self.is_editing() {
+            format!(" {}/{}", self.cursor + 1, self.maximum_length)
+        } else {
+            String::new()
+        };
         let label_width = area.width.saturating_sub(counter.len());
         frame.fill(Rect::new(area.x, area.y, area.width, 1), ' ', Style::NORMAL);
         frame.write(

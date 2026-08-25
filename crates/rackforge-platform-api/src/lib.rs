@@ -435,7 +435,7 @@ fn validate_request_id(value: &str) -> Result<(), PlatformError> {
 
 fn validate_wifi_ssid(value: &str) -> Result<(), PlatformError> {
     if value.is_empty()
-        || value.as_bytes().len() > 32
+        || value.len() > 32
         || value.bytes().any(|byte| matches!(byte, 0 | b'\r' | b'\n'))
     {
         return Err(PlatformError::InvalidWifiSsid);

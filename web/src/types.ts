@@ -16,7 +16,7 @@ export interface HostAudioOutput {
   buffer_frames: number[];
 }
 
-export interface HostAudioInput extends HostAudioOutput {}
+export type HostAudioInput = HostAudioOutput;
 
 export interface HostAudioPreferences {
   schema_version: number;

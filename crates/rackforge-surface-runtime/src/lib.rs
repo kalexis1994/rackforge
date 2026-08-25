@@ -425,7 +425,7 @@ enum Page {
     PluginProgramOutput,
     PluginUnsavedChanges,
     ProgramEditorRoot,
-    ProgramEditorPage,
+    ProgramEditorSection,
     ProgramEditorField,
     ProgramEditorSound,
 }
@@ -1389,11 +1389,10 @@ impl Menu {
             self.apply_keyboard_parts_input(input);
         } else if self.page == Page::ProgramEditorField {
             self.apply_generic_editor_field_input(input);
-        } else if self.page == Page::ProgramEditorSound {
-            if let Some(action) = input.default_navigation() {
-                self.apply_generic_editor_action(action);
-            }
-        } else if matches!(self.page, Page::ProgramEditorRoot | Page::ProgramEditorPage) {
+        } else if matches!(
+            self.page,
+            Page::ProgramEditorSound | Page::ProgramEditorRoot | Page::ProgramEditorSection
+        ) {
             if let Some(action) = input.default_navigation() {
                 self.apply_generic_editor_action(action);
             }
@@ -1803,9 +1802,7 @@ impl Menu {
                 }
             }
             Page::ConfigRackSlotMidiOutput => {
-                if select {
-                    self.page = Page::ConfigRackSlotEditor;
-                } else if back {
+                if select || back {
                     self.page = Page::ConfigRackSlotEditor;
                 }
             }
@@ -2533,14 +2530,14 @@ impl Menu {
                 2 => self.move_song_part(-1),
                 3 => self.move_song_part(1),
                 _ => {
-                    if let Some(PerformanceDraft::Song(song)) = self.performance_draft.as_mut() {
-                        if song.parts.len() > 1 {
-                            song.parts.remove(self.performance_child_index);
-                            self.performance_dirty = true;
-                            self.performance_child_index =
-                                self.performance_child_index.min(song.parts.len() - 1) + 1;
-                            self.page = Page::ConfigSongParts;
-                        }
+                    if let Some(PerformanceDraft::Song(song)) = self.performance_draft.as_mut()
+                        && song.parts.len() > 1
+                    {
+                        song.parts.remove(self.performance_child_index);
+                        self.performance_dirty = true;
+                        self.performance_child_index =
+                            self.performance_child_index.min(song.parts.len() - 1) + 1;
+                        self.page = Page::ConfigSongParts;
                     }
                 }
             }
@@ -2640,14 +2637,13 @@ impl Menu {
                 _ => {
                     if let Some(PerformanceDraft::Setlist(setlist)) =
                         self.performance_draft.as_mut()
+                        && setlist.entries.len() > 1
                     {
-                        if setlist.entries.len() > 1 {
-                            setlist.entries.remove(self.performance_child_index);
-                            self.performance_dirty = true;
-                            self.performance_child_index =
-                                self.performance_child_index.min(setlist.entries.len() - 1) + 1;
-                            self.page = Page::ConfigSetlistEntries;
-                        }
+                        setlist.entries.remove(self.performance_child_index);
+                        self.performance_dirty = true;
+                        self.performance_child_index =
+                            self.performance_child_index.min(setlist.entries.len() - 1) + 1;
+                        self.page = Page::ConfigSetlistEntries;
                     }
                 }
             }
@@ -2731,7 +2727,7 @@ impl Menu {
         }
         if matches!(
             self.page,
-            Page::ProgramEditorRoot | Page::ProgramEditorPage | Page::ProgramEditorSound
+            Page::ProgramEditorRoot | Page::ProgramEditorSection | Page::ProgramEditorSound
         ) {
             self.apply_generic_editor_action(action);
             return;
@@ -2875,14 +2871,14 @@ impl Menu {
                     }
                     return;
                 }
-                if let Some(location) = self.focused_live_location() {
-                    if matches!(
+                if let Some(location) = self.focused_live_location()
+                    && matches!(
                         self.page,
                         Page::LiveRacks | Page::LiveSongParts | Page::LiveSetlistEntries
-                    ) {
-                        self.pending_command = Some(MenuCommand::ActivateLiveTarget { location });
-                        return;
-                    }
+                    )
+                {
+                    self.pending_command = Some(MenuCommand::ActivateLiveTarget { location });
+                    return;
                 }
                 self.page = match self.page {
                     Page::Home => match self.home_index {
@@ -3343,7 +3339,7 @@ impl Menu {
                 Screen::with_header(&self.active_plugin_name, line_1, line_2)
             }
             Page::ProgramEditorRoot => self.render_generic_editor_root(),
-            Page::ProgramEditorPage => self.render_generic_editor_page(),
+            Page::ProgramEditorSection => self.render_generic_editor_page(),
             Page::ProgramEditorField => self.render_generic_editor_field(),
             Page::ProgramEditorSound => self.render_generic_editor_sound(),
         };
@@ -4812,7 +4808,7 @@ impl Menu {
             | Page::PluginEnvelope
             | Page::PluginUnsavedChanges
             | Page::ProgramEditorRoot
-            | Page::ProgramEditorPage
+            | Page::ProgramEditorSection
             | Page::ProgramEditorField
             | Page::ProgramEditorSound
             | Page::SystemWifi
@@ -4838,10 +4834,10 @@ impl Menu {
             Page::ProgramEditorSound => match action {
                 Action::Previous => self.move_editor_sound(-1),
                 Action::Next => self.move_editor_sound(1),
-                Action::Back => self.page = Page::ProgramEditorPage,
+                Action::Back => self.page = Page::ProgramEditorSection,
                 Action::Select => self.select_editor_sound(),
             },
-            Page::ProgramEditorRoot | Page::ProgramEditorPage => match action {
+            Page::ProgramEditorRoot | Page::ProgramEditorSection => match action {
                 Action::Previous => self.move_editor_selection(-1),
                 Action::Next => self.move_editor_selection(1),
                 Action::Back => self.back_from_generic_editor(),
@@ -4914,7 +4910,7 @@ impl Menu {
                 self.editor_path.push(selected - 1);
                 self.editor_selections.resize(2, 0);
                 self.editor_selections[1] = 0;
-                self.page = Page::ProgramEditorPage;
+                self.page = Page::ProgramEditorSection;
                 if page.enabled && page.pages.is_empty() && page.fields.len() == 1 {
                     self.open_generic_editor_field(page.fields[0].clone(), false);
                 }
@@ -4943,7 +4939,7 @@ impl Menu {
             let depth = self.editor_path.len();
             self.editor_selections.resize(depth + 1, 0);
             self.editor_selections[depth] = 0;
-            self.page = Page::ProgramEditorPage;
+            self.page = Page::ProgramEditorSection;
             if child.pages.is_empty() && child.fields.len() == 1 {
                 self.open_generic_editor_field(child.fields[0].clone(), false);
             }
@@ -4989,7 +4985,7 @@ impl Menu {
 
     fn apply_generic_editor_field_input(&mut self, input: Input) {
         let Some(editor) = self.editor_field.as_mut() else {
-            self.page = Page::ProgramEditorPage;
+            self.page = Page::ProgramEditorSection;
             return;
         };
         let event = editor.handle(input);
@@ -5018,7 +5014,7 @@ impl Menu {
     fn close_generic_editor_field(&mut self) {
         self.editor_field = None;
         self.editor_field_id = None;
-        self.page = Page::ProgramEditorPage;
+        self.page = Page::ProgramEditorSection;
     }
 
     fn active_editor_field(&self) -> Option<&ProgramEditorField> {
@@ -5075,7 +5071,7 @@ impl Menu {
         self.page = if self.editor_path.is_empty() {
             Page::ProgramEditorRoot
         } else {
-            Page::ProgramEditorPage
+            Page::ProgramEditorSection
         };
     }
 
@@ -5742,7 +5738,7 @@ impl Menu {
                 | Page::PluginProgramOutput
                 | Page::PluginUnsavedChanges
                 | Page::ProgramEditorRoot
-                | Page::ProgramEditorPage
+                | Page::ProgramEditorSection
                 | Page::ProgramEditorField
                 | Page::ProgramEditorSound
         )

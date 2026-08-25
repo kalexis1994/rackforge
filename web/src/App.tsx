@@ -522,15 +522,12 @@ function RackForgeApp() {
     void completePlayNavigation(instance);
   }, [completePlayNavigation, liveWorkspace, location.pathname, snapshot]);
 
-  useEffect(() => {
-    if (
-      preferredPlayInstanceId &&
-      snapshot?.active_mode === "play" &&
-      snapshot.active_instance_id === preferredPlayInstanceId
-    ) {
-      setPreferredPlayInstanceId(null);
-    }
-  }, [preferredPlayInstanceId, snapshot]);
+  const pendingPreferredPlayInstanceId =
+    preferredPlayInstanceId &&
+    snapshot?.active_mode === "play" &&
+    snapshot.active_instance_id === preferredPlayInstanceId
+      ? null
+      : preferredPlayInstanceId;
 
   return (
     <div className={`app-shell${vstHost ? " vst-host" : ""}${isPluginSurface ? " plugin-surface-active" : ""}${
@@ -635,7 +632,7 @@ function RackForgeApp() {
                   snapshot={snapshot}
                   overlay={playOverlay}
                   onOverlayChange={setPlayOverlay}
-                  preferredInstanceId={preferredPlayInstanceId}
+                  preferredInstanceId={pendingPreferredPlayInstanceId}
                 />
               }
             />
@@ -2221,23 +2218,15 @@ function meterPercent(db: number) {
 }
 
 function MasterOutputMeter() {
-  const [sample, setSample] = useState({
-    meter: { left_peak: 0, right_peak: 0 } as OutputMeterSnapshot,
-    sequence: 0,
-  });
-  const incoming = [
-    amplitudeToMeterDb(sample.meter.left_peak),
-    amplitudeToMeterDb(sample.meter.right_peak),
-  ] as const;
   const [levels, setLevels] = useState<[number, number]>([METER_FLOOR_DB, METER_FLOOR_DB]);
   const [holds, setHolds] = useState<[number, number]>([METER_FLOOR_DB, METER_FLOOR_DB]);
   const holdUntil = useRef<[number, number]>([0, 0]);
 
-  useEffect(() => subscribeOutputMeter((meter) => {
-    setSample((previous) => ({ meter, sequence: previous.sequence + 1 }));
-  }), []);
-
-  useEffect(() => {
+  useEffect(() => subscribeOutputMeter((meter: OutputMeterSnapshot) => {
+    const incoming = [
+      amplitudeToMeterDb(meter.left_peak),
+      amplitudeToMeterDb(meter.right_peak),
+    ] as const;
     const now = performance.now();
     setLevels((previous) => [
       Math.max(incoming[0], previous[0] - 2.4),
@@ -2253,7 +2242,7 @@ function MasterOutputMeter() {
         ? held
         : Math.max(next, held - 1.2);
     }) as [number, number]);
-  }, [sample.sequence]);
+  }), []);
 
   const maximum = Math.max(...levels);
   const readable = maximum <= METER_FLOOR_DB
@@ -2653,7 +2642,11 @@ function PlayPage({
         />
       )}
       {presetsOpen && active && (
-        <PresetModal instance={active} onClose={() => onOverlayChange(null)} />
+        <PresetModal
+          key={active.instance_id}
+          instance={active}
+          onClose={() => onOverlayChange(null)}
+        />
       )}
     </section>
   );
@@ -2956,8 +2949,21 @@ function PresetModal({
       .finally(() => setLoadingPresets(false));
   }, [instance.plugin_id]);
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let cancelled = false;
+    requestPluginPresets(instance.plugin_id)
+      .then((nextPresets) => {
+        if (!cancelled) setPresets(nextPresets);
+      })
+      .catch((error: Error) => {
+        if (!cancelled) setMessage(error.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPresets(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [instance.plugin_id]);
   const load = (preset: HostPresetSummary) => {
     setBusyAction({ kind: "load", presetId: preset.id });
     setMessage(null);
@@ -4085,16 +4091,26 @@ export function PluginFrame({
     : catalogDescriptor.status === "ready"
       ? descriptor ? "ready" : "unavailable"
       : "loading";
-  const [frameLoaded, setFrameLoaded] = useState(false);
+  const selectedSurface = descriptor?.surfaces.find(
+    (candidate) => candidate.kind === surface,
+  );
+  const surfaceIdentity = [
+    instance.plugin_id,
+    descriptor?.version ?? "loading",
+    selectedSurface?.entry_url ?? surface,
+  ].join(":");
+  const [loadedFrameIdentity, setLoadedFrameIdentity] = useState<string | null>(null);
+  const frameLoaded = loadedFrameIdentity === surfaceIdentity;
   const [frameDocumentGeneration, setFrameDocumentGeneration] = useState(0);
   // The splash's own lifecycle: the icon fill reaches the top, THEN the
   // whole overlay fades, THEN it unmounts. Removing it on iframe load was
   // an abrupt cut.
-  const [splashDone, setSplashDone] = useState(false);
-  const [splashGone, setSplashGone] = useState(false);
+  const [completedSplashIdentity, setCompletedSplashIdentity] = useState<string | null>(null);
+  const [hiddenSplashIdentity, setHiddenSplashIdentity] = useState<string | null>(null);
+  const splashDone = completedSplashIdentity === surfaceIdentity;
+  const splashGone = hiddenSplashIdentity === surfaceIdentity;
   const splashLitRef = useRef<HTMLImageElement | null>(null);
   const frameLoadedRef = useRef(false);
-  frameLoadedRef.current = frameLoaded;
   const [resourceBusy, setResourceBusy] = useState<string | null>(null);
   const snapshot = useSelector((state: RootState) => state.rackforge.snapshot);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -4160,6 +4176,10 @@ export function PluginFrame({
   useEffect(() => {
     onIsolatedStateChangeRef.current = onIsolatedStateChange;
   }, [onIsolatedStateChange]);
+
+  useEffect(() => {
+    frameLoadedRef.current = frameLoaded;
+  }, [frameLoaded]);
 
   const publishIsolatedState = useCallback((state: PluginStateReference) => {
     isolatedStateRef.current = state;
@@ -4339,14 +4359,12 @@ export function PluginFrame({
     publishIsolatedState,
   ]);
 
-  const selectedSurface = descriptor?.surfaces.find(
-    (candidate) => candidate.kind === surface,
-  );
+  const isolatedSelectedSoundId = isolatedContextState?.selected_sound_id;
   const pluginContext = useMemo(() => {
-    const contextInstance = isolated && isolatedContextState?.selected_sound_id
+    const contextInstance = isolated && isolatedSelectedSoundId
       ? {
           ...instance,
-          selected_sound_id: isolatedContextState.selected_sound_id,
+          selected_sound_id: isolatedSelectedSoundId,
         }
       : instance;
     return {
@@ -4368,7 +4386,7 @@ export function PluginFrame({
         master_pan: snapshot?.master_pan ?? 0,
       },
     };
-  }, [instance, isolated, isolatedContextState?.selected_sound_id, snapshot, surface]);
+  }, [instance, isolated, isolatedSelectedSoundId, snapshot, surface]);
 
   // Parameter changes can originate outside the iframe (MIDI Learn links,
   // semantic .rfcontroller profiles, automation, or another RackForge
@@ -4377,7 +4395,8 @@ export function PluginFrame({
   // request is serialized and visibility-aware so slow bridges cannot build
   // an unbounded polling backlog.
   useEffect(() => {
-    liveParameterValuesRef.current.clear();
+    const parameterValues = liveParameterValuesRef.current;
+    parameterValues.clear();
     if (!frameLoaded || isolated || !selectedSurface) return;
 
     let cancelled = false;
@@ -4388,10 +4407,9 @@ export function PluginFrame({
         try {
           const result = await requestPluginParameters(instance.instance_id);
           if (cancelled) return;
-          const previous = liveParameterValuesRef.current;
           for (const parameter of result.values) {
-            if (previous.get(parameter.index) === parameter.value) continue;
-            previous.set(parameter.index, parameter.value);
+            if (parameterValues.get(parameter.index) === parameter.value) continue;
+            parameterValues.set(parameter.index, parameter.value);
             frameRef.current?.contentWindow?.postMessage(
               {
                 protocol: "rackforge.plugin.web@1",
@@ -4416,20 +4434,15 @@ export function PluginFrame({
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
-      liveParameterValuesRef.current.clear();
+      parameterValues.clear();
     };
   }, [
     frameDocumentGeneration,
     frameLoaded,
     instance.instance_id,
     isolated,
-    selectedSurface?.entry_url,
+    selectedSurface,
   ]);
-
-  useEffect(() => {
-    setSplashDone(false);
-    setSplashGone(false);
-  }, [descriptor?.version, selectedSurface?.entry_url]);
 
   // The icon reveal: a dim copy of the plugin icon sits under a full-color
   // copy clipped from the top, and the clip retreats bottom-to-top. The
@@ -4453,7 +4466,7 @@ export function PluginFrame({
         lit.style.clipPath = `inset(${((1 - progress) * 100).toFixed(2)}% 0 0 0)`;
         if (frameLoadedRef.current && progress > 0.995) {
           lit.style.clipPath = "inset(0 0 0 0)";
-          setSplashDone(true);
+          setCompletedSplashIdentity(surfaceIdentity);
           return;
         }
       }
@@ -4461,7 +4474,7 @@ export function PluginFrame({
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [splashGone, descriptor?.version, selectedSurface?.entry_url]);
+  }, [splashGone, surfaceIdentity]);
 
   // Insurance for the reveal: animation frames stop in a hidden window
   // (minimized, background tab), and the splash must never outlive the
@@ -4469,9 +4482,12 @@ export function PluginFrame({
   // completes the splash even if no frame ever fires.
   useEffect(() => {
     if (!frameLoaded || splashDone) return;
-    const timer = window.setTimeout(() => setSplashDone(true), 1800);
+    const timer = window.setTimeout(
+      () => setCompletedSplashIdentity(surfaceIdentity),
+      1800,
+    );
     return () => window.clearTimeout(timer);
-  }, [frameLoaded, splashDone]);
+  }, [frameLoaded, splashDone, surfaceIdentity]);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -4489,7 +4505,7 @@ export function PluginFrame({
         return;
       }
       if (event.data.kind === "ready") {
-        setFrameLoaded(true);
+        setLoadedFrameIdentity(surfaceIdentity);
         setFrameDocumentGeneration((generation) => generation + 1);
         send(pluginContext);
         return;
@@ -4972,6 +4988,7 @@ export function PluginFrame({
     selectedSurface,
     snapshot,
     surface,
+    surfaceIdentity,
     pluginContext,
   ]);
 
@@ -5059,7 +5076,7 @@ export function PluginFrame({
           sandbox="allow-scripts allow-same-origin allow-downloads"
           referrerPolicy="same-origin"
           onLoad={() => {
-            setFrameLoaded(true);
+            setLoadedFrameIdentity(surfaceIdentity);
             setFrameDocumentGeneration((generation) => generation + 1);
             // Plugin surfaces are same-origin, sandboxed documents. Give them
             // RackForge's low-specificity scrollbar defaults while allowing a
@@ -5099,7 +5116,7 @@ export function PluginFrame({
             aria-label={`Loading ${instance.plugin_name}`}
             onTransitionEnd={(event) => {
               if (event.target === event.currentTarget && splashDone) {
-                setSplashGone(true);
+                setHiddenSplashIdentity(surfaceIdentity);
               }
             }}
           >
@@ -5313,7 +5330,7 @@ const TYPING_KEY_NOTES: Record<string, number> = {
   Equal: 78, BracketRight: 79,
 };
 
-export function typingKeyboardEnabled(): boolean {
+function typingKeyboardEnabled(): boolean {
   try {
     return localStorage.getItem(TYPING_KEYBOARD_STORAGE) === "1";
   } catch {

@@ -478,9 +478,7 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             },
             Err(_) => internal_error("audio state lock is poisoned", current_revision(context)),
         },
-        ControlRequest::OutputMeter => ControlResponse::OutputMeter {
-            meter: context.output_meter.take(),
-        },
+        ControlRequest::OutputMeter => output_meter_response(&context),
         ControlRequest::PerformanceSnapshot => {
             match (context.store.lock(), context.performance_repository.lock()) {
                 (Ok(store), Ok(repository)) => {
@@ -4526,6 +4524,12 @@ fn internal_error(
     error_response(ControlErrorCode::Internal, message, current_revision)
 }
 
+fn output_meter_response(context: &ControlContext) -> ControlResponse {
+    ControlResponse::OutputMeter {
+        meter: context.output_meter.take(),
+    }
+}
+
 fn write_response(stream: &mut UnixStream, response: &ControlResponse) -> Result<()> {
     let bytes = encode_line(response).context("serializing control response")?;
     stream
@@ -4648,6 +4652,7 @@ mod tests {
                     active_profile: profile,
                     devices: vec![device],
                 })),
+                output_meter: Arc::new(OutputMeter::default()),
                 audio_state_path: std::env::temp_dir().join("rackforge-control-audio.toml"),
                 performance_repository: Arc::new(Mutex::new(
                     PerformanceRepository::in_memory(PerformanceLibrary {
@@ -4717,6 +4722,23 @@ mod tests {
             }),
             receiver,
         )
+    }
+
+    #[test]
+    fn output_meter_request_drains_the_shared_post_master_peaks() {
+        let (context, _receiver) = context();
+        context.output_meter.observe_stereo(0.25, 1.25);
+
+        assert!(matches!(
+            output_meter_response(&context),
+            ControlResponse::OutputMeter { meter }
+                if meter.left_peak == 0.25 && meter.right_peak == 1.25
+        ));
+        assert!(matches!(
+            output_meter_response(&context),
+            ControlResponse::OutputMeter { meter }
+                if meter.left_peak == 0.0 && meter.right_peak == 0.0
+        ));
     }
 
     #[test]

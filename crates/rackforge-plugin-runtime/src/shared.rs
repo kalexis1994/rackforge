@@ -112,7 +112,7 @@ pub(crate) fn byte_range(
     alignment: usize,
     memory_size: usize,
 ) -> Result<Range<usize>> {
-    if offset < 0 || offset as usize % alignment != 0 {
+    if offset < 0 || !(offset as usize).is_multiple_of(alignment) {
         bail!("plugin returned an invalid linear-memory pointer");
     }
     let start = offset as usize;

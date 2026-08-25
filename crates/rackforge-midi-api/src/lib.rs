@@ -234,32 +234,28 @@ pub enum PluginChannelModel {
     MultiPart,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MidiSourceSelector {
+    #[default]
     Primary,
     AllPerformance,
-    Source { source_id: MidiSourceId },
+    Source {
+        source_id: MidiSourceId,
+    },
 }
 
-impl Default for MidiSourceSelector {
-    fn default() -> Self {
-        Self::Primary
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MidiChannelFilter {
+    #[default]
     Omni,
-    Channel { channel: MidiChannel },
-    Set { channels: Vec<MidiChannel> },
-}
-
-impl Default for MidiChannelFilter {
-    fn default() -> Self {
-        Self::Omni
-    }
+    Channel {
+        channel: MidiChannel,
+    },
+    Set {
+        channels: Vec<MidiChannel>,
+    },
 }
 
 impl MidiChannelFilter {
@@ -431,21 +427,18 @@ impl<'de> Deserialize<'de> for MidiTranspose {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MidiChannelTransform {
+    #[default]
     Auto,
     Preserve,
-    Channel { channel: MidiChannel },
+    Channel {
+        channel: MidiChannel,
+    },
 }
 
-impl Default for MidiChannelTransform {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MidiRouteMatch {
     #[serde(default)]
@@ -460,34 +453,13 @@ pub struct MidiRouteMatch {
     pub messages: MidiMessageFilter,
 }
 
-impl Default for MidiRouteMatch {
-    fn default() -> Self {
-        Self {
-            source: MidiSourceSelector::default(),
-            channels: MidiChannelFilter::default(),
-            notes: MidiNoteRange::default(),
-            velocities: MidiVelocityRange::default(),
-            messages: MidiMessageFilter::default(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MidiRouteTransform {
     #[serde(default)]
     pub channel: MidiChannelTransform,
     #[serde(default)]
     pub transpose: MidiTranspose,
-}
-
-impl Default for MidiRouteTransform {
-    fn default() -> Self {
-        Self {
-            channel: MidiChannelTransform::default(),
-            transpose: MidiTranspose::default(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

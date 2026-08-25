@@ -31,6 +31,7 @@ use rackforge_midi_api::{
     MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry, MidiSourceSelector,
     MidiTargetId, ParameterLink, ParameterLinkPassThrough, PluginChannelModel,
 };
+#[cfg(test)]
 use rackforge_performance_api::RackKeyboardParts;
 use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use rackforge_plugin_api::{ParameterKind, PluginKind};

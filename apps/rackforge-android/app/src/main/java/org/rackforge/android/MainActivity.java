@@ -106,6 +106,7 @@ public final class MainActivity extends Activity {
     private WebView webView;
     private Spinner audioOutputSpinner;
     private volatile boolean audioRunning;
+    private volatile boolean activityResumed;
     private volatile int selectedAudioDeviceId;
     private String selectedAudioDeviceKey = "default";
     private int latencyMode;
@@ -421,6 +422,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        activityResumed = true;
         refreshAudioOutputs();
         scheduleMidiReconnect();
         // A system document picker temporarily pauses the Activity. Navigating while its
@@ -432,7 +434,14 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        activityResumed = false;
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
+        activityResumed = false;
         releaseAllVirtualMidi();
         // Restore LITTLE while Android still owns every MIDI destination.
         // Audio and the foreground service are stopped only afterwards.
@@ -457,6 +466,35 @@ public final class MainActivity extends Activity {
     static void releaseControllerHardware() {
         MainActivity activity = activeActivity;
         if (activity != null) activity.closeMidi();
+    }
+
+    static String qualificationSnapshot() {
+        MainActivity activity = activeActivity;
+        if (activity == null) {
+            return "{\"ready\":false,\"error\":\"RackForge activity is not active\"}";
+        }
+        try {
+            int openMidiDeviceCount;
+            int openMidiPortCount;
+            synchronized (activity.openMidiDevices) {
+                openMidiDeviceCount = activity.openMidiDevices.size();
+            }
+            synchronized (activity.openMidiPorts) {
+                openMidiPortCount = activity.openMidiPorts.size();
+            }
+            return activity.sharedDiagnostics()
+                    .put("ready", true)
+                    .put("activity_resumed", activity.activityResumed)
+                    .put("audio_recovery_in_progress", activity.audioRecoveryInProgress)
+                    .put("midi_generation", activity.midiGeneration)
+                    .put("open_midi_devices", openMidiDeviceCount)
+                    .put("open_midi_ports", openMidiPortCount)
+                    .put("thermal_status", activity.thermalStatus)
+                    .toString();
+        } catch (Throwable error) {
+            return "{\"ready\":false,\"error\":"
+                    + JSONObject.quote(error.toString()) + "}";
+        }
     }
 
     private WebViewClient pluginWebViewClient() {
@@ -1382,6 +1420,7 @@ public final class MainActivity extends Activity {
                 .put("version", BuildConfig.VERSION_NAME)
                 .put("audio_running", audioRunning)
                 .put("selected_audio_output", selectedAudioOutputLabel())
+                .put("selected_audio_device_id", selectedAudioDeviceId)
                 .put("audio_status", audioStatus)
                 .put("audio_outputs", audioOutputs)
                 .put("midi_devices", midiDevices)
@@ -4588,6 +4627,8 @@ public final class MainActivity extends Activity {
             }
         }
         boolean disappeared = previous != 0 && selectedIndex == 0;
+        boolean reappeared = previous == 0 && selectedIndex != 0
+                && !"default".equals(selectedAudioDeviceKey);
         selectedAudioDeviceId = audioOutputChoices.get(selectedIndex).id;
         refreshingAudioOutputs = true;
         ArrayAdapter<AudioOutputChoice> adapter = new ArrayAdapter<>(this,
@@ -4596,7 +4637,7 @@ public final class MainActivity extends Activity {
         audioOutputSpinner.setAdapter(adapter);
         audioOutputSpinner.setSelection(selectedIndex, false);
         refreshingAudioOutputs = false;
-        if (disappeared && audioRunning) switchAudioOutput();
+        if ((disappeared || reappeared) && audioRunning) switchAudioOutput();
     }
 
     private void registerAudioDeviceUpdates() {

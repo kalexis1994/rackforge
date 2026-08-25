@@ -80,6 +80,10 @@ jobs:
         shell: bash
         run: pnpm --dir web test
 
+      - name: Test Android qualification harness
+        shell: bash
+        run: python3 -m unittest discover -s tools/tests -p 'test_*.py'
+
       - name: Lint Web workspace
         shell: bash
         run: pnpm --dir web lint --max-warnings=0

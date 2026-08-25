@@ -51,3 +51,21 @@ bash tools/build-android.sh
 
 The local toolchain is stored below ignored `local/android-toolchain`, and the
 APK is written to `dist/android/RackForge-debug.apk`.
+
+## Lifecycle qualification
+
+The debug APK exposes a permission-protected ADB snapshot receiver that is not
+present in release builds. After installing the APK and connecting through USB
+or wireless debugging, run the full screen-lock, background/resume, MIDI and
+USB-audio recovery scenario from the repository root:
+
+```powershell
+python tools/qualify-android-lifecycle.py --usb-cycle
+```
+
+Disconnect and reconnect the powered hub when prompted. The harness verifies
+that audio callbacks keep advancing, MIDI ports reopen, and AAudio returns to
+the actual selected USB device. It writes the complete device metadata,
+counters and stage snapshots to `dist/qualification/` as JSON. A run without
+`--usb-cycle` is useful as a quick lifecycle smoke test, but its USB stage is
+reported as skipped and does not constitute full hardware qualification.

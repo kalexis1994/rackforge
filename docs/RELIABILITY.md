@@ -86,10 +86,33 @@ Run this layer with:
 cargo test -p rackforge-core audio_reliability
 ```
 
+## Android lifecycle and USB recovery
+
+`tools/qualify-android-lifecycle.py` drives a debug APK through ADB and records
+machine-readable snapshots from a debug-only receiver. It proves that native
+audio callbacks continue while the screen is locked and while the Activity is
+in the background, then verifies clean resume transitions. The full hardware
+mode also waits for a physical USB disconnect and reconnect, requires MIDI
+ports to reopen under a newer generation, and compares AAudio's real device ID
+with the restored selected interface. This catches a UI that claims to have
+returned to USB while the stream still uses the fallback output.
+
+With one authorized device connected, run the complete scenario from the
+repository root:
+
+```text
+python tools/qualify-android-lifecycle.py --usb-cycle
+```
+
+The operator disconnects and reconnects the hub when prompted. Use `--serial`
+when multiple ADB devices are online. Without `--usb-cycle`, the harness runs a
+short lock/background smoke test and explicitly records the USB stage as
+skipped. Every run writes a timestamped JSON report below
+`dist/qualification/`; only a report whose top-level outcome is `passed` is a
+valid qualification result.
+
 ## Qualification still required for v0.2.0
 
-- Add a repeatable ADB scenario for screen lock, background, resume, USB MIDI,
-  and USB audio recovery.
 - Add a native soak command that runs for at least two hours and exports xruns,
   dropped MIDI, missed deadlines, reconnects, and stream errors.
 - Record supported test hardware and pass/fail thresholds with every retained

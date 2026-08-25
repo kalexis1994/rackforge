@@ -619,6 +619,7 @@ unsafe extern "C" {
     fn AAudioStream_requestStart(stream: *mut AAudioStream) -> i32;
     fn AAudioStream_requestStop(stream: *mut AAudioStream) -> i32;
     fn AAudioStream_close(stream: *mut AAudioStream) -> i32;
+    fn AAudioStream_getDeviceId(stream: *mut AAudioStream) -> i32;
     fn AAudioStream_getFramesPerBurst(stream: *mut AAudioStream) -> i32;
     fn AAudioStream_getFramesPerDataCallback(stream: *mut AAudioStream) -> i32;
     fn AAudioStream_setBufferSizeInFrames(stream: *mut AAudioStream, frames: i32) -> i32;
@@ -1890,6 +1891,7 @@ fn audio_status_json() -> String {
     unsafe {
         serde_json::json!({
             "running": true,
+            "device_id": AAudioStream_getDeviceId(output.stream),
             "sample_rate": AAudioStream_getSampleRate(output.stream),
             "frames_per_burst": AAudioStream_getFramesPerBurst(output.stream),
             "frames_per_data_callback": AAudioStream_getFramesPerDataCallback(output.stream),

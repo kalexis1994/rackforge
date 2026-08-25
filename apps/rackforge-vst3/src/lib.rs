@@ -34,6 +34,20 @@ const MIDI_PARAMETER_COUNT: u32 = MIDI_CONTROLLERS_PER_CHANNEL * MIDI_CHANNELS;
 const STATE_MAGIC: &[u8; 8] = b"RFVST3\0\0";
 const STATE_VERSION: u32 = 2;
 
+// The generated VST3 bindings expose SDK enum constants as signed integers on
+// Windows and unsigned integers on Unix. Normalize that ABI difference at the
+// assignment boundary instead of spreading target-specific casts throughout
+// the factory implementation.
+#[cfg(windows)]
+const fn vst3_enum_i32(value: i32) -> i32 {
+    value
+}
+
+#[cfg(not(windows))]
+const fn vst3_enum_i32(value: u32) -> i32 {
+    value as i32
+}
+
 struct ProcessorInner {
     engines: Vec<RackForgeEngine>,
     active_engine: usize,
@@ -1378,9 +1392,13 @@ fn midi_parameter_from_index(index: u32) -> (u16, u16) {
 }
 
 fn midi_controller_label(channel: u16, controller: u16) -> String {
-    match controller as i32 {
-        ControllerNumbers_::kAfterTouch => format!("MIDI Ch {} Pressure", channel + 1),
-        ControllerNumbers_::kPitchBend => format!("MIDI Ch {} Pitch Bend", channel + 1),
+    match controller {
+        value if value == ControllerNumbers_::kAfterTouch as u16 => {
+            format!("MIDI Ch {} Pressure", channel + 1)
+        }
+        value if value == ControllerNumbers_::kPitchBend as u16 => {
+            format!("MIDI Ch {} Pitch Bend", channel + 1)
+        }
         _ => format!("MIDI Ch {} CC {}", channel + 1, controller),
     }
 }
@@ -1388,13 +1406,13 @@ fn midi_controller_label(channel: u16, controller: u16) -> String {
 fn controller_midi_event(frame: u32, channel: u16, controller: u16, value: f64) -> MidiEventV1 {
     let channel = channel.min(15) as u8;
     let normalized = value.clamp(0.0, 1.0);
-    match controller as i32 {
-        ControllerNumbers_::kAfterTouch => MidiEventV1 {
+    match controller {
+        value if value == ControllerNumbers_::kAfterTouch as u16 => MidiEventV1 {
             frame,
             length: 2,
             data: [0xD0 | channel, (normalized * 127.0).round() as u8, 0],
         },
-        ControllerNumbers_::kPitchBend => {
+        value if value == ControllerNumbers_::kPitchBend as u16 => {
             let bend = (normalized * 16_383.0).round() as u16;
             MidiEventV1 {
                 frame,
@@ -1428,7 +1446,7 @@ impl IPluginFactoryTrait for Factory {
         copy_cstring("RackForge", &mut info.vendor);
         copy_cstring("https://github.com/kalexis1994/rackforge", &mut info.url);
         copy_cstring("", &mut info.email);
-        info.flags = PFactoryInfo_::FactoryFlags_::kUnicode;
+        info.flags = vst3_enum_i32(PFactoryInfo_::FactoryFlags_::kUnicode);
         kResultOk
     }
     unsafe fn countClasses(&self) -> i32 {
@@ -1442,12 +1460,12 @@ impl IPluginFactoryTrait for Factory {
         match index {
             0 => {
                 info.cid = RackForgeProcessor::CID;
-                info.cardinality = PClassInfo_::ClassCardinality_::kManyInstances;
+                info.cardinality = vst3_enum_i32(PClassInfo_::ClassCardinality_::kManyInstances);
                 copy_cstring("Audio Module Class", &mut info.category);
             }
             1 => {
                 info.cid = RackForgeController::CID;
-                info.cardinality = PClassInfo_::ClassCardinality_::kManyInstances;
+                info.cardinality = vst3_enum_i32(PClassInfo_::ClassCardinality_::kManyInstances);
                 copy_cstring("Component Controller Class", &mut info.category);
             }
             _ => return kInvalidArgument,
@@ -1493,13 +1511,13 @@ impl IPluginFactory2Trait for Factory {
         match index {
             0 => {
                 info.cid = RackForgeProcessor::CID;
-                info.cardinality = PClassInfo_::ClassCardinality_::kManyInstances;
+                info.cardinality = vst3_enum_i32(PClassInfo_::ClassCardinality_::kManyInstances);
                 copy_cstring("Audio Module Class", &mut info.category);
                 copy_cstring("Instrument|Synth", &mut info.subCategories);
             }
             1 => {
                 info.cid = RackForgeController::CID;
-                info.cardinality = PClassInfo_::ClassCardinality_::kManyInstances;
+                info.cardinality = vst3_enum_i32(PClassInfo_::ClassCardinality_::kManyInstances);
                 copy_cstring("Component Controller Class", &mut info.category);
                 copy_cstring("", &mut info.subCategories);
             }

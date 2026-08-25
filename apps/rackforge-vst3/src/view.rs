@@ -1,5 +1,7 @@
 use super::{RackForgeControllerShared, diagnostic};
-use std::{ffi::CStr, sync::Mutex};
+#[cfg(windows)]
+use std::ffi::CStr;
+use std::sync::Mutex;
 use vst3::{Class, ComPtr, ComRef, Steinberg::*};
 
 const DEFAULT_WIDTH: i32 = 920;

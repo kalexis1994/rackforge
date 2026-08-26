@@ -16,7 +16,10 @@ use crate::rack_graph::compile_instrument_definition;
 use crate::realtime::{self, XrunMonitor};
 use crate::session::SessionStore;
 use crate::session_checkpoint::SessionCheckpointStore;
-use crate::{CompiledParameterLink, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore};
+use crate::{
+    CompiledParameterLink, LiveParameterStateStore, LiveParameterTarget, LiveParameterWriter,
+    LiveParameterWriterHandle, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
+};
 use alsa::pcm::PCM;
 use anyhow::{Context, Result, bail};
 use midir::MidiInput;
@@ -550,6 +553,7 @@ struct StandaloneVoice<'plugin> {
     plugin: &'plugin LoadedPlugin,
     instance: PluginInstance<'plugin>,
     input_channels: usize,
+    live_parameter_target: usize,
 }
 
 fn create_rack_voices<'plugin>(
@@ -901,6 +905,8 @@ pub fn run(config: LiveConfig) -> Result<()> {
         .get(&primary_id)
         .context("primary plugin failed to load")?;
 
+    let live_parameter_store = LiveParameterStateStore::open(config.data_root.as_deref())?;
+    let mut live_parameter_targets = Vec::with_capacity(plugins.len());
     let mut standalone_voices = Vec::with_capacity(plugins.len());
     let mut session_instances = Vec::with_capacity(plugins.len());
     for (plugin_id, plugin) in &plugins {
@@ -945,6 +951,20 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 plugin_id, preset.id, preset.name
             );
         }
+        for (parameter_index, value) in
+            live_parameter_store.restored_values(plugin_id, plugin.parameters())
+        {
+            crate::set_plugin_parameter(plugin, &mut instance, parameter_index, value)
+                .with_context(|| {
+                    format!("restoring live parameter {parameter_index} for plugin {plugin_id}")
+                })?;
+        }
+        let live_parameter_target = live_parameter_targets.len();
+        live_parameter_targets.push(LiveParameterTarget {
+            plugin_id: plugin_id.clone(),
+            plugin_version: plugin.manifest().version.to_string(),
+            schema: plugin.parameters().clone(),
+        });
         instance.activate(
             f64::from(output_rate),
             period_frames as u32,
@@ -1000,8 +1020,11 @@ pub fn run(config: LiveConfig) -> Result<()> {
             plugin,
             instance,
             input_channels,
+            live_parameter_target,
         });
     }
+    let live_parameter_writer =
+        LiveParameterWriter::start(live_parameter_store, live_parameter_targets);
     let mut state_store = PluginStateStore::new(config.data_root.as_deref())?;
     // A first boot starts with an EMPTY library on every platform: the
     // performer builds their first Rack deliberately instead of inheriting
@@ -1284,6 +1307,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         render_mode: resolve_render_mode(initial_surface_mode, initial_rack_specs.len()),
         audio_state,
         output_meter,
+        live_parameter_writer: live_parameter_writer.handle(),
     })
 }
 
@@ -1562,6 +1586,7 @@ struct AudioLoopContext<'a> {
     render_mode: AudioRenderMode,
     audio_state: Arc<Mutex<AudioOutputState>>,
     output_meter: Arc<OutputMeter>,
+    live_parameter_writer: LiveParameterWriterHandle,
 }
 
 fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
@@ -1584,6 +1609,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         mut render_mode,
         audio_state,
         output_meter,
+        live_parameter_writer,
     } = context;
     let mut output = Some(initial_output);
     let mut input = initial_input;
@@ -1852,7 +1878,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             voice
                                 .instance
                                 .load_preset(&sound_id)
-                                .map_err(|error| error.to_string())
+                                .map_err(|error| error.to_string())?;
+                            live_parameter_writer.clear(voice.live_parameter_target);
+                            Ok(())
                         })
                         .map(|()| {
                             println!("LIVE_SOUND_SELECTED instance={instance_id} id={sound_id}");
@@ -1969,10 +1997,16 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                                 .instance
                                 .set_parameter(parameter_index, value)
                                 .map_err(|error| error.to_string())?;
-                            voice
+                            let canonical = voice
                                 .instance
                                 .get_parameter(parameter_index)
-                                .map_err(|error| error.to_string())
+                                .map_err(|error| error.to_string())?;
+                            live_parameter_writer.try_record(
+                                voice.live_parameter_target,
+                                parameter_index,
+                                canonical,
+                            );
+                            Ok(canonical)
                         });
                     let _ = reply.send(result);
                 }
@@ -2286,12 +2320,25 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 match render_mode {
                     AudioRenderMode::Silent => {}
                     AudioRenderMode::Plugin => {
+                        let parameter_start = parameter_events.len();
                         let consume = apply_parameter_links(
                             &parameter_links,
                             event,
                             active_instance_id.as_str(),
                             &mut parameter_events,
                         );
+                        if let Some(voice) = standalone_voices
+                            .iter()
+                            .find(|voice| voice.instance_id == active_instance_id)
+                        {
+                            for mapped in &parameter_events[parameter_start..] {
+                                live_parameter_writer.try_record(
+                                    voice.live_parameter_target,
+                                    mapped.parameter_index,
+                                    mapped.value,
+                                );
+                            }
+                        }
                         if !consume && let Some(routed) = play_route.route(event) {
                             if events.len() < MAX_EVENTS_PER_BLOCK {
                                 events.push(plugin_midi_event(routed.packet));
@@ -2363,12 +2410,25 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
             match render_mode {
                 AudioRenderMode::Silent => {}
                 AudioRenderMode::Plugin => {
+                    let parameter_start = parameter_events.len();
                     let consume = apply_parameter_links(
                         &parameter_links,
                         event,
                         active_instance_id.as_str(),
                         &mut parameter_events,
                     );
+                    if let Some(voice) = standalone_voices
+                        .iter()
+                        .find(|voice| voice.instance_id == active_instance_id)
+                    {
+                        for mapped in &parameter_events[parameter_start..] {
+                            live_parameter_writer.try_record(
+                                voice.live_parameter_target,
+                                mapped.parameter_index,
+                                mapped.value,
+                            );
+                        }
+                    }
                     if !consume && let Some(routed) = play_route.route(event) {
                         if events.len() < MAX_EVENTS_PER_BLOCK {
                             events.push(plugin_midi_event(routed.packet));

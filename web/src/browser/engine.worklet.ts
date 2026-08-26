@@ -67,6 +67,7 @@ interface HostExports {
   rf_controller_set_color: (red: number, green: number, blue: number) => void;
   rf_controller_catalog: () => number;
   rf_session_revision: () => number;
+  rf_storage_revision: () => number;
   rf_render: (frames: number) => number;
   rf_inspect_plugin: (pointer: number, length: number) => number;
   rf_install_plugin: (pointer: number, length: number) => number;
@@ -150,6 +151,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
   #frames = 128;
   #failed = false;
   #sessionRevision = 0;
+  #storageRevision = 0;
 
   constructor() {
     super();
@@ -270,6 +272,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
     this.#pluginHost.attach(exports.memory);
     this.#host = exports;
     this.#sessionRevision = exports.rf_session_revision();
+    this.#storageRevision = exports.rf_storage_revision();
     this.#frames = maximumFrames;
     this.#channels = channels;
 
@@ -376,6 +379,15 @@ class RackForgeEngine extends AudioWorkletProcessor {
     this.#post({ kind: "revision", revision });
   }
 
+  #publishStorageIfChanged() {
+    const host = this.#host;
+    if (!host) return;
+    const revision = host.rf_storage_revision();
+    if (revision === this.#storageRevision) return;
+    this.#storageRevision = revision;
+    this.#publishStorage();
+  }
+
   #readResponse(length: number): string {
     const host = this.#host;
     if (!host || length <= 0) {
@@ -404,6 +416,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
 
     const frames = Math.min(output[0].length, this.#frames);
     const pointer = host.rf_render(frames);
+    this.#publishStorageIfChanged();
     this.#publishControllerOutput();
     this.#publishRevisionIfChanged();
     if (pointer === 0) {

@@ -10,7 +10,8 @@ use rackforge_control_api::{
     parse_plugin_parameter_control_command,
 };
 use rackforge_core::{
-    CompiledParameterLink, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
+    CompiledParameterLink, LiveParameterStateStore, LiveParameterTarget, LiveParameterWriter,
+    LiveParameterWriterHandle, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
     PluginStorage, SemanticParameterLinkContext,
     audio_reliability::{
         AudioStreamHealth, AudioStreamRecovery, StereoDropoutRecovery, StereoRenderQueue,
@@ -658,6 +659,8 @@ struct AndroidEngine {
     program_draft: Option<ProgramDraftState>,
     program_previous_sound_id: Option<String>,
     next_program_draft_id: u64,
+    _live_parameter_writer: LiveParameterWriter,
+    live_parameter_writer_handle: LiveParameterWriterHandle,
 }
 
 struct SendablePluginInstance(PluginInstance<'static>);
@@ -929,7 +932,17 @@ impl AndroidEngine {
         instance
             .load_preset(&selected_sound_id)
             .with_context(|| format!("loading preset {selected_sound_id:?}"))?;
+        let live_parameter_store = LiveParameterStateStore::open(Some(&data_root))?;
         instance.activate(SAMPLE_RATE, MAX_FRAMES, 0, 2)?;
+        let live_parameter_writer = LiveParameterWriter::start(
+            live_parameter_store,
+            vec![LiveParameterTarget {
+                plugin_id: plugin_id.clone(),
+                plugin_version: plugin_version.clone(),
+                schema: plugin.parameters().clone(),
+            }],
+        );
+        let live_parameter_writer_handle = live_parameter_writer.handle();
         Ok(Self {
             instance: SendablePluginInstance(instance),
             runtime: SendableLoadedPlugin(plugin),
@@ -951,6 +964,8 @@ impl AndroidEngine {
             program_draft: None,
             program_previous_sound_id: None,
             next_program_draft_id: 1,
+            _live_parameter_writer: live_parameter_writer,
+            live_parameter_writer_handle,
         })
     }
 
@@ -967,6 +982,28 @@ impl AndroidEngine {
             bail!("plugin does not expose sound {sound_id:?}");
         }
         self.instance.0.load_preset(sound_id)?;
+        self.live_parameter_writer_handle.clear(0);
+        self.selected_sound_id = sound_id.to_owned();
+        Ok(())
+    }
+
+    fn restore_sound(&mut self, sound_id: &str) -> Result<()> {
+        if !self
+            .catalog
+            .presets
+            .iter()
+            .any(|preset| preset.id == sound_id)
+        {
+            bail!("plugin does not expose sound {sound_id:?}");
+        }
+        self.instance.0.load_preset(sound_id)?;
+        self.live_parameter_writer_handle.flush();
+        let store = LiveParameterStateStore::open(Some(&self.data_root))?;
+        for (parameter_index, value) in
+            store.restored_values(&self.plugin_id, self.runtime.0.parameters())
+        {
+            set_plugin_parameter(self.runtime.0, &mut self.instance.0, parameter_index, value)?;
+        }
         self.selected_sound_id = sound_id.to_owned();
         Ok(())
     }
@@ -999,6 +1036,8 @@ impl AndroidEngine {
                         parameter_index,
                         value,
                     )?;
+                    self.live_parameter_writer_handle
+                        .try_record(0, parameter_index, value);
                     ControlResponse::PluginParameterSet {
                         instance_id,
                         parameter_index,
@@ -1063,6 +1102,7 @@ impl AndroidEngine {
                 }
                 let bytes = store.read(&preset.state)?;
                 self.instance.0.load_state(&bytes)?;
+                self.live_parameter_writer_handle.clear(0);
                 if let Some(sound_id) = preset.state.selected_sound_id.as_ref() {
                     self.selected_sound_id = sound_id.clone();
                 }
@@ -1511,6 +1551,11 @@ impl AndroidEngine {
                     if let Some(output) = link.apply(ingress_event) {
                         if self.parameter_events.len() < MAX_PENDING_MIDI_EVENTS {
                             self.parameter_events.push(output.event);
+                            self.live_parameter_writer_handle.try_record(
+                                0,
+                                output.event.parameter_index,
+                                output.event.value,
+                            );
                         }
                         consume |= output.pass_through == ParameterLinkPassThrough::Consume;
                     }
@@ -3263,6 +3308,13 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_activateInstalled
         if let Err(error) = ensure_performance_menu(&data_root) {
             eprintln!("PERFORMANCE_LIBRARY_UNAVAILABLE {error:#}");
         }
+        if let Some(current) = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+            .as_ref()
+        {
+            current.live_parameter_writer_handle.flush();
+        }
         let mut candidate = AndroidEngine::open_package(&package_root, data_root.clone())?;
         candidate.recompile_parameter_links()?;
         set_plugin_enabled(
@@ -3580,6 +3632,30 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_selectPluginSound
             .as_mut()
             .context("RackForge engine is not initialized")?
             .select_sound(&sound_id)
+    })();
+    match result {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            report(&mut env, error);
+            JNI_FALSE
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_restorePluginSound(
+    mut env: JNIEnv,
+    _class: JClass,
+    sound_id: JString,
+) -> jboolean {
+    let result = (|| -> Result<()> {
+        let sound_id = java_string(&mut env, sound_id)?;
+        engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
+            .as_mut()
+            .context("RackForge engine is not initialized")?
+            .restore_sound(&sound_id)
     })();
     match result {
         Ok(()) => JNI_TRUE,

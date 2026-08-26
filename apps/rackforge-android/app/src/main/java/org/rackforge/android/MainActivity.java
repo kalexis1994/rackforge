@@ -229,6 +229,7 @@ public final class MainActivity extends Activity {
     private static native String pluginWebContext();
     private static native String outputMeterSnapshot();
     private static native boolean selectPluginSound(String soundId);
+    private static native boolean restorePluginSound(String soundId);
     private static native String pluginProgramCommand(String method, String paramsJson);
     private static native String pluginParameterCommand(String method, String paramsJson);
     private static native String pluginStateCommand(String method, String paramsJson);
@@ -3966,7 +3967,7 @@ public final class MainActivity extends Activity {
                     }
                 }
             }
-            if (!available || !selectPluginSound(savedSoundId)) {
+            if (!available || !restorePluginSound(savedSoundId)) {
                 preferences.edit().remove(preferenceKey).apply();
                 Log.w("RackForge", "Saved plugin sound is unavailable: " + savedSoundId);
                 rememberActivePluginSound();

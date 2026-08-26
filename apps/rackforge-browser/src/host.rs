@@ -32,8 +32,9 @@ use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session::SessionStore;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{
-    CompiledParameterLink, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
-    PluginStorage, SemanticParameterLinkContext, compile_semantic_parameter_links,
+    CompiledParameterLink, LiveParameterStateStore, LoadedPlugin, PluginInstance, PluginPackage,
+    PluginStateStore, PluginStorage, SemanticParameterLinkContext,
+    compile_semantic_parameter_links,
 };
 use rackforge_midi_api::{
     IngressMidiEvent, MidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
@@ -58,6 +59,7 @@ use rackforge_session_api::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::audio::{AudioEngine, RenderRequest};
 use crate::controller::{
@@ -121,6 +123,9 @@ pub struct BrowserHost {
     controller: BrowserKeyLabController,
     controller_command_id: u64,
     parameter_links: Vec<CompiledParameterLink>,
+    live_parameter_store: LiveParameterStateStore,
+    live_parameter_dirty_at: Option<Instant>,
+    storage_revision: u32,
     warnings: Vec<String>,
 }
 
@@ -160,6 +165,7 @@ impl BrowserHost {
         }
 
         let state_store = PluginStateStore::new(Some(&data_root))?;
+        let live_parameter_store = LiveParameterStateStore::open(Some(&data_root))?;
         let performance = PerformanceRepository::load_or_empty(Some(&data_root))?;
 
         let session_id = SessionId::new("browser").map_err(|message| anyhow!(message))?;
@@ -169,19 +175,31 @@ impl BrowserHost {
         // longer installed is ignored rather than refused: a performer opening
         // RackForge should get an instrument, not an explanation.
         for plugin in &mut plugins {
-            let Ok(Some(sound)) =
+            if let Ok(Some(sound)) =
                 checkpoint.selected_sound(&session_id, plugin.instance_id.as_str())
-            else {
-                continue;
-            };
-            if plugin
-                .presets
-                .presets
-                .iter()
-                .any(|preset| preset.id == sound)
+                && plugin
+                    .presets
+                    .presets
+                    .iter()
+                    .any(|preset| preset.id == sound)
                 && plugin.instance.load_preset(&sound).is_ok()
             {
                 plugin.selected_sound_id = Some(sound);
+            }
+            for (parameter_index, value) in
+                live_parameter_store.restored_values(&plugin.plugin_id, plugin.runtime.parameters())
+            {
+                if let Err(error) = rackforge_core::set_plugin_parameter(
+                    plugin.runtime,
+                    &mut plugin.instance,
+                    parameter_index,
+                    value,
+                ) {
+                    warnings.push(format!(
+                        "{} live parameter {}: {error:#}",
+                        plugin.plugin_id, parameter_index
+                    ));
+                }
             }
         }
         let instances: Vec<PluginInstanceState> =
@@ -246,6 +264,9 @@ impl BrowserHost {
             controller: BrowserKeyLabController::default(),
             controller_command_id: 1,
             parameter_links: Vec::new(),
+            live_parameter_store,
+            live_parameter_dirty_at: None,
+            storage_revision: 0,
             warnings,
         };
         host.rebuild_parameter_links()?;
@@ -634,6 +655,10 @@ impl BrowserHost {
             .load_state(&bytes)
             .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
         plugin.selected_sound_id = selected_sound_id.clone();
+        let plugin_id = plugin.plugin_id.clone();
+        self.live_parameter_store.clear_plugin(&plugin_id);
+        self.live_parameter_dirty_at = Some(Instant::now());
+        self.flush_live_parameters(true);
 
         self.store
             .record(
@@ -654,8 +679,8 @@ impl BrowserHost {
         let plugin = self.plugin_mut(instance_id)?;
         let schema = plugin.runtime.parameters().clone();
         let mut values = Vec::with_capacity(schema.parameters.len());
-        for (index, _) in schema.parameters.iter().enumerate() {
-            let index = index as u32;
+        for parameter in &schema.parameters {
+            let index = parameter.index;
             let value = plugin
                 .instance
                 .get_parameter(index)
@@ -675,11 +700,34 @@ impl BrowserHost {
         parameter_index: u32,
         value: f64,
     ) -> Result<ControlResponse, Failure> {
-        let plugin = self.plugin_mut(instance_id)?;
-        plugin
-            .instance
-            .set_parameter(parameter_index, value)
-            .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+        let index = self
+            .plugins
+            .iter()
+            .position(|plugin| plugin.instance_id == *instance_id)
+            .ok_or_else(|| {
+                Failure::new(
+                    ControlErrorCode::NotFound,
+                    format!("no plugin instance {instance_id}"),
+                )
+            })?;
+        let plugin = &mut self.plugins[index];
+        let value = rackforge_core::set_plugin_parameter(
+            plugin.runtime,
+            &mut plugin.instance,
+            parameter_index,
+            value,
+        )
+        .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+        self.live_parameter_store
+            .record(
+                &plugin.plugin_id,
+                &plugin.runtime.manifest().version,
+                plugin.runtime.parameters(),
+                parameter_index,
+                value,
+            )
+            .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
+        self.live_parameter_dirty_at = Some(Instant::now());
         Ok(ControlResponse::PluginParameterSet {
             instance_id: instance_id.clone(),
             parameter_index,
@@ -774,6 +822,10 @@ impl BrowserHost {
                     Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
                 })?;
                 plugin.selected_sound_id = Some(sound_id.clone());
+                let plugin_id = plugin.plugin_id.clone();
+                self.live_parameter_store.clear_plugin(&plugin_id);
+                self.live_parameter_dirty_at = Some(Instant::now());
+                self.flush_live_parameters(true);
                 SessionEvent::SoundSelected {
                     instance_id,
                     sound_id,
@@ -1131,6 +1183,22 @@ impl BrowserHost {
                     {
                         plugin.selected_sound_id = Some(sound.clone());
                     }
+                    for (parameter_index, value) in self
+                        .live_parameter_store
+                        .restored_values(&plugin.plugin_id, plugin.runtime.parameters())
+                    {
+                        if let Err(error) = rackforge_core::set_plugin_parameter(
+                            plugin.runtime,
+                            &mut plugin.instance,
+                            parameter_index,
+                            value,
+                        ) {
+                            warnings.push(format!(
+                                "{} live parameter {}: {error:#}",
+                                plugin.plugin_id, parameter_index
+                            ));
+                        }
+                    }
                     plugins.push(plugin);
                 }
                 Err(error) => warnings.push(format!("{}: {error:#}", root.display())),
@@ -1191,6 +1259,7 @@ impl BrowserHost {
 
     pub fn controller_disconnect(&mut self) {
         self.controller.disconnect();
+        self.flush_live_parameters(true);
     }
 
     pub fn push_controller_midi(&mut self, data: [u8; 3], length: u8) {
@@ -1201,9 +1270,10 @@ impl BrowserHost {
                 source: BROWSER_KEYLAB_SOURCE_KEY,
                 packet,
             };
-            let active_instance_id = self.store.state().active_instance_id.as_ref();
+            let active_instance_id = self.store.state().active_instance_id.clone();
             for link in self.parameter_links.iter().filter(|link| {
                 active_instance_id
+                    .as_ref()
                     .is_some_and(|instance_id| link.link.instance_id == instance_id.as_str())
             }) {
                 let Some(mapped) = link.apply(ingress) else {
@@ -1211,6 +1281,27 @@ impl BrowserHost {
                 };
                 consumed |= mapped.pass_through == ParameterLinkPassThrough::Consume;
                 self.audio.push_parameter(mapped.event);
+                if let Some(instance_id) = active_instance_id.as_ref() {
+                    if let Some(plugin) = self
+                        .plugins
+                        .iter()
+                        .find(|plugin| plugin.instance_id == *instance_id)
+                    {
+                        if self
+                            .live_parameter_store
+                            .record(
+                                &plugin.plugin_id,
+                                &plugin.runtime.manifest().version,
+                                plugin.runtime.parameters(),
+                                mapped.event.parameter_index,
+                                mapped.event.value,
+                            )
+                            .is_ok()
+                        {
+                            self.live_parameter_dirty_at = Some(Instant::now());
+                        }
+                    }
+                }
             }
         }
         if !consumed {
@@ -1406,8 +1497,13 @@ impl BrowserHost {
         self.store.state().revision.get().min(u64::from(u32::MAX)) as u32
     }
 
+    pub fn storage_revision(&self) -> u32 {
+        self.storage_revision
+    }
+
     /// Renders one interleaved block for the page's audio callback.
     pub fn render(&mut self, frames: u32) -> &[f32] {
+        self.flush_live_parameters(false);
         let actions = self.controller.poll();
         self.apply_controller_actions(actions);
         let active = self.store.state().active_instance_id.clone();
@@ -1421,6 +1517,27 @@ impl BrowserHost {
         };
         let plugin = &mut self.plugins[index];
         self.audio.render(request, &mut plugin.instance)
+    }
+
+    fn flush_live_parameters(&mut self, force: bool) {
+        let due = self
+            .live_parameter_dirty_at
+            .is_some_and(|changed| force || changed.elapsed() >= Duration::from_millis(1500));
+        if !due {
+            return;
+        }
+        if let Err(error) = self.live_parameter_store.flush() {
+            eprintln!("LIVE_PARAMETER_STATE_SAVE_FAILED reason={error:#}");
+            return;
+        }
+        self.live_parameter_dirty_at = None;
+        self.storage_revision = self.storage_revision.wrapping_add(1);
+    }
+}
+
+impl Drop for BrowserHost {
+    fn drop(&mut self) {
+        self.flush_live_parameters(true);
     }
 }
 

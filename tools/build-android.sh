@@ -6,6 +6,16 @@ android_project="$repository/apps/rackforge-android"
 sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
 ndk_version="27.0.12077973"
 output_directory="${1:-$repository/dist/android}"
+edition="${RACKFORGE_EDITION:-standard}"
+
+case "$edition" in
+  standard|minimal) ;;
+  *)
+    printf 'RACKFORGE_EDITION must be standard or minimal, got %s.\n' \
+      "$edition" >&2
+    exit 2
+    ;;
+esac
 
 [[ -n "$sdk_root" ]] || {
   printf 'ANDROID_SDK_ROOT or ANDROID_HOME must point to the Android SDK.\n' >&2
@@ -35,8 +45,10 @@ command -v python3 >/dev/null 2>&1 || {
 }
 
 official_plugins="$repository/dist/bundled-plugins/official"
-python3 "$repository/tools/fetch-official-plugins.py" \
-  --output-directory "$official_plugins"
+if [[ "$edition" == standard ]]; then
+  python3 "$repository/tools/fetch-official-plugins.py" \
+    --output-directory "$official_plugins"
+fi
 
 export ANDROID_HOME="$sdk_root"
 export ANDROID_SDK_ROOT="$sdk_root"
@@ -47,6 +59,9 @@ export CARGO_TARGET_AARCH64_LINUX_ANDROID_AR="$archive_tool"
 export CC_aarch64_linux_android="$clang"
 export CXX_aarch64_linux_android="$clangxx"
 export AR_aarch64_linux_android="$archive_tool"
+
+cd "$android_project"
+bash ./gradlew clean --no-daemon
 
 cd "$repository"
 pnpm --dir web install --frozen-lockfile
@@ -72,21 +87,25 @@ bundled_output="$android_project/app/build/generated/bundled-plugins"
 rm -rf -- "$bundled_output"
 install -d "$bundled_output/bundled-plugins"
 default_plugin="${RACKFORGE_BUNDLED_PLUGIN:-}"
-if [[ -z "$default_plugin" && -f "$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
-  default_plugin="$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+if [[ "$edition" == standard ]]; then
+  if [[ -z "$default_plugin" && -f "$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
+    default_plugin="$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+  fi
+  if [[ -n "$default_plugin" ]]; then
+    [[ -f "$default_plugin" ]] || {
+      printf 'RACKFORGE_BUNDLED_PLUGIN is not a file: %s\n' \
+        "$default_plugin" >&2
+      exit 2
+    }
+    install -m 0644 "$default_plugin" \
+      "$bundled_output/bundled-plugins/$(basename "$default_plugin")"
+  fi
+  shopt -s nullglob
+  for archive in "$official_plugins"/*.rfplugin; do
+    install -m 0644 "$archive" "$bundled_output/bundled-plugins/$(basename "$archive")"
+  done
+  shopt -u nullglob
 fi
-if [[ -n "$default_plugin" ]]; then
-  [[ -f "$default_plugin" ]] || {
-    printf 'RACKFORGE_BUNDLED_PLUGIN is not a file: %s\n' \
-      "$default_plugin" >&2
-    exit 2
-  }
-  install -m 0644 "$default_plugin" \
-    "$bundled_output/bundled-plugins/$(basename "$default_plugin")"
-fi
-for archive in "$official_plugins"/*.rfplugin; do
-  install -m 0644 "$archive" "$bundled_output/bundled-plugins/$(basename "$archive")"
-done
 
 web_output="$android_project/app/build/generated/web-ui/rackforge"
 rm -rf -- "$web_output"
@@ -104,4 +123,6 @@ source_apk="$android_project/app/build/outputs/apk/debug/app-debug.apk"
 mkdir -p "$output_directory"
 output_directory="$(cd "$output_directory" && pwd)"
 install -m 0644 "$source_apk" "$output_directory/RackForge-debug.apk"
-printf 'RackForge Android: %s\n' "$output_directory/RackForge-debug.apk"
+printf 'edition=%s\n' "$edition" >"$output_directory/build-info.txt"
+printf 'RackForge Android (%s): %s\n' \
+  "$edition" "$output_directory/RackForge-debug.apk"

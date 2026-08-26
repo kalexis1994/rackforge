@@ -4,6 +4,16 @@ set -euo pipefail
 repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 output_directory="${1:-$repository/dist/raspberry-pi}"
 architecture="$(uname -m)"
+edition="${RACKFORGE_EDITION:-standard}"
+
+case "$edition" in
+  standard|minimal) ;;
+  *)
+    printf 'RACKFORGE_EDITION must be standard or minimal, got %s.\n' \
+      "$edition" >&2
+    exit 2
+    ;;
+esac
 
 case "$architecture" in
   aarch64|arm64) ;;
@@ -21,8 +31,10 @@ command -v python3 >/dev/null
 bash -n "$repository/platforms/raspberry-pi/install-release.sh"
 
 official_plugins="$repository/dist/bundled-plugins/official"
-python3 "$repository/tools/fetch-official-plugins.py" \
-  --output-directory "$official_plugins"
+if [[ "$edition" == standard ]]; then
+  python3 "$repository/tools/fetch-official-plugins.py" \
+    --output-directory "$official_plugins"
+fi
 
 cd "$repository"
 pnpm --dir web install --frozen-lockfile
@@ -68,24 +80,27 @@ RACKFORGE_SOURCE="$repository" bash \
 cp -a "$repository/web/dist" "$release/web/dist"
 cp -a "$repository/config/." "$release/config/"
 default_plugin_archive="${RACKFORGE_BUNDLED_PLUGIN:-}"
-if [[ -z "$default_plugin_archive" && -f "$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
-  default_plugin_archive="$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
-fi
-if [[ -n "$default_plugin_archive" ]]; then
-  [[ -f "$default_plugin_archive" ]] || {
-    printf 'RACKFORGE_BUNDLED_PLUGIN is not a file: %s\n' \
-      "$default_plugin_archive" >&2
-    exit 2
-  }
-  install -d "$release/bundled-plugins"
-  install -m 0644 "$default_plugin_archive" \
-    "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin"
-fi
 install -d "$release/bundled-plugins"
-for archive in "$official_plugins"/*.rfplugin; do
-  install -m 0644 "$archive" \
-    "$release/bundled-plugins/$(basename "$archive")"
-done
+if [[ "$edition" == standard ]]; then
+  if [[ -z "$default_plugin_archive" && -f "$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
+    default_plugin_archive="$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+  fi
+  if [[ -n "$default_plugin_archive" ]]; then
+    [[ -f "$default_plugin_archive" ]] || {
+      printf 'RACKFORGE_BUNDLED_PLUGIN is not a file: %s\n' \
+        "$default_plugin_archive" >&2
+      exit 2
+    }
+    install -m 0644 "$default_plugin_archive" \
+      "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+  fi
+  shopt -s nullglob
+  for archive in "$official_plugins"/*.rfplugin; do
+    install -m 0644 "$archive" \
+      "$release/bundled-plugins/$(basename "$archive")"
+  done
+  shopt -u nullglob
+fi
 install -d "$release/platforms/raspberry-pi" "$release/hardware"
 for entry in appliance audio config etc provision sbin scripts systemd README.md install-release.sh
 do
@@ -104,15 +119,16 @@ official_plugin=none
 if [[ -f "$release/bundled-plugins/RF-106.rfplugin" ]]; then
   official_plugin=org.rackforge.rf-106@0.2.9
 fi
-printf 'revision=%s\narchitecture=linux-aarch64\ndefault_plugin=%s\nofficial_plugin=%s\n' \
-  "$revision" "$default_plugin" "$official_plugin" >"$release/build-info.txt"
+printf 'revision=%s\narchitecture=linux-aarch64\nedition=%s\ndefault_plugin=%s\nofficial_plugin=%s\n' \
+  "$revision" "$edition" "$default_plugin" "$official_plugin" >"$release/build-info.txt"
 
 cat >"$release/INSTALL.md" <<'EOF'
 # RackForge for Raspberry Pi ARM64
 
-This artifact contains the RackForge hosts, Raspberry Pi integration, the
-RackForge Concert Grand, and the pinned official RF-106 package. Instruments
-such as RF-Soundfonts are versioned and distributed by their own pipelines.
+This artifact contains the RackForge hosts and Raspberry Pi integration. The
+Standard edition also bundles RackForge Concert Grand and the pinned official
+RF-106 package. The Minimal edition contains no instrument plugins; install
+the instruments you want from Plugin Manager.
 
 Extract it for the user who will run RackForge. The installer derives the
 deployment root from that user's home directory; it can also be overridden
@@ -149,5 +165,5 @@ tar \
   -czf "$output_directory/RackForge-RaspberryPi-arm64.tar.gz" \
   rackforge
 
-printf 'RackForge Raspberry Pi: %s\n' \
-  "$output_directory/RackForge-RaspberryPi-arm64.tar.gz"
+printf 'RackForge Raspberry Pi (%s): %s\n' \
+  "$edition" "$output_directory/RackForge-RaspberryPi-arm64.tar.gz"

@@ -204,32 +204,103 @@ jobs:
           $plugin = Join-Path $PWD 'dist/bundled-plugins/RackForge-Concert-Grand.rfplugin'
           "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
 
-      - name: Build RackForge Desktop
+      - name: Build RackForge Desktop Standard
         shell: pwsh
-        run: ./tools/build-windows-desktop.ps1 -RunTests
+        run: >-
+          ./tools/build-windows-desktop.ps1
+          -Edition Standard
+          -OutputDirectory dist/windows-x86_64/standard
+          -RunTests
 
-      - name: Build RackForge VST3
+      - name: Build RackForge Desktop Minimal
         shell: pwsh
-        run: ./tools/build-windows-vst3.ps1 -RunTests
+        run: >-
+          ./tools/build-windows-desktop.ps1
+          -Edition Minimal
+          -OutputDirectory dist/windows-x86_64/minimal
 
-      - name: Upload Windows executable
+      - name: Build RackForge VST3 Standard
+        shell: pwsh
+        run: >-
+          ./tools/build-windows-vst3.ps1
+          -Edition Standard
+          -OutputDirectory dist/windows-x86_64/vst3-standard
+          -RunTests
+
+      - name: Build RackForge VST3 Minimal
+        shell: pwsh
+        run: >-
+          ./tools/build-windows-vst3.ps1
+          -Edition Minimal
+          -OutputDirectory dist/windows-x86_64/vst3-minimal
+
+      - name: Verify Windows edition contents
+        shell: pwsh
+        run: |
+          python tools/verify-release-edition.py --edition standard `
+            --manifest dist/windows-x86_64/standard/bundled-plugins.txt `
+            --expect-plugin RackForge-Concert-Grand.rfplugin `
+            --expect-plugin RF-106.rfplugin
+          python tools/verify-release-edition.py --edition minimal `
+            --manifest dist/windows-x86_64/minimal/bundled-plugins.txt
+          python tools/verify-release-edition.py --edition standard `
+            --manifest dist/windows-x86_64/vst3-standard/bundled-plugins.txt `
+            --expect-plugin RackForge-Concert-Grand.rfplugin `
+            --expect-plugin RF-106.rfplugin
+          python tools/verify-release-edition.py --edition minimal `
+            --manifest dist/windows-x86_64/vst3-minimal/bundled-plugins.txt
+
+      - name: Upload Windows Standard executable
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: RackForge-Windows-x86_64-${{ github.sha }}
-          path: dist/windows-x86_64/rackforge.exe
+          path: |
+            dist/windows-x86_64/standard/rackforge.exe
+            dist/windows-x86_64/standard/build-info.txt
+            dist/windows-x86_64/standard/bundled-plugins.txt
+            dist/windows-x86_64/standard/THIRD_PARTY_NOTICES.md
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload Windows VST3
+      - name: Upload Windows Minimal executable
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: RackForge-Windows-x86_64-Minimal-${{ github.sha }}
+          path: |
+            dist/windows-x86_64/minimal/rackforge.exe
+            dist/windows-x86_64/minimal/build-info.txt
+            dist/windows-x86_64/minimal/bundled-plugins.txt
+            dist/windows-x86_64/minimal/THIRD_PARTY_NOTICES.md
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows VST3 Standard
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: RackForge-VST3-Windows-x86_64-${{ github.sha }}
           path: |
-            dist/windows-x86_64/rackforge-vst3.dll
-            dist/windows-x86_64/RackForge.vst3
-            dist/windows-x86_64/THIRD_PARTY_NOTICES.md
+            dist/windows-x86_64/vst3-standard/rackforge-vst3.dll
+            dist/windows-x86_64/vst3-standard/RackForge.vst3
+            dist/windows-x86_64/vst3-standard/build-info.txt
+            dist/windows-x86_64/vst3-standard/bundled-plugins.txt
+            dist/windows-x86_64/vst3-standard/THIRD_PARTY_NOTICES.md
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows VST3 Minimal
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: RackForge-VST3-Windows-x86_64-Minimal-${{ github.sha }}
+          path: |
+            dist/windows-x86_64/vst3-minimal/rackforge-vst3.dll
+            dist/windows-x86_64/vst3-minimal/RackForge.vst3
+            dist/windows-x86_64/vst3-minimal/build-info.txt
+            dist/windows-x86_64/vst3-minimal/bundled-plugins.txt
+            dist/windows-x86_64/vst3-minimal/THIRD_PARTY_NOTICES.md
           if-no-files-found: error
           retention-days: 14
 
@@ -291,16 +362,45 @@ jobs:
           printf 'RACKFORGE_BUNDLED_PLUGIN=%s/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin\n' \
             "$GITHUB_WORKSPACE" >>"$GITHUB_ENV"
 
-      - name: Build Linux x86-64 release bundle
+      - name: Build Linux x86-64 Standard bundle
         shell: bash
-        run: bash tools/build-linux-x86_64.sh
+        run: >-
+          env RACKFORGE_EDITION=standard
+          bash tools/build-linux-x86_64.sh dist/linux-x86_64/standard
 
-      - name: Upload Linux x86-64 bundle
+      - name: Build Linux x86-64 Minimal bundle
+        shell: bash
+        run: >-
+          env RACKFORGE_EDITION=minimal
+          bash tools/build-linux-x86_64.sh dist/linux-x86_64/minimal
+
+      - name: Verify Linux edition contents
+        shell: bash
+        run: |
+          python3 tools/verify-release-edition.py \
+            --edition standard \
+            --archive dist/linux-x86_64/standard/RackForge-Linux-x86_64.tar.gz \
+            --expect-plugin RackForge-Concert-Grand.rfplugin \
+            --expect-plugin RF-106.rfplugin
+          python3 tools/verify-release-edition.py \
+            --edition minimal \
+            --archive dist/linux-x86_64/minimal/RackForge-Linux-x86_64.tar.gz
+
+      - name: Upload Linux x86-64 Standard bundle
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: RackForge-Linux-x86_64-${{ github.sha }}
-          path: dist/linux-x86_64/RackForge-Linux-x86_64.tar.gz
+          path: dist/linux-x86_64/standard/RackForge-Linux-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Linux x86-64 Minimal bundle
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: RackForge-Linux-x86_64-Minimal-${{ github.sha }}
+          path: dist/linux-x86_64/minimal/RackForge-Linux-x86_64.tar.gz
           if-no-files-found: error
           retention-days: 14
 
@@ -389,16 +489,49 @@ jobs:
           $plugin = Join-Path $PWD 'dist/bundled-plugins/RackForge-Concert-Grand.rfplugin'
           "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
 
-      - name: Build Android APK
+      - name: Build Android Standard APK
         shell: bash
-        run: bash tools/build-android.sh
+        run: >-
+          env RACKFORGE_EDITION=standard
+          bash tools/build-android.sh dist/android/standard
 
-      - name: Upload Android APK
+      - name: Build Android Minimal APK
+        shell: bash
+        run: >-
+          env RACKFORGE_EDITION=minimal
+          bash tools/build-android.sh dist/android/minimal
+
+      - name: Verify Android edition contents
+        shell: bash
+        run: |
+          python3 tools/verify-release-edition.py \
+            --edition standard \
+            --archive dist/android/standard/RackForge-debug.apk \
+            --expect-plugin RackForge-Concert-Grand.rfplugin \
+            --expect-plugin RF-106.rfplugin
+          python3 tools/verify-release-edition.py \
+            --edition minimal \
+            --archive dist/android/minimal/RackForge-debug.apk
+
+      - name: Upload Android Standard APK
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: RackForge-Android-arm64-${{ github.sha }}
-          path: dist/android/RackForge-debug.apk
+          path: |
+            dist/android/standard/RackForge-debug.apk
+            dist/android/standard/build-info.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Android Minimal APK
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: RackForge-Android-arm64-Minimal-${{ github.sha }}
+          path: |
+            dist/android/minimal/RackForge-debug.apk
+            dist/android/minimal/build-info.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -472,15 +605,44 @@ jobs:
           $plugin = Join-Path $PWD 'dist/bundled-plugins/RackForge-Concert-Grand.rfplugin'
           "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
 
-      - name: Build Raspberry Pi release bundle
+      - name: Build Raspberry Pi Standard bundle
         shell: bash
-        run: bash tools/build-raspberry-pi.sh
+        run: >-
+          env RACKFORGE_EDITION=standard
+          bash tools/build-raspberry-pi.sh dist/raspberry-pi/standard
 
-      - name: Upload Raspberry Pi bundle
+      - name: Build Raspberry Pi Minimal bundle
+        shell: bash
+        run: >-
+          env RACKFORGE_EDITION=minimal
+          bash tools/build-raspberry-pi.sh dist/raspberry-pi/minimal
+
+      - name: Verify Raspberry Pi edition contents
+        shell: bash
+        run: |
+          python3 tools/verify-release-edition.py \
+            --edition standard \
+            --archive dist/raspberry-pi/standard/RackForge-RaspberryPi-arm64.tar.gz \
+            --expect-plugin RackForge-Concert-Grand.rfplugin \
+            --expect-plugin RF-106.rfplugin
+          python3 tools/verify-release-edition.py \
+            --edition minimal \
+            --archive dist/raspberry-pi/minimal/RackForge-RaspberryPi-arm64.tar.gz
+
+      - name: Upload Raspberry Pi Standard bundle
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: RackForge-RaspberryPi-arm64-${{ github.sha }}
-          path: dist/raspberry-pi/RackForge-RaspberryPi-arm64.tar.gz
+          path: dist/raspberry-pi/standard/RackForge-RaspberryPi-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Raspberry Pi Minimal bundle
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: RackForge-RaspberryPi-arm64-Minimal-${{ github.sha }}
+          path: dist/raspberry-pi/minimal/RackForge-RaspberryPi-arm64.tar.gz
           if-no-files-found: error
           retention-days: 14

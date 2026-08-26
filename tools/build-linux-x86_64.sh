@@ -3,6 +3,16 @@ set -euo pipefail
 
 repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 output_directory="${1:-$repository/dist/linux-x86_64}"
+edition="${RACKFORGE_EDITION:-standard}"
+
+case "$edition" in
+  standard|minimal) ;;
+  *)
+    printf 'RACKFORGE_EDITION must be standard or minimal, got %s.\n' \
+      "$edition" >&2
+    exit 2
+    ;;
+esac
 
 case "$(uname -m)" in
   x86_64|amd64) ;;
@@ -19,8 +29,10 @@ done
 bash -n "$repository/platforms/linux-x86_64/install.sh"
 
 official_plugins="$repository/dist/bundled-plugins/official"
-python3 "$repository/tools/fetch-official-plugins.py" \
-  --output-directory "$official_plugins"
+if [[ "$edition" == standard ]]; then
+  python3 "$repository/tools/fetch-official-plugins.py" \
+    --output-directory "$official_plugins"
+fi
 
 cd "$repository"
 pnpm --dir web install --frozen-lockfile
@@ -67,22 +79,24 @@ cp -a "$repository/platforms/linux-x86_64" "$release/platforms/linux-x86_64"
 cp "$repository/THIRD_PARTY_NOTICES.md" "$release/THIRD_PARTY_NOTICES.md"
 
 default_plugin_archive="${RACKFORGE_BUNDLED_PLUGIN:-}"
-if [[ -z "$default_plugin_archive" && -f "$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
-  default_plugin_archive="$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+if [[ "$edition" == standard ]]; then
+  if [[ -z "$default_plugin_archive" && -f "$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
+    default_plugin_archive="$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+  fi
+  if [[ -n "$default_plugin_archive" ]]; then
+    test -f "$default_plugin_archive"
+    install -m 0644 "$default_plugin_archive" \
+      "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+  fi
+  shopt -s nullglob
+  for archive in "$official_plugins"/*.rfplugin; do
+    install -m 0644 "$archive" "$release/bundled-plugins/$(basename "$archive")"
+  done
+  shopt -u nullglob
 fi
-if [[ -n "$default_plugin_archive" ]]; then
-  test -f "$default_plugin_archive"
-  install -m 0644 "$default_plugin_archive" \
-    "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin"
-fi
-shopt -s nullglob
-for archive in "$official_plugins"/*.rfplugin; do
-  install -m 0644 "$archive" "$release/bundled-plugins/$(basename "$archive")"
-done
-shopt -u nullglob
 
 revision="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || printf 'unknown')}"
-printf 'revision=%s\narchitecture=linux-x86-64\n' "$revision" \
+printf 'revision=%s\narchitecture=linux-x86-64\nedition=%s\n' "$revision" "$edition" \
   >"$release/build-info.txt"
 
 cat >"$release/INSTALL.md" <<'EOF'
@@ -117,5 +131,5 @@ tar \
   -czf "$output_directory/RackForge-Linux-x86_64.tar.gz" \
   rackforge
 
-printf 'RackForge Linux x86-64: %s\n' \
-  "$output_directory/RackForge-Linux-x86_64.tar.gz"
+printf 'RackForge Linux x86-64 (%s): %s\n' \
+  "$edition" "$output_directory/RackForge-Linux-x86_64.tar.gz"

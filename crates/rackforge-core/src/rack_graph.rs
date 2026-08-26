@@ -528,6 +528,98 @@ mod tests {
     }
 
     #[test]
+    fn compiles_an_instrument_and_an_effect_side_by_side() {
+        // Exactly the Rack the interface now builds when a player adds an
+        // instrument and then an effect: the keyboard drives one Slot, the
+        // guitar jack feeds the other, and both arrive at the main output. The
+        // port names asserted here are the contract the web editor writes, so
+        // this fails if either side renames one.
+        let mut rack = rack("rack.stage", "piano");
+        rack.slots.push(RackSlot {
+            plugin_id: "org.rackforge.rf-rig".into(),
+            ..slot("pedalboard")
+        });
+        let graph = rack.graph.as_mut().unwrap();
+        let audio_output = graph
+            .nodes
+            .iter()
+            .find(|node| matches!(&node.kind, RackGraphNodeKind::AudioOutput { bus_id } if bus_id == "main"))
+            .unwrap()
+            .id
+            .clone();
+        graph.nodes.extend([
+            RackGraphNode {
+                id: RackGraphNodeId::new("input.audio.00").unwrap(),
+                kind: RackGraphNodeKind::AudioInput {
+                    bus_id: "main".into(),
+                },
+                position: RackGraphPosition { x: 0, y: 180 },
+            },
+            RackGraphNode {
+                id: RackGraphNodeId::new("plugin.02").unwrap(),
+                kind: RackGraphNodeKind::Plugin {
+                    slot_id: RackSlotId::new("pedalboard").unwrap(),
+                },
+                position: RackGraphPosition { x: 360, y: 180 },
+            },
+        ]);
+        graph.edges.extend([
+            RackGraphEdge {
+                id: RackGraphEdgeId::new("audio.in.02").unwrap(),
+                signal: RackGraphSignal::Audio,
+                source: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("input.audio.00").unwrap(),
+                    port_id: "out".into(),
+                },
+                target: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("plugin.02").unwrap(),
+                    port_id: "audio_in".into(),
+                },
+                midi_transform: None,
+            },
+            RackGraphEdge {
+                id: RackGraphEdgeId::new("audio.out.02").unwrap(),
+                signal: RackGraphSignal::Audio,
+                source: RackGraphEndpoint {
+                    node_id: RackGraphNodeId::new("plugin.02").unwrap(),
+                    port_id: "audio_out".into(),
+                },
+                target: RackGraphEndpoint {
+                    node_id: audio_output,
+                    port_id: "in".into(),
+                },
+                midi_transform: None,
+            },
+        ]);
+
+        let compiled =
+            compile_instrument_rack(&library(vec![rack]), &RackId::new("rack.stage").unwrap())
+                .unwrap();
+        assert_eq!(compiled.len(), 2);
+
+        let piano = compiled
+            .iter()
+            .find(|one| one.slot.id.as_str() == "piano")
+            .unwrap();
+        assert_eq!(piano.midi_stages.len(), 1);
+        assert!(piano.audio_sources.is_empty());
+        assert!(piano.sends_to_main);
+
+        let pedalboard = compiled
+            .iter()
+            .find(|one| one.slot.id.as_str() == "pedalboard")
+            .unwrap();
+        assert!(pedalboard.midi_stages.is_empty());
+        assert_eq!(
+            pedalboard.audio_sources,
+            vec![CompiledAudioSource::HardwareInput {
+                bus_id: "main".into()
+            }]
+        );
+        assert!(pedalboard.sends_to_main);
+    }
+
+    #[test]
     fn flattens_a_child_rack_with_a_unique_runtime_path() {
         let child = rack("rack.child", "strings");
         let mut parent = rack("rack.parent", "piano");

@@ -14,6 +14,7 @@ use rackforge_performance_api::{
     SetlistDefinition, SetlistEntry, SetlistEntryId, SetlistId, SongDefinition, SongId, SongPart,
     SongPartId,
 };
+use rackforge_plugin_api::{ParameterDescriptor, ParameterKind, ParameterSchema};
 use rackforge_program_api::{
     ProgramEditorField, ProgramEditorFieldKind, ProgramEditorPage, ProgramEditorValue,
 };
@@ -26,13 +27,37 @@ use rackforge_ui::{
         SimpleCarousel, Spinner, TextEditor, ValueCarousel, ValueItem,
     },
 };
+use std::collections::BTreeMap;
 
 pub const DISPLAY_COLUMNS: usize = LITTLE_TEXT_COLUMNS;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Header {
     Visible(String),
+    /// Host-owned plugin identity plus page-local context. Keeping these as
+    /// separate values lets every controller project the same LITTLE model to
+    /// its own viewport instead of forcing an 18-column layout on all screens.
+    Plugin {
+        name: String,
+        short_name: String,
+        context: String,
+    },
     Hidden,
+}
+
+impl Header {
+    /// Projects a semantic header into a character-cell viewport.
+    pub fn text(&self, columns: usize) -> Option<String> {
+        match self {
+            Self::Visible(text) => Some(fit_surface_text(text, columns)),
+            Self::Plugin {
+                name,
+                short_name,
+                context,
+            } => Some(responsive_plugin_header(name, short_name, context, columns)),
+            Self::Hidden => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -56,6 +81,28 @@ pub struct PlaySound {
     pub bank: String,
     pub detail: String,
     pub editable: bool,
+}
+
+/// One RackForge-owned preset available for the active plugin.
+///
+/// This is intentionally separate from [`PlaySound`]: sounds are native
+/// plugin PROGRAMS, while these presets are portable snapshots owned by the
+/// host.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlayPreset {
+    pub id: String,
+    pub name: String,
+    pub detail: String,
+}
+
+impl PlayPreset {
+    pub fn new(id: impl Into<String>, name: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: normalized_display_text(&name.into(), "PRESET"),
+            detail: normalized_display_text(&detail.into(), "RACKFORGE PRESET"),
+        }
+    }
 }
 
 impl PlaySound {
@@ -84,7 +131,11 @@ impl PlaySound {
 pub struct PlayPlugin {
     pub instance_id: String,
     pub plugin_id: String,
+    pub full_name: String,
     pub name: String,
+    /// Compact identity used by constrained controller displays. The surface
+    /// owns the actual layout; this is only the plugin-provided fallback.
+    pub short_name: String,
     pub config_available: bool,
 }
 
@@ -94,10 +145,14 @@ impl PlayPlugin {
         plugin_id: impl Into<String>,
         name: impl Into<String>,
     ) -> Self {
+        let full_name = clean_surface_text(&name.into(), "PLUGIN");
+        let name = normalized_display_text(&full_name, "PLUGIN");
         Self {
             instance_id: instance_id.into(),
             plugin_id: plugin_id.into(),
-            name: normalized_display_text(&name.into(), "PLUGIN"),
+            short_name: compact_plugin_name(&name),
+            full_name,
+            name,
             // Preserve the behavior of callers compiled against the original
             // constructor. Runtime catalogs always override this from the
             // plugin manifest.
@@ -107,6 +162,11 @@ impl PlayPlugin {
 
     pub fn config_available(mut self, available: bool) -> Self {
         self.config_available = available;
+        self
+    }
+
+    pub fn short_name(mut self, short_name: impl AsRef<str>) -> Self {
+        self.short_name = compact_plugin_name(short_name.as_ref());
         self
     }
 }
@@ -217,6 +277,18 @@ pub enum MenuCommand {
     SelectSound {
         id: String,
     },
+    LoadPluginPreset {
+        preset_id: String,
+    },
+    SetPluginParameter {
+        instance_id: String,
+        parameter_index: u32,
+        value: f64,
+    },
+    TriggerPluginParameter {
+        instance_id: String,
+        parameter_index: u32,
+    },
     BeginProgramEdit {
         program_id: Option<String>,
     },
@@ -295,9 +367,19 @@ impl Screen {
         screen
     }
 
-    fn fullscreen(line_1: impl Into<String>, line_2: impl Into<String>) -> Self {
+    fn with_plugin_header(
+        name: impl Into<String>,
+        short_name: impl Into<String>,
+        context: impl Into<String>,
+        line_1: impl Into<String>,
+        line_2: impl Into<String>,
+    ) -> Self {
         let screen = Self {
-            header: Header::Hidden,
+            header: Header::Plugin {
+                name: clean_surface_text(&name.into(), "PLUGIN"),
+                short_name: compact_plugin_name(&short_name.into()),
+                context: clean_surface_text(&context.into(), " ").to_ascii_uppercase(),
+            },
             line_1: line_1.into(),
             line_2: line_2.into(),
             footer: standard_footer(None),
@@ -309,6 +391,13 @@ impl Screen {
     pub fn is_valid(&self) -> bool {
         let header_is_valid = match &self.header {
             Header::Visible(header) => valid_line(header),
+            Header::Plugin {
+                name,
+                short_name,
+                context,
+            } => [name, short_name, context]
+                .into_iter()
+                .all(|value| valid_semantic_text(value)),
             Header::Hidden => true,
         };
         header_is_valid
@@ -320,6 +409,10 @@ impl Screen {
                 .iter()
                 .all(|button| valid_footer_label(&button.label))
     }
+}
+
+fn valid_semantic_text(value: &str) -> bool {
+    !value.is_empty() && value.is_ascii() && !value.as_bytes().contains(&0)
 }
 
 fn valid_line(line: &str) -> bool {
@@ -409,7 +502,12 @@ enum Page {
     SystemWifiBusy,
     SystemWifiResult,
     PluginLibrary,
+    PluginPresets,
+    PluginPrograms,
     PluginPlay,
+    PluginParameterPages,
+    PluginParameters,
+    PluginParameterValue,
     PluginCustomPrograms,
     PluginProgramSections,
     PluginName,
@@ -522,7 +620,9 @@ pub struct Menu {
     active_plugin_instance_id: Option<String>,
     pending_plugin_instance_id: Option<String>,
     active_plugin_id: String,
+    active_plugin_full_name: String,
     active_plugin_name: String,
+    active_plugin_short_name: String,
     active_plugin_config_available: bool,
     plugin_spinner: Spinner,
     system_index: usize,
@@ -548,6 +648,15 @@ pub struct Menu {
     audio_spinner: Spinner,
     audio_result: Option<(bool, String)>,
     plugin_library_index: usize,
+    plugin_preset_index: usize,
+    plugin_program_bank_index: usize,
+    plugin_parameter_page_index: usize,
+    plugin_parameter_index: usize,
+    plugin_parameter_schema: Option<ParameterSchema>,
+    plugin_parameter_values: BTreeMap<u32, f64>,
+    plugin_parameter_editor: Option<ValueCarousel>,
+    plugin_presets: Vec<PlayPreset>,
+    plugin_active_preset_id: Option<String>,
     plugin_play_index: usize,
     plugin_play_context: PluginPlayContext,
     plugin_custom_index: usize,
@@ -707,7 +816,9 @@ impl Default for Menu {
             active_plugin_instance_id: None,
             pending_plugin_instance_id: None,
             active_plugin_id: "plugin.unavailable".into(),
+            active_plugin_full_name: "PLUGIN".into(),
             active_plugin_name: "PLUGIN".into(),
+            active_plugin_short_name: "PLUGIN".into(),
             active_plugin_config_available: false,
             plugin_spinner: Spinner::ascii("plugin-loader", "LOADING PLUGIN", "PLEASE WAIT"),
             system_index: 0,
@@ -733,6 +844,15 @@ impl Default for Menu {
             audio_spinner: Spinner::ascii("audio-loader", "APPLYING", "PLEASE WAIT"),
             audio_result: None,
             plugin_library_index: 0,
+            plugin_preset_index: 0,
+            plugin_program_bank_index: 0,
+            plugin_parameter_page_index: 0,
+            plugin_parameter_index: 0,
+            plugin_parameter_schema: None,
+            plugin_parameter_values: BTreeMap::new(),
+            plugin_parameter_editor: None,
+            plugin_presets: Vec::new(),
+            plugin_active_preset_id: None,
             plugin_play_index: 0,
             plugin_play_context: PluginPlayContext::Standalone,
             plugin_custom_index: 0,
@@ -766,13 +886,48 @@ impl Default for Menu {
 }
 
 impl Menu {
+    fn plugin_screen(
+        &self,
+        context: impl Into<String>,
+        line_1: impl Into<String>,
+        line_2: impl Into<String>,
+    ) -> Screen {
+        Screen::with_plugin_header(
+            &self.active_plugin_full_name,
+            &self.active_plugin_short_name,
+            context,
+            line_1,
+            line_2,
+        )
+    }
+
+    fn plugin_simple_screen(
+        &self,
+        context: impl Into<String>,
+        items: &[&str],
+        details: &[&str],
+        selected: usize,
+    ) -> Screen {
+        let [line_1, line_2] = simple_carousel(items, details, selected);
+        self.plugin_screen(context, line_1, line_2)
+    }
+
     pub fn set_active_plugin(&mut self, id: impl Into<String>, name: impl Into<String>) {
         self.active_plugin_id = id.into();
-        self.active_plugin_name = normalized_display_text(&name.into(), "PLUGIN");
-        self.active_plugin_config_available = self
+        let name = name.into();
+        self.active_plugin_full_name = clean_surface_text(&name, "PLUGIN");
+        self.active_plugin_name = normalized_display_text(&name, "PLUGIN");
+        let catalog_plugin = self
             .play_plugins
             .iter()
-            .find(|plugin| plugin.plugin_id == self.active_plugin_id)
+            .find(|plugin| plugin.plugin_id == self.active_plugin_id);
+        self.active_plugin_short_name = catalog_plugin
+            .map(|plugin| plugin.short_name.clone())
+            .unwrap_or_else(|| compact_plugin_name(&self.active_plugin_name));
+        if let Some(plugin) = catalog_plugin {
+            self.active_plugin_full_name = plugin.full_name.clone();
+        }
+        self.active_plugin_config_available = catalog_plugin
             .map(|plugin| plugin.config_available)
             .unwrap_or(false);
         if self.play_plugins.is_empty() {
@@ -832,6 +987,8 @@ impl Menu {
             .iter()
             .find(|plugin| plugin.plugin_id == self.active_plugin_id)
         {
+            self.active_plugin_full_name = plugin.full_name.clone();
+            self.active_plugin_short_name = plugin.short_name.clone();
             self.active_plugin_config_available = plugin.config_available;
         }
     }
@@ -851,6 +1008,18 @@ impl Menu {
             .is_some_and(|pending| pending != instance_id)
         {
             return false;
+        }
+        let plugin_id = plugin_id.into();
+        if self.active_plugin_id != plugin_id {
+            self.plugin_presets.clear();
+            self.plugin_active_preset_id = None;
+            self.plugin_preset_index = 0;
+            self.plugin_program_bank_index = 0;
+            self.plugin_parameter_schema = None;
+            self.plugin_parameter_values.clear();
+            self.plugin_parameter_page_index = 0;
+            self.plugin_parameter_index = 0;
+            self.plugin_parameter_editor = None;
         }
         self.active_plugin_instance_id = Some(instance_id.clone());
         self.set_active_plugin(plugin_id, name);
@@ -882,7 +1051,16 @@ impl Menu {
     }
 
     fn is_plugin_browser_page(&self) -> bool {
-        matches!(self.page, Page::PluginLibrary | Page::PluginPlay)
+        matches!(
+            self.page,
+            Page::PluginLibrary
+                | Page::PluginPresets
+                | Page::PluginPrograms
+                | Page::PluginPlay
+                | Page::PluginParameterPages
+                | Page::PluginParameters
+                | Page::PluginParameterValue
+        )
     }
 
     pub fn sync_active_mode(&mut self, mode: ActiveMode) {
@@ -1111,7 +1289,7 @@ impl Menu {
         if let Some(sound) =
             focus_id.and_then(|id| self.plugin_sounds.iter().find(|sound| sound.id == id))
         {
-            self.plugin_library_index = self.plugin_bank_index(&sound.bank).unwrap_or(0);
+            self.plugin_program_bank_index = self.plugin_bank_index(&sound.bank).unwrap_or(0);
         }
         self.plugin_play_index = focus_id
             .and_then(|id| {
@@ -1122,6 +1300,91 @@ impl Menu {
             .unwrap_or(0);
     }
 
+    pub fn set_plugin_presets(&mut self, presets: Vec<PlayPreset>, active_preset_id: Option<&str>) {
+        let focused = self
+            .plugin_presets
+            .get(self.plugin_preset_index)
+            .map(|preset| preset.id.clone());
+        let active_id = active_preset_id
+            .map(str::to_owned)
+            .or_else(|| self.plugin_active_preset_id.clone());
+        let focus_id = active_id.clone().or(focused);
+        self.plugin_presets = presets;
+        self.plugin_active_preset_id =
+            active_id.filter(|id| self.plugin_presets.iter().any(|preset| preset.id == *id));
+        self.plugin_preset_index = focus_id
+            .as_deref()
+            .and_then(|id| {
+                self.plugin_presets
+                    .iter()
+                    .position(|preset| preset.id == id)
+            })
+            .unwrap_or(0)
+            .min(self.plugin_presets.len().saturating_sub(1));
+    }
+
+    pub fn complete_plugin_preset_load(&mut self, preset_id: &str) {
+        self.plugin_active_preset_id = Some(preset_id.to_owned());
+        if let Some(index) = self
+            .plugin_presets
+            .iter()
+            .position(|preset| preset.id == preset_id)
+        {
+            self.plugin_preset_index = index;
+        }
+    }
+
+    /// Supplies the active plugin's validated public parameter contract to
+    /// LITTLE. The plugin owns names, grouping and domains; RackForge owns the
+    /// text navigation and dispatches mutations through the normal parameter
+    /// path. Read-only meters remain visible but cannot be edited.
+    pub fn sync_plugin_parameters(
+        &mut self,
+        schema: ParameterSchema,
+        values: impl IntoIterator<Item = (u32, f64)>,
+    ) {
+        if schema.validate().is_err() {
+            self.plugin_parameter_schema = None;
+            self.plugin_parameter_values.clear();
+            self.plugin_parameter_editor = None;
+            return;
+        }
+        let preserve_open_editor = self.page == Page::PluginParameterValue
+            && self.plugin_parameter_editor.is_some()
+            && self
+                .plugin_parameter_schema
+                .as_ref()
+                .is_some_and(|current| current == &schema);
+        self.plugin_parameter_values = values
+            .into_iter()
+            .filter(|(_, value)| value.is_finite())
+            .collect();
+        self.plugin_parameter_schema = Some(schema);
+        self.plugin_parameter_page_index = self
+            .plugin_parameter_page_index
+            .min(self.plugin_parameter_pages().len().saturating_sub(1));
+        self.plugin_parameter_index = self
+            .plugin_parameter_index
+            .min(self.current_plugin_parameters().len().saturating_sub(1));
+        if !preserve_open_editor {
+            self.plugin_parameter_editor = None;
+        }
+    }
+
+    /// Applies the canonical value returned by the host after a LITTLE edit.
+    pub fn complete_plugin_parameter_set(&mut self, parameter_index: u32, value: f64) {
+        if value.is_finite()
+            && self.plugin_parameter_schema.as_ref().is_some_and(|schema| {
+                schema
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.index == parameter_index)
+            })
+        {
+            self.plugin_parameter_values.insert(parameter_index, value);
+        }
+    }
+
     fn focus_plugin_play_sound(&mut self, sound_id: Option<&str>) {
         let Some((sound_id, bank)) = sound_id.and_then(|id| {
             self.plugin_sounds
@@ -1129,11 +1392,11 @@ impl Menu {
                 .find(|sound| sound.id == id)
                 .map(|sound| (sound.id.clone(), sound.bank.clone()))
         }) else {
-            self.plugin_library_index = 0;
+            self.plugin_program_bank_index = 0;
             self.plugin_play_index = 0;
             return;
         };
-        self.plugin_library_index = self.plugin_bank_index(&bank).unwrap_or(0);
+        self.plugin_program_bank_index = self.plugin_bank_index(&bank).unwrap_or(0);
         self.plugin_play_index = self
             .filtered_sounds()
             .iter()
@@ -2742,6 +3005,16 @@ impl Menu {
             self.apply_generic_editor_field_input(input);
             return;
         }
+        if self.page == Page::PluginParameterValue {
+            let input = match action {
+                Action::Previous => Input::Button2,
+                Action::Next => Input::Button3,
+                Action::Back => Input::Button4,
+                Action::Select => Input::Button1,
+            };
+            self.apply_plugin_parameter_input(input);
+            return;
+        }
         if self.page == Page::PluginUnsavedChanges {
             let input = match action {
                 Action::Previous => Input::Button2,
@@ -2790,7 +3063,14 @@ impl Menu {
                     Page::LiveRacks | Page::LiveSongs | Page::LiveSetlists => Page::Live,
                     Page::LiveSongParts => Page::LiveSongs,
                     Page::LiveSetlistEntries => Page::LiveSetlists,
-                    Page::PluginPlay => Page::PluginLibrary,
+                    Page::PluginPlay if self.plugin_banks().len() > 1 => Page::PluginPrograms,
+                    Page::PluginPlay | Page::PluginPresets | Page::PluginPrograms => {
+                        Page::PluginLibrary
+                    }
+                    Page::PluginParameters if self.plugin_parameter_pages().len() > 1 => {
+                        Page::PluginParameterPages
+                    }
+                    Page::PluginParameters | Page::PluginParameterPages => Page::PluginLibrary,
                     Page::PluginLibrary
                         if self.plugin_play_context == PluginPlayContext::RackSlot =>
                     {
@@ -2864,6 +3144,7 @@ impl Menu {
                                 self.pending_command = Some(MenuCommand::PreviewRack { rack });
                             }
                         } else {
+                            self.plugin_active_preset_id = None;
                             self.pending_command = Some(MenuCommand::SelectSound {
                                 id: sound.id.clone(),
                             });
@@ -2934,8 +3215,50 @@ impl Menu {
                         Page::LiveSetlistEntries
                     }
                     Page::PluginLibrary => {
+                        if self.plugin_play_context == PluginPlayContext::Standalone
+                            && self.plugin_library_index == 0
+                        {
+                            Page::PluginPresets
+                        } else if self.plugin_play_context == PluginPlayContext::Standalone
+                            && self.plugin_library_index == 2
+                            && !self.plugin_parameter_pages().is_empty()
+                        {
+                            self.plugin_parameter_page_index = 0;
+                            self.plugin_parameter_index = 0;
+                            if self.plugin_parameter_pages().len() > 1 {
+                                Page::PluginParameterPages
+                            } else {
+                                Page::PluginParameters
+                            }
+                        } else {
+                            self.plugin_program_bank_index = 0;
+                            self.plugin_play_index = 0;
+                            if self.plugin_banks().len() > 1 {
+                                Page::PluginPrograms
+                            } else {
+                                Page::PluginPlay
+                            }
+                        }
+                    }
+                    Page::PluginPresets if !self.plugin_presets.is_empty() => {
+                        if let Some(preset) = self.plugin_presets.get(self.plugin_preset_index) {
+                            self.pending_command = Some(MenuCommand::LoadPluginPreset {
+                                preset_id: preset.id.clone(),
+                            });
+                        }
+                        Page::PluginPresets
+                    }
+                    Page::PluginPrograms => {
                         self.plugin_play_index = 0;
                         Page::PluginPlay
+                    }
+                    Page::PluginParameterPages => {
+                        self.plugin_parameter_index = 0;
+                        Page::PluginParameters
+                    }
+                    Page::PluginParameters if !self.current_plugin_parameters().is_empty() => {
+                        self.open_plugin_parameter();
+                        self.page
                     }
                     Page::Config if self.config_index == 0 => {
                         self.performance_list_index = 0;
@@ -3075,7 +3398,8 @@ impl Menu {
                 if let Some(sound) = focus_sound_id
                     .and_then(|id| self.plugin_sounds.iter().find(|sound| sound.id == id))
                 {
-                    self.plugin_library_index = self.plugin_bank_index(&sound.bank).unwrap_or(0);
+                    self.plugin_program_bank_index =
+                        self.plugin_bank_index(&sound.bank).unwrap_or(0);
                     self.plugin_play_index = self
                         .filtered_sounds()
                         .iter()
@@ -3245,11 +3569,9 @@ impl Menu {
                 &self.active_plugin_name,
                 "Plugin settings",
             ),
-            Page::PluginConfigUnavailable => Screen::with_header(
-                &self.active_plugin_name,
-                "CONFIG UNAVAILABLE",
-                "USE PLAY + PRESETS",
-            ),
+            Page::PluginConfigUnavailable => {
+                self.plugin_screen("CONFIG", "CONFIG UNAVAILABLE", "USE PLAY + PRESETS")
+            }
             Page::System => {
                 let (item, detail) = self.system_item();
                 Screen::with_header(
@@ -3281,19 +3603,30 @@ impl Menu {
                 Screen::with_header("WI-FI", line_1, line_2)
             }
             Page::SystemWifiResult => self.render_wifi_result(),
-            Page::PluginLibrary | Page::PluginPlay if self.pending_plugin_instance_id.is_some() => {
+            Page::PluginLibrary
+            | Page::PluginPresets
+            | Page::PluginPrograms
+            | Page::PluginPlay
+            | Page::PluginParameterPages
+            | Page::PluginParameters
+            | Page::PluginParameterValue
+                if self.pending_plugin_instance_id.is_some() =>
+            {
                 self.render_plugin_loading()
             }
             Page::PluginLibrary => self.render_plugin_library(),
+            Page::PluginPresets => self.render_plugin_presets(),
+            Page::PluginPrograms => self.render_plugin_programs(),
             Page::PluginPlay => self.render_plugin_play(),
+            Page::PluginParameterPages => self.render_plugin_parameter_pages(),
+            Page::PluginParameters => self.render_plugin_parameters(),
+            Page::PluginParameterValue => self.render_plugin_parameter_value(),
             Page::PluginCustomPrograms => self.render_custom_programs(),
-            Page::PluginProgramSections => simple_screen(
-                indexed_title(
-                    self.program_draft
-                        .as_ref()
-                        .map_or("PROGRAM", |draft| draft.name.as_str()),
-                    self.plugin_section_index,
-                    PLUGIN_PROGRAM_SECTIONS.len(),
+            Page::PluginProgramSections => self.plugin_simple_screen(
+                format!(
+                    "EDIT {}/{}",
+                    self.plugin_section_index + 1,
+                    PLUGIN_PROGRAM_SECTIONS.len()
                 ),
                 &PLUGIN_PROGRAM_SECTIONS,
                 &PLUGIN_SECTION_DETAILS,
@@ -3301,42 +3634,42 @@ impl Menu {
             ),
             Page::PluginName => {
                 let [line_1, line_2] = component_lines(&self.program_name, false);
-                Screen::with_header(&self.active_plugin_name, line_1, line_2)
+                self.plugin_screen("NAME", line_1, line_2)
             }
             Page::PluginLayerMenu => self.render_layer_menu(),
             Page::PluginTimbre => self.render_timbre(),
             Page::PluginEnvelope => {
                 let [line_1, line_2] = component_lines(&self.envelope, true);
-                Screen::fullscreen(line_1, line_2)
+                self.plugin_screen("AMP ENV", line_1, line_2)
             }
             Page::PluginPitchEnvelope => {
                 let [line_1, line_2] = component_lines(&self.pitch_envelope, true);
-                Screen::with_header(self.layer_header("PITCH ENV"), line_1, line_2)
+                self.plugin_screen(self.layer_header("PITCH ENV"), line_1, line_2)
             }
             Page::PluginLfo => {
                 let [line_1, line_2] = component_lines(&self.lfo, true);
-                Screen::with_header(self.layer_header("LFO"), line_1, line_2)
+                self.plugin_screen(self.layer_header("LFO"), line_1, line_2)
             }
             Page::PluginTuning => {
                 let [line_1, line_2] = component_lines(&self.tuning, true);
-                Screen::with_header(self.layer_header("TUNING"), line_1, line_2)
+                self.plugin_screen(self.layer_header("TUNING"), line_1, line_2)
             }
             Page::PluginRange => {
                 let [line_1, line_2] = component_lines(&self.range, true);
-                Screen::with_header(self.layer_header("RANGE"), line_1, line_2)
+                self.plugin_screen(self.layer_header("RANGE"), line_1, line_2)
             }
             Page::PluginLayerLevel => {
                 let [line_1, line_2] = component_lines(&self.layer_level, true);
-                Screen::with_header(self.layer_header("VOLUME"), line_1, line_2)
+                self.plugin_screen(self.layer_header("VOLUME"), line_1, line_2)
             }
-            Page::PluginSharedFx => Screen::with_header("SHARED FX", "NO FX", "Chain is empty"),
+            Page::PluginSharedFx => self.plugin_screen("FX", "NO FX", "Chain is empty"),
             Page::PluginProgramOutput => {
                 let [line_1, line_2] = component_lines(&self.program_output, true);
-                Screen::with_header("OUTPUT", line_1, line_2)
+                self.plugin_screen("OUTPUT", line_1, line_2)
             }
             Page::PluginUnsavedChanges => {
                 let [line_1, line_2] = component_lines(&self.unsaved_changes, true);
-                Screen::with_header(&self.active_plugin_name, line_1, line_2)
+                self.plugin_screen("UNSAVED", line_1, line_2)
             }
             Page::ProgramEditorRoot => self.render_generic_editor_root(),
             Page::ProgramEditorSection => self.render_generic_editor_page(),
@@ -4735,16 +5068,40 @@ impl Menu {
             Page::SystemWeb => (&mut self.system_web_index, SYSTEM_WEB_ITEMS.len()),
             Page::Audio => (&mut self.audio_index, AUDIO_ITEMS.len()),
             Page::PluginLibrary => {
+                let len = if self.plugin_play_context == PluginPlayContext::RackSlot {
+                    1
+                } else {
+                    2 + usize::from(!self.plugin_parameter_pages().is_empty())
+                };
+                (&mut self.plugin_library_index, len)
+            }
+            Page::PluginPresets if self.plugin_presets.is_empty() => return,
+            Page::PluginPresets => (&mut self.plugin_preset_index, self.plugin_presets.len()),
+            Page::PluginPrograms => {
                 let len = self.plugin_banks().len();
                 if len == 0 {
                     return;
                 }
-                (&mut self.plugin_library_index, len)
+                (&mut self.plugin_program_bank_index, len)
             }
             Page::PluginPlay if self.filtered_sounds().is_empty() => return,
             Page::PluginPlay => {
                 let len = self.filtered_sounds().len();
                 (&mut self.plugin_play_index, len)
+            }
+            Page::PluginParameterPages => {
+                let len = self.plugin_parameter_pages().len();
+                if len == 0 {
+                    return;
+                }
+                (&mut self.plugin_parameter_page_index, len)
+            }
+            Page::PluginParameters => {
+                let len = self.current_plugin_parameters().len();
+                if len == 0 {
+                    return;
+                }
+                (&mut self.plugin_parameter_index, len)
             }
             Page::PluginCustomPrograms => {
                 let len = self.editable_sounds().len() + 1;
@@ -4810,6 +5167,7 @@ impl Menu {
             | Page::ProgramEditorRoot
             | Page::ProgramEditorSection
             | Page::ProgramEditorField
+            | Page::PluginParameterValue
             | Page::ProgramEditorSound
             | Page::SystemWifi
             | Page::SystemWifiNetworks
@@ -5411,13 +5769,8 @@ impl Menu {
 
     fn render_plugin_play(&self) -> Screen {
         let sounds = self.filtered_sounds();
-        let banks = self.plugin_banks();
-        let library = banks
-            .get(self.plugin_library_index)
-            .copied()
-            .unwrap_or("PROGRAMS");
         if sounds.is_empty() {
-            return Screen::with_header(library, "NO PROGRAMS", " ");
+            return self.plugin_screen("PROGRAMS", "NO PROGRAMS", " ");
         }
         let mut carousel = SimpleCarousel::new(
             "plugin-sounds",
@@ -5438,12 +5791,8 @@ impl Menu {
         carousel.set_selected(self.plugin_play_index);
         carousel.set_focused(true);
         let [line_1, line_2] = component_lines(&carousel, false);
-        Screen::with_header(
-            indexed_title(
-                &normalized_display_text(&library.to_ascii_uppercase(), "PROGRAMS"),
-                self.plugin_play_index,
-                sounds.len(),
-            ),
+        self.plugin_screen(
+            compact_indexed_context("PROG", self.plugin_play_index, sounds.len()),
             line_1,
             line_2,
         )
@@ -5451,22 +5800,94 @@ impl Menu {
 
     fn render_plugin_loading(&self) -> Screen {
         let [line_1, line_2] = component_lines(&self.plugin_spinner, false);
-        let header = self
-            .pending_plugin_instance_id
-            .as_deref()
-            .and_then(|id| {
-                self.play_plugins
-                    .iter()
-                    .find(|plugin| plugin.instance_id == id)
-            })
-            .map_or("PLUGIN", |plugin| plugin.name.as_str());
-        Screen::with_header(header, line_1, line_2)
+        let plugin = self.pending_plugin_instance_id.as_deref().and_then(|id| {
+            self.play_plugins
+                .iter()
+                .find(|plugin| plugin.instance_id == id)
+        });
+        Screen::with_plugin_header(
+            plugin.map_or("PLUGIN", |plugin| plugin.full_name.as_str()),
+            plugin.map_or("PLUGIN", |plugin| plugin.short_name.as_str()),
+            "LOADING",
+            line_1,
+            line_2,
+        )
     }
 
     fn render_plugin_library(&self) -> Screen {
+        let (mut names, mut details): (Vec<&str>, Vec<String>) =
+            if self.plugin_play_context == PluginPlayContext::RackSlot {
+                (
+                    vec!["PROGRAMS"],
+                    vec![format!("{} AVAILABLE", self.plugin_sounds.len())],
+                )
+            } else {
+                (
+                    vec!["PRESETS", "PROGRAMS"],
+                    vec![
+                        format!("{} SAVED", self.plugin_presets.len()),
+                        format!("{} AVAILABLE", self.plugin_sounds.len()),
+                    ],
+                )
+            };
+        if self.plugin_play_context == PluginPlayContext::Standalone
+            && !self.plugin_parameter_pages().is_empty()
+        {
+            names.push("CONTROLS");
+            details.push(format!(
+                "{} PARAMETERS",
+                self.plugin_parameter_schema
+                    .as_ref()
+                    .map_or(0, |schema| schema.parameters.len())
+            ));
+        }
+        let detail_refs = details.iter().map(String::as_str).collect::<Vec<_>>();
+        self.plugin_simple_screen(
+            compact_indexed_context("PLAY", self.plugin_library_index, names.len()),
+            &names,
+            &detail_refs,
+            self.plugin_library_index,
+        )
+    }
+
+    fn render_plugin_presets(&self) -> Screen {
+        if self.plugin_presets.is_empty() {
+            return self.plugin_screen("PRESETS", "NO SAVED PRESETS", "USE RACKFORGE UI");
+        }
+        let mut carousel = SimpleCarousel::new(
+            "plugin-presets",
+            self.plugin_presets.iter().map(|preset| {
+                let name = if self.plugin_active_preset_id.as_deref() == Some(preset.id.as_str()) {
+                    let bounded = preset
+                        .name
+                        .chars()
+                        .take(DISPLAY_COLUMNS - 2)
+                        .collect::<String>();
+                    format!("[{bounded}]")
+                } else {
+                    preset.name.clone()
+                };
+                CarouselItem::new(name, &preset.detail)
+            }),
+        );
+        carousel.set_selected(self.plugin_preset_index);
+        carousel.set_focused(true);
+        let [line_1, line_2] = component_lines(&carousel, false);
+        self.plugin_screen(
+            compact_indexed_context(
+                "PRESET",
+                self.plugin_preset_index,
+                self.plugin_presets.len(),
+            ),
+            line_1,
+            line_2,
+        )
+    }
+
+    fn render_plugin_programs(&self) -> Screen {
         let banks = self.plugin_banks();
         if banks.is_empty() {
-            return Screen::with_header(&self.active_plugin_name, "NO PROGRAMS", " ");
+            return self.plugin_screen("PROGRAMS", "NO PROGRAMS", " ");
         }
         let names = banks
             .iter()
@@ -5486,16 +5907,89 @@ impl Menu {
             .collect::<Vec<_>>();
         let name_refs = names.iter().map(String::as_str).collect::<Vec<_>>();
         let details = counts.iter().map(String::as_str).collect::<Vec<_>>();
-        simple_screen(
-            indexed_title(
-                &format!("{} PLAY", self.active_plugin_name),
-                self.plugin_library_index,
-                banks.len(),
-            ),
+        self.plugin_simple_screen(
+            compact_indexed_context("BANK", self.plugin_program_bank_index, banks.len()),
             &name_refs,
             &details,
-            self.plugin_library_index,
+            self.plugin_program_bank_index,
         )
+    }
+
+    fn render_plugin_parameter_pages(&self) -> Screen {
+        let pages = self.plugin_parameter_pages();
+        if pages.is_empty() {
+            return self.plugin_screen("CONTROLS", "NO CONTROLS", " ");
+        }
+        let names = pages
+            .iter()
+            .map(|page| normalized_display_text(&page.name, "CONTROLS").to_ascii_uppercase())
+            .collect::<Vec<_>>();
+        let details = pages
+            .iter()
+            .map(|page| {
+                let count = self.plugin_parameter_schema.as_ref().map_or(0, |schema| {
+                    schema
+                        .parameters
+                        .iter()
+                        .filter(|parameter| parameter.page == page.id)
+                        .count()
+                });
+                format!("{count} CONTROLS")
+            })
+            .collect::<Vec<_>>();
+        let name_refs = names.iter().map(String::as_str).collect::<Vec<_>>();
+        let detail_refs = details.iter().map(String::as_str).collect::<Vec<_>>();
+        self.plugin_simple_screen(
+            compact_indexed_context("CTRL", self.plugin_parameter_page_index, pages.len()),
+            &name_refs,
+            &detail_refs,
+            self.plugin_parameter_page_index,
+        )
+    }
+
+    fn render_plugin_parameters(&self) -> Screen {
+        let parameters = self.current_plugin_parameters();
+        let Some(page) = self
+            .plugin_parameter_pages()
+            .get(self.plugin_parameter_page_index)
+            .copied()
+        else {
+            return self.plugin_screen("CONTROLS", "NO CONTROLS", " ");
+        };
+        if parameters.is_empty() {
+            return self.plugin_screen(&page.name, "NO CONTROLS", " ");
+        }
+        let mut carousel = SimpleCarousel::new(
+            "plugin-live-parameters",
+            parameters.iter().map(|parameter| {
+                CarouselItem::new(
+                    normalized_display_text(&parameter.name, "PARAMETER").to_ascii_uppercase(),
+                    little_parameter_display(
+                        parameter,
+                        self.plugin_parameter_value(parameter),
+                        self.plugin_parameter_schema
+                            .as_ref()
+                            .and_then(|schema| schema.display_decimals),
+                    ),
+                )
+            }),
+        );
+        carousel.set_selected(self.plugin_parameter_index.min(parameters.len() - 1));
+        carousel.set_focused(true);
+        let [line_1, line_2] = component_lines(&carousel, false);
+        self.plugin_screen(
+            compact_indexed_context(&page.name, self.plugin_parameter_index, parameters.len()),
+            line_1,
+            line_2,
+        )
+    }
+
+    fn render_plugin_parameter_value(&self) -> Screen {
+        let Some(editor) = &self.plugin_parameter_editor else {
+            return self.plugin_screen("CONTROLS", "INVALID CONTROL", " ");
+        };
+        let [line_1, line_2] = component_lines(editor, false);
+        self.plugin_screen("CONTROL", line_1, line_2)
     }
 
     fn render_custom_programs(&self) -> Screen {
@@ -5508,8 +6002,8 @@ impl Menu {
         }
         let name_refs = names.iter().map(String::as_str).collect::<Vec<_>>();
         let detail_refs = details.iter().map(String::as_str).collect::<Vec<_>>();
-        simple_screen(
-            indexed_title("PROGRAMS", self.plugin_custom_index, names.len()),
+        self.plugin_simple_screen(
+            compact_indexed_context("CUSTOM", self.plugin_custom_index, names.len()),
             &name_refs,
             &detail_refs,
             self.plugin_custom_index,
@@ -5518,7 +6012,7 @@ impl Menu {
 
     fn render_layer_menu(&self) -> Screen {
         if self.plugin_layer_index == 0 {
-            return simple_screen(
+            return self.plugin_simple_screen(
                 self.layer_header(""),
                 &PLUGIN_LAYER_SECTIONS,
                 &PLUGIN_LAYER_DETAILS,
@@ -5530,14 +6024,14 @@ impl Menu {
             sections.extend(PLUGIN_LAYER_SECTIONS);
             let mut details = vec!["ON"];
             details.extend(PLUGIN_LAYER_DETAILS);
-            simple_screen(
+            self.plugin_simple_screen(
                 self.layer_header(""),
                 &sections,
                 &details,
                 self.plugin_layer_option_index,
             )
         } else {
-            simple_screen(
+            self.plugin_simple_screen(
                 self.layer_header(""),
                 &["ENABLED"],
                 &["OFF"],
@@ -5549,7 +6043,7 @@ impl Menu {
     fn render_timbre(&self) -> Screen {
         let sounds = self.base_sounds();
         if sounds.is_empty() {
-            return Screen::with_header(self.layer_header("TIMBRE"), "NO SOUNDS", " ");
+            return self.plugin_screen(self.layer_header("TIMBRE"), "NO SOUNDS", " ");
         }
         let selected_id = self.program_layer_source_id(self.plugin_layer_index);
         let mut carousel = SimpleCarousel::new(
@@ -5571,12 +6065,8 @@ impl Menu {
         carousel.set_selected(self.plugin_timbre_index);
         carousel.set_focused(true);
         let [line_1, line_2] = component_lines(&carousel, false);
-        Screen::with_header(
-            indexed_title(
-                &self.layer_header("TIMBRE"),
-                self.plugin_timbre_index,
-                sounds.len(),
-            ),
+        self.plugin_screen(
+            compact_indexed_context("TIMBRE", self.plugin_timbre_index, sounds.len()),
             line_1,
             line_2,
         )
@@ -5584,7 +6074,7 @@ impl Menu {
 
     fn filtered_sounds(&self) -> Vec<&PlaySound> {
         let banks = self.plugin_banks();
-        let Some(bank) = banks.get(self.plugin_library_index) else {
+        let Some(bank) = banks.get(self.plugin_program_bank_index) else {
             return Vec::new();
         };
         self.plugin_sounds
@@ -5621,6 +6111,176 @@ impl Menu {
         self.plugin_banks()
             .iter()
             .position(|candidate| candidate.eq_ignore_ascii_case(bank))
+    }
+
+    fn plugin_parameter_pages(&self) -> Vec<&rackforge_plugin_api::PageDescriptor> {
+        let Some(schema) = &self.plugin_parameter_schema else {
+            return Vec::new();
+        };
+        let mut pages = schema
+            .pages
+            .iter()
+            .filter(|page| {
+                schema
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.page == page.id)
+            })
+            .collect::<Vec<_>>();
+        pages.sort_by(|left, right| {
+            left.order
+                .cmp(&right.order)
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        pages
+    }
+
+    fn current_plugin_parameters(&self) -> Vec<&ParameterDescriptor> {
+        let Some(page) = self
+            .plugin_parameter_pages()
+            .get(self.plugin_parameter_page_index)
+            .copied()
+        else {
+            return Vec::new();
+        };
+        let Some(schema) = &self.plugin_parameter_schema else {
+            return Vec::new();
+        };
+        let mut parameters = schema
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.page == page.id)
+            .collect::<Vec<_>>();
+        parameters.sort_by(|left, right| {
+            left.order
+                .cmp(&right.order)
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.index.cmp(&right.index))
+        });
+        parameters
+    }
+
+    fn plugin_parameter_value(&self, parameter: &ParameterDescriptor) -> f64 {
+        self.plugin_parameter_values
+            .get(&parameter.index)
+            .copied()
+            .unwrap_or_else(|| match &parameter.kind {
+                ParameterKind::Float { default, .. } => *default,
+                ParameterKind::Integer { default, .. } => *default as f64,
+                ParameterKind::Boolean { default } => f64::from(u8::from(*default)),
+                ParameterKind::Enum { default, .. } => f64::from(*default),
+                ParameterKind::Trigger => 0.0,
+                ParameterKind::Meter { minimum, .. } => *minimum,
+            })
+    }
+
+    fn open_plugin_parameter(&mut self) {
+        let Some(parameter) = self
+            .current_plugin_parameters()
+            .get(self.plugin_parameter_index)
+            .cloned()
+            .cloned()
+        else {
+            return;
+        };
+        if parameter.flags.read_only || matches!(parameter.kind, ParameterKind::Meter { .. }) {
+            return;
+        }
+        if matches!(parameter.kind, ParameterKind::Trigger) {
+            if let Some(instance_id) = self.active_plugin_instance_id.clone() {
+                self.pending_command = Some(MenuCommand::TriggerPluginParameter {
+                    instance_id,
+                    parameter_index: parameter.index,
+                });
+            }
+            return;
+        }
+        let Some(value) = little_parameter_editable_value(
+            &parameter,
+            self.plugin_parameter_value(&parameter),
+            self.plugin_parameter_schema
+                .as_ref()
+                .and_then(|schema| schema.display_decimals),
+        ) else {
+            return;
+        };
+        let mut editor = ValueCarousel::new(
+            "plugin-live-parameter",
+            [ValueItem::new(
+                parameter.index.to_string(),
+                normalized_display_text(&parameter.name, "PARAMETER"),
+                value,
+            )],
+        );
+        editor.set_focused(true);
+        let _ = editor.handle(Input::Button1);
+        self.plugin_parameter_editor = Some(editor);
+        self.page = Page::PluginParameterValue;
+    }
+
+    fn apply_plugin_parameter_input(&mut self, input: Input) {
+        let Some(parameter) = self
+            .current_plugin_parameters()
+            .get(self.plugin_parameter_index)
+            .cloned()
+            .cloned()
+        else {
+            self.page = Page::PluginParameters;
+            self.plugin_parameter_editor = None;
+            return;
+        };
+        let event = self
+            .plugin_parameter_editor
+            .as_mut()
+            .map_or(ComponentEvent::Ignored, |editor| editor.handle(input));
+        match event {
+            ComponentEvent::Changed(_) => self.emit_plugin_parameter_value(&parameter),
+            ComponentEvent::EditCommitted(_) => {
+                self.emit_plugin_parameter_value(&parameter);
+                self.plugin_parameter_editor = None;
+                self.page = Page::PluginParameters;
+            }
+            ComponentEvent::EditCancelled(_) => {
+                self.emit_plugin_parameter_value(&parameter);
+                self.plugin_parameter_editor = None;
+                self.page = Page::PluginParameters;
+            }
+            ComponentEvent::ExitRequested(_) => {
+                self.plugin_parameter_editor = None;
+                self.page = Page::PluginParameters;
+            }
+            _ => {}
+        }
+    }
+
+    fn emit_plugin_parameter_value(&mut self, parameter: &ParameterDescriptor) {
+        let Some(editor) = &self.plugin_parameter_editor else {
+            return;
+        };
+        let item = editor.selected_item();
+        let value = match &parameter.kind {
+            ParameterKind::Enum { choices, .. } => item
+                .value()
+                .choice_index()
+                .and_then(|index| choices.get(index))
+                .map(|choice| f64::from(choice.value)),
+            ParameterKind::Float { step, .. } => item.value().as_f64().map(|value| {
+                let scale = 10_f64.powi(parameter_decimals(*step) as i32);
+                (value * scale).round() / scale
+            }),
+            _ => item.value().as_f64(),
+        };
+        let (Some(instance_id), Some(value)) = (self.active_plugin_instance_id.clone(), value)
+        else {
+            return;
+        };
+        self.plugin_parameter_values.insert(parameter.index, value);
+        self.pending_command = Some(MenuCommand::SetPluginParameter {
+            instance_id,
+            parameter_index: parameter.index,
+            value,
+        });
     }
 
     fn sync_layer_editors(&mut self) {
@@ -5718,7 +6378,7 @@ impl Menu {
         } else {
             "B"
         };
-        format!("LAYER {layer} {section}").trim_end().to_owned()
+        format!("{layer} {section}").trim_end().to_owned()
     }
 
     fn is_program_edit_page(&self) -> bool {
@@ -5796,6 +6456,109 @@ fn editor_scaled_value(parameter: &str, value: f64) -> i64 {
         _ => 1.0,
     };
     (value * scale).round() as i64
+}
+
+fn little_parameter_editable_value(
+    parameter: &ParameterDescriptor,
+    value: f64,
+    display_decimals: Option<u8>,
+) -> Option<EditableValue> {
+    match &parameter.kind {
+        ParameterKind::Float {
+            minimum,
+            maximum,
+            step,
+            unit,
+            ..
+        } => Some(EditableValue::number(
+            value.clamp(*minimum, *maximum),
+            *minimum,
+            *maximum,
+            *step,
+            parameter_display_decimals(*step, display_decimals),
+            unit.as_deref().unwrap_or(""),
+        )),
+        ParameterKind::Integer {
+            minimum,
+            maximum,
+            step,
+            unit,
+            ..
+        } => Some(EditableValue::integer(
+            (value.round() as i64).clamp(*minimum, *maximum),
+            *minimum,
+            *maximum,
+            *step,
+            unit.as_deref().unwrap_or(""),
+        )),
+        ParameterKind::Boolean { .. } => Some(EditableValue::toggle(value >= 0.5, "OFF", "ON")),
+        ParameterKind::Enum { choices, .. } => {
+            let selected = choices
+                .iter()
+                .position(|choice| f64::from(choice.value) == value)
+                .unwrap_or(0);
+            Some(EditableValue::choice(
+                selected,
+                choices.iter().map(|choice| choice.name.clone()),
+            ))
+        }
+        ParameterKind::Trigger | ParameterKind::Meter { .. } => None,
+    }
+}
+
+fn little_parameter_display(
+    parameter: &ParameterDescriptor,
+    value: f64,
+    display_decimals: Option<u8>,
+) -> String {
+    match &parameter.kind {
+        ParameterKind::Float { step, unit, .. } => {
+            let value = format!(
+                "{value:.precision$}",
+                precision = parameter_display_decimals(*step, display_decimals)
+            );
+            unit.as_deref()
+                .filter(|unit| !unit.is_empty())
+                .map_or(value.clone(), |unit| format!("{value} {unit}"))
+        }
+        ParameterKind::Integer { unit, .. } => {
+            let value = (value.round() as i64).to_string();
+            unit.as_deref()
+                .filter(|unit| !unit.is_empty())
+                .map_or(value.clone(), |unit| format!("{value} {unit}"))
+        }
+        ParameterKind::Boolean { .. } => if value >= 0.5 { "ON" } else { "OFF" }.into(),
+        ParameterKind::Enum { choices, .. } => choices
+            .iter()
+            .find(|choice| f64::from(choice.value) == value)
+            .map_or_else(|| format!("{value:.0}"), |choice| choice.name.clone()),
+        ParameterKind::Trigger => "PRESS OK".into(),
+        ParameterKind::Meter { unit, .. } => {
+            let precision = display_decimals.map_or(2, usize::from);
+            unit.as_deref().map_or_else(
+                || format!("{value:.precision$}"),
+                |unit| format!("{value:.precision$} {unit}"),
+            )
+        }
+    }
+}
+
+fn parameter_display_decimals(step: f64, display_decimals: Option<u8>) -> usize {
+    display_decimals.map_or_else(|| parameter_decimals(step), usize::from)
+}
+
+fn parameter_decimals(step: f64) -> usize {
+    if step >= 1.0 {
+        0
+    } else {
+        let mut scaled = step.abs();
+        let mut decimals = 0;
+        while decimals < 6 && (scaled.round() - scaled).abs() > 1.0e-9 {
+            scaled *= 10.0;
+            decimals += 1;
+        }
+        decimals
+    }
 }
 
 fn find_editor_field<'a>(
@@ -5943,16 +6706,86 @@ fn editor_field_summary(field: &ProgramEditorField) -> String {
 }
 
 fn normalized_display_text(value: &str, fallback: &str) -> String {
+    clean_surface_text(value, fallback)
+        .chars()
+        .take(DISPLAY_COLUMNS)
+        .collect()
+}
+
+fn clean_surface_text(value: &str, fallback: &str) -> String {
     let mut normalized = value
         .chars()
         .filter(|character| !character.is_control())
         .map(|character| if character.is_ascii() { character } else { '?' })
-        .take(DISPLAY_COLUMNS)
         .collect::<String>();
     if normalized.trim().is_empty() {
         normalized = fallback.into();
     }
     normalized
+}
+
+fn compact_plugin_name(value: &str) -> String {
+    let normalized = clean_surface_text(value, "PLUGIN").to_ascii_uppercase();
+    let compact = normalized
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .take(8)
+        .collect::<String>();
+    if compact.is_empty() {
+        "PLUGIN".into()
+    } else {
+        compact
+    }
+}
+
+fn fit_surface_text(value: &str, columns: usize) -> String {
+    clean_surface_text(value, " ")
+        .chars()
+        .take(columns)
+        .collect()
+}
+
+fn responsive_plugin_header(name: &str, short_name: &str, context: &str, columns: usize) -> String {
+    if columns == 0 {
+        return String::new();
+    }
+    let full_name = clean_surface_text(name, "PLUGIN").to_ascii_uppercase();
+    let short_name = compact_plugin_name(short_name);
+    let context = clean_surface_text(context, " ").to_ascii_uppercase();
+    if context.trim().is_empty() {
+        // Some character displays center short header payloads. Always fill
+        // the complete viewport so the plugin identity remains anchored to
+        // the first column even when there is no page-local context.
+        let identity = fit_surface_text(&full_name, columns);
+        return format!("{identity:<columns$}");
+    }
+    if columns == 1 {
+        return full_name.chars().take(1).collect();
+    }
+
+    // Prefer the complete identity whenever both semantic values fit. When
+    // they do not, split the available space responsively. At the KeyLab's
+    // 18 columns this naturally becomes 8 + separator + 9; narrower and wider
+    // controllers get a proportional allocation without another layout ID.
+    if full_name.chars().count() + 1 + context.chars().count() <= columns {
+        let gap = columns - full_name.chars().count() - context.chars().count();
+        return format!("{full_name}{}{context}", " ".repeat(gap.max(1)));
+    }
+    let name_columns = ((columns - 1) / 2).max(1);
+    let context_columns = columns - name_columns - 1;
+    let identity = if full_name.chars().count() <= name_columns {
+        full_name
+    } else {
+        short_name
+    };
+    let identity = identity.chars().take(name_columns).collect::<String>();
+    let context = context.chars().take(context_columns).collect::<String>();
+    format!("{identity:<width$} {context}", width = name_columns)
+}
+
+fn compact_indexed_context(label: &str, index: usize, len: usize) -> String {
+    let counter = format!("{}/{}", index.saturating_add(1), len.max(1));
+    format!("{label} {counter}")
 }
 
 fn initialize_keyboard_parts(rack: &mut RackDefinition) -> bool {
@@ -6514,6 +7347,49 @@ mod tests {
     };
     use rackforge_session_api::InstanceId;
 
+    fn assert_plugin_header(screen: &Screen, expected_name: &str, expected_context: &str) {
+        assert!(matches!(
+            &screen.header,
+            Header::Plugin { name, context, .. }
+                if name == expected_name && context == expected_context
+        ));
+    }
+
+    #[test]
+    fn plugin_header_projects_responsively_without_new_layout_ids() {
+        let header = Header::Plugin {
+            name: "RackForge Concert Grand".into(),
+            short_name: "RF-GRAND".into(),
+            context: "PROGRAM 12/128".into(),
+        };
+        assert_eq!(header.text(18).as_deref(), Some("RF-GRAND PROGRAM 1"));
+        assert_eq!(header.text(12).as_deref(), Some("RF-GR PROGRA"));
+        assert_eq!(
+            header.text(40).as_deref(),
+            Some("RACKFORGE CONCERT GRAND   PROGRAM 12/128")
+        );
+
+        let identity_only = Header::Plugin {
+            name: "RF-106".into(),
+            short_name: "RF-106".into(),
+            context: " ".into(),
+        };
+        assert_eq!(
+            identity_only.text(18).as_deref(),
+            Some("RF-106            ")
+        );
+
+        let rf_106_control = Header::Plugin {
+            name: "RF-106".into(),
+            short_name: "RF-106".into(),
+            context: "CTRL 1/9".into(),
+        };
+        let projected = rf_106_control.text(18).unwrap();
+        assert_eq!(projected.chars().count(), 18);
+        assert!(projected.starts_with("RF-106"));
+        assert_eq!(projected.as_bytes()[0], b'R');
+    }
+
     #[test]
     fn play_plugin_carousel_selects_a_real_runtime_instance() {
         let mut menu = Menu::default();
@@ -6569,7 +7445,7 @@ mod tests {
         );
         assert!(menu.is_plugin_loading());
         let loading = menu.render();
-        assert_eq!(loading.header, Header::Visible("SYNTH".into()));
+        assert_plugin_header(&loading, "SYNTH", "LOADING");
         assert_eq!(loading.line_1.trim(), "LOADING PLUGIN");
         assert!(loading.line_2.contains("PLEASE WAIT"));
         assert!(!loading.line_1.contains("OLD PIANO"));
@@ -6604,7 +7480,9 @@ mod tests {
             Some("synth.new"),
         ));
         assert!(!menu.is_plugin_loading());
-        assert_eq!(menu.render().line_1.trim(), "LEADS");
+        assert_eq!(menu.render().line_1.trim(), "PRESETS");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1.trim(), "PROGRAMS");
         menu.apply(Action::Select);
         assert_eq!(menu.render().line_1.trim(), "[NEW SYNTH]");
     }
@@ -6653,6 +7531,186 @@ mod tests {
         menu.apply(Action::Select);
 
         assert_eq!(menu.page, Page::PluginCustomPrograms);
+    }
+
+    fn test_live_parameter_schema() -> ParameterSchema {
+        use rackforge_plugin_api::{
+            EnumChoice, PARAMETER_SCHEMA_VERSION, PageDescriptor, ParameterFlags, SuggestedControl,
+        };
+
+        let parameter =
+            |index, id: &str, name: &str, page: &str, order, kind| ParameterDescriptor {
+                index,
+                id: id.into(),
+                name: name.into(),
+                page: page.into(),
+                group: None,
+                order,
+                kind,
+                flags: ParameterFlags {
+                    automatable: true,
+                    modulatable: false,
+                    read_only: false,
+                    advanced: false,
+                },
+                suggested_control: SuggestedControl::Automatic,
+            };
+        ParameterSchema {
+            schema_version: PARAMETER_SCHEMA_VERSION,
+            display_decimals: Some(2),
+            pages: vec![
+                PageDescriptor {
+                    id: "level".into(),
+                    name: "Level".into(),
+                    order: 0,
+                    header: None,
+                },
+                PageDescriptor {
+                    id: "mode".into(),
+                    name: "Mode".into(),
+                    order: 1,
+                    header: None,
+                },
+            ],
+            parameters: vec![
+                parameter(
+                    0,
+                    "gain",
+                    "Gain",
+                    "level",
+                    0,
+                    ParameterKind::Float {
+                        minimum: 0.0,
+                        maximum: 1.0,
+                        default: 0.5,
+                        step: 0.1,
+                        unit: None,
+                    },
+                ),
+                parameter(
+                    1,
+                    "enabled",
+                    "Enabled",
+                    "mode",
+                    0,
+                    ParameterKind::Boolean { default: true },
+                ),
+                parameter(
+                    2,
+                    "shape",
+                    "Shape",
+                    "mode",
+                    1,
+                    ParameterKind::Enum {
+                        default: 10,
+                        choices: vec![
+                            EnumChoice {
+                                value: 10,
+                                name: "Soft".into(),
+                            },
+                            EnumChoice {
+                                value: 20,
+                                name: "Hard".into(),
+                            },
+                        ],
+                    },
+                ),
+                parameter(3, "fire", "Fire", "mode", 2, ParameterKind::Trigger),
+            ],
+            semantic_controls: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn little_exposes_plugin_parameter_pages_and_dispatches_normal_parameter_events() {
+        let mut menu = Menu::default();
+        menu.set_play_plugins(
+            vec![PlayPlugin::new("play.synth", "org.example.synth", "SYNTH")],
+            Some("play.synth"),
+        );
+        assert!(menu.sync_active_plugin(
+            "play.synth",
+            "org.example.synth",
+            "SYNTH",
+            vec![PlaySound::new("factory.0", "Init", "Factory", "Init")],
+            Some("factory.0"),
+        ));
+        menu.sync_plugin_parameters(
+            test_live_parameter_schema(),
+            [(0, 0.5), (1, 1.0), (2, 10.0), (3, 0.0)],
+        );
+        menu.page = Page::PluginLibrary;
+
+        assert_eq!(menu.render().line_1.trim(), "PRESETS");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1.trim(), "PROGRAMS");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1.trim(), "CONTROLS");
+        assert_eq!(menu.render().line_2.trim(), "4 PARAMETERS");
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1.trim(), "LEVEL");
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1.trim(), "GAIN");
+        menu.apply(Action::Select);
+        assert_eq!(menu.page, Page::PluginParameterValue);
+        menu.apply(Action::Next);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetPluginParameter {
+                instance_id: "play.synth".into(),
+                parameter_index: 0,
+                value: 0.6,
+            })
+        );
+        menu.complete_plugin_parameter_set(0, 0.6);
+        menu.apply(Action::Select);
+        assert_eq!(menu.page, Page::PluginParameters);
+        assert_eq!(menu.render().line_2.trim(), "0.60");
+    }
+
+    #[test]
+    fn little_preserves_enum_values_and_emits_trigger_gestures() {
+        let mut menu = Menu::default();
+        menu.set_play_plugins(
+            vec![PlayPlugin::new("play.synth", "org.example.synth", "SYNTH")],
+            Some("play.synth"),
+        );
+        menu.sync_active_plugin(
+            "play.synth",
+            "org.example.synth",
+            "SYNTH",
+            vec![PlaySound::new("factory.0", "Init", "Factory", "Init")],
+            Some("factory.0"),
+        );
+        menu.sync_plugin_parameters(
+            test_live_parameter_schema(),
+            [(0, 0.5), (1, 1.0), (2, 10.0), (3, 0.0)],
+        );
+        menu.plugin_parameter_page_index = 1;
+        menu.plugin_parameter_index = 1;
+        menu.page = Page::PluginParameters;
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetPluginParameter {
+                instance_id: "play.synth".into(),
+                parameter_index: 2,
+                value: 20.0,
+            })
+        );
+
+        menu.page = Page::PluginParameters;
+        menu.plugin_parameter_editor = None;
+        menu.plugin_parameter_index = 2;
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::TriggerPluginParameter {
+                instance_id: "play.synth".into(),
+                parameter_index: 3,
+            })
+        );
     }
 
     fn plugin_menu() -> Menu {
@@ -6959,10 +8017,10 @@ mod tests {
         menu.apply(Action::Select);
         assert_eq!(menu.render().line_1, "RF-DLS");
         menu.apply(Action::Select);
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("RF-DLS PLAY    1/2".into())
-        );
+        assert_plugin_header(&menu.render(), "RF-DLS", "PLAY 1/1");
+        assert_eq!(menu.render().line_1.trim(), "PROGRAMS");
+        menu.apply(Action::Select);
+        assert_plugin_header(&menu.render(), "RF-DLS", "BANK 1/2");
         assert_eq!(menu.render().line_1.trim(), "DLS");
         menu.apply(Action::Next);
         assert_eq!(menu.render().line_1.trim(), "CUSTOM");
@@ -6982,10 +8040,9 @@ mod tests {
             Some("custom.user.warm-piano")
         );
         menu.apply(Action::Back);
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("RF-DLS PLAY    2/2".into())
-        );
+        assert_plugin_header(&menu.render(), "RF-DLS", "BANK 2/2");
+        menu.apply(Action::Back);
+        assert_eq!(menu.render().line_1.trim(), "PROGRAMS");
         menu.apply(Action::Back);
         assert_eq!(menu.render().line_1, "RF-DLS");
     }
@@ -7454,10 +8511,7 @@ mod tests {
             Some(MenuCommand::CancelProgramEdit { draft_id: 17 })
         ));
         menu.sync_program_edit(None, None);
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("PROGRAMS       1/1".into())
-        );
+        assert_plugin_header(&menu.render(), "RF-DLS", "CUSTOM 1/1");
         menu.apply(Action::Back);
         assert_eq!(
             menu.render().header,
@@ -7507,23 +8561,16 @@ mod tests {
             Header::Visible("PLAY           1/1".into())
         );
         menu.apply(Action::Select);
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("RF-DLS PLAY    1/1".into())
-        );
-        assert!(menu.render().line_1.contains("DLS"));
+        assert_plugin_header(&menu.render(), "RF-DLS", "PLAY 1/2");
+        assert_eq!(menu.render().line_1.trim(), "PRESETS");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1.trim(), "PROGRAMS");
         menu.apply(Action::Select);
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("DLS            1/1".into())
-        );
+        assert_plugin_header(&menu.render(), "RF-DLS", "PROG 1/1");
         assert!(menu.render().line_1.contains("[PIANO 1]"));
         assert_eq!(menu.render().line_2.trim(), "B000 P000");
         menu.apply(Action::Back);
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("RF-DLS PLAY    1/1".into())
-        );
+        assert_plugin_header(&menu.render(), "RF-DLS", "PLAY 2/2");
         menu.apply(Action::Back);
         assert_eq!(
             menu.render().header,
@@ -7538,11 +8585,38 @@ mod tests {
         menu.apply(Action::Next);
         menu.apply(Action::Select);
         menu.apply(Action::Select);
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("PROGRAMS       1/1".into())
-        );
+        assert_plugin_header(&menu.render(), "RF-DLS", "CUSTOM 1/1");
         assert!(menu.render().line_1.contains("ADD NEW"));
+    }
+
+    #[test]
+    fn plugin_play_opens_host_presets_before_native_programs() {
+        let mut menu = plugin_menu();
+        menu.set_plugin_presets(
+            vec![
+                PlayPreset::new("preset.stage", "Stage Piano", "v1.0.0"),
+                PlayPreset::new("preset.soft", "Soft Piano", "v1.0.0"),
+            ],
+            Some("preset.soft"),
+        );
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1.trim(), "PRESETS");
+        menu.apply(Action::Select);
+        assert_plugin_header(&menu.render(), "RF-DLS", "PRESET 2/2");
+        assert!(menu.render().line_1.to_ascii_uppercase().contains("SOFT"));
+
+        menu.apply(Action::Previous);
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::LoadPluginPreset {
+                preset_id: "preset.stage".into(),
+            })
+        );
+        menu.complete_plugin_preset_load("preset.stage");
+        assert!(menu.render().line_1.to_ascii_uppercase().contains("STAGE"));
     }
 
     #[test]
@@ -7558,6 +8632,7 @@ mod tests {
         menu.apply(Action::Next);
         menu.apply(Action::Select);
         menu.apply(Action::Select);
+        menu.apply(Action::Next);
         menu.apply(Action::Select);
         menu.apply(Action::Next);
         assert!(menu.render().line_1.contains("STR?NGS 1"));
@@ -7611,15 +8686,14 @@ mod tests {
         menu.apply(Action::Next);
         menu.apply(Action::Select);
         menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
         assert!(menu.render().line_1.contains("DLS"));
         assert_eq!(menu.render().line_2.trim(), "1 PROGRAMS");
         menu.apply(Action::Next);
         assert!(menu.render().line_1.contains("CUSTOM"));
         menu.apply(Action::Select);
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("CUSTOM         1/1".into())
-        );
+        assert_plugin_header(&menu.render(), "RF-DLS", "PROG 1/1");
         assert!(menu.render().line_1.contains("WARM PIANO"));
         assert_eq!(menu.render().line_2.trim(), "CUSTOM 001");
     }
@@ -8017,7 +9091,7 @@ mod tests {
         open_new_program_editor(&mut menu);
         assert!(menu.render().line_1.contains("NAME"));
         menu.apply(Action::Select);
-        assert_eq!(menu.render().header, Header::Visible("RF-DLS".into()));
+        assert_plugin_header(&menu.render(), "RF-DLS", "NAME");
         menu.apply_input(Input::Button1);
         assert!(menu.program_name.is_editing());
         menu.apply_input(Input::EncoderRight);
@@ -8064,10 +9138,7 @@ mod tests {
             })
         ));
         menu.complete_return_to_active_mode(ActiveMode::Play, Some("custom.user.warm-piano"));
-        assert_eq!(
-            menu.render().header,
-            Header::Visible("CUSTOM         1/1".into())
-        );
+        assert_plugin_header(&menu.render(), "RF-DLS", "PROG 1/1");
         assert!(menu.render().line_1.contains("[WARM PIANO]"));
     }
 

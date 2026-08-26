@@ -1,13 +1,29 @@
 import type { PluginInstance, PluginWebDescriptor } from "./types";
 
 /**
- * Builds the instrument surface available to Rack and Song Part editors.
+ * What a plugin does in a Rack node.
+ *
+ * An instrument is played: MIDI goes in, audio comes out. An effect is patched:
+ * audio goes in and audio comes out, so it has no note range, no key split and
+ * nothing to transpose. The distinction decides how a new Slot is wired, and
+ * nothing else — both own a graph node, both hold state, both carry presets.
+ */
+export type RackPluginRole = "instrument" | "effect";
+
+/**
+ * Builds the plugin surface available to Rack and Song Part editors.
  *
  * Session instances are runtime details and may contain only the global PLAY
  * plugin on replaceable hosts such as Android. The installed catalog is the
- * authority for which enabled instruments can own an isolated graph node.
+ * authority for which enabled plugins can own an isolated graph node.
+ *
+ * Effects belong here as much as instruments do. The engine has always been
+ * able to run them — a Rack graph compiles a hardware audio input into a plugin
+ * node, and the audio thread mixes the result — but the picker filtered them
+ * out, so an effect could be installed and validated and still never reach a
+ * board.
  */
-export function buildRackInstrumentInstances(
+export function buildRackPluginInstances(
   instances: PluginInstance[],
   plugins: PluginWebDescriptor[],
 ): PluginInstance[] {
@@ -21,6 +37,7 @@ export function buildRackInstrumentInstances(
     .filter(
       (plugin) =>
         (plugin.kind === "instrument" ||
+          plugin.kind === "effect" ||
           (plugin.kind == null && plugin.surfaces.some((surface) => surface.kind === "play"))) &&
         plugin.active &&
         !plugin.transitioning,
@@ -36,7 +53,8 @@ export function buildRackInstrumentInstances(
 
   // A legacy host may expose a playable instance before its catalog endpoint
   // becomes available. Preserve that temporary compatibility without allowing
-  // known effects, inactive packages or transitioning runtimes into the picker.
+  // MIDI processors, inactive packages or transitioning runtimes into the
+  // picker — a MIDI processor emits no audio, so a Slot cannot own one.
   for (const instance of instances) {
     if (available.some((candidate) => candidate.plugin_id === instance.plugin_id)) {
       continue;
@@ -45,7 +63,9 @@ export function buildRackInstrumentInstances(
     if (
       descriptor &&
       (
-        (descriptor.kind != null && descriptor.kind !== "instrument") ||
+        (descriptor.kind != null &&
+          descriptor.kind !== "instrument" &&
+          descriptor.kind !== "effect") ||
         !descriptor.active ||
         descriptor.transitioning
       )
@@ -57,5 +77,32 @@ export function buildRackInstrumentInstances(
 
   return [...available].sort((left, right) =>
     left.plugin_name.localeCompare(right.plugin_name),
+  );
+}
+
+/**
+ * What role a plugin plays in a Rack node.
+ *
+ * Anything the catalog does not call an effect is treated as an instrument,
+ * including a plugin the catalog has not described yet: a Slot wired for MIDI
+ * is the behaviour every existing Rack already has, so it is the safe answer
+ * when the descriptor is missing.
+ */
+export function rackPluginRole(
+  pluginId: string,
+  plugins: PluginWebDescriptor[],
+): RackPluginRole {
+  const descriptor = plugins.find((plugin) => plugin.plugin_id === pluginId);
+  return descriptor?.kind === "effect" ? "effect" : "instrument";
+}
+
+/** The plugins in `instances` that play the given role. */
+export function rackPluginsOfRole(
+  instances: PluginInstance[],
+  plugins: PluginWebDescriptor[],
+  role: RackPluginRole,
+): PluginInstance[] {
+  return instances.filter(
+    (instance) => rackPluginRole(instance.plugin_id, plugins) === role,
   );
 }

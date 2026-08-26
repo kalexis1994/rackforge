@@ -15,18 +15,52 @@ case "$architecture" in
 esac
 
 command -v cargo >/dev/null
-command -v pnpm >/dev/null
 command -v tar >/dev/null
 command -v python3 >/dev/null
 bash -n "$repository/platforms/raspberry-pi/install-release.sh"
 
 official_plugins="$repository/dist/bundled-plugins/official"
-python3 "$repository/tools/fetch-official-plugins.py" \
-  --output-directory "$official_plugins"
+official_plugin_override="${RACKFORGE_OFFICIAL_PLUGIN:-}"
+if [[ -n "$official_plugin_override" ]]; then
+  [[ "$official_plugin_override" == /* ]] || {
+    printf 'RACKFORGE_OFFICIAL_PLUGIN must be an absolute path: %s\n' \
+      "$official_plugin_override" >&2
+    exit 2
+  }
+  [[ -f "$official_plugin_override" ]] || {
+    printf 'RACKFORGE_OFFICIAL_PLUGIN is not a file: %s\n' \
+      "$official_plugin_override" >&2
+    exit 2
+  }
+  install -d "$official_plugins"
+  install -m 0644 "$official_plugin_override" \
+    "$official_plugins/RF-106.rfplugin"
+else
+  python3 "$repository/tools/fetch-official-plugins.py" \
+    --output-directory "$official_plugins"
+fi
+
+web_dist="${RACKFORGE_WEB_DIST:-}"
+if [[ -z "$web_dist" ]]; then
+  command -v node >/dev/null
+  command -v pnpm >/dev/null
+  cd "$repository"
+  pnpm --dir web install --frozen-lockfile
+  pnpm --dir web build
+  web_dist="$repository/web/dist"
+else
+  [[ "$web_dist" == /* ]] || {
+    printf 'RACKFORGE_WEB_DIST must be an absolute path: %s\n' "$web_dist" >&2
+    exit 2
+  }
+  web_dist="$(cd "$web_dist" && pwd)"
+fi
+[[ -f "$web_dist/index.html" ]] || {
+  printf 'RackForge Web build is missing index.html: %s\n' "$web_dist" >&2
+  exit 2
+}
 
 cd "$repository"
-pnpm --dir web install --frozen-lockfile
-pnpm --dir web build
 
 cargo build --locked --release \
   -p rackforge-core \
@@ -65,7 +99,7 @@ RACKFORGE_SOURCE="$repository" bash \
   "$repository/hardware/controllers/arturia-keylab-essential-mk3/build-package.sh" \
   "$release/controller-packages/org.rackforge.arturia-keylab-essential-mk3.rfcontroller"
 
-cp -a "$repository/web/dist" "$release/web/dist"
+cp -a "$web_dist" "$release/web/dist"
 cp -a "$repository/config/." "$release/config/"
 default_plugin_archive="${RACKFORGE_BUNDLED_PLUGIN:-}"
 if [[ -z "$default_plugin_archive" && -f "$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
@@ -102,7 +136,22 @@ if [[ -f "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
 fi
 official_plugin=none
 if [[ -f "$release/bundled-plugins/RF-106.rfplugin" ]]; then
-  official_plugin=org.rackforge.rf-106@0.2.9
+  official_plugin_version="$(python3 - "$release/bundled-plugins/RF-106.rfplugin" <<'PY'
+import re
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    manifest = archive.read("rackforge-plugin.toml").decode("utf-8")
+
+plugin_id = re.search(r'^id = "([^"]+)"$', manifest, re.MULTILINE)
+version = re.search(r'^version = "([^"]+)"$', manifest, re.MULTILINE)
+if plugin_id is None or plugin_id.group(1) != "org.rackforge.rf-106" or version is None:
+    raise SystemExit("bundled RF-106 package has invalid identity metadata")
+print(version.group(1))
+PY
+)"
+  official_plugin="org.rackforge.rf-106@$official_plugin_version"
 fi
 printf 'revision=%s\narchitecture=linux-aarch64\ndefault_plugin=%s\nofficial_plugin=%s\n' \
   "$revision" "$default_plugin" "$official_plugin" >"$release/build-info.txt"

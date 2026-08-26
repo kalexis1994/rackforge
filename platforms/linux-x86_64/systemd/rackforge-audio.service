@@ -2,11 +2,14 @@
 Description=RackForge supervised low-latency audio engine
 After=local-fs.target sound.target
 Wants=sound.target
+Before=rackforge-platform-host.service rackforge-controller-host.service
 StartLimitIntervalSec=0
 ConditionPathExists=@RACKFORGE_ROOT@/config/audio.toml
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+TimeoutStartSec=20
 User=@RACKFORGE_USER@
 Group=@RACKFORGE_GROUP@
 SupplementaryGroups=audio rackforge
@@ -15,6 +18,9 @@ WorkingDirectory=@RACKFORGE_ROOT@
 ExecCondition=/usr/bin/test -f @RACKFORGE_ROOT@/config/audio.toml
 LimitRTPRIO=95
 LimitMEMLOCK=infinity
+StartupCPUWeight=10000
+StartupIOWeight=10000
+Nice=-10
 ExecStart=@RACKFORGE_ROOT@/bin/rackforge-core resume @RACKFORGE_ROOT@/config/audio.toml
 Restart=always
 RestartSec=1

@@ -8,6 +8,11 @@ use thiserror::Error;
 #[serde(deny_unknown_fields)]
 pub struct ParameterSchema {
     pub schema_version: u32,
+    /// Preferred number of fractional digits for floating-point values in
+    /// compact host-owned surfaces. This is presentation metadata only: the
+    /// parameter `step` remains the authoritative editing resolution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_decimals: Option<u8>,
     #[serde(default)]
     pub pages: Vec<PageDescriptor>,
     #[serde(default)]
@@ -27,6 +32,14 @@ impl ParameterSchema {
         }
         if self.schema_version < 2 && !self.semantic_controls.is_empty() {
             return Err(SchemaError::SemanticControlsRequireSchema2);
+        }
+        if self.schema_version < 3 && self.display_decimals.is_some() {
+            return Err(SchemaError::DisplayDecimalsRequireSchema3);
+        }
+        if self.display_decimals.is_some_and(|decimals| decimals > 6) {
+            return Err(SchemaError::InvalidDisplayDecimals(
+                self.display_decimals.unwrap_or_default(),
+            ));
         }
         let mut page_ids = BTreeSet::new();
         for page in &self.pages {
@@ -285,6 +298,10 @@ pub enum SchemaError {
     UnsupportedSchema(u32),
     #[error("semantic controls require parameter schema 2")]
     SemanticControlsRequireSchema2,
+    #[error("display decimals require parameter schema 3")]
+    DisplayDecimalsRequireSchema3,
+    #[error("display decimals must be between 0 and 6, got {0}")]
+    InvalidDisplayDecimals(u8),
     #[error("invalid identifier {0:?}")]
     InvalidIdentifier(String),
     #[error("empty display name for {0}")]
@@ -321,6 +338,7 @@ mod tests {
     fn validates_declarative_pages_and_parameters() {
         let schema = ParameterSchema {
             schema_version: PARAMETER_SCHEMA_VERSION,
+            display_decimals: None,
             pages: vec![PageDescriptor {
                 id: "level".into(),
                 name: "Level".into(),
@@ -360,6 +378,7 @@ mod tests {
             "parameters": []
         }"#;
         let schema: ParameterSchema = serde_json::from_str(json).unwrap();
+        assert_eq!(schema.display_decimals, None);
         assert_eq!(schema.pages[0].header, None);
         assert_eq!(schema.validate(), Ok(()));
 
@@ -372,9 +391,35 @@ mod tests {
     }
 
     #[test]
+    fn display_precision_is_versioned_and_bounded_without_changing_step() {
+        let mut schema = ParameterSchema {
+            schema_version: PARAMETER_SCHEMA_VERSION,
+            display_decimals: Some(2),
+            pages: Vec::new(),
+            parameters: Vec::new(),
+            semantic_controls: Vec::new(),
+        };
+        assert_eq!(schema.validate(), Ok(()));
+
+        schema.schema_version = 2;
+        assert_eq!(
+            schema.validate(),
+            Err(SchemaError::DisplayDecimalsRequireSchema3)
+        );
+
+        schema.schema_version = PARAMETER_SCHEMA_VERSION;
+        schema.display_decimals = Some(7);
+        assert_eq!(
+            schema.validate(),
+            Err(SchemaError::InvalidDisplayDecimals(7))
+        );
+    }
+
+    #[test]
     fn semantic_roles_are_unique_and_target_writable_parameters() {
         let mut schema = ParameterSchema {
             schema_version: PARAMETER_SCHEMA_VERSION,
+            display_decimals: None,
             pages: vec![PageDescriptor {
                 id: "main".into(),
                 name: "Main".into(),

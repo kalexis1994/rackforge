@@ -45,6 +45,7 @@ impl RackForgeEngine {
     }
 
     fn open_package(package_root: &Path, sample_rate: f64, maximum_frames: usize) -> Result<Self> {
+        let startup = rackforge_core::startup::StartupTimeline::new("vst3");
         if !sample_rate.is_finite() || sample_rate <= 0.0 || maximum_frames == 0 {
             bail!("invalid VST3 processing setup");
         }
@@ -65,6 +66,10 @@ impl RackForgeEngine {
             instance.load_preset(&preset.id)?;
         }
         instance.activate(sample_rate, maximum_frames as u32, 0, 2)?;
+        startup.advance(rackforge_core::startup::StartupPhase::AudioReady)?;
+        // A VST3 instance has no host-owned network or Web server on its
+        // processing path. Its editor is created lazily by the DAW.
+        startup.advance(rackforge_core::startup::StartupPhase::BackgroundReady)?;
 
         Ok(Self {
             instance,

@@ -84,21 +84,22 @@ persistent profile.
 
 Audio readiness must not depend on Internet or `network-online.target`.
 
-For Raspberry Pi appliance profiles, independent services start in parallel
-after local filesystems:
+For Raspberry Pi appliance profiles, service readiness follows the shared
+[startup availability policy](startup-availability.md). Audio is the only
+critical boot path; controller and management layers follow it:
 
 ```text
 local filesystems
-  +-> platform host
-  +-> controller host
-  +-> audio Core
-  +-> web host
-  +-> NetworkManager
+  +-> audio Core -> first successful device period
+       +-> platform host -> controller host
+            +-> NetworkManager -> Web host
 ```
 
 Core restores the last stable PLAY/LIVE selection and retries bounded hardware
-discovery for MIDI and audio devices. The controller may show boot progress
-before Core is ready.
+discovery for MIDI and audio devices. systemd does not consider Core ready when
+the process merely starts: Core publishes readiness after its first successful
+audio period. CPU and I/O startup weights reinforce this order without fixed
+delays.
 
 The metric is power-on to `READY_TO_PLAY`, not the time at which every general
 OS background unit is idle. NetworkManager wait-online, package updates and

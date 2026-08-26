@@ -57,9 +57,19 @@ portable so an arrangement authored on Desktop remains understandable on other
 platforms. The current zoom and pan viewport is intentionally device-local:
 restoring a Desktop viewport on a phone would be actively unhelpful.
 
+A Slot can hold an instrument or an effect, and which one decides how the
+editor wires its node: an instrument is driven by the MIDI input, an effect by
+the hardware audio input, and both leave by the Slot's audio output. The
+distinction lives in the installed catalog rather than in the Slot, because a
+`RackSlot` records which plugin it holds and not what that plugin does. Nothing
+downstream cares: compilation reads the edges, so a Slot re-patched by hand
+behind an instrument compiles exactly as one wired to the input does.
+
 Flat Rack documents are graph schema v1 implicitly. Resolving one generates a
 deterministic v2 graph in memory with one MIDI input, one node per Slot and
-output nodes for the Slot routes. The new graph editor materializes that graph
+output nodes for the Slot routes. Every Slot in that graph is wired for MIDI,
+which is correct by construction: a document old enough to be stored as a bare
+Slot list predates effect Slots. The new graph editor materializes that graph
 when the user saves it; merely starting RackForge never rewrites existing
 documents. Validation rejects
 missing Slots or nodes, invalid ports, duplicate connections, feedback cycles,

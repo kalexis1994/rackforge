@@ -26,6 +26,7 @@ pub mod rack_graph;
 pub mod realtime;
 pub mod session;
 pub mod session_checkpoint;
+pub use rackforge_startup as startup;
 pub mod state_store;
 pub mod storage;
 

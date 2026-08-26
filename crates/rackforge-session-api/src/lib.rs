@@ -368,6 +368,10 @@ pub struct PluginInstanceState {
     pub plugin_id: String,
     #[serde(alias = "addon_name")]
     pub plugin_name: String,
+    /// Compact fallback identity for constrained controller viewports. Empty
+    /// means an older host/session and is derived from `plugin_name`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub plugin_short_name: String,
     #[serde(default)]
     pub ui_layouts: Vec<String>,
     #[serde(default)]
@@ -1012,6 +1016,7 @@ mod tests {
                 instance_id,
                 plugin_id: "org.rackforge.rf-dls".into(),
                 plugin_name: "RF-DLS".into(),
+                plugin_short_name: "RF-DLS".into(),
                 ui_layouts: vec!["little@1".into()],
                 config_available: true,
                 banks: Vec::new(),
@@ -1196,6 +1201,7 @@ mod tests {
             instance_id: synth_id.clone(),
             plugin_id: "org.rackforge.rf-kr106".into(),
             plugin_name: "RF-KR106".into(),
+            plugin_short_name: "RF-KR106".into(),
             ui_layouts: vec!["little@1".into()],
             config_available: false,
             banks: Vec::new(),

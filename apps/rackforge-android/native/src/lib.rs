@@ -46,8 +46,8 @@ use rackforge_session_api::{
     rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
 };
 use rackforge_surface_runtime::{
-    ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayPlugin, PlaySound,
-    ProgramExitDecision, ProgramExitDestination,
+    ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayPlugin, PlayPreset,
+    PlaySound, ProgramExitDecision, ProgramExitDestination,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{CStr, c_char, c_void};
@@ -284,6 +284,50 @@ impl AndroidControllerMenu {
             // Previewing a DRAFT Rack needs a rack engine Android does not
             // have yet; saving and activating are the honest paths.
             MenuCommand::PreviewRack { .. } => None,
+            MenuCommand::LoadPluginPreset { preset_id } => {
+                let result = engine_call(|engine| {
+                    engine.plugin_state_command(
+                        "load_preset",
+                        &serde_json::json!({ "preset_id": &preset_id }),
+                    )?;
+                    Ok(())
+                })
+                .and_then(|()| sync_menu_program_state(&mut self.menu));
+                match result {
+                    Ok(()) => {
+                        self.menu.complete_plugin_preset_load(&preset_id);
+                    }
+                    Err(error) => eprintln!("PLUGIN_PRESET_LOAD_FAILED {error:#}"),
+                }
+                None
+            }
+            MenuCommand::SetPluginParameter {
+                instance_id,
+                parameter_index,
+                value,
+            } => {
+                match set_android_little_parameter(&instance_id, parameter_index, value) {
+                    Ok(value) => self
+                        .menu
+                        .complete_plugin_parameter_set(parameter_index, value),
+                    Err(error) => eprintln!("LITTLE_PARAMETER_SET_FAILED {error:#}"),
+                }
+                None
+            }
+            MenuCommand::TriggerPluginParameter {
+                instance_id,
+                parameter_index,
+            } => {
+                let result = set_android_little_parameter(&instance_id, parameter_index, 1.0)
+                    .and_then(|_| set_android_little_parameter(&instance_id, parameter_index, 0.0));
+                match result {
+                    Ok(value) => self
+                        .menu
+                        .complete_plugin_parameter_set(parameter_index, value),
+                    Err(error) => eprintln!("LITTLE_PARAMETER_TRIGGER_FAILED {error:#}"),
+                }
+                None
+            }
             MenuCommand::BeginProgramEdit { program_id } => {
                 let result = engine_call(|engine| engine.begin_program_edit(program_id))
                     .and_then(|()| sync_menu_program_state(&mut self.menu));
@@ -2303,6 +2347,7 @@ fn package_descriptor(package: &PluginPackage, active: bool) -> serde_json::Valu
     serde_json::json!({
         "plugin_id": manifest.id,
         "plugin_name": manifest.name,
+        "plugin_short_name": manifest.little_short_name(),
         "version": manifest.version,
         "kind": manifest.kind,
         "portable": portable,
@@ -2507,6 +2552,49 @@ fn engine_call(act: impl FnOnce(&mut AndroidEngine) -> Result<()>) -> Result<()>
         .context("RackForge engine is not initialized")?)
 }
 
+fn set_android_little_parameter(
+    instance_id: &str,
+    parameter_index: u32,
+    value: f64,
+) -> Result<f64> {
+    let mut guard = engine()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+    let engine = guard
+        .as_mut()
+        .context("RackForge engine is not initialized")?;
+    if instance_id != engine.plugin_id {
+        bail!("LITTLE targeted inactive plugin instance {instance_id}");
+    }
+    let value = set_plugin_parameter(
+        engine.runtime.0,
+        &mut engine.instance.0,
+        parameter_index,
+        value,
+    )?;
+    engine
+        .live_parameter_writer_handle
+        .try_record(0, parameter_index, value);
+    Ok(value)
+}
+
+fn sync_menu_parameter_state(menu: &mut SurfaceMenu) -> Result<()> {
+    let (schema, values) = {
+        let mut guard = engine()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;
+        let engine = guard
+            .as_mut()
+            .context("RackForge engine is not initialized")?;
+        plugin_parameters(engine.runtime.0, &mut engine.instance.0)?
+    };
+    menu.sync_plugin_parameters(
+        schema,
+        values.into_iter().map(|value| (value.index, value.value)),
+    );
+    Ok(())
+}
+
 /// After a program command the menu re-reads the engine: catalog, selection
 /// and the draft -- the exact refresh the process-driver bridge performs.
 fn sync_menu_program_state(menu: &mut SurfaceMenu) -> Result<()> {
@@ -2535,6 +2623,7 @@ fn sync_menu_program_state(menu: &mut SurfaceMenu) -> Result<()> {
     ) {
         menu.sync_program_edit(draft, lease);
     }
+    sync_menu_parameter_state(menu)?;
     Ok(())
 }
 
@@ -2545,6 +2634,9 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
         .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?
         .as_ref()
         .map(|engine| {
+            let presets = PluginStateStore::new(Some(&engine.data_root))
+                .and_then(|store| store.list_presets(&engine.plugin_id))
+                .unwrap_or_default();
             (
                 engine.package_root.to_string_lossy().into_owned(),
                 engine.plugin_id.clone(),
@@ -2552,6 +2644,7 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
                 engine.catalog.clone(),
                 engine.selected_sound_id.clone(),
                 engine.instance.0.supports_program_editing(),
+                presets,
             )
         });
     let mut plugins = Vec::new();
@@ -2574,12 +2667,16 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
         let Some(name) = descriptor["plugin_name"].as_str() else {
             continue;
         };
+        let short_name = descriptor["plugin_short_name"].as_str().unwrap_or(name);
         let version = descriptor["version"].as_str().unwrap_or_default();
         let config_available = active
             .as_ref()
             .is_some_and(|active| active.1 == plugin_id && active.5);
-        plugins
-            .push(PlayPlugin::new(plugin_id, plugin_id, name).config_available(config_available));
+        plugins.push(
+            PlayPlugin::new(plugin_id, plugin_id, name)
+                .short_name(short_name)
+                .config_available(config_available),
+        );
         metadata.insert(
             plugin_id.to_owned(),
             ControllerPluginInfo {
@@ -2598,7 +2695,7 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
     controller
         .menu
         .set_play_plugins(plugins, active_instance_id);
-    if let Some((_root, plugin_id, name, catalog, selected_sound_id, _supports)) = active {
+    if let Some((_root, plugin_id, name, catalog, selected_sound_id, _supports, presets)) = active {
         controller.menu.sync_active_plugin(
             plugin_id.clone(),
             plugin_id,
@@ -2606,6 +2703,20 @@ fn sync_controller_plugins(store_root: &Path) -> Result<()> {
             controller_play_sounds(&catalog),
             Some(&selected_sound_id),
         );
+        controller.menu.set_plugin_presets(
+            presets
+                .into_iter()
+                .map(|preset| {
+                    PlayPreset::new(
+                        preset.id,
+                        preset.name,
+                        format!("v{}", preset.plugin_version),
+                    )
+                })
+                .collect(),
+            None,
+        );
+        sync_menu_parameter_state(&mut controller.menu)?;
     }
     Ok(())
 }

@@ -111,3 +111,6 @@ RackForge's public contracts.
 
 LITTLE, LEDs, display rendering, and SysEx are outside `declarative-v1`. They use
 `process-v1` today and become portable when sandboxed `wasm-v1` is implemented.
+`little@1` is a semantic host surface, not a screen-size preset. Rich drivers
+declare a physical viewport and project the same model responsively; see
+`little-surfaces.md`.

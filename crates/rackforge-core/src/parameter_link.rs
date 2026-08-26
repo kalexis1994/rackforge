@@ -286,6 +286,7 @@ mod tests {
     fn schema(kind: ParameterKind) -> ParameterSchema {
         ParameterSchema {
             schema_version: PARAMETER_SCHEMA_VERSION,
+            display_decimals: None,
             pages: vec![PageDescriptor {
                 id: "main".into(),
                 name: "Main".into(),

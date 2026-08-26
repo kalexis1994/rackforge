@@ -1605,17 +1605,53 @@ fn live_snapshot() -> Result<SessionState, String> {
     }
 }
 
-fn active_plugin_instance(snapshot: &SessionState) -> Result<&PluginInstanceState, String> {
-    let instance = snapshot
-        .active_instance()
-        .ok_or_else(|| "la sesión LIVE no tiene una instancia activa".to_owned())?;
-    if !instance.ui_layouts.iter().any(|layout| layout == LITTLE_V1) {
-        return Err(format!(
-            "{} no declara una vista compatible con {LITTLE_V1}",
-            instance.plugin_name
-        ));
+fn rackforge_presets(plugin_id: &str) -> Result<Vec<menu::PlayPreset>, String> {
+    match control_request(&ControlRequest::PluginPresets {
+        plugin_id: plugin_id.to_owned(),
+    })? {
+        ControlResponse::PluginPresets { presets, .. } => Ok(presets
+            .into_iter()
+            .map(|preset| {
+                menu::PlayPreset::new(
+                    preset.id,
+                    preset.name,
+                    format!("v{}", preset.plugin_version),
+                )
+            })
+            .collect()),
+        ControlResponse::Error { message, .. } => Err(message),
+        _ => Err("unexpected response while listing RackForge presets".into()),
     }
-    Ok(instance)
+}
+
+fn active_plugin_instance(snapshot: &SessionState) -> Result<&PluginInstanceState, String> {
+    snapshot
+        .active_instance()
+        .ok_or_else(|| "la sesión LIVE no tiene una instancia activa".to_owned())
+}
+
+fn play_plugins(snapshot: &SessionState) -> Vec<menu::PlayPlugin> {
+    // LITTLE is a RackForge-owned surface. A plugin does not need to publish
+    // its own `little@1` layout to participate: the host already owns the
+    // plugin name, sound catalog and selection commands required by this
+    // compact browser. `ui_layouts` only describes plugin-provided surfaces.
+    snapshot
+        .instances
+        .iter()
+        .map(|candidate| {
+            menu::PlayPlugin::new(
+                candidate.instance_id.as_str(),
+                &candidate.plugin_id,
+                &candidate.plugin_name,
+            )
+            .short_name(if candidate.plugin_short_name.is_empty() {
+                &candidate.plugin_name
+            } else {
+                &candidate.plugin_short_name
+            })
+            .config_available(candidate.config_available)
+        })
+        .collect()
 }
 
 fn active_plugin_instance_id() -> Result<InstanceId, String> {
@@ -1700,24 +1736,7 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
         SurfaceMode::Play => menu::ActiveMode::Play,
     });
     menu.set_play_plugins(
-        snapshot
-            .instances
-            .iter()
-            .filter(|candidate| {
-                candidate
-                    .ui_layouts
-                    .iter()
-                    .any(|layout| layout == LITTLE_V1)
-            })
-            .map(|candidate| {
-                menu::PlayPlugin::new(
-                    candidate.instance_id.as_str(),
-                    &candidate.plugin_id,
-                    &candidate.plugin_name,
-                )
-                .config_available(candidate.config_available)
-            })
-            .collect(),
+        play_plugins(&snapshot),
         snapshot.active_instance_id.as_ref().map(InstanceId::as_str),
     );
     let instance = active_plugin_instance(&snapshot)?;
@@ -1752,7 +1771,28 @@ fn refresh_live_catalog(menu: &mut menu::Menu) -> Result<(), String> {
         sounds,
         selected.as_deref(),
     ) {
+        match rackforge_presets(&instance.plugin_id) {
+            Ok(presets) => menu.set_plugin_presets(presets, None),
+            Err(error) => {
+                menu.set_plugin_presets(Vec::new(), None);
+                eprintln!("Could not refresh RackForge presets: {error}");
+            }
+        }
         menu.sync_program_edit(program_draft, audition_lease_id);
+    }
+    match control_request(&ControlRequest::PluginParameters {
+        instance_id: instance.instance_id.clone(),
+    }) {
+        Ok(ControlResponse::PluginParameters { schema, values, .. }) => {
+            menu.sync_plugin_parameters(
+                *schema,
+                values.into_iter().map(|value| (value.index, value.value)),
+            );
+        }
+        Ok(ControlResponse::Error { message, .. }) | Err(message) => {
+            eprintln!("Could not refresh LITTLE plugin parameters: {message}");
+        }
+        Ok(_) => eprintln!("Could not refresh LITTLE plugin parameters: unexpected response"),
     }
     Ok(())
 }
@@ -2058,6 +2098,67 @@ fn apply_pending_menu_command(
             })?;
             refresh_live_catalog(menu)?;
             println!("SOUND_SELECTED id={id}");
+            Ok(true)
+        }
+        menu::MenuCommand::LoadPluginPreset { preset_id } => {
+            let instance_id = active_plugin_instance_id()?;
+            match control_request(&ControlRequest::LoadPluginPreset {
+                instance_id,
+                preset_id: preset_id.clone(),
+            })? {
+                ControlResponse::PluginPresetLoaded { .. } => {
+                    menu.complete_plugin_preset_load(&preset_id);
+                    refresh_live_catalog(menu)?;
+                    println!("PLUGIN_PRESET_LOADED id={preset_id}");
+                    Ok(true)
+                }
+                ControlResponse::Error { message, .. } => Err(message),
+                _ => Err("unexpected response while loading RackForge preset".into()),
+            }
+        }
+        menu::MenuCommand::SetPluginParameter {
+            instance_id,
+            parameter_index,
+            value,
+        } => {
+            let instance_id = InstanceId::new(instance_id)
+                .map_err(|message| format!("invalid plugin instance: {message}"))?;
+            match control_request(&ControlRequest::SetPluginParameter {
+                instance_id,
+                parameter_index,
+                value,
+            })? {
+                ControlResponse::PluginParameterSet { value, .. } => {
+                    menu.complete_plugin_parameter_set(parameter_index, value);
+                    Ok(true)
+                }
+                ControlResponse::Error { message, .. } => Err(message),
+                _ => Err("unexpected response while setting a plugin parameter".into()),
+            }
+        }
+        menu::MenuCommand::TriggerPluginParameter {
+            instance_id,
+            parameter_index,
+        } => {
+            let instance_id = InstanceId::new(instance_id)
+                .map_err(|message| format!("invalid plugin instance: {message}"))?;
+            for value in [1.0, 0.0] {
+                match control_request(&ControlRequest::SetPluginParameter {
+                    instance_id: instance_id.clone(),
+                    parameter_index,
+                    value,
+                })? {
+                    ControlResponse::PluginParameterSet { value, .. } => {
+                        menu.complete_plugin_parameter_set(parameter_index, value);
+                    }
+                    ControlResponse::Error { message, .. } => return Err(message),
+                    _ => {
+                        return Err(
+                            "unexpected response while triggering a plugin parameter".into()
+                        );
+                    }
+                }
+            }
             Ok(true)
         }
         menu::MenuCommand::BeginProgramEdit { program_id } => {
@@ -2697,9 +2798,9 @@ fn render_screen_messages(screen: &menu::Screen) -> Result<MenuMessages, String>
 }
 
 fn screen_header_message(header_mode: &menu::Header) -> Result<Vec<u8>, String> {
-    match header_mode {
-        menu::Header::Visible(title) => header(title),
-        menu::Header::Hidden => header(" "),
+    match header_mode.text(menu::DISPLAY_COLUMNS) {
+        Some(title) => header(&title),
+        None => header(" "),
     }
 }
 
@@ -2963,6 +3064,57 @@ fn run_led_demo(midi: MidiOutput, port: &PortInfo, execute: bool) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn plugin_instance(
+        instance_id: &str,
+        plugin_id: &str,
+        name: &str,
+        ui_layouts: &[&str],
+    ) -> PluginInstanceState {
+        PluginInstanceState {
+            instance_id: InstanceId::new(instance_id).unwrap(),
+            plugin_id: plugin_id.into(),
+            plugin_name: name.into(),
+            plugin_short_name: name.into(),
+            ui_layouts: ui_layouts.iter().map(|layout| (*layout).into()).collect(),
+            config_available: false,
+            banks: Vec::new(),
+            sounds: Vec::new(),
+            selected_sound_id: None,
+        }
+    }
+
+    #[test]
+    fn little_play_catalog_includes_host_rendered_plugins_without_a_little_layout() {
+        let piano_id = InstanceId::new("play.piano").unwrap();
+        let mut snapshot = SessionState::new(
+            rackforge_session_api::SessionId::new("test.little-catalog").unwrap(),
+        );
+        snapshot.instances = vec![
+            plugin_instance(
+                piano_id.as_str(),
+                "org.rackforge.concert-grand",
+                "Concert Grand",
+                &[],
+            ),
+            plugin_instance(
+                "play.rf-106",
+                "org.rackforge.rf-106",
+                "RF-106",
+                &[LITTLE_V1],
+            ),
+        ];
+        snapshot.active_instance_id = Some(piano_id);
+
+        let catalog = play_plugins(&snapshot);
+        assert_eq!(catalog.len(), 2);
+        assert_eq!(catalog[0].plugin_id, "org.rackforge.concert-grand");
+        assert_eq!(catalog[1].plugin_id, "org.rackforge.rf-106");
+        assert_eq!(
+            active_plugin_instance(&snapshot).unwrap().plugin_id,
+            "org.rackforge.concert-grand"
+        );
+    }
 
     #[test]
     fn forwards_performance_midi_but_not_controller_surface_messages() {

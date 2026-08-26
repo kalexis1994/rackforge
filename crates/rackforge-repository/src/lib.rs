@@ -1808,7 +1808,7 @@ vendor = "RackForge Test"
 version = "1.2.3"
 kind = "instrument"
 state_version = 1
-capabilities = ["audio_output", "midi_input"]
+capabilities = ["audio_output", "midi_input", "presets"]
 ui_layouts = ["little@1"]
 
 [api]
@@ -1833,7 +1833,7 @@ preset_catalog = "metadata/presets.json"
     }
 
     fn portable_presets() -> &'static [u8] {
-        br#"{"schema_version":1,"banks":[],"presets":[]}"#
+        br#"{"schema_version":1,"banks":[{"id":"factory","name":"Factory","order":0}],"presets":[{"id":"factory.default","name":"Default","bank":"factory","order":0,"tags":[]}] }"#
     }
 
     #[test]

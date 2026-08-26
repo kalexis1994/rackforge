@@ -1,13 +1,20 @@
 [Unit]
 Description=RackForge modular controller host
-After=local-fs.target
+After=local-fs.target rackforge-audio.service rackforge-platform-host.service
+Wants=rackforge-audio.service rackforge-platform-host.service
+Before=NetworkManager.service
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+TimeoutStartSec=10
 User=@RACKFORGE_USER@
 Group=@RACKFORGE_GROUP@
 SupplementaryGroups=audio rackforge
 Environment=RACKFORGE_ROOT=@RACKFORGE_ROOT@
+StartupCPUWeight=5000
+StartupIOWeight=5000
+Nice=-5
 ExecStart=@RACKFORGE_ROOT@/bin/rackforge-controller-host serve --root @RACKFORGE_ROOT@/controllers
 ExecStopPost=-@RACKFORGE_ROOT@/bin/rackforge-controller-host restore-all --root @RACKFORGE_ROOT@/controllers
 Restart=always

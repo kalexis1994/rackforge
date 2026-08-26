@@ -1349,7 +1349,40 @@ impl BrowserHost {
     }
 
     fn sync_controller(&mut self) {
+        let active_parameter_snapshot =
+            self.store
+                .state()
+                .active_instance_id
+                .clone()
+                .and_then(|instance_id| match self.plugin_parameters(&instance_id) {
+                    Ok(ControlResponse::PluginParameters { schema, values, .. }) => {
+                        Some((*schema, values))
+                    }
+                    _ => None,
+                });
         self.controller.sync(self.store.state());
+        let presets = self
+            .store
+            .state()
+            .active_instance()
+            .and_then(|instance| self.state_store.list_presets(&instance.plugin_id).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|preset| {
+                rackforge_surface_runtime::PlayPreset::new(
+                    preset.id,
+                    preset.name,
+                    format!("v{}", preset.plugin_version),
+                )
+            })
+            .collect();
+        self.controller.set_plugin_presets(presets);
+        if let Some((schema, values)) = active_parameter_snapshot {
+            self.controller.set_plugin_parameters(
+                schema,
+                values.into_iter().map(|value| (value.index, value.value)),
+            );
+        }
     }
 
     fn rebuild_parameter_links(&mut self) -> Result<()> {
@@ -1448,6 +1481,45 @@ impl BrowserHost {
                         instance_id,
                         sound_id: id,
                     });
+                }
+            }
+            MenuCommand::LoadPluginPreset { preset_id } => {
+                if let Some(instance_id) = self.store.state().active_instance_id.clone()
+                    && matches!(
+                        self.load_plugin_preset(&instance_id, &preset_id),
+                        Ok(ControlResponse::PluginPresetLoaded { .. })
+                    )
+                {
+                    self.controller.complete_plugin_preset_load(&preset_id);
+                }
+            }
+            MenuCommand::SetPluginParameter {
+                instance_id,
+                parameter_index,
+                value,
+            } => {
+                if let Ok(instance_id) = InstanceId::new(instance_id)
+                    && let Ok(ControlResponse::PluginParameterSet { value, .. }) =
+                        self.set_plugin_parameter(&instance_id, parameter_index, value)
+                {
+                    self.controller
+                        .complete_plugin_parameter_set(parameter_index, value);
+                }
+            }
+            MenuCommand::TriggerPluginParameter {
+                instance_id,
+                parameter_index,
+            } => {
+                if let Ok(instance_id) = InstanceId::new(instance_id)
+                    && matches!(
+                        self.set_plugin_parameter(&instance_id, parameter_index, 1.0),
+                        Ok(ControlResponse::PluginParameterSet { .. })
+                    )
+                    && let Ok(ControlResponse::PluginParameterSet { value, .. }) =
+                        self.set_plugin_parameter(&instance_id, parameter_index, 0.0)
+                {
+                    self.controller
+                        .complete_plugin_parameter_set(parameter_index, value);
                 }
             }
             MenuCommand::ReturnToActiveMode {
@@ -1779,6 +1851,7 @@ fn session_instance_state(plugin: &HostedPlugin) -> PluginInstanceState {
         instance_id: plugin.instance_id.clone(),
         plugin_id: plugin.plugin_id.clone(),
         plugin_name: manifest.name.clone(),
+        plugin_short_name: manifest.little_short_name(),
         ui_layouts: manifest.ui_layouts.clone(),
         config_available: manifest.config_mode,
         banks: plugin

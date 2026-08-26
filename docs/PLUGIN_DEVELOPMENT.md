@@ -61,9 +61,10 @@ New packages use manifest schema 2 and must include a host-rendered visual
 identity:
 
 ```toml
-schema_version = 2
+schema_version = 3
 id = "org.example.instrument"
 name = "Example Instrument"
+short_name = "EXAMPLE"
 vendor = "Example Audio"
 version = "1.0.0"
 description = "A concise description shown before the user installs the plugin."
@@ -110,7 +111,9 @@ escapes and excessive file sizes, and exposes only host-owned asset URLs to the
 shared UI. See [Plugin branding](PLUGIN_BRANDING.md) for composition rules and
 where each asset appears.
 
-`description` is optional for compatibility, but new plugins should provide it.
+`short_name` is required by schema 3, contains one to eight visible ASCII
+characters, and is only a responsive fallback. Controllers with enough room
+show the full `name`. `description` is optional for compatibility, but new plugins should provide it.
 RackForge shows it with the validated banner, name, vendor, version, type, and
 package size in a confirmation preview before installation starts.
 
@@ -164,18 +167,21 @@ persists every recognized file in that target's own `data_path`. Imports are
 cumulative, and a later ZIP may complete or replace individual resources.
 
 Plugins whose program list depends on those bytes implement
-`Processor::write_preset_catalog`. RackForge calls it on the control thread
-after resource delivery, validates the returned `PresetCatalog`, and falls back
-to `metadata/presets.json` when the optional export is absent or empty. The
-static catalog should therefore contain a useful bootstrap/unavailable entry,
-not duplicate every private-bank name.
+`Processor::write_program_catalog`. The legacy `write_preset_catalog` spelling
+remains source-compatible. RackForge calls it on the control thread after
+resource delivery, validates the returned `ProgramCatalog`, and falls back to
+`metadata/presets.json` when the optional export is absent or empty. Every
+catalog contains at least one PROGRAM; the static catalog should therefore
+contain a useful Default/bootstrap entry, not duplicate every private-bank
+name. RackForge `.rfpreset` files are a separate host-owned collection.
 
 Plugins declare `config_mode = true` only when they own a separate CONFIG
 workflow. A single-window instrument editor belongs in PLAY and leaves the flag
 false. RackForge still exposes the CONFIG entry consistently, but renders an
 explicit unavailable message on LITTLE and Web instead of guessing or opening
-plugin-specific UI. Static Web surfaces are declared independently: a plugin
-with CONFIG mode may provide a CONFIG Web surface, a LITTLE editor, or both.
+plugin-specific UI. Static Web surfaces are declared independently. LITTLE is
+always host-owned; a plugin may contribute declarative program-editor pages,
+but does not own the controller layout or its geometry.
 
 ## RF-DLS development checkout
 

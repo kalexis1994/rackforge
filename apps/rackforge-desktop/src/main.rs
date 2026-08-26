@@ -40,8 +40,8 @@ use rackforge_midi_api::{
 };
 use rackforge_performance_api::{PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot};
 use rackforge_plugin_api::{
-    PROGRAM_EDITOR_SCHEMA_VERSION, PluginKind, PreparedProgram, PresetCatalog, ProgramDocument,
-    ProgramEditRequest, ProgramEditorValue, ProgramFieldEditRequest,
+    HostPresetSummary, PROGRAM_EDITOR_SCHEMA_VERSION, PluginKind, PreparedProgram, PresetCatalog,
+    ProgramDocument, ProgramEditRequest, ProgramEditorValue, ProgramFieldEditRequest,
 };
 use rackforge_repository::{
     InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions,
@@ -57,8 +57,8 @@ use rackforge_session_api::{
 };
 use rackforge_surface_api::{SurfaceActivationRequest, SurfaceMode};
 use rackforge_surface_runtime::{
-    ActiveMode, Header, Input, Menu, MenuCommand, PlayPlugin, PlaySound, ProgramExitDecision,
-    ProgramExitDestination,
+    ActiveMode, Header, Input, Menu, MenuCommand, PlayPlugin, PlayPreset, PlaySound,
+    ProgramExitDecision, ProgramExitDestination,
 };
 use semver::Version;
 use shutdown::DesktopShutdown;
@@ -665,6 +665,7 @@ impl DesktopApp {
                 .iter()
                 .map(|plugin| {
                     PlayPlugin::new(&plugin.instance_id, &plugin.plugin_id, &plugin.name)
+                        .short_name(plugin.runtime.manifest().little_short_name())
                         .config_available(plugin.config_available)
                 })
                 .collect(),
@@ -680,6 +681,9 @@ impl DesktopApp {
                 plugin.sounds.clone(),
                 plugin.selected_sound_id.as_deref(),
             );
+            if let Ok(presets) = state_store.list_presets(&plugin.plugin_id) {
+                menu.set_plugin_presets(little_host_presets(presets), None);
+            }
         }
         {
             let mut state = session.write().expect("session lock poisoned");
@@ -757,7 +761,7 @@ impl DesktopApp {
             } else {
                 None
             };
-        Ok(Self {
+        let mut app = Self {
             menu,
             session,
             session_checkpoint,
@@ -813,7 +817,9 @@ impl DesktopApp {
             next_midi_learn_id: 1,
             controller_shutdown: None,
             controller_supervisor: None,
-        })
+        };
+        app.sync_little_plugin_parameters();
+        Ok(app)
     }
 
     fn reload_plugins(&mut self) -> Result<Vec<String>> {
@@ -890,6 +896,7 @@ impl DesktopApp {
                 .iter()
                 .map(|plugin| {
                     PlayPlugin::new(&plugin.instance_id, &plugin.plugin_id, &plugin.name)
+                        .short_name(plugin.runtime.manifest().little_short_name())
                         .config_available(plugin.config_available)
                 })
                 .collect(),
@@ -905,6 +912,9 @@ impl DesktopApp {
                 plugin.sounds.clone(),
                 plugin.selected_sound_id.as_deref(),
             );
+            if let Ok(presets) = self.state_store.list_presets(&plugin.plugin_id) {
+                menu.set_plugin_presets(little_host_presets(presets), None);
+            }
         }
         menu.sync_active_mode(active_mode_from_surface(previous_mode));
         {
@@ -933,6 +943,7 @@ impl DesktopApp {
                 }
             }
         }
+        self.sync_little_plugin_parameters();
         self.persist_session_checkpoint();
         Ok(warnings)
     }
@@ -3718,6 +3729,8 @@ impl DesktopApp {
             self.plugins[index].sounds.clone(),
             preset.state.selected_sound_id.as_deref(),
         );
+        self.menu.complete_plugin_preset_load(preset_id);
+        self.sync_little_plugin_parameters();
         self.live_state_dirty = Some(Instant::now());
         self.persist_session_checkpoint();
         ControlResponse::PluginPresetLoaded {
@@ -3801,6 +3814,26 @@ impl DesktopApp {
                 message: format!("Could not read plugin parameters: {message}"),
                 current_revision: Some(revision),
             },
+        }
+    }
+
+    fn sync_little_plugin_parameters(&mut self) {
+        let active_id = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .active_instance_id
+            .clone();
+        let Some(instance_id) = active_id else {
+            return;
+        };
+        if let ControlResponse::PluginParameters { schema, values, .. } =
+            self.plugin_parameters(&instance_id)
+        {
+            self.menu.sync_plugin_parameters(
+                *schema,
+                values.into_iter().map(|value| (value.index, value.value)),
+            );
         }
     }
 
@@ -4166,15 +4199,23 @@ impl DesktopApp {
             event
         };
 
-        let plugin = &self.plugins[index];
+        let plugin_name = self.plugins[index].name.clone();
         self.menu.sync_active_plugin(
-            &plugin.instance_id,
-            &plugin.plugin_id,
-            &plugin.name,
-            plugin.sounds.clone(),
-            plugin.selected_sound_id.as_deref(),
+            &self.plugins[index].instance_id,
+            &self.plugins[index].plugin_id,
+            &self.plugins[index].name,
+            self.plugins[index].sounds.clone(),
+            self.plugins[index].selected_sound_id.as_deref(),
         );
-        self.status = format!("{} selected", plugin.name);
+        if let Ok(presets) = self
+            .state_store
+            .list_presets(&self.plugins[index].plugin_id)
+        {
+            self.menu
+                .set_plugin_presets(little_host_presets(presets), None);
+        }
+        self.sync_little_plugin_parameters();
+        self.status = format!("{plugin_name} selected");
         self.persist_session_checkpoint();
         Ok(vec![event])
     }
@@ -4246,6 +4287,9 @@ impl DesktopApp {
             && let Err(error) = audio.select_sound(instance_id.as_str(), sound_id)
         {
             self.status = format!("Loaded {sound_id}, but audio did not switch: {error:#}");
+        }
+        if active {
+            self.sync_little_plugin_parameters();
         }
         self.persist_session_checkpoint();
         Ok(vec![event])
@@ -4807,6 +4851,72 @@ impl DesktopApp {
                     self.status = error;
                 }
             }
+            MenuCommand::LoadPluginPreset { preset_id } => {
+                let Some(active_id) = self
+                    .session
+                    .read()
+                    .expect("session lock poisoned")
+                    .active_instance_id
+                    .clone()
+                else {
+                    self.status = "No active plugin".into();
+                    return;
+                };
+                match self.load_host_preset(&active_id, &preset_id) {
+                    ControlResponse::PluginPresetLoaded { .. } => {
+                        self.menu.complete_plugin_preset_load(&preset_id);
+                        self.status = format!("RackForge preset loaded: {preset_id}");
+                    }
+                    ControlResponse::Error { message, .. } => self.status = message,
+                    response => {
+                        self.status = format!(
+                            "Unexpected response while loading RackForge preset: {response:?}"
+                        )
+                    }
+                }
+            }
+            MenuCommand::SetPluginParameter {
+                instance_id,
+                parameter_index,
+                value,
+            } => {
+                let Ok(instance_id) = InstanceId::new(instance_id) else {
+                    self.status = "LITTLE produced an invalid plugin instance".into();
+                    return;
+                };
+                match self.set_plugin_parameter(&instance_id, parameter_index, value) {
+                    ControlResponse::PluginParameterSet { value, .. } => {
+                        self.menu
+                            .complete_plugin_parameter_set(parameter_index, value);
+                    }
+                    ControlResponse::Error { message, .. } => self.status = message,
+                    response => {
+                        self.status = format!("Unexpected parameter response: {response:?}")
+                    }
+                }
+            }
+            MenuCommand::TriggerPluginParameter {
+                instance_id,
+                parameter_index,
+            } => {
+                let Ok(instance_id) = InstanceId::new(instance_id) else {
+                    self.status = "LITTLE produced an invalid plugin instance".into();
+                    return;
+                };
+                let pressed = self.set_plugin_parameter(&instance_id, parameter_index, 1.0);
+                let released = self.set_plugin_parameter(&instance_id, parameter_index, 0.0);
+                match (pressed, released) {
+                    (
+                        ControlResponse::PluginParameterSet { .. },
+                        ControlResponse::PluginParameterSet { value, .. },
+                    ) => self
+                        .menu
+                        .complete_plugin_parameter_set(parameter_index, value),
+                    (ControlResponse::Error { message, .. }, _)
+                    | (_, ControlResponse::Error { message, .. }) => self.status = message,
+                    _ => self.status = "Unexpected trigger response".into(),
+                }
+            }
             MenuCommand::BeginProgramEdit { program_id } => {
                 match self.begin_program_edit(program_id, None) {
                     Ok(_) => {
@@ -5031,7 +5141,10 @@ impl DesktopApp {
         }
 
         glass.rect_filled(geometry.header, 0.0, Color32::from_rgb(16, 20, 22));
-        if let Header::Visible(title) = &screen.header {
+        if let Some(title) = screen
+            .header
+            .text(rackforge_surface_runtime::DISPLAY_COLUMNS)
+        {
             glass.text(
                 Pos2::new(geometry.header.min.x + 18.0, geometry.header.center().y),
                 Align2::LEFT_CENTER,
@@ -5307,12 +5420,26 @@ fn plugin_session_state(plugin: &DesktopPlugin) -> PluginInstanceState {
             .expect("desktop plugin instance id is validated during loading"),
         plugin_id: plugin.plugin_id.clone(),
         plugin_name: plugin.name.clone(),
+        plugin_short_name: plugin.runtime.manifest().little_short_name(),
         ui_layouts: vec!["little@1".into()],
         config_available: plugin.config_available,
         banks: plugin.banks.clone(),
         sounds: plugin.sound_summaries.clone(),
         selected_sound_id: plugin.selected_sound_id.clone(),
     }
+}
+
+fn little_host_presets(presets: Vec<HostPresetSummary>) -> Vec<PlayPreset> {
+    presets
+        .into_iter()
+        .map(|preset| {
+            PlayPreset::new(
+                preset.id,
+                preset.name,
+                format!("v{}", preset.plugin_version),
+            )
+        })
+        .collect()
 }
 
 fn desktop_catalog_views(
@@ -5772,6 +5899,7 @@ fn load_desktop_plugin(package: &PluginPackage, data_root: &Path) -> Result<Desk
 }
 
 fn create_desktop(options: Options) -> Result<DesktopApp> {
+    let startup = rackforge_core::startup::StartupTimeline::new("desktop");
     if !options.install_archives.is_empty() {
         let store_root = options
             .plugin_store_root
@@ -5794,22 +5922,36 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
     let web_servers = web::start(
         Arc::clone(&session),
         &options,
-        options.web_preferences.clone(),
+        web::WebServerPreferences {
+            enabled: false,
+            ..options.web_preferences.clone()
+        },
         web_control_sender,
     )?;
+    let controller_root = options.rackforge_root.join("controllers");
+    let controller_address = web_servers.control_bridge_addr().to_string();
+    let mut app = DesktopApp::new(Arc::clone(&session), &options, web_servers, web_control)?;
+    #[cfg(windows)]
+    if app.audio.is_some() {
+        startup.advance(rackforge_core::startup::StartupPhase::AudioReady)?;
+    }
     ensure_bundled_controller(&options.rackforge_root);
+
     // The controller supervisor: every enabled .rfcontroller package runs
-    // its driver, pointed back at this host through the TCP control bridge.
-    // The loop exits on its own when the store holds nothing runnable.
+    // only after DesktopAudio has completed its device/plugin generation.
+    // Its driver points back at this host through the TCP control bridge. The
+    // loop exits on its own when the store holds nothing runnable.
     let controller_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (controller_ready_sender, controller_ready_receiver) = mpsc::sync_channel(1);
     let controller_supervisor = {
-        let root = options.rackforge_root.join("controllers");
-        let address = web_servers.control_bridge_addr().to_string();
+        let root = controller_root;
+        let address = controller_address;
         let shutdown = Arc::clone(&controller_shutdown);
         std::thread::Builder::new()
             .name("rackforge-controller-supervisor".into())
             .spawn(move || {
                 if !root.join("packages").exists() {
+                    let _ = controller_ready_sender.send(());
                     return;
                 }
                 let options = rackforge_controller_package::supervise::SuperviseOptions {
@@ -5822,6 +5964,9 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
                         ("RACKFORGE_FORWARD_MIDI".into(), "1".into()),
                     ],
                     shutdown,
+                    on_ready: Some(Arc::new(move || {
+                        let _ = controller_ready_sender.try_send(());
+                    })),
                 };
                 match rackforge_controller_package::supervise::supervise(&root, &options) {
                     Ok(0) => println!("DESKTOP_CONTROLLERS_NONE"),
@@ -5831,7 +5976,18 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
             })
             .context("starting the controller supervisor")?
     };
-    let mut app = DesktopApp::new(Arc::clone(&session), &options, web_servers, web_control)?;
+    #[cfg(windows)]
+    if app.audio.is_some() {
+        if let Err(error) = controller_ready_receiver.recv_timeout(Duration::from_secs(2)) {
+            eprintln!("DESKTOP_CONTROLLER_STARTUP_DEGRADED error={error}");
+        }
+        startup.advance(rackforge_core::startup::StartupPhase::ControlReady)?;
+        if let Err(error) = app.web_servers.apply(options.web_preferences.clone()) {
+            eprintln!("DESKTOP_BACKGROUND_WEB_FAILED error={error:#}");
+            app.web_preferences.enabled = false;
+        }
+        startup.advance(rackforge_core::startup::StartupPhase::BackgroundReady)?;
+    }
     app.controller_shutdown = Some(controller_shutdown);
     app.controller_supervisor = Some(controller_supervisor);
     Ok(app)
@@ -6382,6 +6538,7 @@ mod tests {
             instance_id: instance_id.clone(),
             plugin_id: "org.rackforge.rf-106".into(),
             plugin_name: "RF-106".into(),
+            plugin_short_name: "RF-106".into(),
             ui_layouts: vec!["little@1".into()],
             config_available: false,
             banks: Vec::new(),

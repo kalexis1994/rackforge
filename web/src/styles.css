@@ -7032,6 +7032,7 @@ body {
 
 .editor-actions button,
 .editor-section > header > button,
+.editor-section > header > .editor-section-actions > button,
 .reorder-controls button {
   min-height: 36px;
   padding: 0 13px;
@@ -7046,6 +7047,7 @@ body {
 
 .editor-actions button:disabled,
 .editor-section > header > button:disabled,
+.editor-section > header > .editor-section-actions > button:disabled,
 .reorder-controls button:disabled {
   opacity: 0.35;
   cursor: not-allowed;
@@ -7174,6 +7176,13 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
+}
+
+/* A header that offers more than one thing to add. */
+.editor-section-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 7px;
 }
 
 .editor-section h3 {

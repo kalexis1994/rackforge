@@ -28,6 +28,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.provider.OpenableColumns;
 import android.provider.DocumentsContract;
 import android.util.Log;
@@ -178,6 +179,27 @@ public final class MainActivity extends Activity {
     private final Map<String, VirtualMidiClientState> virtualMidiClients =
             new ConcurrentHashMap<>();
 
+    /** One monotonic availability timeline per engine generation. */
+    private static final class StartupTimeline {
+        private final String host;
+        private final long startedAtMs = SystemClock.elapsedRealtime();
+        private final StartupPhaseOrder order = new StartupPhaseOrder();
+
+        StartupTimeline(String host) {
+            this.host = host;
+            Log.i("RackForge", "STARTUP_PHASE host=" + host
+                    + " phase=starting elapsed_ms=0");
+        }
+
+        void advance(int phase) {
+            if (!order.advance(phase)) return;
+            Log.i("RackForge", "STARTUP_PHASE host=" + host
+                    + " phase=" + StartupPhaseOrder.label(phase)
+                    + " elapsed_ms="
+                    + (SystemClock.elapsedRealtime() - startedAtMs));
+        }
+    }
+
     private static final class ClientResourceSelection {
         final File file;
         final String displayName;
@@ -315,16 +337,6 @@ public final class MainActivity extends Activity {
         if (!setNativeMasterPan(preferences.getInt("session.master_pan", 0))) {
             preferences.edit().remove("session.master_pan").apply();
             setNativeMasterPan(0);
-        }
-        try {
-            ensureBundledControllers(controllerStoreRoot());
-        } catch (Throwable error) {
-            Log.w("RackForge", "Bundled controller install failed", error);
-        }
-        try {
-            ensurePerformanceLibrary(pluginDataRoot().getAbsolutePath());
-        } catch (Throwable error) {
-            Log.w("RackForge", "Performance library init failed", error);
         }
         setNativeOutputGain(outputGainDb);
         if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
@@ -4546,6 +4558,7 @@ public final class MainActivity extends Activity {
     private void startEngine() {
         if (engineStarting || audioRunning) return;
         engineStarting = true;
+        StartupTimeline startup = new StartupTimeline("android");
         Thread loader = new Thread(() -> {
             try {
                 File store = pluginStoreRoot();
@@ -4579,8 +4592,13 @@ public final class MainActivity extends Activity {
                 }
                 if (!activated) {
                     preferences.edit().remove("plugin.active_root").apply();
+                    try {
+                        ensureBundledControllers(controllerStoreRoot());
+                    } catch (Throwable error) {
+                        Log.w("RackForge", "Bundled controller install failed", error);
+                    }
                     if (!keyLabSyncPlugins(store.getAbsolutePath())) {
-                        throw new IllegalStateException("The controller plugin catalog could not be synchronized");
+                        Log.w("RackForge", "The controller plugin catalog could not be synchronized");
                     }
                     String failureDetail = activationError == null
                             ? "Select another installed plugin."
@@ -4606,11 +4624,30 @@ public final class MainActivity extends Activity {
                 restorePersistedPluginSound();
                 preferences.edit().putString(
                         "plugin.active_root", pluginPackageRoot.getAbsolutePath()).apply();
-                if (!keyLabSyncPlugins(store.getAbsolutePath())) {
-                    throw new IllegalStateException("The controller plugin catalog could not be synchronized");
-                }
                 startAudio();
+                startup.advance(StartupPhaseOrder.AUDIO_READY);
+
+                // Controller packages, LIVE metadata and LITTLE deliberately
+                // follow the first working audio stream. None of this work is
+                // allowed to postpone Touch Controller or audio availability.
+                try {
+                    ensureBundledControllers(controllerStoreRoot());
+                } catch (Throwable error) {
+                    Log.w("RackForge", "Bundled controller install failed", error);
+                }
+                try {
+                    ensurePerformanceLibrary(pluginDataRoot().getAbsolutePath());
+                } catch (Throwable error) {
+                    Log.w("RackForge", "Performance library init failed", error);
+                }
+                if (!keyLabSyncPlugins(store.getAbsolutePath())) {
+                    // A controller failure must never revoke a working audio
+                    // stream. Hot-plug/reconnect can recover this layer later.
+                    Log.w("RackForge", "The controller plugin catalog could not be synchronized");
+                }
                 openMidiInputs();
+                startup.advance(StartupPhaseOrder.CONTROL_READY);
+                startup.advance(StartupPhaseOrder.BACKGROUND_READY);
                 runOnUiThread(() -> {
                     finishPluginTransition();
                     if (activePluginLabel != null) activePluginLabel.setText(activePluginDisplayName());

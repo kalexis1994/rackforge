@@ -183,9 +183,9 @@ pub fn header(text: &str) -> Result<Vec<u8>, String> {
 }
 
 pub fn screen_header(header: &Header) -> Result<Vec<u8>, String> {
-    match header {
-        Header::Visible(text) => self::header(text),
-        Header::Hidden => sysex(&[0x04, 0x01, 0x60, 0x01, 0x00, 0x00]),
+    match header.text(rackforge_surface_runtime::DISPLAY_COLUMNS) {
+        Some(text) => self::header(&text),
+        None => sysex(&[0x04, 0x01, 0x60, 0x01, 0x00, 0x00]),
     }
 }
 
@@ -314,6 +314,25 @@ mod tests {
                 0xF0, 0x00, 0x20, 0x6B, 0x7F, 0x42, 0x21, 0x11, 0x40, 0x02, 0x00, 0x01, 0xF7
             ]
         );
+    }
+
+    #[test]
+    fn plugin_identity_starts_at_the_first_native_header_payload_column() {
+        let header = Header::Plugin {
+            name: "RF-106".into(),
+            short_name: "RF-106".into(),
+            context: "CTRL 1/9".into(),
+        };
+        let message = screen_header(&header).unwrap();
+
+        assert_eq!(
+            &message[..11],
+            &[
+                0xF0, 0x00, 0x20, 0x6B, 0x7F, 0x42, 0x04, 0x01, 0x60, 0x01, 0x02
+            ]
+        );
+        assert_eq!(message[11], b'R');
+        assert_eq!(&message[11..17], b"RF-106");
     }
 
     #[test]

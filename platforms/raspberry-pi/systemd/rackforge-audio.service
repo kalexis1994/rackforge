@@ -2,11 +2,14 @@
 Description=RackForge supervised low-latency audio engine
 After=local-fs.target sound.target rackforge-cpu-performance.service
 Wants=sound.target rackforge-cpu-performance.service
+Before=rackforge-platform-host.service rackforge-controller-host.service NetworkManager.service
 StartLimitIntervalSec=0
 ConditionPathExists=@RACKFORGE_ROOT@/config/audio.toml
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+TimeoutStartSec=20
 User=@RACKFORGE_USER@
 Group=@RACKFORGE_GROUP@
 SupplementaryGroups=audio rackforge
@@ -25,6 +28,12 @@ ExecCondition=/usr/bin/test -f @RACKFORGE_ROOT@/config/audio.toml
 # buffer takes the whole board down mid-performance.
 LimitRTPRIO=95
 LimitMEMLOCK=infinity
+# During boot, device discovery and plugin restoration compete with general OS
+# services. cgroup startup weights prioritize this unit only until systemd
+# finishes booting; the audio thread then owns its explicit SCHED_FIFO policy.
+StartupCPUWeight=10000
+StartupIOWeight=10000
+Nice=-10
 ExecStart=@RACKFORGE_ROOT@/bin/rackforge-core resume @RACKFORGE_ROOT@/config/audio.toml
 Restart=always
 RestartSec=1

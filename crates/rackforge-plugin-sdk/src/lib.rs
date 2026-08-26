@@ -101,6 +101,19 @@ pub trait Processor: Default {
     /// Writes an instance-specific preset catalog as RackForge Preset Catalog
     /// JSON after resources have been delivered. Returning `None` keeps the
     /// package's static catalog. This runs on the control thread.
+    /// Publishes this instance's selectable PROGRAMS.
+    ///
+    /// Every plugin package must also ship a non-empty static program catalog.
+    /// The historical ABI calls that document a `preset_catalog`; RackForge
+    /// keeps that transport name compatible but presents these entries as
+    /// PROGRAMS. Portable RackForge `.rfpreset` files are host-owned and are
+    /// not returned here.
+    fn write_program_catalog(&mut self, destination: &mut [u8]) -> Option<usize> {
+        self.write_preset_catalog(destination)
+    }
+
+    /// Legacy spelling retained for source compatibility. New plugins should
+    /// implement [`Self::write_program_catalog`].
     fn write_preset_catalog(&mut self, _destination: &mut [u8]) -> Option<usize> {
         None
     }
@@ -421,7 +434,7 @@ macro_rules! export_processor {
                     core::ptr::addr_of_mut!(RF_TRANSFER).cast::<u8>(),
                     RF_MAX_TRANSFER_BYTES,
                 );
-                match processor.write_preset_catalog(destination) {
+                match processor.write_program_catalog(destination) {
                     Some(length) if length > 0 && length <= RF_MAX_TRANSFER_BYTES => length as i32,
                     Some(_) => $crate::STATUS_INVALID_STATE,
                     None => 0,

@@ -98,6 +98,7 @@ import {
 } from "./playPluginSelection";
 import { LivePage, type PerformanceGraphWorkspace } from "./LivePage";
 import { TouchControllerPage } from "./TouchControllerPage";
+import { controllerPresentationTransition } from "./controllerPresentation";
 import type { RootState } from "./store";
 import type {
   PluginInstance,
@@ -293,7 +294,15 @@ function useMediaQuery(query: string) {
     const update = () => setMatches(media.matches);
     update();
     media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    window.visualViewport?.addEventListener("resize", update);
+    return () => {
+      media.removeEventListener("change", update);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+      window.visualViewport?.removeEventListener("resize", update);
+    };
   }, [query]);
 
   return matches;
@@ -477,20 +486,26 @@ function RackForgeApp() {
   useEffect(() => {
     if (location.pathname !== "/controller") {
       lastContentRoute.current = location.pathname;
-      return;
     }
-    if (dockableController) {
-      let active = true;
-      window.queueMicrotask(() => {
-        if (!active) return;
+    const transition = controllerPresentationTransition({
+      dockable: dockableController,
+      dockOpen: controllerDockOpen,
+      pathname: location.pathname,
+      lastContentRoute: lastContentRoute.current,
+    });
+    if (!transition) return;
+    let active = true;
+    window.queueMicrotask(() => {
+      if (!active) return;
+      if (transition.openDock) {
         setControllerDockOpen(true);
-        navigate(lastContentRoute.current, { replace: true });
-      });
-      return () => {
-        active = false;
-      };
-    }
-  }, [dockableController, location.pathname, navigate]);
+      }
+      navigate(transition.navigateTo, { replace: true });
+    });
+    return () => {
+      active = false;
+    };
+  }, [controllerDockOpen, dockableController, location.pathname, navigate]);
 
   const showControllerDock = dockableController && controllerDockOpen;
   const completePlayNavigation = useCallback(async (instance?: PluginInstance) => {

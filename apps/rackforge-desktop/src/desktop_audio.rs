@@ -6,7 +6,8 @@ use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnec
 use rackforge_audio_api::{OutputMeter, OutputMeterSnapshot};
 use rackforge_control_api::PluginParameterValue;
 use rackforge_core::{
-    CompiledParameterLink, LoadedPlugin, PluginInstance,
+    CompiledParameterLink, LiveParameterStateStore, LiveParameterTarget, LiveParameterWriter,
+    LiveParameterWriterHandle, LoadedPlugin, PluginInstance,
     isolated_state::parameter_value_is_valid,
     midi_hotplug::{PanicScope, panic_packets},
 };
@@ -727,6 +728,8 @@ pub struct DesktopAudio {
     sample_rate: u32,
     summary: String,
     _voice_reclaimer: thread::JoinHandle<()>,
+    _live_parameter_writer: LiveParameterWriter,
+    data_root: PathBuf,
 }
 
 impl DesktopAudio {
@@ -735,6 +738,7 @@ impl DesktopAudio {
         preferences: &AudioPreferences,
         active_instance_id: Option<&str>,
         external_controller: bool,
+        data_root: &Path,
     ) -> Result<Self> {
         if specs.is_empty() {
             bail!("no playable plugin is available for the audio engine");
@@ -789,11 +793,28 @@ impl DesktopAudio {
             bail!("the selected audio output reports zero channels");
         }
 
+        let live_parameter_store = LiveParameterStateStore::open(Some(data_root))?;
+        let live_parameter_targets = specs
+            .iter()
+            .map(|spec| LiveParameterTarget {
+                plugin_id: spec.plugin.manifest().id.clone(),
+                plugin_version: spec.plugin.manifest().version.to_string(),
+                schema: spec.plugin.parameters().clone(),
+            })
+            .collect::<Vec<_>>();
         let voice_capacity = specs.len().saturating_add(8);
         let mut voices = Vec::with_capacity(specs.len());
-        for spec in specs {
-            voices.push(prepare_audio_voice(spec, config.sample_rate.0)?);
+        for (live_parameter_target, spec) in specs.into_iter().enumerate() {
+            voices.push(prepare_audio_voice(
+                spec,
+                config.sample_rate.0,
+                live_parameter_target,
+                &live_parameter_store,
+            )?);
         }
+        let live_parameter_writer =
+            LiveParameterWriter::start(live_parameter_store, live_parameter_targets);
+        let live_parameter_writer_handle = live_parameter_writer.handle();
         let active_voice = active_instance_id
             .and_then(|active| voices.iter().position(|voice| voice.instance_id == active))
             .unwrap_or(0);
@@ -861,6 +882,7 @@ impl DesktopAudio {
             stopped: false,
             retired_voice_sender,
             deferred_retire: Vec::with_capacity(voice_capacity),
+            live_parameter_writer: live_parameter_writer_handle,
         };
         let stream = device
             .build_output_stream_raw(
@@ -932,6 +954,8 @@ impl DesktopAudio {
             sample_rate: config.sample_rate.0,
             summary,
             _voice_reclaimer: voice_reclaimer,
+            _live_parameter_writer: live_parameter_writer,
+            data_root: data_root.to_path_buf(),
         })
     }
 
@@ -1107,7 +1131,18 @@ impl DesktopAudio {
     }
 
     pub fn replace_voice(&self, spec: VoiceSpec) -> Result<()> {
-        let voice = prepare_audio_voice(spec, self.sample_rate)?;
+        self._live_parameter_writer.handle().flush();
+        let store = LiveParameterStateStore::open(Some(&self.data_root))?;
+        let target = self
+            ._live_parameter_writer
+            .handle()
+            .register(LiveParameterTarget {
+                plugin_id: spec.plugin.manifest().id.clone(),
+                plugin_version: spec.plugin.manifest().version.to_string(),
+                schema: spec.plugin.parameters().clone(),
+            })
+            .context("registering replacement plugin live state")?;
+        let voice = prepare_audio_voice(spec, self.sample_rate, target, &store)?;
         self.send_command(AudioCommand::ReplaceVoice(voice))
     }
 
@@ -1339,6 +1374,7 @@ struct AudioVoice {
     input_channels: usize,
     output_channels: usize,
     instance: SendablePluginInstance,
+    live_parameter_target: usize,
 }
 
 struct SendablePluginInstance(PluginInstance<'static>);
@@ -1450,6 +1486,7 @@ struct AudioProcessor {
     stopped: bool,
     retired_voice_sender: SyncSender<AudioVoice>,
     deferred_retire: Vec<AudioVoice>,
+    live_parameter_writer: LiveParameterWriterHandle,
 }
 
 impl AudioProcessor {
@@ -1479,6 +1516,11 @@ impl AudioProcessor {
                     mapped.pass_through == rackforge_midi_api::ParameterLinkPassThrough::Consume;
                 if self.parameter_events.len() < MAX_MIDI_EVENTS_PER_BLOCK {
                     self.parameter_events.push(mapped.event);
+                    self.live_parameter_writer.try_record(
+                        self.voices[self.active_voice].live_parameter_target,
+                        mapped.event.parameter_index,
+                        mapped.event.value,
+                    );
                 }
             }
             if !consume {
@@ -1604,6 +1646,8 @@ impl AudioProcessor {
                             .0
                             .load_state(&state)
                             .map_err(|error| error.to_string())?;
+                        self.live_parameter_writer
+                            .clear(self.voices[index].live_parameter_target);
                         if index != self.active_voice {
                             self.voices[self.active_voice]
                                 .instance
@@ -1626,6 +1670,8 @@ impl AudioProcessor {
                         .position(|voice| voice.instance_id == instance_id)
                         .with_context(|| format!("unknown audio plugin instance {instance_id}"))?;
                     self.voices[index].instance.0.load_preset(&sound_id)?;
+                    self.live_parameter_writer
+                        .clear(self.voices[index].live_parameter_target);
                     if index != self.active_voice {
                         self.voices[self.active_voice].instance.0.reset()?;
                         self.active_voice = index;
@@ -1825,11 +1871,17 @@ impl AudioProcessor {
                                 .0
                                 .set_parameter(parameter_index, value)
                                 .map_err(|error| error.to_string())?;
-                            voice
+                            let canonical = voice
                                 .instance
                                 .0
                                 .get_parameter(parameter_index)
-                                .map_err(|error| error.to_string())
+                                .map_err(|error| error.to_string())?;
+                            self.live_parameter_writer.try_record(
+                                voice.live_parameter_target,
+                                parameter_index,
+                                canonical,
+                            );
+                            Ok(canonical)
                         });
                     let _ = reply.try_send(result);
                 }
@@ -1880,7 +1932,12 @@ impl AudioProcessor {
     }
 }
 
-fn prepare_audio_voice(spec: VoiceSpec, sample_rate: u32) -> Result<AudioVoice> {
+fn prepare_audio_voice(
+    spec: VoiceSpec,
+    sample_rate: u32,
+    live_parameter_target: usize,
+    live_parameter_store: &LiveParameterStateStore,
+) -> Result<AudioVoice> {
     let audio = spec.plugin.manifest().resolved_audio_contract();
     let input_channels = audio.input_channels() as usize;
     let output_channels = audio.output_channels() as usize;
@@ -1916,6 +1973,17 @@ fn prepare_audio_voice(spec: VoiceSpec, sample_rate: u32) -> Result<AudioVoice> 
             );
         }
     }
+    for (parameter_index, value) in
+        live_parameter_store.restored_values(&spec.plugin.manifest().id, spec.plugin.parameters())
+    {
+        rackforge_core::set_plugin_parameter(spec.plugin, &mut instance, parameter_index, value)
+            .with_context(|| {
+                format!(
+                    "restoring live parameter {parameter_index} for {}",
+                    spec.instance_id
+                )
+            })?;
+    }
     instance
         .activate(
             f64::from(sample_rate),
@@ -1930,6 +1998,7 @@ fn prepare_audio_voice(spec: VoiceSpec, sample_rate: u32) -> Result<AudioVoice> 
         input_channels,
         output_channels,
         instance: SendablePluginInstance(instance),
+        live_parameter_target,
     })
 }
 

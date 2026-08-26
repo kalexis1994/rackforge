@@ -5437,6 +5437,10 @@ fn start_desktop_audio(
         preferences,
         active_instance_id,
         external_controller,
+        live_state_dir
+            .parent()
+            .and_then(Path::parent)
+            .unwrap_or(live_state_dir),
     )
 }
 

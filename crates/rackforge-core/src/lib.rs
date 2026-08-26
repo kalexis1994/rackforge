@@ -9,6 +9,7 @@ pub mod isolated_state;
 pub mod live;
 #[cfg(any(target_os = "linux", test))]
 mod live_midi_state;
+pub mod live_parameter_state;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod loader;
 /// Browsers cannot load native plugin binaries, so the wasm host compiles a
@@ -32,6 +33,11 @@ pub use hosted::{LoadedPlugin, PluginInstance};
 pub use isolated_state::{
     IsolatedPluginStateEditor, plugin_parameters, set_plugin_parameter, validate_parameter_write,
     validate_state_reference,
+};
+pub use live_parameter_state::LiveParameterStateStore;
+#[cfg(not(target_arch = "wasm32"))]
+pub use live_parameter_state::{
+    LiveParameterTarget, LiveParameterWriter, LiveParameterWriterHandle,
 };
 pub use package::{PluginPackage, platform_key};
 pub use parameter_link::{

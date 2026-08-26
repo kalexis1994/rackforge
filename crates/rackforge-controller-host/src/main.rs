@@ -173,6 +173,7 @@ fn execute_controller(
 }
 
 fn serve_controllers(root: &Path, allow_community: bool) -> Result<()> {
+    let startup = rackforge_startup::StartupTimeline::new("controller-host");
     #[cfg(target_os = "linux")]
     let declarative_packages = PackageStore::new(root)
         .list()?
@@ -198,6 +199,16 @@ fn serve_controllers(root: &Path, allow_community: bool) -> Result<()> {
                 "no active controller packages are available in {}",
                 root.display()
             );
+        }
+        #[cfg(target_os = "linux")]
+        if let Err(error) = register_declarative_controllers(root) {
+            eprintln!("DECLARATIVE_CONTROLLER_INITIAL_REGISTER_FAILED error={error:#}");
+        }
+        startup.advance(rackforge_startup::StartupPhase::ControlReady)?;
+        if let Err(error) = rackforge_startup::notify_service_ready(
+            "RackForge controller host completed initial discovery",
+        ) {
+            eprintln!("SYSTEMD_READY_FAILED error={error}");
         }
         println!(
             "CONTROLLER_HOST_READY declarative={} root={}",
@@ -233,6 +244,14 @@ fn serve_controllers(root: &Path, allow_community: bool) -> Result<()> {
         allow_community,
         extra_env: Vec::new(),
         shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        on_ready: Some(std::sync::Arc::new(move || {
+            let _ = startup.advance(rackforge_startup::StartupPhase::ControlReady);
+            if let Err(error) = rackforge_startup::notify_service_ready(
+                "RackForge controller host completed initial driver launch",
+            ) {
+                eprintln!("SYSTEMD_READY_FAILED error={error}");
+            }
+        })),
     };
     let count = rackforge_controller_package::supervise::supervise(root, &options)
         .map_err(|error| anyhow::anyhow!(error))?;

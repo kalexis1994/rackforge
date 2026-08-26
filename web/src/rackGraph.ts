@@ -9,6 +9,7 @@ import type {
   SongPart,
   SongPartGraph,
 } from "./types";
+import type { RackPluginRole } from "./rackPluginSelection";
 import { scopedId } from "./ids";
 
 export const RACK_GRAPH_SCHEMA_VERSION = 2;
@@ -64,6 +65,14 @@ export function midiTransformFromSlot(slot: RackSlot): RackMidiTransform {
   };
 }
 
+/**
+ * Builds a graph for a Rack that has none.
+ *
+ * Every Slot is wired for MIDI here, because a Rack old enough to be stored as
+ * a bare Slot list is older than effect Slots are: a `RackSlot` records which
+ * plugin it holds but not what that plugin does, and only the installed catalog
+ * knows. Racks saved since carry their own graph, so this path never sees one.
+ */
 export function graphFromSlots(slots: RackSlot[]): RackGraph {
   const midiInput: RackGraphNode = {
     id: "input.midi",
@@ -233,10 +242,25 @@ export function materializeRackGraph(rack: RackDefinition): RackDefinition {
       };
 }
 
+/**
+ * Adds a Slot and wires its node up.
+ *
+ * An instrument is fed notes: the MIDI input drives it and its audio leaves for
+ * the Slot's output bus. An effect is fed sound, so it is wired from the
+ * hardware audio input instead — created here if the Rack has none, because a
+ * pedalboard whose input is not connected to anything is not a working Rack,
+ * and asking someone to draw that cable before they can hear the plugin they
+ * just added is asking them to guess.
+ *
+ * Either way the Slot leaves by the same route, so an effect can be dropped in
+ * front of the output and played immediately, or re-patched behind an
+ * instrument afterwards.
+ */
 export function addSlotToRack(
   rack: RackDefinition,
   slot: RackSlot,
   position?: RackGraphPosition,
+  role: RackPluginRole = "instrument",
 ): RackDefinition {
   const current = materializeRackGraph(rack);
   const graph = current.graph!;
@@ -247,7 +271,8 @@ export function addSlotToRack(
   const audioOutput = graph.nodes.find(
     (node) => node.kind.kind === "audio_output" && node.kind.bus_id === slot.audio_output_bus,
   );
-  if (!midiInput || !audioOutput) {
+  const source = role === "effect" ? audioOutput : midiInput && audioOutput;
+  if (!source || !audioOutput) {
     const nextGraph = graphFromSlots([...current.slots, slot]);
     return {
       ...current,
@@ -268,29 +293,51 @@ export function addSlotToRack(
     kind: { kind: "plugin", slot_id: slot.id },
     position: nodePosition,
   };
+  const nodes = [...graph.nodes, node];
+  const edges = [...graph.edges];
+
+  if (role === "effect") {
+    let audioInput = graph.nodes.find(
+      (candidate) => candidate.kind.kind === "audio_input" && candidate.kind.bus_id === "main",
+    );
+    if (!audioInput) {
+      audioInput = {
+        id: rackGraphId("input.audio"),
+        kind: { kind: "audio_input", bus_id: "main" },
+        position: normalizeRackGraphPosition({
+          x: nodePosition.x - 360,
+          y: nodePosition.y,
+        }),
+      };
+      nodes.push(audioInput);
+    }
+    edges.push({
+      id: rackGraphId("edge.audio-in"),
+      signal: "audio",
+      source: { node_id: audioInput.id, port_id: "out" },
+      target: { node_id: nodeId, port_id: "audio_in" },
+    });
+  } else {
+    edges.push({
+      id: rackGraphId("edge.midi"),
+      signal: "midi",
+      source: { node_id: midiInput!.id, port_id: "out" },
+      target: { node_id: nodeId, port_id: "midi_in" },
+      midi_transform: midiTransformFromSlot(slot),
+    });
+  }
+
+  edges.push({
+    id: rackGraphId("edge.audio"),
+    signal: "audio",
+    source: { node_id: nodeId, port_id: "audio_out" },
+    target: { node_id: audioOutput.id, port_id: "in" },
+  });
+
   return {
     ...current,
     slots: [...current.slots, slot],
-    graph: {
-      ...graph,
-      nodes: [...graph.nodes, node],
-      edges: [
-        ...graph.edges,
-        {
-          id: rackGraphId("edge.midi"),
-          signal: "midi",
-          source: { node_id: midiInput.id, port_id: "out" },
-          target: { node_id: nodeId, port_id: "midi_in" },
-          midi_transform: midiTransformFromSlot(slot),
-        },
-        {
-          id: rackGraphId("edge.audio"),
-          signal: "audio",
-          source: { node_id: nodeId, port_id: "audio_out" },
-          target: { node_id: audioOutput.id, port_id: "in" },
-        },
-      ],
-    },
+    graph: { ...graph, nodes, edges },
   };
 }
 

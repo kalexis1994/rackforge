@@ -163,12 +163,41 @@ pub fn open_audio_output_from_inventory(
         );
     }
     drop(actual);
+    configure_playback_software_params(&pcm, profile)?;
     pcm.prepare()?;
     Ok(OpenedAudioOutput {
         pcm,
         device,
         profile: profile.clone(),
     })
+}
+
+/// Makes the negotiated hardware buffer an actual scheduling reserve.
+///
+/// ALSA's device defaults are not uniform: some USB devices auto-start after
+/// the first write, even when a larger hardware buffer was requested. That
+/// leaves only one period between rendering and the device clock and turns a
+/// harmless scheduler hiccup into an underrun storm. Starting only after the
+/// complete negotiated buffer has been queued preserves the configured
+/// latency while making all of that buffer available as deadline headroom.
+fn configure_playback_software_params(pcm: &PCM, profile: &AudioOutputProfile) -> Result<()> {
+    let parameters = pcm.sw_params_current()?;
+    parameters.set_avail_min(i64::from(profile.period_frames))?;
+    parameters.set_start_threshold(i64::from(profile.buffer_frames))?;
+    pcm.sw_params(&parameters)?;
+
+    let applied = pcm.sw_params_current()?;
+    let actual_avail_min = applied.get_avail_min()?;
+    let actual_start_threshold = applied.get_start_threshold()?;
+    if actual_avail_min != i64::from(profile.period_frames)
+        || actual_start_threshold != i64::from(profile.buffer_frames)
+    {
+        bail!(
+            "ALSA negotiated different playback scheduling: avail_min={actual_avail_min} \
+             start_threshold={actual_start_threshold}"
+        );
+    }
+    Ok(())
 }
 
 pub fn open_audio_input(profile: &AudioInputProfile) -> Result<OpenedAudioInput> {

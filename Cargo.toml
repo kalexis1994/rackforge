@@ -25,6 +25,7 @@ members = [
     "crates/rackforge-resource-api",
     "crates/rackforge-resource-host",
     "crates/rackforge-session-api",
+    "crates/rackforge-startup",
     "crates/rackforge-surface-api",
     "crates/rackforge-surface-runtime",
     "crates/rackforge-ui",

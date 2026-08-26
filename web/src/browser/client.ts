@@ -28,6 +28,7 @@ import {
   writeStoredFiles,
 } from "./storage";
 import { assetUrl } from "../assets";
+import { StartupTimeline } from "../startupPolicy";
 import type {
   HostAudioSettings,
   PluginWebDescriptor,
@@ -278,6 +279,7 @@ export async function startBrowserHost(): Promise<void> {
     return;
   }
   booting = (async () => {
+    const startup = new StartupTimeline("browser");
     const audio = new AudioContext({ latencyHint: "interactive" });
     await audio.audioWorklet.addModule(engineWorkletUrl);
     // The worker keeps non-hashed files available offline. Tie the host ABI to
@@ -330,13 +332,15 @@ export async function startBrowserHost(): Promise<void> {
     );
     context = audio;
     await booted;
+    startup.advance("audio_ready");
 
     engine = node;
-    attachWebMidi(node);
+    void attachWebMidi(node);
     // Worth asking once the host is actually running: a browser is far more
     // likely to grant this to a page someone is using than to one that just
     // opened.
     void requestPersistentStorage();
+    startup.advance("background_ready");
   })();
 
   try {
@@ -555,14 +559,14 @@ function requestControllerRestorePlan(
  * or a person who declines the permission, simply play with the on-screen
  * controls instead.
  */
-function attachWebMidi(node: AudioWorkletNode) {
+function attachWebMidi(node: AudioWorkletNode): Promise<void> {
   const midi = (
     navigator as Navigator & {
       requestMIDIAccess?: (options?: { sysex?: boolean }) => Promise<BrowserMidiAccess>;
     }
   ).requestMIDIAccess;
   webMidiSupported = Boolean(midi);
-  if (!midi) return;
+  if (!midi) return Promise.resolve();
   installControllerLifecycleRelease();
   void requestControllerRestorePlan(node)
     .then((plan) => {
@@ -629,7 +633,7 @@ function attachWebMidi(node: AudioWorkletNode) {
 
   // LITTLE needs SysEx for the OLED and LEDs. If that permission is denied,
   // retry ordinary Web MIDI so keys and controls keep working as instruments.
-  void midi
+  return midi
     .call(navigator, { sysex: true })
     .then((access) => connect(access, true))
     .catch(() =>
@@ -637,7 +641,8 @@ function attachWebMidi(node: AudioWorkletNode) {
         .call(navigator, { sysex: false })
         .then((access) => connect(access, false))
         .catch(() => undefined),
-    );
+    )
+    .then(() => undefined);
 }
 
 function requestControllerCatalog(): Promise<{

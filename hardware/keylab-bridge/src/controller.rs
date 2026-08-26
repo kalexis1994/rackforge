@@ -3,7 +3,7 @@ use rackforge_controller_api::{
     ControllerDriver, ControllerProfile, GestureCapabilities, HostActionBinding, HostActionTarget,
     LITTLE_V1, MidiButtonBinding, MidiControlChangeBinding, SemanticControlBinding,
     SemanticControlMode, SemanticControlProfile, SurfaceImplementation, SurfaceQuality,
-    negotiate_surface,
+    SurfaceViewport, negotiate_surface,
 };
 use rackforge_controller_package::{ControllerPackageManifest, DeviceMatcher};
 use std::sync::OnceLock;
@@ -25,6 +25,7 @@ impl ControllerDriver for KeyLabEssentialMk3 {
                 layout_id: LITTLE_V1.into(),
                 quality: SurfaceQuality::Native,
                 priority: 0,
+                viewport: SurfaceViewport::little_reference(),
                 gestures: GestureCapabilities {
                     soft_key_long_press: true,
                     emergency_home_chord: true,

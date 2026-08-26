@@ -776,6 +776,7 @@ fn plugin_instance_id(plugin_id: &str, primary: bool) -> Result<InstanceId> {
 }
 
 pub fn run(config: LiveConfig) -> Result<()> {
+    let startup = crate::startup::StartupTimeline::new("core");
     ensure_supported_engine_profile(&config.audio_output)?;
     if let Some(input) = &config.audio_input {
         ensure_supported_input_profile(input, &config.audio_output)?;
@@ -975,6 +976,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
             instance_id: instance_id.clone(),
             plugin_id: plugin.manifest().id.clone(),
             plugin_name: plugin.manifest().name.clone(),
+            plugin_short_name: plugin.manifest().little_short_name(),
             ui_layouts: plugin.manifest().ui_layouts.clone(),
             config_available: plugin.manifest().config_mode,
             banks: presets
@@ -1287,7 +1289,6 @@ pub fn run(config: LiveConfig) -> Result<()> {
         },
     )?;
     println!("CONTROL_READY socket={}", control_path.display());
-    println!("READY_TO_PLAY");
     audio_loop(AudioLoopContext {
         initial_output: output,
         initial_input: input,
@@ -1308,6 +1309,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
         audio_state,
         output_meter,
         live_parameter_writer: live_parameter_writer.handle(),
+        startup,
     })
 }
 
@@ -1587,6 +1589,7 @@ struct AudioLoopContext<'a> {
     audio_state: Arc<Mutex<AudioOutputState>>,
     output_meter: Arc<OutputMeter>,
     live_parameter_writer: LiveParameterWriterHandle,
+    startup: crate::startup::StartupTimeline,
 }
 
 fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
@@ -1610,6 +1613,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         audio_state,
         output_meter,
         live_parameter_writer,
+        startup,
     } = context;
     let mut output = Some(initial_output);
     let mut input = initial_input;
@@ -1670,6 +1674,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
             }
         })?;
     let mut deferred_retire = Vec::with_capacity(16);
+    let mut startup_ready = false;
 
     // Engaged here, not during setup: `SCHED_FIFO` is a per-thread property and
     // this is the thread that runs the audio loop. Setup work stays on the
@@ -2596,6 +2601,16 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
             channels,
             &mut xruns,
         )?;
+        if !startup_ready {
+            startup_ready = true;
+            startup.advance(crate::startup::StartupPhase::AudioReady)?;
+            println!("READY_TO_PLAY");
+            if let Err(error) = crate::startup::notify_service_ready(
+                "RackForge audio rendered its first device period",
+            ) {
+                eprintln!("SYSTEMD_READY_FAILED error={error}");
+            }
+        }
         if let Some(report) = xruns.tick() {
             eprintln!("{report}");
         }

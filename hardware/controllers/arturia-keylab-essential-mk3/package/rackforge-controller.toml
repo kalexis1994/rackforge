@@ -178,6 +178,12 @@ layout_id = "little@1"
 quality = "native"
 priority = 0
 
+[surfaces.viewport]
+text_columns = 18
+header_rows = 1
+body_rows = 2
+soft_keys = 4
+
 [surfaces.gestures]
 soft_key_long_press = true
 emergency_home_chord = true

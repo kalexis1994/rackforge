@@ -672,6 +672,7 @@ mod tests {
                     instance_id: instance_id(),
                     plugin_id: "org.rackforge.rf-dls".into(),
                     plugin_name: "RF-DLS".into(),
+                    plugin_short_name: "RF-DLS".into(),
                     ui_layouts: vec!["little@1".into()],
                     config_available: true,
                     banks: Vec::new(),

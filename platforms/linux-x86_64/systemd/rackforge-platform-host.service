@@ -1,6 +1,8 @@
 [Unit]
 Description=RackForge allowlisted platform capability host
-After=local-fs.target
+After=local-fs.target rackforge-audio.service
+Wants=rackforge-audio.service
+Before=rackforge-controller-host.service
 StartLimitIntervalSec=0
 
 [Service]
@@ -10,6 +12,8 @@ Group=rackforge
 RuntimeDirectory=rackforge
 RuntimeDirectoryMode=0750
 UMask=0007
+StartupCPUWeight=3000
+StartupIOWeight=3000
 ExecStart=@RACKFORGE_ROOT@/bin/rackforge-platform-host serve /run/rackforge/platform-control.sock
 Restart=on-failure
 RestartSec=1

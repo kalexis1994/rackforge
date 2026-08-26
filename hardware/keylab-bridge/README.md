@@ -52,7 +52,9 @@ PLAY
 CONFIG
 ```
 
-- **PLAY** selects one installed plugin and its sounds/programs.
+- **PLAY** selects one active plugin. Inside it, RackForge presents portable
+  PRESETS first, native plugin PROGRAMS second, then any declarative editor
+  sections published by the plugin.
 - **LIVE** selects performances such as racks, songs, and setlists.
 - **CONFIG** exposes host-owned plugin, audio, network, and system settings.
 

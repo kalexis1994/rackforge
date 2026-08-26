@@ -1264,6 +1264,7 @@ mod tests {
                 layout_id: "little@1".into(),
                 quality: SurfaceQuality::Native,
                 priority: 0,
+                viewport: Default::default(),
                 gestures: GestureCapabilities {
                     soft_key_long_press: true,
                     emergency_home_chord: true,

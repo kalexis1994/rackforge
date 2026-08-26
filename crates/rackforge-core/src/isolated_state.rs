@@ -270,6 +270,7 @@ mod tests {
     fn schema(parameter: ParameterDescriptor) -> ParameterSchema {
         ParameterSchema {
             schema_version: 1,
+            display_decimals: None,
             pages: Vec::new(),
             parameters: vec![parameter],
             semantic_controls: Vec::new(),
@@ -356,7 +357,7 @@ vendor = "RackForge"
 version = "1.2.3"
 kind = "instrument"
 state_version = 4
-capabilities = ["audio_output", "state"]
+capabilities = ["audio_output", "state", "presets"]
 
 [api]
 major = 1
@@ -399,7 +400,7 @@ preset_catalog = "metadata/presets.json"
         .unwrap();
         fs::write(
             root.join("metadata/presets.json"),
-            r#"{"schema_version":1,"banks":[],"presets":[]}"#,
+            r#"{"schema_version":1,"banks":[{"id":"factory","name":"Factory","order":0}],"presets":[{"id":"factory.default","name":"Default","bank":"factory","order":0,"tags":[]}] }"#,
         )
         .unwrap();
         fs::write(

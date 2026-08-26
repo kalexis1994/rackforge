@@ -13,10 +13,21 @@ pub struct PresetCatalog {
     pub presets: Vec<PresetDescriptor>,
 }
 
+/// The plugin-owned catalog shown as PROGRAMS by RackForge.
+///
+/// `PresetCatalog` remains the wire/ABI name for compatibility with existing
+/// `.rfplugin` packages. Host-owned, portable `.rfpreset` documents are a
+/// different concept represented by [`crate::HostPreset`]. New plugin code
+/// should use this alias so the distinction is explicit.
+pub type ProgramCatalog = PresetCatalog;
+
 impl PresetCatalog {
     pub fn validate(&self) -> Result<(), PresetError> {
         if self.schema_version != PRESET_CATALOG_SCHEMA_VERSION {
             return Err(PresetError::UnsupportedSchema(self.schema_version));
+        }
+        if self.presets.is_empty() {
+            return Err(PresetError::MissingDefaultProgram);
         }
         let mut bank_ids = BTreeSet::new();
         for bank in &self.banks {
@@ -98,6 +109,8 @@ fn validate_identifier(value: &str) -> Result<(), PresetError> {
 pub enum PresetError {
     #[error("unsupported preset catalog schema {0}")]
     UnsupportedSchema(u32),
+    #[error("plugin program catalog must contain at least one program")]
+    MissingDefaultProgram,
     #[error("invalid identifier {0:?}")]
     InvalidIdentifier(String),
     #[error("empty display name for {0}")]
@@ -155,5 +168,16 @@ mod tests {
         .expect("legacy catalog");
 
         assert!(!catalog.presets[0].editable);
+    }
+
+    #[test]
+    fn rejects_a_plugin_without_any_program() {
+        let catalog = ProgramCatalog {
+            schema_version: PRESET_CATALOG_SCHEMA_VERSION,
+            banks: Vec::new(),
+            presets: Vec::new(),
+        };
+
+        assert_eq!(catalog.validate(), Err(PresetError::MissingDefaultProgram));
     }
 }

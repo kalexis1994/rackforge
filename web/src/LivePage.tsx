@@ -5,7 +5,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type ReactNode,
 } from "react";
 import { ChevronLeft, ChevronRight, LogOut, Save } from "lucide-react";
@@ -32,7 +31,12 @@ import {
   songPartAsRack,
   songPartGraphFromRack,
 } from "./rackGraph";
-import { buildRackInstrumentInstances } from "./rackInstrumentSelection";
+import {
+  buildRackPluginInstances,
+  rackPluginRole,
+  type RackPluginRole,
+} from "./rackPluginSelection";
+import { PluginPickerDialog } from "./components/PluginPickerDialog";
 import type {
   LiveBrowseMode,
   LiveLocation,
@@ -806,7 +810,7 @@ function PerformanceConfig({
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deleteBusyRef = useRef(false);
-  const rackInstances = buildRackInstrumentInstances(session?.instances ?? [], plugins);
+  const rackInstances = buildRackPluginInstances(session?.instances ?? [], plugins);
   const items =
     kind === "rack"
       ? performance.library.racks
@@ -1236,84 +1240,6 @@ function defaultSlot(instance: PluginInstance): RackSlot {
   };
 }
 
-function InstrumentPickerDialog({
-  instances,
-  plugins,
-  onSelect,
-  onClose,
-}: {
-  instances: PluginInstance[];
-  plugins: PluginWebDescriptor[];
-  onSelect: (instance: PluginInstance) => void;
-  onClose: () => void;
-}) {
-  const descriptors = new Map(plugins.map((plugin) => [plugin.plugin_id, plugin]));
-  return (
-    <ModalDialog
-      eyebrow="Rack graph"
-      title="Choose an instrument"
-      onClose={onClose}
-      closeLabel="Close instrument selector"
-      className="rack-instrument-picker-dialog"
-      actions={
-        <button type="button" className="secondary-button" onClick={onClose}>
-          Cancel
-        </button>
-      }
-    >
-      <p className="rack-instrument-picker-help">
-        Select the plugin this node will own. The current PLAY instrument is not changed.
-      </p>
-      <div className="play-plugin-selector modal-list rack-instrument-picker-list" role="list">
-        {instances.map((instance, index) => {
-          const plugin = descriptors.get(instance.plugin_id);
-          const branding = plugin?.branding;
-          return (
-            <button
-              type="button"
-              className={"plugin-picker-card" + (branding ? " branded" : "")}
-              key={instance.plugin_id}
-              onClick={() => onSelect(instance)}
-              style={branding ? {
-                "--plugin-accent": branding.accent_color,
-                "--plugin-background": branding.background_color,
-              } as CSSProperties : undefined}
-            >
-              {branding ? (
-                <>
-                  <img className="plugin-picker-banner" src={branding.banner_url} alt="" />
-                  <span className="plugin-picker-shade" aria-hidden="true" />
-                </>
-              ) : null}
-              <span className="play-plugin-number">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              {branding ? (
-                <img className="plugin-picker-icon" src={branding.icon_url} alt="" />
-              ) : (
-                <span className="plugin-picker-icon rack-instrument-fallback-icon">RF</span>
-              )}
-              <span className="play-plugin-copy">
-                <strong>{instance.plugin_name}</strong>
-                <small>{plugin ? "v" + plugin.version : instance.plugin_id}</small>
-              </span>
-              <span className="play-plugin-status">
-                ADD <i aria-hidden="true">→</i>
-              </span>
-            </button>
-          );
-        })}
-        {instances.length === 0 ? (
-          <div className="config-library-empty">
-            <strong>No active instruments</strong>
-            <p>Activate an instrument from Plugin Manager before adding it to a Rack.</p>
-          </div>
-        ) : null}
-      </div>
-    </ModalDialog>
-  );
-}
-
 function newRack(): RackDefinition {
   const slots: RackSlot[] = [];
   return {
@@ -1708,8 +1634,9 @@ function RackEditor({
   const [baseRevision, setBaseRevision] = useState(performance.revision);
   const [error, setError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [instrumentPicker, setInstrumentPicker] = useState<{
+  const [pluginPicker, setPluginPicker] = useState<{
     position?: RackGraphPosition;
+    role: RackPluginRole;
   } | null>(null);
   const previewSupported = !isNativeHost();
   const initialPreviewMode = session?.active_mode ?? "idle";
@@ -1802,15 +1729,19 @@ function RackEditor({
     }, 120);
     return () => window.clearTimeout(timer);
   }, [previewPayload, previewSupported, previewVoiceCount]);
-  const addInstrument = useCallback((position?: RackGraphPosition) => {
-    setInstrumentPicker({ position });
+  const addPlugin = useCallback((position?: RackGraphPosition, role: RackPluginRole = "instrument") => {
+    setPluginPicker({ position, role });
   }, []);
-  const selectInstrument = useCallback((instance: PluginInstance) => {
+  const selectPlugin = useCallback((instance: PluginInstance) => {
+    // The menu says what the node is for, but the catalog says what the plugin
+    // is; wire it by what it is, so a mis-aimed menu still produces a Rack that
+    // works.
+    const role = rackPluginRole(instance.plugin_id, plugins);
     setDraft((current) => current
-      ? addSlotToRack(current, defaultSlot(instance), instrumentPicker?.position)
+      ? addSlotToRack(current, defaultSlot(instance), pluginPicker?.position, role)
       : current);
-    setInstrumentPicker(null);
-  }, [instrumentPicker]);
+    setPluginPicker(null);
+  }, [pluginPicker, plugins]);
   const handleGraphOverlayChange = useCallback((open: boolean) => {
     if (open) setDetailsOpen(false);
     window.dispatchEvent(new CustomEvent("rackforge:rack-graph-overlay", {
@@ -1984,7 +1915,7 @@ function RackEditor({
               })
             }
             canAddInstrument={draft.slots.length < 32}
-            onAddInstrument={addInstrument}
+            onAddInstrument={addPlugin}
             instances={instances}
             renderPluginSurface={renderPluginSurface}
             onOverlayChange={handleGraphOverlayChange}
@@ -1992,16 +1923,25 @@ function RackEditor({
         </Suspense>
       </EditorSection>
       <EditorSection
-        title="Instrument settings"
-        detail="Configure plugin state and mix for each instrument node. MIDI routing lives on its input connection."
+        title="Slot settings"
+        detail="Configure plugin state and mix for each node. MIDI routing lives on an instrument's input connection; an effect is fed by the audio input instead."
         action={
-          <button
-            type="button"
-            onClick={() => addInstrument()}
-            disabled={draft.slots.length >= 32}
-          >
-            ＋ Add Slot
-          </button>
+          <span className="editor-section-actions">
+            <button
+              type="button"
+              onClick={() => addPlugin(undefined, "instrument")}
+              disabled={draft.slots.length >= 32}
+            >
+              ＋ Instrument
+            </button>
+            <button
+              type="button"
+              onClick={() => addPlugin(undefined, "effect")}
+              disabled={draft.slots.length >= 32}
+            >
+              ＋ Effect
+            </button>
+          </span>
         }
       >
         {draft.slots.map((slot, index) => (
@@ -2025,12 +1965,13 @@ function RackEditor({
           />
         ))}
       </EditorSection>
-      {instrumentPicker ? (
-        <InstrumentPickerDialog
+      {pluginPicker ? (
+        <PluginPickerDialog
           instances={instances}
           plugins={plugins}
-          onSelect={selectInstrument}
-          onClose={() => setInstrumentPicker(null)}
+          role={pluginPicker.role}
+          onSelect={selectPlugin}
+          onClose={() => setPluginPicker(null)}
         />
       ) : null}
     </form>
@@ -2280,8 +2221,9 @@ function SongEditor({
   const [error, setError] = useState<string | null>(null);
   const [selectedPartId, setSelectedPartId] = useState(song?.parts[0]?.id);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [instrumentPicker, setInstrumentPicker] = useState<{
+  const [pluginPicker, setPluginPicker] = useState<{
     position?: RackGraphPosition;
+    role: RackPluginRole;
   } | null>(null);
   const immersive = immersivePartId !== null;
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(original);
@@ -2551,7 +2493,7 @@ function SongEditor({
                   racks={performance.library.racks}
                   onChange={updatePartRack}
                   canAddInstrument={selectedPartRack.slots.length < 32}
-                  onAddInstrument={(position) => setInstrumentPicker({ position })}
+                  onAddInstrument={(position, role) => setPluginPicker({ position, role })}
                   instances={instances}
                   renderPluginSurface={renderPluginSurface}
                   onOverlayChange={handleGraphOverlayChange}
@@ -2588,21 +2530,23 @@ function SongEditor({
           ) : null}
         </div>
       </EditorSection>
-      {instrumentPicker && selectedPartRack ? (
-        <InstrumentPickerDialog
+      {pluginPicker && selectedPartRack ? (
+        <PluginPickerDialog
           instances={instances}
           plugins={plugins}
+          role={pluginPicker.role}
           onSelect={(instance) => {
             updatePartRack(
               addSlotToRack(
                 selectedPartRack,
                 defaultSlot(instance),
-                instrumentPicker.position,
+                pluginPicker.position,
+                rackPluginRole(instance.plugin_id, plugins),
               ),
             );
-            setInstrumentPicker(null);
+            setPluginPicker(null);
           }}
-          onClose={() => setInstrumentPicker(null)}
+          onClose={() => setPluginPicker(null)}
         />
       ) : null}
     </form>

@@ -6,12 +6,13 @@
 //! the returned output plans.
 
 use keylab_essential_mk3::protocol as keylab_protocol;
+use rackforge_plugin_api::ParameterSchema;
 use rackforge_session_api::{
     RackForgeParameterMapper, RackForgeParameterValue, SessionState, SurfaceMode,
     rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
 };
 use rackforge_surface_runtime::{
-    ActiveMode, Input, Menu, MenuCommand, PlayPlugin, PlaySound, Screen,
+    ActiveMode, Input, Menu, MenuCommand, PlayPlugin, PlayPreset, PlaySound, Screen,
 };
 use serde::Serialize;
 use std::time::{Duration, Instant};
@@ -180,6 +181,11 @@ impl BrowserKeyLabController {
                         &instance.plugin_id,
                         &instance.plugin_name,
                     )
+                    .short_name(if instance.plugin_short_name.is_empty() {
+                        &instance.plugin_name
+                    } else {
+                        &instance.plugin_short_name
+                    })
                     .config_available(instance.config_available)
                 })
                 .collect(),
@@ -207,6 +213,30 @@ impl BrowserKeyLabController {
                 active.selected_sound_id.as_deref(),
             );
         }
+        self.queue_current_screen(false);
+    }
+
+    pub fn set_plugin_presets(&mut self, presets: Vec<PlayPreset>) {
+        self.menu.set_plugin_presets(presets, None);
+        self.queue_current_screen(false);
+    }
+
+    pub fn complete_plugin_preset_load(&mut self, preset_id: &str) {
+        self.menu.complete_plugin_preset_load(preset_id);
+    }
+
+    pub fn set_plugin_parameters(
+        &mut self,
+        schema: ParameterSchema,
+        values: impl IntoIterator<Item = (u32, f64)>,
+    ) {
+        self.menu.sync_plugin_parameters(schema, values);
+        self.queue_current_screen(false);
+    }
+
+    pub fn complete_plugin_parameter_set(&mut self, parameter_index: u32, value: f64) {
+        self.menu
+            .complete_plugin_parameter_set(parameter_index, value);
         self.queue_current_screen(false);
     }
 

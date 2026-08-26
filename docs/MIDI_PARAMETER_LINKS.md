@@ -123,6 +123,9 @@ Parameter schema 1 remains supported for existing plugins. Publishing
 `semantic_controls` requires schema 2 so an older host rejects the new contract
 explicitly instead of silently interpreting a changed schema.
 
+Schema 3 additionally allows `display_decimals` as presentation metadata for
+compact host surfaces. It never changes parameter resolution or MIDI mapping.
+
 These generated links are ephemeral defaults:
 
 - they are not written into the session or opaque plugin state;

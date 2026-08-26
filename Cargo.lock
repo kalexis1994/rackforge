@@ -3717,6 +3717,7 @@ dependencies = [
  "rackforge-control-api",
  "rackforge-controller-package",
  "rackforge-session-api",
+ "rackforge-startup",
  "serde_json",
 ]
 
@@ -3750,6 +3751,7 @@ dependencies = [
  "rackforge-plugin-api",
  "rackforge-plugin-runtime",
  "rackforge-session-api",
+ "rackforge-startup",
  "semver",
  "serde",
  "serde_json",
@@ -3970,6 +3972,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rackforge-startup"
+version = "0.1.5"
+
+[[package]]
 name = "rackforge-store"
 version = "0.1.5"
 dependencies = [
@@ -3999,6 +4005,7 @@ dependencies = [
  "rackforge-audio-api",
  "rackforge-controller-api",
  "rackforge-performance-api",
+ "rackforge-plugin-api",
  "rackforge-program-api",
  "rackforge-session-api",
  "rackforge-ui",

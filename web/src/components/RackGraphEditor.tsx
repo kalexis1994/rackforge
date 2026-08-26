@@ -40,6 +40,7 @@ import {
   rackGraphId,
   removeSlotFromRack,
 } from "../rackGraph";
+import type { RackPluginRole } from "../rackPluginSelection";
 import { RackSlotPopover } from "./RackSlotPopover";
 import { RackMidiLinkEditor } from "./RackMidiLinkEditor";
 import type {
@@ -390,7 +391,7 @@ interface RackGraphEditorProps {
     update: RackDefinition | ((current: RackDefinition) => RackDefinition),
   ) => void;
   canAddInstrument: boolean;
-  onAddInstrument: (position: RackGraphPosition) => void;
+  onAddInstrument: (position: RackGraphPosition, role: RackPluginRole) => void;
   instances: PluginInstance[];
   renderPluginSurface: (options: {
     instance: PluginInstance;
@@ -1027,9 +1028,13 @@ export default function RackGraphEditor({
                 <strong>{materialized.name}</strong>
               </header>
               <button type="button" role="menuitem" disabled={!canAddInstrument} onClick={() => {
-                onAddInstrument(paneMenu.position);
+                onAddInstrument(paneMenu.position, "instrument");
                 setPaneMenu(null);
               }}>Instrument</button>
+              <button type="button" role="menuitem" disabled={!canAddInstrument} onClick={() => {
+                onAddInstrument(paneMenu.position, "effect");
+                setPaneMenu(null);
+              }}>Effect</button>
               <button type="button" role="menuitem" disabled={materialized.graph!.nodes.some(
                 (node) => node.kind.kind === "audio_input" && node.kind.bus_id === "main",
               )} onClick={() => {

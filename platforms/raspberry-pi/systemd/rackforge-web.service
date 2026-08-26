@@ -1,6 +1,6 @@
 [Unit]
 Description=RackForge local web interface
-After=local-fs.target
+After=local-fs.target NetworkManager.service rackforge-controller-host.service
 
 [Service]
 Type=simple
@@ -8,6 +8,8 @@ User=@RACKFORGE_USER@
 Group=@RACKFORGE_GROUP@
 Environment=RACKFORGE_ROOT=@RACKFORGE_ROOT@
 Environment=RACKFORGE_WEB_ROOT=@RACKFORGE_ROOT@/web
+StartupCPUWeight=100
+StartupIOWeight=100
 ExecStart=@RACKFORGE_ROOT@/bin/rackforge-web
 Restart=on-failure
 RestartSec=1

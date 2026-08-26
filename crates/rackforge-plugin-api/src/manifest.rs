@@ -443,6 +443,12 @@ pub struct PluginManifest {
     pub schema_version: u32,
     pub id: String,
     pub name: String,
+    /// Compact identity preferred when a responsive controller surface cannot
+    /// fit the full plugin name. Required by manifest schema 3; schema 1/2
+    /// packages use a deterministic compatibility fallback derived from
+    /// `name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub short_name: Option<String>,
     pub vendor: String,
     pub version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -481,7 +487,7 @@ impl PluginManifest {
             return Err(ManifestError::UnsupportedSchema(self.schema_version));
         }
         match (self.schema_version, &self.branding) {
-            (MANIFEST_SCHEMA_VERSION, None) => return Err(ManifestError::MissingBranding),
+            (2..=MANIFEST_SCHEMA_VERSION, None) => return Err(ManifestError::MissingBranding),
             (MIN_MANIFEST_SCHEMA_VERSION, Some(_)) => {
                 return Err(ManifestError::BrandingRequiresSchema2);
             }
@@ -492,6 +498,18 @@ impl PluginManifest {
             .map_err(|_| ManifestError::InvalidPluginId(self.id.clone()))?;
         if self.name.trim().is_empty() {
             return Err(ManifestError::EmptyField("name"));
+        }
+        if self.schema_version >= 3 && self.short_name.is_none() {
+            return Err(ManifestError::MissingShortName);
+        }
+        if let Some(short_name) = &self.short_name
+            && (short_name.trim().is_empty()
+                || short_name.trim() != short_name
+                || short_name.len() > 8
+                || !short_name.is_ascii()
+                || short_name.bytes().any(|byte| byte.is_ascii_control()))
+        {
+            return Err(ManifestError::InvalidShortName(short_name.clone()));
         }
         if self.vendor.trim().is_empty() {
             return Err(ManifestError::EmptyField("vendor"));
@@ -673,6 +691,19 @@ impl PluginManifest {
         Ok(())
     }
 
+    /// Returns the hardware-safe compact plugin identity. The surface renderer
+    /// may still use the full name whenever its viewport has enough room.
+    pub fn little_short_name(&self) -> String {
+        self.short_name
+            .as_deref()
+            .unwrap_or(&self.name)
+            .chars()
+            .map(|character| if character.is_ascii() { character } else { '?' })
+            .take(8)
+            .collect::<String>()
+            .to_ascii_uppercase()
+    }
+
     /// Returns the explicit contract or the stereo convention used by legacy
     /// RackForge packages before audio buses became manifest data.
     pub fn resolved_audio_contract(&self) -> PluginAudioContract {
@@ -842,10 +873,14 @@ fn is_hex_color(value: &str) -> bool {
 pub enum ManifestError {
     #[error("unsupported manifest schema {0}")]
     UnsupportedSchema(u32),
-    #[error("manifest schema 2 requires a branding section")]
+    #[error("manifest schema 2 or newer requires a branding section")]
     MissingBranding,
-    #[error("branding requires manifest schema 2")]
+    #[error("branding requires manifest schema 2 or newer")]
     BrandingRequiresSchema2,
+    #[error("manifest schema 3 requires short_name")]
+    MissingShortName,
+    #[error("short_name must contain 1 to 8 visible ASCII characters: {0:?}")]
+    InvalidShortName(String),
     #[error("branding asset must be a safe relative .png path: {0:?}")]
     UnsafeBrandingPath(String),
     #[error("branding {field} must be #RRGGBB, found {value:?}")]
@@ -943,6 +978,7 @@ mod tests {
             schema_version: 1,
             id: "org.rackforge.gain".into(),
             name: "Gain".into(),
+            short_name: None,
             vendor: "RackForge".into(),
             version: "0.1.0".into(),
             description: Some("A test RackForge effect.".into()),
@@ -1041,17 +1077,37 @@ mod tests {
     }
 
     #[test]
-    fn schema_two_requires_valid_branding() {
+    fn current_schema_requires_valid_branding_and_short_name() {
         let mut candidate = manifest();
         candidate.schema_version = MANIFEST_SCHEMA_VERSION;
         assert_eq!(candidate.validate(), Err(ManifestError::MissingBranding));
         candidate.branding = Some(branding());
+        assert_eq!(candidate.validate(), Err(ManifestError::MissingShortName));
+        candidate.short_name = Some("GAIN".into());
         assert_eq!(candidate.validate(), Ok(()));
         candidate.branding.as_mut().unwrap().icon = "../icon.png".into();
         assert!(matches!(
             candidate.validate(),
             Err(ManifestError::UnsafeBrandingPath(_))
         ));
+    }
+
+    #[test]
+    fn short_name_is_bounded_for_little_and_legacy_manifests_have_a_fallback() {
+        let legacy = manifest();
+        assert_eq!(legacy.little_short_name(), "GAIN");
+
+        let mut current = manifest();
+        current.schema_version = MANIFEST_SCHEMA_VERSION;
+        current.branding = Some(branding());
+        current.short_name = Some("TOO-LONG-9".into());
+        assert!(matches!(
+            current.validate(),
+            Err(ManifestError::InvalidShortName(_))
+        ));
+        current.short_name = Some("RF-106".into());
+        assert_eq!(current.little_short_name(), "RF-106");
+        assert_eq!(current.validate(), Ok(()));
     }
 
     #[test]

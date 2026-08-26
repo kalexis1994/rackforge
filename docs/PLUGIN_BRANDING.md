@@ -33,10 +33,12 @@ installation.
 
 ## Manifest contract
 
-Branding is mandatory in manifest schema 2:
+Branding is mandatory in manifest schema 2 and newer (new packages use schema
+3, which also requires `short_name`):
 
 ```toml
-schema_version = 2
+schema_version = 3
+short_name = "RF-EX"
 
 [branding]
 icon = "branding/icon.png"

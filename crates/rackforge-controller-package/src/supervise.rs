@@ -35,6 +35,10 @@ pub struct SuperviseOptions {
     pub extra_env: Vec<(String, String)>,
     /// Set to true to wind the loop down; drivers are killed and reaped.
     pub shutdown: Arc<AtomicBool>,
+    /// Called once after the supervisor has made its first launch attempt for
+    /// every enabled controller. Hardware may reconnect later; this milestone
+    /// means controller work no longer needs to block lower-priority startup.
+    pub on_ready: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 pub fn ensure_executable(
@@ -198,12 +202,12 @@ pub fn supervise(root: &Path, options: &SuperviseOptions) -> Result<usize, Strin
         .collect::<Vec<_>>();
     let count = managed.len();
     if count == 0 {
+        if let Some(on_ready) = &options.on_ready {
+            on_ready();
+        }
         return Ok(0);
     }
-    println!(
-        "CONTROLLER_HOST_READY packages={count} root={}",
-        root.display()
-    );
+    let mut announced_ready = false;
     while !options.shutdown.load(Ordering::Relaxed) {
         let now = Instant::now();
         for controller in &mut managed {
@@ -272,8 +276,52 @@ pub fn supervise(root: &Path, options: &SuperviseOptions) -> Result<usize, Strin
                 }
             }
         }
+        if !announced_ready {
+            announced_ready = true;
+            let started = managed
+                .iter()
+                .filter(|controller| controller.child.is_some())
+                .count();
+            println!(
+                "CONTROLLER_HOST_READY packages={count} started={started} root={}",
+                root.display()
+            );
+            if let Some(on_ready) = &options.on_ready {
+                on_ready();
+            }
+        }
         thread::sleep(Duration::from_millis(250));
     }
     stop_controllers(&mut managed);
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn an_empty_store_still_completes_controller_discovery() {
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-empty-controller-supervisor-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let ready = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&ready);
+        let options = SuperviseOptions {
+            allow_community: false,
+            extra_env: Vec::new(),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            on_ready: Some(Arc::new(move || {
+                observed.fetch_add(1, Ordering::Relaxed);
+            })),
+        };
+
+        assert_eq!(supervise(&root, &options).unwrap(), 0);
+        assert_eq!(ready.load(Ordering::Relaxed), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

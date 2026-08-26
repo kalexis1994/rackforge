@@ -394,6 +394,7 @@ mod tests {
     fn schema(index: u32) -> ParameterSchema {
         ParameterSchema {
             schema_version: 1,
+            display_decimals: None,
             pages: vec![PageDescriptor {
                 id: "main".into(),
                 name: "Main".into(),

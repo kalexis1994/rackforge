@@ -341,10 +341,6 @@ impl SemanticControlProfile {
 #[serde(deny_unknown_fields)]
 pub struct SurfaceContract {
     pub id: String,
-    pub text_columns: u16,
-    pub header_rows: u8,
-    pub body_rows: u8,
-    pub soft_keys: u8,
     pub navigation: NavigationCapabilities,
 }
 
@@ -352,10 +348,6 @@ impl SurfaceContract {
     pub fn little_v1() -> Self {
         Self {
             id: LITTLE_V1.into(),
-            text_columns: LITTLE_TEXT_COLUMNS as u16,
-            header_rows: 1,
-            body_rows: LITTLE_BODY_ROWS as u8,
-            soft_keys: LITTLE_SOFT_KEYS as u8,
             navigation: NavigationCapabilities {
                 previous: true,
                 next: true,
@@ -367,11 +359,7 @@ impl SurfaceContract {
 
     pub fn validate(&self) -> Result<(), String> {
         validate_versioned_id(&self.id)?;
-        if self.text_columns == 0
-            || self.body_rows == 0
-            || self.soft_keys == 0
-            || !self.navigation.is_complete()
-        {
+        if !self.navigation.is_complete() {
             return Err(format!("surface {:?} has incomplete capabilities", self.id));
         }
         Ok(())
@@ -400,6 +388,44 @@ pub enum SurfaceQuality {
     CertifiedCompatibility,
 }
 
+/// Physical text viewport used to project a semantic RackForge surface.
+///
+/// The layout ID describes navigation and meaning; geometry belongs to the
+/// controller implementation. This lets two controllers implement `little@1`
+/// at different sizes without inventing `medium@1` or `wide@1` contracts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SurfaceViewport {
+    pub text_columns: u16,
+    pub header_rows: u8,
+    pub body_rows: u8,
+    pub soft_keys: u8,
+}
+
+impl SurfaceViewport {
+    pub const fn little_reference() -> Self {
+        Self {
+            text_columns: LITTLE_TEXT_COLUMNS as u16,
+            header_rows: 1,
+            body_rows: LITTLE_BODY_ROWS as u8,
+            soft_keys: LITTLE_SOFT_KEYS as u8,
+        }
+    }
+
+    pub fn validate(self) -> Result<(), String> {
+        if self.text_columns == 0 || self.body_rows == 0 || self.soft_keys == 0 {
+            return Err("surface viewport dimensions must all be greater than zero".into());
+        }
+        Ok(())
+    }
+}
+
+impl Default for SurfaceViewport {
+    fn default() -> Self {
+        Self::little_reference()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GestureCapabilities {
@@ -422,6 +448,8 @@ pub struct SurfaceImplementation {
     pub layout_id: String,
     pub quality: SurfaceQuality,
     pub priority: u16,
+    #[serde(default)]
+    pub viewport: SurfaceViewport,
     #[serde(default)]
     pub gestures: GestureCapabilities,
 }
@@ -471,6 +499,7 @@ impl ControllerProfile {
         let mut priorities = BTreeSet::new();
         for surface in &self.surfaces {
             validate_versioned_id(&surface.layout_id)?;
+            surface.viewport.validate()?;
             surface.gestures.validate()?;
             if !ids.insert(surface.layout_id.as_str()) {
                 return Err(format!("duplicate surface {:?}", surface.layout_id));
@@ -547,17 +576,20 @@ pub struct NegotiatedSurface {
     pub quality: SurfaceQuality,
 }
 
-/// Chooses only an implementation explicitly declared by both sides.
+/// Chooses a semantic surface contract implemented by the controller.
 ///
-/// Screen size, control count and layout names are never inferred.
+/// Physical size is deliberately not part of the layout ID. The selected
+/// implementation's [`SurfaceViewport`] projects the shared model to the
+/// actual display. Distinct IDs are reserved for genuinely different
+/// interaction contracts, not breakpoints.
 pub fn negotiate_surface(
     controller: &ControllerProfile,
-    plugin_layouts: &[String],
+    available_layouts: &[String],
 ) -> Option<NegotiatedSurface> {
     controller
         .surfaces
         .iter()
-        .filter(|surface| plugin_layouts.contains(&surface.layout_id))
+        .filter(|surface| available_layouts.contains(&surface.layout_id))
         .min_by_key(|surface| surface.priority)
         .map(|surface| NegotiatedSurface {
             layout_id: surface.layout_id.clone(),
@@ -605,6 +637,7 @@ mod tests {
             layout_id: "medium@1".into(),
             quality: SurfaceQuality::Native,
             priority: 0,
+            viewport: SurfaceViewport::default(),
             gestures: GestureCapabilities::default(),
         }];
         if with_little {
@@ -612,6 +645,7 @@ mod tests {
                 layout_id: LITTLE_V1.into(),
                 quality: SurfaceQuality::CertifiedCompatibility,
                 priority: 1,
+                viewport: SurfaceViewport::default(),
                 gestures: GestureCapabilities::default(),
             });
         }

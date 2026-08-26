@@ -28,8 +28,9 @@ Reserved action:
 - PART, MIDI channel 1 CC 119: `keyboard_parts`.
 
 The host resolves global parameter roles and actions before plugin MIDI routing. The package
-implements only `little@1`; other layouts require an explicit certified
-implementation.
+implements the semantic `little@1` surface with an 18-column, two-body-row
+viewport. Screen geometry belongs to the `.rfcontroller`, so another width can
+implement the same responsive contract without a size-specific layout ID.
 
 See [the driver documentation](../../keylab-bridge/README.md) and
 [protocol record](../../keylab-bridge/PROTOCOL.md).

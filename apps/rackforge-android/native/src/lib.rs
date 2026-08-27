@@ -30,9 +30,9 @@ use rackforge_performance_api::{
     LivePerformanceState, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceSnapshot,
 };
 use rackforge_plugin_api::{
-    PROGRAM_EDITOR_SCHEMA_VERSION, PluginKind, PluginStateReference, PreparedProgram,
-    PresetCatalog, ProgramDocument, ProgramEditRequest, ProgramEditorValue, ProgramEditorView,
-    ProgramFieldEditRequest, WebSurfaceKind,
+    HostPreset, HostPresetSummary, PROGRAM_EDITOR_SCHEMA_VERSION, PluginKind, PluginStateReference,
+    PreparedProgram, PresetCatalog, ProgramDocument, ProgramEditRequest, ProgramEditorValue,
+    ProgramEditorView, ProgramFieldEditRequest, WebSurfaceKind,
     abi::{MidiEventV1, ParameterEventV1},
 };
 use rackforge_repository::{
@@ -299,6 +299,42 @@ impl AndroidControllerMenu {
                     }
                     Err(error) => eprintln!("PLUGIN_PRESET_LOAD_FAILED {error:#}"),
                 }
+                None
+            }
+            MenuCommand::SavePluginPreset { name } => {
+                let result = engine_call(|engine| {
+                    let preset: HostPreset = serde_json::from_value(engine.plugin_state_command(
+                        "save_preset",
+                        &serde_json::json!({ "name": &name }),
+                    )?)?;
+                    let presets: Vec<HostPresetSummary> = serde_json::from_value(
+                        engine.plugin_state_command("list_presets", &serde_json::json!({}))?,
+                    )?;
+                    Ok((preset, presets))
+                })
+                .map(|(preset, presets)| {
+                    let saved = PlayPreset::new(
+                        preset.id.clone(),
+                        preset.name.clone(),
+                        format!("v{}", preset.state.plugin_version),
+                    );
+                    let presets = presets
+                        .into_iter()
+                        .map(|preset| {
+                            PlayPreset::new(
+                                preset.id,
+                                preset.name,
+                                format!("v{}", preset.plugin_version),
+                            )
+                        })
+                        .collect();
+                    (saved, presets)
+                })
+                .map_err(|error| format!("{error:#}"));
+                if let Err(error) = &result {
+                    eprintln!("PLUGIN_PRESET_SAVE_FAILED {error}");
+                }
+                self.menu.complete_plugin_preset_save(result);
                 None
             }
             MenuCommand::SetPluginParameter {
@@ -2543,7 +2579,7 @@ fn ensure_performance_menu(data_root: &Path) -> Result<()> {
 
 /// Runs one engine call under the lock and releases it before any menu work,
 /// keeping the menu -> engine lock order the only nesting that exists.
-fn engine_call(act: impl FnOnce(&mut AndroidEngine) -> Result<()>) -> Result<()> {
+fn engine_call<T>(act: impl FnOnce(&mut AndroidEngine) -> Result<T>) -> Result<T> {
     let mut guard = engine()
         .lock()
         .map_err(|_| anyhow::anyhow!("engine lock poisoned"))?;

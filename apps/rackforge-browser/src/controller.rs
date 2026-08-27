@@ -225,6 +225,14 @@ impl BrowserKeyLabController {
         self.menu.complete_plugin_preset_load(preset_id);
     }
 
+    pub fn complete_plugin_preset_save(
+        &mut self,
+        result: Result<(PlayPreset, Vec<PlayPreset>), String>,
+    ) {
+        self.menu.complete_plugin_preset_save(result);
+        self.queue_current_screen(false);
+    }
+
     pub fn set_plugin_parameters(
         &mut self,
         schema: ParameterSchema,

@@ -280,6 +280,9 @@ pub enum MenuCommand {
     LoadPluginPreset {
         preset_id: String,
     },
+    SavePluginPreset {
+        name: String,
+    },
     SetPluginParameter {
         instance_id: String,
         parameter_index: u32,
@@ -503,6 +506,9 @@ enum Page {
     SystemWifiResult,
     PluginLibrary,
     PluginPresets,
+    PluginPresetName,
+    PluginPresetBusy,
+    PluginPresetResult,
     PluginPrograms,
     PluginPlay,
     PluginParameterPages,
@@ -657,6 +663,8 @@ pub struct Menu {
     plugin_parameter_editor: Option<ValueCarousel>,
     plugin_presets: Vec<PlayPreset>,
     plugin_active_preset_id: Option<String>,
+    plugin_preset_name: TextEditor,
+    plugin_preset_result: Option<(bool, String)>,
     plugin_play_index: usize,
     plugin_play_context: PluginPlayContext,
     plugin_custom_index: usize,
@@ -853,6 +861,8 @@ impl Default for Menu {
             plugin_parameter_editor: None,
             plugin_presets: Vec::new(),
             plugin_active_preset_id: None,
+            plugin_preset_name: plugin_preset_name_editor("NEW PRESET"),
+            plugin_preset_result: None,
             plugin_play_index: 0,
             plugin_play_context: PluginPlayContext::Standalone,
             plugin_custom_index: 0,
@@ -1031,7 +1041,9 @@ impl Menu {
     }
 
     pub fn advance_plugin_spinner(&mut self) -> bool {
-        if self.pending_plugin_instance_id.is_none() || !self.is_plugin_browser_page() {
+        let loading_plugin =
+            self.pending_plugin_instance_id.is_some() && self.is_plugin_browser_page();
+        if !loading_plugin && self.page != Page::PluginPresetBusy {
             return false;
         }
         self.plugin_spinner.advance();
@@ -1055,6 +1067,9 @@ impl Menu {
             self.page,
             Page::PluginLibrary
                 | Page::PluginPresets
+                | Page::PluginPresetName
+                | Page::PluginPresetBusy
+                | Page::PluginPresetResult
                 | Page::PluginPrograms
                 | Page::PluginPlay
                 | Page::PluginParameterPages
@@ -1302,8 +1317,9 @@ impl Menu {
 
     pub fn set_plugin_presets(&mut self, presets: Vec<PlayPreset>, active_preset_id: Option<&str>) {
         let focused = self
-            .plugin_presets
-            .get(self.plugin_preset_index)
+            .plugin_preset_index
+            .checked_sub(1)
+            .and_then(|index| self.plugin_presets.get(index))
             .map(|preset| preset.id.clone());
         let active_id = active_preset_id
             .map(str::to_owned)
@@ -1319,8 +1335,9 @@ impl Menu {
                     .iter()
                     .position(|preset| preset.id == id)
             })
+            .map(|index| index + 1)
             .unwrap_or(0)
-            .min(self.plugin_presets.len().saturating_sub(1));
+            .min(self.plugin_presets.len());
     }
 
     pub fn complete_plugin_preset_load(&mut self, preset_id: &str) {
@@ -1330,8 +1347,29 @@ impl Menu {
             .iter()
             .position(|preset| preset.id == preset_id)
         {
-            self.plugin_preset_index = index;
+            self.plugin_preset_index = index + 1;
         }
+    }
+
+    /// Completes a host-owned snapshot started from LITTLE. The host returns
+    /// both the canonical preset and the refreshed catalog so the surface
+    /// never has to guess an id, version or normalized name.
+    pub fn complete_plugin_preset_save(
+        &mut self,
+        result: Result<(PlayPreset, Vec<PlayPreset>), String>,
+    ) {
+        match result {
+            Ok((saved, presets)) => {
+                let saved_id = saved.id.clone();
+                self.set_plugin_presets(presets, Some(&saved_id));
+                self.plugin_preset_result = Some((true, "PRESET SAVED".into()));
+            }
+            Err(error) => {
+                self.plugin_preset_result =
+                    Some((false, normalized_display_text(&error, "SAVE FAILED")));
+            }
+        }
+        self.page = Page::PluginPresetResult;
     }
 
     /// Supplies the active plugin's validated public parameter contract to
@@ -1661,6 +1699,11 @@ impl Menu {
             }
         } else if self.page == Page::PluginUnsavedChanges {
             self.apply_unsaved_changes_input(input);
+        } else if matches!(
+            self.page,
+            Page::PluginPresetName | Page::PluginPresetBusy | Page::PluginPresetResult
+        ) {
+            self.apply_plugin_preset_input(input);
         } else if self.page == Page::PluginName {
             self.apply_program_name_input(input);
         } else if self.page == Page::PluginProgramOutput {
@@ -1709,6 +1752,48 @@ impl Menu {
             Some(program.id.clone())
         };
         self.pending_command = Some(MenuCommand::BeginProgramEdit { program_id });
+    }
+
+    fn open_plugin_preset_name(&mut self) {
+        let suggested = self
+            .plugin_active_sound_id
+            .as_deref()
+            .and_then(|id| self.plugin_sounds.iter().find(|sound| sound.id == id))
+            .map_or("NEW PRESET", |sound| sound.name.as_str());
+        self.plugin_preset_name.set_value(suggested);
+        let _ = self.plugin_preset_name.handle(Input::Button1);
+        self.plugin_preset_result = None;
+        self.page = Page::PluginPresetName;
+    }
+
+    fn apply_plugin_preset_input(&mut self, input: Input) {
+        match self.page {
+            Page::PluginPresetName => match self.plugin_preset_name.handle(input) {
+                ComponentEvent::EditCommitted(_) => {
+                    self.plugin_spinner.reset("SAVING PRESET");
+                    self.plugin_spinner.set_detail("PLEASE WAIT");
+                    self.pending_command = Some(MenuCommand::SavePluginPreset {
+                        name: self.plugin_preset_name.value().to_owned(),
+                    });
+                    self.page = Page::PluginPresetBusy;
+                }
+                ComponentEvent::EditCancelled(_) | ComponentEvent::ExitRequested(_) => {
+                    self.page = Page::PluginPresets;
+                }
+                _ => {}
+            },
+            Page::PluginPresetBusy => {}
+            Page::PluginPresetResult => {
+                if matches!(
+                    input.default_navigation(),
+                    Some(Action::Select | Action::Back)
+                ) {
+                    self.plugin_preset_result = None;
+                    self.page = Page::PluginPresets;
+                }
+            }
+            _ => {}
+        }
     }
 
     pub fn complete_performance_edit(&mut self, result: Result<PerformanceSnapshot, String>) {
@@ -3025,6 +3110,19 @@ impl Menu {
             self.apply_unsaved_changes_input(input);
             return;
         }
+        if matches!(
+            self.page,
+            Page::PluginPresetName | Page::PluginPresetBusy | Page::PluginPresetResult
+        ) {
+            let input = match action {
+                Action::Previous => Input::Button2,
+                Action::Next => Input::Button3,
+                Action::Back => Input::Button4,
+                Action::Select => Input::Button1,
+            };
+            self.apply_plugin_preset_input(input);
+            return;
+        }
         if self.page == Page::PluginName {
             let input = match action {
                 Action::Previous => Input::Button2,
@@ -3240,8 +3338,16 @@ impl Menu {
                             }
                         }
                     }
-                    Page::PluginPresets if !self.plugin_presets.is_empty() => {
-                        if let Some(preset) = self.plugin_presets.get(self.plugin_preset_index) {
+                    Page::PluginPresets if self.plugin_preset_index == 0 => {
+                        self.open_plugin_preset_name();
+                        self.page
+                    }
+                    Page::PluginPresets => {
+                        if let Some(preset) = self
+                            .plugin_preset_index
+                            .checked_sub(1)
+                            .and_then(|index| self.plugin_presets.get(index))
+                        {
                             self.pending_command = Some(MenuCommand::LoadPluginPreset {
                                 preset_id: preset.id.clone(),
                             });
@@ -3616,6 +3722,27 @@ impl Menu {
             }
             Page::PluginLibrary => self.render_plugin_library(),
             Page::PluginPresets => self.render_plugin_presets(),
+            Page::PluginPresetName => {
+                let [line_1, line_2] = component_lines(&self.plugin_preset_name, false);
+                self.plugin_screen("SAVE PRESET", line_1, line_2)
+            }
+            Page::PluginPresetBusy => {
+                let [line_1, line_2] = component_lines(&self.plugin_spinner, false);
+                self.plugin_screen("PRESETS", line_1, line_2)
+            }
+            Page::PluginPresetResult => {
+                let (success, message) = self
+                    .plugin_preset_result
+                    .as_ref()
+                    .map_or((false, "SAVE FAILED"), |(success, message)| {
+                        (*success, message.as_str())
+                    });
+                self.plugin_screen(
+                    "PRESETS",
+                    if success { "SUCCESS" } else { "ERROR" },
+                    message,
+                )
+            }
             Page::PluginPrograms => self.render_plugin_programs(),
             Page::PluginPlay => self.render_plugin_play(),
             Page::PluginParameterPages => self.render_plugin_parameter_pages(),
@@ -5075,8 +5202,7 @@ impl Menu {
                 };
                 (&mut self.plugin_library_index, len)
             }
-            Page::PluginPresets if self.plugin_presets.is_empty() => return,
-            Page::PluginPresets => (&mut self.plugin_preset_index, self.plugin_presets.len()),
+            Page::PluginPresets => (&mut self.plugin_preset_index, self.plugin_presets.len() + 1),
             Page::PluginPrograms => {
                 let len = self.plugin_banks().len();
                 if len == 0 {
@@ -5154,7 +5280,10 @@ impl Menu {
             | Page::PerformanceDelete
             | Page::PerformanceBusy
             | Page::PerformanceResult
-            | Page::KeyboardParts => return,
+            | Page::KeyboardParts
+            | Page::PluginPresetName
+            | Page::PluginPresetBusy
+            | Page::PluginPresetResult => return,
             Page::PluginTuning
             | Page::PluginPitchEnvelope
             | Page::PluginLayerLevel
@@ -5851,24 +5980,24 @@ impl Menu {
     }
 
     fn render_plugin_presets(&self) -> Screen {
-        if self.plugin_presets.is_empty() {
-            return self.plugin_screen("PRESETS", "NO SAVED PRESETS", "USE RACKFORGE UI");
-        }
         let mut carousel = SimpleCarousel::new(
             "plugin-presets",
-            self.plugin_presets.iter().map(|preset| {
-                let name = if self.plugin_active_preset_id.as_deref() == Some(preset.id.as_str()) {
-                    let bounded = preset
-                        .name
-                        .chars()
-                        .take(DISPLAY_COLUMNS - 2)
-                        .collect::<String>();
-                    format!("[{bounded}]")
-                } else {
-                    preset.name.clone()
-                };
-                CarouselItem::new(name, &preset.detail)
-            }),
+            std::iter::once(CarouselItem::new("SAVE CURRENT", "CAPTURE PLUGIN STATE")).chain(
+                self.plugin_presets.iter().map(|preset| {
+                    let name =
+                        if self.plugin_active_preset_id.as_deref() == Some(preset.id.as_str()) {
+                            let bounded = preset
+                                .name
+                                .chars()
+                                .take(DISPLAY_COLUMNS - 2)
+                                .collect::<String>();
+                            format!("[{bounded}]")
+                        } else {
+                            preset.name.clone()
+                        };
+                    CarouselItem::new(name, &preset.detail)
+                }),
+            ),
         );
         carousel.set_selected(self.plugin_preset_index);
         carousel.set_focused(true);
@@ -5877,7 +6006,7 @@ impl Menu {
             compact_indexed_context(
                 "PRESET",
                 self.plugin_preset_index,
-                self.plugin_presets.len(),
+                self.plugin_presets.len() + 1,
             ),
             line_1,
             line_2,
@@ -7252,6 +7381,12 @@ fn program_name_editor(name: &str) -> TextEditor {
     editor
 }
 
+fn plugin_preset_name_editor(name: &str) -> TextEditor {
+    let mut editor = TextEditor::new("plugin-preset-name", "PRESET NAME", name, 24);
+    editor.set_focused(true);
+    editor
+}
+
 fn performance_text_editor(id: &str, label: &str, name: &str) -> TextEditor {
     let mut editor = TextEditor::new(id, label, name, 24);
     editor.set_focused(true);
@@ -8604,7 +8739,7 @@ mod tests {
         menu.apply(Action::Select);
         assert_eq!(menu.render().line_1.trim(), "PRESETS");
         menu.apply(Action::Select);
-        assert_plugin_header(&menu.render(), "RF-DLS", "PRESET 2/2");
+        assert_plugin_header(&menu.render(), "RF-DLS", "PRESET 3/3");
         assert!(menu.render().line_1.to_ascii_uppercase().contains("SOFT"));
 
         menu.apply(Action::Previous);
@@ -8617,6 +8752,63 @@ mod tests {
         );
         menu.complete_plugin_preset_load("preset.stage");
         assert!(menu.render().line_1.to_ascii_uppercase().contains("STAGE"));
+    }
+
+    #[test]
+    fn plugin_presets_can_capture_the_current_state_even_when_the_catalog_is_empty() {
+        let mut menu = plugin_menu();
+        menu.page = Page::PluginPresets;
+
+        let screen = menu.render();
+        assert_plugin_header(&screen, "RF-DLS", "PRESET 1/1");
+        assert_eq!(screen.line_1.trim(), "SAVE CURRENT");
+
+        menu.apply(Action::Select);
+        assert_eq!(menu.page, Page::PluginPresetName);
+        assert!(menu.plugin_preset_name.is_editing());
+        assert_eq!(menu.plugin_preset_name.value(), "PIANO 1");
+
+        menu.apply(Action::Select);
+        assert_eq!(menu.page, Page::PluginPresetBusy);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SavePluginPreset {
+                name: "PIANO 1".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn completing_a_plugin_preset_save_focuses_the_canonical_saved_preset() {
+        let mut menu = plugin_menu();
+        menu.page = Page::PluginPresetBusy;
+        let saved = PlayPreset::new("preset.new", "Warm Keys", "v1.2.3");
+        menu.complete_plugin_preset_save(Ok((saved.clone(), vec![saved])));
+
+        assert_eq!(menu.page, Page::PluginPresetResult);
+        assert_eq!(menu.plugin_active_preset_id.as_deref(), Some("preset.new"));
+        assert_eq!(menu.plugin_preset_index, 1);
+        assert_eq!(menu.render().line_1.trim(), "SUCCESS");
+
+        menu.apply(Action::Select);
+        assert_eq!(menu.page, Page::PluginPresets);
+        assert!(
+            menu.render()
+                .line_1
+                .to_ascii_uppercase()
+                .contains("[WARM KEYS]")
+        );
+    }
+
+    #[test]
+    fn cancelling_a_plugin_preset_name_does_not_emit_a_command() {
+        let mut menu = plugin_menu();
+        menu.page = Page::PluginPresets;
+        menu.apply(Action::Select);
+        menu.apply(Action::Back);
+
+        assert_eq!(menu.page, Page::PluginPresets);
+        assert_eq!(menu.take_command(), None);
     }
 
     #[test]

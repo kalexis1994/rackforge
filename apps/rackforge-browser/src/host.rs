@@ -1493,6 +1493,43 @@ impl BrowserHost {
                     self.controller.complete_plugin_preset_load(&preset_id);
                 }
             }
+            MenuCommand::SavePluginPreset { name } => {
+                let result = self
+                    .store
+                    .state()
+                    .active_instance_id
+                    .clone()
+                    .ok_or_else(|| "No active plugin is available".to_owned())
+                    .and_then(|instance_id| {
+                        self.save_plugin_preset(&instance_id, &name)
+                            .map_err(|error| error.message)
+                    })
+                    .and_then(|response| match response {
+                        ControlResponse::PluginPresetSaved { preset, presets } => {
+                            let saved = rackforge_surface_runtime::PlayPreset::new(
+                                preset.id.clone(),
+                                preset.name.clone(),
+                                format!("v{}", preset.state.plugin_version),
+                            );
+                            let presets = presets
+                                .into_iter()
+                                .map(|preset| {
+                                    rackforge_surface_runtime::PlayPreset::new(
+                                        preset.id,
+                                        preset.name,
+                                        format!("v{}", preset.plugin_version),
+                                    )
+                                })
+                                .collect();
+                            Ok((saved, presets))
+                        }
+                        ControlResponse::Error { message, .. } => Err(message),
+                        response => Err(format!(
+                            "Unexpected response while saving RackForge preset: {response:?}"
+                        )),
+                    });
+                self.controller.complete_plugin_preset_save(result);
+            }
             MenuCommand::SetPluginParameter {
                 instance_id,
                 parameter_index,

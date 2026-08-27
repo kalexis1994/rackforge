@@ -723,6 +723,15 @@ impl PoolShared {
 }
 
 pub fn automatic_audio_worker_capacity(available_cpus: usize) -> usize {
+    // Phones advertise all their cores but big.LITTLE topologies make the
+    // small ones poor realtime citizens, and the system itself competes for
+    // them. Three workers cover a five-unit instrument next to the
+    // system-boosted callback; `RACKFORGE_AUDIO_WORKERS` still overrides.
+    let platform_ceiling = if cfg!(target_os = "android") {
+        3
+    } else {
+        MAX_RENDER_SLOTS
+    };
     match available_cpus {
         0 | 1 => 0,
         // On two-core systems the coordinator sleeps while both workers run.
@@ -731,7 +740,7 @@ pub fn automatic_audio_worker_capacity(available_cpus: usize) -> usize {
         2 => 2,
         count => count - 1,
     }
-    .min(MAX_RENDER_SLOTS)
+    .min(platform_ceiling)
 }
 
 pub fn requested_audio_worker_capacity(available_cpus: usize) -> usize {

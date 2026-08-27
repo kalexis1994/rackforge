@@ -9,6 +9,10 @@ use rackforge_control_api::{
     ControlResponse, PluginParameterControlCommand, PresetImportConflictPolicy, RfPresetFile,
     parse_plugin_parameter_control_command,
 };
+use rackforge_core::parallel_render::{
+    self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
+    process_slots_sequential, spawn_telemetry_publisher,
+};
 use rackforge_core::{
     CompiledParameterLink, LiveParameterStateStore, LiveParameterTarget, LiveParameterWriter,
     LiveParameterWriterHandle, LoadedPlugin, PluginInstance, PluginPackage, PluginStateStore,
@@ -744,6 +748,12 @@ unsafe extern "C" {
 
 struct AndroidEngine {
     instance: SendablePluginInstance,
+    /// Host-owned unit instances for `parallel_render_v1` plugins, so the
+    /// Android PLAY voice schedules units across the shared worker pool.
+    parallel: Option<SendableParallelUnits>,
+    process_faulted: bool,
+    render_pool: RenderPool,
+    render_telemetry: std::sync::Arc<RenderTelemetry>,
     runtime: SendableLoadedPlugin,
     midi: Vec<MidiEventV1>,
     parameter_events: Vec<ParameterEventV1>,
@@ -768,6 +778,90 @@ struct AndroidEngine {
 }
 
 struct SendablePluginInstance(PluginInstance<'static>);
+
+struct SendableParallelUnits(ParallelUnits<'static>);
+
+// SAFETY: unit instances are portable wasm-v1 sandboxes created next to the
+// coordinator; ownership stays with the engine behind its mutex and each
+// unit is entered by at most one pool worker per block under the epoch
+// protocol.
+unsafe impl Send for SendableParallelUnits {}
+
+/// The engine's single PLAY voice, borrowed for one block so the shared
+/// worker pool can schedule its units. Android has no Rack engine, so this
+/// one-Slot graph is the whole render.
+struct AndroidSlot<'block> {
+    instance: &'block mut PluginInstance<'static>,
+    parallel: Option<&'block mut ParallelUnits<'static>>,
+    output: &'block mut [f32],
+    midi: &'block [MidiEventV1],
+    parameter_events: &'block [ParameterEventV1],
+    faulted: &'block mut bool,
+}
+
+// SAFETY: the same argument as the other hosts — the coordinator and every
+// unit instance run in the portable backend, and unit jobs point at
+// per-unit boxed cells owned by `ParallelUnits`.
+unsafe impl ScheduledSlot for AndroidSlot<'_> {
+    fn max_units(&self) -> u32 {
+        self.parallel
+            .as_ref()
+            .map_or(0, |parallel| parallel.max_units())
+    }
+
+    fn run_single(&mut self, frames: u32, channels: u32) -> bool {
+        self.output.fill(0.0);
+        if *self.faulted {
+            return true;
+        }
+        self.instance
+            .process_interleaved(
+                &[],
+                self.output,
+                frames,
+                0,
+                channels,
+                self.midi,
+                self.parameter_events,
+            )
+            .is_ok()
+    }
+
+    fn run_begin(&mut self, frames: u32, _channels: u32) -> Option<u32> {
+        self.output.fill(0.0);
+        if *self.faulted {
+            return Some(0);
+        }
+        let parallel = self.parallel.as_mut()?;
+        parallel
+            .begin(self.instance, &[], frames, self.midi, self.parameter_events)
+            .ok()
+    }
+
+    fn unit_job(&mut self, unit: u32, frames: u32, channels: u32) -> UnitJob {
+        self.parallel
+            .as_mut()
+            .expect("unit job requested for a classic Android voice")
+            .unit_job(unit, &[], frames, channels)
+    }
+
+    fn run_end(&mut self, frames: u32, channels: u32, completed: u32) -> bool {
+        if *self.faulted {
+            return true;
+        }
+        let Some(parallel) = self.parallel.as_mut() else {
+            return false;
+        };
+        parallel
+            .finish(self.instance, self.output, frames, channels, completed)
+            .is_ok()
+    }
+
+    fn quarantine(&mut self) {
+        self.output.fill(0.0);
+        *self.faulted = true;
+    }
+}
 
 #[derive(Clone, Copy)]
 struct SendableLoadedPlugin(&'static LoadedPlugin);
@@ -1047,8 +1141,16 @@ impl AndroidEngine {
             }],
         );
         let live_parameter_writer_handle = live_parameter_writer.handle();
+        let parallel = Self::rebuild_parallel_units(plugin, &BTreeMap::new(), &selected_sound_id);
+        let render_telemetry = RenderTelemetry::new(parallel_render::MAX_RENDER_SLOTS);
+        spawn_telemetry_publisher(&render_telemetry, std::time::Duration::from_secs(1));
+        let render_pool = RenderPool::automatic(std::sync::Arc::clone(&render_telemetry));
         Ok(Self {
             instance: SendablePluginInstance(instance),
+            parallel,
+            process_faulted: false,
+            render_pool,
+            render_telemetry,
             runtime: SendableLoadedPlugin(plugin),
             midi: Vec::with_capacity(256),
             parameter_events: Vec::with_capacity(256),
@@ -1085,10 +1187,56 @@ impl AndroidEngine {
         {
             bail!("plugin does not expose sound {sound_id:?}");
         }
-        self.instance.0.load_preset(sound_id)?;
+        self.mirror_control(|instance| instance.load_preset(sound_id))?;
+        self.process_faulted = false;
         self.live_parameter_writer_handle.clear(0);
         self.selected_sound_id = sound_id.to_owned();
         Ok(())
+    }
+
+    /// Applies one control-plane operation to the coordinator and mirrors
+    /// the identical canonical input to every unit instance.
+    fn mirror_control<E>(
+        &mut self,
+        mut operation: impl FnMut(&mut PluginInstance<'static>) -> std::result::Result<(), E>,
+    ) -> std::result::Result<(), E> {
+        operation(&mut self.instance.0)?;
+        if let Some(parallel) = self.parallel.as_mut() {
+            parallel.0.mirror(operation)?;
+        }
+        Ok(())
+    }
+
+    /// Rebuilds the unit family around a replacement coordinator, mirroring
+    /// the same canonical inputs it just received. Control threads only.
+    fn rebuild_parallel_units(
+        plugin: &'static LoadedPlugin,
+        resource_overrides: &BTreeMap<String, PathBuf>,
+        sound_id: &str,
+    ) -> Option<SendableParallelUnits> {
+        if !parallel_render::parallel_units_enabled() {
+            return None;
+        }
+        let mut units = match ParallelUnits::create_with_resources(
+            plugin,
+            resource_overrides,
+            SAMPLE_RATE,
+            MAX_FRAMES,
+            0,
+            2,
+        ) {
+            Ok(Some(units)) => units,
+            Ok(None) => return None,
+            Err(error) => {
+                eprintln!("ANDROID_PLAY_UNITS_SKIPPED error={error:#}");
+                return None;
+            }
+        };
+        if let Err(error) = units.mirror(|instance| instance.load_preset(sound_id)) {
+            eprintln!("ANDROID_PLAY_UNITS_SKIPPED error={error:#}");
+            return None;
+        }
+        Some(SendableParallelUnits(units))
     }
 
     fn restore_sound(&mut self, sound_id: &str) -> Result<()> {
@@ -1100,13 +1248,19 @@ impl AndroidEngine {
         {
             bail!("plugin does not expose sound {sound_id:?}");
         }
-        self.instance.0.load_preset(sound_id)?;
+        self.mirror_control(|instance| instance.load_preset(sound_id))?;
+        self.process_faulted = false;
         self.live_parameter_writer_handle.flush();
         let store = LiveParameterStateStore::open(Some(&self.data_root))?;
         for (parameter_index, value) in
             store.restored_values(&self.plugin_id, self.runtime.0.parameters())
         {
             set_plugin_parameter(self.runtime.0, &mut self.instance.0, parameter_index, value)?;
+            if let Some(parallel) = self.parallel.as_mut() {
+                parallel
+                    .0
+                    .mirror(|instance| instance.set_parameter(parameter_index, value))?;
+            }
         }
         self.selected_sound_id = sound_id.to_owned();
         Ok(())
@@ -1134,12 +1288,18 @@ impl AndroidEngine {
                     parameter_index,
                     value,
                 } => {
+                    let requested = value;
                     let value = set_plugin_parameter(
                         self.runtime.0,
                         &mut self.instance.0,
                         parameter_index,
-                        value,
+                        requested,
                     )?;
+                    if let Some(parallel) = self.parallel.as_mut() {
+                        parallel.0.mirror(|instance| {
+                            instance.set_parameter(parameter_index, requested)
+                        })?;
+                    }
                     self.live_parameter_writer_handle
                         .try_record(0, parameter_index, value);
                     ControlResponse::PluginParameterSet {
@@ -1205,7 +1365,8 @@ impl AndroidEngine {
                     );
                 }
                 let bytes = store.read(&preset.state)?;
-                self.instance.0.load_state(&bytes)?;
+                self.mirror_control(|instance| instance.load_state(&bytes))?;
+                self.process_faulted = false;
                 self.live_parameter_writer_handle.clear(0);
                 if let Some(sound_id) = preset.state.selected_sound_id.as_ref() {
                     self.selected_sound_id = sound_id.clone();
@@ -1484,14 +1645,11 @@ impl AndroidEngine {
             .program_previous_sound_id
             .clone()
             .context("program audition has no previous sound")?;
-        self.instance
-            .0
-            .reset()
+        self.mirror_control(|instance| instance.reset())
             .context("resetting the program audition")?;
-        self.instance
-            .0
-            .load_preset(&previous)
+        self.mirror_control(|instance| instance.load_preset(&previous))
             .with_context(|| format!("restoring preset {previous:?}"))?;
+        self.process_faulted = false;
         self.selected_sound_id = previous;
         Ok(())
     }
@@ -1508,9 +1666,7 @@ impl AndroidEngine {
         PluginStorage::new(&self.data_root)
             .save_prepared_program(&prepared)
             .context("saving the Android program")?;
-        self.instance
-            .0
-            .install_program(&prepared)
+        self.mirror_control(|instance| instance.install_program(&prepared))
             .context("installing the saved Android program")?;
         self.catalog = self
             .instance
@@ -1669,15 +1825,39 @@ impl AndroidEngine {
                 }
             }
         }
-        self.instance.0.process_interleaved(
-            &[],
+        let deadline_ns = u64::from(frames) * 1_000_000_000 / SAMPLE_RATE as u64;
+        let was_faulted = self.process_faulted;
+        let mut slot = AndroidSlot {
+            instance: &mut self.instance.0,
+            parallel: self.parallel.as_mut().map(|parallel| &mut parallel.0),
             output,
-            frames,
-            0,
-            2,
-            &self.midi,
-            &self.parameter_events,
-        )?;
+            midi: &self.midi,
+            parameter_events: &self.parameter_events,
+            faulted: &mut self.process_faulted,
+        };
+        let render_started = std::time::Instant::now();
+        let scheduled =
+            self.render_pool
+                .process(std::slice::from_mut(&mut slot), frames, 2, deadline_ns);
+        if !scheduled {
+            process_slots_sequential(
+                std::slice::from_mut(&mut slot),
+                frames,
+                2,
+                &self.render_telemetry,
+            );
+            self.render_telemetry.record_block(
+                render_started.elapsed().as_nanos() as u64,
+                deadline_ns,
+                None,
+            );
+        }
+        if self.process_faulted && !was_faulted {
+            eprintln!(
+                "PLUGIN_PROCESS_QUARANTINED context=android:{} action=silence",
+                self.plugin_id
+            );
+        }
         self.midi.clear();
         self.parameter_events.clear();
         Ok(())
@@ -2626,12 +2806,18 @@ fn set_android_little_parameter(
     if instance_id != engine.plugin_id {
         bail!("LITTLE targeted inactive plugin instance {instance_id}");
     }
+    let requested = value;
     let value = set_plugin_parameter(
         engine.runtime.0,
         &mut engine.instance.0,
         parameter_index,
-        value,
+        requested,
     )?;
+    if let Some(parallel) = engine.parallel.as_mut() {
+        parallel
+            .0
+            .mirror(|instance| instance.set_parameter(parameter_index, requested))?;
+    }
     engine
         .live_parameter_writer_handle
         .try_record(0, parameter_index, value);
@@ -4009,6 +4195,12 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_loadPluginResourc
                 Ok((replacement, catalog, next_sound_id)) => {
                     current.catalog = catalog;
                     current.selected_sound_id = next_sound_id;
+                    current.parallel = AndroidEngine::rebuild_parallel_units(
+                        current.runtime.0,
+                        &current.resource_overrides,
+                        &current.selected_sound_id,
+                    );
+                    current.process_faulted = false;
                     (
                         Some(std::mem::replace(
                             &mut current.instance,
@@ -4122,6 +4314,12 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_importPluginResou
                 Ok((replacement, catalog, next_sound_id)) => {
                     current.catalog = catalog;
                     current.selected_sound_id = next_sound_id;
+                    current.parallel = AndroidEngine::rebuild_parallel_units(
+                        current.runtime.0,
+                        &current.resource_overrides,
+                        &current.selected_sound_id,
+                    );
+                    current.process_faulted = false;
                     (
                         Some(std::mem::replace(
                             &mut current.instance,

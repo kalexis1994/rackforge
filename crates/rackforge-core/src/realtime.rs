@@ -195,7 +195,48 @@ fn engage_mmcss(requested: i32) -> SchedulingState {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+/// Android: apps may not take `SCHED_FIFO` (a rare device grants it, so it
+/// is still attempted), but they may move their own audio threads into the
+/// urgent-audio niceness class — the same boost `Process.setThreadPriority
+/// (THREAD_PRIORITY_URGENT_AUDIO)` applies, and what keeps pool workers
+/// from being starved under the system-boosted AAudio callback. Memory
+/// locking has no meaningful grant inside an app sandbox.
+#[cfg(target_os = "android")]
+pub fn engage(priority: i32) -> RealtimeStatus {
+    RealtimeStatus {
+        scheduling: engage_android(priority),
+        memory: MemoryState::Unsupported,
+    }
+}
+
+#[cfg(target_os = "android")]
+fn engage_android(requested: i32) -> SchedulingState {
+    /// `android.os.Process.THREAD_PRIORITY_URGENT_AUDIO`.
+    const ANDROID_PRIORITY_URGENT_AUDIO: i32 = -19;
+    let parameters = libc::sched_param {
+        sched_priority: requested,
+    };
+    // SAFETY: plain syscalls on the calling thread with a valid parameter
+    // block; failures are reported, never fatal.
+    unsafe {
+        if libc::sched_setscheduler(0, libc::SCHED_FIFO, &parameters) == 0 {
+            return SchedulingState::Realtime {
+                priority: requested,
+            };
+        }
+        if libc::setpriority(libc::PRIO_PROCESS, 0, ANDROID_PRIORITY_URGENT_AUDIO) == 0 {
+            return SchedulingState::Boosted {
+                class: "urgent-audio",
+            };
+        }
+        SchedulingState::Failed {
+            requested,
+            errno: *libc::__errno(),
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "android")))]
 pub fn engage(_priority: i32) -> RealtimeStatus {
     RealtimeStatus {
         scheduling: SchedulingState::Unsupported,

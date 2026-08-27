@@ -4875,6 +4875,42 @@ impl DesktopApp {
                     }
                 }
             }
+            MenuCommand::SavePluginPreset { name } => {
+                let Some(active_id) = self
+                    .session
+                    .read()
+                    .expect("session lock poisoned")
+                    .active_instance_id
+                    .clone()
+                else {
+                    self.menu
+                        .complete_plugin_preset_save(Err("No active plugin is available".into()));
+                    return;
+                };
+                match self.save_host_preset(&active_id, &name) {
+                    ControlResponse::PluginPresetSaved { preset, presets } => {
+                        let saved = PlayPreset::new(
+                            preset.id.clone(),
+                            preset.name.clone(),
+                            format!("v{}", preset.state.plugin_version),
+                        );
+                        self.menu
+                            .complete_plugin_preset_save(Ok((saved, little_host_presets(presets))));
+                        self.status = format!("RackForge preset saved: {}", preset.name);
+                    }
+                    ControlResponse::Error { message, .. } => {
+                        self.status = message.clone();
+                        self.menu.complete_plugin_preset_save(Err(message));
+                    }
+                    response => {
+                        let message = format!(
+                            "Unexpected response while saving RackForge preset: {response:?}"
+                        );
+                        self.status = message.clone();
+                        self.menu.complete_plugin_preset_save(Err(message));
+                    }
+                }
+            }
             MenuCommand::SetPluginParameter {
                 instance_id,
                 parameter_index,

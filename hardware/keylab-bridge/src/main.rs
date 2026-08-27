@@ -2116,6 +2116,47 @@ fn apply_pending_menu_command(
                 _ => Err("unexpected response while loading RackForge preset".into()),
             }
         }
+        menu::MenuCommand::SavePluginPreset { name } => {
+            let response = active_plugin_instance_id().and_then(|instance_id| {
+                control_request(&ControlRequest::SavePluginPreset {
+                    instance_id,
+                    name: name.clone(),
+                })
+            });
+            match response {
+                Ok(ControlResponse::PluginPresetSaved { preset, presets }) => {
+                    let saved = menu::PlayPreset::new(
+                        preset.id.clone(),
+                        preset.name.clone(),
+                        format!("v{}", preset.state.plugin_version),
+                    );
+                    let presets = presets
+                        .into_iter()
+                        .map(|preset| {
+                            menu::PlayPreset::new(
+                                preset.id,
+                                preset.name,
+                                format!("v{}", preset.plugin_version),
+                            )
+                        })
+                        .collect();
+                    menu.complete_plugin_preset_save(Ok((saved, presets)));
+                    println!("PLUGIN_PRESET_SAVED name={}", preset.name);
+                    Ok(true)
+                }
+                Ok(ControlResponse::Error { message, .. }) | Err(message) => {
+                    menu.complete_plugin_preset_save(Err(message.clone()));
+                    println!("PLUGIN_PRESET_SAVE_FAILED message={message}");
+                    Ok(true)
+                }
+                Ok(_) => {
+                    menu.complete_plugin_preset_save(Err(
+                        "unexpected response while saving RackForge preset".into(),
+                    ));
+                    Ok(true)
+                }
+            }
+        }
         menu::MenuCommand::SetPluginParameter {
             instance_id,
             parameter_index,

@@ -324,17 +324,17 @@ export function TouchControllerPage({
     maximumDockHeight,
     Math.max(minimumDockHeight, dockHeights[mode] ?? automaticDockHeight),
   );
-  const roomyLayout = window.innerWidth >= 1100 && window.innerHeight >= 620;
-  const padGap = roomyLayout ? 9 : 7;
+  const regularControllerLayout = controllerWidth >= 761 && sizingHeight > 600;
+  const padGap = regularControllerLayout ? 9 : 7;
   const padAreaWidth = Math.max(
     1,
-    Math.min(920, controllerSize.width - (roomyLayout ? 28 : 14)),
+    Math.min(920, controllerSize.width - (regularControllerLayout ? 28 : 14)),
   );
-  const dockChromeHeight = docked ? roomyLayout ? 48 : 42 : 0;
+  const dockChromeHeight = docked ? regularControllerLayout ? 48 : 42 : 0;
   const padSizingHeight = docked ? dockHeight - dockChromeHeight : controllerSize.height;
   const padAreaHeight = Math.max(
     1,
-    padSizingHeight - (roomyLayout ? 28 : 14),
+    padSizingHeight - (regularControllerLayout ? 28 : 14),
   );
   const padCellHeight = Math.max(1, Math.min(
     (padAreaHeight - padGap * (padMatrix.rows - 1)) / padMatrix.rows,

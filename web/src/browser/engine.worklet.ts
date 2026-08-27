@@ -67,7 +67,9 @@ interface HostExports {
   rf_controller_set_color: (red: number, green: number, blue: number) => void;
   rf_controller_catalog: () => number;
   rf_session_revision: () => number;
-  rf_storage_revision: () => number;
+  /** Added with persisted live parameters. Optional so a freshly deployed UI
+   * can still boot once against a previously cached host module. */
+  rf_storage_revision?: () => number;
   rf_render: (frames: number) => number;
   rf_inspect_plugin: (pointer: number, length: number) => number;
   rf_install_plugin: (pointer: number, length: number) => number;
@@ -272,7 +274,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
     this.#pluginHost.attach(exports.memory);
     this.#host = exports;
     this.#sessionRevision = exports.rf_session_revision();
-    this.#storageRevision = exports.rf_storage_revision();
+    this.#storageRevision = exports.rf_storage_revision?.() ?? 0;
     this.#frames = maximumFrames;
     this.#channels = channels;
 
@@ -381,7 +383,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
 
   #publishStorageIfChanged() {
     const host = this.#host;
-    if (!host) return;
+    if (!host?.rf_storage_revision) return;
     const revision = host.rf_storage_revision();
     if (revision === this.#storageRevision) return;
     this.#storageRevision = revision;

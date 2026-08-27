@@ -27,7 +27,9 @@ const rackForgeSlice = createSlice({
   reducers: {
     connectionChanged(state, action: PayloadAction<ConnectionStatus>) {
       state.connection = action.payload;
-      if (action.payload === "online" || action.payload === "connecting") {
+      // A reconnect attempt is not a recovery. Keep a confirmed persistent
+      // outage visible until the transport actually reaches ONLINE again.
+      if (action.payload === "online") {
         state.error = null;
       }
     },

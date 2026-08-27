@@ -1,0 +1,59 @@
+:root {
+  /* Spacing follows a compact 4 px rhythm. Components may use the aliases,
+     but should not introduce new one-off spacing values without a reason. */
+  --rf-space-1: 4px;
+  --rf-space-2: 8px;
+  --rf-space-3: 12px;
+  --rf-space-4: 16px;
+  --rf-space-5: 20px;
+  --rf-space-6: 24px;
+  --rf-space-8: 32px;
+  --rf-space-10: 40px;
+  --rf-space-12: 48px;
+
+  --rf-radius-small: 8px;
+  --rf-radius-control: 11px;
+  --rf-radius-card: 18px;
+  --rf-radius-dialog: 24px;
+  --rf-radius-pill: 999px;
+
+  --rf-target-compact: 36px;
+  --rf-target-default: 44px;
+  --rf-target-touch: 48px;
+
+  /* One motion vocabulary for Web, native WebViews and the VST surface. */
+  --rf-motion-instant: 80ms;
+  --rf-motion-fast: 140ms;
+  --rf-motion-standard: 220ms;
+  --rf-motion-emphasized: 320ms;
+  --rf-motion-exit: 160ms;
+  --rf-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --rf-ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+  --rf-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  --rf-elevation-control:
+    inset 0 1px 0 rgba(225, 250, 255, 0.08),
+    0 5px 16px rgba(0, 4, 8, 0.18);
+  --rf-elevation-card:
+    inset 0 1px 0 rgba(225, 250, 255, 0.08),
+    0 18px 48px rgba(0, 4, 8, 0.34);
+  --rf-elevation-dialog:
+    inset 0 1px 0 rgba(225, 250, 255, 0.1),
+    0 30px 90px rgba(0, 0, 0, 0.58);
+
+  --rf-layer-base: 0;
+  --rf-layer-sticky: 10;
+  --rf-layer-menu: 30;
+  --rf-layer-dialog: 60;
+  --rf-layer-critical: 90;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --rf-motion-instant: 1ms;
+    --rf-motion-fast: 1ms;
+    --rf-motion-standard: 1ms;
+    --rf-motion-emphasized: 1ms;
+    --rf-motion-exit: 1ms;
+  }
+}

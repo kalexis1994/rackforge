@@ -11,6 +11,10 @@ import { isVstHost, openSessionChannel, type SessionChannel } from "./host";
 import { randomIdToken } from "./ids";
 import { invalidatePluginCatalog } from "./pluginCatalog";
 import { serializeSessionCommand } from "./sessionCommandProtocol";
+import {
+  CONNECTION_INTERRUPTED_MESSAGE,
+  DeferredConnectionOutage,
+} from "./connectionOutage";
 import type {
   CoreCommandAppliedMessage,
   CoreErrorMessage,
@@ -39,6 +43,7 @@ function createClientId() {
 
 const CLIENT_ID = createClientId();
 const RECONNECT_DELAY_MS = 1200;
+const CONNECTION_NOTICE_DELAY_MS = 4_000;
 const PERFORMANCE_REFRESH_MS = 2000;
 const OUTPUT_METER_REFRESH_MS = 50;
 const COMMAND_TIMEOUT_MS = 8_000;
@@ -92,6 +97,14 @@ const pendingSnapshotRefreshes = new Set<{
   timeout: number;
 }>();
 const outputMeterListeners = new Set<(meter: OutputMeterSnapshot) => void>();
+const connectionOutage = new DeferredConnectionOutage(
+  CONNECTION_NOTICE_DELAY_MS,
+  () => {
+    if (!intentionallyStopped && !sessionConnected) {
+      store.dispatch(errorReceived(CONNECTION_INTERRUPTED_MESSAGE));
+    }
+  },
+);
 
 function resolveSnapshotRefreshes(snapshot: SessionSnapshot) {
   for (const pending of pendingSnapshotRefreshes) {
@@ -148,6 +161,39 @@ function scheduleReconnect() {
   }, RECONNECT_DELAY_MS);
 }
 
+function disconnectGateway(generation: number) {
+  if (generation !== gatewayGeneration) return null;
+  if (!socket && !sessionConnected && !sessionConnecting) return null;
+
+  const disconnectedSocket = socket;
+  socket = null;
+  sessionConnected = false;
+  sessionConnecting = false;
+  coreReady = false;
+  performanceSnapshotInFlight = false;
+  outputMeterInFlight = false;
+  if (performanceTimer !== null) window.clearInterval(performanceTimer);
+  if (outputMeterTimer !== null) window.clearInterval(outputMeterTimer);
+  performanceTimer = null;
+  outputMeterTimer = null;
+  pendingPerformanceEdit?.reject(new Error(CONNECTION_INTERRUPTED_MESSAGE));
+  pendingPerformanceEdit = null;
+  if (pendingPresetRequest?.timeout !== undefined) {
+    window.clearTimeout(pendingPresetRequest.timeout);
+  }
+  pendingPresetRequest?.reject(new Error(CONNECTION_INTERRUPTED_MESSAGE));
+  pendingPresetRequest = null;
+  rejectPendingCommands(new Error(CONNECTION_INTERRUPTED_MESSAGE));
+  rejectSnapshotRefreshes(new Error(CONNECTION_INTERRUPTED_MESSAGE));
+  for (const queued of presetRequestQueue.splice(0)) {
+    queued.reject(new Error(CONNECTION_INTERRUPTED_MESSAGE));
+  }
+  store.dispatch(connectionChanged("offline"));
+  connectionOutage.begin();
+  scheduleReconnect();
+  return disconnectedSocket;
+}
+
 function sendPerformanceSnapshotRequest() {
   if (
     socket &&
@@ -184,6 +230,7 @@ export function connectGateway() {
   socket = openSessionChannel({
     onOpen: () => {
       if (generation !== gatewayGeneration) return;
+      connectionOutage.recover();
       sessionConnecting = false;
       sessionConnected = true;
       performanceSnapshotInFlight = false;
@@ -295,43 +342,14 @@ export function connectGateway() {
       }
     },
     onClose: () => {
-      if (generation !== gatewayGeneration) return;
-      socket = null;
-      sessionConnected = false;
-      sessionConnecting = false;
-      coreReady = false;
-      performanceSnapshotInFlight = false;
-      outputMeterInFlight = false;
-      if (performanceTimer !== null) window.clearInterval(performanceTimer);
-      if (outputMeterTimer !== null) window.clearInterval(outputMeterTimer);
-      performanceTimer = null;
-      outputMeterTimer = null;
-      pendingPerformanceEdit?.reject(
-        new Error("The RackForge Core connection was interrupted."),
-      );
-      pendingPerformanceEdit = null;
-      if (pendingPresetRequest?.timeout !== undefined) {
-        window.clearTimeout(pendingPresetRequest.timeout);
-      }
-      pendingPresetRequest?.reject(
-        new Error("The RackForge Core connection was interrupted."),
-      );
-      pendingPresetRequest = null;
-      rejectPendingCommands(
-        new Error("The RackForge Core connection was interrupted."),
-      );
-      rejectSnapshotRefreshes(
-        new Error("The RackForge Core connection was interrupted."),
-      );
-      for (const queued of presetRequestQueue.splice(0)) {
-        queued.reject(new Error("The RackForge Core connection was interrupted."));
-      }
-      store.dispatch(connectionChanged("offline"));
-      scheduleReconnect();
+      disconnectGateway(generation);
     },
     onError: () => {
-      if (generation !== gatewayGeneration) return;
-      store.dispatch(errorReceived("The RackForge Core connection was interrupted."));
+      // Native bridges do not necessarily emit a second close event when a
+      // session request fails. Normalize both transports through the same
+      // teardown/reconnect path and let the grace period decide whether the
+      // interruption deserves a user-facing banner.
+      disconnectGateway(generation)?.close();
     },
   });
 }
@@ -509,6 +527,7 @@ export function requestSessionSnapshot(): Promise<SessionSnapshot> {
 export function stopGateway() {
   intentionallyStopped = true;
   gatewayGeneration += 1;
+  connectionOutage.recover();
   if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
   if (performanceTimer !== null) window.clearInterval(performanceTimer);
   if (outputMeterTimer !== null) window.clearInterval(outputMeterTimer);
@@ -526,7 +545,7 @@ export function stopGateway() {
   for (const listener of outputMeterListeners) {
     listener({ left_peak: 0, right_peak: 0 });
   }
-  const interruption = new Error("The RackForge Core connection was interrupted.");
+  const interruption = new Error(CONNECTION_INTERRUPTED_MESSAGE);
   pendingPerformanceEdit?.reject(interruption);
   pendingPerformanceEdit = null;
   if (pendingPresetRequest?.timeout !== undefined) {

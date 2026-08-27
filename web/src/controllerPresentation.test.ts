@@ -1,8 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { controllerPresentationTransition } from "./controllerPresentation";
+import {
+  controllerPresentationTransition,
+  isImmersiveControllerViewport,
+} from "./controllerPresentation";
+
+describe("Touch Controller viewport policy", () => {
+  it.each([
+    { name: "modern phone landscape", width: 844, height: 390 },
+    { name: "compact 16:9 phone landscape", width: 667, height: 375 },
+    { name: "wide phone landscape", width: 915, height: 412 },
+  ])("uses the immersive surface on a $name", ({ width, height }) => {
+    expect(isImmersiveControllerViewport({ width, height, touchCapable: true })).toBe(true);
+  });
+
+  it.each([
+    { name: "phone portrait", width: 390, height: 844, touchCapable: true },
+    { name: "4:3 tablet landscape", width: 1024, height: 768, touchCapable: true },
+    { name: "compact tablet landscape", width: 1024, height: 600, touchCapable: true },
+    { name: "16:10 tablet landscape", width: 1280, height: 800, touchCapable: true },
+    { name: "desktop landscape", width: 844, height: 390, touchCapable: false },
+  ])("keeps the controller docked on a $name", ({ width, height, touchCapable }) => {
+    expect(isImmersiveControllerViewport({ width, height, touchCapable })).toBe(false);
+  });
+});
 
 describe("responsive Touch Controller presentation", () => {
-  it("moves a portrait dock to the full-screen surface in landscape", () => {
+  it("moves an open dock to the immersive surface when the viewport qualifies", () => {
     expect(controllerPresentationTransition({
       dockable: false,
       dockOpen: true,
@@ -11,7 +34,7 @@ describe("responsive Touch Controller presentation", () => {
     })).toEqual({ navigateTo: "/controller" });
   });
 
-  it("moves the full-screen surface back to the portrait dock", () => {
+  it("moves the immersive surface back to the dock when the viewport no longer qualifies", () => {
     expect(controllerPresentationTransition({
       dockable: true,
       dockOpen: true,

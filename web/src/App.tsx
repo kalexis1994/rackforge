@@ -68,6 +68,10 @@ import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
 import { ModalDialog } from "./components/ModalDialog";
 import { ParameterLinkHost } from "./components/ParameterLinkHost";
 import { ToggleSwitch } from "./components/ToggleSwitch";
+import { ExperienceDiagnosticsCard } from "./components/ExperienceDiagnosticsCard";
+import { AsyncNotice, AsyncStateBoundary } from "./components/AsyncStateBoundary";
+import { RfButton } from "./ui/RfButton";
+import { useSurfaceTransition } from "./ui/useSurfaceTransition";
 import {
   bindNativePluginResource,
   hostHaptic,
@@ -98,7 +102,10 @@ import {
 } from "./playPluginSelection";
 import { LivePage, type PerformanceGraphWorkspace } from "./LivePage";
 import { TouchControllerPage } from "./TouchControllerPage";
-import { controllerPresentationTransition } from "./controllerPresentation";
+import {
+  controllerPresentationTransition,
+  IMMERSIVE_CONTROLLER_QUERY,
+} from "./controllerPresentation";
 import type { RootState } from "./store";
 import type {
   PluginInstance,
@@ -282,10 +289,6 @@ const vstWorkspaceNavItems = [homeNavItem, playNavItem];
 const vstSystemNavItems = [pluginManagerNavItem, aboutItem];
 const vstNavItems = [...vstWorkspaceNavItems, ...vstSystemNavItems];
 
-const ROOMY_CONTROLLER_QUERY = "(min-width: 1100px) and (min-height: 620px)";
-const PORTRAIT_CONTROLLER_DOCK_QUERY =
-  "(max-width: 760px) and (orientation: portrait) and (min-height: 540px)";
-
 function useMediaQuery(query: string) {
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
 
@@ -411,11 +414,9 @@ function RackForgeApp() {
   const pendingPlayInstance = useRef<PluginInstance | null>(null);
   const [settingsBootstrap, setSettingsBootstrap] = useState<HostSettingsBootstrap | null>(null);
   const [controllerDockOpen, setControllerDockOpen] = useState(false);
-  const roomyController = useMediaQuery(ROOMY_CONTROLLER_QUERY);
-  const portraitControllerDock = useMediaQuery(PORTRAIT_CONTROLLER_DOCK_QUERY);
-  const dockableController = roomyController || portraitControllerDock;
+  const immersiveController = useMediaQuery(IMMERSIVE_CONTROLLER_QUERY);
+  const dockableController = !immersiveController;
   const lastContentRoute = useRef(location.pathname === "/controller" ? "/play" : location.pathname);
-  useTactileFeedback();
   useEffect(() => {
     const updateOverlay = (event: Event) => {
       const detail = (event as CustomEvent<{ open?: boolean }>).detail;
@@ -431,6 +432,8 @@ function RackForgeApp() {
   const isPerformanceSurface =
     location.pathname === "/play" || location.pathname === "/live";
   const isLiveSurface = location.pathname === "/live";
+  const routeSurfaceRef = useRef<HTMLDivElement | null>(null);
+  useSurfaceTransition(routeSurfaceRef, location.key, isControllerSurface);
   const renderRackSlotPluginSurface = useCallback(
     ({
       instance,
@@ -615,6 +618,7 @@ function RackForgeApp() {
         ) : null}
         {error && <div className="error-banner">{error}</div>}
         <div
+          ref={routeSurfaceRef}
           className={`page${isPluginSurface ? " plugin-host-page" : ""}${
             isControllerSurface ? " controller-host-page" : ""
           }${
@@ -1015,137 +1019,6 @@ function FloatingPerformanceMenuButton({
     ) : null}
     </>
   );
-}
-
-function useTactileFeedback() {
-  useEffect(() => {
-    const DRAG_THRESHOLD_PX = 10;
-    const rippleHosts = new Set<HTMLElement>();
-    let gesture: {
-      candidate: HTMLElement;
-      pointerId: number;
-      startX: number;
-      startY: number;
-      cancelled: boolean;
-      pressTimer: number | null;
-    } | null = null;
-    const clearPressTimer = () => {
-      if (gesture?.pressTimer !== null && gesture?.pressTimer !== undefined) {
-        window.clearTimeout(gesture.pressTimer);
-        gesture.pressTimer = null;
-      }
-    };
-    const clearPressed = () => {
-      clearPressTimer();
-      gesture?.candidate.classList.remove("rf-pressed");
-      gesture = null;
-    };
-    const cancelGesture = () => {
-      if (!gesture) return;
-      clearPressTimer();
-      gesture.cancelled = true;
-      gesture.candidate.classList.remove("rf-pressed");
-    };
-    const pointerDown = (event: PointerEvent) => {
-      if (event.pointerType === "mouse" && event.button !== 0) return;
-      const origin = event.target instanceof Element ? event.target : null;
-      const candidate = origin?.closest<HTMLElement>(
-        "button:not(:disabled), a[href], [role='button']:not([aria-disabled='true'])",
-      );
-      if (!candidate || !candidate.closest("#root")) return;
-      // Piano keys and pads provide their own immediate pressed state. A
-      // delayed expanding ripple obscures adjacent notes and feels sluggish
-      // when playing quickly or gliding across the keyboard.
-      if (candidate.closest(".touch-instrument, .performance-menu-button, .rack-details-floating-button")) return;
-      clearPressed();
-      gesture = {
-        candidate,
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        cancelled: false,
-        pressTimer: null,
-      };
-      candidate.classList.add("rf-tactile");
-      gesture.pressTimer = window.setTimeout(() => {
-        if (gesture?.candidate === candidate && !gesture.cancelled) {
-          candidate.classList.add("rf-pressed");
-          gesture.pressTimer = null;
-        }
-      }, 70);
-    };
-    const pointerMove = (event: PointerEvent) => {
-      if (!gesture || gesture.pointerId !== event.pointerId || gesture.cancelled) return;
-      if (
-        Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) >
-        DRAG_THRESHOLD_PX
-      ) {
-        cancelGesture();
-      }
-    };
-    const pointerUp = (event: PointerEvent) => {
-      if (!gesture || gesture.pointerId !== event.pointerId) return;
-      const { candidate, cancelled } = gesture;
-      clearPressTimer();
-      candidate.classList.remove("rf-pressed");
-      gesture = null;
-      const releaseTarget = document.elementFromPoint(event.clientX, event.clientY);
-      if (cancelled || !releaseTarget || !candidate.contains(releaseTarget)) return;
-      const bounds = candidate.getBoundingClientRect();
-      const localX = Math.min(bounds.width, Math.max(0, event.clientX - bounds.left));
-      const localY = Math.min(bounds.height, Math.max(0, event.clientY - bounds.top));
-      const diameter = Math.max(
-        Math.hypot(localX, localY),
-        Math.hypot(bounds.width - localX, localY),
-        Math.hypot(localX, bounds.height - localY),
-        Math.hypot(bounds.width - localX, bounds.height - localY),
-      ) * 2;
-      // Render against the viewport rectangle instead of inside the control.
-      // Controls throughout RackForge can live below animated/scaled ancestors;
-      // viewport coordinates are not valid CSS-local coordinates in those
-      // cases and used to place the ripple away from the touched element.
-      const rippleHost = document.createElement("span");
-      rippleHost.className = "rf-touch-ripple-host";
-      rippleHost.style.left = `${bounds.left}px`;
-      rippleHost.style.top = `${bounds.top}px`;
-      rippleHost.style.width = `${bounds.width}px`;
-      rippleHost.style.height = `${bounds.height}px`;
-      rippleHost.style.borderRadius = window.getComputedStyle(candidate).borderRadius;
-      const ripple = document.createElement("span");
-      ripple.className = "rf-touch-ripple";
-      ripple.style.width = `${diameter}px`;
-      ripple.style.height = `${diameter}px`;
-      ripple.style.left = `${localX - diameter / 2}px`;
-      ripple.style.top = `${localY - diameter / 2}px`;
-      rippleHost.appendChild(ripple);
-      document.body.appendChild(rippleHost);
-      rippleHosts.add(rippleHost);
-      const removeRipple = () => {
-        rippleHosts.delete(rippleHost);
-        rippleHost.remove();
-      };
-      ripple.addEventListener("animationend", removeRipple, { once: true });
-      window.setTimeout(removeRipple, 700);
-      hostHaptic("tap");
-    };
-    document.addEventListener("pointerdown", pointerDown, { capture: true, passive: true });
-    document.addEventListener("pointermove", pointerMove, { capture: true, passive: true });
-    document.addEventListener("pointerup", pointerUp, { capture: true, passive: true });
-    document.addEventListener("pointercancel", clearPressed, { capture: true, passive: true });
-    document.addEventListener("scroll", cancelGesture, { capture: true, passive: true });
-    window.addEventListener("blur", clearPressed);
-    return () => {
-      clearPressed();
-      rippleHosts.forEach((host) => host.remove());
-      rippleHosts.clear();
-      document.removeEventListener("pointerdown", pointerDown, true);
-      document.removeEventListener("pointermove", pointerMove, true);
-      document.removeEventListener("pointerup", pointerUp, true);
-      document.removeEventListener("pointercancel", clearPressed, true);
-      document.removeEventListener("scroll", cancelGesture, true);
-      window.removeEventListener("blur", clearPressed);
-    };
-  }, []);
 }
 
 function NavigationLinks({
@@ -2801,78 +2674,67 @@ function PluginPickerModal({
             </div>
           </section>
         )}
-        {activationError && <p className="form-error">{activationError}</p>}
-        {(catalogStatus === "idle" || catalogStatus === "loading") && plugins.length === 0 ? (
-          <RfLoader
-            className="plugin-catalog-loader"
-            label="Loading plugins"
-            detail="Discovering installed instruments and checking their runtimes…"
-          />
-        ) : catalogStatus === "error" && plugins.length === 0 ? (
-          <div className="plugin-catalog-error" role="alert">
-            <PluginSurfaceState
-              title="Plugin library unavailable"
-              detail={catalogError ?? "RackForge could not load the plugin catalog."}
-            />
-            <button className="secondary-button" onClick={() => void invalidatePluginCatalog()}>
-              Retry
-            </button>
-          </div>
-        ) : (
-        <div className="play-plugin-selector modal-list" role="list" aria-label="Playable plugins">
-          {catalogStatus === "loading" ? (
-            <RfLoader
-              className="plugin-catalog-refresh"
-              label="Refreshing plugins"
-              detail="Keeping runtime state synchronized…"
-              size="compact"
-            />
-          ) : null}
-          {orderedPlugins.map((plugin, index) => {
-            const selected = plugin.plugin_id === activePluginId;
-            const activating = activatingId === plugin.plugin_id;
-            return (
-              <button
-                className={`plugin-picker-card${selected ? " active" : ""}${!plugin.active ? " inactive" : ""}${plugin.branding ? " branded" : ""}`}
-                disabled={activatingId !== null}
-                key={plugin.plugin_id}
-                onClick={() => requestActivation(plugin)}
-                aria-disabled={!plugin.active}
-                style={plugin.branding ? {
-                  "--plugin-accent": plugin.branding.accent_color,
-                  "--plugin-background": plugin.branding.background_color,
-                } as CSSProperties : undefined}
-              >
-                {plugin.branding && (
-                  <>
-                    <img className="plugin-picker-banner" src={plugin.branding.banner_url} alt="" />
-                    <span className="plugin-picker-shade" aria-hidden="true" />
-                  </>
-                )}
-                <span className="play-plugin-number">{String(index + 1).padStart(2, "0")}</span>
-                <PluginIcon plugin={plugin} name={plugin.plugin_name} className="plugin-picker-icon" />
-                <span className="play-plugin-copy">
-                  <strong>{plugin.plugin_name}{formatPluginVersion(plugin.version)}</strong>
-                  <PluginRuntimeStatus status={runtime[plugin.plugin_id]} />
-                </span>
-                <span className="play-plugin-status">
-                  {activating ? (
-                    <AsyncActionLabel active activeLabel="Loading…">SELECT</AsyncActionLabel>
-                  ) : (
-                    <>{selected ? "PLAYING" : plugin.active ? "SELECT" : "INACTIVE"}<i aria-hidden="true">→</i></>
+        {activationError ? (
+          <AsyncNotice tone="error" title="Could not open the plugin">
+            {activationError}
+          </AsyncNotice>
+        ) : null}
+        <AsyncStateBoundary
+          className="plugin-picker-boundary"
+          status={catalogStatus}
+          hasContent={plugins.length > 0}
+          loadingLabel="Loading plugins"
+          loadingDetail="Discovering installed instruments and checking their runtimes…"
+          errorTitle="Plugin library unavailable"
+          errorDetail={catalogError ?? "RackForge could not load the plugin catalog."}
+          onRetry={() => void invalidatePluginCatalog()}
+        >
+          <div className="play-plugin-selector modal-list" role="list" aria-label="Playable plugins">
+            {orderedPlugins.map((plugin, index) => {
+              const selected = plugin.plugin_id === activePluginId;
+              const activating = activatingId === plugin.plugin_id;
+              return (
+                <button
+                  className={`plugin-picker-card${selected ? " active" : ""}${!plugin.active ? " inactive" : ""}${plugin.branding ? " branded" : ""}`}
+                  disabled={activatingId !== null}
+                  key={plugin.plugin_id}
+                  onClick={() => requestActivation(plugin)}
+                  aria-disabled={!plugin.active}
+                  style={plugin.branding ? {
+                    "--plugin-accent": plugin.branding.accent_color,
+                    "--plugin-background": plugin.branding.background_color,
+                  } as CSSProperties : undefined}
+                >
+                  {plugin.branding && (
+                    <>
+                      <img className="plugin-picker-banner" src={plugin.branding.banner_url} alt="" />
+                      <span className="plugin-picker-shade" aria-hidden="true" />
+                    </>
                   )}
-                </span>
-              </button>
-            );
-          })}
-          {orderedPlugins.length === 0 && (
-            <PluginSurfaceState
-              title="No plugins installed"
-              detail="Install an .rfplugin package from the Plugins section."
-            />
-          )}
-        </div>
-        )}
+                  <span className="play-plugin-number">{String(index + 1).padStart(2, "0")}</span>
+                  <PluginIcon plugin={plugin} name={plugin.plugin_name} className="plugin-picker-icon" />
+                  <span className="play-plugin-copy">
+                    <strong>{plugin.plugin_name}{formatPluginVersion(plugin.version)}</strong>
+                    <PluginRuntimeStatus status={runtime[plugin.plugin_id]} />
+                  </span>
+                  <span className="play-plugin-status">
+                    {activating ? (
+                      <AsyncActionLabel active activeLabel="Loading…">SELECT</AsyncActionLabel>
+                    ) : (
+                      <>{selected ? "PLAYING" : plugin.active ? "SELECT" : "INACTIVE"}<i aria-hidden="true">→</i></>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+            {orderedPlugins.length === 0 ? (
+              <PluginSurfaceState
+                title="No plugins installed"
+                detail="Install an .rfplugin package from the Plugins section."
+              />
+            ) : null}
+          </div>
+        </AsyncStateBoundary>
       </ModalDialog>
       {pendingActivation ? (
         <ModalDialog
@@ -2884,17 +2746,15 @@ function PluginPickerModal({
           className="plugin-activation-dialog"
           actions={
             <>
-              <button
-                type="button"
-                className="secondary-button"
+              <RfButton
+                variant="secondary"
                 onClick={() => setPendingActivation(null)}
                 disabled={activatingId !== null}
               >
                 Cancel
-              </button>
-              <button
-                type="button"
-                className="primary-button"
+              </RfButton>
+              <RfButton
+                variant="primary"
                 onClick={() => {
                   const plugin = pendingActivation;
                   setPendingActivation(null);
@@ -2908,7 +2768,7 @@ function PluginPickerModal({
                 >
                   Activate plugin
                 </AsyncActionLabel>
-              </button>
+              </RfButton>
             </>
           }
         >
@@ -3518,6 +3378,7 @@ function PluginsPage({
   const [controllersStatus, setControllersStatus] = useState<"loading" | "ready" | "error">(
     showControllers ? "loading" : "ready",
   );
+  const [controllerRefreshRevision, setControllerRefreshRevision] = useState(0);
   useEffect(() => {
     if (!showControllers) return;
     let cancelled = false;
@@ -3534,7 +3395,7 @@ function PluginsPage({
     return () => {
       cancelled = true;
     };
-  }, [showControllers]);
+  }, [controllerRefreshRevision, showControllers]);
   const [pendingRemoval, setPendingRemoval] = useState<PluginWebDescriptor | null>(null);
   const [removing, setRemoving] = useState(false);
   const [changingPluginId, setChangingPluginId] = useState<string | null>(null);
@@ -3646,11 +3507,6 @@ function PluginsPage({
     }
   };
 
-  const initialCatalogLoading =
-    (pluginCatalog.status === "idle" || pluginCatalog.status === "loading") &&
-    installed.length === 0;
-  const pluginManagerLoading = initialCatalogLoading || controllersStatus === "loading";
-
   return (
     <>
       <div className="plugin-manager-heading">
@@ -3661,45 +3517,62 @@ function PluginsPage({
             ? "Install, configure and remove RackForge plugins: instruments and controllers. Musical controls remain in Play."
             : "Choose and manage the instruments available to this RackForge VST3 instance."}
         />
-        <button className="primary-button plugin-install-button" onClick={onInstall}>
+        <RfButton variant="primary" className="plugin-install-button" onClick={onInstall}>
           <Download aria-hidden="true" />
           Install plugin
-        </button>
+        </RfButton>
       </div>
       <div className="plugin-section-heading">
         <span className="card-kicker">Audio plugins</span>
         <small>Installation and runtime activation are managed separately</small>
       </div>
-      {removalMessage ? <p className="plugin-removal-message">{removalMessage}</p> : null}
-      {activationError ? <p className="form-error plugin-manager-error">{activationError}</p> : null}
-      {pluginManagerLoading ? (
-        <RfLoader
-          className="plugin-manager-loader"
-          label="Loading Plugin Manager"
-          detail="Discovering packages and checking the audio runtime…"
-          size="large"
-        />
-      ) : pluginCatalog.status === "error" && installed.length === 0 ? (
-        <div className="plugin-catalog-error" role="alert">
-          <PluginSurfaceState
-            title="Plugin library unavailable"
-            detail={pluginCatalog.error ?? "RackForge could not load installed plugins."}
-          />
-          <button className="secondary-button" onClick={() => void invalidatePluginCatalog()}>
-            Retry
-          </button>
-        </div>
-      ) : (
-      <>
-      {pluginCatalog.status === "loading" ? (
-        <RfLoader
-          className="plugin-catalog-refresh"
-          label="Refreshing plugins"
-          detail="Synchronizing package and runtime state…"
-          size="compact"
-        />
-      ) : null}
-      <div className="plugin-grid expanded plugin-manager-grid">
+      <div className="rf-floating-notice-stack">
+        {removalMessage ? (
+          <AsyncNotice
+            tone="success"
+            title="Plugin library updated"
+            onDismiss={() => setRemovalMessage(null)}
+          >
+            {removalMessage}
+          </AsyncNotice>
+        ) : null}
+        {activationError ? (
+          <AsyncNotice
+            tone="error"
+            title="Plugin operation failed"
+            onDismiss={() => setActivationError(null)}
+          >
+            {activationError}
+          </AsyncNotice>
+        ) : null}
+        {controllersStatus === "error" ? (
+          <AsyncNotice tone="error" title="Controller packages unavailable">
+            Could not read the installed hardware profiles.
+            <RfButton
+              size="compact"
+              haptic="none"
+              onClick={() => {
+                setControllersStatus("loading");
+                setControllerRefreshRevision((current) => current + 1);
+              }}
+            >
+              Retry
+            </RfButton>
+          </AsyncNotice>
+        ) : null}
+      </div>
+      <AsyncStateBoundary
+        className="plugin-manager-boundary"
+        status={pluginCatalog.status}
+        hasContent={installed.length > 0}
+        loadingLabel="Loading Plugin Manager"
+        loadingDetail="Discovering packages and checking the audio runtime…"
+        errorTitle="Plugin library unavailable"
+        errorDetail={pluginCatalog.error ?? "RackForge could not load installed plugins."}
+        onRetry={() => void invalidatePluginCatalog()}
+        loaderSize="large"
+      >
+        <div className="plugin-grid expanded plugin-manager-grid">
         {installed.map((plugin, index) => {
           const instance = running.find((candidate) => candidate.plugin_id === plugin.plugin_id);
           const busy = changingPluginId === plugin.plugin_id;
@@ -3724,9 +3597,8 @@ function PluginsPage({
                 <p>{plugin.surfaces.length === 0 ? "No Web interface" : "Web interface ready"}</p>
               </div>
               <div className="plugin-manager-card-actions" aria-label={`${plugin.plugin_name} actions`}>
-                <button
-                  type="button"
-                  className={plugin.active ? "secondary-button" : "primary-button"}
+                <RfButton
+                  variant={plugin.active ? "secondary" : "primary"}
                   disabled={busy || (!plugin.managed && plugin.active)}
                   onClick={() => void changeActivation(plugin)}
                 >
@@ -3738,31 +3610,29 @@ function PluginsPage({
                       ? plugin.managed ? "Deactivate" : "Built-in active"
                       : "Activate"}
                   </AsyncActionLabel>
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
+                </RfButton>
+                <RfButton
+                  variant="secondary"
                   disabled={!plugin.active || busy}
                   onClick={() => void openInPlay(plugin)}
                 >
                   Go to PLAY
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
+                </RfButton>
+                <RfButton
+                  variant="secondary"
                   disabled={!plugin.active || !configAvailable || !instance || busy}
                   onClick={() => navigate(`/plugins/${encodeURIComponent(instance!.instance_id)}`)}
                 >
                   Config
-                </button>
-                <button
-                  type="button"
-                  className="danger-button plugin-manager-remove"
+                </RfButton>
+                <RfButton
+                  variant="danger"
+                  className="plugin-manager-remove"
                   disabled={!plugin.managed || busy}
                   onClick={() => requestRemoval(plugin)}
                 >
                   Remove
-                </button>
+                </RfButton>
               </div>
             </article>
           );
@@ -3771,9 +3641,8 @@ function PluginsPage({
       {installed.length === 0 ? (
         <EmptyState title="No plugins installed" />
       ) : null}
-      </>
-      )}
-      {controllersStatus === "loading" && !pluginManagerLoading ? (
+        </AsyncStateBoundary>
+      {controllersStatus === "loading" ? (
         <RfLoader
           className="plugin-controller-loader"
           label="Loading controllers"
@@ -3816,9 +3685,6 @@ function PluginsPage({
           </div>
         </>
       )}
-      {controllersStatus === "error" ? (
-        <p className="form-error plugin-manager-error">Controller packages could not be loaded.</p>
-      ) : null}
       {pendingRemoval ? (
         <PluginRemovalDialog
           pluginName={pendingRemoval.plugin_name}
@@ -6029,27 +5895,30 @@ function DiagnosticsPage() {
         </button>
       </div>
       {error ? <p className="form-error">{error}</p> : null}
-      {diagnostics ? (
-        <section className="settings-grid diagnostics-grid">
-          <article className="settings-card">
-            <div className="settings-icon">◉</div>
-            <div className="settings-copy">
-              <span className="card-kicker">Native runtime</span>
-              <h2>{diagnostics.platform}</h2>
-              <p>RackForge {diagnostics.version} · {diagnostics.audio_running ? "Audio running" : "Audio stopped"}</p>
-            </div>
-            <dl className="settings-values">
-              <div><dt>Output</dt><dd>{diagnostics.selected_audio_output}</dd></div>
-              <div><dt>Sample rate</dt><dd>{status.sample_rate ?? 0} Hz</dd></div>
-              <div><dt>Buffer</dt><dd>{status.buffer_size_frames ?? 0} frames</dd></div>
-              <div><dt>Xruns</dt><dd>{status.xruns ?? 0}</dd></div>
-            </dl>
-          </article>
-          <DiagnosticDeviceCard title="Audio outputs" items={diagnostics.audio_outputs} />
-          <DiagnosticDeviceCard title="MIDI devices" items={diagnostics.midi_devices} />
-          <DiagnosticDeviceCard title="USB devices" items={diagnostics.usb_devices} />
-        </section>
-      ) : null}
+      <section className="settings-grid diagnostics-grid">
+        {diagnostics ? (
+          <>
+            <article className="settings-card">
+              <div className="settings-icon">◉</div>
+              <div className="settings-copy">
+                <span className="card-kicker">Native runtime</span>
+                <h2>{diagnostics.platform}</h2>
+                <p>RackForge {diagnostics.version} · {diagnostics.audio_running ? "Audio running" : "Audio stopped"}</p>
+              </div>
+              <dl className="settings-values">
+                <div><dt>Output</dt><dd>{diagnostics.selected_audio_output}</dd></div>
+                <div><dt>Sample rate</dt><dd>{status.sample_rate ?? 0} Hz</dd></div>
+                <div><dt>Buffer</dt><dd>{status.buffer_size_frames ?? 0} frames</dd></div>
+                <div><dt>Xruns</dt><dd>{status.xruns ?? 0}</dd></div>
+              </dl>
+            </article>
+            <DiagnosticDeviceCard title="Audio outputs" items={diagnostics.audio_outputs} />
+            <DiagnosticDeviceCard title="MIDI devices" items={diagnostics.midi_devices} />
+            <DiagnosticDeviceCard title="USB devices" items={diagnostics.usb_devices} />
+          </>
+        ) : null}
+        <ExperienceDiagnosticsCard />
+      </section>
     </>
   );
 }

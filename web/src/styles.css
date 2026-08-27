@@ -98,33 +98,16 @@ textarea {
   max-width: 100%;
 }
 
-.rf-tactile {
+.rf-interaction-target {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  transition-duration: var(--rf-motion-instant) !important;
+  transition-timing-function: var(--rf-ease-standard) !important;
 }
 
-.rf-tactile.rf-pressed {
-  filter: brightness(1.13) saturate(1.06);
-}
-
-.rf-touch-ripple-host {
-  position: fixed;
-  z-index: 2147483646;
-  display: block;
-  overflow: hidden;
-  pointer-events: none;
-  contain: strict;
-}
-
-.rf-touch-ripple {
-  position: absolute;
-  z-index: 20;
-  display: block;
-  pointer-events: none;
-  background: rgba(149, 241, 255, 0.25);
-  border-radius: 50%;
-  transform: scale(0);
-  animation: rf-touch-ripple 460ms cubic-bezier(0.16, 0.8, 0.25, 1) forwards;
+.rf-interaction-target[data-rf-pressed="true"] {
+  filter: brightness(1.1) saturate(1.04);
+  opacity: 0.9;
 }
 
 .play-launcher {
@@ -160,7 +143,10 @@ textarea {
   border-radius: 16px;
   box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.045);
   cursor: pointer;
-  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+  transition:
+    border-color var(--rf-motion-fast) var(--rf-ease-standard),
+    background var(--rf-motion-fast) var(--rf-ease-standard),
+    transform var(--rf-motion-fast) var(--rf-ease-standard);
 }
 
 .play-plugin-selector button > :not(.plugin-picker-banner, .plugin-picker-shade) {
@@ -457,7 +443,8 @@ textarea {
   place-items: center;
   background: rgba(1, 7, 11, 0.74);
   backdrop-filter: blur(10px);
-  z-index: 20;
+  z-index: var(--rf-layer-dialog);
+  animation: rf-backdrop-in var(--rf-motion-fast) var(--rf-ease-standard) both;
 }
 
 .preset-modal {
@@ -467,10 +454,9 @@ textarea {
   color: var(--ink);
   background: rgba(8, 23, 33, 0.98);
   border: 1px solid rgba(97, 224, 243, 0.3);
-  border-radius: 24px;
-  box-shadow:
-    inset 0 1px 0 rgba(225, 250, 255, 0.1),
-    0 30px 90px rgba(0, 0, 0, 0.58);
+  border-radius: var(--rf-radius-dialog);
+  box-shadow: var(--rf-elevation-dialog);
+  animation: rf-dialog-in var(--rf-motion-standard) var(--rf-ease-emphasized) both;
 }
 
 .play-plugin-selector button.plugin-picker-card.inactive {
@@ -601,8 +587,8 @@ textarea {
 }
 
 .preset-modal-close {
-  width: 38px;
-  height: 38px;
+  width: var(--rf-target-default);
+  height: var(--rf-target-default);
   color: var(--muted);
   background: rgba(255, 255, 255, 0.035);
   border: 1px solid var(--line);
@@ -616,10 +602,10 @@ textarea {
   display: grid;
   place-items: center;
   transition:
-    color 140ms ease,
-    background 140ms ease,
-    border-color 140ms ease,
-    transform 140ms ease;
+    color var(--rf-motion-fast) var(--rf-ease-standard),
+    background var(--rf-motion-fast) var(--rf-ease-standard),
+    border-color var(--rf-motion-fast) var(--rf-ease-standard),
+    transform var(--rf-motion-instant) var(--rf-ease-standard);
 }
 
 .modal-dialog-close:hover:not(:disabled),
@@ -3842,15 +3828,19 @@ body {
   }
 }
 
-@keyframes rf-touch-ripple {
-  0% {
-    opacity: 0.8;
-    transform: scale(0);
-  }
-  65% { opacity: 0.28; }
-  100% {
+@keyframes rf-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes rf-dialog-in {
+  from {
     opacity: 0;
-    transform: scale(1);
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -5514,10 +5504,9 @@ body {
   }
 }
 
-/* Roomy controller workspace. This is intentionally capability-responsive,
-   not platform-specific: CSS pixels already include OS DPI/display scaling,
-   and the rail is kept whenever the usable viewport can support it. */
-@media (min-width: 1100px) and (min-height: 620px) {
+/* Regular and wide controller dock. Tall tablet viewports belong here too;
+   orientation alone never promotes a tablet to the immersive phone surface. */
+@media (min-width: 761px) and (min-height: 601px) {
   .app-shell.controller-surface-active {
     display: grid;
     grid-template-columns: 220px minmax(0, 1fr);
@@ -5782,11 +5771,13 @@ body {
   }
 }
 
-/* On narrow portrait viewports the controller shares the workspace instead of
-   replacing it. The same persisted height and pointer resize behavior used by
-   the desktop dock applies here, while portrait-specific bounds preserve a
-   useful amount of PLAY/LIVE content above it. */
-@media (max-width: 760px) and (orientation: portrait) and (min-height: 540px) {
+/* Compact dock: portrait phones, short non-immersive tablets and short desktop
+   windows share the workspace. The media list is the complement of the
+   immersive touch-phone policy for short viewports. */
+@media (max-width: 760px) and (orientation: portrait),
+  (orientation: landscape) and (max-height: 600px) and (max-aspect-ratio: 7/4),
+  (orientation: landscape) and (max-height: 600px) and (min-width: 1201px),
+  (pointer: fine) and (orientation: landscape) and (max-height: 600px) {
   .app-shell.controller-dock-active {
     overflow: hidden;
   }
@@ -6112,7 +6103,7 @@ body {
   }
 }
 
-@media (orientation: landscape) and (max-height: 760px) {
+@media (any-pointer: coarse) and (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) and (min-aspect-ratio: 7/4) {
   .touch-controller-menu-button {
     top: 10px;
     left: 10px;
@@ -11029,3 +11020,348 @@ body {
 }
 
 .settings-icon-svg svg { width: 26px; height: 26px; }
+
+/* RackForge experience-system primitives. New screens use these directly;
+   legacy class names remain supported while the migration advances. */
+.rf-button {
+  min-height: var(--rf-target-default);
+  padding: 0 var(--rf-space-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--rf-space-2);
+  color: var(--ink);
+  background: rgba(111, 219, 239, 0.06);
+  border: 1px solid var(--line);
+  border-radius: var(--rf-radius-control);
+  box-shadow: var(--rf-elevation-control);
+  cursor: pointer;
+  font: 800 10px/1 var(--display-font);
+  letter-spacing: 0.055em;
+  text-decoration: none;
+  text-transform: uppercase;
+  transform: translateZ(0) scale(1);
+  transform-origin: center;
+  transition:
+    color var(--rf-motion-fast) var(--rf-ease-standard),
+    background-color var(--rf-motion-fast) var(--rf-ease-standard),
+    border-color var(--rf-motion-fast) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-fast) var(--rf-ease-standard),
+    transform var(--rf-motion-instant) var(--rf-ease-standard),
+    opacity var(--rf-motion-fast) var(--rf-ease-standard);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.rf-button--compact {
+  min-height: var(--rf-target-compact);
+  padding-inline: var(--rf-space-3);
+}
+
+.rf-button--icon {
+  width: var(--rf-target-default);
+  min-width: var(--rf-target-default);
+  height: var(--rf-target-default);
+  min-height: var(--rf-target-default);
+  padding: 0;
+}
+
+.rf-button--primary {
+  color: #021016;
+  background: linear-gradient(135deg, #98f4ff, #50ddf5);
+  border-color: rgba(155, 244, 255, 0.78);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 8px 24px rgba(40, 201, 228, 0.18);
+}
+
+.rf-button--danger {
+  color: #ffd9df;
+  background: rgba(181, 35, 64, 0.2);
+  border-color: rgba(255, 91, 121, 0.42);
+}
+
+.rf-button--ghost {
+  background: rgba(255, 255, 255, 0.025);
+  box-shadow: none;
+}
+
+@media (hover: hover) {
+  .rf-button:hover:not(:disabled) {
+    color: #eaffff;
+    background-color: rgba(85, 231, 255, 0.12);
+    border-color: rgba(85, 231, 255, 0.46);
+    box-shadow:
+      inset 0 1px 0 rgba(225, 250, 255, 0.12),
+      0 10px 28px rgba(26, 191, 219, 0.14);
+  }
+
+  .rf-button--primary:hover:not(:disabled) {
+    color: #021016;
+    background: linear-gradient(135deg, #b6f8ff, #66e8ff);
+  }
+
+  .rf-button--danger:hover:not(:disabled) {
+    color: #fff3f5;
+    background: rgba(206, 44, 76, 0.3);
+    border-color: rgba(255, 105, 133, 0.62);
+  }
+}
+
+.rf-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--acid) 80%, white);
+  outline-offset: 3px;
+}
+
+.rf-button:active:not(:disabled) {
+  transform: translateY(1px) scale(0.975);
+  transition-duration: var(--rf-motion-instant);
+}
+
+.rf-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  box-shadow: none;
+}
+
+.rf-button[aria-busy="true"] {
+  cursor: wait;
+  opacity: 0.82;
+}
+
+.rf-button__busy {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--rf-space-2);
+}
+
+.modal-dialog-close.rf-button {
+  color: var(--muted);
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.experience-diagnostics-card .settings-values small {
+  display: block;
+  margin-top: var(--rf-space-1);
+  color: var(--muted);
+  font: 500 9px/1.4 "Cascadia Mono", "Consolas", monospace;
+}
+
+.experience-diagnostics-card .settings-values .over-budget dd,
+.experience-diagnostics-card .settings-values .over-budget small {
+  color: #ff9dad;
+}
+
+.rf-async-boundary {
+  position: relative;
+  min-width: 0;
+}
+
+.page.rf-route-enter {
+  animation: rf-route-enter var(--rf-motion-standard) var(--rf-ease-standard) both;
+}
+
+.rf-async-boundary--initial {
+  min-height: clamp(280px, 48vh, 560px);
+  display: grid;
+  place-items: center;
+}
+
+.rf-async-boundary--error {
+  align-content: center;
+  gap: var(--rf-space-4);
+}
+
+.rf-async-boundary__error-copy {
+  width: min(460px, 100%);
+  padding: var(--rf-space-4);
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--rf-space-3);
+  color: #ffd9df;
+  background: rgba(113, 24, 43, 0.22);
+  border: 1px solid rgba(255, 105, 133, 0.3);
+  border-radius: var(--rf-radius-card);
+}
+
+.rf-async-boundary__error-copy > span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: #051018;
+  background: #ff7890;
+  border-radius: 50%;
+  font-weight: 900;
+}
+
+.rf-async-boundary__error-copy > div,
+.rf-async-notice__copy {
+  min-width: 0;
+  display: grid;
+  gap: var(--rf-space-1);
+}
+
+.rf-async-boundary__error-copy small,
+.rf-async-notice__copy small {
+  color: var(--muted);
+  font: 500 9px/1.45 "Cascadia Mono", "Consolas", monospace;
+}
+
+.rf-async-notice__copy small {
+  display: grid;
+  gap: var(--rf-space-2);
+}
+
+.rf-async-boundary__overlay {
+  position: absolute;
+  top: var(--rf-space-2);
+  right: var(--rf-space-2);
+  z-index: var(--rf-layer-sticky);
+  max-width: min(420px, calc(100% - var(--rf-space-4)));
+  pointer-events: none;
+}
+
+.rf-async-boundary__overlay .rf-async-notice {
+  pointer-events: auto;
+}
+
+.rf-async-notice {
+  min-width: 0;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--glass-strong) 94%, transparent);
+  border: 1px solid rgba(118, 225, 245, 0.2);
+  border-radius: var(--rf-radius-control);
+  box-shadow: var(--rf-elevation-card);
+  backdrop-filter: blur(18px) saturate(120%);
+  animation: rf-notice-in var(--rf-motion-standard) var(--rf-ease-emphasized) both;
+}
+
+.rf-async-notice--success {
+  border-color: rgba(127, 234, 180, 0.34);
+}
+
+.rf-async-notice--error {
+  border-color: rgba(255, 105, 133, 0.42);
+  background: color-mix(in srgb, #28111a 90%, transparent);
+}
+
+.rf-async-notice__indicator {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  color: var(--acid);
+  background: rgba(85, 231, 255, 0.09);
+  border: 1px solid rgba(85, 231, 255, 0.22);
+  border-radius: 50%;
+  font: 900 12px/1 var(--display-font);
+}
+
+.rf-async-notice--success .rf-async-notice__indicator {
+  color: #baffd7;
+  background: rgba(72, 209, 139, 0.12);
+  border-color: rgba(127, 234, 180, 0.28);
+}
+
+.rf-async-notice--error .rf-async-notice__indicator {
+  color: #ffd9df;
+  background: rgba(255, 105, 133, 0.12);
+  border-color: rgba(255, 105, 133, 0.3);
+}
+
+.rf-async-notice__copy strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rf-async-notice__copy small > .rf-button {
+  margin-top: var(--rf-space-2);
+}
+
+.rf-async-notice__dismiss.rf-button {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.rf-floating-notice-stack {
+  position: fixed;
+  top: calc(var(--rackforge-safe-top) + 92px);
+  right: calc(var(--rackforge-safe-right) + var(--rf-space-4));
+  z-index: var(--rf-layer-menu);
+  width: min(430px, calc(100vw - var(--rackforge-safe-left) - var(--rackforge-safe-right) - 32px));
+  display: grid;
+  gap: var(--rf-space-2);
+  pointer-events: none;
+}
+
+.rf-floating-notice-stack .rf-async-notice {
+  pointer-events: auto;
+}
+
+.plugin-picker-boundary,
+.plugin-manager-boundary {
+  min-height: 0;
+}
+
+@keyframes rf-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rf-route-enter {
+  from { opacity: 0.86; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .rf-floating-notice-stack {
+    top: calc(var(--rackforge-safe-top) + 66px);
+    right: calc(var(--rackforge-safe-right) + var(--rf-space-2));
+    width: calc(100vw - var(--rackforge-safe-left) - var(--rackforge-safe-right) - 16px);
+  }
+}
+
+@media (pointer: coarse) {
+  .rf-button:not(.rf-button--icon) {
+    min-height: var(--rf-target-touch);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preset-modal-backdrop,
+  .preset-modal,
+  .rf-button,
+  .rf-interaction-target,
+  .rf-async-notice,
+  .page.rf-route-enter,
+  .async-spinner > span,
+  .rf-async-loader__mark::before,
+  .rf-async-loader__logo--fill,
+  .rf-async-loader__scanner {
+    animation: none !important;
+    transition-duration: 1ms !important;
+  }
+}

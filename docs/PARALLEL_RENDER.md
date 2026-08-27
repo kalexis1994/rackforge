@@ -141,6 +141,12 @@ MIDI is delivered only to the coordinator. Per block the host:
 No nested pools, no plugin threads, no additional block of latency: begin,
 units and end all happen inside the same device period.
 
+This applies to **every render mode**, not only Racks. The pool is untyped:
+each block publishes the Slot type's entry points alongside the job graph,
+so PLAY mode — the single standalone instrument on the embedded host and on
+the desktop — schedules its units across exactly the same workers a Rack
+would use. One pool per process, whatever is playing.
+
 ### Cabled Racks are part of the same graph
 
 A Rack with cables does **not** fall back to serial processing. Every Slot

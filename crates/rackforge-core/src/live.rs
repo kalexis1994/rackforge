@@ -479,8 +479,144 @@ struct StandaloneVoice<'plugin> {
     instance_id: InstanceId,
     plugin: &'plugin LoadedPlugin,
     instance: PluginInstance<'plugin>,
+    /// Host-owned unit instances for `parallel_render_v1` plugins, so PLAY
+    /// mode schedules units across the same worker pool as Racks.
+    parallel: Option<ParallelUnits<'plugin>>,
     input_channels: usize,
     live_parameter_target: usize,
+    input: Vec<f32>,
+    output: Vec<f32>,
+    events: Vec<MidiEventV1>,
+    parameter_events: Vec<ParameterEventV1>,
+    process_faulted: bool,
+}
+
+impl<'plugin> StandaloneVoice<'plugin> {
+    /// Applies one control-plane operation to the coordinator and mirrors
+    /// the identical canonical input to every unit instance.
+    fn mirror_control<E>(
+        &mut self,
+        mut operation: impl FnMut(&mut PluginInstance<'plugin>) -> Result<(), E>,
+    ) -> Result<(), E> {
+        operation(&mut self.instance)?;
+        if let Some(parallel) = self.parallel.as_mut() {
+            parallel.mirror(operation)?;
+        }
+        Ok(())
+    }
+}
+
+/// One PLAY-mode voice as the global scheduler sees it: the same
+/// begin → units → end family a Rack Slot contributes, minus cables.
+//
+// SAFETY: same argument as the Rack Slot implementation — instances reach
+// pool workers only under the epoch protocol and unit jobs point at
+// per-unit boxed cells holding isolated portable instances.
+unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
+    fn max_units(&self) -> u32 {
+        self.parallel.as_ref().map_or(0, ParallelUnits::max_units)
+    }
+
+    fn run_single(&mut self, frames: u32, channels: u32) -> bool {
+        self.output.fill(0.0);
+        if self.process_faulted {
+            return true;
+        }
+        self.instance
+            .process_interleaved(
+                &self.input,
+                &mut self.output,
+                frames,
+                self.input_channels as u32,
+                channels,
+                &self.events,
+                &self.parameter_events,
+            )
+            .is_ok()
+    }
+
+    fn run_begin(&mut self, frames: u32, _channels: u32) -> Option<u32> {
+        self.output.fill(0.0);
+        if self.process_faulted {
+            return Some(0);
+        }
+        let parallel = self.parallel.as_mut()?;
+        parallel
+            .begin(
+                &mut self.instance,
+                &self.input,
+                frames,
+                &self.events,
+                &self.parameter_events,
+            )
+            .ok()
+    }
+
+    fn unit_job(&mut self, unit: u32, frames: u32, channels: u32) -> UnitJob {
+        self.parallel
+            .as_mut()
+            .expect("unit job requested for a classic standalone voice")
+            .unit_job(unit, &self.input, frames, channels)
+    }
+
+    fn run_end(&mut self, frames: u32, channels: u32, completed: u32) -> bool {
+        if self.process_faulted {
+            return true;
+        }
+        let Some(parallel) = self.parallel.as_mut() else {
+            return false;
+        };
+        parallel
+            .finish(
+                &mut self.instance,
+                &mut self.output,
+                frames,
+                channels,
+                completed,
+            )
+            .is_ok()
+    }
+
+    fn quarantine(&mut self) {
+        self.output.fill(0.0);
+        self.process_faulted = true;
+    }
+}
+
+/// Re-prepares a PLAY voice's unit instances after playback resumes,
+/// rebuilding them from the coordinator's state when an emergency stop or a
+/// runtime replacement dropped them. Control paths of the audio thread only.
+fn reactivate_standalone_parallel_units(
+    voice: &mut StandaloneVoice<'_>,
+    sample_rate: f64,
+    maximum_frames: u32,
+    output_channels: u32,
+) -> Result<()> {
+    match voice.parallel.as_mut() {
+        Some(units) => units.reconfigure(
+            sample_rate,
+            maximum_frames,
+            voice.input_channels as u32,
+            output_channels,
+        ),
+        None => {
+            if !parallel_render::parallel_units_enabled()
+                || voice.plugin.parallel_layout().is_none()
+            {
+                return Ok(());
+            }
+            let state = voice.instance.save_state()?;
+            voice.parallel = create_rack_slot_parallel_units(
+                voice.plugin,
+                &RackSlotStateLoad::Opaque(state),
+                sample_rate as u32,
+                maximum_frames,
+                voice.input_channels as u32,
+                output_channels,
+            )?;
+            Ok(())
+        }
+    }
 }
 
 fn create_rack_voices<'plugin>(
@@ -903,9 +1039,9 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 plugin_id, preset.id, preset.name
             );
         }
-        for (parameter_index, value) in
-            live_parameter_store.restored_values(plugin_id, plugin.parameters())
-        {
+        let restored_parameters: Vec<(u32, f64)> =
+            live_parameter_store.restored_values(plugin_id, plugin.parameters());
+        for (parameter_index, value) in restored_parameters.iter().copied() {
             crate::set_plugin_parameter(plugin, &mut instance, parameter_index, value)
                 .with_context(|| {
                     format!("restoring live parameter {parameter_index} for plugin {plugin_id}")
@@ -968,12 +1104,46 @@ pub fn run(config: LiveConfig) -> Result<()> {
                 .collect(),
             selected_sound_id: selected.map(|preset| preset.id.clone()),
         });
+        // PLAY-mode unit instances mirror the same canonical inputs the
+        // coordinator just received: program, then restored parameters.
+        let mut parallel = if parallel_render::parallel_units_enabled() {
+            ParallelUnits::create(
+                plugin,
+                f64::from(output_rate),
+                period_frames as u32,
+                input_channels as u32,
+                plugin_output_channels as u32,
+            )
+            .with_context(|| format!("preparing PLAY units for plugin {plugin_id}"))?
+        } else {
+            None
+        };
+        if let Some(units) = parallel.as_mut() {
+            if let Some(preset) = selected {
+                units
+                    .mirror(|instance| instance.load_preset(&preset.id))
+                    .with_context(|| format!("mirroring program for plugin {plugin_id}"))?;
+            }
+            for (parameter_index, value) in restored_parameters.iter().copied() {
+                units
+                    .mirror(|instance| instance.set_parameter(parameter_index, value))
+                    .with_context(|| {
+                        format!("mirroring live parameter {parameter_index} for {plugin_id}")
+                    })?;
+            }
+        }
         standalone_voices.push(StandaloneVoice {
             instance_id,
             plugin,
             instance,
+            parallel,
             input_channels,
             live_parameter_target,
+            input: vec![0.0; period_frames * input_channels],
+            output: vec![0.0; period_frames * channels],
+            events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
+            parameter_events: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
+            process_faulted: false,
         });
     }
     let live_parameter_writer =
@@ -1637,8 +1807,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     }
     let render_telemetry = RenderTelemetry::new(parallel_render::MAX_RENDER_SLOTS);
     spawn_telemetry_publisher(&render_telemetry, Duration::from_secs(1));
-    let mut rack_renderer: RenderPool<RackSlotVoice<'static>> =
-        RenderPool::automatic(Arc::clone(&render_telemetry));
+    let mut rack_renderer = RenderPool::automatic(Arc::clone(&render_telemetry));
     render_telemetry.set_slot_labels(
         rack_voices
             .iter()
@@ -1692,6 +1861,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         plugin_output.resize(period_frames * channels, 0.0);
                         mix_output.resize(period_frames * channels, 0.0);
                         for voice in &mut rack_voices {
+                            voice
+                                .input
+                                .resize(period_frames * voice.input_channels, 0.0);
+                            voice.output.resize(period_frames * channels, 0.0);
+                        }
+                        for voice in standalone_voices.iter_mut() {
                             voice
                                 .input
                                 .resize(period_frames * voice.input_channels, 0.0);
@@ -1823,8 +1998,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         }
                         standalone_voice_mut(standalone_voices, &instance_id)?;
                         standalone_voice_mut(standalone_voices, &active_instance_id)?
-                            .instance
-                            .reset()
+                            .mirror_control(|instance| instance.reset())
                             .map_err(|error| error.to_string())?;
                         active_instance_id = instance_id.clone();
                         replay_controller_state |= render_mode == AudioRenderMode::Plugin;
@@ -1841,9 +2015,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     let result = standalone_voice_mut(standalone_voices, &instance_id)
                         .and_then(|voice| {
                             voice
-                                .instance
-                                .load_preset(&sound_id)
+                                .mirror_control(|instance| instance.load_preset(&sound_id))
                                 .map_err(|error| error.to_string())?;
+                            voice.process_faulted = false;
                             live_parameter_writer.clear(voice.live_parameter_target);
                             Ok(())
                         })
@@ -1875,9 +2049,10 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     let result =
                         standalone_voice_mut(standalone_voices, &instance_id).and_then(|voice| {
                             voice
-                                .instance
-                                .load_state(&bytes)
-                                .map_err(|error| error.to_string())
+                                .mirror_control(|instance| instance.load_state(&bytes))
+                                .map_err(|error| error.to_string())?;
+                            voice.process_faulted = false;
+                            Ok(())
                         });
                     if result.is_ok() {
                         active_instance_id = instance_id;
@@ -1959,8 +2134,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                                 ));
                             }
                             voice
-                                .instance
-                                .set_parameter(parameter_index, value)
+                                .mirror_control(|instance| {
+                                    instance.set_parameter(parameter_index, value)
+                                })
                                 .map_err(|error| error.to_string())?;
                             let canonical = voice
                                 .instance
@@ -1990,6 +2166,21 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             deferred_retire.push(RetiredAudioRuntime::Standalone(
                                 control::PreparedPluginInstance(retired),
                             ));
+                            // The old units mirrored the retired runtime;
+                            // rebuild them from the replacement's state.
+                            voice.parallel = None;
+                            voice.process_faulted = false;
+                            if let Err(error) = reactivate_standalone_parallel_units(
+                                voice,
+                                output_rate as f64,
+                                period_frames as u32,
+                                channels as u32,
+                            ) {
+                                eprintln!(
+                                    "PLAY_UNITS_REBUILD_FAILED instance={instance_id} \
+                                     error={error:#}"
+                                );
+                            }
                         });
                     let _ = reply.send(result);
                 }
@@ -2045,8 +2236,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             return Err("audition focus is already leased".into());
                         }
                         standalone_voice_mut(standalone_voices, &instance_id)?
-                            .instance
-                            .reset()
+                            .mirror_control(|instance| instance.reset())
                             .map_err(|error| error.to_string())?;
                         let lease_id = next_audition_id;
                         next_audition_id = next_audition_id.wrapping_add(1).max(1);
@@ -2077,7 +2267,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         Some(lease) if lease.id == lease_id => {
                             standalone_voice_mut(standalone_voices, &lease.instance_id)
                                 .and_then(|voice| {
-                                    restore_after_audition(&mut voice.instance, &lease)
+                                    restore_after_audition(voice, &lease)
                                         .map_err(|error| error.to_string())
                                 })
                                 .map(|()| {
@@ -2109,21 +2299,35 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         if audition.is_some() {
                             return Err("audition focus is already leased".into());
                         }
-                        let instance =
-                            &mut standalone_voice_mut(standalone_voices, &instance_id)?.instance;
-                        let prepared = instance
+                        let voice = standalone_voice_mut(standalone_voices, &instance_id)?;
+                        let prepared = voice
+                            .instance
                             .begin_program_edit(&request)
                             .map_err(|error| error.to_string())?;
-                        let editor = instance
+                        let editor = voice
+                            .instance
                             .program_editor_view(&prepared.document)
                             .map_err(|error| error.to_string())?;
-                        instance.reset().map_err(|error| error.to_string())?;
-                        if !instance
+                        voice
+                            .mirror_control(|instance| instance.reset())
+                            .map_err(|error| error.to_string())?;
+                        if voice
+                            .instance
                             .preview_program(&prepared)
                             .map_err(|error| error.to_string())?
                         {
-                            instance
-                                .load_preset(&prepared.preview_sound_id)
+                            if let Some(parallel) = voice.parallel.as_mut() {
+                                parallel
+                                    .mirror(|instance| {
+                                        instance.preview_program(&prepared).map(|_| ())
+                                    })
+                                    .map_err(|error| error.to_string())?;
+                            }
+                        } else {
+                            voice
+                                .mirror_control(|instance| {
+                                    instance.load_preset(&prepared.preview_sound_id)
+                                })
                                 .map_err(|error| error.to_string())?;
                         }
                         let lease_id = next_audition_id;
@@ -2151,20 +2355,32 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     reply,
                 } => {
                     let result = (|| -> Result<_, String> {
-                        let instance =
-                            &mut standalone_voice_mut(standalone_voices, &instance_id)?.instance;
-                        let prepared = instance
+                        let voice = standalone_voice_mut(standalone_voices, &instance_id)?;
+                        let prepared = voice
+                            .instance
                             .prepare_program_save(&document)
                             .map_err(|error| error.to_string())?;
-                        let editor = instance
+                        let editor = voice
+                            .instance
                             .program_editor_view(&prepared.document)
                             .map_err(|error| error.to_string())?;
-                        if !instance
+                        if voice
+                            .instance
                             .preview_program(&prepared)
                             .map_err(|error| error.to_string())?
                         {
-                            instance
-                                .load_preset(&prepared.preview_sound_id)
+                            if let Some(parallel) = voice.parallel.as_mut() {
+                                parallel
+                                    .mirror(|instance| {
+                                        instance.preview_program(&prepared).map(|_| ())
+                                    })
+                                    .map_err(|error| error.to_string())?;
+                            }
+                        } else {
+                            voice
+                                .mirror_control(|instance| {
+                                    instance.load_preset(&prepared.preview_sound_id)
+                                })
                                 .map_err(|error| error.to_string())?;
                         }
                         println!("PROGRAM_DRAFT_AUDIO_READY instance={instance_id}");
@@ -2182,20 +2398,32 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     reply,
                 } => {
                     let result = (|| -> Result<_, String> {
-                        let instance =
-                            &mut standalone_voice_mut(standalone_voices, &instance_id)?.instance;
-                        let prepared = instance
+                        let voice = standalone_voice_mut(standalone_voices, &instance_id)?;
+                        let prepared = voice
+                            .instance
                             .apply_program_edit(&request)
                             .map_err(|error| error.to_string())?;
-                        let editor = instance
+                        let editor = voice
+                            .instance
                             .program_editor_view(&prepared.document)
                             .map_err(|error| error.to_string())?;
-                        if !instance
+                        if voice
+                            .instance
                             .preview_program(&prepared)
                             .map_err(|error| error.to_string())?
                         {
-                            instance
-                                .load_preset(&prepared.preview_sound_id)
+                            if let Some(parallel) = voice.parallel.as_mut() {
+                                parallel
+                                    .mirror(|instance| {
+                                        instance.preview_program(&prepared).map(|_| ())
+                                    })
+                                    .map_err(|error| error.to_string())?;
+                            }
+                        } else {
+                            voice
+                                .mirror_control(|instance| {
+                                    instance.load_preset(&prepared.preview_sound_id)
+                                })
                                 .map_err(|error| error.to_string())?;
                         }
                         println!(
@@ -2218,9 +2446,11 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     let result = standalone_voice_mut(standalone_voices, &instance_id)
                         .and_then(|voice| {
                             voice
+                                .mirror_control(|instance| instance.install_program(&prepared))
+                                .map_err(|error| error.to_string())?;
+                            voice
                                 .instance
-                                .install_program(&prepared)
-                                .and_then(|()| voice.instance.preset_catalog())
+                                .preset_catalog()
                                 .map_err(|error| error.to_string())
                         })
                         .inspect(|_| {
@@ -2461,7 +2691,8 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         match render_mode {
             AudioRenderMode::Silent => {}
             AudioRenderMode::Plugin => {
-                plugin_output.fill(0.0);
+                let deadline_ns =
+                    period_frames as u64 * 1_000_000_000 / (output_rate as u64).max(1);
                 let voice = standalone_voice_mut(standalone_voices, &active_instance_id)
                     .map_err(anyhow::Error::msg)?;
                 prepare_plugin_capture(
@@ -2471,23 +2702,44 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     voice.input_channels,
                     period_frames,
                 );
-                let process_result = voice.instance.process_interleaved(
-                    &plugin_input[..period_frames * voice.input_channels],
-                    &mut plugin_output,
+                voice
+                    .input
+                    .copy_from_slice(&plugin_input[..period_frames * voice.input_channels]);
+                voice.events.clear();
+                voice.events.extend_from_slice(&events);
+                voice.parameter_events.clear();
+                voice.parameter_events.extend_from_slice(&parameter_events);
+                let was_faulted = voice.process_faulted;
+                let render_started = Instant::now();
+                let scheduled = rack_renderer.process(
+                    std::slice::from_mut(voice),
                     period_frames as u32,
-                    voice.input_channels as u32,
                     channels as u32,
-                    &events,
-                    &parameter_events,
+                    deadline_ns,
                 );
-                if quarantine_failed_process(
-                    process_result,
-                    &mut plugin_output,
-                    &format!("standalone:{active_instance_id}"),
-                ) {
+                if !scheduled {
+                    process_slots_sequential(
+                        std::slice::from_mut(voice),
+                        period_frames as u32,
+                        channels as u32,
+                        &render_telemetry,
+                    );
+                    render_telemetry.record_block(
+                        render_started.elapsed().as_nanos() as u64,
+                        deadline_ns,
+                        None,
+                    );
+                }
+                if voice.process_faulted {
+                    if !was_faulted {
+                        eprintln!(
+                            "PLUGIN_PROCESS_QUARANTINED context=standalone:{active_instance_id} \
+                             action=silence"
+                        );
+                    }
                     render_mode = AudioRenderMode::Silent;
                 } else {
-                    mix_output.copy_from_slice(&plugin_output);
+                    mix_output.copy_from_slice(&voice.output);
                 }
             }
             AudioRenderMode::Rack => {
@@ -2621,6 +2873,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     }
 }
 
+#[cfg(test)]
 fn quarantine_failed_process<E: std::fmt::Display>(
     result: std::result::Result<(), E>,
     output: &mut [f32],
@@ -2643,6 +2896,11 @@ fn stop_all_plugin_runtimes(
         if let Err(error) = replace_with_stopped_runtime(voice.plugin, &mut voice.instance) {
             failures.push(format!("instance {}: {error}", voice.instance_id));
         }
+        // Rebuilt from the coordinator's state when playback resumes.
+        voice.parallel = None;
+        voice.events.clear();
+        voice.output.fill(0.0);
+        voice.process_faulted = false;
     }
     for voice in rack_voices {
         if let Err(error) = replace_with_stopped_runtime(voice.plugin, &mut voice.instance) {
@@ -2699,6 +2957,17 @@ fn restart_render_target(
                     voice.input_channels as u32,
                     output_channels,
                 )
+                .and_then(|()| {
+                    reactivate_standalone_parallel_units(
+                        voice,
+                        sample_rate,
+                        maximum_frames,
+                        output_channels,
+                    )
+                })
+                .map(|()| {
+                    voice.process_faulted = false;
+                })
                 .map_err(|error| error.to_string())
         }
         AudioRenderMode::Rack => {
@@ -2806,8 +3075,7 @@ fn reconfigure_audio_output(
 
     for voice in standalone_voices.iter_mut() {
         voice
-            .instance
-            .deactivate()
+            .mirror_control(|instance| instance.deactivate())
             .with_context(|| format!("deactivating plugin instance {}", voice.instance_id))?;
     }
     for voice in rack_voices.iter_mut() {
@@ -2830,6 +3098,18 @@ fn reconfigure_audio_output(
                     requested.channels,
                 )
                 .with_context(|| format!("activating plugin instance {}", voice.instance_id))?;
+            if let Some(units) = voice.parallel.as_mut() {
+                units
+                    .reconfigure(
+                        f64::from(requested.sample_rate_hz),
+                        requested.period_frames,
+                        voice.input_channels as u32,
+                        requested.channels,
+                    )
+                    .with_context(|| {
+                        format!("activating PLAY units for instance {}", voice.instance_id)
+                    })?;
+            }
         }
         for voice in rack_voices.iter_mut() {
             voice
@@ -2891,6 +3171,14 @@ fn reconfigure_audio_output(
                         voice.input_channels as u32,
                         previous_profile.channels,
                     )?;
+                    if let Some(units) = voice.parallel.as_mut() {
+                        units.reconfigure(
+                            f64::from(previous_profile.sample_rate_hz),
+                            previous_profile.period_frames,
+                            voice.input_channels as u32,
+                            previous_profile.channels,
+                        )?;
+                    }
                 }
                 for voice in rack_voices.iter_mut() {
                     voice.instance.activate(
@@ -3142,10 +3430,10 @@ fn map_midi_velocity(
     output_low + ((offset * output_span + input_span / 2) / input_span) as u8
 }
 
-fn restore_after_audition(instance: &mut PluginInstance<'_>, lease: &AuditionLease) -> Result<()> {
-    instance.reset()?;
+fn restore_after_audition(voice: &mut StandaloneVoice<'_>, lease: &AuditionLease) -> Result<()> {
+    voice.mirror_control(|instance| instance.reset())?;
     if let Some(previous) = &lease.previous_sound_id {
-        instance.load_preset(previous)?;
+        voice.mirror_control(|instance| instance.load_preset(previous))?;
     }
     Ok(())
 }

@@ -5,6 +5,10 @@ use keylab_essential_mk3::{controller as keylab_controller, protocol as keylab_p
 use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 use rackforge_audio_api::{OutputMeter, OutputMeterSnapshot};
 use rackforge_control_api::PluginParameterValue;
+use rackforge_core::parallel_render::{
+    self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
+    process_slots_sequential, spawn_telemetry_publisher,
+};
 use rackforge_core::{
     CompiledParameterLink, LiveParameterStateStore, LiveParameterTarget, LiveParameterWriter,
     LiveParameterWriterHandle, LoadedPlugin, PluginInstance,
@@ -872,7 +876,6 @@ impl DesktopAudio {
             parameter_links: Vec::new(),
             output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
             plugin_input: vec![0.0; MAX_AUDIO_FRAMES * MAX_STANDALONE_INPUT_CHANNELS],
-            plugin_output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
             capture: capture_ring.clone(),
             capture_channels,
             device_channels,
@@ -884,7 +887,15 @@ impl DesktopAudio {
             retired_voice_sender,
             deferred_retire: Vec::with_capacity(voice_capacity),
             live_parameter_writer: live_parameter_writer_handle,
+            sample_rate: config.sample_rate.0,
+            render_pool: {
+                let render_telemetry = RenderTelemetry::new(parallel_render::MAX_RENDER_SLOTS);
+                spawn_telemetry_publisher(&render_telemetry, Duration::from_secs(1));
+                RenderPool::automatic(render_telemetry)
+            },
+            render_telemetry: RenderTelemetry::new(0),
         };
+        processor.render_telemetry = Arc::clone(processor.render_pool.telemetry());
         let stream = device
             .build_output_stream_raw(
                 &config,
@@ -1371,7 +1382,124 @@ struct AudioVoice {
     input_channels: usize,
     output_channels: usize,
     instance: SendablePluginInstance,
+    /// Host-owned unit instances for `parallel_render_v1` plugins, so the
+    /// desktop's PLAY path schedules units across the shared worker pool.
+    parallel: Option<SendableParallelUnits>,
     live_parameter_target: usize,
+    input: Vec<f32>,
+    output: Vec<f32>,
+    events: Vec<MidiEventV1>,
+    parameter_events: Vec<ParameterEventV1>,
+    process_faulted: bool,
+}
+
+impl AudioVoice {
+    /// Applies one control-plane operation to the coordinator and mirrors
+    /// the identical canonical input to every unit instance.
+    fn mirror_control<E>(
+        &mut self,
+        mut operation: impl FnMut(&mut PluginInstance<'static>) -> std::result::Result<(), E>,
+    ) -> std::result::Result<(), E> {
+        operation(&mut self.instance.0)?;
+        if let Some(parallel) = self.parallel.as_mut() {
+            parallel.0.mirror(operation)?;
+        }
+        Ok(())
+    }
+}
+
+/// One PLAY voice as the shared scheduler sees it.
+//
+// SAFETY: the same argument as the embedded host — instances reach pool
+// workers only under the pool's epoch protocol, and unit jobs point at
+// per-unit boxed cells holding isolated portable instances.
+unsafe impl ScheduledSlot for AudioVoice {
+    fn max_units(&self) -> u32 {
+        self.parallel
+            .as_ref()
+            .map_or(0, |parallel| parallel.0.max_units())
+    }
+
+    fn run_single(&mut self, frames: u32, channels: u32) -> bool {
+        let samples = frames as usize * channels as usize;
+        self.output[..samples].fill(0.0);
+        if self.process_faulted {
+            return true;
+        }
+        let input_samples = frames as usize * self.input_channels;
+        self.instance
+            .0
+            .process_interleaved(
+                &self.input[..input_samples],
+                &mut self.output[..samples],
+                frames,
+                self.input_channels as u32,
+                channels,
+                &self.events,
+                &self.parameter_events,
+            )
+            .is_ok()
+    }
+
+    fn run_begin(&mut self, frames: u32, channels: u32) -> Option<u32> {
+        let samples = frames as usize * channels as usize;
+        self.output[..samples].fill(0.0);
+        if self.process_faulted {
+            return Some(0);
+        }
+        let input_samples = frames as usize * self.input_channels;
+        let parallel = self.parallel.as_mut()?;
+        parallel
+            .0
+            .begin(
+                &mut self.instance.0,
+                &self.input[..input_samples],
+                frames,
+                &self.events,
+                &self.parameter_events,
+            )
+            .ok()
+    }
+
+    fn unit_job(&mut self, unit: u32, frames: u32, channels: u32) -> UnitJob {
+        let input_samples = frames as usize * self.input_channels;
+        let parallel = self
+            .parallel
+            .as_mut()
+            .expect("unit job requested for a classic desktop voice");
+        // The borrow checker cannot see the field split through the Option;
+        // the input slice is reborrowed from a raw pointer instead.
+        let input_ptr = self.input.as_ptr();
+        // SAFETY: `input` and `parallel` are disjoint fields, and the slice
+        // outlives the block by the pool's contract.
+        let input = unsafe { std::slice::from_raw_parts(input_ptr, input_samples) };
+        parallel.0.unit_job(unit, input, frames, channels)
+    }
+
+    fn run_end(&mut self, frames: u32, channels: u32, completed: u32) -> bool {
+        if self.process_faulted {
+            return true;
+        }
+        let samples = frames as usize * channels as usize;
+        let Some(parallel) = self.parallel.as_mut() else {
+            return false;
+        };
+        parallel
+            .0
+            .finish(
+                &mut self.instance.0,
+                &mut self.output[..samples],
+                frames,
+                channels,
+                completed,
+            )
+            .is_ok()
+    }
+
+    fn quarantine(&mut self) {
+        self.output.fill(0.0);
+        self.process_faulted = true;
+    }
 }
 
 struct SendablePluginInstance(PluginInstance<'static>);
@@ -1380,6 +1508,13 @@ struct SendablePluginInstance(PluginInstance<'static>);
 // subsequent plugin ABI call happens serially on that callback. RackForge does
 // not share the handle with the UI instance or access it after the move.
 unsafe impl Send for SendablePluginInstance {}
+
+struct SendableParallelUnits(ParallelUnits<'static>);
+
+// SAFETY: unit instances are portable wasm-v1 sandboxes created next to the
+// coordinator; ownership moves once into the audio callback and each unit is
+// entered by at most one pool worker per block under the epoch protocol.
+unsafe impl Send for SendableParallelUnits {}
 
 struct MasterGain {
     current: f32,
@@ -1472,7 +1607,6 @@ struct AudioProcessor {
     parameter_links: Vec<CompiledParameterLink>,
     output: Vec<f32>,
     plugin_input: Vec<f32>,
-    plugin_output: Vec<f32>,
     capture: Option<Arc<CaptureRing>>,
     capture_channels: usize,
     device_channels: usize,
@@ -1484,6 +1618,9 @@ struct AudioProcessor {
     retired_voice_sender: SyncSender<AudioVoice>,
     deferred_retire: Vec<AudioVoice>,
     live_parameter_writer: LiveParameterWriterHandle,
+    sample_rate: u32,
+    render_pool: RenderPool,
+    render_telemetry: Arc<RenderTelemetry>,
 }
 
 impl AudioProcessor {
@@ -1533,22 +1670,44 @@ impl AudioProcessor {
         let input_channels = self.voices[self.active_voice].input_channels;
         let output_channels = self.voices[self.active_voice].output_channels;
         self.prepare_plugin_input(frames, input_channels);
-        let plugin_input = &self.plugin_input[..frames * input_channels];
-        let plugin_output = &mut self.plugin_output[..frames * output_channels];
-        plugin_output.fill(0.0);
-        self.voices[self.active_voice]
-            .instance
-            .0
-            .process_interleaved(
-                plugin_input,
-                plugin_output,
+        let deadline_ns = frames as u64 * 1_000_000_000 / u64::from(self.sample_rate.max(1));
+        let voice = &mut self.voices[self.active_voice];
+        voice.input[..frames * input_channels]
+            .copy_from_slice(&self.plugin_input[..frames * input_channels]);
+        voice.events.clear();
+        voice.events.extend_from_slice(&self.events);
+        voice.parameter_events.clear();
+        voice
+            .parameter_events
+            .extend_from_slice(&self.parameter_events);
+        let was_faulted = voice.process_faulted;
+        let render_started = Instant::now();
+        let scheduled = self.render_pool.process(
+            std::slice::from_mut(voice),
+            frames as u32,
+            output_channels as u32,
+            deadline_ns,
+        );
+        if !scheduled {
+            process_slots_sequential(
+                std::slice::from_mut(voice),
                 frames as u32,
-                input_channels as u32,
                 output_channels as u32,
-                &self.events,
-                &self.parameter_events,
-            )
-            .context("processing RackForge plugin audio")?;
+                &self.render_telemetry,
+            );
+            self.render_telemetry.record_block(
+                render_started.elapsed().as_nanos() as u64,
+                deadline_ns,
+                None,
+            );
+        }
+        if voice.process_faulted && !was_faulted {
+            eprintln!(
+                "PLUGIN_PROCESS_QUARANTINED context=desktop:{} action=silence",
+                voice.instance_id
+            );
+        }
+        let plugin_output = &voice.output[..frames * output_channels];
         let output = &mut self.output[..samples];
         for frame in 0..frames {
             output[frame * 2] = plugin_output[frame * output_channels];
@@ -1613,7 +1772,8 @@ impl AudioProcessor {
                         .position(|voice| voice.instance_id == instance_id)
                         .with_context(|| format!("unknown audio plugin instance {instance_id}"))?;
                     if index != self.active_voice {
-                        self.voices[self.active_voice].instance.0.reset()?;
+                        self.voices[self.active_voice]
+                            .mirror_control(|instance| instance.reset())?;
                         self.active_voice = index;
                     }
                 }
@@ -1639,17 +1799,14 @@ impl AudioProcessor {
                                 format!("unknown audio plugin instance {instance_id}")
                             })?;
                         self.voices[index]
-                            .instance
-                            .0
-                            .load_state(&state)
+                            .mirror_control(|instance| instance.load_state(&state))
                             .map_err(|error| error.to_string())?;
+                        self.voices[index].process_faulted = false;
                         self.live_parameter_writer
                             .clear(self.voices[index].live_parameter_target);
                         if index != self.active_voice {
                             self.voices[self.active_voice]
-                                .instance
-                                .0
-                                .reset()
+                                .mirror_control(|instance| instance.reset())
                                 .map_err(|error| error.to_string())?;
                             self.active_voice = index;
                         }
@@ -1666,11 +1823,14 @@ impl AudioProcessor {
                         .iter()
                         .position(|voice| voice.instance_id == instance_id)
                         .with_context(|| format!("unknown audio plugin instance {instance_id}"))?;
-                    self.voices[index].instance.0.load_preset(&sound_id)?;
+                    self.voices[index]
+                        .mirror_control(|instance| instance.load_preset(&sound_id))?;
+                    self.voices[index].process_faulted = false;
                     self.live_parameter_writer
                         .clear(self.voices[index].live_parameter_target);
                     if index != self.active_voice {
-                        self.voices[self.active_voice].instance.0.reset()?;
+                        self.voices[self.active_voice]
+                            .mirror_control(|instance| instance.reset())?;
                         self.active_voice = index;
                     }
                 }
@@ -1709,9 +1869,7 @@ impl AudioProcessor {
                             })?;
                         if reset {
                             self.voices[index]
-                                .instance
-                                .0
-                                .reset()
+                                .mirror_control(|instance| instance.reset())
                                 .map_err(|error| error.to_string())?;
                         }
                         let previewed = self.voices[index]
@@ -1719,18 +1877,26 @@ impl AudioProcessor {
                             .0
                             .preview_program(&prepared)
                             .map_err(|error| error.to_string())?;
-                        if !previewed {
+                        if previewed {
+                            if let Some(parallel) = self.voices[index].parallel.as_mut() {
+                                parallel
+                                    .0
+                                    .mirror(|instance| {
+                                        instance.preview_program(&prepared).map(|_| ())
+                                    })
+                                    .map_err(|error| error.to_string())?;
+                            }
+                        } else {
                             self.voices[index]
-                                .instance
-                                .0
-                                .load_preset(&prepared.preview_sound_id)
+                                .mirror_control(|instance| {
+                                    instance.load_preset(&prepared.preview_sound_id)
+                                })
                                 .map_err(|error| error.to_string())?;
                         }
+                        self.voices[index].process_faulted = false;
                         if index != self.active_voice {
                             self.voices[self.active_voice]
-                                .instance
-                                .0
-                                .reset()
+                                .mirror_control(|instance| instance.reset())
                                 .map_err(|error| error.to_string())?;
                             self.active_voice = index;
                         }
@@ -1753,9 +1919,7 @@ impl AudioProcessor {
                                 format!("unknown audio plugin instance {instance_id}")
                             })?;
                         voice
-                            .instance
-                            .0
-                            .install_program(&prepared)
+                            .mirror_control(|instance| instance.install_program(&prepared))
                             .map_err(|error| error.to_string())?;
                         voice
                             .instance
@@ -1779,22 +1943,17 @@ impl AudioProcessor {
                                 format!("unknown audio plugin instance {instance_id}")
                             })?;
                         self.voices[index]
-                            .instance
-                            .0
-                            .reset()
+                            .mirror_control(|instance| instance.reset())
                             .map_err(|error| error.to_string())?;
                         if let Some(sound_id) = sound_id {
                             self.voices[index]
-                                .instance
-                                .0
-                                .load_preset(&sound_id)
+                                .mirror_control(|instance| instance.load_preset(&sound_id))
                                 .map_err(|error| error.to_string())?;
                         }
+                        self.voices[index].process_faulted = false;
                         if index != self.active_voice {
                             self.voices[self.active_voice]
-                                .instance
-                                .0
-                                .reset()
+                                .mirror_control(|instance| instance.reset())
                                 .map_err(|error| error.to_string())?;
                             self.active_voice = index;
                         }
@@ -1864,9 +2023,9 @@ impl AudioProcessor {
                                 ));
                             }
                             voice
-                                .instance
-                                .0
-                                .set_parameter(parameter_index, value)
+                                .mirror_control(|instance| {
+                                    instance.set_parameter(parameter_index, value)
+                                })
                                 .map_err(|error| error.to_string())?;
                             let canonical = voice
                                 .instance
@@ -1892,7 +2051,8 @@ impl AudioProcessor {
                 AudioCommand::SetRunning(running) => self.stopped = !running,
                 AudioCommand::EmergencyStop => {
                     for voice in &mut self.voices {
-                        voice.instance.0.reset()?;
+                        voice.mirror_control(|instance| instance.reset())?;
+                        voice.process_faulted = false;
                     }
                     self.stopped = true;
                 }
@@ -1970,9 +2130,9 @@ fn prepare_audio_voice(
             );
         }
     }
-    for (parameter_index, value) in
-        live_parameter_store.restored_values(&spec.plugin.manifest().id, spec.plugin.parameters())
-    {
+    let restored_parameters: Vec<(u32, f64)> =
+        live_parameter_store.restored_values(&spec.plugin.manifest().id, spec.plugin.parameters());
+    for (parameter_index, value) in restored_parameters.iter().copied() {
         rackforge_core::set_plugin_parameter(spec.plugin, &mut instance, parameter_index, value)
             .with_context(|| {
                 format!(
@@ -1989,13 +2149,57 @@ fn prepare_audio_voice(
             output_channels as u32,
         )
         .with_context(|| format!("activating audio instance {}", spec.instance_id))?;
+    // PLAY unit instances mirror the same canonical inputs the coordinator
+    // just received: program, state and restored parameters. This runs on a
+    // control/setup thread, never inside the audio callback.
+    let mut parallel = if rackforge_core::parallel_render::parallel_units_enabled() {
+        ParallelUnits::create_with_resources(
+            spec.plugin,
+            &spec.resources,
+            f64::from(sample_rate),
+            MAX_AUDIO_FRAMES as u32,
+            input_channels as u32,
+            output_channels as u32,
+        )
+        .with_context(|| format!("preparing PLAY units for {}", spec.instance_id))?
+    } else {
+        None
+    };
+    if let Some(units) = parallel.as_mut() {
+        if let Some(preset_id) = spec.preset_id.as_deref() {
+            units
+                .mirror(|instance| instance.load_preset(preset_id))
+                .with_context(|| format!("mirroring preset for {}", spec.instance_id))?;
+        }
+        if let Some(state) = spec.initial_state.as_deref() {
+            // Mirrors the coordinator's best-effort restore: a state the
+            // coordinator skipped is skipped here too.
+            let _ = units.mirror(|instance| instance.load_state(state));
+        }
+        for (parameter_index, value) in restored_parameters.iter().copied() {
+            units
+                .mirror(|instance| instance.set_parameter(parameter_index, value))
+                .with_context(|| {
+                    format!(
+                        "mirroring live parameter {parameter_index} for {}",
+                        spec.instance_id
+                    )
+                })?;
+        }
+    }
     Ok(AudioVoice {
         instance_id: spec.instance_id,
         parameters,
         input_channels,
         output_channels,
         instance: SendablePluginInstance(instance),
+        parallel: parallel.map(SendableParallelUnits),
         live_parameter_target,
+        input: vec![0.0; MAX_AUDIO_FRAMES * input_channels.max(1)],
+        output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
+        events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
+        parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
+        process_faulted: false,
     })
 }
 

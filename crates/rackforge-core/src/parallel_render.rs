@@ -167,6 +167,118 @@ pub unsafe trait ScheduledSlot {
     fn quarantine(&mut self);
 }
 
+/// Monomorphized entry points for one Slot type, published with each block
+/// so the non-generic workers can drive any [`ScheduledSlot`] type. This is
+/// what lets ONE pool — one set of realtime workers — serve every render
+/// mode of the host (Rack Slots, the Play-mode standalone voice, and any
+/// future graph) without nested pools or oversubscription.
+#[derive(Clone, Copy)]
+struct SlotOps {
+    gather: unsafe fn(slots: *mut (), slot_count: usize, index: usize, frames: u32, channels: u32),
+    run_single: unsafe fn(slots: *mut (), index: usize, frames: u32, channels: u32) -> bool,
+    /// Returns `false` on a fault; on success `mask` holds the unit bits.
+    run_begin:
+        unsafe fn(slots: *mut (), index: usize, frames: u32, channels: u32, mask: &mut u32) -> bool,
+    run_end:
+        unsafe fn(slots: *mut (), index: usize, frames: u32, channels: u32, completed: u32) -> bool,
+    quarantine: unsafe fn(slots: *mut (), index: usize),
+}
+
+impl SlotOps {
+    fn erased<S: ScheduledSlot>() -> Self {
+        Self {
+            gather: gather_erased::<S>,
+            run_single: run_single_erased::<S>,
+            run_begin: run_begin_erased::<S>,
+            run_end: run_end_erased::<S>,
+            quarantine: quarantine_erased::<S>,
+        }
+    }
+
+    const fn inert() -> Self {
+        unsafe fn no_gather(_: *mut (), _: usize, _: usize, _: u32, _: u32) {}
+        unsafe fn no_stage(_: *mut (), _: usize, _: u32, _: u32) -> bool {
+            false
+        }
+        unsafe fn no_begin(_: *mut (), _: usize, _: u32, _: u32, _: &mut u32) -> bool {
+            false
+        }
+        unsafe fn no_end(_: *mut (), _: usize, _: u32, _: u32, _: u32) -> bool {
+            false
+        }
+        unsafe fn no_quarantine(_: *mut (), _: usize) {}
+        Self {
+            gather: no_gather,
+            run_single: no_stage,
+            run_begin: no_begin,
+            run_end: no_end,
+            quarantine: no_quarantine,
+        }
+    }
+}
+
+// SAFETY contracts of the erased entry points: the caller holds the same
+// claims the typed trait calls require — the pointer designates the block's
+// Slot array of the matching type, and phase ownership rules grant either
+// exclusive Slot access or completed-upstream reads.
+unsafe fn gather_erased<S: ScheduledSlot>(
+    slots: *mut (),
+    slot_count: usize,
+    index: usize,
+    frames: u32,
+    channels: u32,
+) {
+    // SAFETY: forwarded from the caller's claim.
+    unsafe { S::gather_input(index, slots as *mut S, slot_count, frames, channels) }
+}
+
+unsafe fn run_single_erased<S: ScheduledSlot>(
+    slots: *mut (),
+    index: usize,
+    frames: u32,
+    channels: u32,
+) -> bool {
+    // SAFETY: forwarded from the caller's exclusive claim.
+    let slot = unsafe { &mut *(slots as *mut S).add(index) };
+    slot.run_single(frames, channels)
+}
+
+unsafe fn run_begin_erased<S: ScheduledSlot>(
+    slots: *mut (),
+    index: usize,
+    frames: u32,
+    channels: u32,
+    mask: &mut u32,
+) -> bool {
+    // SAFETY: forwarded from the caller's exclusive claim.
+    let slot = unsafe { &mut *(slots as *mut S).add(index) };
+    match slot.run_begin(frames, channels) {
+        Some(bits) => {
+            *mask = bits;
+            true
+        }
+        None => false,
+    }
+}
+
+unsafe fn run_end_erased<S: ScheduledSlot>(
+    slots: *mut (),
+    index: usize,
+    frames: u32,
+    channels: u32,
+    completed: u32,
+) -> bool {
+    // SAFETY: forwarded from the caller's exclusive claim.
+    let slot = unsafe { &mut *(slots as *mut S).add(index) };
+    slot.run_end(frames, channels, completed)
+}
+
+unsafe fn quarantine_erased<S: ScheduledSlot>(slots: *mut (), index: usize) {
+    // SAFETY: forwarded from the caller's exclusive claim.
+    let slot = unsafe { &mut *(slots as *mut S).add(index) };
+    slot.quarantine();
+}
+
 // ---------------------------------------------------------------------------
 // Telemetry
 // ---------------------------------------------------------------------------
@@ -540,6 +652,8 @@ pub fn spawn_telemetry_publisher(telemetry: &Arc<RenderTelemetry>, interval: Dur
 
 struct SlotSchedule {
     phase: AtomicU8,
+    /// This block's unit capacity for the Slot; `0` renders as one job.
+    max_units: AtomicU32,
     pending_units: AtomicU32,
     remaining_units: AtomicU32,
     completed_units: AtomicU32,
@@ -554,6 +668,7 @@ impl SlotSchedule {
     fn new() -> Self {
         Self {
             phase: AtomicU8::new(PHASE_IDLE),
+            max_units: AtomicU32::new(0),
             pending_units: AtomicU32::new(0),
             remaining_units: AtomicU32::new(0),
             completed_units: AtomicU32::new(0),
@@ -564,13 +679,14 @@ impl SlotSchedule {
     }
 }
 
-struct PoolShared<S> {
+struct PoolShared {
     epoch: AtomicU64,
     remaining_jobs: AtomicUsize,
     slot_count: AtomicUsize,
     frames: AtomicU32,
     channels: AtomicU32,
-    slots_ptr: UnsafeCell<*mut S>,
+    slots_ptr: UnsafeCell<*mut ()>,
+    ops: UnsafeCell<SlotOps>,
     coordinator: UnsafeCell<Option<thread::Thread>>,
     schedules: Vec<SlotSchedule>,
     unit_jobs: Vec<[UnsafeCell<UnitJob>; MAX_PARALLEL_UNITS]>,
@@ -584,11 +700,11 @@ struct PoolShared<S> {
 // and workers read them after an Acquire load; Slot state is only entered
 // under a CAS claim; `ScheduledSlot` is an unsafe trait whose implementors
 // promise thread-migration safety.
-unsafe impl<S> Send for PoolShared<S> {}
+unsafe impl Send for PoolShared {}
 // SAFETY: as above.
-unsafe impl<S> Sync for PoolShared<S> {}
+unsafe impl Sync for PoolShared {}
 
-impl<S> PoolShared<S> {
+impl PoolShared {
     fn wake_workers(&self, active: usize) {
         if let Some(threads) = self.worker_threads.get() {
             for thread in threads.iter().take(active) {
@@ -647,13 +763,17 @@ pub fn parallel_units_enabled() -> bool {
     requested_audio_worker_capacity(available_cpus) >= 2
 }
 
-pub struct RenderPool<S: ScheduledSlot + 'static> {
-    shared: Arc<PoolShared<S>>,
+/// One global pool of realtime audio workers. The pool itself is untyped:
+/// each `process` call publishes the Slot type's entry points with the
+/// block, so Rack graphs and the Play-mode standalone voice share the very
+/// same workers.
+pub struct RenderPool {
+    shared: Arc<PoolShared>,
     handles: Vec<thread::JoinHandle<()>>,
     epoch: u64,
 }
 
-impl<S: ScheduledSlot + 'static> RenderPool<S> {
+impl RenderPool {
     /// Creates the pool with the automatic worker count for this machine,
     /// honoring `RACKFORGE_AUDIO_WORKERS` exactly as the previous pool did.
     pub fn automatic(telemetry: Arc<RenderTelemetry>) -> Self {
@@ -680,6 +800,7 @@ impl<S: ScheduledSlot + 'static> RenderPool<S> {
             frames: AtomicU32::new(0),
             channels: AtomicU32::new(0),
             slots_ptr: UnsafeCell::new(std::ptr::null_mut()),
+            ops: UnsafeCell::new(SlotOps::inert()),
             coordinator: UnsafeCell::new(None),
             schedules: (0..MAX_RENDER_SLOTS).map(|_| SlotSchedule::new()).collect(),
             unit_jobs: (0..MAX_RENDER_SLOTS)
@@ -729,7 +850,7 @@ impl<S: ScheduledSlot + 'static> RenderPool<S> {
     /// Schedules one block across the pool. Returns `false` when serial
     /// execution is cheaper or is the only safe option — the caller then
     /// runs [`process_slots_sequential`] over the very same graph.
-    pub fn process(
+    pub fn process<S: ScheduledSlot>(
         &mut self,
         slots: &mut [S],
         frames: u32,
@@ -785,6 +906,7 @@ impl<S: ScheduledSlot + 'static> RenderPool<S> {
                         slot.unit_job(unit, frames, channels);
                 }
             }
+            schedule.max_units.store(max_units, Ordering::Relaxed);
             let deps = slot.dependency_mask();
             schedule.deps_remaining.store(deps, Ordering::Relaxed);
             schedule.phase.store(
@@ -802,7 +924,8 @@ impl<S: ScheduledSlot + 'static> RenderPool<S> {
         shared.remaining_jobs.store(slots.len(), Ordering::Relaxed);
         // SAFETY: previous epoch fully acknowledged, so no reader is live.
         unsafe {
-            *shared.slots_ptr.get() = slots.as_mut_ptr();
+            *shared.slots_ptr.get() = slots.as_mut_ptr().cast();
+            *shared.ops.get() = SlotOps::erased::<S>();
             *shared.coordinator.get() = Some(thread::current());
         }
         shared.epoch.store(epoch, Ordering::Release);
@@ -850,7 +973,7 @@ impl<S: ScheduledSlot + 'static> RenderPool<S> {
     }
 }
 
-impl<S: ScheduledSlot + 'static> Drop for RenderPool<S> {
+impl Drop for RenderPool {
     fn drop(&mut self) {
         self.shared
             .epoch
@@ -862,7 +985,7 @@ impl<S: ScheduledSlot + 'static> Drop for RenderPool<S> {
     }
 }
 
-fn worker_main<S: ScheduledSlot>(index: usize, shared: Arc<PoolShared<S>>) {
+fn worker_main(index: usize, shared: Arc<PoolShared>) {
     let realtime_status = crate::realtime::engage(AUDIO_WORKER_PRIORITY);
     println!("AUDIO_WORKER_READY index={index} {realtime_status}");
     let mut observed = 0_u64;
@@ -882,12 +1005,14 @@ fn worker_main<S: ScheduledSlot>(index: usize, shared: Arc<PoolShared<S>>) {
     }
 }
 
-fn run_epoch<S: ScheduledSlot>(worker_index: usize, shared: &PoolShared<S>) {
+fn run_epoch(worker_index: usize, shared: &PoolShared) {
     let slot_count = shared.slot_count.load(Ordering::Relaxed);
     let frames = shared.frames.load(Ordering::Relaxed);
     let channels = shared.channels.load(Ordering::Relaxed);
     // SAFETY: published before the epoch this worker acquired.
     let slots_ptr = unsafe { *shared.slots_ptr.get() };
+    // SAFETY: as above; the table matches the Slot type behind `slots_ptr`.
+    let ops = unsafe { *shared.ops.get() };
     let mut idle_passes = 0_u32;
     loop {
         if shared.remaining_jobs.load(Ordering::Acquire) == 0 {
@@ -898,6 +1023,7 @@ fn run_epoch<S: ScheduledSlot>(worker_index: usize, shared: &PoolShared<S>) {
             let index = (worker_index + offset) % slot_count;
             if try_slot_job(
                 shared,
+                &ops,
                 slots_ptr,
                 slot_count,
                 index,
@@ -928,7 +1054,7 @@ fn run_epoch<S: ScheduledSlot>(worker_index: usize, shared: &PoolShared<S>) {
     }
 }
 
-fn finish_job<S>(shared: &PoolShared<S>) {
+fn finish_job(shared: &PoolShared) {
     if shared.remaining_jobs.fetch_sub(1, Ordering::AcqRel) == 1 {
         let workers = shared
             .worker_threads
@@ -941,7 +1067,7 @@ fn finish_job<S>(shared: &PoolShared<S>) {
 
 /// Clears `completed` from every Slot's dependency mask; a Slot whose last
 /// dependency just finished becomes ready and the workers are woken.
-fn release_dependents<S>(shared: &PoolShared<S>, completed: usize, slot_count: usize) {
+fn release_dependents(shared: &PoolShared, completed: usize, slot_count: usize) {
     let bit = 1_u32 << completed;
     let mut released = false;
     for schedule in shared.schedules.iter().take(slot_count) {
@@ -970,9 +1096,11 @@ fn release_dependents<S>(shared: &PoolShared<S>, completed: usize, slot_count: u
     }
 }
 
-fn try_slot_job<S: ScheduledSlot>(
-    shared: &PoolShared<S>,
-    slots_ptr: *mut S,
+#[allow(clippy::too_many_arguments)]
+fn try_slot_job(
+    shared: &PoolShared,
+    ops: &SlotOps,
+    slots_ptr: *mut (),
     slot_count: usize,
     index: usize,
     frames: u32,
@@ -997,28 +1125,31 @@ fn try_slot_job<S: ScheduledSlot>(
             let started = Instant::now();
             // SAFETY: every dependency reached PHASE_DONE (this Slot was
             // promoted out of PHASE_BLOCKED), so upstream outputs are
-            // stable; the CAS grants exclusive access to this Slot.
-            unsafe { S::gather_input(index, slots_ptr, slot_count, frames, channels) };
-            // SAFETY: the CAS above grants exclusive Slot access.
-            let slot = unsafe { &mut *slots_ptr.add(index) };
-            if slot.max_units() == 0 {
+            // stable; the CAS grants exclusive access to this Slot, and the
+            // ops table matches the Slot type published with this epoch.
+            unsafe { (ops.gather)(slots_ptr, slot_count, index, frames, channels) };
+            if schedule.max_units.load(Ordering::Relaxed) == 0 {
                 let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    slot.run_single(frames, channels)
+                    // SAFETY: as above.
+                    unsafe { (ops.run_single)(slots_ptr, index, frames, channels) }
                 }))
                 .unwrap_or(false);
                 let ns = started.elapsed().as_nanos() as u64;
                 record_stage(shared, schedule, index, STAGE_SINGLE, ns, worker_index, 0);
                 if !ok {
-                    quarantine_slot(shared, slot, index);
+                    quarantine_slot(shared, ops, slots_ptr, index);
                 }
                 schedule.phase.store(PHASE_DONE, Ordering::Release);
                 release_dependents(shared, index, slot_count);
                 finish_job(shared);
             } else {
+                let mut mask_bits = 0_u32;
                 let mask = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    slot.run_begin(frames, channels)
+                    // SAFETY: as above.
+                    unsafe { (ops.run_begin)(slots_ptr, index, frames, channels, &mut mask_bits) }
                 }))
-                .unwrap_or(None);
+                .unwrap_or(false)
+                .then_some(mask_bits);
                 let ns = started.elapsed().as_nanos() as u64;
                 record_stage(shared, schedule, index, STAGE_BEGIN, ns, worker_index, 0);
                 match mask {
@@ -1046,7 +1177,7 @@ fn try_slot_job<S: ScheduledSlot>(
                         finish_job(shared);
                     }
                     None => {
-                        quarantine_slot(shared, slot, index);
+                        quarantine_slot(shared, ops, slots_ptr, index);
                         schedule.phase.store(PHASE_DONE, Ordering::Release);
                         release_dependents(shared, index, slot_count);
                         finish_job(shared);
@@ -1111,19 +1242,19 @@ fn try_slot_job<S: ScheduledSlot>(
             {
                 return false;
             }
-            // SAFETY: begin retired and every unit completed, so the CAS
-            // grants exclusive Slot access again.
-            let slot = unsafe { &mut *slots_ptr.add(index) };
             let completed = schedule.completed_units.load(Ordering::Acquire);
             let started = Instant::now();
             let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                slot.run_end(frames, channels, completed)
+                // SAFETY: begin retired and every unit completed, so the CAS
+                // grants exclusive Slot access again; the ops table matches
+                // the Slot type published with this epoch.
+                unsafe { (ops.run_end)(slots_ptr, index, frames, channels, completed) }
             }))
             .unwrap_or(false);
             let ns = started.elapsed().as_nanos() as u64;
             record_stage(shared, schedule, index, STAGE_END, ns, worker_index, 0);
             if !ok {
-                quarantine_slot(shared, slot, index);
+                quarantine_slot(shared, ops, slots_ptr, index);
             }
             schedule.phase.store(PHASE_DONE, Ordering::Release);
             release_dependents(shared, index, slot_count);
@@ -1134,8 +1265,8 @@ fn try_slot_job<S: ScheduledSlot>(
     }
 }
 
-fn record_stage<S>(
-    shared: &PoolShared<S>,
+fn record_stage(
+    shared: &PoolShared,
     schedule: &SlotSchedule,
     slot: usize,
     stage: usize,
@@ -1149,9 +1280,12 @@ fn record_stage<S>(
     schedule.stage_ns[stage].fetch_add(ns, Ordering::Relaxed);
 }
 
-fn quarantine_slot<S: ScheduledSlot>(shared: &PoolShared<S>, slot: &mut S, index: usize) {
+fn quarantine_slot(shared: &PoolShared, ops: &SlotOps, slots_ptr: *mut (), index: usize) {
     shared.telemetry.record_slot_fault(index);
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| slot.quarantine()));
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: the caller holds the exclusive Slot claim.
+        unsafe { (ops.quarantine)(slots_ptr, index) }
+    }));
 }
 
 /// Executes the same job graph in Slot order on the calling thread. This is
@@ -1339,13 +1473,38 @@ impl<'plugin> ParallelUnits<'plugin> {
         input_channels: u32,
         output_channels: u32,
     ) -> anyhow::Result<Option<Self>> {
+        Self::create_with_resources(
+            plugin,
+            &std::collections::BTreeMap::new(),
+            sample_rate,
+            maximum_frames,
+            input_channels,
+            output_channels,
+        )
+    }
+
+    /// Like [`Self::create`], but every unit instance receives the same
+    /// runtime resource overrides the coordinator was created with — the
+    /// desktop host resolves private sound banks this way.
+    pub fn create_with_resources(
+        plugin: &'plugin LoadedPlugin,
+        resource_overrides: &std::collections::BTreeMap<String, std::path::PathBuf>,
+        sample_rate: f64,
+        maximum_frames: u32,
+        input_channels: u32,
+        output_channels: u32,
+    ) -> anyhow::Result<Option<Self>> {
         let Some(layout) = plugin.parallel_layout() else {
             return Ok(None);
         };
         let samples = maximum_frames as usize * output_channels as usize;
         let mut cells = Vec::with_capacity(layout.max_units);
         for unit in 0..layout.max_units {
-            let mut instance = plugin.create_instance()?;
+            let mut instance = if resource_overrides.is_empty() {
+                plugin.create_instance()?
+            } else {
+                plugin.create_instance_with_resource_overrides(resource_overrides)?
+            };
             if !instance.is_portable() {
                 anyhow::bail!("parallel units require the portable wasm-v1 backend");
             }
@@ -1717,7 +1876,7 @@ mod tests {
         }
     }
 
-    fn drive(pool: &mut RenderPool<MockSlot>, slots: &mut [MockSlot], blocks: usize) {
+    fn drive(pool: &mut RenderPool, slots: &mut [MockSlot], blocks: usize) {
         for _ in 0..blocks {
             if !pool.process(slots, 128, 2, 1_000_000_000) {
                 process_slots_sequential(slots, 128, 2, pool.telemetry());
@@ -1990,6 +2149,82 @@ mod tests {
             new_worst < old_worst * 8 / 10,
             "unit-aware {new_worst}ns vs indivisible {old_worst}ns"
         );
+    }
+
+    /// The whole point of the untyped pool: Rack blocks and Play-mode
+    /// blocks — different Slot types — share the same workers, alternating
+    /// epoch by epoch, with every invariant intact.
+    #[test]
+    fn one_pool_serves_different_slot_types_across_blocks() {
+        // Boxed for the same reason as the real unit cells: jobs hold raw
+        // pointers into them.
+        #[allow(clippy::vec_box)]
+        struct PlaySlot {
+            cells: Vec<Box<MockUnitCell>>,
+            begins: usize,
+            ends: usize,
+            quarantined: bool,
+        }
+        // SAFETY: same shape as MockSlot — per-unit boxed cells with atomic
+        // counters, stage methods safe on any pool thread.
+        unsafe impl ScheduledSlot for PlaySlot {
+            fn max_units(&self) -> u32 {
+                self.cells.len() as u32
+            }
+            fn run_single(&mut self, _frames: u32, _channels: u32) -> bool {
+                false
+            }
+            fn run_begin(&mut self, _frames: u32, _channels: u32) -> Option<u32> {
+                self.begins += 1;
+                Some((1 << self.cells.len()) - 1)
+            }
+            fn unit_job(&mut self, unit: u32, _frames: u32, _channels: u32) -> UnitJob {
+                UnitJob {
+                    context: (&mut *self.cells[unit as usize] as *mut MockUnitCell).cast(),
+                    unit,
+                    run: run_mock_unit,
+                }
+            }
+            fn run_end(&mut self, _frames: u32, _channels: u32, completed: u32) -> bool {
+                self.ends += 1;
+                completed == (1 << self.cells.len()) - 1
+            }
+            fn quarantine(&mut self) {
+                self.quarantined = true;
+            }
+        }
+
+        let telemetry = RenderTelemetry::new(3);
+        let mut pool = RenderPool::with_workers(3, telemetry);
+        let mut rack = vec![MockSlot::parallel(4, 0b1111, 0), MockSlot::single(0)];
+        let mut play = PlaySlot {
+            cells: (0..5)
+                .map(|_| {
+                    Box::new(MockUnitCell {
+                        runs: AtomicUsize::new(0),
+                        fail: false,
+                        spin_ns: 0,
+                    })
+                })
+                .collect(),
+            begins: 0,
+            ends: 0,
+            quarantined: false,
+        };
+        let blocks = 100;
+        for _ in 0..blocks {
+            assert!(pool.process(&mut rack, 128, 2, 1_000_000_000));
+            assert!(pool.process(std::slice::from_mut(&mut play), 128, 2, 1_000_000_000));
+        }
+        assert_eq!(rack[0].begins, blocks);
+        assert_eq!(rack[0].ends, blocks);
+        assert_eq!(rack[1].singles, blocks);
+        assert_eq!(play.begins, blocks);
+        assert_eq!(play.ends, blocks);
+        assert!(!play.quarantined);
+        for cell in &play.cells {
+            assert_eq!(cell.runs.load(Ordering::SeqCst), blocks);
+        }
     }
 
     #[test]

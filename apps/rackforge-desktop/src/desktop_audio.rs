@@ -896,11 +896,21 @@ impl DesktopAudio {
             render_telemetry: RenderTelemetry::new(0),
         };
         processor.render_telemetry = Arc::clone(processor.render_pool.telemetry());
+        let engage_callback_thread = std::sync::Once::new();
         let stream = device
             .build_output_stream_raw(
                 &config,
                 sample_format,
                 move |data, _| {
+                    // The WASAPI callback thread arrives without the
+                    // Multimedia Class boost ASIO drivers provide; request
+                    // the best the platform grants, once, on this thread.
+                    engage_callback_thread.call_once(|| {
+                        let status = rackforge_core::realtime::engage(
+                            rackforge_core::realtime::DEFAULT_AUDIO_PRIORITY,
+                        );
+                        println!("DESKTOP_AUDIO_CALLBACK {status}");
+                    });
                     let started = Instant::now();
                     let frames = data.len() / callback_channels;
                     if let Err(error) = render_output(&mut processor, data, sample_format) {

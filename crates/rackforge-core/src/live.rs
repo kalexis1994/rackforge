@@ -11,6 +11,10 @@ use crate::live_midi_state::{MidiControllerStates, ReservedMidiControls, plugin_
 use crate::midi_hotplug::{
     self, SupervisedSource, is_performance_midi_input, stable_alsa_source_id,
 };
+use crate::parallel_render::{
+    self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
+    process_one_slot_sequential, process_slots_sequential, spawn_telemetry_publisher,
+};
 use crate::performance::PerformanceRepository;
 use crate::rack_graph::compile_instrument_definition;
 use crate::realtime::{self, XrunMonitor};
@@ -44,20 +48,17 @@ use rackforge_session_api::{
     SoundSummary, SurfaceMode,
 };
 use semver::Version;
-use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use std::{env, fs, thread};
 
 const MIDI_QUEUE_CAPACITY: usize = 2_048;
 const AUDIO_CONTROL_QUEUE_CAPACITY: usize = 64;
 const MASTER_LEVEL_SMOOTHING_FRAMES: u32 = 480;
 pub(crate) const VIRTUAL_MIDI_SOURCE_ID: &str = "rackforge.virtual.touch";
-const AUDIO_WORKER_PRIORITY: i32 = realtime::DEFAULT_AUDIO_PRIORITY - 1;
-const WORKER_SHUTDOWN_EPOCH: u64 = u64::MAX;
 
 struct MasterGain {
     current: f32,
@@ -133,6 +134,9 @@ struct RackSlotVoice<'plugin> {
     slot_id: String,
     plugin: &'plugin LoadedPlugin,
     instance: PluginInstance<'plugin>,
+    /// Host-owned unit instances for `parallel_render_v1` plugins; `None`
+    /// keeps the Slot on the classic indivisible render path.
+    parallel: Option<ParallelUnits<'plugin>>,
     midi_stages: Vec<RackMidiStageRuntimeSpec>,
     audio_sources: Vec<crate::rack_graph::CompiledAudioSource>,
     sends_to_main: bool,
@@ -178,256 +182,109 @@ fn retire_portable_rack(
     }
 }
 
-#[derive(Clone, Copy)]
-struct RackRenderJob {
-    voices: *mut RackSlotVoice<'static>,
-    start: usize,
-    end: usize,
-    period_frames: u32,
-    channels: u32,
-}
-
-struct RackRenderWorkerShared {
-    published_epoch: AtomicU64,
-    completed_epoch: AtomicU64,
-    failure: AtomicU8,
-    job: UnsafeCell<RackRenderJob>,
-    coordinator: thread::Thread,
-}
-
-// SAFETY: the coordinator is the only writer of `job`, publishes it with a
-// Release store, and never mutates or relocates the voice slice until every
-// worker has acknowledged that epoch. Each worker receives a disjoint range.
-unsafe impl Send for RackRenderWorkerShared {}
-// SAFETY: synchronization and range ownership are the same as above; the raw
-// pointer is never dereferenced outside the published epoch.
-unsafe impl Sync for RackRenderWorkerShared {}
-
-struct RackRenderWorker {
-    shared: Arc<RackRenderWorkerShared>,
-    handle: Option<thread::JoinHandle<()>>,
-}
-
-struct RackRenderPool {
-    workers: Vec<RackRenderWorker>,
-    epoch: u64,
-}
-
-fn automatic_audio_worker_capacity(available_cpus: usize) -> usize {
-    match available_cpus {
-        0 | 1 => 0,
-        // On two-core systems the coordinator sleeps while both workers run.
-        // On larger systems one core remains available for the coordinator,
-        // device IRQs and the rest of the host.
-        2 => 2,
-        count => count - 1,
-    }
-    .min(control::MAX_ACTIVE_RACK_SLOTS)
-}
-
-fn rack_render_range(
-    voice_count: usize,
-    active_workers: usize,
-    worker_index: usize,
-) -> std::ops::Range<usize> {
-    let chunk_size = voice_count.div_ceil(active_workers);
-    let start = worker_index * chunk_size;
-    start..(start + chunk_size).min(voice_count)
-}
-
-fn requested_audio_worker_capacity(available_cpus: usize) -> usize {
-    let automatic = automatic_audio_worker_capacity(available_cpus);
-    let Some(value) = env::var_os("RACKFORGE_AUDIO_WORKERS") else {
-        return automatic;
-    };
-    let Some(value) = value.to_str() else {
-        eprintln!("AUDIO_WORKERS_INVALID value=non-utf8 fallback=auto:{automatic}");
-        return automatic;
-    };
-    match value.parse::<usize>() {
-        Ok(requested) => requested.min(control::MAX_ACTIVE_RACK_SLOTS),
-        Err(_) => {
-            eprintln!("AUDIO_WORKERS_INVALID value={value:?} fallback=auto:{automatic}");
-            automatic
-        }
-    }
-}
-
-impl RackRenderPool {
-    fn automatic() -> Self {
-        let available_cpus = thread::available_parallelism().map_or(1, |count| count.get());
-        let requested_workers = requested_audio_worker_capacity(available_cpus);
-        let coordinator = thread::current();
-        let mut workers = Vec::with_capacity(requested_workers);
-        for index in 0..requested_workers {
-            let shared = Arc::new(RackRenderWorkerShared {
-                published_epoch: AtomicU64::new(0),
-                completed_epoch: AtomicU64::new(0),
-                failure: AtomicU8::new(0),
-                job: UnsafeCell::new(RackRenderJob {
-                    voices: std::ptr::null_mut(),
-                    start: 0,
-                    end: 0,
-                    period_frames: 0,
-                    channels: 0,
-                }),
-                coordinator: coordinator.clone(),
-            });
-            let worker_shared = Arc::clone(&shared);
-            let handle = match thread::Builder::new()
-                .name(format!("rackforge-audio-worker-{index}"))
-                .spawn(move || rack_render_worker(index, worker_shared))
-            {
-                Ok(handle) => handle,
-                Err(error) => {
-                    eprintln!(
-                        "AUDIO_WORKER_SPAWN_FAILED index={index} error={error} \
-                         active_workers={}",
-                        workers.len()
-                    );
-                    break;
-                }
-            };
-            workers.push(RackRenderWorker {
-                shared,
-                handle: Some(handle),
-            });
-        }
-        println!(
-            "AUDIO_PARALLEL_READY mode={} detected_cpus={available_cpus} workers={}",
-            if env::var_os("RACKFORGE_AUDIO_WORKERS").is_some() {
-                "manual"
-            } else {
-                "auto"
-            },
-            workers.len()
-        );
-        Self { workers, epoch: 0 }
+/// One Slot as the global scheduler sees it: classic plugins contribute a
+/// single indivisible job, `parallel_render_v1` plugins contribute their
+/// begin → units → end family.
+//
+// SAFETY: rack voices reach worker threads only through the pool's epoch
+// protocol; unit jobs point at per-unit boxed cells inside `ParallelUnits`,
+// which hold isolated portable instances. Classic processing has always run
+// on pool workers, which the plugin ABI already requires plugins to accept.
+unsafe impl<'plugin> ScheduledSlot for RackSlotVoice<'plugin> {
+    fn max_units(&self) -> u32 {
+        self.parallel.as_ref().map_or(0, ParallelUnits::max_units)
     }
 
-    /// Processes independent leaf instruments in parallel. Returns `false`
-    /// when serial execution is cheaper or is the only safe option.
-    fn process(
-        &mut self,
-        voices: &mut [RackSlotVoice<'static>],
-        period_frames: u32,
-        channels: u32,
-    ) -> bool {
-        let active_workers = voices.len().min(self.workers.len());
-        if active_workers < 2 {
-            return false;
-        }
-        self.epoch = self.epoch.wrapping_add(1);
-        if self.epoch == 0 || self.epoch == WORKER_SHUTDOWN_EPOCH {
-            self.epoch = 1;
-        }
-        let epoch = self.epoch;
-        let voices_ptr = voices.as_mut_ptr();
-
-        for (index, worker) in self.workers.iter().take(active_workers).enumerate() {
-            let range = rack_render_range(voices.len(), active_workers, index);
-            // SAFETY: this worker completed the previous epoch before this
-            // method returned. The job is fully written before publication.
-            unsafe {
-                *worker.shared.job.get() = RackRenderJob {
-                    voices: voices_ptr,
-                    start: range.start,
-                    end: range.end,
-                    period_frames,
-                    channels,
-                };
-            }
-            worker.shared.failure.store(0, Ordering::Relaxed);
-            worker
-                .shared
-                .published_epoch
-                .store(epoch, Ordering::Release);
-            if let Some(handle) = &worker.handle {
-                handle.thread().unpark();
-            }
-        }
-
-        while self
-            .workers
-            .iter()
-            .take(active_workers)
-            .any(|worker| worker.shared.completed_epoch.load(Ordering::Acquire) != epoch)
-        {
-            thread::park();
-        }
-
-        for worker in self.workers.iter().take(active_workers) {
-            if worker.shared.failure.load(Ordering::Acquire) == 0 {
-                continue;
-            }
-            // SAFETY: every worker has completed the epoch, so the coordinator
-            // exclusively owns the voice slice again.
-            let job = unsafe { *worker.shared.job.get() };
-            for voice in &mut voices[job.start..job.end] {
-                voice.output.fill(0.0);
-                voice.process_faulted = true;
-            }
-            eprintln!(
-                "AUDIO_WORKER_PANIC range={}..{} action=quarantine",
-                job.start, job.end
-            );
-        }
+    fn run_single(&mut self, frames: u32, channels: u32) -> bool {
+        process_rack_voice(self, frames, channels);
+        // Faults are already silenced and quarantined in place; report
+        // success so the scheduler does not quarantine a second time.
         true
     }
-}
 
-impl Drop for RackRenderPool {
-    fn drop(&mut self) {
-        for worker in &self.workers {
-            worker
-                .shared
-                .published_epoch
-                .store(WORKER_SHUTDOWN_EPOCH, Ordering::Release);
-            if let Some(handle) = &worker.handle {
-                handle.thread().unpark();
-            }
+    fn run_begin(&mut self, frames: u32, _channels: u32) -> Option<u32> {
+        self.output.fill(0.0);
+        if self.process_faulted {
+            return Some(0);
         }
-        for worker in &mut self.workers {
-            if let Some(handle) = worker.handle.take() {
-                let _ = handle.join();
-            }
+        let parallel = self.parallel.as_mut()?;
+        parallel
+            .begin(
+                &mut self.instance,
+                &self.input,
+                frames,
+                &self.events,
+                &self.parameter_events,
+            )
+            .ok()
+    }
+
+    fn unit_job(&mut self, unit: u32, frames: u32, channels: u32) -> UnitJob {
+        self.parallel
+            .as_mut()
+            .expect("unit job requested for a classic Rack Slot")
+            .unit_job(unit, &self.input, frames, channels)
+    }
+
+    fn run_end(&mut self, frames: u32, channels: u32, completed: u32) -> bool {
+        if self.process_faulted {
+            return true;
         }
+        let Some(parallel) = self.parallel.as_mut() else {
+            return false;
+        };
+        parallel
+            .finish(
+                &mut self.instance,
+                &mut self.output,
+                frames,
+                channels,
+                completed,
+            )
+            .is_ok()
+    }
+
+    fn quarantine(&mut self) {
+        self.output.fill(0.0);
+        self.process_faulted = true;
     }
 }
 
-fn rack_render_worker(index: usize, shared: Arc<RackRenderWorkerShared>) {
-    let realtime_status = realtime::engage(AUDIO_WORKER_PRIORITY);
-    println!("AUDIO_WORKER_READY index={index} {realtime_status}");
-    let mut observed_epoch = 0;
-    loop {
-        let epoch = shared.published_epoch.load(Ordering::Acquire);
-        if epoch == observed_epoch {
-            thread::park();
-            continue;
-        }
-        if epoch == WORKER_SHUTDOWN_EPOCH {
-            return;
-        }
-        // SAFETY: the Release/Acquire epoch handoff publishes a complete job,
-        // and the coordinator guarantees non-overlapping voice ranges.
-        let job = unsafe { *shared.job.get() };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // SAFETY: `job.voices` points to the stable coordinator-owned
-            // slice for this epoch. Only this worker touches start..end.
-            let voices = unsafe {
-                std::slice::from_raw_parts_mut(job.voices.add(job.start), job.end - job.start)
-            };
-            for voice in voices {
-                process_rack_voice(voice, job.period_frames, job.channels);
-            }
-        }));
-        if result.is_err() {
-            shared.failure.store(1, Ordering::Release);
-        }
-        observed_epoch = epoch;
-        shared.completed_epoch.store(epoch, Ordering::Release);
-        shared.coordinator.unpark();
+/// Creates the host-owned unit instances for one activated Rack Slot when
+/// the plugin declares `parallel_render_v1` and this host schedules units.
+/// State and program loads are mirrored so every instance agrees on control
+/// state; per-block dynamics still travel through dispatch payloads.
+fn create_rack_slot_parallel_units<'plugin>(
+    plugin: &'plugin LoadedPlugin,
+    state: &RackSlotStateLoad,
+    sample_rate_hz: u32,
+    period_frames: u32,
+    input_channels: u32,
+    output_channels: u32,
+) -> Result<Option<ParallelUnits<'plugin>>> {
+    if !parallel_render::parallel_units_enabled() {
+        return Ok(None);
     }
+    let Some(mut units) = ParallelUnits::create(
+        plugin,
+        f64::from(sample_rate_hz),
+        period_frames,
+        input_channels,
+        output_channels,
+    )?
+    else {
+        return Ok(None);
+    };
+    match state {
+        RackSlotStateLoad::Default => {}
+        RackSlotStateLoad::Opaque(bytes) => {
+            units.mirror(|instance| instance.load_state(bytes))?;
+        }
+        RackSlotStateLoad::LegacyPreset(preset_id) => {
+            units.mirror(|instance| instance.load_preset(preset_id))?;
+        }
+    }
+    Ok(Some(units))
 }
 
 fn process_rack_voice(voice: &mut RackSlotVoice<'_>, period_frames: u32, channels: u32) {
@@ -460,6 +317,7 @@ fn process_rack_audio_graph(
     capture_channels: usize,
     frames: usize,
     output_channels: usize,
+    telemetry: &RenderTelemetry,
 ) {
     for index in 0..voices.len() {
         let (completed, pending) = voices.split_at_mut(index);
@@ -493,7 +351,13 @@ fn process_rack_audio_graph(
                 }
             }
         }
-        process_rack_voice(voice, frames as u32, output_channels as u32);
+        process_one_slot_sequential(
+            voice,
+            index,
+            frames as u32,
+            output_channels as u32,
+            telemetry,
+        );
     }
 }
 
@@ -605,10 +469,20 @@ fn create_rack_voices<'plugin>(
                 output_channels as u32,
             )
             .with_context(|| format!("activating Rack Slot {}", spec.slot_id))?;
+        let parallel = create_rack_slot_parallel_units(
+            plugin,
+            &spec.state,
+            sample_rate_hz,
+            period_frames,
+            input_channels as u32,
+            output_channels as u32,
+        )
+        .with_context(|| format!("preparing parallel units for Rack Slot {}", spec.slot_id))?;
         voices.push(RackSlotVoice {
             slot_id: spec.slot_id.clone(),
             plugin,
             instance,
+            parallel,
             midi_stages: spec.midi_stages.clone(),
             audio_sources: spec.audio_sources.clone(),
             sends_to_main: spec.sends_to_main,
@@ -634,6 +508,7 @@ fn rack_voices_from_prepared(
             slot_id: prepared.slot_id,
             plugin: prepared.plugin,
             instance: prepared.instance.0,
+            parallel: prepared.parallel.map(|units| units.0),
             midi_stages: prepared.midi_stages,
             audio_sources: prepared.audio_sources,
             sends_to_main: prepared.sends_to_main,
@@ -1684,7 +1559,16 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     if let Some(remedy) = realtime_status.remedy() {
         eprintln!("REALTIME_REMEDY {remedy}");
     }
-    let mut rack_renderer = RackRenderPool::automatic();
+    let render_telemetry = RenderTelemetry::new(parallel_render::MAX_RENDER_SLOTS);
+    spawn_telemetry_publisher(&render_telemetry, Duration::from_secs(1));
+    let mut rack_renderer: RenderPool<RackSlotVoice<'static>> =
+        RenderPool::automatic(Arc::clone(&render_telemetry));
+    render_telemetry.set_slot_labels(
+        rack_voices
+            .iter()
+            .map(|voice| voice.slot_id.clone())
+            .collect(),
+    );
     let mut xruns = XrunMonitor::new(output_rate as u32, period_frames);
     let mut input_xruns = XrunMonitor::new(output_rate as u32, period_frames);
 
@@ -2061,6 +1945,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             drop(native_voices);
                         }
                         render_mode = AudioRenderMode::Rack;
+                        render_telemetry.set_slot_labels(
+                            rack_voices
+                                .iter()
+                                .map(|voice| voice.slot_id.clone())
+                                .collect(),
+                        );
                         println!(
                             "LIVE_RACK_ACTIVATED rack={rack_id} instance={instance_id} slots={}",
                             rack_voices.len()
@@ -2528,22 +2418,41 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 let graph_audio = rack_voices
                     .iter()
                     .any(|voice| !voice.audio_sources.is_empty());
-                if graph_audio {
+                let deadline_ns =
+                    period_frames as u64 * 1_000_000_000 / (output_rate as u64).max(1);
+                let render_started = Instant::now();
+                let scheduled = if graph_audio {
                     process_rack_audio_graph(
                         &mut rack_voices,
                         &captured_input,
                         capture_channels,
                         period_frames,
                         channels,
+                        &render_telemetry,
                     );
-                } else if !rack_renderer.process(
+                    false
+                } else if rack_renderer.process(
                     &mut rack_voices,
                     period_frames as u32,
                     channels as u32,
+                    deadline_ns,
                 ) {
-                    for voice in &mut rack_voices {
-                        process_rack_voice(voice, period_frames as u32, channels as u32);
-                    }
+                    true
+                } else {
+                    process_slots_sequential(
+                        &mut rack_voices,
+                        period_frames as u32,
+                        channels as u32,
+                        &render_telemetry,
+                    );
+                    false
+                };
+                if !scheduled {
+                    render_telemetry.record_block(
+                        render_started.elapsed().as_nanos() as u64,
+                        deadline_ns,
+                        None,
+                    );
                 }
                 for voice in &rack_voices {
                     if voice.process_faulted || !voice.sends_to_main {
@@ -2669,6 +2578,9 @@ fn stop_all_plugin_runtimes(
         if let Err(error) = replace_with_stopped_runtime(voice.plugin, &mut voice.instance) {
             failures.push(format!("slot {}: {error}", voice.slot_id));
         }
+        // Unit instances are dropped with the stopped runtime and rebuilt
+        // from the coordinator's state when playback resumes.
+        voice.parallel = None;
         voice.events.clear();
         voice.output.fill(0.0);
         voice.process_faulted = false;
@@ -2731,6 +2643,14 @@ fn restart_render_target(
                             voice.input_channels as u32,
                             output_channels,
                         )
+                        .and_then(|()| {
+                            reactivate_rack_slot_parallel_units(
+                                voice,
+                                sample_rate,
+                                maximum_frames,
+                                output_channels,
+                            )
+                        })
                         .map_err(|error| format!("reactivating slot {}: {error:#}", voice.slot_id))
                 };
                 if let Err(error) = activation {
@@ -2740,6 +2660,42 @@ fn restart_render_target(
                     return Err(error);
                 }
             }
+            Ok(())
+        }
+    }
+}
+
+/// Re-prepares a Slot's unit instances after playback resumes, rebuilding
+/// them from the coordinator's state when an emergency stop dropped them.
+/// This runs on control paths of the audio thread, never inside a deadline.
+fn reactivate_rack_slot_parallel_units(
+    voice: &mut RackSlotVoice<'_>,
+    sample_rate: f64,
+    maximum_frames: u32,
+    output_channels: u32,
+) -> Result<()> {
+    match voice.parallel.as_mut() {
+        Some(units) => units.reconfigure(
+            sample_rate,
+            maximum_frames,
+            voice.input_channels as u32,
+            output_channels,
+        ),
+        None => {
+            if !parallel_render::parallel_units_enabled()
+                || voice.plugin.parallel_layout().is_none()
+            {
+                return Ok(());
+            }
+            let state = voice.instance.save_state()?;
+            voice.parallel = create_rack_slot_parallel_units(
+                voice.plugin,
+                &RackSlotStateLoad::Opaque(state),
+                sample_rate as u32,
+                maximum_frames,
+                voice.input_channels as u32,
+                output_channels,
+            )?;
             Ok(())
         }
     }
@@ -2815,6 +2771,18 @@ fn reconfigure_audio_output(
                     requested.channels,
                 )
                 .with_context(|| format!("activating Rack Slot {}", voice.slot_id))?;
+            if let Some(units) = voice.parallel.as_mut() {
+                units
+                    .reconfigure(
+                        f64::from(requested.sample_rate_hz),
+                        requested.period_frames,
+                        voice.input_channels as u32,
+                        requested.channels,
+                    )
+                    .with_context(|| {
+                        format!("activating parallel units for Rack Slot {}", voice.slot_id)
+                    })?;
+            }
         }
         Ok((opened, devices))
     })();
@@ -2861,6 +2829,14 @@ fn reconfigure_audio_output(
                         voice.input_channels as u32,
                         previous_profile.channels,
                     )?;
+                    if let Some(units) = voice.parallel.as_mut() {
+                        units.reconfigure(
+                            f64::from(previous_profile.sample_rate_hz),
+                            previous_profile.period_frames,
+                            voice.input_channels as u32,
+                            previous_profile.channels,
+                        )?;
+                    }
                 }
                 Ok(opened)
             })();
@@ -3231,28 +3207,21 @@ mod tests {
 
     #[test]
     fn automatic_audio_workers_scale_with_cpu_capacity() {
-        assert_eq!(automatic_audio_worker_capacity(1), 0);
-        assert_eq!(automatic_audio_worker_capacity(2), 2);
-        assert_eq!(automatic_audio_worker_capacity(4), 3);
+        assert_eq!(parallel_render::automatic_audio_worker_capacity(1), 0);
+        assert_eq!(parallel_render::automatic_audio_worker_capacity(2), 2);
+        assert_eq!(parallel_render::automatic_audio_worker_capacity(4), 3);
         assert_eq!(
-            automatic_audio_worker_capacity(64),
+            parallel_render::automatic_audio_worker_capacity(64),
             control::MAX_ACTIVE_RACK_SLOTS
         );
     }
 
     #[test]
-    fn rack_render_ranges_cover_every_voice_once() {
-        for voice_count in 2..=control::MAX_ACTIVE_RACK_SLOTS {
-            for worker_count in 2..=voice_count {
-                let mut covered = vec![0_u8; voice_count];
-                for worker in 0..worker_count {
-                    for voice in rack_render_range(voice_count, worker_count, worker) {
-                        covered[voice] += 1;
-                    }
-                }
-                assert!(covered.into_iter().all(|visits| visits == 1));
-            }
-        }
+    fn the_scheduler_covers_every_control_plane_rack_slot() {
+        assert_eq!(
+            parallel_render::MAX_RENDER_SLOTS,
+            control::MAX_ACTIVE_RACK_SLOTS
+        );
     }
 
     #[test]

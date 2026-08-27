@@ -11,6 +11,62 @@ use std::ops::Range;
 
 pub const ABI_VERSION_V1_1: i32 = 0x0001_0001;
 pub const ABI_VERSION_V1: i32 = 0x0001_0002;
+/// Version reported by `rackforge_parallel_abi_version` for the optional
+/// parallel-render extension. Major mismatches are rejected outright.
+pub const PARALLEL_ABI_VERSION_V1: i32 = 0x0001_0000;
+/// Host-side ceiling on `rackforge_parallel_max_units`. It bounds every
+/// preallocated plan, dispatch and mix structure on both sides of the ABI.
+pub const MAX_PARALLEL_UNITS: usize = 16;
+/// Bytes of one entry in the plan region: `unit: u32` then `payload: u32`.
+pub const PARALLEL_PLAN_ENTRY_BYTES: usize = 8;
+
+/// One ready-to-render unit announced by `rackforge_parallel_begin_block`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ParallelPlanEntry {
+    /// Unit index in `0..max_units`. Entries are strictly increasing, which
+    /// both forbids duplicates and fixes the deterministic combine order.
+    pub unit: u32,
+    /// Bytes of dispatch payload the coordinator wrote for this unit. Never
+    /// exceeds the module's declared dispatch stride.
+    pub payload_bytes: u32,
+}
+
+/// Geometry of a module's parallel-render extension, fixed at instantiation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ParallelLayout {
+    pub max_units: usize,
+    /// Bytes reserved for each unit's dispatch payload slot.
+    pub dispatch_stride: usize,
+    /// f32 samples reserved for each unit's slot in the mix region.
+    pub mix_slot_samples: usize,
+}
+
+/// Validates the plan entries a coordinator produced for one block.
+pub(crate) fn validate_parallel_plan(
+    entries: &[ParallelPlanEntry],
+    max_units: usize,
+    dispatch_stride: usize,
+) -> Result<()> {
+    let mut previous: Option<u32> = None;
+    for entry in entries {
+        if entry.unit as usize >= max_units {
+            bail!("parallel plan names unit {} beyond max_units", entry.unit);
+        }
+        if let Some(previous) = previous
+            && entry.unit <= previous
+        {
+            bail!("parallel plan units must be strictly increasing");
+        }
+        if entry.payload_bytes as usize > dispatch_stride {
+            bail!(
+                "parallel plan payload {} exceeds dispatch stride {dispatch_stride}",
+                entry.payload_bytes
+            );
+        }
+        previous = Some(entry.unit);
+    }
+    Ok(())
+}
 pub(crate) const STATUS_OK: i32 = 0;
 pub(crate) const PROGRAM_EDIT_BASIC: u32 = 1 << 0;
 pub(crate) const PROGRAM_EDIT_PREVIEW: u32 = 1 << 1;

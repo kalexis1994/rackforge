@@ -34,6 +34,14 @@ pub enum Capability {
     Presets,
     State,
     SampleAccurateAutomation,
+    /// The portable component additionally exposes the versioned wasm-v1
+    /// parallel-render extension: `begin_block` prepares the block once,
+    /// independent units render concurrently in host-owned worker instances,
+    /// and `end_block` combines them deterministically. Hosts that do not
+    /// schedule units (single core, browser) keep using the classic
+    /// `rackforge_process` export of the very same component.
+    #[serde(rename = "parallel_render_v1")]
+    ParallelRenderV1,
 }
 
 pub const MAIN_AUDIO_BUS_ID: &str = "main";
@@ -526,6 +534,14 @@ impl PluginManifest {
         if unique.len() != self.capabilities.len() {
             return Err(ManifestError::DuplicateCapability);
         }
+        if self.capabilities.contains(&Capability::ParallelRenderV1) {
+            if self.component.is_none() {
+                return Err(ManifestError::ParallelRenderRequiresComponent);
+            }
+            if !self.capabilities.contains(&Capability::AudioOutput) {
+                return Err(ManifestError::ParallelRenderRequiresAudioOutput);
+            }
+        }
         match (&self.component, self.binaries.is_empty()) {
             (None, true) => return Err(ManifestError::NoRuntime),
             (Some(_), false) => return Err(ManifestError::AmbiguousRuntime),
@@ -897,6 +913,10 @@ pub enum ManifestError {
     UnsupportedApi { major: u16, minor: u16 },
     #[error("capability appears more than once")]
     DuplicateCapability,
+    #[error("parallel_render_v1 requires a portable wasm-v1 component")]
+    ParallelRenderRequiresComponent,
+    #[error("parallel_render_v1 requires the audio_output capability")]
+    ParallelRenderRequiresAudioOutput,
     #[error("manifest declares neither a portable component nor native binaries")]
     NoRuntime,
     #[error("manifest cannot mix a portable component with native binaries")]
@@ -1036,6 +1056,47 @@ mod tests {
             candidate.validate(),
             Err(ManifestError::InvalidAudioBusChannels { .. })
         ));
+    }
+
+    #[test]
+    fn parallel_render_capability_serializes_with_its_version_suffix() {
+        let toml = "capabilities = [\"audio_output\", \"parallel_render_v1\"]";
+        #[derive(Deserialize)]
+        struct Probe {
+            capabilities: Vec<Capability>,
+        }
+        let probe: Probe = toml::from_str(toml).unwrap();
+        assert_eq!(
+            probe.capabilities,
+            vec![Capability::AudioOutput, Capability::ParallelRenderV1]
+        );
+    }
+
+    #[test]
+    fn parallel_render_requires_a_portable_component_and_audio_output() {
+        let mut candidate = manifest();
+        candidate.capabilities.push(Capability::ParallelRenderV1);
+        assert_eq!(
+            candidate.validate(),
+            Err(ManifestError::ParallelRenderRequiresComponent)
+        );
+        candidate.binaries.clear();
+        candidate.component = Some(PortableComponent {
+            abi: PortableAbi::WasmV1,
+            path: "component.wasm".into(),
+            runtime_descriptor: "metadata/runtime.json".into(),
+            parameter_schema: "metadata/parameters.json".into(),
+            preset_catalog: "metadata/presets.json".into(),
+            memory_limit_mib: None,
+        });
+        assert_eq!(candidate.validate(), Ok(()));
+        candidate
+            .capabilities
+            .retain(|capability| *capability != Capability::AudioOutput);
+        assert_eq!(
+            candidate.validate(),
+            Err(ManifestError::ParallelRenderRequiresAudioOutput)
+        );
     }
 
     #[test]

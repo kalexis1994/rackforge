@@ -1281,26 +1281,23 @@ impl BrowserHost {
                 };
                 consumed |= mapped.pass_through == ParameterLinkPassThrough::Consume;
                 self.audio.push_parameter(mapped.event);
-                if let Some(instance_id) = active_instance_id.as_ref() {
-                    if let Some(plugin) = self
+                if let Some(instance_id) = active_instance_id.as_ref()
+                    && let Some(plugin) = self
                         .plugins
                         .iter()
                         .find(|plugin| plugin.instance_id == *instance_id)
-                    {
-                        if self
-                            .live_parameter_store
-                            .record(
-                                &plugin.plugin_id,
-                                &plugin.runtime.manifest().version,
-                                plugin.runtime.parameters(),
-                                mapped.event.parameter_index,
-                                mapped.event.value,
-                            )
-                            .is_ok()
-                        {
-                            self.live_parameter_dirty_at = Some(Instant::now());
-                        }
-                    }
+                    && self
+                        .live_parameter_store
+                        .record(
+                            &plugin.plugin_id,
+                            &plugin.runtime.manifest().version,
+                            plugin.runtime.parameters(),
+                            mapped.event.parameter_index,
+                            mapped.event.value,
+                        )
+                        .is_ok()
+                {
+                    self.live_parameter_dirty_at = Some(Instant::now());
                 }
             }
         }

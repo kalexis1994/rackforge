@@ -1,0 +1,12 @@
+[package]
+name = "rackforge-parallel-demo-synth"
+description = "Five-voice wasm-v1 instrument demonstrating the parallel_render_v1 unit contract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rackforge-plugin-sdk = { path = "../../crates/rackforge-plugin-sdk" }

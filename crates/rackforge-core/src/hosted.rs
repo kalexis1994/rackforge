@@ -6,9 +6,11 @@ use rackforge_plugin_api::{
     ProgramEditRequest, ProgramEditorView, ProgramFieldEditRequest, ResourceKind,
     RuntimeDescriptor, SurfaceActivationRequest, SurfaceActivationResponse,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use rackforge_plugin_runtime::ParallelPlanEntry;
 use rackforge_plugin_runtime::{
-    MidiEvent, ParameterEvent, PortableEngine, PortableInstance as WasmInstance, PortableModule,
-    RuntimeLimits,
+    MidiEvent, ParallelLayout, ParameterEvent, PortableEngine, PortableInstance as WasmInstance,
+    PortableModule, RuntimeLimits,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -98,6 +100,15 @@ impl LoadedPlugin {
         match &self.backend {
             LoadedBackend::Native(plugin) => plugin.presets(),
             LoadedBackend::Portable(plugin) => &plugin.presets,
+        }
+    }
+
+    /// Geometry of the plugin's parallel-render extension, when the package
+    /// declares `parallel_render_v1` and this backend can schedule units.
+    pub fn parallel_layout(&self) -> Option<ParallelLayout> {
+        match &self.backend {
+            LoadedBackend::Native(_) => None,
+            LoadedBackend::Portable(plugin) => plugin.parallel_layout,
         }
     }
 
@@ -239,6 +250,7 @@ pub struct PortableLoadedPlugin {
     resources: BTreeMap<String, PathBuf>,
     data_root: Option<PathBuf>,
     module: PortableModule,
+    parallel_layout: Option<ParallelLayout>,
 }
 
 impl PortableLoadedPlugin {
@@ -318,6 +330,33 @@ impl PortableLoadedPlugin {
             None => PortableEngine::new(limits)?,
         };
         let module = engine.compile(&component_bytes)?;
+        // The manifest and the component must agree on the parallel-render
+        // extension, exactly as they must agree on presets: a host decides
+        // its scheduling strategy from the manifest before any instance
+        // exists, so a silent mismatch would surface as a runtime surprise.
+        // The browser backend cannot schedule units at all and reports no
+        // layout, which keeps every parallel package on its sequential
+        // `rackforge_process` fallback there.
+        #[cfg(not(target_arch = "wasm32"))]
+        let parallel_layout = {
+            let layout = module.instantiate()?.parallel_layout();
+            let declares_parallel = package
+                .manifest()
+                .capabilities
+                .contains(&Capability::ParallelRenderV1);
+            match (declares_parallel, layout) {
+                (true, None) => bail!(
+                    "manifest declares parallel_render_v1 but the component does not export the extension"
+                ),
+                (false, Some(_)) => bail!(
+                    "component exports the parallel-render extension without declaring parallel_render_v1"
+                ),
+                _ => {}
+            }
+            layout
+        };
+        #[cfg(target_arch = "wasm32")]
+        let parallel_layout = None;
         Ok(Self {
             manifest: package.manifest().clone(),
             descriptor,
@@ -326,6 +365,7 @@ impl PortableLoadedPlugin {
             resources,
             data_root: data_root.map(Path::to_path_buf),
             module,
+            parallel_layout,
         })
     }
 
@@ -699,6 +739,134 @@ impl PluginInstance<'_> {
         }
     }
 
+    /// Whether this instance runs in the sandboxed portable backend, which is
+    /// the precondition for handing it to another host-owned thread.
+    pub fn is_portable(&self) -> bool {
+        matches!(self.backend, PluginInstanceBackend::Portable(_))
+    }
+
+    /// Geometry of the instance's parallel-render extension, `None` for
+    /// classic plugins and for backends that cannot schedule units.
+    pub fn parallel_layout(&self) -> Option<ParallelLayout> {
+        match &self.backend {
+            PluginInstanceBackend::Native(_) => None,
+            PluginInstanceBackend::Portable(instance) => instance.instance.parallel_layout(),
+        }
+    }
+
+    /// Serial pre-stage of one parallel block on the coordinator instance.
+    /// Fills `plan` and returns the number of ready units.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_begin_block(
+        &mut self,
+        input: &[f32],
+        frames: u32,
+        midi_events: &[MidiEventV1],
+        parameter_events: &[ParameterEventV1],
+        plan: &mut [ParallelPlanEntry],
+    ) -> Result<usize> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                if !instance.active {
+                    bail!("plugin instance is not active");
+                }
+                instance.stage_realtime_events(midi_events, parameter_events)?;
+                let midi = std::mem::take(&mut instance.midi_scratch);
+                let parameters = std::mem::take(&mut instance.parameter_scratch);
+                let result =
+                    instance
+                        .instance
+                        .parallel_begin_block(input, frames, &midi, &parameters, plan);
+                instance.midi_scratch = midi;
+                instance.parameter_scratch = parameters;
+                result
+            }
+        }
+    }
+
+    /// Copies the coordinator's dispatch payload for `unit` into `payload`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_read_dispatch(&self, unit: u32, payload: &mut [u8]) -> Result<()> {
+        match &self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.parallel_read_dispatch(unit, payload)
+            }
+        }
+    }
+
+    /// Writes the dispatch payload for `unit` into a worker instance.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_write_dispatch(&mut self, unit: u32, payload: &[u8]) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.parallel_write_dispatch(unit, payload)
+            }
+        }
+    }
+
+    /// Renders one independent unit inside a worker instance.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_render_unit(
+        &mut self,
+        unit: u32,
+        payload_bytes: usize,
+        input: &[f32],
+        output: &mut [f32],
+        frames: u32,
+    ) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                if !instance.active {
+                    bail!("plugin instance is not active");
+                }
+                instance
+                    .instance
+                    .parallel_render_unit(unit, payload_bytes, input, output, frames)
+            }
+        }
+    }
+
+    /// Deposits one finished unit's audio in the coordinator's mix region.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_write_mix_slot(&mut self, unit: u32, samples: &[f32]) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.parallel_write_mix_slot(unit, samples)
+            }
+        }
+    }
+
+    /// Serial post-stage of one parallel block on the coordinator instance.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_end_block(&mut self, output: &mut [f32], frames: u32) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                if !instance.active {
+                    bail!("plugin instance is not active");
+                }
+                instance.instance.parallel_end_block(output, frames)
+            }
+        }
+    }
+
     /// Reports the fuel consumed by the most recent portable process call.
     /// Native plugins are not metered by the WebAssembly sandbox.
     pub fn last_realtime_fuel_consumed(&self) -> Option<u64> {
@@ -721,6 +889,35 @@ pub struct PortablePluginInstance {
 }
 
 impl PortablePluginInstance {
+    /// Converts ABI events into the runtime's representation inside the
+    /// preallocated scratch vectors, enforcing RackForge's real-time limits.
+    fn stage_realtime_events(
+        &mut self,
+        midi_events: &[MidiEventV1],
+        parameter_events: &[ParameterEventV1],
+    ) -> Result<()> {
+        if midi_events.len() > MAX_REALTIME_EVENTS || parameter_events.len() > MAX_REALTIME_EVENTS {
+            bail!("process block exceeds RackForge's real-time event limit");
+        }
+        self.midi_scratch.clear();
+        for event in midi_events {
+            let length = event.length as usize;
+            if length == 0 || length > event.data.len() {
+                bail!("MIDI event has an invalid length");
+            }
+            self.midi_scratch
+                .push(MidiEvent::new(event.frame, &event.data[..length])?);
+        }
+        self.parameter_scratch.clear();
+        self.parameter_scratch
+            .extend(parameter_events.iter().map(|event| ParameterEvent {
+                frame: event.frame,
+                index: event.parameter_index,
+                value: event.value,
+            }));
+        Ok(())
+    }
+
     fn refresh_presets(&mut self) -> Result<()> {
         let Some(bytes) = self.instance.preset_catalog()? else {
             return Ok(());
@@ -751,25 +948,7 @@ impl PortablePluginInstance {
         if !self.active {
             bail!("plugin instance is not active");
         }
-        if midi_events.len() > MAX_REALTIME_EVENTS || parameter_events.len() > MAX_REALTIME_EVENTS {
-            bail!("process block exceeds RackForge's real-time event limit");
-        }
-        self.midi_scratch.clear();
-        for event in midi_events {
-            let length = event.length as usize;
-            if length == 0 || length > event.data.len() {
-                bail!("MIDI event has an invalid length");
-            }
-            self.midi_scratch
-                .push(MidiEvent::new(event.frame, &event.data[..length])?);
-        }
-        self.parameter_scratch.clear();
-        self.parameter_scratch
-            .extend(parameter_events.iter().map(|event| ParameterEvent {
-                frame: event.frame,
-                index: event.parameter_index,
-                value: event.value,
-            }));
+        self.stage_realtime_events(midi_events, parameter_events)?;
         if input.len() != frames as usize * input_channels as usize
             || output.len() != frames as usize * output_channels as usize
         {

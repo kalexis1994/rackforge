@@ -216,6 +216,13 @@ pub struct PreparedPluginInstance(pub PluginInstance<'static>);
 // Ownership moves from the control worker to the single audio loop.
 unsafe impl Send for PreparedPluginInstance {}
 
+pub struct PreparedParallelUnits(pub crate::parallel_render::ParallelUnits<'static>);
+
+// SAFETY: `ParallelUnits::create` admits only portable wasm-v1 instances.
+// Ownership moves once from the control worker to the audio loop, which
+// hands each unit to at most one pool worker per block.
+unsafe impl Send for PreparedParallelUnits {}
+
 pub struct PreparedRackSlot {
     pub slot_id: String,
     pub midi_stages: Vec<RackMidiStageRuntimeSpec>,
@@ -225,6 +232,7 @@ pub struct PreparedRackSlot {
     pub pan_per_mille: i16,
     pub plugin: &'static LoadedPlugin,
     pub instance: PreparedPluginInstance,
+    pub parallel: Option<PreparedParallelUnits>,
     pub input_channels: usize,
     pub input: Vec<f32>,
     pub output: Vec<f32>,
@@ -4099,6 +4107,8 @@ fn prepare_portable_rack_slots(
                     Some(revision),
                 )
             })?;
+        let parallel =
+            prepare_rack_slot_parallel_units(context, revision, spec, plugin, &mut instance)?;
         prepared.push(PreparedRackSlot {
             slot_id: spec.slot_id.clone(),
             midi_stages: spec.midi_stages.clone(),
@@ -4108,6 +4118,7 @@ fn prepare_portable_rack_slots(
             pan_per_mille: spec.pan_per_mille,
             plugin,
             instance: PreparedPluginInstance(instance),
+            parallel,
             input_channels,
             input: vec![0.0; context.plugin_maximum_frames as usize * input_channels],
             output: vec![
@@ -4120,6 +4131,52 @@ fn prepare_portable_rack_slots(
         });
     }
     Ok(Some(prepared))
+}
+
+/// Builds and warms the host-owned unit instances for one prepared Slot of a
+/// `parallel_render_v1` plugin, mirroring the Slot's state load so control
+/// state agrees across the coordinator and every unit.
+fn prepare_rack_slot_parallel_units(
+    context: &ControlContext,
+    revision: Revision,
+    spec: &RackSlotRuntimeSpec,
+    plugin: &'static LoadedPlugin,
+    coordinator: &mut PluginInstance<'static>,
+) -> Result<Option<PreparedParallelUnits>, ControlFailure> {
+    if !crate::parallel_render::parallel_units_enabled() || plugin.parallel_layout().is_none() {
+        return Ok(None);
+    }
+    let failure = |error: anyhow::Error| {
+        control_failure(
+            ControlErrorCode::Internal,
+            format!(
+                "preparing parallel units for Rack Slot {}: {error:#}",
+                spec.slot_id
+            ),
+            Some(revision),
+        )
+    };
+    let audio = plugin.manifest().resolved_audio_contract();
+    let mut units = crate::parallel_render::ParallelUnits::create(
+        plugin,
+        context.plugin_sample_rate,
+        context.plugin_maximum_frames,
+        audio.input_channels(),
+        context.plugin_output_channels,
+    )
+    .map_err(failure)?
+    .expect("parallel layout was just observed");
+    match &spec.state {
+        RackSlotStateLoad::Default => {}
+        RackSlotStateLoad::Opaque(bytes) => units
+            .mirror(|instance| instance.load_state(bytes))
+            .map_err(failure)?,
+        RackSlotStateLoad::LegacyPreset(preset_id) => units
+            .mirror(|instance| instance.load_preset(preset_id))
+            .map_err(failure)?,
+    }
+    units.warmup(coordinator).map_err(failure)?;
+    Ok(Some(PreparedParallelUnits(units)))
 }
 
 fn prepare_compiled_rack_runtime(

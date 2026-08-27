@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "banks": [
+    {
+      "id": "factory",
+      "name": "Factory",
+      "order": 0
+    }
+  ],
+  "presets": [
+    {
+      "id": "keys",
+      "name": "Demo Keys",
+      "bank": "factory",
+      "category": "Keys",
+      "order": 0,
+      "tags": [
+        "default"
+      ]
+    },
+    {
+      "id": "pad",
+      "name": "Demo Pad",
+      "bank": "factory",
+      "category": "Pad",
+      "order": 1,
+      "tags": [
+        "soft"
+      ]
+    },
+    {
+      "id": "lead",
+      "name": "Demo Lead",
+      "bank": "factory",
+      "category": "Lead",
+      "order": 3,
+      "tags": [
+        "bright"
+      ]
+    }
+  ]
+}

@@ -37,6 +37,7 @@ members = [
     "plugins/demo-synth",
     "plugins/gain",
     "plugins/gain-portable",
+    "plugins/parallel-demo-synth",
     "plugins/roland-scva",
 ]
 exclude = [

@@ -20,6 +20,8 @@ pub mod loader;
 pub mod midi_hotplug;
 pub mod midi_trace;
 pub mod package;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod parallel_render;
 pub mod parameter_link;
 pub mod performance;
 pub mod rack_graph;

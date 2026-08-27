@@ -177,6 +177,222 @@ pub trait Processor: Default {
     );
 }
 
+/// Version this SDK writes into `rackforge_parallel_abi_version`.
+pub const PARALLEL_ABI_VERSION_V1: u32 = 0x0001_0000;
+
+/// Everything the coordinator sees while preparing one block: audio input,
+/// sample-positioned MIDI, sample-accurate automation and the block shape.
+pub struct BlockContext<'a> {
+    pub input: &'a [f32],
+    pub midi: &'a [MidiEvent],
+    pub parameters: &'a [ParameterEvent],
+    pub frames: u32,
+    pub input_channels: u32,
+    pub output_channels: u32,
+}
+
+/// Collects the block plan inside `begin_block`: which units render this
+/// block and the dispatch payload each receives. Units must be activated in
+/// ascending order, which is also the deterministic combine order.
+pub struct PlanWriter<'a> {
+    plan: &'a mut [u32],
+    dispatch: &'a mut [u8],
+    stride: usize,
+    max_units: usize,
+    count: usize,
+    last_unit: Option<u32>,
+}
+
+impl<'a> PlanWriter<'a> {
+    #[doc(hidden)]
+    pub fn new(
+        plan: &'a mut [u32],
+        dispatch: &'a mut [u8],
+        stride: usize,
+        max_units: usize,
+    ) -> Self {
+        Self {
+            plan,
+            dispatch,
+            stride,
+            max_units,
+            count: 0,
+            last_unit: None,
+        }
+    }
+
+    /// Schedules `unit` for this block with its dispatch payload. Returns
+    /// `false` (and schedules nothing) when the unit is out of range, out of
+    /// ascending order, or the payload exceeds the declared stride.
+    pub fn activate(&mut self, unit: u32, payload: &[u8]) -> bool {
+        if unit as usize >= self.max_units
+            || payload.len() > self.stride
+            || self.count >= self.max_units
+        {
+            return false;
+        }
+        if self.last_unit.is_some_and(|previous| unit <= previous) {
+            return false;
+        }
+        self.plan[self.count * 2] = unit;
+        self.plan[self.count * 2 + 1] = payload.len() as u32;
+        self.dispatch[unit as usize * self.stride..][..payload.len()].copy_from_slice(payload);
+        self.count += 1;
+        self.last_unit = Some(unit);
+        true
+    }
+
+    pub fn activated(&self) -> usize {
+        self.count
+    }
+}
+
+/// The block shape a unit renders against.
+pub struct UnitContext<'a> {
+    pub input: &'a [f32],
+    pub frames: u32,
+    pub output_channels: u32,
+}
+
+/// Deterministic access to the finished unit blocks inside `end_block`.
+/// Slots are addressed by unit index, never by completion order, and a unit
+/// the host had to silence reads as zeros.
+pub struct UnitMix<'a> {
+    mix: &'a [f32],
+    slot_samples: usize,
+    plan: &'a [u32],
+    count: usize,
+    samples: usize,
+}
+
+impl<'a> UnitMix<'a> {
+    #[doc(hidden)]
+    pub fn new(
+        mix: &'a [f32],
+        slot_samples: usize,
+        plan: &'a [u32],
+        count: usize,
+        samples: usize,
+    ) -> Self {
+        Self {
+            mix,
+            slot_samples,
+            plan,
+            count,
+            samples,
+        }
+    }
+
+    /// Units activated by this block's `begin_block`, in ascending order.
+    pub fn active_units(&self) -> impl Iterator<Item = u32> + '_ {
+        (0..self.count).map(|index| self.plan[index * 2])
+    }
+
+    /// This block's samples for one unit slot.
+    pub fn slot(&self, unit: u32) -> &[f32] {
+        &self.mix[unit as usize * self.slot_samples..][..self.samples]
+    }
+}
+
+/// A processor whose block is split into a serial pre-stage, independent
+/// units the host may render on any of its own threads, and a serial
+/// post-stage. Export it with [`export_parallel_processor!`], which also
+/// derives the classic `rackforge_process` as `begin_block` → every planned
+/// unit in ascending order → `end_block`, so hosts without unit scheduling
+/// (single core, browsers) produce identical audio from the same component.
+///
+/// The division of state is the whole contract:
+///
+/// * `Self` is *coordinator* state — MIDI parsing, voice allocation, LFOs,
+///   noise seeds, global effects. It is only touched by `begin_block` /
+///   `end_block` and the control plane.
+/// * `Self::Unit` is per-unit state — oscillator phases, envelopes, filters.
+///   [`Self::render_unit`] deliberately has no access to `&self`: everything
+///   a unit needs each block must arrive in its dispatch payload. On a
+///   multi-core host each unit lives in its own isolated instance, so any
+///   value smuggled around the payload would simply not be there.
+pub trait ParallelProcessor: Default {
+    type Unit: Default;
+
+    fn prepare(
+        &mut self,
+        _sample_rate: f64,
+        _maximum_frames: u32,
+        _input_channels: u32,
+        _output_channels: u32,
+    ) -> bool {
+        true
+    }
+
+    fn set_parameter(&mut self, index: u32, value: f64) -> bool;
+
+    fn get_parameter(&self, _index: u32) -> Option<f64> {
+        None
+    }
+
+    /// Resets coordinator state. Unit state is reset separately through
+    /// [`Self::reset_unit`] on every instance that holds it.
+    fn reset(&mut self) {}
+
+    fn reset_unit(unit: &mut Self::Unit) {
+        *unit = Self::Unit::default();
+    }
+
+    fn begin_resource(&mut self, _id: &str, _total_bytes: u64) -> bool {
+        false
+    }
+
+    fn write_resource(&mut self, _offset: u64, _bytes: &[u8]) -> bool {
+        false
+    }
+
+    fn end_resource(&mut self) -> bool {
+        false
+    }
+
+    fn write_program_catalog(&mut self, _destination: &mut [u8]) -> Option<usize> {
+        None
+    }
+
+    fn load_preset(&mut self, _id: &str) -> bool {
+        false
+    }
+
+    fn save_state(&self, _destination: &mut [u8]) -> Option<usize> {
+        None
+    }
+
+    fn load_state(&mut self, _state: &[u8]) -> bool {
+        false
+    }
+
+    /// Serial pre-stage: consume MIDI and automation, advance global state
+    /// exactly once, decide the active units and write their payloads.
+    fn begin_block(&mut self, context: &BlockContext<'_>, plan: &mut PlanWriter<'_>);
+
+    /// Renders one unit from its persistent state and dispatch payload into
+    /// `output` (`frames × output_channels` interleaved samples, fully
+    /// overwritten). No `&self`: units must not read coordinator state.
+    fn render_unit(
+        unit_index: u32,
+        unit: &mut Self::Unit,
+        payload: &[u8],
+        context: &UnitContext<'_>,
+        output: &mut [f32],
+    );
+
+    /// Serial post-stage: combine the unit slots in ascending unit order and
+    /// apply global stages. Iterate [`UnitMix::active_units`] — never the
+    /// completion order, which the host does not even expose.
+    fn end_block(
+        &mut self,
+        mix: &UnitMix<'_>,
+        output: &mut [f32],
+        frames: u32,
+        output_channels: u32,
+    );
+}
+
 #[macro_export]
 macro_rules! export_processor {
     ($processor:ty, max_frames = $max_frames:expr, max_input_channels = $max_input_channels:expr, max_output_channels = $max_output_channels:expr, max_midi_events = $max_midi_events:expr, max_parameter_events = $max_parameter_events:expr, max_transfer_bytes = $max_transfer_bytes:expr) => {
@@ -693,6 +909,445 @@ macro_rules! export_processor {
                     input_channels as u32,
                     output_channels as u32,
                 );
+                $crate::STATUS_OK
+            }
+        }
+    };
+}
+
+/// Exports a [`ParallelProcessor`] as a complete `wasm-v1` component with
+/// the optional `parallel_render_v1` extension.
+///
+/// The classic exports are derived from the same stage functions: the
+/// generated `rackforge_process` runs `begin_block`, renders every planned
+/// unit in ascending order into its mix slot, then runs `end_block`. A host
+/// that schedules units performs exactly the same sequence across its own
+/// worker instances, so both paths produce identical audio.
+#[macro_export]
+macro_rules! export_parallel_processor {
+    ($processor:ty, max_units = $max_units:expr, dispatch_stride = $dispatch_stride:expr, max_frames = $max_frames:expr, max_input_channels = $max_input_channels:expr, max_output_channels = $max_output_channels:expr, max_midi_events = $max_midi_events:expr, max_parameter_events = $max_parameter_events:expr, max_transfer_bytes = $max_transfer_bytes:expr) => {
+        use $crate::Processor as _;
+
+        const RF_PARALLEL_MAX_UNITS: usize = $max_units;
+        const RF_PARALLEL_DISPATCH_STRIDE: usize = $dispatch_stride;
+        const RF_PARALLEL_MIX_SLOT_SAMPLES: usize = $max_frames * $max_output_channels;
+
+        /// The host requires an 8-aligned dispatch region.
+        #[repr(C, align(8))]
+        pub struct RackForgeDispatchBuffer(
+            [u8; RF_PARALLEL_MAX_UNITS * RF_PARALLEL_DISPATCH_STRIDE],
+        );
+
+        static mut RF_DISPATCH: RackForgeDispatchBuffer =
+            RackForgeDispatchBuffer([0; RF_PARALLEL_MAX_UNITS * RF_PARALLEL_DISPATCH_STRIDE]);
+        static mut RF_PLAN: [u32; RF_PARALLEL_MAX_UNITS * 2] = [0; RF_PARALLEL_MAX_UNITS * 2];
+        static mut RF_PLAN_COUNT: usize = 0;
+        static mut RF_MIX: [f32; RF_PARALLEL_MAX_UNITS * RF_PARALLEL_MIX_SLOT_SAMPLES] =
+            [0.0; RF_PARALLEL_MAX_UNITS * RF_PARALLEL_MIX_SLOT_SAMPLES];
+        static mut RF_PARALLEL_INPUT_CHANNELS: u32 = 0;
+
+        /// Owns the coordinator and, in single-instance hosts, every unit.
+        /// In a scheduling host each instance is either used as the
+        /// coordinator or entered only through one unit's render calls, so
+        /// the states can never race.
+        pub struct RackForgeParallelExport {
+            inner: $processor,
+            units: [<$processor as $crate::ParallelProcessor>::Unit; RF_PARALLEL_MAX_UNITS],
+        }
+
+        impl Default for RackForgeParallelExport {
+            fn default() -> Self {
+                Self {
+                    inner: Default::default(),
+                    units: core::array::from_fn(|_| Default::default()),
+                }
+            }
+        }
+
+        impl RackForgeParallelExport {
+            /// Serial pre-stage over the shared plan/dispatch statics.
+            /// Returns the number of planned units.
+            fn rf_begin(
+                &mut self,
+                input: &[f32],
+                midi: &[$crate::MidiEvent],
+                parameters: &[$crate::ParameterEvent],
+                frames: u32,
+                input_channels: u32,
+                output_channels: u32,
+            ) -> usize {
+                // SAFETY: every entry point into this component is
+                // single-threaded; the statics are only reached from here.
+                unsafe {
+                    let plan = &mut *core::ptr::addr_of_mut!(RF_PLAN);
+                    let dispatch = &mut (*core::ptr::addr_of_mut!(RF_DISPATCH)).0;
+                    let mut writer = $crate::PlanWriter::new(
+                        plan,
+                        dispatch,
+                        RF_PARALLEL_DISPATCH_STRIDE,
+                        RF_PARALLEL_MAX_UNITS,
+                    );
+                    let context = $crate::BlockContext {
+                        input,
+                        midi,
+                        parameters,
+                        frames,
+                        input_channels,
+                        output_channels,
+                    };
+                    $crate::ParallelProcessor::begin_block(&mut self.inner, &context, &mut writer);
+                    let count = writer.activated();
+                    RF_PLAN_COUNT = count;
+                    count
+                }
+            }
+
+            fn rf_end(&mut self, output: &mut [f32], frames: u32, output_channels: u32) {
+                // SAFETY: single-threaded component, as above.
+                unsafe {
+                    let mix = $crate::UnitMix::new(
+                        &*core::ptr::addr_of!(RF_MIX),
+                        RF_PARALLEL_MIX_SLOT_SAMPLES,
+                        &*core::ptr::addr_of!(RF_PLAN),
+                        RF_PLAN_COUNT,
+                        frames as usize * output_channels as usize,
+                    );
+                    $crate::ParallelProcessor::end_block(
+                        &mut self.inner,
+                        &mix,
+                        output,
+                        frames,
+                        output_channels,
+                    );
+                }
+            }
+        }
+
+        impl $crate::Processor for RackForgeParallelExport {
+            fn prepare(
+                &mut self,
+                sample_rate: f64,
+                maximum_frames: u32,
+                input_channels: u32,
+                output_channels: u32,
+            ) -> bool {
+                // SAFETY: single-threaded component.
+                unsafe {
+                    RF_PARALLEL_INPUT_CHANNELS = input_channels;
+                }
+                for unit in &mut self.units {
+                    <$processor as $crate::ParallelProcessor>::reset_unit(unit);
+                }
+                $crate::ParallelProcessor::prepare(
+                    &mut self.inner,
+                    sample_rate,
+                    maximum_frames,
+                    input_channels,
+                    output_channels,
+                )
+            }
+
+            fn set_parameter(&mut self, index: u32, value: f64) -> bool {
+                $crate::ParallelProcessor::set_parameter(&mut self.inner, index, value)
+            }
+
+            fn get_parameter(&self, index: u32) -> Option<f64> {
+                $crate::ParallelProcessor::get_parameter(&self.inner, index)
+            }
+
+            fn reset(&mut self) {
+                $crate::ParallelProcessor::reset(&mut self.inner);
+                for unit in &mut self.units {
+                    <$processor as $crate::ParallelProcessor>::reset_unit(unit);
+                }
+            }
+
+            fn begin_resource(&mut self, id: &str, total_bytes: u64) -> bool {
+                $crate::ParallelProcessor::begin_resource(&mut self.inner, id, total_bytes)
+            }
+
+            fn write_resource(&mut self, offset: u64, bytes: &[u8]) -> bool {
+                $crate::ParallelProcessor::write_resource(&mut self.inner, offset, bytes)
+            }
+
+            fn end_resource(&mut self) -> bool {
+                $crate::ParallelProcessor::end_resource(&mut self.inner)
+            }
+
+            fn write_program_catalog(&mut self, destination: &mut [u8]) -> Option<usize> {
+                $crate::ParallelProcessor::write_program_catalog(&mut self.inner, destination)
+            }
+
+            fn load_preset(&mut self, id: &str) -> bool {
+                $crate::ParallelProcessor::load_preset(&mut self.inner, id)
+            }
+
+            fn save_state(&self, destination: &mut [u8]) -> Option<usize> {
+                $crate::ParallelProcessor::save_state(&self.inner, destination)
+            }
+
+            fn load_state(&mut self, state: &[u8]) -> bool {
+                $crate::ParallelProcessor::load_state(&mut self.inner, state)
+            }
+
+            fn process(
+                &mut self,
+                input: &[f32],
+                output: &mut [f32],
+                midi: &[$crate::MidiEvent],
+                parameters: &[$crate::ParameterEvent],
+                frames: u32,
+                input_channels: u32,
+                output_channels: u32,
+            ) {
+                let count = self.rf_begin(
+                    input,
+                    midi,
+                    parameters,
+                    frames,
+                    input_channels,
+                    output_channels,
+                );
+                let samples = frames as usize * output_channels as usize;
+                for index in 0..count {
+                    // SAFETY: single-threaded component; the plan was just
+                    // written by `rf_begin` and stays untouched until the
+                    // next block.
+                    let (unit, payload_len) = unsafe {
+                        let plan = &*core::ptr::addr_of!(RF_PLAN);
+                        (plan[index * 2], plan[index * 2 + 1] as usize)
+                    };
+                    // SAFETY: as above; payload and mix regions are disjoint
+                    // from `output`.
+                    unsafe {
+                        let dispatch = &(*core::ptr::addr_of!(RF_DISPATCH)).0;
+                        let payload =
+                            &dispatch[unit as usize * RF_PARALLEL_DISPATCH_STRIDE..][..payload_len];
+                        let context = $crate::UnitContext {
+                            input,
+                            frames,
+                            output_channels,
+                        };
+                        <$processor as $crate::ParallelProcessor>::render_unit(
+                            unit,
+                            &mut self.units[unit as usize],
+                            payload,
+                            &context,
+                            &mut output[..samples],
+                        );
+                        let mix = &mut *core::ptr::addr_of_mut!(RF_MIX);
+                        mix[unit as usize * RF_PARALLEL_MIX_SLOT_SAMPLES..][..samples]
+                            .copy_from_slice(&output[..samples]);
+                    }
+                }
+                self.rf_end(output, frames, output_channels);
+            }
+        }
+
+        $crate::export_processor!(
+            RackForgeParallelExport,
+            max_frames = $max_frames,
+            max_input_channels = $max_input_channels,
+            max_output_channels = $max_output_channels,
+            max_midi_events = $max_midi_events,
+            max_parameter_events = $max_parameter_events,
+            max_transfer_bytes = $max_transfer_bytes
+        );
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_abi_version() -> i32 {
+            $crate::PARALLEL_ABI_VERSION_V1 as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_max_units() -> i32 {
+            RF_PARALLEL_MAX_UNITS as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_dispatch_stride() -> i32 {
+            RF_PARALLEL_DISPATCH_STRIDE as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_dispatch_ptr() -> i32 {
+            core::ptr::addr_of_mut!(RF_DISPATCH).cast::<u8>() as usize as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_plan_ptr() -> i32 {
+            core::ptr::addr_of_mut!(RF_PLAN).cast::<u32>() as usize as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_mix_ptr() -> i32 {
+            core::ptr::addr_of_mut!(RF_MIX).cast::<f32>() as usize as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_begin_block(
+            frames: i32,
+            input_channels: i32,
+            output_channels: i32,
+            midi_event_count: i32,
+            parameter_event_count: i32,
+        ) -> i32 {
+            if frames <= 0
+                || input_channels < 0
+                || output_channels < 0
+                || midi_event_count < 0
+                || parameter_event_count < 0
+            {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            let Some(input_samples) = (frames as usize).checked_mul(input_channels as usize) else {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            };
+            if input_samples > RF_MAX_INPUT_SAMPLES
+                || frames as usize > RF_MAX_FRAMES
+                || midi_event_count as usize > RF_MAX_MIDI_EVENTS
+                || parameter_event_count as usize > RF_MAX_PARAMETER_EVENTS
+            {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            // SAFETY: single-threaded component entry point over the same
+            // statics as `rackforge_process`.
+            unsafe {
+                if !RF_PREPARED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let processor =
+                    &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<RackForgeParallelExport>();
+                let input = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_INPUT).cast::<f32>(),
+                    input_samples,
+                );
+                let packed_midi = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_MIDI).cast::<u64>(),
+                    midi_event_count as usize,
+                );
+                let parameter_events = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_PARAMETERS).cast::<$crate::ParameterEvent>(),
+                    parameter_event_count as usize,
+                );
+                let mut events = [$crate::MidiEvent {
+                    frame: 0,
+                    data: [0; 3],
+                    length: 1,
+                }; RF_MAX_MIDI_EVENTS];
+                for (destination, packed) in events.iter_mut().zip(packed_midi) {
+                    *destination = $crate::MidiEvent::from_packed(*packed);
+                    if destination.frame >= frames as u32
+                        || destination.length == 0
+                        || destination.length > 3
+                    {
+                        return $crate::STATUS_INVALID_ARGUMENT;
+                    }
+                }
+                if parameter_events
+                    .iter()
+                    .any(|event| event.frame >= frames as u32 || !event.value.is_finite())
+                {
+                    return $crate::STATUS_INVALID_ARGUMENT;
+                }
+                processor.rf_begin(
+                    input,
+                    &events[..midi_event_count as usize],
+                    parameter_events,
+                    frames as u32,
+                    input_channels as u32,
+                    output_channels as u32,
+                ) as i32
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_render_unit(
+            unit: i32,
+            payload_bytes: i32,
+            frames: i32,
+            output_channels: i32,
+        ) -> i32 {
+            if unit < 0
+                || unit as usize >= RF_PARALLEL_MAX_UNITS
+                || payload_bytes < 0
+                || payload_bytes as usize > RF_PARALLEL_DISPATCH_STRIDE
+                || frames <= 0
+                || frames as usize > RF_MAX_FRAMES
+                || output_channels < 0
+            {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            let Some(samples) = (frames as usize).checked_mul(output_channels as usize) else {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            };
+            if samples > RF_MAX_OUTPUT_SAMPLES {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            // SAFETY: single-threaded component entry point. In a scheduling
+            // host this instance is a worker: only this unit's state is
+            // touched, exactly as the trait contract promises.
+            unsafe {
+                if !RF_PREPARED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let processor =
+                    &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<RackForgeParallelExport>();
+                let input_samples =
+                    (frames as usize).saturating_mul(RF_PARALLEL_INPUT_CHANNELS as usize);
+                if input_samples > RF_MAX_INPUT_SAMPLES {
+                    return $crate::STATUS_INVALID_ARGUMENT;
+                }
+                let input = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_INPUT).cast::<f32>(),
+                    input_samples,
+                );
+                let dispatch = &(*core::ptr::addr_of!(RF_DISPATCH)).0;
+                let payload = &dispatch[unit as usize * RF_PARALLEL_DISPATCH_STRIDE..]
+                    [..payload_bytes as usize];
+                let output = core::slice::from_raw_parts_mut(
+                    core::ptr::addr_of_mut!(RF_OUTPUT).cast::<f32>(),
+                    samples,
+                );
+                let context = $crate::UnitContext {
+                    input,
+                    frames: frames as u32,
+                    output_channels: output_channels as u32,
+                };
+                <$processor as $crate::ParallelProcessor>::render_unit(
+                    unit as u32,
+                    &mut processor.units[unit as usize],
+                    payload,
+                    &context,
+                    output,
+                );
+                $crate::STATUS_OK
+            }
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_end_block(frames: i32, output_channels: i32) -> i32 {
+            if frames <= 0 || frames as usize > RF_MAX_FRAMES || output_channels < 0 {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            let Some(samples) = (frames as usize).checked_mul(output_channels as usize) else {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            };
+            if samples > RF_MAX_OUTPUT_SAMPLES {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            // SAFETY: single-threaded component entry point.
+            unsafe {
+                if !RF_PREPARED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let processor =
+                    &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<RackForgeParallelExport>();
+                let output = core::slice::from_raw_parts_mut(
+                    core::ptr::addr_of_mut!(RF_OUTPUT).cast::<f32>(),
+                    samples,
+                );
+                processor.rf_end(output, frames as u32, output_channels as u32);
                 $crate::STATUS_OK
             }
         }

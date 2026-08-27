@@ -605,6 +605,14 @@ impl PortableInstance {
         check_status(status, "load_state")
     }
 
+    /// The browser backend never schedules units: the page has one audio
+    /// rendering thread, so the classic `rackforge_process` export of the
+    /// very same component is the sequential fallback the extension
+    /// guarantees. Reporting `None` keeps callers on that path.
+    pub fn parallel_layout(&self) -> Option<crate::ParallelLayout> {
+        None
+    }
+
     pub fn supports_program_editing(&self) -> bool {
         self.program_editing_capabilities() != 0
     }

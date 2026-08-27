@@ -126,6 +126,15 @@ The preferred format is `wasm-v1`: a plugin is compiled once against
 compatible host. Native libraries remain supported during the transition, but
 they are platform-specific artifacts.
 
+Instruments whose block splits into independent units — a voice-per-core
+synthesizer, for example — may additionally declare the versioned
+`parallel_render_v1` capability and implement `ParallelProcessor` with
+`export_parallel_processor!`. RackForge then distributes the units across its
+own audio workers while single-core hosts and the browser keep using the
+identical component sequentially. The complete contract lives in
+[PARALLEL_RENDER.md](PARALLEL_RENDER.md), with `plugins/parallel-demo-synth`
+as the worked five-voice example.
+
 Sound banks, ROMs, credentials, caches, and saved programs are forbidden from
 the package. The installer replaces only the immutable package directory and
 preserves the plugin data directory.

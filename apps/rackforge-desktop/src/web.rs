@@ -2142,7 +2142,14 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
                     break;
                 }
             }
-            Message::Close(_) => break,
+            Message::Close(frame) => {
+                // Complete the WebSocket close handshake. Dropping the TCP
+                // stream directly makes Chromium report an error in addition
+                // to the expected close event, which used to surface as a
+                // misleading Core interruption banner during UI handovers.
+                let _ = sender.send(Message::Close(frame)).await;
+                break;
+            }
             _ => {}
         }
     }

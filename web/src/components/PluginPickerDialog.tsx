@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { ModalDialog } from "./ModalDialog";
 import { rackPluginsOfRole, type RackPluginRole } from "../rackPluginSelection";
 import type { PluginInstance, PluginWebDescriptor } from "../types";
+import { RfButton } from "../ui/RfButton";
 
 /**
  * Chooses the plugin a Rack node will own.
@@ -36,9 +37,9 @@ export function PluginPickerDialog({
       closeLabel={isEffect ? "Close effect selector" : "Close instrument selector"}
       className="rack-instrument-picker-dialog"
       actions={
-        <button type="button" className="secondary-button" onClick={onClose}>
+        <RfButton variant="secondary" onClick={onClose}>
           Cancel
-        </button>
+        </RfButton>
       }
     >
       <p className="rack-instrument-picker-help">

@@ -4,6 +4,25 @@ import {
   useRef,
   type ReactNode,
 } from "react";
+import { RfButton } from "../ui/RfButton";
+
+const FOCUSABLE_SELECTOR =
+  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+const modalStack: symbol[] = [];
+let bodyScrollLocks = 0;
+let bodyOverflowBeforeLock = "";
+
+function lockBodyScroll() {
+  if (bodyScrollLocks === 0) {
+    bodyOverflowBeforeLock = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+  bodyScrollLocks += 1;
+  return () => {
+    bodyScrollLocks = Math.max(0, bodyScrollLocks - 1);
+    if (bodyScrollLocks === 0) document.body.style.overflow = bodyOverflowBeforeLock;
+  };
+}
 
 export interface ModalDialogProps {
   title: ReactNode;
@@ -42,6 +61,8 @@ export function ModalDialog({
   const titleId = useId();
   const descriptionId = useId();
   const dialogRef = useRef<HTMLElement | null>(null);
+  const modalIdentity = useRef(Symbol("rackforge-modal"));
+  const backdropPressRef = useRef(false);
   const onCloseRef = useRef(onClose);
   const dismissibleRef = useRef(dismissible);
 
@@ -51,14 +72,16 @@ export function ModalDialog({
   }, [dismissible, onClose]);
 
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
+    const identity = modalIdentity.current;
+    modalStack.push(identity);
+    const unlockBodyScroll = lockBodyScroll();
     const previousFocus = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
-    document.body.style.overflow = "hidden";
     dialogRef.current?.focus({ preventScroll: true });
 
     const closeOnEscape = (event: KeyboardEvent) => {
+      if (modalStack.at(-1) !== identity) return;
       if (dismissibleRef.current && event.key === "Escape") {
         event.preventDefault();
         onCloseRef.current();
@@ -66,9 +89,7 @@ export function ModalDialog({
       }
       if (event.key !== "Tab" || !dialogRef.current) return;
       const focusable = Array.from(
-        dialogRef.current.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-        ),
+        dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
       ).filter((element) => !element.hidden && element.getClientRects().length > 0);
       if (focusable.length === 0) {
         event.preventDefault();
@@ -90,7 +111,9 @@ export function ModalDialog({
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => {
-      document.body.style.overflow = previousOverflow;
+      const index = modalStack.lastIndexOf(identity);
+      if (index >= 0) modalStack.splice(index, 1);
+      unlockBodyScroll();
       window.removeEventListener("keydown", closeOnEscape);
       previousFocus?.focus({ preventScroll: true });
     };
@@ -100,7 +123,15 @@ export function ModalDialog({
     <div
       className={`preset-modal-backdrop modal-dialog-backdrop ${backdropClassName}`.trim()}
       onPointerDown={(event) => {
-        if (dismissible && event.target === event.currentTarget) onClose();
+        backdropPressRef.current = event.target === event.currentTarget;
+      }}
+      onPointerUp={(event) => {
+        const completedOnBackdrop = backdropPressRef.current && event.target === event.currentTarget;
+        backdropPressRef.current = false;
+        if (dismissible && completedOnBackdrop) onClose();
+      }}
+      onPointerCancel={() => {
+        backdropPressRef.current = false;
       }}
     >
       <section
@@ -118,15 +149,17 @@ export function ModalDialog({
             <h2 id={titleId}>{title}</h2>
           </div>
           {showClose ? (
-            <button
-              type="button"
+            <RfButton
+              variant="ghost"
+              size="compact"
+              iconOnly
               className="preset-modal-close modal-dialog-close"
               disabled={!dismissible}
               onClick={onClose}
               aria-label={closeLabel}
             >
               <span aria-hidden="true">×</span>
-            </button>
+            </RfButton>
           ) : null}
         </header>
         {message ? (

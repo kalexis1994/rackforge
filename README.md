@@ -288,6 +288,7 @@ Current limitations:
 - [Linux x86-64 guide](platforms/linux-x86_64/README.md)
 - [Portable preset format](docs/RFPRESET.md)
 - [LIVE performance model](docs/architecture/live-performance.md)
+- [Experience system and performance budgets](docs/architecture/experience-system.md)
 - [Reliability qualification](docs/RELIABILITY.md)
 - [Runtime and process layout](docs/RUNTIME.md)
 - [Technical roadmap](ROADMAP.md)

@@ -24,7 +24,9 @@ use rackforge_session_api::{
     rackforge_parameter_input, semantic_control_input,
 };
 use rackforge_surface_api::{SurfaceActivationRequest, SurfaceActivationResponse};
-use rackforge_surface_runtime::{Input as SurfaceInput, Screen};
+use rackforge_surface_runtime::{
+    Input as SurfaceInput, Screen, ScreenMailbox, ScreenUpdate, SurfaceUpdatePriority,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::cell::UnsafeCell;
@@ -46,7 +48,6 @@ const MAX_AUDIO_FRAMES: usize = 4_096;
 const MIDI_QUEUE_CAPACITY: usize = 4_096;
 const COMMAND_QUEUE_CAPACITY: usize = 64;
 const CONTROLLER_QUEUE_CAPACITY: usize = 256;
-const DISPLAY_QUEUE_CAPACITY: usize = 8;
 /// Never hand a plugin more MIDI in one block than the ABI guarantees it can
 /// take. Every RackForge plugin declares 256 events, and a block that carries
 /// more is rejected whole — which killed the audio stream, and killed it again
@@ -720,7 +721,7 @@ pub struct DesktopAudio {
     /// Notes played on a surface, sharing the hardware MIDI queue.
     injected_midi: SyncSender<MidiPacket>,
     controller_receiver: Receiver<DesktopControllerEvent>,
-    display_sender: SyncSender<Screen>,
+    display_mailbox: ScreenMailbox,
     errors: Arc<Mutex<Option<String>>>,
     telemetry: Arc<AudioTelemetry>,
     output_meter: Arc<OutputMeter>,
@@ -828,13 +829,13 @@ impl DesktopAudio {
         let injected_midi = midi_sender.clone();
         let (controller_sender, controller_receiver) =
             mpsc::sync_channel(CONTROLLER_QUEUE_CAPACITY);
-        let (display_sender, display_receiver) = mpsc::sync_channel(DISPLAY_QUEUE_CAPACITY);
+        let display_mailbox = ScreenMailbox::default();
         let (midi_supervisor, midi_names) = MidiSupervisor::start(
             midi_sender,
             preferences.midi_inputs.clone(),
             Arc::clone(&telemetry),
             controller_sender,
-            display_receiver,
+            display_mailbox.clone(),
             external_controller,
         )?;
         let (command_sender, command_receiver) = mpsc::sync_channel(COMMAND_QUEUE_CAPACITY);
@@ -946,7 +947,7 @@ impl DesktopAudio {
             command_sender,
             injected_midi,
             controller_receiver,
-            display_sender,
+            display_mailbox,
             errors,
             telemetry,
             output_meter,
@@ -1167,15 +1168,11 @@ impl DesktopAudio {
     }
 
     pub fn render_little(&self, screen: Screen) {
-        match self.display_sender.try_send(screen) {
-            Ok(()) => {}
-            Err(mpsc::TrySendError::Full(screen)) => {
-                // The supervisor will shortly drain the queue. Losing an intermediate
-                // animation frame is preferable to ever blocking the UI/audio path.
-                let _ = screen;
-            }
-            Err(mpsc::TrySendError::Disconnected(_)) => {}
-        }
+        // A controller transport may be slower than the UI. The shared
+        // mailbox replaces obsolete pending screens instead of dropping the
+        // newest update or blocking the caller.
+        self.display_mailbox
+            .publish(screen, SurfaceUpdatePriority::Interactive);
     }
 
     pub fn test_note(&self) -> Result<()> {
@@ -2255,7 +2252,7 @@ impl MidiSupervisor {
         selected: Vec<String>,
         telemetry: Arc<AudioTelemetry>,
         controller_sender: SyncSender<DesktopControllerEvent>,
-        display_receiver: Receiver<Screen>,
+        display_mailbox: ScreenMailbox,
         yield_keylab: bool,
     ) -> Result<(Self, Vec<String>)> {
         // When an installed controller package is enabled, ITS driver owns
@@ -2273,8 +2270,6 @@ impl MidiSupervisor {
             .spawn(move || {
                 let mut connections = BTreeMap::new();
                 let mut display = None;
-                let mut latest_screen = None;
-                let mut display_dirty = false;
                 match reconcile_midi_inputs(
                     &selected,
                     &mut connections,
@@ -2284,8 +2279,7 @@ impl MidiSupervisor {
                     yield_keylab,
                 ) {
                     Ok(names) => {
-                        if !yield_keylab
-                            && reconcile_keylab_display(&mut display, latest_screen.as_ref())
+                        if !yield_keylab && reconcile_keylab_display(&mut display, &display_mailbox)
                         {
                             reconnect_keylab_inputs(
                                 &selected,
@@ -2303,32 +2297,21 @@ impl MidiSupervisor {
                     }
                 }
                 let mut next_reconcile = Instant::now() + MIDI_RECONNECT_INTERVAL;
-                let mut next_render = Instant::now();
                 loop {
                     match stop_receiver.recv_timeout(MIDI_SUPERVISOR_TICK) {
                         Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
                         Err(RecvTimeoutError::Timeout) => {}
                     }
-                    while let Ok(screen) = display_receiver.try_recv() {
-                        latest_screen = Some(screen);
-                        display_dirty = true;
-                    }
-                    // Chords burst several screen updates in a few
-                    // milliseconds; flooding the display with SysEx is what
-                    // knocked it over and triggered a full input reopen (the
-                    // "LITTLE mode reset"). Coalesce to one render per
-                    // 150 ms — the latest screen always wins.
-                    if display_dirty && Instant::now() >= next_render {
-                        if let (Some(display), Some(screen)) =
-                            (display.as_mut(), latest_screen.as_ref())
-                        {
-                            if let Err(error) = display.render(screen) {
-                                eprintln!("DESKTOP_KEYLAB_DISPLAY_FAILED error={error:#}");
-                                display.restore_best_effort();
-                            }
-                            next_render = Instant::now() + Duration::from_millis(150);
-                        }
-                        display_dirty = false;
+                    // The mailbox owns coalescing: while SysEx is settling,
+                    // producers replace the pending semantic screen and the
+                    // next tick takes only the newest revision.
+                    if let Some(display) = display.as_mut()
+                        && let Some(update) = display_mailbox.take()
+                        && let Err(error) = display.render(&update)
+                    {
+                        eprintln!("DESKTOP_KEYLAB_DISPLAY_FAILED error={error:#}");
+                        display_mailbox.invalidate_delivery();
+                        display.restore_best_effort();
                     }
                     if display.as_ref().is_some_and(|display| display.failed) {
                         display = None;
@@ -2344,8 +2327,7 @@ impl MidiSupervisor {
                         ) {
                             eprintln!("DESKTOP_MIDI_SCAN_FAILED error={error:#}");
                         }
-                        if !yield_keylab
-                            && reconcile_keylab_display(&mut display, latest_screen.as_ref())
+                        if !yield_keylab && reconcile_keylab_display(&mut display, &display_mailbox)
                         {
                             reconnect_keylab_inputs(
                                 &selected,
@@ -2597,8 +2579,9 @@ impl KeyLabDisplay {
         Ok(())
     }
 
-    fn render(&mut self, screen: &Screen) -> Result<()> {
-        let messages = keylab_protocol::render_messages(screen).map_err(anyhow::Error::msg)?;
+    fn render(&mut self, update: &ScreenUpdate) -> Result<()> {
+        let messages =
+            keylab_protocol::render_update_messages(update).map_err(anyhow::Error::msg)?;
         if let Err(error) = self.send_messages(messages) {
             self.failed = true;
             return Err(error);
@@ -2619,7 +2602,7 @@ impl KeyLabDisplay {
 
 fn reconcile_keylab_display(
     display: &mut Option<KeyLabDisplay>,
-    latest_screen: Option<&Screen>,
+    display_mailbox: &ScreenMailbox,
 ) -> bool {
     if display.is_some() {
         return false;
@@ -2639,10 +2622,15 @@ fn reconcile_keylab_display(
     };
     match KeyLabDisplay::open(name) {
         Ok(mut opened) => {
-            if let Some(screen) = latest_screen
-                && let Err(error) = opened.render(screen)
+            // The hardware may have been unplugged or switched back to its
+            // factory preset. Never trust an earlier delivery marker after
+            // acquisition: the first update must be a complete snapshot.
+            display_mailbox.invalidate_delivery();
+            if let Some(update) = display_mailbox.take()
+                && let Err(error) = opened.render(&update)
             {
                 eprintln!("DESKTOP_KEYLAB_INITIAL_RENDER_FAILED error={error:#}");
+                display_mailbox.invalidate_delivery();
                 opened.restore_best_effort();
                 return false;
             }

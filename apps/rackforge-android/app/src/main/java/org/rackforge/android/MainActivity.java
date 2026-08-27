@@ -278,6 +278,7 @@ public final class MainActivity extends Activity {
     private static native boolean keyLabSyncActivePlugin();
     private static native boolean keyLabSyncActiveMode(String mode);
     private static native String keyLabRenderPlan();
+    private static native void keyLabInvalidateDisplay();
     private static native String ensureBundledControllers(String storeRoot);
     private static native String controllerCatalog(String storeRoot);
     private static native String controllerApplySettings(String storeRoot, String controllerId, String valuesJson);
@@ -5413,6 +5414,12 @@ public final class MainActivity extends Activity {
                     } catch (Exception error) {
                         Log.e("RackForge", "KeyLab MIDI output failed on destination port "
                                 + destinationPort, error);
+                        // The native compositor advances optimistically when it hands a
+                        // plan to Java. If the physical write fails, forget that delivered
+                        // snapshot so the next refresh/reconnect is authoritative instead
+                        // of sending a partial diff against a screen the controller never
+                        // received.
+                        keyLabInvalidateDisplay();
                     }
                 }, scheduledAt);
                 delayMs += step.optLong("settle_after_ms", 0);
@@ -5422,6 +5429,7 @@ public final class MainActivity extends Activity {
                     + " initialDelayMs=" + initialDelayMs);
         } catch (Exception error) {
             Log.e("RackForge", "Invalid KeyLab controller plan", error);
+            keyLabInvalidateDisplay();
         }
     }
 

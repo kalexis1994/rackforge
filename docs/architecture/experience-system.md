@@ -104,13 +104,21 @@ Touch Controller has two presentation states, not one state per orientation:
 The height and aspect requirements prevent a landscape tablet from being
 treated as a phone merely because its width is greater than its height.
 
-## LITTLE compositor direction
+## LITTLE compositor
 
-The LITTLE semantic runtime remains controller-independent. Its transport will
-evolve toward revisioned screen snapshots, partial diffs, priority queues and
-latest-wins coalescing for continuous controls. Heartbeats verify health without
-repainting an unchanged display. A reconnect sends one complete authoritative
-snapshot before incremental updates resume.
+The LITTLE semantic runtime remains controller-independent. A shared compositor
+assigns monotonically increasing revisions to logical screens, calculates
+header/body/footer diffs, preserves the highest pending priority, and coalesces
+bursts to the latest desired state. Desktop uses its single-slot mailbox instead
+of a bounded FIFO, so a slow MIDI transport cannot leave the controller showing
+an older screen.
+
+Physical drivers also deduplicate the encoded regions they have sent. A healthy
+heartbeat therefore verifies the transport without repainting an unchanged OLED
+or rewriting unchanged LEDs. A write failure invalidates the delivered snapshot,
+and a reconnect sends one complete authoritative screen before partial updates
+resume. The logical revision is transport-independent; protocol ACK correlation
+can be layered onto transports that expose a useful ACK identity later.
 
 ## Qualification
 

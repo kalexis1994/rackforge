@@ -87,6 +87,12 @@ The screen uses the native header, two-line body, and four-button footer.
 Transient global-parameter feedback replaces only the header and restores it
 after inactivity. Formatting is owned by RackForge, not by the Arturia driver.
 
+Logical revisions are projected as partial Arturia messages: unchanged header,
+body and footer regions are not transmitted, and contextual LEDs are updated
+only when their encoded color changes. The six-second health probe does not
+repaint a stable display. Reacquisition clears the physical delivery cache and
+sends one complete authoritative screen.
+
 The shared controller runtime applies a dim blue profile to mode buttons,
 transport, contextual buttons, and pads. Context buttons may temporarily
 brighten for focus or press feedback. The full RGB range is switched off before

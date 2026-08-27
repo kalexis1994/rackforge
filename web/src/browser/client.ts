@@ -15,11 +15,15 @@ import {
   PACKAGED_STORAGE_PREFIX,
   type EngineEvent,
   type SeedFile,
+  waitForLinkedStoragePublication,
 } from "./protocol";
 import {
   canServePluginAssets,
+  declaredPluginAssetsPublished,
   pluginAssetUrl,
+  pluginAssetPath,
   publishPluginAssets,
+  versionPluginAssetUrl,
   whenServing,
 } from "./pluginAssets";
 import {
@@ -141,6 +145,88 @@ async function fetchBytes(path: string): Promise<Uint8Array> {
  * sounding, since audio needs no URLs, while its interface answered 404.
  */
 let packagedFiles: SeedFile[] = [];
+let latestStoredFiles: SeedFile[] = [];
+let latestPluginAssetFiles: SeedFile[] = [];
+let publishedPluginAssetPaths: ReadonlySet<string> = new Set();
+let pluginAssetPublicationGeneration = 0;
+let pluginAssetSnapshotRevision = 0;
+let pluginAssetPublicationError: unknown = null;
+let pluginAssetPublicationTail: Promise<void> = Promise.resolve();
+const storagePublications = new Map<number, Promise<void>>();
+let recoveredAssetSnapshotRevision = -1;
+let pluginAssetRecoveryInstalled = false;
+
+function completePluginAssetFiles(stored: SeedFile[]): SeedFile[] {
+  const files = [
+    ...packagedFiles.filter(
+      (packaged) => !stored.some((file) => file.path === packaged.path),
+    ),
+    ...stored,
+  ];
+  return files.filter(
+    (file) => file.path.startsWith("plugins/") || file.path.startsWith("store/packages/"),
+  );
+}
+
+/** Serializes Cache Storage replacements so install/remove snapshots cannot cross. */
+function queuePluginAssetPublication(stored: SeedFile[], newSnapshot: boolean): Promise<void> {
+  latestPluginAssetFiles = completePluginAssetFiles(stored);
+  if (newSnapshot) {
+    pluginAssetSnapshotRevision += 1;
+  }
+  const files = latestPluginAssetFiles;
+  const publication = pluginAssetPublicationTail.then(async () => {
+    try {
+      publishedPluginAssetPaths = await publishPluginAssets(files);
+      pluginAssetPublicationGeneration += 1;
+      pluginAssetPublicationError = null;
+    } catch (error) {
+      pluginAssetPublicationError = error;
+      throw error;
+    }
+  });
+  // Keep the queue usable after a failed Cache Storage write. The operation
+  // receives the original rejecting promise; a later catalog/miss can retry.
+  pluginAssetPublicationTail = publication.catch(() => undefined);
+  return publication;
+}
+
+async function ensureLatestPluginAssetsPublished(): Promise<void> {
+  await pluginAssetPublicationTail;
+  if (pluginAssetPublicationError !== null) {
+    await queuePluginAssetPublication(latestStoredFiles, false);
+  }
+}
+
+function installPluginAssetRecovery() {
+  if (pluginAssetRecoveryInstalled || !("serviceWorker" in navigator)) return;
+  pluginAssetRecoveryInstalled = true;
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    const message = event.data as { kind?: string; path?: string } | null;
+    if (message?.kind !== "rackforge-plugin-asset-miss" || !message.path) return;
+    const path = pluginAssetPath("", message.path);
+    if (!latestPluginAssetFiles.some((file) => pluginAssetPath("", file.path) === path)) {
+      return;
+    }
+    const recoveringRevision = pluginAssetSnapshotRevision;
+    if (recoveredAssetSnapshotRevision === recoveringRevision) return;
+    recoveredAssetSnapshotRevision = recoveringRevision;
+    void queuePluginAssetPublication(latestStoredFiles, false)
+      .then(() => {
+        // The catalog will receive URLs with a new publication generation,
+        // which remounts an iframe that already observed the old 404.
+        window.dispatchEvent(new Event("rackforge:plugin-assets-published"));
+      })
+      .catch((error: unknown) => {
+        // A later explicit request may retry this same authoritative snapshot
+        // if Cache Storage itself was temporarily unavailable.
+        if (recoveredAssetSnapshotRevision === recoveringRevision) {
+          recoveredAssetSnapshotRevision = -1;
+        }
+        console.warn("RackForge could not recover a missing plugin asset", error);
+      });
+  });
+}
 
 async function loadStorage(): Promise<SeedFile[]> {
   const manifest = (await (
@@ -164,7 +250,11 @@ async function loadStorage(): Promise<SeedFile[]> {
   // storage write, and a plugin's interface quietly stopped following its
   // package for the rest of the session.
   packagedFiles = packaged.map((file) => ({ path: file.path, bytes: file.bytes.slice() }));
-  await publishPluginAssets(files).catch((error: unknown) => {
+  latestStoredFiles = stored
+    .filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX))
+    .map((file) => ({ path: file.path, bytes: file.bytes.slice() }));
+  installPluginAssetRecovery();
+  await queuePluginAssetPublication(latestStoredFiles, true).catch((error: unknown) => {
     console.warn("RackForge could not publish a plugin's files", error);
   });
   return files;
@@ -179,28 +269,23 @@ async function loadStorage(): Promise<SeedFile[]> {
 let storageWrite: number | null = null;
 let pendingStorage: SeedFile[] = [];
 
-function storeFiles(files: SeedFile[]) {
+function storeFiles(files: SeedFile[], publishAssets: boolean): Promise<void> {
   pendingStorage = files;
-  // A plugin's own interface is served from what the host holds, so the
-  // published files follow every install and removal — but the packages the
-  // site ships are not in this snapshot and must not be dropped with it.
-  void publishPluginAssets([
-    ...packagedFiles.filter(
-      (packaged) => !files.some((file) => file.path === packaged.path),
-    ),
-    ...files,
-  ]).catch((error: unknown) => {
-    console.warn("RackForge could not publish a plugin's files", error);
-  });
-  if (storageWrite !== null) return;
-  storageWrite = window.setTimeout(() => {
-    storageWrite = null;
-    const files = pendingStorage;
-    pendingStorage = [];
-    void writeStoredFiles(files).catch((error: unknown) => {
-      console.warn("RackForge could not keep its storage in this browser", error);
-    });
-  }, 400);
+  latestStoredFiles = files;
+  const publication = publishAssets
+    ? queuePluginAssetPublication(files, true)
+    : pluginAssetPublicationTail;
+  if (storageWrite === null) {
+    storageWrite = window.setTimeout(() => {
+      storageWrite = null;
+      const files = pendingStorage;
+      pendingStorage = [];
+      void writeStoredFiles(files).catch((error: unknown) => {
+        console.warn("RackForge could not keep its storage in this browser", error);
+      });
+    }, 400);
+  }
+  return publication;
 }
 
 /** Boot milestones the engine announces, awaited by [`startBrowserHost`]. */
@@ -214,9 +299,23 @@ function handleEngineEvent(event: EngineEvent) {
     case "response": {
       const waiting = pending.get(event.id);
       if (!waiting) return;
-      pending.delete(event.id);
-      window.clearTimeout(waiting.timeout);
-      waiting.resolve(event.response);
+      // The worklet posts a linked storage event first. MessagePort preserves
+      // that order, and the map now contains the exact Cache Storage promise
+      // this response must wait for. No timeout or catalog retry is guessed.
+      void waitForLinkedStoragePublication(event, storagePublications)
+        .then(() => waiting.resolve(event.response))
+        .catch((error: unknown) => {
+          waiting.reject(
+            error instanceof Error
+              ? error
+              : new Error("RackForge could not publish the plugin's interface."),
+          );
+        })
+        .finally(() => {
+          pending.delete(event.id);
+          storagePublications.delete(event.storage_operation_id ?? -1);
+          window.clearTimeout(waiting.timeout);
+        });
       break;
     }
     case "booted":
@@ -226,9 +325,20 @@ function handleEngineEvent(event: EngineEvent) {
         : (event.error ?? "the RackForge engine did not start");
       milestones.booted?.(bootError);
       break;
-    case "storage":
-      storeFiles(event.files);
+    case "storage": {
+      const publication = storeFiles(
+        event.files,
+        event.publish_plugin_assets === true,
+      );
+      if (event.operation_id !== undefined) {
+        storagePublications.set(event.operation_id, publication);
+        // The linked response consumes the original promise. Attach a side
+        // observer immediately so a fast Cache Storage rejection is never
+        // reported as an unhandled promise before that response event arrives.
+        void publication.catch(() => undefined);
+      }
       break;
+    }
     case "ready":
       milestones.ready?.();
       break;
@@ -855,6 +965,7 @@ function sendPackage(
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       pending.delete(id);
+      storagePublications.delete(id);
       reject(new Error("RackForge did not finish processing the plugin package in time."));
     }, 120_000);
     pending.set(id, {
@@ -889,8 +1000,24 @@ interface PackagePreview {
  * publishes them. This turns them into the URLs the interface loads.
  */
 function withAssetUrls(plugin: CatalogEntry, serving: boolean): PluginWebDescriptor {
-  const asset = (entry: string) => pluginAssetUrl(plugin.package_root, entry, plugin.version);
-  const assetsAvailable = canServePluginAssets(plugin.package_root, serving);
+  const asset = (entry: string) => versionPluginAssetUrl(
+    pluginAssetUrl(plugin.package_root, entry, plugin.version),
+    plugin.package_root,
+    pluginAssetPublicationGeneration,
+  );
+  const declaredAssets = [
+    ...plugin.surfaces.map((surface) => surface.entry),
+    ...(plugin.branding
+      ? [plugin.branding.icon, plugin.branding.banner, plugin.branding.splash]
+      : []),
+  ];
+  const published = declaredPluginAssetsPublished(
+    plugin.package_root,
+    declaredAssets,
+    publishedPluginAssetPaths,
+  );
+  const assetsAvailable = canServePluginAssets(plugin.package_root, serving)
+    && published;
   return {
     ...plugin,
     branding: assetsAvailable && plugin.branding
@@ -981,6 +1108,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     if (!answer.ok || !answer.catalog) {
       throw new HostRequestError(answer.error ?? "The plugin catalog is unavailable.", 503);
     }
+    await ensureLatestPluginAssetsPublished();
     const serving = catalogNeedsAssetWorker(answer.catalog) ? await whenServing() : false;
     return answer.catalog.map((plugin) => withAssetUrls(plugin, serving)) as T;
   }
@@ -1259,6 +1387,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     if (!descriptor) {
       throw new HostRequestError("This plugin is not loaded.", 404);
     }
+    await ensureLatestPluginAssetsPublished();
     const serving = catalogNeedsAssetWorker([descriptor]) ? await whenServing() : false;
     return withAssetUrls(descriptor, serving) as T;
   }

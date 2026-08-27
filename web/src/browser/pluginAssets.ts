@@ -109,6 +109,40 @@ export function pluginAssetUrl(packageRoot: string, entry: string, version: stri
   return `${assetUrl(prefix)}${path}?v=${encodeURIComponent(version)}`;
 }
 
+/** Canonical package-relative key used by publication readiness checks. */
+export function pluginAssetPath(packageRoot: string, entry: string): string {
+  return `${packageRoot}/${entry}`
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\/{2,}/g, "/");
+}
+
+/**
+ * Adds a publication generation to installed-plugin URLs.
+ *
+ * A same-version reinstall and a deterministic recovery must produce a new
+ * iframe identity even though the plugin's semantic version did not change.
+ * Bundled packages stay on their immutable static URL.
+ */
+export function versionPluginAssetUrl(
+  url: string,
+  packageRoot: string,
+  publicationGeneration: number,
+): string {
+  if (isPackagedPluginRoot(packageRoot) || publicationGeneration <= 0) return url;
+  return `${url}&assets=${publicationGeneration}`;
+}
+
+/** True only after every catalog-declared dynamic file crossed the cache barrier. */
+export function declaredPluginAssetsPublished(
+  packageRoot: string,
+  entries: readonly string[],
+  publishedPaths: ReadonlySet<string>,
+): boolean {
+  return isPackagedPluginRoot(packageRoot)
+    || entries.every((entry) => publishedPaths.has(pluginAssetPath(packageRoot, entry)));
+}
+
 /**
  * Republishes every packaged file the host currently holds.
  *
@@ -116,10 +150,11 @@ export function pluginAssetUrl(packageRoot: string, entry: string, version: stri
  * published files and the installed packages can never disagree. Entries no
  * longer present are dropped, which is what makes an uninstall take effect.
  */
-export async function publishPluginAssets(files: SeedFile[]): Promise<void> {
-  if (!("caches" in globalThis)) return;
+export async function publishPluginAssets(files: SeedFile[]): Promise<ReadonlySet<string>> {
+  if (!("caches" in globalThis)) return new Set();
   const cache = await caches.open(CACHE);
   const published = new Set<string>();
+  const writes: Array<{ file: SeedFile; url: string }> = [];
 
   for (const file of files) {
     // Only package contents are published; the host's private storage —
@@ -128,21 +163,42 @@ export async function publishPluginAssets(files: SeedFile[]): Promise<void> {
       continue;
     }
     const url = `${assetUrl(PLUGIN_ASSET_PREFIX)}${file.path}`;
-    published.add(new URL(url, location.href).pathname);
-    await cache.put(
-      url,
-      new Response(file.bytes.slice(), {
-        headers: {
-          "content-type": contentType(file.path),
-          "cache-control": "no-cache",
-        },
-      }),
-    );
+    published.add(pluginAssetPath("", file.path));
+    writes.push({ file, url });
   }
 
+  // Publication is a barrier: callers cannot advertise a package until all
+  // of its HTML, JavaScript, CSS, Wasm and branding writes have completed.
+  // Keep concurrency bounded: sampled instruments may contain hundreds of
+  // megabytes and cloning every Response at once would spike mobile memory.
+  let nextWrite = 0;
+  const write = async () => {
+    while (nextWrite < writes.length) {
+      const { file, url } = writes[nextWrite++];
+      await cache.put(
+        url,
+        new Response(file.bytes.slice(), {
+          headers: {
+            "content-type": contentType(file.path),
+            "cache-control": "no-cache",
+          },
+        }),
+      );
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(4, writes.length) }, () => write()),
+  );
+
   for (const request of await cache.keys()) {
-    if (!published.has(new URL(request.url).pathname)) {
+    const url = new URL(request.url);
+    const marker = url.pathname.indexOf(`/${PLUGIN_ASSET_PREFIX}`);
+    const path = marker >= 0
+      ? url.pathname.slice(marker + PLUGIN_ASSET_PREFIX.length + 1)
+      : "";
+    if (!published.has(pluginAssetPath("", path))) {
       await cache.delete(request);
     }
   }
+  return published;
 }

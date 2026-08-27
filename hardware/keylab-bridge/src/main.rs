@@ -829,6 +829,10 @@ struct KeyLabSession {
     connection: MidiOutputConnection,
     switched_to_daw: bool,
     connected: bool,
+    last_header: Option<Vec<u8>>,
+    last_body: Option<Vec<u8>>,
+    last_footer: Option<Vec<u8>>,
+    last_button_leds: [Option<Vec<u8>>; 4],
 }
 
 impl KeyLabSession {
@@ -846,6 +850,10 @@ impl KeyLabSession {
             connection,
             switched_to_daw: false,
             connected: false,
+            last_header: None,
+            last_body: None,
+            last_footer: None,
+            last_button_leds: std::array::from_fn(|_| None),
         })
     }
 
@@ -870,6 +878,10 @@ impl KeyLabSession {
     fn start(&mut self) -> Result<(), Box<dyn Error>> {
         self.switched_to_daw = true;
         self.connected = true;
+        self.last_header = None;
+        self.last_body = None;
+        self.last_footer = None;
+        self.last_button_leds = std::array::from_fn(|_| None);
         self.send_messages(keylab_protocol::acquire_messages()?)
     }
 
@@ -1506,9 +1518,9 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                             }
                         }
                     }
-                    // A healthy OLED heartbeat only reasserts the display. Re-sending
-                    // unchanged button LED messages makes the KeyLab briefly blank and
-                    // restore the four soft-key LEDs every few seconds.
+                    // The physical delivery cache turns this into a no-op when the
+                    // semantic screen is unchanged. Re-sending identical OLED or LED
+                    // messages makes the KeyLab visibly blink every few seconds.
                     if let Err(error) = send_menu_display_with_header_override(
                         &mut session,
                         &messages,
@@ -2854,11 +2866,7 @@ fn send_menu_with_header_override(
     messages: &MenuMessages,
     header_override: Option<&[u8]>,
 ) -> Result<(), Box<dyn Error>> {
-    send_menu_display_with_header_override(session, messages, header_override)?;
-    for message in &messages.button_leds {
-        session.send(message)?;
-    }
-    Ok(())
+    send_menu_regions(session, messages, header_override, true)
 }
 
 fn send_menu_display_with_header_override(
@@ -2866,11 +2874,38 @@ fn send_menu_display_with_header_override(
     messages: &MenuMessages,
     header_override: Option<&[u8]>,
 ) -> Result<(), Box<dyn Error>> {
-    session.send(&messages.body)?;
-    thread::sleep(Duration::from_millis(20));
-    session.send(header_override.unwrap_or(&messages.header))?;
-    thread::sleep(Duration::from_millis(20));
-    session.send(&messages.footer)?;
+    send_menu_regions(session, messages, header_override, false)
+}
+
+fn send_menu_regions(
+    session: &mut KeyLabSession,
+    messages: &MenuMessages,
+    header_override: Option<&[u8]>,
+    include_button_leds: bool,
+) -> Result<(), Box<dyn Error>> {
+    let visible_header = header_override.unwrap_or(&messages.header);
+    if session.last_body.as_deref() != Some(messages.body.as_slice()) {
+        session.send(&messages.body)?;
+        session.last_body = Some(messages.body.clone());
+        thread::sleep(Duration::from_millis(20));
+    }
+    if session.last_header.as_deref() != Some(visible_header) {
+        session.send(visible_header)?;
+        session.last_header = Some(visible_header.to_vec());
+        thread::sleep(Duration::from_millis(20));
+    }
+    if session.last_footer.as_deref() != Some(messages.footer.as_slice()) {
+        session.send(&messages.footer)?;
+        session.last_footer = Some(messages.footer.clone());
+    }
+    if include_button_leds {
+        for (index, message) in messages.button_leds.iter().enumerate() {
+            if session.last_button_leds[index].as_deref() != Some(message.as_slice()) {
+                session.send(message)?;
+                session.last_button_leds[index] = Some(message.clone());
+            }
+        }
+    }
     Ok(())
 }
 

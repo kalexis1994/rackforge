@@ -70,3 +70,14 @@ The public plugin descriptor contains host-owned `icon_url`, `banner_url`, and
 `splash_url` values. A UI must consume those URLs rather than constructing or
 reading package paths. The same `/plugin-assets/<plugin-id>/...` boundary is
 implemented by Desktop, Android, and the Raspberry Pi Web host.
+
+The pure Browser host has no package HTTP server. It publishes dynamically
+installed package files into a service-worker-owned Cache Storage namespace.
+Package lifecycle responses are linked to a specific storage snapshot and do
+not complete until that snapshot's HTML, JavaScript, CSS, Wasm, and branding
+files have crossed the publication barrier. Catalog descriptors expose no
+dynamic URL before that point. Reinstalls advance an asset generation so an
+iframe that observed an earlier cache miss is remounted deterministically;
+uninstall removes every cache entry absent from the authoritative snapshot.
+Bundled plugins continue to use immutable files below `demo/rackforge/plugins/`
+and do not depend on this worker-backed route.

@@ -1,4 +1,4 @@
-use rackforge_surface_runtime::{FooterButton, Header, Input, Screen};
+use rackforge_surface_runtime::{FooterButton, Header, Input, Screen, ScreenUpdate};
 use rackforge_ui::VisualState;
 
 pub const CONNECT: &[u8] = &[
@@ -158,6 +158,37 @@ pub fn render_messages(screen: &Screen) -> Result<Vec<OutboundMessage>, String> 
     Ok(messages)
 }
 
+/// Projects only the regions changed by the shared LITTLE compositor.
+/// Footer LEDs travel with the footer because their visual state is derived
+/// from the same four semantic buttons.
+pub fn render_update_messages(update: &ScreenUpdate) -> Result<Vec<OutboundMessage>, String> {
+    let mut messages = Vec::with_capacity(7);
+    if update.changed.body {
+        messages.push(OutboundMessage::new(
+            two_lines(&update.screen.line_1, &update.screen.line_2)?,
+            MESSAGE_SETTLE_MS,
+        ));
+    }
+    if update.changed.header {
+        messages.push(OutboundMessage::new(
+            screen_header(&update.screen.header)?,
+            MESSAGE_SETTLE_MS,
+        ));
+    }
+    if update.changed.footer {
+        messages.push(OutboundMessage::new(
+            footer(&update.screen.footer)?,
+            MESSAGE_SETTLE_MS,
+        ));
+        messages.extend(
+            button_led_messages(&update.screen.footer)?
+                .into_iter()
+                .map(|bytes| OutboundMessage::new(bytes, LED_SETTLE_MS)),
+        );
+    }
+    Ok(messages)
+}
+
 pub fn transient_header_messages(text: &str) -> Result<Vec<OutboundMessage>, String> {
     Ok(vec![OutboundMessage::new(header(text)?, MESSAGE_SETTLE_MS)])
 }
@@ -285,6 +316,7 @@ fn ascii_label(text: &str) -> Result<&[u8], String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rackforge_surface_runtime::{ScreenRegions, SurfaceUpdatePriority};
 
     #[test]
     fn parses_only_surface_inputs() {
@@ -384,5 +416,28 @@ mod tests {
 
         let initial = initial_session_messages().unwrap();
         assert_eq!(initial.len(), acquire.len() + render.len());
+    }
+
+    #[test]
+    fn partial_update_encodes_only_the_changed_hardware_region() {
+        let screen = rackforge_surface_runtime::Menu::default().render();
+        let header = render_update_messages(&ScreenUpdate {
+            revision: 7,
+            screen: screen.clone(),
+            changed: ScreenRegions::header(),
+            priority: SurfaceUpdatePriority::Immediate,
+        })
+        .unwrap();
+        assert_eq!(header.len(), 1);
+        assert_eq!(&header[0].bytes[6..10], &[0x04, 0x01, 0x60, 0x01]);
+
+        let full = render_update_messages(&ScreenUpdate {
+            revision: 8,
+            screen,
+            changed: ScreenRegions::full(),
+            priority: SurfaceUpdatePriority::Interactive,
+        })
+        .unwrap();
+        assert_eq!(full.len(), 7);
     }
 }

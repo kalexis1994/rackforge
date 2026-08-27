@@ -47,7 +47,8 @@ use rackforge_session_api::{
 };
 use rackforge_surface_runtime::{
     ActiveMode, Input as SurfaceInput, Menu as SurfaceMenu, MenuCommand, PlayPlugin, PlayPreset,
-    PlaySound, ProgramExitDecision, ProgramExitDestination,
+    PlaySound, ProgramExitDecision, ProgramExitDestination, ScreenCompositor, ScreenRegions,
+    SurfaceUpdatePriority,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{CStr, c_char, c_void};
@@ -138,6 +139,7 @@ struct AndroidMidiIngress {
 #[derive(Default)]
 struct AndroidControllerMenu {
     menu: SurfaceMenu,
+    compositor: ScreenCompositor,
     button_down: [Option<Instant>; 4],
     button_long_fired: [bool; 4],
     installed_plugins: Vec<PlayPlugin>,
@@ -152,16 +154,34 @@ struct ControllerPluginInfo {
 }
 
 impl AndroidControllerMenu {
-    fn render_response(&self, command: Option<serde_json::Value>) -> Result<String> {
+    fn render_plan(
+        &mut self,
+        priority: SurfaceUpdatePriority,
+    ) -> Result<Vec<keylab_protocol::OutboundMessage>> {
+        self.compositor.publish(self.menu.render(), priority);
+        self.compositor
+            .take()
+            .map_or_else(
+                || Ok(Vec::new()),
+                |update| keylab_protocol::render_update_messages(&update),
+            )
+            .map_err(anyhow::Error::msg)
+    }
+
+    fn render_response(&mut self, command: Option<serde_json::Value>) -> Result<String> {
         Ok(serde_json::json!({
-            "plan": controller_plan_value(keylab_protocol::render_messages(&self.menu.render()))?,
+            "plan": controller_plan_value(Ok(self.render_plan(SurfaceUpdatePriority::Interactive)?))?,
             "command": command,
         })
         .to_string())
     }
 
-    fn render_rackforge_parameter(&self, parameter: RackForgeParameterValue) -> Result<String> {
+    fn render_rackforge_parameter(&mut self, parameter: RackForgeParameterValue) -> Result<String> {
         let header = parameter.little_header();
+        self.compositor
+            .publish(self.menu.render(), SurfaceUpdatePriority::Background);
+        self.compositor
+            .invalidate(ScreenRegions::header(), SurfaceUpdatePriority::Immediate);
         Ok(serde_json::json!({
             "plan": controller_plan_value(keylab_protocol::transient_header_messages(&header))?,
             "command": null,
@@ -170,8 +190,12 @@ impl AndroidControllerMenu {
         .to_string())
     }
 
-    fn render_semantic_control(&self, input: &SemanticControlInput) -> Result<String> {
+    fn render_semantic_control(&mut self, input: &SemanticControlInput) -> Result<String> {
         let header = semantic_control_little_header(input);
+        self.compositor
+            .publish(self.menu.render(), SurfaceUpdatePriority::Background);
+        self.compositor
+            .invalidate(ScreenRegions::header(), SurfaceUpdatePriority::Immediate);
         Ok(serde_json::json!({
             "plan": controller_plan_value(keylab_protocol::transient_header_messages(&header))?,
             "command": null,
@@ -2770,14 +2794,16 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabAcquirePlan
     _class: JClass,
 ) -> jstring {
     let result = (|| -> Result<String> {
-        let controller = controller_menu()
+        let mut controller = controller_menu()
             .lock()
             .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))?;
         let mut messages = keylab_protocol::acquire_messages().map_err(anyhow::Error::msg)?;
-        messages.extend(
-            keylab_protocol::render_messages(&controller.menu.render())
-                .map_err(anyhow::Error::msg)?,
-        );
+        let screen = controller.menu.render();
+        controller
+            .compositor
+            .publish(screen, SurfaceUpdatePriority::Immediate);
+        controller.compositor.invalidate_delivery();
+        messages.extend(controller.render_plan(SurfaceUpdatePriority::Immediate)?);
         controller_plan_json(Ok(messages))
     })();
     result_string(&mut env, result)
@@ -3191,10 +3217,22 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabRenderPlan(
     let result = controller_menu()
         .lock()
         .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
-        .and_then(|controller| {
-            controller_plan_json(keylab_protocol::render_messages(&controller.menu.render()))
+        .and_then(|mut controller| {
+            controller_plan_json(Ok(
+                controller.render_plan(SurfaceUpdatePriority::Background)?
+            ))
         });
     result_string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabInvalidateDisplay(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    if let Ok(mut controller) = controller_menu().lock() {
+        controller.compositor.invalidate_delivery();
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -3237,7 +3275,7 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabHandleMidi(
                 Some(parameter) => controller_menu()
                     .lock()
                     .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
-                    .and_then(|controller| controller.render_rackforge_parameter(parameter)),
+                    .and_then(|mut controller| controller.render_rackforge_parameter(parameter)),
                 None => Ok(serde_json::json!({
                     "plan": [],
                     "command": null,
@@ -3254,7 +3292,7 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_keyLabHandleMidi(
         let result = controller_menu()
             .lock()
             .map_err(|_| anyhow::anyhow!("controller menu lock poisoned"))
-            .and_then(|controller| controller.render_semantic_control(&input));
+            .and_then(|mut controller| controller.render_semantic_control(&input));
         return result_string(&mut env, result);
     }
     let Some(event) = keylab_protocol::parse_input(&message) else {

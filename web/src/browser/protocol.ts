@@ -122,6 +122,13 @@ export interface ResponseMessage {
   id: number;
   /** A `ControlResponse`, encoded as JSON. */
   response: string;
+  /**
+   * Identifies the storage snapshot that must be durably published before
+   * this response is observable by its caller. Package lifecycle operations
+   * use their request id, which keeps the protocol deterministic without a
+   * timing assumption between two MessagePort events.
+   */
+  storage_operation_id?: number;
 }
 
 /**
@@ -131,6 +138,10 @@ export interface ResponseMessage {
 export interface StorageMessage {
   kind: "storage";
   files: SeedFile[];
+  /** Package request whose response is blocked on this snapshot. */
+  operation_id?: number;
+  /** Whether this mutation can add, replace, or remove public package files. */
+  publish_plugin_assets?: boolean;
 }
 
 /**
@@ -154,6 +165,51 @@ export type EngineEvent =
   | StorageMessage
   | RevisionMessage
   | ControllerOutputMessage;
+
+/** Constructs the only valid event order for a successful package mutation. */
+export function linkedPackageMutationEvents(
+  operationId: number,
+  response: string,
+  files: SeedFile[],
+  publishPluginAssets: boolean,
+): [StorageMessage, ResponseMessage] {
+  return [
+    {
+      kind: "storage",
+      files,
+      operation_id: operationId,
+      ...(publishPluginAssets ? { publish_plugin_assets: true } : {}),
+    },
+    {
+      kind: "response",
+      id: operationId,
+      response,
+      storage_operation_id: operationId,
+    },
+  ];
+}
+
+/**
+ * Waits for the storage publication explicitly linked by a response.
+ *
+ * Kept independent of the browser globals so the real ordering contract can
+ * be tested without an AudioWorklet. A linked response without its snapshot
+ * is a protocol violation, not a reason to guess or sleep.
+ */
+export async function waitForLinkedStoragePublication(
+  event: ResponseMessage,
+  publications: ReadonlyMap<number, Promise<void>>,
+): Promise<void> {
+  const operationId = event.storage_operation_id;
+  if (operationId === undefined) return;
+  const publication = publications.get(operationId);
+  if (!publication) {
+    throw new Error(
+      `RackForge received package response ${event.id} before storage operation ${operationId}.`,
+    );
+  }
+  await publication;
+}
 
 /**
  * Converts a worklet exception into the response the caller is waiting for.

@@ -14,3 +14,17 @@ remain host-owned.
 
 This separation lets a new `.rfcontroller` reuse the same menus without
 copying plugin-specific behavior.
+
+## Screen delivery
+
+`ScreenCompositor` turns logical screens into revisioned `ScreenUpdate` values.
+Each update names the header, body and footer regions that changed and carries
+an explicit background, interactive or immediate priority. Repeated screens are
+suppressed and pending bursts use latest-wins coalescing while retaining the
+highest priority in the burst.
+
+`ScreenMailbox` is the thread-safe, bounded handoff used by hosts. It never grows
+an event queue: producers publish the newest desired screen and the transport
+takes one authoritative update when it can send. A transport must call
+`invalidate_delivery()` after a failed write or physical reconnect so its next
+update contains a complete screen.

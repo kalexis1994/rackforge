@@ -28,6 +28,7 @@ use rackforge_ui::{
     },
 };
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 pub const DISPLAY_COLUMNS: usize = LITTLE_TEXT_COLUMNS;
 
@@ -72,6 +73,185 @@ pub struct Screen {
     pub line_1: String,
     pub line_2: String,
     pub footer: [FooterButton; 4],
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ScreenRegions {
+    pub header: bool,
+    pub body: bool,
+    pub footer: bool,
+}
+
+impl ScreenRegions {
+    pub const fn full() -> Self {
+        Self {
+            header: true,
+            body: true,
+            footer: true,
+        }
+    }
+
+    pub const fn header() -> Self {
+        Self {
+            header: true,
+            body: false,
+            footer: false,
+        }
+    }
+
+    pub const fn is_empty(self) -> bool {
+        !self.header && !self.body && !self.footer
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            header: self.header || other.header,
+            body: self.body || other.body,
+            footer: self.footer || other.footer,
+        }
+    }
+
+    fn between(previous: Option<&Screen>, next: &Screen) -> Self {
+        let Some(previous) = previous else {
+            return Self::full();
+        };
+        Self {
+            header: previous.header != next.header,
+            body: previous.line_1 != next.line_1 || previous.line_2 != next.line_2,
+            footer: previous.footer != next.footer,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub enum SurfaceUpdatePriority {
+    #[default]
+    Background,
+    Interactive,
+    Immediate,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScreenUpdate {
+    pub revision: u64,
+    pub screen: Screen,
+    pub changed: ScreenRegions,
+    pub priority: SurfaceUpdatePriority,
+}
+
+/// Latest-wins compositor shared by every LITTLE transport.
+///
+/// Producers only publish semantic screens. A transport takes the most recent
+/// revision when it is ready, so a slow OLED never builds a queue of obsolete
+/// animations. Delivery is tracked separately from desired state: reconnects
+/// invalidate delivery and obtain one complete authoritative snapshot.
+#[derive(Clone, Debug, Default)]
+pub struct ScreenCompositor {
+    desired: Option<Screen>,
+    delivered: Option<Screen>,
+    invalidated: ScreenRegions,
+    revision: u64,
+    pending_revision: Option<u64>,
+    pending_priority: SurfaceUpdatePriority,
+}
+
+impl ScreenCompositor {
+    pub fn publish(&mut self, screen: Screen, priority: SurfaceUpdatePriority) -> bool {
+        if self.desired.as_ref() == Some(&screen) {
+            // Re-publishing the same desired pixels must not create another
+            // revision, but an interaction may legitimately promote an
+            // already-pending background refresh.
+            if self.pending_revision.is_some() {
+                self.pending_priority = self.pending_priority.max(priority);
+            }
+            return false;
+        }
+        self.desired = Some(screen);
+        if self.desired == self.delivered && self.invalidated.is_empty() {
+            self.pending_revision = None;
+            self.pending_priority = SurfaceUpdatePriority::Background;
+            return false;
+        }
+        self.queue(priority);
+        true
+    }
+
+    pub fn invalidate(&mut self, regions: ScreenRegions, priority: SurfaceUpdatePriority) {
+        if regions.is_empty() || self.desired.is_none() {
+            return;
+        }
+        self.invalidated = self.invalidated.union(regions);
+        self.queue(priority);
+    }
+
+    pub fn invalidate_delivery(&mut self) {
+        self.delivered = None;
+        self.invalidated = ScreenRegions::full();
+        if self.desired.is_some() {
+            self.queue(SurfaceUpdatePriority::Immediate);
+        }
+    }
+
+    pub fn take(&mut self) -> Option<ScreenUpdate> {
+        let revision = self.pending_revision.take()?;
+        let screen = self.desired.clone()?;
+        let changed =
+            ScreenRegions::between(self.delivered.as_ref(), &screen).union(self.invalidated);
+        self.invalidated = ScreenRegions::default();
+        let priority = std::mem::take(&mut self.pending_priority);
+        if changed.is_empty() {
+            return None;
+        }
+        self.delivered = Some(screen.clone());
+        Some(ScreenUpdate {
+            revision,
+            screen,
+            changed,
+            priority,
+        })
+    }
+
+    pub fn desired(&self) -> Option<&Screen> {
+        self.desired.as_ref()
+    }
+
+    fn queue(&mut self, priority: SurfaceUpdatePriority) {
+        self.revision = self.revision.saturating_add(1);
+        self.pending_revision = Some(self.revision);
+        self.pending_priority = self.pending_priority.max(priority);
+    }
+}
+
+/// Lock-bounded latest-screen handoff for UI and controller transport threads.
+/// It never waits for hardware and never allocates an unbounded message queue.
+#[derive(Clone, Debug, Default)]
+pub struct ScreenMailbox {
+    compositor: Arc<Mutex<ScreenCompositor>>,
+}
+
+impl ScreenMailbox {
+    pub fn publish(&self, screen: Screen, priority: SurfaceUpdatePriority) -> bool {
+        self.with_compositor(|compositor| compositor.publish(screen, priority))
+    }
+
+    pub fn take(&self) -> Option<ScreenUpdate> {
+        self.with_compositor(ScreenCompositor::take)
+    }
+
+    pub fn invalidate_delivery(&self) {
+        self.with_compositor(ScreenCompositor::invalidate_delivery);
+    }
+
+    fn with_compositor<T>(&self, operation: impl FnOnce(&mut ScreenCompositor) -> T) -> T {
+        // A UI-side panic must not permanently disable the controller surface.
+        // The compositor contains only replaceable presentation state, so
+        // recovering the poisoned guard is safer than taking down audio/UI.
+        let mut compositor = self
+            .compositor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        operation(&mut compositor)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -9661,5 +9841,74 @@ mod tests {
         assert_eq!(ssid, "PHONE NEW");
         assert_eq!(passphrase.expose(), "AA");
         assert!(!format!("{passphrase:?}").contains("AA"));
+    }
+
+    #[test]
+    fn compositor_emits_one_full_snapshot_then_only_changed_regions() {
+        let mut compositor = ScreenCompositor::default();
+        let first = Menu::default().render();
+        assert!(compositor.publish(first.clone(), SurfaceUpdatePriority::Interactive));
+        let initial = compositor.take().unwrap();
+        assert_eq!(initial.revision, 1);
+        assert_eq!(initial.changed, ScreenRegions::full());
+        assert!(!compositor.publish(first.clone(), SurfaceUpdatePriority::Background));
+        assert!(compositor.take().is_none());
+
+        let mut header = first;
+        header.header = Header::Visible("MASTER 75%".into());
+        assert!(compositor.publish(header.clone(), SurfaceUpdatePriority::Immediate));
+        let update = compositor.take().unwrap();
+        assert_eq!(update.screen, header);
+        assert_eq!(update.changed, ScreenRegions::header());
+        assert_eq!(update.priority, SurfaceUpdatePriority::Immediate);
+    }
+
+    #[test]
+    fn compositor_coalesces_to_latest_screen_and_preserves_highest_priority() {
+        let mut compositor = ScreenCompositor::default();
+        let first = Menu::default().render();
+        compositor.publish(first.clone(), SurfaceUpdatePriority::Interactive);
+        compositor.take().unwrap();
+
+        let mut intermediate = first.clone();
+        intermediate.line_1 = "INTERMEDIATE".into();
+        compositor.publish(intermediate, SurfaceUpdatePriority::Immediate);
+        let mut latest = first;
+        latest.line_1 = "LATEST".into();
+        compositor.publish(latest.clone(), SurfaceUpdatePriority::Background);
+
+        let update = compositor.take().unwrap();
+        assert_eq!(update.revision, 3);
+        assert_eq!(update.screen, latest);
+        assert!(update.changed.body);
+        assert_eq!(update.priority, SurfaceUpdatePriority::Immediate);
+        assert!(compositor.take().is_none());
+    }
+
+    #[test]
+    fn compositor_promotes_a_duplicate_pending_screen_without_new_revision() {
+        let mut compositor = ScreenCompositor::default();
+        let screen = Menu::default().render();
+        assert!(compositor.publish(screen.clone(), SurfaceUpdatePriority::Background));
+        assert!(!compositor.publish(screen, SurfaceUpdatePriority::Immediate));
+
+        let update = compositor.take().unwrap();
+        assert_eq!(update.revision, 1);
+        assert_eq!(update.priority, SurfaceUpdatePriority::Immediate);
+    }
+
+    #[test]
+    fn compositor_reconnect_resends_one_authoritative_full_snapshot() {
+        let mut compositor = ScreenCompositor::default();
+        let screen = Menu::default().render();
+        compositor.publish(screen.clone(), SurfaceUpdatePriority::Interactive);
+        compositor.take().unwrap();
+
+        compositor.invalidate_delivery();
+        let restored = compositor.take().unwrap();
+        assert_eq!(restored.screen, screen);
+        assert_eq!(restored.changed, ScreenRegions::full());
+        assert_eq!(restored.priority, SurfaceUpdatePriority::Immediate);
+        assert!(compositor.take().is_none());
     }
 }

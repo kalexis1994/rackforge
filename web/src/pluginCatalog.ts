@@ -83,6 +83,7 @@ function ensureBrowserAssetRefresh() {
     void refreshPluginCatalog(true).catch(() => undefined);
   };
   navigator.serviceWorker.addEventListener("controllerchange", refresh);
+  window.addEventListener("rackforge:plugin-assets-published", refresh);
   void navigator.serviceWorker.ready.then(() => {
     if (navigator.serviceWorker.controller && !browserAssetReadyRefreshDone) {
       refresh();

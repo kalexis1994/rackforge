@@ -157,6 +157,20 @@ async function pluginAsset(request) {
       if (!body.includes("/@vite/client")) return response;
     }
   }
+  const url = new URL(request.url);
+  const marker = url.pathname.indexOf(PLUGIN_ASSETS);
+  const path = marker >= 0
+    ? url.pathname.slice(marker + PLUGIN_ASSETS.length)
+    : "";
+  if (path) {
+    // A controlled page can deterministically republish a file that exists in
+    // the latest host snapshot. This repairs an iframe that observed a cache
+    // miss during an older build without relying on a user reload.
+    const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of clients) {
+      client.postMessage({ kind: "rackforge-plugin-asset-miss", path });
+    }
+  }
   return new Response("This plugin file is not installed.", {
     status: 404,
     headers: { "content-type": "text/plain; charset=utf-8" },

@@ -25,6 +25,7 @@ import {
   ENGINE_PROCESSOR,
   PACKAGED_STORAGE_PREFIX,
   engineFailureEvent,
+  linkedPackageMutationEvents,
   type EngineCommand,
   type EngineEvent,
   type PackageMessage,
@@ -97,6 +98,7 @@ const READ_ONLY_OPERATIONS = new Set([
   "plugin_state_parameters",
 ]);
 const READ_ONLY_PACKAGE_ACTIONS = new Set(["inspect", "catalog", "resource_status"]);
+const PACKAGE_ASSET_MUTATIONS = new Set(["install", "activate", "deactivate", "uninstall"]);
 
 /** Builds the directory tree the host boots against from a flat file list. */
 function seedDirectory(files: SeedFile[]): Map<string, Inode> {
@@ -182,16 +184,37 @@ class RackForgeEngine extends AudioWorkletProcessor {
         break;
       }
       case "package":
-        this.#post({
-          kind: "response",
-          id: command.id,
-          response: this.#package(command.action, command.payload),
-        });
-        if (!READ_ONLY_PACKAGE_ACTIONS.has(command.action)) {
-          this.#publishStorage();
+        {
+          const response = this.#package(command.action, command.payload);
+          let succeeded = false;
+          try {
+            succeeded = (JSON.parse(response) as { ok?: boolean }).ok === true;
+          } catch {
+            // The response itself remains authoritative and will surface the
+            // malformed host result. Do not advertise a storage barrier that
+            // cannot be tied to a successful package mutation.
+          }
+          if (!READ_ONLY_PACKAGE_ACTIONS.has(command.action)) {
+            const files = this.#storageFiles();
+            if (files && succeeded) {
+              for (const event of linkedPackageMutationEvents(
+                command.id,
+                response,
+                files,
+                PACKAGE_ASSET_MUTATIONS.has(command.action),
+              )) {
+                this.#post(event);
+              }
+            } else {
+              if (files) this.#post({ kind: "storage", files });
+              this.#post({ kind: "response", id: command.id, response });
+            }
+          } else {
+            this.#post({ kind: "response", id: command.id, response });
+          }
+          this.#publishControllerOutput();
+          break;
         }
-        this.#publishControllerOutput();
-        break;
       case "midi": {
         const [status, data1, data2] = command.data;
         this.#host?.rf_push_midi(0, status, data1, data2, command.length);
@@ -349,15 +372,18 @@ class RackForgeEngine extends AudioWorkletProcessor {
   }
 
   /** Reports what the host has written, so the page can keep it. */
-  #publishStorage() {
+  #storageFiles(): SeedFile[] | null {
     const storage = this.#storage;
-    if (!storage) return;
+    if (!storage) return null;
     const files: SeedFile[] = [];
     collectFiles(storage.dir.contents, "", files);
-    this.#post({
-      kind: "storage",
-      files: files.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX)),
-    });
+    this.#storageRevision = this.#host?.rf_storage_revision?.() ?? this.#storageRevision;
+    return files.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX));
+  }
+
+  #publishStorage() {
+    const files = this.#storageFiles();
+    if (files) this.#post({ kind: "storage", files });
   }
 
   #publishControllerOutput() {

@@ -3601,7 +3601,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rackforge-android-native"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "base64",
@@ -3624,7 +3624,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-audio-api"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -3634,7 +3634,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-browser"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "rackforge-audio-api",
@@ -3657,14 +3657,14 @@ dependencies = [
 
 [[package]]
 name = "rackforge-concert-grand"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "rackforge-plugin-sdk",
 ]
 
 [[package]]
 name = "rackforge-control-api"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "rackforge-audio-api",
  "rackforge-midi-api",
@@ -3677,7 +3677,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-control-profile"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "thiserror 2.0.19",
@@ -3685,7 +3685,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-controller-api"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "rackforge-control-profile",
  "serde",
@@ -3710,7 +3710,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-controller-host"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "midir",
@@ -3723,7 +3723,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-controller-package"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "rackforge-controller-api",
  "semver",
@@ -3736,7 +3736,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "alsa 0.10.0",
  "anyhow",
@@ -3764,14 +3764,14 @@ dependencies = [
 
 [[package]]
 name = "rackforge-demo-synth"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "rackforge-plugin-sdk",
 ]
 
 [[package]]
 name = "rackforge-desktop"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "axum",
@@ -3812,11 +3812,11 @@ dependencies = [
 
 [[package]]
 name = "rackforge-dsp"
-version = "0.1.6"
+version = "0.1.7"
 
 [[package]]
 name = "rackforge-gain"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "rackforge-plugin-api",
  "serde_json",
@@ -3824,18 +3824,18 @@ dependencies = [
 
 [[package]]
 name = "rackforge-gain-portable"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "rackforge-plugin-sdk",
 ]
 
 [[package]]
 name = "rackforge-host-capabilities"
-version = "0.1.6"
+version = "0.1.7"
 
 [[package]]
 name = "rackforge-midi-api"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -3844,7 +3844,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-performance-api"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "rackforge-plugin-api",
  "serde",
@@ -3854,7 +3854,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-platform-api"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -3864,7 +3864,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-platform-host"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "rackforge-platform-api",
@@ -3874,7 +3874,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-plugin-api"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "png",
  "rackforge-control-profile",
@@ -3889,7 +3889,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-plugin-runtime"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "wasmtime",
@@ -3898,11 +3898,11 @@ dependencies = [
 
 [[package]]
 name = "rackforge-plugin-sdk"
-version = "0.1.6"
+version = "0.1.7"
 
 [[package]]
 name = "rackforge-program-api"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "semver",
  "serde",
@@ -3912,7 +3912,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-repository"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -3930,7 +3930,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-resource-api"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "thiserror 2.0.19",
@@ -3938,7 +3938,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-resource-host"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "base64",
  "getrandom 0.3.4",
@@ -3950,7 +3950,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-roland-scva"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "hound",
  "rackforge-plugin-api",
@@ -3960,7 +3960,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-session-api"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "rackforge-controller-api",
  "rackforge-midi-api",
@@ -3973,11 +3973,11 @@ dependencies = [
 
 [[package]]
 name = "rackforge-startup"
-version = "0.1.6"
+version = "0.1.7"
 
 [[package]]
 name = "rackforge-store"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -4000,7 +4000,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-surface-runtime"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "rackforge-audio-api",
  "rackforge-controller-api",
@@ -4014,14 +4014,14 @@ dependencies = [
 
 [[package]]
 name = "rackforge-ui"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "zeroize",
 ]
 
 [[package]]
 name = "rackforge-vst3"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "include_dir",
@@ -4039,7 +4039,7 @@ dependencies = [
 
 [[package]]
 name = "rackforge-web"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "axum",

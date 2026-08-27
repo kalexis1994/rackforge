@@ -16,7 +16,7 @@ mod shared;
 
 pub use shared::{
     ABI_VERSION_V1, ABI_VERSION_V1_1, MAX_PARALLEL_UNITS, MidiEvent, PARALLEL_ABI_VERSION_V1,
-    ParallelLayout, ParallelPlanEntry, ParameterEvent, RuntimeLimits,
+    ParallelBlockPlan, ParallelLayout, ParallelPlanEntry, ParameterEvent, RuntimeLimits,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

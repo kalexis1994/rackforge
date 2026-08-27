@@ -19,6 +19,9 @@ pub const PARALLEL_ABI_VERSION_V1: i32 = 0x0001_0000;
 pub const MAX_PARALLEL_UNITS: usize = 16;
 /// Bytes of one entry in the plan region: `unit: u32` then `payload: u32`.
 pub const PARALLEL_PLAN_ENTRY_BYTES: usize = 8;
+/// Bytes of the plan-region header preceding the entries:
+/// `shared_payload_bytes: u32` then a reserved word.
+pub const PARALLEL_PLAN_HEADER_BYTES: usize = 8;
 
 /// One ready-to-render unit announced by `rackforge_parallel_begin_block`.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -39,6 +42,18 @@ pub struct ParallelLayout {
     pub dispatch_stride: usize,
     /// f32 samples reserved for each unit's slot in the mix region.
     pub mix_slot_samples: usize,
+    /// Bytes of the block-shared payload region every unit receives — the
+    /// immutable per-block signals (per-frame LFO/noise arrays, wheel and
+    /// bend curves, automation segments) the coordinator computes once.
+    pub shared_capacity: usize,
+}
+
+/// What one `begin_block` produced: how many units are ready and how many
+/// bytes of block-shared payload accompany them.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ParallelBlockPlan {
+    pub active_units: usize,
+    pub shared_bytes: usize,
 }
 
 /// Validates the plan entries a coordinator produced for one block.

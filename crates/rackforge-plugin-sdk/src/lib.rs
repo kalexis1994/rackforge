@@ -197,6 +197,8 @@ pub struct BlockContext<'a> {
 pub struct PlanWriter<'a> {
     plan: &'a mut [u32],
     dispatch: &'a mut [u8],
+    shared: &'a mut [u8],
+    shared_len: usize,
     stride: usize,
     max_units: usize,
     count: usize,
@@ -208,17 +210,41 @@ impl<'a> PlanWriter<'a> {
     pub fn new(
         plan: &'a mut [u32],
         dispatch: &'a mut [u8],
+        shared: &'a mut [u8],
         stride: usize,
         max_units: usize,
     ) -> Self {
         Self {
             plan,
             dispatch,
+            shared,
+            shared_len: 0,
             stride,
             max_units,
             count: 0,
             last_unit: None,
         }
+    }
+
+    /// The block-shared payload buffer: one immutable byte region every
+    /// unit receives alongside its own dispatch payload. Write the block's
+    /// shared signals here — per-frame LFO or noise arrays, wheel and bend
+    /// curves, automation segments — then call [`Self::commit_shared`].
+    pub fn shared_buffer(&mut self) -> &mut [u8] {
+        self.shared
+    }
+
+    /// Declares how many bytes of [`Self::shared_buffer`] this block uses.
+    pub fn commit_shared(&mut self, length: usize) -> bool {
+        if length > self.shared.len() {
+            return false;
+        }
+        self.shared_len = length;
+        true
+    }
+
+    pub fn shared_len(&self) -> usize {
+        self.shared_len
     }
 
     /// Schedules `unit` for this block with its dispatch payload. Returns
@@ -247,9 +273,11 @@ impl<'a> PlanWriter<'a> {
     }
 }
 
-/// The block shape a unit renders against.
+/// The block shape a unit renders against, including the immutable
+/// block-shared payload the coordinator committed for every unit.
 pub struct UnitContext<'a> {
     pub input: &'a [f32],
+    pub shared: &'a [u8],
     pub frames: u32,
     pub output_channels: u32,
 }
@@ -925,11 +953,12 @@ macro_rules! export_processor {
 /// worker instances, so both paths produce identical audio.
 #[macro_export]
 macro_rules! export_parallel_processor {
-    ($processor:ty, max_units = $max_units:expr, dispatch_stride = $dispatch_stride:expr, max_frames = $max_frames:expr, max_input_channels = $max_input_channels:expr, max_output_channels = $max_output_channels:expr, max_midi_events = $max_midi_events:expr, max_parameter_events = $max_parameter_events:expr, max_transfer_bytes = $max_transfer_bytes:expr) => {
+    ($processor:ty, max_units = $max_units:expr, dispatch_stride = $dispatch_stride:expr, shared_capacity = $shared_capacity:expr, max_frames = $max_frames:expr, max_input_channels = $max_input_channels:expr, max_output_channels = $max_output_channels:expr, max_midi_events = $max_midi_events:expr, max_parameter_events = $max_parameter_events:expr, max_transfer_bytes = $max_transfer_bytes:expr) => {
         use $crate::Processor as _;
 
         const RF_PARALLEL_MAX_UNITS: usize = $max_units;
         const RF_PARALLEL_DISPATCH_STRIDE: usize = $dispatch_stride;
+        const RF_PARALLEL_SHARED_CAPACITY: usize = $shared_capacity;
         const RF_PARALLEL_MIX_SLOT_SAMPLES: usize = $max_frames * $max_output_channels;
 
         /// The host requires an 8-aligned dispatch region.
@@ -940,7 +969,16 @@ macro_rules! export_parallel_processor {
 
         static mut RF_DISPATCH: RackForgeDispatchBuffer =
             RackForgeDispatchBuffer([0; RF_PARALLEL_MAX_UNITS * RF_PARALLEL_DISPATCH_STRIDE]);
-        static mut RF_PLAN: [u32; RF_PARALLEL_MAX_UNITS * 2] = [0; RF_PARALLEL_MAX_UNITS * 2];
+
+        /// The host requires an 8-aligned shared region.
+        #[repr(C, align(8))]
+        pub struct RackForgeSharedBuffer([u8; RF_PARALLEL_SHARED_CAPACITY]);
+
+        static mut RF_SHARED: RackForgeSharedBuffer =
+            RackForgeSharedBuffer([0; RF_PARALLEL_SHARED_CAPACITY]);
+        /// Header (shared_bytes, reserved) followed by the plan entries.
+        static mut RF_PLAN: [u32; 2 + RF_PARALLEL_MAX_UNITS * 2] =
+            [0; 2 + RF_PARALLEL_MAX_UNITS * 2];
         static mut RF_PLAN_COUNT: usize = 0;
         static mut RF_MIX: [f32; RF_PARALLEL_MAX_UNITS * RF_PARALLEL_MIX_SLOT_SAMPLES] =
             [0.0; RF_PARALLEL_MAX_UNITS * RF_PARALLEL_MIX_SLOT_SAMPLES];
@@ -979,11 +1017,14 @@ macro_rules! export_parallel_processor {
                 // SAFETY: every entry point into this component is
                 // single-threaded; the statics are only reached from here.
                 unsafe {
-                    let plan = &mut *core::ptr::addr_of_mut!(RF_PLAN);
+                    let plan_region = &mut *core::ptr::addr_of_mut!(RF_PLAN);
+                    let plan = &mut plan_region[2..];
                     let dispatch = &mut (*core::ptr::addr_of_mut!(RF_DISPATCH)).0;
+                    let shared = &mut (*core::ptr::addr_of_mut!(RF_SHARED)).0;
                     let mut writer = $crate::PlanWriter::new(
                         plan,
                         dispatch,
+                        shared,
                         RF_PARALLEL_DISPATCH_STRIDE,
                         RF_PARALLEL_MAX_UNITS,
                     );
@@ -997,6 +1038,10 @@ macro_rules! export_parallel_processor {
                     };
                     $crate::ParallelProcessor::begin_block(&mut self.inner, &context, &mut writer);
                     let count = writer.activated();
+                    let shared_len = writer.shared_len();
+                    let header = &mut *core::ptr::addr_of_mut!(RF_PLAN);
+                    header[0] = shared_len as u32;
+                    header[1] = 0;
                     RF_PLAN_COUNT = count;
                     count
                 }
@@ -1005,10 +1050,11 @@ macro_rules! export_parallel_processor {
             fn rf_end(&mut self, output: &mut [f32], frames: u32, output_channels: u32) {
                 // SAFETY: single-threaded component, as above.
                 unsafe {
+                    let plan_region = &*core::ptr::addr_of!(RF_PLAN);
                     let mix = $crate::UnitMix::new(
                         &*core::ptr::addr_of!(RF_MIX),
                         RF_PARALLEL_MIX_SLOT_SAMPLES,
-                        &*core::ptr::addr_of!(RF_PLAN),
+                        &plan_region[2..],
                         RF_PLAN_COUNT,
                         frames as usize * output_channels as usize,
                     );
@@ -1113,9 +1159,13 @@ macro_rules! export_parallel_processor {
                     // SAFETY: single-threaded component; the plan was just
                     // written by `rf_begin` and stays untouched until the
                     // next block.
-                    let (unit, payload_len) = unsafe {
+                    let (unit, payload_len, shared_len) = unsafe {
                         let plan = &*core::ptr::addr_of!(RF_PLAN);
-                        (plan[index * 2], plan[index * 2 + 1] as usize)
+                        (
+                            plan[2 + index * 2],
+                            plan[2 + index * 2 + 1] as usize,
+                            plan[0] as usize,
+                        )
                     };
                     // SAFETY: as above; payload and mix regions are disjoint
                     // from `output`.
@@ -1123,8 +1173,11 @@ macro_rules! export_parallel_processor {
                         let dispatch = &(*core::ptr::addr_of!(RF_DISPATCH)).0;
                         let payload =
                             &dispatch[unit as usize * RF_PARALLEL_DISPATCH_STRIDE..][..payload_len];
+                        let shared_region = &(*core::ptr::addr_of!(RF_SHARED)).0;
+                        let shared = &shared_region[..shared_len];
                         let context = $crate::UnitContext {
                             input,
+                            shared,
                             frames,
                             output_channels,
                         };
@@ -1182,6 +1235,16 @@ macro_rules! export_parallel_processor {
         #[unsafe(no_mangle)]
         pub extern "C" fn rackforge_parallel_mix_ptr() -> i32 {
             core::ptr::addr_of_mut!(RF_MIX).cast::<f32>() as usize as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_shared_ptr() -> i32 {
+            core::ptr::addr_of_mut!(RF_SHARED).cast::<u8>() as usize as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_parallel_shared_capacity() -> i32 {
+            RF_PARALLEL_SHARED_CAPACITY as i32
         }
 
         #[unsafe(no_mangle)]
@@ -1265,6 +1328,7 @@ macro_rules! export_parallel_processor {
         pub extern "C" fn rackforge_parallel_render_unit(
             unit: i32,
             payload_bytes: i32,
+            shared_bytes: i32,
             frames: i32,
             output_channels: i32,
         ) -> i32 {
@@ -1272,6 +1336,8 @@ macro_rules! export_parallel_processor {
                 || unit as usize >= RF_PARALLEL_MAX_UNITS
                 || payload_bytes < 0
                 || payload_bytes as usize > RF_PARALLEL_DISPATCH_STRIDE
+                || shared_bytes < 0
+                || shared_bytes as usize > RF_PARALLEL_SHARED_CAPACITY
                 || frames <= 0
                 || frames as usize > RF_MAX_FRAMES
                 || output_channels < 0
@@ -1305,12 +1371,15 @@ macro_rules! export_parallel_processor {
                 let dispatch = &(*core::ptr::addr_of!(RF_DISPATCH)).0;
                 let payload = &dispatch[unit as usize * RF_PARALLEL_DISPATCH_STRIDE..]
                     [..payload_bytes as usize];
+                let shared_region = &(*core::ptr::addr_of!(RF_SHARED)).0;
+                let shared = &shared_region[..shared_bytes as usize];
                 let output = core::slice::from_raw_parts_mut(
                     core::ptr::addr_of_mut!(RF_OUTPUT).cast::<f32>(),
                     samples,
                 );
                 let context = $crate::UnitContext {
                     input,
+                    shared,
                     frames: frames as u32,
                     output_channels: output_channels as u32,
                 };

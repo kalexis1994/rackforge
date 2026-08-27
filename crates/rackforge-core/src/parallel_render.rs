@@ -54,6 +54,8 @@ const PHASE_UNITS: u8 = 3;
 const PHASE_END_READY: u8 = 4;
 const PHASE_END_RUNNING: u8 = 5;
 const PHASE_DONE: u8 = 6;
+/// Waiting on upstream Slots named in the dependency mask.
+const PHASE_BLOCKED: u8 = 7;
 
 /// Telemetry stage indices.
 pub const STAGE_SINGLE: usize = 0;
@@ -116,10 +118,40 @@ pub unsafe fn execute_unit_job(job: &UnitJob, frames: u32, channels: u32) -> boo
 ///   never destroyed by the pool, only entered);
 /// * [`Self::unit_job`] returns jobs whose state is disjoint per unit, so
 ///   different units of one Slot may run concurrently;
-/// * `run_begin` only reports units below `max_units`.
+/// * `run_begin` only reports units below `max_units`;
+/// * [`Self::dependency_mask`] names only Slots with a *lower* index, which
+///   keeps every graph acyclic by construction — the shape the Rack
+///   compiler already guarantees. Anything else (a true cycle, feedback)
+///   is not schedulable and must be rejected before reaching the pool;
+/// * [`Self::gather_input`] reads only the *outputs* of the Slots in its
+///   dependency mask — which the scheduler guarantees are complete — and
+///   mutates only its own Slot.
 pub unsafe trait ScheduledSlot {
     /// Number of host-schedulable units; `0` renders as one classic job.
     fn max_units(&self) -> u32;
+    /// Bitmask of lower-indexed Slots whose output feeds this Slot's input.
+    /// `0` makes the Slot immediately ready — the leaf-instrument case.
+    fn dependency_mask(&self) -> u32 {
+        0
+    }
+    /// Builds this Slot's input from its finished upstream Slots. Runs on
+    /// the worker that claims the Slot's first job, after every dependency
+    /// completed and before `run_single`/`run_begin`.
+    ///
+    /// # Safety
+    ///
+    /// `slots` points at the block's Slot array of `slot_count` entries.
+    /// Implementations may create shared references to upstream Slots in
+    /// their dependency mask (all in `PHASE_DONE`, so nothing mutates them)
+    /// and a mutable reference to their own entry — never to anything else.
+    unsafe fn gather_input(
+        _slot_index: usize,
+        _slots: *mut Self,
+        _slot_count: usize,
+        _frames: u32,
+        _channels: u32,
+    ) {
+    }
     /// Classic whole-plugin render. Returns `false` on a fault.
     fn run_single(&mut self, frames: u32, channels: u32) -> bool;
     /// Serial pre-stage. Returns the bitmask of units to schedule, or `None`
@@ -511,6 +543,9 @@ struct SlotSchedule {
     pending_units: AtomicU32,
     remaining_units: AtomicU32,
     completed_units: AtomicU32,
+    /// Upstream Slots this Slot still waits for; the last cleared bit
+    /// promotes the phase from blocked to ready.
+    deps_remaining: AtomicU32,
     block_ns: AtomicU64,
     stage_ns: [AtomicU64; STAGE_COUNT],
 }
@@ -522,6 +557,7 @@ impl SlotSchedule {
             pending_units: AtomicU32::new(0),
             remaining_units: AtomicU32::new(0),
             completed_units: AtomicU32::new(0),
+            deps_remaining: AtomicU32::new(0),
             block_ns: AtomicU64::new(0),
             stage_ns: std::array::from_fn(|_| AtomicU64::new(0)),
         }
@@ -704,8 +740,23 @@ impl<S: ScheduledSlot + 'static> RenderPool<S> {
         if workers < 2 || slots.is_empty() || slots.len() > MAX_RENDER_SLOTS {
             return false;
         }
-        if slots.len() == 1 && slots[0].max_units() == 0 {
+        // Adaptive width: with fewer than two schedulable pieces there is
+        // nothing to overlap and the epoch synchronization would cost more
+        // than it buys. Integer sums only — no measurement, no allocation.
+        let width: usize = slots
+            .iter()
+            .map(|slot| slot.max_units().max(1) as usize)
+            .sum();
+        if width < 2 {
             return false;
+        }
+        // A dependency mask may only name lower-indexed Slots; that is the
+        // acyclic shape the Rack compiler emits. Anything else falls back
+        // to the sequential executor, which runs declaration order.
+        for (index, slot) in slots.iter().enumerate() {
+            if slot.dependency_mask() >> index != 0 {
+                return false;
+            }
         }
         let started = Instant::now();
         self.epoch = self.epoch.wrapping_add(1);
@@ -734,7 +785,16 @@ impl<S: ScheduledSlot + 'static> RenderPool<S> {
                         slot.unit_job(unit, frames, channels);
                 }
             }
-            schedule.phase.store(PHASE_FIRST_READY, Ordering::Relaxed);
+            let deps = slot.dependency_mask();
+            schedule.deps_remaining.store(deps, Ordering::Relaxed);
+            schedule.phase.store(
+                if deps == 0 {
+                    PHASE_FIRST_READY
+                } else {
+                    PHASE_BLOCKED
+                },
+                Ordering::Relaxed,
+            );
         }
         shared.slot_count.store(slots.len(), Ordering::Relaxed);
         shared.frames.store(frames, Ordering::Relaxed);
@@ -836,7 +896,15 @@ fn run_epoch<S: ScheduledSlot>(worker_index: usize, shared: &PoolShared<S>) {
         let mut ran_any = false;
         for offset in 0..slot_count {
             let index = (worker_index + offset) % slot_count;
-            if try_slot_job(shared, slots_ptr, index, frames, channels, worker_index) {
+            if try_slot_job(
+                shared,
+                slots_ptr,
+                slot_count,
+                index,
+                frames,
+                channels,
+                worker_index,
+            ) {
                 ran_any = true;
             }
         }
@@ -871,9 +939,41 @@ fn finish_job<S>(shared: &PoolShared<S>) {
     }
 }
 
+/// Clears `completed` from every Slot's dependency mask; a Slot whose last
+/// dependency just finished becomes ready and the workers are woken.
+fn release_dependents<S>(shared: &PoolShared<S>, completed: usize, slot_count: usize) {
+    let bit = 1_u32 << completed;
+    let mut released = false;
+    for schedule in shared.schedules.iter().take(slot_count) {
+        let previous = schedule.deps_remaining.fetch_and(!bit, Ordering::AcqRel);
+        if previous & bit != 0
+            && previous & !bit == 0
+            && schedule
+                .phase
+                .compare_exchange(
+                    PHASE_BLOCKED,
+                    PHASE_FIRST_READY,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+        {
+            released = true;
+        }
+    }
+    if released {
+        let workers = shared
+            .worker_threads
+            .get()
+            .map_or(0, |threads| threads.len());
+        shared.wake_workers(workers);
+    }
+}
+
 fn try_slot_job<S: ScheduledSlot>(
     shared: &PoolShared<S>,
     slots_ptr: *mut S,
+    slot_count: usize,
     index: usize,
     frames: u32,
     channels: u32,
@@ -894,9 +994,13 @@ fn try_slot_job<S: ScheduledSlot>(
             {
                 return false;
             }
+            let started = Instant::now();
+            // SAFETY: every dependency reached PHASE_DONE (this Slot was
+            // promoted out of PHASE_BLOCKED), so upstream outputs are
+            // stable; the CAS grants exclusive access to this Slot.
+            unsafe { S::gather_input(index, slots_ptr, slot_count, frames, channels) };
             // SAFETY: the CAS above grants exclusive Slot access.
             let slot = unsafe { &mut *slots_ptr.add(index) };
-            let started = Instant::now();
             if slot.max_units() == 0 {
                 let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     slot.run_single(frames, channels)
@@ -908,6 +1012,7 @@ fn try_slot_job<S: ScheduledSlot>(
                     quarantine_slot(shared, slot, index);
                 }
                 schedule.phase.store(PHASE_DONE, Ordering::Release);
+                release_dependents(shared, index, slot_count);
                 finish_job(shared);
             } else {
                 let mask = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -943,6 +1048,7 @@ fn try_slot_job<S: ScheduledSlot>(
                     None => {
                         quarantine_slot(shared, slot, index);
                         schedule.phase.store(PHASE_DONE, Ordering::Release);
+                        release_dependents(shared, index, slot_count);
                         finish_job(shared);
                     }
                 }
@@ -1020,6 +1126,7 @@ fn try_slot_job<S: ScheduledSlot>(
                 quarantine_slot(shared, slot, index);
             }
             schedule.phase.store(PHASE_DONE, Ordering::Release);
+            release_dependents(shared, index, slot_count);
             finish_job(shared);
             true
         }
@@ -1058,7 +1165,15 @@ pub fn process_slots_sequential<S: ScheduledSlot>(
     channels: u32,
     telemetry: &RenderTelemetry,
 ) {
-    for (index, slot) in slots.iter_mut().enumerate() {
+    let slot_count = slots.len();
+    let slots_ptr = slots.as_mut_ptr();
+    for index in 0..slot_count {
+        // SAFETY: single-threaded, and declaration order is topological
+        // (dependency masks only name lower indices), so every upstream
+        // Slot this gather reads is already complete.
+        unsafe { S::gather_input(index, slots_ptr, slot_count, frames, channels) };
+        // SAFETY: `index` is in bounds and no other reference is live.
+        let slot = unsafe { &mut *slots_ptr.add(index) };
         process_one_slot_sequential(slot, index, frames, channels, telemetry);
     }
 }
@@ -1128,6 +1243,10 @@ struct UnitCell<'plugin> {
     instance: PluginInstance<'plugin>,
     payload: Box<[u8]>,
     payload_len: usize,
+    /// Host-staged copy of the coordinator's block-shared payload; every
+    /// unit receives the identical bytes.
+    shared_ptr: *const u8,
+    shared_len: usize,
     output: Box<[f32]>,
     input_ptr: *const f32,
     input_len: usize,
@@ -1164,11 +1283,22 @@ unsafe fn run_unit_cell(context: *mut (), _unit: u32, _frames: u32, _channels: u
     if !payload_ok {
         return false;
     }
+    let shared = if cell.shared_len == 0 {
+        &[][..]
+    } else {
+        // SAFETY: the shared staging buffer is owned by `ParallelUnits`
+        // and only read for the duration of the block.
+        unsafe { std::slice::from_raw_parts(cell.shared_ptr, cell.shared_len) }
+    };
+    if cell.instance.parallel_write_shared(shared).is_err() {
+        return false;
+    }
     let output_samples = cell.output_samples;
     cell.instance
         .parallel_render_unit(
             unit,
             payload_len,
+            cell.shared_len,
             input,
             &mut cell.output[..output_samples],
             frames,
@@ -1186,6 +1316,9 @@ pub struct ParallelUnits<'plugin> {
     layout: ParallelLayout,
     cells: Vec<Box<UnitCell<'plugin>>>,
     plan: Box<[ParallelPlanEntry]>,
+    /// Host staging buffer for the coordinator's block-shared payload.
+    shared: Box<[u8]>,
+    shared_len: usize,
     plan_mask: u32,
     sched_mask: u32,
     quarantined_units: u32,
@@ -1222,6 +1355,8 @@ impl<'plugin> ParallelUnits<'plugin> {
                 instance,
                 payload: vec![0_u8; layout.dispatch_stride].into_boxed_slice(),
                 payload_len: 0,
+                shared_ptr: std::ptr::null(),
+                shared_len: 0,
                 output: vec![0.0_f32; samples].into_boxed_slice(),
                 input_ptr: std::ptr::null(),
                 input_len: 0,
@@ -1232,6 +1367,8 @@ impl<'plugin> ParallelUnits<'plugin> {
             layout,
             cells,
             plan: vec![ParallelPlanEntry::default(); MAX_PARALLEL_UNITS].into_boxed_slice(),
+            shared: vec![0_u8; layout.shared_capacity].into_boxed_slice(),
+            shared_len: 0,
             plan_mask: 0,
             sched_mask: 0,
             quarantined_units: 0,
@@ -1293,19 +1430,29 @@ impl<'plugin> ParallelUnits<'plugin> {
         midi_events: &[MidiEventV1],
         parameter_events: &[ParameterEventV1],
     ) -> anyhow::Result<u32> {
-        let active = coordinator.parallel_begin_block(
+        let block = coordinator.parallel_begin_block(
             input,
             frames,
             midi_events,
             parameter_events,
             &mut self.plan,
         )?;
+        self.shared_len = block.shared_bytes;
+        coordinator.parallel_read_shared(&mut self.shared[..block.shared_bytes])?;
+        // The staging buffer's heap storage never moves, so the pointer the
+        // cells carry stays valid however this struct itself is moved.
+        let shared_ptr = self.shared.as_ptr();
         let mut mask = 0_u32;
-        for entry in &self.plan[..active] {
+        for entry in &self.plan[..block.active_units] {
             let cell = &mut self.cells[entry.unit as usize];
             let length = entry.payload_bytes as usize;
             coordinator.parallel_read_dispatch(entry.unit, &mut cell.payload[..length])?;
             cell.payload_len = length;
+            // Written here — after this block's `begin_block` — because the
+            // scheduler publishes unit jobs before begin has run; the cell,
+            // not the job, must carry the fresh per-block values.
+            cell.shared_ptr = shared_ptr;
+            cell.shared_len = block.shared_bytes;
             mask |= 1 << entry.unit;
         }
         self.plan_mask = mask;
@@ -1422,13 +1569,19 @@ mod tests {
         active_mask: u32,
         fail_begin: bool,
         single_spin_ns: u64,
+        deps_mask: u32,
         cells: Vec<Box<MockUnitCell>>,
         singles: usize,
         begins: usize,
         ends: usize,
+        gathers: usize,
+        /// True once this block's final stage retired; dependents assert it
+        /// from `gather_input`.
+        finished: std::sync::atomic::AtomicBool,
         end_saw_completed: Vec<u32>,
         runs_at_begin: Vec<usize>,
         dependency_violation: bool,
+        gather_violation: bool,
         quarantined: bool,
     }
 
@@ -1447,6 +1600,7 @@ mod tests {
                 active_mask,
                 fail_begin: false,
                 single_spin_ns,
+                deps_mask: 0,
                 cells: (0..max_units)
                     .map(|_| {
                         Box::new(MockUnitCell {
@@ -1459,9 +1613,12 @@ mod tests {
                 singles: 0,
                 begins: 0,
                 ends: 0,
+                gathers: 0,
+                finished: std::sync::atomic::AtomicBool::new(false),
                 end_saw_completed: Vec::new(),
                 runs_at_begin: Vec::new(),
                 dependency_violation: false,
+                gather_violation: false,
                 quarantined: false,
             }
         }
@@ -1478,9 +1635,38 @@ mod tests {
             self.max_units
         }
 
+        fn dependency_mask(&self) -> u32 {
+            self.deps_mask
+        }
+
+        unsafe fn gather_input(
+            slot_index: usize,
+            slots: *mut Self,
+            _slot_count: usize,
+            _frames: u32,
+            _channels: u32,
+        ) {
+            // SAFETY: the scheduler guarantees exclusive access to this Slot
+            // and completed, immutable upstream Slots.
+            let me = unsafe { &mut *slots.add(slot_index) };
+            me.gathers += 1;
+            let mut pending = me.deps_mask;
+            while pending != 0 {
+                let bit = pending.isolate_lowest_one();
+                pending &= !bit;
+                let upstream = bit.trailing_zeros() as usize;
+                // SAFETY: as above; upstream is a different index.
+                let upstream = unsafe { &*(slots.add(upstream) as *const MockSlot) };
+                if !upstream.finished.load(Ordering::SeqCst) {
+                    me.gather_violation = true;
+                }
+            }
+        }
+
         fn run_single(&mut self, _frames: u32, _channels: u32) -> bool {
             spin_for(self.single_spin_ns);
             self.singles += 1;
+            self.finished.store(true, Ordering::SeqCst);
             true
         }
 
@@ -1522,6 +1708,7 @@ mod tests {
             if completed & !self.active_mask != 0 {
                 self.dependency_violation = true;
             }
+            self.finished.store(true, Ordering::SeqCst);
             true
         }
 
@@ -1647,13 +1834,65 @@ mod tests {
         }
     }
 
+    /// A cabled Rack inside the pool: a parallel instrument feeding a
+    /// downstream effect, next to an independent instrument. The effect's
+    /// gather asserts — from inside the scheduler — that every upstream
+    /// Slot finished (so `end_block` ran) before the effect starts.
+    #[test]
+    fn a_downstream_slot_starts_only_after_its_sources_finish() {
+        for workers in [2_usize, 3, 4] {
+            let telemetry = RenderTelemetry::new(workers);
+            let mut pool = RenderPool::with_workers(workers, telemetry);
+            if pool.worker_count() < workers {
+                continue;
+            }
+            let mut slots = vec![
+                MockSlot::parallel(5, 0b11111, 30_000),
+                MockSlot::single(0),
+                MockSlot::single(0),
+            ];
+            // Chain: parallel synth -> effect; the third stays independent.
+            slots[1].deps_mask = 0b1;
+            let blocks = 100;
+            for _ in 0..blocks {
+                for slot in &mut slots {
+                    slot.finished.store(false, Ordering::SeqCst);
+                }
+                if !pool.process(&mut slots, 128, 2, 1_000_000_000) {
+                    process_slots_sequential(&mut slots, 128, 2, pool.telemetry());
+                }
+            }
+            for slot in &slots {
+                assert!(!slot.gather_violation, "workers={workers}");
+                assert_eq!(slot.gathers, blocks, "workers={workers}");
+            }
+            assert_eq!(slots[0].ends, blocks, "workers={workers}");
+            assert_eq!(slots[1].singles, blocks, "workers={workers}");
+            assert_eq!(slots[2].singles, blocks, "workers={workers}");
+        }
+    }
+
+    /// A cyclic mask can never be scheduled; the pool refuses the block and
+    /// the sequential executor still runs it in declaration order.
+    #[test]
+    fn cyclic_dependency_masks_fall_back_to_the_sequential_executor() {
+        let telemetry = RenderTelemetry::new(2);
+        let mut pool = RenderPool::with_workers(2, Arc::clone(&telemetry));
+        let mut slots = vec![MockSlot::single(0), MockSlot::single(0)];
+        slots[0].deps_mask = 0b10; // depends on a *later* Slot: not a DAG shape
+        assert!(!pool.process(&mut slots, 128, 2, 1_000_000_000));
+        process_slots_sequential(&mut slots, 128, 2, &telemetry);
+        assert_eq!(slots[0].singles, 1);
+        assert_eq!(slots[1].singles, 1);
+    }
+
     /// The scenario from the design brief: one five-unit instrument next to
     /// two cheaper ones. The pool must let workers that finish the cheap
     /// instruments take pending units of the expensive one, improving the
     /// worst block against the strictly sequential rendering of the very
     /// same graph.
     #[test]
-    fn unbalanced_load_improves_the_worst_block() {
+    fn unbalanced_load_improves_the_worst_block_and_workers_share_units() {
         let cpus = thread::available_parallelism().map_or(1, |count| count.get());
         if cpus < 4 {
             eprintln!("skipping unbalanced-load benchmark: only {cpus} cpus");
@@ -1662,45 +1901,94 @@ mod tests {
         let unit_ns = 300_000;
         let light_ns = 150_000;
         let blocks = 30;
-        let build = || {
-            vec![
-                MockSlot::parallel(5, 0b11111, unit_ns),
-                MockSlot::single(light_ns),
-                MockSlot::single(light_ns),
-            ]
+        // 128 frames at 48 kHz.
+        let deadline_ns = 2_666_666;
+        let workers = 3;
+
+        let run = |mut slots: Vec<MockSlot>| {
+            let telemetry = RenderTelemetry::new(workers);
+            let mut pool = RenderPool::with_workers(workers, Arc::clone(&telemetry));
+            // Warm the worker threads out of the measurement.
+            drive(&mut pool, &mut slots, 5);
+            let _ = telemetry.snapshot_and_reset();
+            let started = Instant::now();
+            let mut worst = 0_u64;
+            for _ in 0..blocks {
+                let block = Instant::now();
+                assert!(pool.process(&mut slots, 128, 2, deadline_ns));
+                worst = worst.max(block.elapsed().as_nanos() as u64);
+            }
+            let elapsed = started.elapsed();
+            (worst, telemetry.snapshot_and_reset(), elapsed)
         };
 
-        let telemetry = RenderTelemetry::new(1);
-        let mut slots = build();
-        let mut sequential_worst = 0_u64;
-        for _ in 0..blocks {
-            let started = Instant::now();
-            process_slots_sequential(&mut slots, 128, 2, &telemetry);
-            sequential_worst = sequential_worst.max(started.elapsed().as_nanos() as u64);
-        }
+        // The previous scheduler could not split a plugin: the heavy
+        // instrument was one indivisible job, so its worker carried
+        // 5 x unit_ns alone while the others idled after their lights.
+        let (old_worst, old_snapshot, _) = run(vec![
+            MockSlot::single(5 * unit_ns),
+            MockSlot::single(light_ns),
+            MockSlot::single(light_ns),
+        ]);
+        // The unit-aware scheduler: same total work, five stealable units.
+        let (new_worst, new_snapshot, new_elapsed) = run(vec![
+            MockSlot::parallel(5, 0b11111, unit_ns),
+            MockSlot::single(light_ns),
+            MockSlot::single(light_ns),
+        ]);
 
-        let telemetry = RenderTelemetry::new(3);
-        let mut pool = RenderPool::with_workers(3, telemetry);
-        let mut slots = build();
-        // Warm the workers so thread startup does not pollute the measure.
-        drive(&mut pool, &mut slots, 5);
-        let mut pool_worst = 0_u64;
-        for _ in 0..blocks {
-            let started = Instant::now();
-            assert!(pool.process(&mut slots, 128, 2, 1_000_000_000));
-            pool_worst = pool_worst.max(started.elapsed().as_nanos() as u64);
-        }
+        let report = |label: &str, worst: u64, snapshot: &TelemetrySnapshot| {
+            println!(
+                "UNBALANCED_BENCH scheduler={label} worst_us={} p95_us={} p99_us={} \
+                 budget_worst_pct={:.1} deadline_misses={}",
+                worst / 1_000,
+                snapshot.block.percentile_ns(95.0) / 1_000,
+                snapshot.block.percentile_ns(99.0) / 1_000,
+                worst as f64 * 100.0 / deadline_ns as f64,
+                snapshot.deadline_misses,
+            );
+            let units: Vec<String> = snapshot
+                .worker_units
+                .iter()
+                .map(|count| count.to_string())
+                .collect();
+            let busy: Vec<String> = snapshot
+                .worker_busy_ns
+                .iter()
+                .map(|ns| format!("{}", ns / 1_000))
+                .collect();
+            println!(
+                "UNBALANCED_BENCH scheduler={label} worker_units=[{}] worker_busy_us=[{}]",
+                units.join(","),
+                busy.join(","),
+            );
+        };
+        report("previous-indivisible", old_worst, &old_snapshot);
+        report("unit-aware", new_worst, &new_snapshot);
         println!(
-            "UNBALANCED_BENCH sequential_worst_us={} pool_worst_us={}",
-            sequential_worst / 1_000,
-            pool_worst / 1_000
+            "UNBALANCED_BENCH wall_ms={} blocks={blocks}",
+            new_elapsed.as_millis()
         );
-        // Sequential: 5×300µs + 2×150µs ≈ 1.8 ms. Three workers with global
-        // work claiming should land well under 80% of that even on a busy
-        // test machine.
+
+        // The workers that finished the light instruments must have taken
+        // pending units of the heavy one: unit executions cannot all sit on
+        // one worker.
+        let busy_workers = new_snapshot
+            .worker_units
+            .iter()
+            .filter(|count| **count > 0)
+            .count();
         assert!(
-            pool_worst < sequential_worst * 8 / 10,
-            "pool {pool_worst}ns vs sequential {sequential_worst}ns"
+            busy_workers >= 2,
+            "units were not shared: {:?}",
+            new_snapshot.worker_units
+        );
+        let total_units: u64 = new_snapshot.worker_units.iter().sum();
+        assert_eq!(total_units, blocks as u64 * 5);
+        // And the worst block must actually improve on the old scheduler.
+        assert!(
+            new_worst < old_worst * 8 / 10,
+            "unit-aware {new_worst}ns vs indivisible {old_worst}ns"
         );
     }
 

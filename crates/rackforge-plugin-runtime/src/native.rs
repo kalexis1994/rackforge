@@ -5,14 +5,14 @@
 //! public surface on top of the engine already present in the page.
 
 use crate::shared::{
-    PARALLEL_PLAN_ENTRY_BYTES, PROGRAM_EDIT_BASIC, PROGRAM_EDIT_DECLARATIVE,
-    PROGRAM_EDIT_KNOWN_CAPABILITIES, PROGRAM_EDIT_PREVIEW, byte_range, check_status,
-    checked_samples, memory_range, ranges_overlap, read_f32, validate_parallel_plan,
+    PARALLEL_PLAN_ENTRY_BYTES, PARALLEL_PLAN_HEADER_BYTES, PROGRAM_EDIT_BASIC,
+    PROGRAM_EDIT_DECLARATIVE, PROGRAM_EDIT_KNOWN_CAPABILITIES, PROGRAM_EDIT_PREVIEW, byte_range,
+    check_status, checked_samples, memory_range, ranges_overlap, read_f32, validate_parallel_plan,
     validate_realtime_events, write_f32, write_midi, write_parameters,
 };
 use crate::{
     ABI_VERSION_V1, ABI_VERSION_V1_1, MAX_PARALLEL_UNITS, MidiEvent, PARALLEL_ABI_VERSION_V1,
-    ParallelLayout, ParallelPlanEntry, ParameterEvent, RuntimeLimits,
+    ParallelBlockPlan, ParallelLayout, ParallelPlanEntry, ParameterEvent, RuntimeLimits,
 };
 use anyhow::{Context, Result, bail};
 use std::fs::File;
@@ -276,6 +276,16 @@ impl PortableModule {
                 let mix_offset =
                     typed::<(), i32>(&instance, &mut store, "rackforge_parallel_mix_ptr")?
                         .call(&mut store, ())?;
+                let shared_offset =
+                    typed::<(), i32>(&instance, &mut store, "rackforge_parallel_shared_ptr")?
+                        .call(&mut store, ())?;
+                let shared_capacity =
+                    typed::<(), i32>(&instance, &mut store, "rackforge_parallel_shared_capacity")?
+                        .call(&mut store, ())?;
+                if shared_capacity <= 0 || !(shared_capacity as usize).is_multiple_of(8) {
+                    bail!("parallel-render shared capacity must be a positive multiple of 8");
+                }
+                let shared_capacity = shared_capacity as usize;
                 let memory_size = memory.data_size(&store);
                 byte_range(
                     dispatch_offset,
@@ -286,10 +296,11 @@ impl PortableModule {
                     8,
                     memory_size,
                 )?;
+                byte_range(shared_offset, shared_capacity, 1, 8, memory_size)?;
                 byte_range(
                     plan_offset,
-                    max_units,
-                    PARALLEL_PLAN_ENTRY_BYTES,
+                    PARALLEL_PLAN_HEADER_BYTES + max_units * PARALLEL_PLAN_ENTRY_BYTES,
+                    1,
                     4,
                     memory_size,
                 )?;
@@ -307,10 +318,12 @@ impl PortableModule {
                         max_units,
                         dispatch_stride,
                         mix_slot_samples: output_capacity as usize,
+                        shared_capacity,
                     },
                     dispatch_offset,
                     plan_offset,
                     mix_offset,
+                    shared_offset,
                     begin_block: typed(&instance, &mut store, "rackforge_parallel_begin_block")?,
                     render_unit: typed(&instance, &mut store, "rackforge_parallel_render_unit")?,
                     end_block: typed(&instance, &mut store, "rackforge_parallel_end_block")?,
@@ -371,8 +384,9 @@ struct PortableParallelApi {
     dispatch_offset: i32,
     plan_offset: i32,
     mix_offset: i32,
+    shared_offset: i32,
     begin_block: TypedFunc<(i32, i32, i32, i32, i32), i32>,
-    render_unit: TypedFunc<(i32, i32, i32, i32), i32>,
+    render_unit: TypedFunc<(i32, i32, i32, i32, i32), i32>,
     end_block: TypedFunc<(i32, i32), i32>,
 }
 
@@ -839,7 +853,7 @@ impl PortableInstance {
         midi: &[MidiEvent],
         parameters: &[ParameterEvent],
         plan: &mut [ParallelPlanEntry],
-    ) -> Result<usize> {
+    ) -> Result<ParallelBlockPlan> {
         let api = self
             .parallel_api
             .as_ref()
@@ -911,22 +925,76 @@ impl PortableInstance {
         }
         let plan_range = byte_range(
             plan_offset,
-            active,
-            PARALLEL_PLAN_ENTRY_BYTES,
+            PARALLEL_PLAN_HEADER_BYTES + active * PARALLEL_PLAN_ENTRY_BYTES,
+            1,
             4,
             self.memory.data_size(&self.store),
         )?;
         let memory = self.memory.data(&self.store);
+        let plan_bytes = &memory[plan_range];
+        let shared_bytes =
+            u32::from_le_bytes(plan_bytes[0..4].try_into().expect("plan header")) as usize;
+        if shared_bytes > layout.shared_capacity {
+            bail!(
+                "portable plugin announced {shared_bytes} shared bytes beyond capacity {}",
+                layout.shared_capacity
+            );
+        }
         for (entry, chunk) in plan[..active]
             .iter_mut()
-            .zip(memory[plan_range].as_chunks::<8>().0)
+            .zip(plan_bytes[PARALLEL_PLAN_HEADER_BYTES..].as_chunks::<8>().0)
         {
             entry.unit = u32::from_le_bytes(chunk[0..4].try_into().expect("plan entry unit"));
             entry.payload_bytes =
                 u32::from_le_bytes(chunk[4..8].try_into().expect("plan entry payload"));
         }
         validate_parallel_plan(&plan[..active], layout.max_units, layout.dispatch_stride)?;
-        Ok(active)
+        Ok(ParallelBlockPlan {
+            active_units: active,
+            shared_bytes,
+        })
+    }
+
+    /// Copies the block-shared payload the coordinator produced into a
+    /// host-owned buffer sized by the plan header.
+    pub fn parallel_read_shared(&self, shared: &mut [u8]) -> Result<()> {
+        let api = self
+            .parallel_api
+            .as_ref()
+            .context("portable plugin does not expose parallel render")?;
+        if shared.len() > api.layout.shared_capacity {
+            bail!("shared payload exceeds the declared capacity");
+        }
+        let range = byte_range(
+            api.shared_offset,
+            shared.len(),
+            1,
+            1,
+            self.memory.data_size(&self.store),
+        )?;
+        shared.copy_from_slice(&self.memory.data(&self.store)[range]);
+        Ok(())
+    }
+
+    /// Writes the block-shared payload into a worker instance before its
+    /// `parallel_render_unit` calls.
+    pub fn parallel_write_shared(&mut self, shared: &[u8]) -> Result<()> {
+        let api = self
+            .parallel_api
+            .as_ref()
+            .context("portable plugin does not expose parallel render")?;
+        if shared.len() > api.layout.shared_capacity {
+            bail!("shared payload exceeds the declared capacity");
+        }
+        let range = byte_range(
+            api.shared_offset,
+            shared.len(),
+            1,
+            1,
+            self.memory.data_size(&self.store),
+        )?;
+        self.memory.data_mut(&mut self.store)[range].copy_from_slice(shared);
+        Ok(())
     }
 
     /// Copies the dispatch payload a coordinator produced for `unit` into a
@@ -984,6 +1052,7 @@ impl PortableInstance {
         &mut self,
         unit: u32,
         payload_bytes: usize,
+        shared_bytes: usize,
         input: &[f32],
         output: &mut [f32],
         frames: u32,
@@ -997,6 +1066,9 @@ impl PortableInstance {
         }
         if payload_bytes > api.layout.dispatch_stride {
             bail!("parallel dispatch payload exceeds the declared stride");
+        }
+        if shared_bytes > api.layout.shared_capacity {
+            bail!("shared payload exceeds the declared capacity");
         }
         let render_unit = api.render_unit.clone();
         if frames == 0 || frames > self.maximum_frames {
@@ -1017,6 +1089,7 @@ impl PortableInstance {
             (
                 unit as i32,
                 payload_bytes as i32,
+                shared_bytes as i32,
                 frames as i32,
                 self.prepared_output_channels as i32,
             ),
@@ -1266,6 +1339,8 @@ mod tests {
           (func (export "rackforge_parallel_plan_ptr") (result i32) i32.const 12288)
           (func (export "rackforge_parallel_dispatch_ptr") (result i32) i32.const 12352)
           (func (export "rackforge_parallel_mix_ptr") (result i32) i32.const 12544)
+          (func (export "rackforge_parallel_shared_ptr") (result i32) i32.const 16704)
+          (func (export "rackforge_parallel_shared_capacity") (result i32) i32.const 256)
           (func (export "rackforge_initialize") (result i32) i32.const 0)
           (func (export "rackforge_prepare") (param f64 i32 i32 i32) (result i32) i32.const 0)
           (func (export "rackforge_set_parameter") (param $index i32) (param $value f64) (result i32)
@@ -1320,13 +1395,17 @@ mod tests {
             end
             local.set $count
             local.get $count global.set $last_active
+            ;; plan header {shared_bytes, reserved} then the entries
+            i32.const 12288 i32.const 8 i32.store
+            i32.const 12292 i32.const 0 i32.store
+            ;; the block-shared payload: the LFO value every unit reads
+            i32.const 16704 global.get $lfo f32.store
             (block $done
               (loop $units
                 local.get $i local.get $count i32.ge_s br_if $done
-                ;; plan entry {unit, payload_bytes}
-                i32.const 12288 local.get $i i32.const 8 i32.mul i32.add
+                i32.const 12296 local.get $i i32.const 8 i32.mul i32.add
                 local.get $i call $plan_unit i32.store
-                i32.const 12292 local.get $i i32.const 8 i32.mul i32.add
+                i32.const 12300 local.get $i i32.const 8 i32.mul i32.add
                 i32.const 8 i32.store
                 ;; dispatch payload {lfo, scale}
                 i32.const 12352 local.get $i i32.const 16 i32.mul i32.add
@@ -1336,12 +1415,13 @@ mod tests {
                 local.get $i i32.const 1 i32.add local.set $i
                 br $units))
             local.get $count)
-          (func $render (param $unit i32) (param $payload i32) (param $frames i32) (param $channels i32) (result i32)
+          (func $render (param $unit i32) (param $payload i32) (param $shared i32) (param $frames i32) (param $channels i32) (result i32)
             (local $lfo f32) (local $scale f32) (local $phase f32)
             (local $k i32) (local $count i32) (local $sample f32)
             local.get $unit global.get $fail i32.eq
             if unreachable end
-            i32.const 12352 local.get $unit i32.const 16 i32.mul i32.add f32.load local.set $lfo
+            ;; the block-shared payload proves host transport into workers
+            i32.const 16704 f32.load local.set $lfo
             i32.const 12356 local.get $unit i32.const 16 i32.mul i32.add f32.load local.set $scale
             i32.const 16640 local.get $unit i32.const 4 i32.mul i32.add
             i32.const 16640 local.get $unit i32.const 4 i32.mul i32.add f32.load
@@ -1385,8 +1465,8 @@ mod tests {
             i32.const 0)
           (func (export "rackforge_parallel_begin_block") (param $frames i32) (param $in i32) (param $out i32) (param $midi i32) (param $parameters i32) (result i32)
             local.get $frames local.get $midi local.get $parameters call $begin)
-          (func (export "rackforge_parallel_render_unit") (param $unit i32) (param $payload i32) (param $frames i32) (param $channels i32) (result i32)
-            local.get $unit local.get $payload local.get $frames local.get $channels call $render)
+          (func (export "rackforge_parallel_render_unit") (param $unit i32) (param $payload i32) (param $shared i32) (param $frames i32) (param $channels i32) (result i32)
+            local.get $unit local.get $payload local.get $shared local.get $frames local.get $channels call $render)
           (func (export "rackforge_parallel_end_block") (param $frames i32) (param $channels i32) (result i32)
             local.get $frames local.get $channels call $end)
           (func (export "rackforge_process") (param $frames i32) (param $in i32) (param $out i32) (param $midi i32) (param $parameters i32) (result i32)
@@ -1396,7 +1476,7 @@ mod tests {
             (block $done
               (loop $units
                 local.get $u local.get $count i32.ge_s br_if $done
-                local.get $u i32.const 8 local.get $frames local.get $out call $render
+                local.get $u i32.const 8 i32.const 8 local.get $frames local.get $out call $render
                 local.tee $status i32.const 0 i32.ne
                 if local.get $status return end
                 ;; deposit the unit's audio in its deterministic mix slot
@@ -1615,9 +1695,13 @@ mod tests {
                 .unwrap();
 
             let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
-            let active = coordinator
+            let block_plan = coordinator
                 .parallel_begin_block(&[], 64, midi, parameters, &mut plan)
                 .unwrap();
+            let active = block_plan.active_units;
+            let mut shared = [0_u8; 256];
+            let shared = &mut shared[..block_plan.shared_bytes];
+            coordinator.parallel_read_shared(shared).unwrap();
             // Units are rendered in reverse plan order on purpose: the mix
             // slots, not completion order, define the deterministic result.
             let mut payload = [0_u8; 16];
@@ -1629,8 +1713,16 @@ mod tests {
                     .unwrap();
                 let worker = &mut workers[entry.unit as usize];
                 worker.parallel_write_dispatch(entry.unit, payload).unwrap();
+                worker.parallel_write_shared(shared).unwrap();
                 worker
-                    .parallel_render_unit(entry.unit, payload.len(), &[], &mut unit_output, 64)
+                    .parallel_render_unit(
+                        entry.unit,
+                        payload.len(),
+                        shared.len(),
+                        &[],
+                        &mut unit_output,
+                        64,
+                    )
                     .unwrap();
                 coordinator
                     .parallel_write_mix_slot(entry.unit, &unit_output)
@@ -1658,16 +1750,16 @@ mod tests {
         failing.set_parameter(1, 1.0).unwrap();
 
         let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
-        let active = coordinator
+        let block_plan = coordinator
             .parallel_begin_block(&[], 64, &[], &[], &mut plan)
             .unwrap();
-        assert_eq!(active, 3);
+        assert_eq!(block_plan.active_units, 3);
         let mut unit_output = [0.0_f32; 128];
         healthy
-            .parallel_render_unit(0, 8, &[], &mut unit_output, 64)
+            .parallel_render_unit(0, 8, 8, &[], &mut unit_output, 64)
             .unwrap();
         let error = failing
-            .parallel_render_unit(1, 8, &[], &mut unit_output, 64)
+            .parallel_render_unit(1, 8, 8, &[], &mut unit_output, 64)
             .unwrap_err();
         assert!(format!("{error:#}").contains("unreachable"));
         // The host silences the quarantined unit and the block still ends.
@@ -1694,6 +1786,72 @@ mod tests {
     }
 
     #[test]
+    fn plan_payloads_beyond_the_stride_are_rejected() {
+        let source = PARALLEL_SYNTH.replace(
+            "                i32.const 12300 local.get $i i32.const 8 i32.mul i32.add\n                i32.const 8 i32.store",
+            "                i32.const 12300 local.get $i i32.const 8 i32.mul i32.add\n                i32.const 24 i32.store",
+        );
+        let engine = parallel_engine();
+        let module = engine.compile(&wat::parse_str(&source).unwrap()).unwrap();
+        let mut coordinator = module.instantiate().unwrap();
+        coordinator.prepare(48_000.0, 64, 0, 2).unwrap();
+        let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
+        let error = coordinator
+            .parallel_begin_block(&[], 64, &[], &[], &mut plan)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("exceeds dispatch stride"));
+    }
+
+    #[test]
+    fn duplicate_plan_units_are_rejected() {
+        let source = PARALLEL_SYNTH.replace(
+            "(func $plan_unit (param $i i32) (result i32) local.get $i)",
+            "(func $plan_unit (param $i i32) (result i32) i32.const 0)",
+        );
+        let engine = parallel_engine();
+        let module = engine.compile(&wat::parse_str(&source).unwrap()).unwrap();
+        let mut coordinator = module.instantiate().unwrap();
+        coordinator.prepare(48_000.0, 64, 0, 2).unwrap();
+        let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
+        let error = coordinator
+            .parallel_begin_block(&[], 64, &[], &[], &mut plan)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("strictly increasing"));
+    }
+
+    #[test]
+    fn a_module_may_not_declare_more_units_than_the_host_bound() {
+        let source = PARALLEL_SYNTH.replace(
+            "(func (export \"rackforge_parallel_max_units\") (result i32) i32.const 4)",
+            "(func (export \"rackforge_parallel_max_units\") (result i32) i32.const 32)",
+        );
+        let engine = parallel_engine();
+        let module = engine.compile(&wat::parse_str(&source).unwrap()).unwrap();
+        let error = match module.instantiate() {
+            Ok(_) => panic!("oversized max_units was accepted"),
+            Err(error) => error,
+        };
+        assert!(format!("{error:#}").contains("outside 1..="));
+    }
+
+    #[test]
+    fn shared_payloads_beyond_capacity_are_rejected() {
+        let source = PARALLEL_SYNTH.replace(
+            "            i32.const 12288 i32.const 8 i32.store",
+            "            i32.const 12288 i32.const 999 i32.store",
+        );
+        let engine = parallel_engine();
+        let module = engine.compile(&wat::parse_str(&source).unwrap()).unwrap();
+        let mut coordinator = module.instantiate().unwrap();
+        coordinator.prepare(48_000.0, 64, 0, 2).unwrap();
+        let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
+        let error = coordinator
+            .parallel_begin_block(&[], 64, &[], &[], &mut plan)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("beyond capacity"));
+    }
+
+    #[test]
     fn an_empty_plan_still_runs_the_final_stage() {
         let engine = parallel_engine();
         let module = engine
@@ -1703,10 +1861,10 @@ mod tests {
         coordinator.prepare(48_000.0, 64, 0, 2).unwrap();
         coordinator.set_parameter(0, 0.0).unwrap();
         let mut plan = [ParallelPlanEntry::default(); MAX_PARALLEL_UNITS];
-        let active = coordinator
+        let block_plan = coordinator
             .parallel_begin_block(&[], 64, &[], &[], &mut plan)
             .unwrap();
-        assert_eq!(active, 0);
+        assert_eq!(block_plan.active_units, 0);
         let mut produced = [0.0_f32; 128];
         coordinator.parallel_end_block(&mut produced, 64).unwrap();
         // No units sounded, but the global stage (here: the LFO offset)

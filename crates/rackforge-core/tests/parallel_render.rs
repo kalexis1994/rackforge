@@ -40,6 +40,8 @@ const PARALLEL_SYNTH: &str = r#"
       (func (export "rackforge_parallel_plan_ptr") (result i32) i32.const 12288)
       (func (export "rackforge_parallel_dispatch_ptr") (result i32) i32.const 12352)
       (func (export "rackforge_parallel_mix_ptr") (result i32) i32.const 12544)
+      (func (export "rackforge_parallel_shared_ptr") (result i32) i32.const 16704)
+      (func (export "rackforge_parallel_shared_capacity") (result i32) i32.const 256)
       (func (export "rackforge_initialize") (result i32) i32.const 0)
       (func (export "rackforge_prepare") (param f64 i32 i32 i32) (result i32) i32.const 0)
       (func (export "rackforge_set_parameter") (param $index i32) (param $value f64) (result i32)
@@ -96,12 +98,15 @@ const PARALLEL_SYNTH: &str = r#"
         end
         local.set $count
         local.get $count global.set $last_active
+        i32.const 12288 i32.const 8 i32.store
+        i32.const 12292 i32.const 0 i32.store
+        i32.const 16704 global.get $lfo f32.store
         (block $done
           (loop $units
             local.get $i local.get $count i32.ge_s br_if $done
-            i32.const 12288 local.get $i i32.const 8 i32.mul i32.add
+            i32.const 12296 local.get $i i32.const 8 i32.mul i32.add
             local.get $i call $plan_unit i32.store
-            i32.const 12292 local.get $i i32.const 8 i32.mul i32.add
+            i32.const 12300 local.get $i i32.const 8 i32.mul i32.add
             i32.const 8 i32.store
             i32.const 12352 local.get $i i32.const 16 i32.mul i32.add
             global.get $lfo f32.store
@@ -110,12 +115,12 @@ const PARALLEL_SYNTH: &str = r#"
             local.get $i i32.const 1 i32.add local.set $i
             br $units))
         local.get $count)
-      (func $render (param $unit i32) (param $payload i32) (param $frames i32) (param $channels i32) (result i32)
+      (func $render (param $unit i32) (param $payload i32) (param $shared i32) (param $frames i32) (param $channels i32) (result i32)
         (local $lfo f32) (local $scale f32) (local $phase f32)
         (local $k i32) (local $count i32) (local $sample f32)
         local.get $unit global.get $fail i32.eq
         if unreachable end
-        i32.const 12352 local.get $unit i32.const 16 i32.mul i32.add f32.load local.set $lfo
+        i32.const 16704 f32.load local.set $lfo
         i32.const 12356 local.get $unit i32.const 16 i32.mul i32.add f32.load local.set $scale
         i32.const 16640 local.get $unit i32.const 4 i32.mul i32.add
         i32.const 16640 local.get $unit i32.const 4 i32.mul i32.add f32.load
@@ -159,8 +164,8 @@ const PARALLEL_SYNTH: &str = r#"
         i32.const 0)
       (func (export "rackforge_parallel_begin_block") (param $frames i32) (param $in i32) (param $out i32) (param $midi i32) (param $parameters i32) (result i32)
         local.get $frames local.get $midi local.get $parameters call $begin)
-      (func (export "rackforge_parallel_render_unit") (param $unit i32) (param $payload i32) (param $frames i32) (param $channels i32) (result i32)
-        local.get $unit local.get $payload local.get $frames local.get $channels call $render)
+      (func (export "rackforge_parallel_render_unit") (param $unit i32) (param $payload i32) (param $shared i32) (param $frames i32) (param $channels i32) (result i32)
+        local.get $unit local.get $payload local.get $shared local.get $frames local.get $channels call $render)
       (func (export "rackforge_parallel_end_block") (param $frames i32) (param $channels i32) (result i32)
         local.get $frames local.get $channels call $end)
       (func (export "rackforge_process") (param $frames i32) (param $in i32) (param $out i32) (param $midi i32) (param $parameters i32) (result i32)
@@ -170,7 +175,7 @@ const PARALLEL_SYNTH: &str = r#"
         (block $done
           (loop $units
             local.get $u local.get $count i32.ge_s br_if $done
-            local.get $u i32.const 8 local.get $frames local.get $out call $render
+            local.get $u i32.const 8 i32.const 8 local.get $frames local.get $out call $render
             local.tee $status i32.const 0 i32.ne
             if local.get $status return end
             i32.const 12544 local.get $u i32.const 1024 i32.mul i32.add
@@ -282,6 +287,10 @@ const PROGRAM: &str = "trio";
 struct TestVoice {
     instance: PluginInstance<'static>,
     parallel: Option<ParallelUnits<'static>>,
+    input_channels: u32,
+    /// Indices of earlier voices whose finished output feeds this one, the
+    /// same shape the live host resolves from Rack cables.
+    deps: Vec<usize>,
     input: Vec<f32>,
     output: Vec<f32>,
     events: Vec<MidiEventV1>,
@@ -291,17 +300,30 @@ struct TestVoice {
 
 impl TestVoice {
     fn create(plugin: &'static LoadedPlugin, with_units: bool) -> Self {
+        Self::create_with_inputs(plugin, with_units, 0, Vec::new())
+    }
+
+    fn create_with_inputs(
+        plugin: &'static LoadedPlugin,
+        with_units: bool,
+        input_channels: u32,
+        deps: Vec<usize>,
+    ) -> Self {
         let mut instance = plugin.create_instance().unwrap();
-        instance.activate(48_000.0, FRAMES, 0, CHANNELS).unwrap();
+        instance
+            .activate(48_000.0, FRAMES, input_channels, CHANNELS)
+            .unwrap();
         let parallel = if with_units {
-            ParallelUnits::create(plugin, 48_000.0, FRAMES, 0, CHANNELS).unwrap()
+            ParallelUnits::create(plugin, 48_000.0, FRAMES, input_channels, CHANNELS).unwrap()
         } else {
             None
         };
         Self {
             instance,
             parallel,
-            input: Vec::new(),
+            input_channels,
+            deps,
+            input: vec![0.0; FRAMES as usize * input_channels as usize],
             output: vec![0.0; SAMPLES],
             events: Vec::new(),
             parameter_events: Vec::new(),
@@ -326,6 +348,36 @@ unsafe impl ScheduledSlot for TestVoice {
         self.parallel.as_ref().map_or(0, ParallelUnits::max_units)
     }
 
+    fn dependency_mask(&self) -> u32 {
+        self.deps.iter().fold(0, |mask, index| mask | (1 << index))
+    }
+
+    unsafe fn gather_input(
+        slot_index: usize,
+        slots: *mut Self,
+        _slot_count: usize,
+        _frames: u32,
+        _channels: u32,
+    ) {
+        // SAFETY: the scheduler grants exclusive access to this voice and
+        // finished, immutable upstream voices at lower indices.
+        let voice = unsafe { &mut *slots.add(slot_index) };
+        if voice.deps.is_empty() {
+            return;
+        }
+        voice.input.fill(0.0);
+        for upstream in voice.deps.clone() {
+            // SAFETY: as above; a lower, completed index.
+            let upstream = unsafe { &*(slots.add(upstream) as *const TestVoice) };
+            if upstream.faulted {
+                continue;
+            }
+            for (target, sample) in voice.input.iter_mut().zip(&upstream.output) {
+                *target += *sample;
+            }
+        }
+    }
+
     fn run_single(&mut self, frames: u32, channels: u32) -> bool {
         self.output.fill(0.0);
         if self.faulted {
@@ -336,7 +388,7 @@ unsafe impl ScheduledSlot for TestVoice {
                 &self.input,
                 &mut self.output,
                 frames,
-                0,
+                self.input_channels,
                 channels,
                 &self.events,
                 &self.parameter_events,
@@ -398,6 +450,8 @@ enum Action {
     Automation(f64),
     Program(&'static str),
     Parameter(u32, f64),
+    /// Mirrored `reset` while notes are sounding.
+    Reset,
 }
 
 fn script(program: &'static str) -> Vec<Action> {
@@ -410,6 +464,8 @@ fn script(program: &'static str) -> Vec<Action> {
         Action::Parameter(0, 1.0),
         Action::None,
         Action::Automation(4.0),
+        Action::Midi,
+        Action::Reset,
         Action::None,
     ]
 }
@@ -434,6 +490,7 @@ fn stage_action(voice: &mut TestVoice, action: &Action) {
             let (index, value) = (*index, *value);
             voice.mirrored(move |instance| instance.set_parameter(index, value));
         }
+        Action::Reset => voice.mirrored(|instance| instance.reset()),
     }
 }
 
@@ -483,6 +540,12 @@ fn every_worker_count_matches_the_sequential_fallback_exactly() {
             assert!(pool.process(voices, FRAMES, CHANNELS, 1_000_000_000));
         });
         assert_eq!(reference, produced, "workers={workers} diverged");
+        // The final coordinator state must be identical too.
+        assert_eq!(
+            reference_voices[0].instance.save_state().unwrap(),
+            voices[0].instance.save_state().unwrap(),
+            "workers={workers} state diverged"
+        );
     }
 }
 
@@ -626,6 +689,182 @@ fn the_packaged_parallel_demo_synth_matches_its_sequential_fallback() {
         });
         assert_eq!(reference, produced, "workers={workers} diverged");
     }
+}
+
+/// A classic downstream effect: `out = in * 0.5`, two channels.
+const EFFECT_WAT: &str = r#"
+    (module
+      (memory (export "memory") 1)
+      (func (export "rackforge_abi_version") (result i32) i32.const 65538)
+      (func (export "rackforge_input_ptr") (result i32) i32.const 0)
+      (func (export "rackforge_output_ptr") (result i32) i32.const 4096)
+      (func (export "rackforge_capacity_input_samples") (result i32) i32.const 256)
+      (func (export "rackforge_capacity_output_samples") (result i32) i32.const 256)
+      (func (export "rackforge_midi_ptr") (result i32) i32.const 8192)
+      (func (export "rackforge_capacity_midi_events") (result i32) i32.const 64)
+      (func (export "rackforge_parameter_ptr") (result i32) i32.const 9216)
+      (func (export "rackforge_capacity_parameter_events") (result i32) i32.const 64)
+      (func (export "rackforge_transfer_ptr") (result i32) i32.const 10240)
+      (func (export "rackforge_capacity_transfer_bytes") (result i32) i32.const 1024)
+      (func (export "rackforge_initialize") (result i32) i32.const 0)
+      (func (export "rackforge_prepare") (param f64 i32 i32 i32) (result i32) i32.const 0)
+      (func (export "rackforge_set_parameter") (param i32 f64) (result i32) i32.const 0)
+      (func (export "rackforge_get_parameter") (param i32) (result f64) f64.const 0.5)
+      (func (export "rackforge_reset") (result i32) i32.const 0)
+      (func (export "rackforge_resource_begin") (param i32 i64) (result i32) i32.const -3)
+      (func (export "rackforge_resource_write") (param i64 i32) (result i32) i32.const -3)
+      (func (export "rackforge_resource_end") (result i32) i32.const -3)
+      (func (export "rackforge_load_preset") (param i32) (result i32) i32.const 0)
+      (func (export "rackforge_save_state") (result i32) i32.const 0)
+      (func (export "rackforge_load_state") (param i32) (result i32) i32.const 0)
+      (func (export "rackforge_process") (param $frames i32) (param $in i32) (param $out i32) (param $midi i32) (param $parameters i32) (result i32)
+        (local $k i32) (local $count i32)
+        local.get $frames local.get $out i32.mul local.set $count
+        (block $done
+          (loop $copy
+            local.get $k local.get $count i32.ge_s br_if $done
+            i32.const 4096 local.get $k i32.const 4 i32.mul i32.add
+            local.get $k i32.const 4 i32.mul f32.load f32.const 0.5 f32.mul
+            f32.store
+            local.get $k i32.const 1 i32.add local.set $k
+            br $copy))
+        i32.const 0)
+    )
+"#;
+
+const EFFECT_MANIFEST: &str = r#"
+schema_version = 1
+id = "org.rackforge.parallel-test-effect"
+name = "Parallel Test Effect"
+vendor = "RackForge"
+version = "0.1.0"
+kind = "effect"
+state_version = 1
+capabilities = ["audio_input", "audio_output", "presets"]
+
+[audio]
+input_buses = [{ id = "main", name = "Input", channels = 2, layout = "stereo" }]
+output_buses = [{ id = "main", name = "Output", channels = 2, layout = "stereo" }]
+
+[api]
+major = 1
+minor = 10
+
+[component]
+abi = "wasm-v1"
+path = "component.wasm"
+runtime_descriptor = "metadata/runtime.json"
+parameter_schema = "metadata/parameters.json"
+preset_catalog = "metadata/presets.json"
+"#;
+
+fn build_effect_package() -> &'static LoadedPlugin {
+    let root = std::env::temp_dir().join(format!(
+        "rackforge-parallel-effect-{}-{}",
+        std::process::id(),
+        SERIAL.fetch_add(1, Ordering::Relaxed)
+    ));
+    let metadata = root.join("metadata");
+    fs::create_dir_all(&metadata).unwrap();
+    fs::write(root.join("rackforge-plugin.toml"), EFFECT_MANIFEST).unwrap();
+    fs::write(
+        root.join("component.wasm"),
+        wat::parse_str(EFFECT_WAT).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        metadata.join("runtime.json"),
+        RUNTIME_JSON.replace(
+            "org.rackforge.parallel-test",
+            "org.rackforge.parallel-test-effect",
+        ),
+    )
+    .unwrap();
+    fs::write(metadata.join("parameters.json"), PARAMETERS_JSON).unwrap();
+    fs::write(metadata.join("presets.json"), PRESETS_JSON).unwrap();
+    let package = PluginPackage::open(&root).unwrap();
+    // SAFETY: portable wasm-v1 packages execute inside the sandbox.
+    let loaded = unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), None) }.unwrap();
+    Box::leak(Box::new(loaded))
+}
+
+/// The Rack-with-cables scenario: a parallel synth feeding a downstream
+/// effect, next to an independent classic instrument — the whole graph
+/// inside the pool, not serialized by the mere presence of a cable. The
+/// effect consumes the synth's *final* block (its `end_block` output), and
+/// the pool must produce exactly the sequential executor's audio.
+#[test]
+fn a_parallel_synth_feeds_a_downstream_effect_inside_the_pool() {
+    let synth = build_package();
+    let effect = build_effect_package();
+
+    let build = |with_units: bool| {
+        vec![
+            TestVoice::create(synth, with_units),
+            TestVoice::create_with_inputs(effect, false, 2, vec![0]),
+            TestVoice::create(synth, false),
+        ]
+    };
+    let note = MidiEventV1 {
+        frame: 1,
+        length: 3,
+        data: [0x90, 60, 100],
+    };
+    let run = |voices: &mut Vec<TestVoice>, render: &mut dyn FnMut(&mut [TestVoice])| {
+        let mut blocks = Vec::new();
+        for block in 0..6 {
+            for voice in voices.iter_mut() {
+                voice.events.clear();
+                voice.parameter_events.clear();
+                if block == 1 {
+                    voice.events.push(note);
+                }
+            }
+            render(voices);
+            blocks.push(
+                voices
+                    .iter()
+                    .map(|voice| voice.output.clone())
+                    .collect::<Vec<_>>(),
+            );
+        }
+        blocks
+    };
+
+    let telemetry = RenderTelemetry::new(1);
+    let mut sequential_voices = build(true);
+    let expected = run(&mut sequential_voices, &mut |voices| {
+        process_slots_sequential(voices, FRAMES, CHANNELS, &telemetry);
+    });
+
+    for workers in [2_usize, 3] {
+        let telemetry = RenderTelemetry::new(workers);
+        let mut pool = RenderPool::with_workers(workers, telemetry);
+        let mut voices = build(true);
+        let produced = run(&mut voices, &mut |voices| {
+            assert!(
+                pool.process(voices, FRAMES, CHANNELS, 1_000_000_000),
+                "a cabled graph must stay schedulable"
+            );
+        });
+        assert_eq!(expected, produced, "workers={workers} diverged");
+    }
+
+    // The effect renders exactly half of the synth's finished block: proof
+    // that it consumed the post-`end_block` output, not raw units.
+    for block in &expected {
+        for (synth_sample, effect_sample) in block[0].iter().zip(&block[1]) {
+            assert_eq!(*effect_sample, synth_sample * 0.5);
+        }
+        assert!(block[2].iter().zip(&block[0]).all(|(a, b)| a == b));
+    }
+    assert!(
+        expected
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|sample| *sample != 0.0)
+    );
 }
 
 #[test]

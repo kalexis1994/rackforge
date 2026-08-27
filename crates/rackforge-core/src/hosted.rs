@@ -6,12 +6,12 @@ use rackforge_plugin_api::{
     ProgramEditRequest, ProgramEditorView, ProgramFieldEditRequest, ResourceKind,
     RuntimeDescriptor, SurfaceActivationRequest, SurfaceActivationResponse,
 };
-#[cfg(not(target_arch = "wasm32"))]
-use rackforge_plugin_runtime::ParallelPlanEntry;
 use rackforge_plugin_runtime::{
     MidiEvent, ParallelLayout, ParameterEvent, PortableEngine, PortableInstance as WasmInstance,
     PortableModule, RuntimeLimits,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use rackforge_plugin_runtime::{ParallelBlockPlan, ParallelPlanEntry};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Cursor, Read};
@@ -764,7 +764,7 @@ impl PluginInstance<'_> {
         midi_events: &[MidiEventV1],
         parameter_events: &[ParameterEventV1],
         plan: &mut [ParallelPlanEntry],
-    ) -> Result<usize> {
+    ) -> Result<ParallelBlockPlan> {
         match &mut self.backend {
             PluginInstanceBackend::Native(_) => {
                 bail!("native plugins do not expose parallel render")
@@ -783,6 +783,32 @@ impl PluginInstance<'_> {
                 instance.midi_scratch = midi;
                 instance.parameter_scratch = parameters;
                 result
+            }
+        }
+    }
+
+    /// Copies the coordinator's block-shared payload into `shared`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_read_shared(&self, shared: &mut [u8]) -> Result<()> {
+        match &self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.parallel_read_shared(shared)
+            }
+        }
+    }
+
+    /// Writes the block-shared payload into a worker instance.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_write_shared(&mut self, shared: &[u8]) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.parallel_write_shared(shared)
             }
         }
     }
@@ -819,6 +845,7 @@ impl PluginInstance<'_> {
         &mut self,
         unit: u32,
         payload_bytes: usize,
+        shared_bytes: usize,
         input: &[f32],
         output: &mut [f32],
         frames: u32,
@@ -831,9 +858,14 @@ impl PluginInstance<'_> {
                 if !instance.active {
                     bail!("plugin instance is not active");
                 }
-                instance
-                    .instance
-                    .parallel_render_unit(unit, payload_bytes, input, output, frames)
+                instance.instance.parallel_render_unit(
+                    unit,
+                    payload_bytes,
+                    shared_bytes,
+                    input,
+                    output,
+                    frames,
+                )
             }
         }
     }

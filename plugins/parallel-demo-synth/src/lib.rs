@@ -29,6 +29,11 @@ use rackforge_plugin_sdk::{
 
 const MAX_UNITS: usize = 5;
 const DISPATCH_STRIDE: usize = 48;
+const MAX_FRAMES: usize = 4096;
+/// Block-shared payload: one f32 of vibrato LFO per frame — a shared,
+/// sample-accurate signal computed once by the coordinator and read by
+/// every unit.
+const SHARED_CAPACITY: usize = MAX_FRAMES * 4;
 const MAX_OUTPUT_CHANNELS: usize = 2;
 /// Parameter indices, in the order the packaged schema declares them.
 const PARAM_BRIGHTNESS: u32 = 0;
@@ -36,23 +41,25 @@ const PARAM_ATTACK: u32 = 1;
 const PARAM_RELEASE: u32 = 2;
 const PARAM_SHAPE: u32 = 3;
 const PARAM_LEVEL: u32 = 4;
-/// Depth of the block-rate vibrato applied by every voice from the shared
-/// LFO value. Small on purpose; its role is to prove that global modulation
-/// is computed once and distributed, never duplicated per unit.
-const VIBRATO_DEPTH: f32 = 0.003;
+/// Depth of the per-frame tremolo every voice applies from the shared LFO
+/// array. Small on purpose; its role is to prove that global modulation is
+/// computed once, sample-accurately, and distributed — never duplicated
+/// per unit.
+const TREMOLO_DEPTH: f32 = 0.15;
 
 /// Payload flags.
 const FLAG_START: u32 = 1 << 0;
 const FLAG_RELEASE: u32 = 1 << 1;
 
-/// One voice's dispatch payload: fixed little-endian layout, 44 bytes used.
+/// One voice's dispatch payload: fixed little-endian layout, 40 bytes used.
+/// Per-block *shared* signals (the vibrato LFO) travel in the block-shared
+/// payload instead — one copy for every unit, not one per payload.
 struct Payload {
     flags: u32,
     start_frame: u32,
     release_frame: u32,
     note: u32,
     velocity: u32,
-    lfo: f32,
     brightness: f32,
     attack: f32,
     release: f32,
@@ -68,7 +75,6 @@ impl Payload {
             self.release_frame,
             self.note,
             self.velocity,
-            self.lfo.to_bits(),
             self.brightness.to_bits(),
             self.attack.to_bits(),
             self.release.to_bits(),
@@ -81,10 +87,10 @@ impl Payload {
     }
 
     fn read(source: &[u8]) -> Option<Self> {
-        if source.len() < 44 {
+        if source.len() < 40 {
             return None;
         }
-        let mut words = [0_u32; 11];
+        let mut words = [0_u32; 10];
         for (word, chunk) in words.iter_mut().zip(source.as_chunks::<4>().0) {
             *word = u32::from_le_bytes(*chunk);
         }
@@ -94,12 +100,11 @@ impl Payload {
             release_frame: words[2],
             note: words[3],
             velocity: words[4],
-            lfo: f32::from_bits(words[5]),
-            brightness: f32::from_bits(words[6]),
-            attack: f32::from_bits(words[7]),
-            release: f32::from_bits(words[8]),
-            shape: f32::from_bits(words[9]),
-            sample_rate: f32::from_bits(words[10]),
+            brightness: f32::from_bits(words[5]),
+            attack: f32::from_bits(words[6]),
+            release: f32::from_bits(words[7]),
+            shape: f32::from_bits(words[8]),
+            sample_rate: f32::from_bits(words[9]),
         })
     }
 }
@@ -187,7 +192,10 @@ pub struct ParallelDemoSynth {
     settings: Settings,
     assignments: [Assignment; MAX_UNITS],
     next_steal: usize,
-    lfo_phase: f32,
+    /// The shared vibrato LFO as a quadrature pair, advanced one rotation
+    /// per *frame* inside `begin_block` — the canonical global generator.
+    lfo_sine: f32,
+    lfo_cosine: f32,
     sample_rate: f32,
 }
 
@@ -197,7 +205,8 @@ impl Default for ParallelDemoSynth {
             settings: Settings::default(),
             assignments: [Assignment::default(); MAX_UNITS],
             next_steal: 0,
-            lfo_phase: 0.0,
+            lfo_sine: 0.0,
+            lfo_cosine: 1.0,
             sample_rate: 48_000.0,
         }
     }
@@ -299,14 +308,11 @@ impl VoiceUnit {
         self.filter_coefficient = normalized.clamp(0.005, 0.999);
     }
 
-    /// Applies the block's shared vibrato: the rotation is derived from the
-    /// note and the LFO value the coordinator distributed, so every host
-    /// path computes the identical pitch for the identical block.
     fn tune(&mut self, payload: &Payload) {
         if !self.active {
             return;
         }
-        let frequency = note_frequency(self.note) * (1.0 + payload.lfo * VIBRATO_DEPTH);
+        let frequency = note_frequency(self.note);
         let increment = core::f32::consts::TAU * frequency / payload.sample_rate.max(1.0);
         let (rotation_sine, rotation_cosine) = rotation(increment);
         self.rotation_sine = rotation_sine;
@@ -353,7 +359,8 @@ impl ParallelProcessor for ParallelDemoSynth {
         }
         self.sample_rate = sample_rate as f32;
         self.assignments = [Assignment::default(); MAX_UNITS];
-        self.lfo_phase = 0.0;
+        self.lfo_sine = 0.0;
+        self.lfo_cosine = 1.0;
         true
     }
 
@@ -367,7 +374,8 @@ impl ParallelProcessor for ParallelDemoSynth {
 
     fn reset(&mut self) {
         self.assignments = [Assignment::default(); MAX_UNITS];
-        self.lfo_phase = 0.0;
+        self.lfo_sine = 0.0;
+        self.lfo_cosine = 1.0;
     }
 
     fn load_preset(&mut self, id: &str) -> bool {
@@ -446,15 +454,26 @@ impl ParallelProcessor for ParallelDemoSynth {
         for event in context.midi {
             self.handle_midi(event);
         }
-        // The shared LFO advances exactly once per block, here and only
-        // here. Units receive its value through their payloads — never by
-        // running their own copy, which would drift the moment host paths
-        // differ.
-        self.lfo_phase += 6.0 * context.frames as f32 / self.sample_rate.max(1.0);
-        if self.lfo_phase > core::f32::consts::TAU {
-            self.lfo_phase -= core::f32::consts::TAU;
+        // The shared LFO advances here and only here — per frame, exactly
+        // once. Units receive the whole per-frame array through the
+        // block-shared payload; they never run their own copy, which would
+        // drift the moment host paths differ.
+        let increment = core::f32::consts::TAU * 6.0 / self.sample_rate.max(1.0);
+        let (rotation_sine, rotation_cosine) = rotation(increment);
+        {
+            let shared = plan.shared_buffer();
+            for frame in 0..context.frames as usize {
+                let sine = self.lfo_sine * rotation_cosine + self.lfo_cosine * rotation_sine;
+                let cosine = self.lfo_cosine * rotation_cosine - self.lfo_sine * rotation_sine;
+                let magnitude = sine * sine + cosine * cosine;
+                let correction = 1.5 - 0.5 * magnitude;
+                self.lfo_sine = sine * correction;
+                self.lfo_cosine = cosine * correction;
+                shared[frame * 4..frame * 4 + 4].copy_from_slice(&self.lfo_sine.to_le_bytes());
+            }
         }
-        let (lfo, _) = rotation_at(self.lfo_phase);
+        let committed = plan.commit_shared(context.frames as usize * 4);
+        debug_assert!(committed);
 
         for unit in 0..MAX_UNITS {
             let assignment = &mut self.assignments[unit];
@@ -482,7 +501,6 @@ impl ParallelProcessor for ParallelDemoSynth {
                 release_frame,
                 note,
                 velocity,
-                lfo,
                 brightness: self.settings.brightness,
                 attack: self.settings.attack,
                 release: self.settings.release,
@@ -516,8 +534,17 @@ impl ParallelProcessor for ParallelDemoSynth {
             if payload.flags & FLAG_RELEASE != 0 && frame as u32 == payload.release_frame {
                 unit.releasing = true;
             }
+            // The shared per-frame LFO: identical bytes in every unit's
+            // instance, applied sample-accurately as a tremolo.
+            let lfo = context
+                .shared
+                .get(frame * 4..frame * 4 + 4)
+                .map_or(0.0, |chunk| {
+                    f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+                });
+            let tremolo = 1.0 + lfo * TREMOLO_DEPTH;
             let sample = if unit.active {
-                unit.next(payload.shape)
+                unit.next(payload.shape) * tremolo
             } else {
                 0.0
             };
@@ -579,28 +606,12 @@ fn rotation(increment: f32) -> (f32, f32) {
     (sine, cosine)
 }
 
-/// Sine of an arbitrary phase in `0..TAU`, folded into the small-angle
-/// series with quadrant symmetry — accurate enough for a slow vibrato LFO.
-fn rotation_at(phase: f32) -> (f32, f32) {
-    let quarter = core::f32::consts::FRAC_PI_2;
-    let (folded, sign) = if phase < quarter {
-        (phase, 1.0)
-    } else if phase < 2.0 * quarter {
-        (2.0 * quarter - phase, 1.0)
-    } else if phase < 3.0 * quarter {
-        (phase - 2.0 * quarter, -1.0)
-    } else {
-        (4.0 * quarter - phase, -1.0)
-    };
-    let (sine, cosine) = rotation(folded);
-    (sine * sign, cosine)
-}
-
 export_parallel_processor!(
     ParallelDemoSynth,
     max_units = 5,
     dispatch_stride = 48,
-    max_frames = 4096,
+    shared_capacity = SHARED_CAPACITY,
+    max_frames = MAX_FRAMES,
     max_input_channels = 0,
     max_output_channels = 2,
     max_midi_events = 256,
@@ -660,7 +671,14 @@ mod tests {
     ) -> [f32; SAMPLES] {
         let mut plan = [0_u32; MAX_UNITS * 2];
         let mut dispatch = [0_u8; MAX_UNITS * DISPATCH_STRIDE];
-        let mut writer = PlanWriter::new(&mut plan, &mut dispatch, DISPATCH_STRIDE, MAX_UNITS);
+        let mut shared = [0_u8; SHARED_CAPACITY];
+        let mut writer = PlanWriter::new(
+            &mut plan,
+            &mut dispatch,
+            &mut shared,
+            DISPATCH_STRIDE,
+            MAX_UNITS,
+        );
         let context = BlockContext {
             input: &[],
             midi,
@@ -671,6 +689,7 @@ mod tests {
         };
         synth.begin_block(&context, &mut writer);
         let count = writer.activated();
+        let shared_len = writer.shared_len();
 
         let mut mix = [0.0_f32; MAX_UNITS * SAMPLES];
         // Reverse order on purpose: completion order must not matter.
@@ -680,6 +699,7 @@ mod tests {
             let payload = &dispatch[unit as usize * DISPATCH_STRIDE..][..payload_len];
             let unit_context = UnitContext {
                 input: &[],
+                shared: &shared[..shared_len],
                 frames: FRAMES,
                 output_channels: 2,
             };
@@ -760,7 +780,14 @@ mod tests {
         let chord: [MidiEvent; 7] = core::array::from_fn(|index| note_on(0, 60 + index as u8, 100));
         let mut plan = [0_u32; MAX_UNITS * 2];
         let mut dispatch = [0_u8; MAX_UNITS * DISPATCH_STRIDE];
-        let mut writer = PlanWriter::new(&mut plan, &mut dispatch, DISPATCH_STRIDE, MAX_UNITS);
+        let mut shared = [0_u8; SHARED_CAPACITY];
+        let mut writer = PlanWriter::new(
+            &mut plan,
+            &mut dispatch,
+            &mut shared,
+            DISPATCH_STRIDE,
+            MAX_UNITS,
+        );
         synth.begin_block(
             &BlockContext {
                 input: &[],

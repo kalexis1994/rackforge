@@ -13,7 +13,7 @@ use crate::midi_hotplug::{
 };
 use crate::parallel_render::{
     self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
-    process_one_slot_sequential, process_slots_sequential, spawn_telemetry_publisher,
+    process_slots_sequential, spawn_telemetry_publisher,
 };
 use crate::performance::PerformanceRepository;
 use crate::rack_graph::compile_instrument_definition;
@@ -130,6 +130,16 @@ fn resolve_render_mode(mode: SurfaceMode, rack_voice_count: usize) -> AudioRende
     }
 }
 
+/// One audio source of a Slot, resolved to indices once per activation so
+/// the per-block gather performs no string comparisons.
+#[derive(Clone, Copy)]
+enum ResolvedRackSource {
+    /// The hardware capture staged for the current block.
+    Capture,
+    /// The finished output of an earlier Slot in the compiled order.
+    Slot(usize),
+}
+
 struct RackSlotVoice<'plugin> {
     slot_id: String,
     plugin: &'plugin LoadedPlugin,
@@ -139,6 +149,16 @@ struct RackSlotVoice<'plugin> {
     parallel: Option<ParallelUnits<'plugin>>,
     midi_stages: Vec<RackMidiStageRuntimeSpec>,
     audio_sources: Vec<crate::rack_graph::CompiledAudioSource>,
+    /// `audio_sources` resolved against the compiled Slot order.
+    resolved_sources: Vec<ResolvedRackSource>,
+    /// Bitmask of the earlier Slots feeding this one; the scheduler holds
+    /// this Slot until every one of them completed its block.
+    deps_mask: u32,
+    /// Hardware capture staged for the current block; rewritten by the
+    /// audio loop before every Rack render.
+    capture_ptr: *const f32,
+    capture_len: usize,
+    capture_channels: usize,
     sends_to_main: bool,
     input_channels: usize,
     level: f32,
@@ -148,6 +168,43 @@ struct RackSlotVoice<'plugin> {
     events: Vec<MidiEventV1>,
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
+}
+
+/// Resolves every Slot's cable sources to indices and dependency masks.
+/// Runs at activation, never per block. A source that does not name an
+/// earlier Slot is dropped, exactly as the previous sequential graph walk
+/// ignored it: the compiled order is topological, so a forward reference
+/// would be a compiler bug rather than a playable graph.
+fn resolve_rack_voice_graph(voices: &mut [RackSlotVoice<'_>]) {
+    for index in 0..voices.len() {
+        let (earlier, rest) = voices.split_at_mut(index);
+        let voice = &mut rest[0];
+        voice.resolved_sources.clear();
+        voice.deps_mask = 0;
+        for source in &voice.audio_sources {
+            match source {
+                crate::rack_graph::CompiledAudioSource::HardwareInput { .. } => {
+                    voice.resolved_sources.push(ResolvedRackSource::Capture);
+                }
+                crate::rack_graph::CompiledAudioSource::Slot { runtime_slot_id } => {
+                    if let Some(upstream) = earlier
+                        .iter()
+                        .position(|candidate| candidate.slot_id == *runtime_slot_id)
+                    {
+                        voice
+                            .resolved_sources
+                            .push(ResolvedRackSource::Slot(upstream));
+                        voice.deps_mask |= 1 << upstream;
+                    } else {
+                        eprintln!(
+                            "LIVE_RACK_SOURCE_IGNORED slot={} source={runtime_slot_id}                              reason=not-an-earlier-slot",
+                            voice.slot_id
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 struct PreparedPortableRackVoices(Vec<RackSlotVoice<'static>>);
@@ -193,6 +250,62 @@ fn retire_portable_rack(
 unsafe impl<'plugin> ScheduledSlot for RackSlotVoice<'plugin> {
     fn max_units(&self) -> u32 {
         self.parallel.as_ref().map_or(0, ParallelUnits::max_units)
+    }
+
+    fn dependency_mask(&self) -> u32 {
+        self.deps_mask
+    }
+
+    unsafe fn gather_input(
+        slot_index: usize,
+        slots: *mut Self,
+        _slot_count: usize,
+        frames: u32,
+        channels: u32,
+    ) {
+        // SAFETY: the scheduler grants exclusive access to this Slot and
+        // guarantees every Slot in the dependency mask is complete and
+        // immutable; upstream references are shared reads of lower indices.
+        let voice = unsafe { &mut *slots.add(slot_index) };
+        if voice.resolved_sources.is_empty() {
+            return;
+        }
+        voice.input.fill(0.0);
+        for source in &voice.resolved_sources {
+            match source {
+                ResolvedRackSource::Capture => {
+                    if voice.capture_len == 0 || voice.capture_channels == 0 {
+                        continue;
+                    }
+                    // SAFETY: staged by the audio loop for this block and
+                    // only read during it.
+                    let capture =
+                        unsafe { std::slice::from_raw_parts(voice.capture_ptr, voice.capture_len) };
+                    mix_capture_into_plugin(
+                        capture,
+                        voice.capture_channels,
+                        &mut voice.input,
+                        voice.input_channels,
+                        frames as usize,
+                    );
+                }
+                ResolvedRackSource::Slot(upstream) => {
+                    // SAFETY: `upstream` is a lower, completed index.
+                    let upstream =
+                        unsafe { &*(slots.add(*upstream) as *const RackSlotVoice<'plugin>) };
+                    if upstream.process_faulted {
+                        continue;
+                    }
+                    mix_slot_into_plugin(
+                        upstream,
+                        &mut voice.input,
+                        voice.input_channels,
+                        frames as usize,
+                        channels as usize,
+                    );
+                }
+            }
+        }
     }
 
     fn run_single(&mut self, frames: u32, channels: u32) -> bool {
@@ -307,56 +420,6 @@ fn process_rack_voice(voice: &mut RackSlotVoice<'_>, period_frames: u32, channel
         eprintln!(
             "PLUGIN_PROCESS_QUARANTINED context=rack-slot:{} action=silence error={error}",
             voice.slot_id
-        );
-    }
-}
-
-fn process_rack_audio_graph(
-    voices: &mut [RackSlotVoice<'static>],
-    capture: &[f32],
-    capture_channels: usize,
-    frames: usize,
-    output_channels: usize,
-    telemetry: &RenderTelemetry,
-) {
-    for index in 0..voices.len() {
-        let (completed, pending) = voices.split_at_mut(index);
-        let voice = &mut pending[0];
-        voice.input.fill(0.0);
-        for source in &voice.audio_sources {
-            match source {
-                crate::rack_graph::CompiledAudioSource::HardwareInput { .. } => {
-                    mix_capture_into_plugin(
-                        capture,
-                        capture_channels,
-                        &mut voice.input,
-                        voice.input_channels,
-                        frames,
-                    );
-                }
-                crate::rack_graph::CompiledAudioSource::Slot { runtime_slot_id } => {
-                    if let Some(source) = completed
-                        .iter()
-                        .find(|candidate| candidate.slot_id == *runtime_slot_id)
-                        .filter(|source| !source.process_faulted)
-                    {
-                        mix_slot_into_plugin(
-                            source,
-                            &mut voice.input,
-                            voice.input_channels,
-                            frames,
-                            output_channels,
-                        );
-                    }
-                }
-            }
-        }
-        process_one_slot_sequential(
-            voice,
-            index,
-            frames as u32,
-            output_channels as u32,
-            telemetry,
         );
     }
 }
@@ -485,6 +548,11 @@ fn create_rack_voices<'plugin>(
             parallel,
             midi_stages: spec.midi_stages.clone(),
             audio_sources: spec.audio_sources.clone(),
+            resolved_sources: Vec::new(),
+            deps_mask: 0,
+            capture_ptr: std::ptr::null(),
+            capture_len: 0,
+            capture_channels: 0,
             sends_to_main: spec.sends_to_main,
             input_channels,
             level: f32::from(spec.level_per_mille) / 1_000.0,
@@ -496,13 +564,14 @@ fn create_rack_voices<'plugin>(
             process_faulted: false,
         });
     }
+    resolve_rack_voice_graph(&mut voices);
     Ok(voices)
 }
 
 fn rack_voices_from_prepared(
     prepared: Vec<control::PreparedRackSlot>,
 ) -> Vec<RackSlotVoice<'static>> {
-    prepared
+    let mut voices = prepared
         .into_iter()
         .map(|prepared| RackSlotVoice {
             slot_id: prepared.slot_id,
@@ -511,6 +580,11 @@ fn rack_voices_from_prepared(
             parallel: prepared.parallel.map(|units| units.0),
             midi_stages: prepared.midi_stages,
             audio_sources: prepared.audio_sources,
+            resolved_sources: Vec::new(),
+            deps_mask: 0,
+            capture_ptr: std::ptr::null(),
+            capture_len: 0,
+            capture_channels: 0,
             sends_to_main: prepared.sends_to_main,
             input_channels: prepared.input_channels,
             level: f32::from(prepared.level_per_mille) / 1_000.0,
@@ -521,7 +595,9 @@ fn rack_voices_from_prepared(
             parameter_events: prepared.parameter_events,
             process_faulted: false,
         })
-        .collect()
+        .collect::<Vec<_>>();
+    resolve_rack_voice_graph(&mut voices);
+    voices
 }
 
 impl MasterBalance {
@@ -2415,23 +2491,17 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 }
             }
             AudioRenderMode::Rack => {
-                let graph_audio = rack_voices
-                    .iter()
-                    .any(|voice| !voice.audio_sources.is_empty());
                 let deadline_ns =
                     period_frames as u64 * 1_000_000_000 / (output_rate as u64).max(1);
+                // Stage this block's capture for the Slots whose cables read
+                // the hardware input; the gather step consumes it.
+                for voice in &mut rack_voices {
+                    voice.capture_ptr = captured_input.as_ptr();
+                    voice.capture_len = captured_input.len();
+                    voice.capture_channels = capture_channels;
+                }
                 let render_started = Instant::now();
-                let scheduled = if graph_audio {
-                    process_rack_audio_graph(
-                        &mut rack_voices,
-                        &captured_input,
-                        capture_channels,
-                        period_frames,
-                        channels,
-                        &render_telemetry,
-                    );
-                    false
-                } else if rack_renderer.process(
+                let scheduled = if rack_renderer.process(
                     &mut rack_voices,
                     period_frames as u32,
                     channels as u32,

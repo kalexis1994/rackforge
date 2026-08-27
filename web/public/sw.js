@@ -52,6 +52,19 @@ const IMMUTABLE = "/assets/";
  */
 const PLUGIN_ASSETS = "/plugin-assets/";
 const PLUGIN_ASSET_CACHE = "rackforge-plugin-assets";
+const PLUGIN_ASSET_PROTOCOL = 1;
+
+// A page must distinguish a current RackForge worker from an older controller
+// that happens to exist. Treating any controller as capable let a freshly
+// deployed UI advertise plugin URLs through yesterday's worker, which then
+// forwarded them to GitHub Pages and cached a 404 in the iframe.
+self.addEventListener("message", (event) => {
+  if (event.data?.kind !== "rackforge-plugin-assets-capabilities") return;
+  event.ports[0]?.postMessage({
+    kind: "rackforge-plugin-assets-capabilities",
+    protocol: PLUGIN_ASSET_PROTOCOL,
+  });
+});
 
 self.addEventListener("install", (event) => {
   // The page and its manifest are the minimum an offline start needs; the rest

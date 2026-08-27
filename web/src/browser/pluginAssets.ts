@@ -18,6 +18,7 @@ import type { SeedFile } from "./protocol";
 import { ensureServiceWorker } from "./pwa";
 
 const CACHE = "rackforge-plugin-assets";
+const PLUGIN_ASSET_PROTOCOL = 1;
 /** Path the service worker recognises, below the site's base. */
 export const PLUGIN_ASSET_PREFIX = "plugin-assets/";
 /** Where packages shipped with the site sit on disk. */
@@ -66,24 +67,94 @@ function contentType(path: string): string {
  * without them — so plugin interfaces are reported as unavailable rather than
  * advertised and then broken.
  */
-export function whenServing(timeoutMs = 5_000): Promise<boolean> {
-  if (!("serviceWorker" in navigator)) return Promise.resolve(false);
-  if (navigator.serviceWorker.controller) return Promise.resolve(true);
+interface PluginAssetController {
+  postMessage(message: unknown, transfer: Transferable[]): void;
+}
+
+/** Proves that the controller understands RackForge's virtual plugin route. */
+export function supportsPluginAssetProtocol(
+  controller: PluginAssetController,
+  timeoutMs = 750,
+): Promise<boolean> {
+  if (typeof MessageChannel === "undefined") return Promise.resolve(false);
   return new Promise((resolve) => {
-    const settle = (serving: boolean) => {
-      navigator.serviceWorker.removeEventListener("controllerchange", onChange);
-      window.clearTimeout(timer);
-      resolve(serving);
+    const channel = new MessageChannel();
+    let settled = false;
+    const settle = (supported: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      channel.port1.close();
+      resolve(supported);
     };
-    const onChange = () => settle(Boolean(navigator.serviceWorker.controller));
-    const timer = window.setTimeout(() => settle(false), timeoutMs);
-    navigator.serviceWorker.addEventListener("controllerchange", onChange);
-    // Do not merely wait and hope another part of the application registers
-    // the worker. The catalog itself depends on it for installed packages.
-    void ensureServiceWorker().then(() => navigator.serviceWorker.ready).then(() => {
-      if (navigator.serviceWorker.controller) settle(true);
-    }).catch(() => settle(false));
+    const timer = setTimeout(() => settle(false), timeoutMs);
+    channel.port1.onmessage = (event: MessageEvent<{
+      kind?: string;
+      protocol?: number;
+    }>) => settle(
+      event.data?.kind === "rackforge-plugin-assets-capabilities"
+        && event.data.protocol === PLUGIN_ASSET_PROTOCOL,
+    );
+    try {
+      controller.postMessage(
+        { kind: "rackforge-plugin-assets-capabilities" },
+        [channel.port2],
+      );
+    } catch {
+      settle(false);
+    }
   });
+}
+
+let serving: Promise<boolean> | null = null;
+
+async function establishServing(timeoutMs: number): Promise<boolean> {
+  if (!("serviceWorker" in navigator)) return false;
+  const registration = await ensureServiceWorker();
+  if (!registration) return false;
+
+  // Explicitly check for an update. `controller !== null` only means *some*
+  // worker owns the page; it says nothing about support for plugin-assets.
+  // The current worker calls skipWaiting + clients.claim, so controllerchange
+  // can complete this without asking the performer for a reload.
+  await registration.update().catch(() => undefined);
+
+  const deadline = Date.now() + timeoutMs;
+  let checked: ServiceWorker | null = null;
+  while (Date.now() < deadline) {
+    const controller = navigator.serviceWorker.controller;
+    if (controller && controller !== checked) {
+      checked = controller;
+      const remaining = Math.max(1, deadline - Date.now());
+      if (await supportsPluginAssetProtocol(controller, Math.min(750, remaining))) {
+        return true;
+      }
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise<void>((resolve) => {
+      const settle = () => {
+        navigator.serviceWorker.removeEventListener("controllerchange", settle);
+        window.clearTimeout(timer);
+        resolve();
+      };
+      const timer = window.setTimeout(settle, Math.min(100, remaining));
+      navigator.serviceWorker.addEventListener("controllerchange", settle, { once: true });
+    });
+  }
+  return false;
+}
+
+export function whenServing(timeoutMs = 5_000): Promise<boolean> {
+  if (serving) return serving;
+  serving = establishServing(timeoutMs).then((available) => {
+    if (!available) serving = null;
+    return available;
+  }, () => {
+    serving = null;
+    return false;
+  });
+  return serving;
 }
 
 /** Packages shipped with the web build have ordinary static URLs. */
@@ -189,6 +260,15 @@ export async function publishPluginAssets(files: SeedFile[]): Promise<ReadonlySe
   await Promise.all(
     Array.from({ length: Math.min(4, writes.length) }, () => write()),
   );
+
+  // Cache.put resolving is the publication barrier. Verify the resulting
+  // entries instead of trusting only our in-memory path set, so a quota or
+  // browser cache failure can never produce a catalog that advertises 404s.
+  for (const { url } of writes) {
+    if (!(await cache.match(url, { ignoreSearch: true }))) {
+      throw new Error(`RackForge did not publish plugin asset ${url}`);
+    }
+  }
 
   for (const request of await cache.keys()) {
     const url = new URL(request.url);

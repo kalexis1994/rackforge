@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
 rackforge-audio-api = { path = "../../crates/rackforge-audio-api" }
 keylab-essential-mk3 = { package = "rackforge-controller-arturia-keylab-essential-mk3", path = "../../hardware/keylab-bridge" }
 rackforge-control-api = { path = "../../crates/rackforge-control-api" }

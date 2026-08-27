@@ -5,6 +5,7 @@ import {
   isPackagedPluginRoot,
   pluginAssetUrl,
   publishPluginAssets,
+  supportsPluginAssetProtocol,
   versionPluginAssetUrl,
 } from "./pluginAssets";
 import {
@@ -51,6 +52,21 @@ afterEach(() => {
 });
 
 describe("browser plugin asset routing", () => {
+  it("distinguishes the current asset worker from a stale controller", async () => {
+    const current = {
+      postMessage(_message: unknown, transfer: Transferable[]) {
+        (transfer[0] as MessagePort).postMessage({
+          kind: "rackforge-plugin-assets-capabilities",
+          protocol: 1,
+        });
+      },
+    };
+    const stale = { postMessage() {} };
+
+    await expect(supportsPluginAssetProtocol(current, 50)).resolves.toBe(true);
+    await expect(supportsPluginAssetProtocol(stale, 5)).resolves.toBe(false);
+  });
+
   it("serves bundled plugin surfaces directly without waiting for a worker", () => {
     expect(isPackagedPluginRoot("plugins/concert-grand")).toBe(true);
     expect(canServePluginAssets("plugins/concert-grand", false)).toBe(true);

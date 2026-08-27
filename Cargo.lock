@@ -3637,6 +3637,7 @@ name = "rackforge-browser"
 version = "0.1.7"
 dependencies = [
  "anyhow",
+ "base64",
  "rackforge-audio-api",
  "rackforge-control-api",
  "rackforge-controller-arturia-keylab-essential-mk3",

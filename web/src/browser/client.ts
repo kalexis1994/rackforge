@@ -993,6 +993,11 @@ interface PackagePreview {
   platform: string;
   portable: boolean;
   archive_bytes: number;
+  branding?: {
+    banner_data_url: string;
+    background_color?: string | null;
+    accent_color?: string | null;
+  } | null;
 }
 
 /**
@@ -1234,7 +1239,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     if (!answer.ok || !answer.preview) {
       throw new HostRequestError(answer.error ?? "This package could not be read.", 400);
     }
-    return { ...answer.preview, selection_id: id, branding: null } as T;
+    return { ...answer.preview, selection_id: id } as T;
   }
   if (path === "/api/v1/plugins/install" && method === "POST") {
     const { selection_id: id } = JSON.parse(String(init.body)) as { selection_id?: string };

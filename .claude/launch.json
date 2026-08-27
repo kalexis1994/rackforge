@@ -4,14 +4,38 @@
     {
       "name": "plugin-ui",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8123", "--directory", "plugins/concert-grand/package"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8123",
+        "--directory",
+        "plugins/concert-grand/package"
+      ],
       "port": 8123
     },
     {
       "name": "mock-ui",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8124", "--directory", "C:/Users/kalex/AppData/Local/Temp/claude/C--Users-kalex-OneDrive-Documents-rackforge/cacf176e-8930-4aaf-bfdf-605844df4285/scratchpad"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8124",
+        "--directory",
+        "C:/Users/kalex/AppData/Local/Temp/claude/C--Users-kalex-OneDrive-Documents-rackforge/cacf176e-8930-4aaf-bfdf-605844df4285/scratchpad"
+      ],
       "port": 8124
+    },
+    {
+      "name": "rf-rig-surface",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8131",
+        "--directory",
+        "C:/Users/kalex/OneDrive/Documents/rackforge-plugin-rf-rig"
+      ],
+      "port": 8131
     }
   ]
 }

@@ -25,6 +25,9 @@ pub const DEFAULT_AUDIO_PRIORITY: i32 = 75;
 pub enum SchedulingState {
     /// The thread runs at the given real-time priority.
     Realtime { priority: i32 },
+    /// The platform granted its best available boost, which is not a POSIX
+    /// real-time class: MMCSS "Pro Audio" or TIME_CRITICAL on Windows.
+    Boosted { class: &'static str },
     /// The platform did not grant `RLIMIT_RTPRIO`; the thread stays on the
     /// ordinary scheduler. `granted` is the ceiling actually available.
     Denied { requested: i32, granted: i32 },
@@ -55,10 +58,17 @@ pub struct RealtimeStatus {
 }
 
 impl RealtimeStatus {
-    /// True when both halves succeeded and the audio path is fully protected.
+    /// True when the platform granted everything it can grant. On Linux
+    /// that is `SCHED_FIFO` plus locked memory; on platforms where a half
+    /// simply does not exist (memory locking on Windows), the absent half
+    /// does not count against the audio path.
     pub fn is_fully_engaged(&self) -> bool {
-        matches!(self.scheduling, SchedulingState::Realtime { .. })
-            && matches!(self.memory, MemoryState::Locked)
+        let scheduling = matches!(
+            self.scheduling,
+            SchedulingState::Realtime { .. } | SchedulingState::Boosted { .. }
+        );
+        let memory = matches!(self.memory, MemoryState::Locked | MemoryState::Unsupported);
+        scheduling && memory
     }
 
     /// True when the host is playable but exposed to scheduler-induced dropouts.
@@ -88,6 +98,7 @@ impl fmt::Display for RealtimeStatus {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let scheduling = match &self.scheduling {
             SchedulingState::Realtime { priority } => format!("fifo:{priority}"),
+            SchedulingState::Boosted { class } => format!("boosted:{class}"),
             SchedulingState::Denied { requested, granted } => {
                 format!("denied:requested={requested},granted={granted}")
             }
@@ -131,7 +142,60 @@ pub fn engage(priority: i32) -> RealtimeStatus {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Windows: the best available posture is the Multimedia Class Scheduler's
+/// "Pro Audio" task (the mechanism every DAW uses for its audio threads),
+/// with plain `TIME_CRITICAL` as the fallback. Memory locking has no
+/// equivalent grant to request, so it reports as not applicable.
+#[cfg(target_os = "windows")]
+pub fn engage(priority: i32) -> RealtimeStatus {
+    RealtimeStatus {
+        scheduling: engage_mmcss(priority),
+        memory: MemoryState::Unsupported,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn engage_mmcss(requested: i32) -> SchedulingState {
+    #[link(name = "avrt")]
+    unsafe extern "system" {
+        fn AvSetMmThreadCharacteristicsW(
+            task_name: *const u16,
+            task_index: *mut u32,
+        ) -> *mut core::ffi::c_void;
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentThread() -> *mut core::ffi::c_void;
+        fn SetThreadPriority(thread: *mut core::ffi::c_void, priority: i32) -> i32;
+        fn GetLastError() -> u32;
+    }
+    const THREAD_PRIORITY_TIME_CRITICAL: i32 = 15;
+
+    let task_name: Vec<u16> = "Pro Audio"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut task_index = 0_u32;
+    // SAFETY: a valid NUL-terminated UTF-16 name and an out-parameter; the
+    // returned handle intentionally lives for the thread's lifetime.
+    let handle = unsafe { AvSetMmThreadCharacteristicsW(task_name.as_ptr(), &mut task_index) };
+    if !handle.is_null() {
+        return SchedulingState::Boosted { class: "pro-audio" };
+    }
+    // SAFETY: the pseudo-handle for the calling thread is always valid.
+    if unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL) } != 0 {
+        return SchedulingState::Boosted {
+            class: "time-critical",
+        };
+    }
+    SchedulingState::Failed {
+        requested,
+        // SAFETY: plain thread-local error read.
+        errno: unsafe { GetLastError() } as i32,
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub fn engage(_priority: i32) -> RealtimeStatus {
     RealtimeStatus {
         scheduling: SchedulingState::Unsupported,

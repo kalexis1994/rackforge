@@ -18,6 +18,7 @@
 //! the client code it already uses for a networked one.
 
 use anyhow::{Context, Result, anyhow, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rackforge_audio_api::{
     AUDIO_DEVICE_SCHEMA_VERSION, AudioBackend, AudioDeviceDescriptor, AudioDeviceId,
     AudioDeviceSelector, AudioFallbackPolicy, AudioOutputProfile, AudioOutputState,
@@ -48,8 +49,9 @@ use rackforge_plugin_api::{
     Capability, HostPresetSummary, PluginKind, PluginManifest, PresetCatalog, ResourceKind,
 };
 use rackforge_repository::{
-    PluginUserDataRemovalOptions, inspect_local_archive, install_local_archive, plugin_is_enabled,
-    remove_plugin_user_data, set_plugin_enabled, uninstall_plugin,
+    LocalPackageInspection, PluginUserDataRemovalOptions, inspect_local_archive,
+    install_local_archive, plugin_is_enabled, remove_plugin_user_data, set_plugin_enabled,
+    uninstall_plugin,
 };
 use rackforge_session_api::{
     BankSummary, ClientId, CommandEnvelope, CommandRef, EventEnvelope, InstanceId, MasterLevel,
@@ -1083,18 +1085,7 @@ impl BrowserHost {
     /// show what is inside before anyone commits to it.
     pub fn inspect_package(&self, archive: &[u8]) -> Result<serde_json::Value> {
         let inspection = inspect_local_archive(store_root(), archive)?;
-        Ok(serde_json::json!({
-            "plugin_id": inspection.plugin_id,
-            "plugin_name": inspection.plugin_name,
-            "vendor": inspection.vendor,
-            "version": inspection.version,
-            "description": inspection.description,
-            "kind": plugin_kind_name(inspection.kind),
-            "platform": inspection.platform,
-            "portable": inspection.portable,
-            "archive_bytes": inspection.archive_bytes,
-            "installable": inspection.portable,
-        }))
+        Ok(package_inspection_response(&inspection))
     }
 
     /// Installs a `.rfplugin` into the page's plugin store without enabling it.
@@ -1722,6 +1713,32 @@ fn plugin_kind_name(kind: PluginKind) -> &'static str {
     }
 }
 
+fn package_inspection_response(inspection: &LocalPackageInspection) -> serde_json::Value {
+    let branding = inspection.branding.as_ref().map(|branding| {
+        serde_json::json!({
+            "banner_data_url": format!(
+                "data:image/png;base64,{}",
+                STANDARD.encode(&branding.banner_png)
+            ),
+            "background_color": branding.background_color,
+            "accent_color": branding.accent_color,
+        })
+    });
+    serde_json::json!({
+        "plugin_id": inspection.plugin_id,
+        "plugin_name": inspection.plugin_name,
+        "vendor": inspection.vendor,
+        "version": inspection.version,
+        "description": inspection.description,
+        "kind": plugin_kind_name(inspection.kind),
+        "platform": inspection.platform,
+        "portable": inspection.portable,
+        "archive_bytes": inspection.archive_bytes,
+        "installable": inspection.portable,
+        "branding": branding,
+    })
+}
+
 /// Lists every package the host should load: those RackForge ships with the
 /// page, and those installed into its plugin store.
 fn package_roots(data_root: &Path) -> Result<Vec<PathBuf>> {
@@ -1976,5 +1993,43 @@ pub fn midi_event(frame: u32, data: [u8; 3], length: u8) -> MidiEventV1 {
         frame,
         length,
         data,
+    }
+}
+
+#[cfg(test)]
+mod package_preview_tests {
+    use super::*;
+    use rackforge_repository::LocalPackageBrandingPreview;
+
+    #[test]
+    fn browser_preview_preserves_validated_branding() {
+        let inspection = LocalPackageInspection {
+            plugin_id: "org.rackforge.preview".into(),
+            plugin_name: "Preview".into(),
+            vendor: "RackForge Test".into(),
+            version: "1.2.3".into(),
+            description: Some("Preview branding".into()),
+            kind: PluginKind::Instrument,
+            platform: "wasm-v1".into(),
+            portable: true,
+            artifact_sha256: "00".repeat(32),
+            archive_bytes: 42,
+            branding: Some(LocalPackageBrandingPreview {
+                banner_png: vec![0x89, b'P', b'N', b'G'],
+                background_color: Some("#010203".into()),
+                accent_color: Some("#aabbcc".into()),
+            }),
+        };
+
+        let response = package_inspection_response(&inspection);
+        let branding = &response["branding"];
+        assert_eq!(branding["background_color"], "#010203");
+        assert_eq!(branding["accent_color"], "#aabbcc");
+        assert!(
+            branding["banner_data_url"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
     }
 }

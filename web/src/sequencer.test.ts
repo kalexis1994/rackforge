@@ -8,6 +8,9 @@ import {
   noteName,
   setMelodicStep,
   setSwing,
+  setStepLock,
+  clearStepLock,
+  stepLock,
   conditionLabel,
   cycleCondition,
   cycleProbability,
@@ -124,6 +127,19 @@ describe("the trig grammar", () => {
     const snare = pattern.notes.find((note) => note.key === 38);
     expect(kick?.probability).toBe(75);
     expect(snare?.probability ?? 100).toBe(100);
+  });
+});
+
+describe("parameter locks", () => {
+  it("freezes, nudges and clears one knob on a step", () => {
+    let pattern = setMelodicStep(emptyPattern("Sweep", 1, 4, "melodic"), 0, 48);
+    expect(stepLock(pattern, 0)).toBeUndefined();
+    pattern = setStepLock(pattern, 0, null, 3, 0.42);
+    expect(stepLock(pattern, 0)).toEqual({ parameter: 3, value: 0.42 });
+    pattern = setStepLock(pattern, 0, null, 3, 0.9);
+    expect(stepLock(pattern, 0)?.value).toBe(0.9);
+    pattern = clearStepLock(pattern, 0);
+    expect(stepLock(pattern, 0)).toBeUndefined();
   });
 });
 

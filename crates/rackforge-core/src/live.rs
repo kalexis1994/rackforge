@@ -2736,7 +2736,13 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         // curves decide who hears which lane. Frame offsets ride the packet
         // the whole way: quantised launches stay sample-accurate per Slot.
         sequencer_events.clear();
-        sequencer.render_block(period_frames as u32, &mut sequencer_events);
+        // Lock events ride the block's parameter queue; Rack-mode parameter
+        // routing (which Slot owns a lane's knobs) is future work.
+        sequencer.render_block(
+            period_frames as u32,
+            &mut sequencer_events,
+            &mut parameter_events,
+        );
         match render_mode {
             AudioRenderMode::Silent => {}
             AudioRenderMode::Plugin => {

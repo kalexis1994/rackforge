@@ -282,7 +282,7 @@ export function LivePage({
             : { label: "Library", value: liveContext }
         }
       />
-      {performance ? <SequencerStrip performance={performance} surface={surface} /> : null}
+      {performance ? <SequencerStrip performance={performance} surface={surface} session={session} /> : null}
       <section className="live-zone live-zone-performance" aria-label="Performance">
       <span className="live-zone-legend">PERFORMANCE</span>
       <div className="live-surface-tabs" role="tablist" aria-label="LIVE views">

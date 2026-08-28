@@ -42,10 +42,11 @@ use rackforge_control_api::{
     SequencerCommand, SequencerLaneStatus, SequencerQuantize, SequencerScale, SequencerStatusV1,
 };
 use rackforge_performance_api::{
-    MAX_PART_PATTERN_BINDINGS, MAX_PATTERN_NOTES, MAX_PATTERN_TICKS, PATTERN_SWING_MAX,
-    PATTERN_SWING_STRAIGHT, PATTERN_TICKS_PER_BEAT, PatternDefinition, SongPart, TrigCondition,
+    MAX_NOTE_LOCKS, MAX_PART_PATTERN_BINDINGS, MAX_PATTERN_NOTES, MAX_PATTERN_TICKS,
+    PATTERN_SWING_MAX, PATTERN_SWING_STRAIGHT, PATTERN_TICKS_PER_BEAT, PatternDefinition,
+    SongPart, TrigCondition,
 };
-use rackforge_plugin_api::abi::MidiEventV1;
+use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use std::sync::Arc;
 
 /// Tick resolution of pattern documents, re-exported from the library schema:
@@ -85,6 +86,9 @@ struct CompiledNote {
     /// The grid tick the note was written on: the deterministic seed of its
     /// probability roll, unmoved by swing.
     seed_tick: u32,
+    /// Knobs frozen into this step: (parameter index, value), fired with
+    /// the note-on. Fixed-size so the runtime note stays `Copy`.
+    locks: [Option<(u32, f64)>; MAX_NOTE_LOCKS],
 }
 
 impl CompiledPattern {
@@ -128,6 +132,13 @@ impl CompiledPattern {
                 probability: note.probability.clamp(1, 100),
                 condition: note.condition,
                 seed_tick: note.tick,
+                locks: {
+                    let mut locks = [None; MAX_NOTE_LOCKS];
+                    for (slot, lock) in note.locks.iter().take(MAX_NOTE_LOCKS).enumerate() {
+                        locks[slot] = Some((lock.parameter, lock.value));
+                    }
+                    locks
+                },
             });
         }
         notes.sort_by(|a, b| a.start_beat.total_cmp(&b.start_beat));
@@ -403,6 +414,7 @@ impl SequencerLane {
         frames: u32,
         fill: bool,
         out: &mut Vec<MidiEventV1>,
+        params_out: &mut Vec<ParameterEventV1>,
     ) {
         if frames == 0 || frames_per_beat <= 0.0 {
             return;
@@ -479,6 +491,7 @@ impl SequencerLane {
                 frames_per_beat,
                 frames,
                 &mut staged,
+                params_out,
             );
         }
         if until < end_beat {
@@ -546,6 +559,7 @@ fn emit_pattern_notes(
     frames_per_beat: f64,
     frames: u32,
     staged: &mut Vec<StagedEvent>,
+    params_out: &mut Vec<ParameterEventV1>,
 ) {
     // The launch boundary may sit inside the block: nothing sounds before it.
     let from = block_start.max(playing.anchor_beat);
@@ -614,8 +628,19 @@ fn emit_pattern_notes(
                     }
                 }
             };
+            let frame = frame_of(at, block_start, frames_per_beat, frames);
+            // A step's frozen knobs land with its note-on: same frame, and
+            // hosts stage parameters ahead of MIDI, so the sound is already
+            // shaped when the note speaks.
+            for lock in note.locks.iter().flatten() {
+                params_out.push(ParameterEventV1 {
+                    frame,
+                    parameter_index: lock.0,
+                    value: lock.1,
+                });
+            }
             staged.push(StagedEvent {
-                frame: frame_of(at, block_start, frames_per_beat, frames),
+                frame,
                 on: true,
                 data: note_on(key, note.velocity, channel),
             });
@@ -962,7 +987,12 @@ impl SequencerEngine {
     /// One audio block: debts owed by stops and panics first, then every
     /// lane against the transport's view of the block. Events come out in
     /// frame order, offs before ons on ties, ready for an instance.
-    pub fn render_block(&mut self, frames: u32, out: &mut Vec<MidiEventV1>) {
+    pub fn render_block(
+        &mut self,
+        frames: u32,
+        out: &mut Vec<MidiEventV1>,
+        params_out: &mut Vec<ParameterEventV1>,
+    ) {
         if self.panic_pending {
             self.panic_pending = false;
             self.flush_pending = false;
@@ -983,11 +1013,19 @@ impl SequencerEngine {
         }
         let frames_per_beat = self.sample_rate * 60.0 / block.tempo_bpm;
         for lane in &mut self.lanes {
-            lane.render_block(block.start_beat, frames_per_beat, frames, self.fill, out);
+            lane.render_block(
+                block.start_beat,
+                frames_per_beat,
+                frames,
+                self.fill,
+                out,
+                params_out,
+            );
         }
         // Lanes emitted in sequence; instances expect one timeline. The sort
         // is stable, so each lane's off-before-on ordering survives.
         out.sort_by_key(|event| event.frame);
+        params_out.sort_by_key(|event| event.frame);
     }
 
     /// What a surface shows. Cheap enough to poll.
@@ -1046,6 +1084,7 @@ mod tests {
                     channel: 0,
                     probability: 100,
                     condition: rackforge_performance_api::TrigCondition::Always,
+                    locks: Vec::new(),
                 })
                 .collect(),
             view: Default::default(),
@@ -1068,7 +1107,7 @@ mod tests {
         let mut beat = start_beat;
         for block in 0..blocks {
             let mut out = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
-            lane.render_block(beat, frames_per_beat, frames, false, &mut out);
+            lane.render_block(beat, frames_per_beat, frames, false, &mut out, &mut Vec::new());
             for event in out {
                 all.push((block, event.frame, event.data));
             }
@@ -1091,6 +1130,7 @@ mod tests {
                 channel: 0,
                     probability: 100,
                     condition: rackforge_performance_api::TrigCondition::Always,
+                    locks: Vec::new(),
             }],
             view: Default::default(),
             swing_percent: 50,
@@ -1112,6 +1152,60 @@ mod tests {
         still.notes[0].duration_ticks = 0;
         assert_eq!(CompiledPattern::compile(&still).err(), Some(PatternError::ZeroDuration));
         assert!(CompiledPattern::compile(&base).is_ok());
+    }
+
+    #[test]
+    fn parameter_locks_fire_with_their_note() {
+        let mut document = definition();
+        document.length_ticks = TICKS_PER_BEAT;
+        document.notes = vec![rackforge_performance_api::PatternNoteSpec {
+            tick: TICKS_PER_BEAT / 2,
+            duration_ticks: TICKS_PER_BEAT / 4,
+            key: 48,
+            velocity: 100,
+            channel: 0,
+            probability: 100,
+            condition: TrigCondition::Always,
+            locks: vec![
+                rackforge_performance_api::ParameterLockSpec {
+                    parameter: 3,
+                    value: 0.42,
+                },
+                rackforge_performance_api::ParameterLockSpec {
+                    parameter: 7,
+                    value: 12_000.0,
+                },
+            ],
+        }];
+        let mut lane = SequencerLane::new();
+        lane.queue(
+            CompiledPattern::compile(&document).expect("valid pattern"),
+            0.0,
+        );
+        let mut out = Vec::new();
+        let mut params = Vec::new();
+        lane.render_block(0.0, 24_000.0, 24_000, false, &mut out, &mut params);
+        let note_frame = out
+            .iter()
+            .find(|event| event.data[0] == 0x90)
+            .expect("the note fires")
+            .frame;
+        assert_eq!(note_frame, 12_000);
+        // Both frozen knobs land on the note's exact frame, values intact.
+        assert_eq!(params.len(), 2);
+        assert!(params.iter().all(|event| event.frame == note_frame));
+        assert!(params.iter().any(|e| e.parameter_index == 3 && (e.value - 0.42).abs() < 1e-12));
+        assert!(params.iter().any(|e| e.parameter_index == 7 && (e.value - 12_000.0).abs() < 1e-9));
+
+        // A skipped step keeps its knobs frozen: no note, no lock.
+        let mut chance = document.clone();
+        chance.notes[0].condition = TrigCondition::Fill;
+        let mut lane = SequencerLane::new();
+        lane.queue(CompiledPattern::compile(&chance).expect("valid"), 0.0);
+        let mut out = Vec::new();
+        let mut params = Vec::new();
+        lane.render_block(0.0, 24_000.0, 24_000, false, &mut out, &mut params);
+        assert!(out.is_empty() && params.is_empty());
     }
 
     #[test]
@@ -1183,6 +1277,7 @@ mod tests {
                 channel: 0,
                 probability: 100,
                 condition: TrigCondition::Always,
+                locks: Vec::new(),
             },
             rackforge_performance_api::PatternNoteSpec {
                 tick: TICKS_PER_BEAT / 4,
@@ -1192,6 +1287,7 @@ mod tests {
                 channel: 0,
                 probability: 100,
                 condition: TrigCondition::Cycle { hit: 2, of: 2 },
+                locks: Vec::new(),
             },
             rackforge_performance_api::PatternNoteSpec {
                 tick: TICKS_PER_BEAT / 2,
@@ -1201,6 +1297,7 @@ mod tests {
                 channel: 0,
                 probability: 100,
                 condition: TrigCondition::Pre,
+                locks: Vec::new(),
             },
             rackforge_performance_api::PatternNoteSpec {
                 tick: 3 * TICKS_PER_BEAT / 4,
@@ -1210,6 +1307,7 @@ mod tests {
                 channel: 0,
                 probability: 100,
                 condition: TrigCondition::Fill,
+                locks: Vec::new(),
             },
         ];
         let run = |fill: bool| {
@@ -1223,7 +1321,7 @@ mod tests {
             let mut beat = 0.0;
             for cycle in 0..4 {
                 let mut out = Vec::new();
-                lane.render_block(beat, frames_per_beat, 24_000, fill, &mut out);
+                lane.render_block(beat, frames_per_beat, 24_000, fill, &mut out, &mut Vec::new());
                 for event in out {
                     if event.data[0] == 0x90 {
                         all.push((cycle, event.data[1]));
@@ -1268,6 +1366,7 @@ mod tests {
             channel: 0,
             probability: 50,
             condition: TrigCondition::Always,
+                locks: Vec::new(),
         }];
         let roll_run = || {
             let mut lane = SequencerLane::new();
@@ -1276,7 +1375,7 @@ mod tests {
             let mut beat = 0.0;
             for cycle in 0..32 {
                 let mut out = Vec::new();
-                lane.render_block(beat, 24_000.0, 24_000, false, &mut out);
+                lane.render_block(beat, 24_000.0, 24_000, false, &mut out, &mut Vec::new());
                 if out.iter().any(|event| event.data[0] == 0x90) {
                     fired.push(cycle);
                 }
@@ -1304,6 +1403,7 @@ mod tests {
             channel: 0,
                     probability: 100,
                     condition: rackforge_performance_api::TrigCondition::Always,
+                    locks: Vec::new(),
         }];
         engine
             .apply(&SequencerCommand::QueuePattern {
@@ -1322,7 +1422,7 @@ mod tests {
 
         // Gate closed: a full bar of silence.
         let mut out = Vec::new();
-        engine.render_block(16_384, &mut out);
+        engine.render_block(16_384, &mut out, &mut Vec::new());
         assert!(out.is_empty(), "a follow lane must be silent with no key held");
         assert!(engine.status().lanes[0].following);
         assert!(!engine.status().lanes[0].playing);
@@ -1330,7 +1430,7 @@ mod tests {
         // Hold F2: the phrase restarts on the next 16th, five semitones up.
         engine.note_input(53, true);
         out.clear();
-        engine.render_block(16_384, &mut out);
+        engine.render_block(16_384, &mut out, &mut Vec::new());
         let ons: Vec<u8> = out
             .iter()
             .filter(|event| event.data[0] == 0x90)
@@ -1343,7 +1443,7 @@ mod tests {
         // Release: the ringing note is silenced at the next block.
         engine.note_input(53, false);
         out.clear();
-        engine.render_block(16_384, &mut out);
+        engine.render_block(16_384, &mut out, &mut Vec::new());
         assert!(out.iter().any(|event| event.data[0] == 0x80));
         assert!(out.iter().all(|event| event.data[0] != 0x90));
 
@@ -1366,6 +1466,7 @@ mod tests {
                 channel: 0,
                     probability: 100,
                     condition: rackforge_performance_api::TrigCondition::Always,
+                    locks: Vec::new(),
             },
             rackforge_performance_api::PatternNoteSpec {
                 tick: TICKS_PER_BEAT / 4, // the off-sixteenth
@@ -1375,6 +1476,7 @@ mod tests {
                 channel: 0,
                     probability: 100,
                     condition: rackforge_performance_api::TrigCondition::Always,
+                    locks: Vec::new(),
             },
             rackforge_performance_api::PatternNoteSpec {
                 tick: TICKS_PER_BEAT / 2, // the next pair's downbeat
@@ -1384,6 +1486,7 @@ mod tests {
                 channel: 0,
                     probability: 100,
                     condition: rackforge_performance_api::TrigCondition::Always,
+                    locks: Vec::new(),
             },
         ];
         document.swing_percent = 66;
@@ -1466,6 +1569,7 @@ mod tests {
                 channel: 0,
                     probability: 100,
                     condition: rackforge_performance_api::TrigCondition::Always,
+                    locks: Vec::new(),
             }],
             view: Default::default(),
             swing_percent: 50,
@@ -1531,6 +1635,7 @@ mod tests {
                 channel: 0,
                     probability: 100,
                     condition: rackforge_performance_api::TrigCondition::Always,
+                    locks: Vec::new(),
             }],
             view: Default::default(),
             swing_percent: 50,
@@ -1563,6 +1668,7 @@ mod tests {
                     channel: 0,
                     probability: 100,
                     condition: rackforge_performance_api::TrigCondition::Always,
+                    locks: Vec::new(),
                 })
                 .collect(),
             view: Default::default(),
@@ -1609,6 +1715,7 @@ mod tests {
                     channel: 0,
                     probability: 100,
                     condition: rackforge_performance_api::TrigCondition::Always,
+                    locks: Vec::new(),
                 })
                 .collect(),
             view: Default::default(),
@@ -1629,7 +1736,7 @@ mod tests {
             .expect("queue accepted");
         engine.apply(&SequencerCommand::TransportStart).expect("start");
         let mut out = Vec::new();
-        engine.render_block(4_096, &mut out);
+        engine.render_block(4_096, &mut out, &mut Vec::new());
         // At bar one beat zero the pattern begins on frame 0.
         assert_eq!(out[0].data, [0x90, 36, 100]);
         assert_eq!(out[0].frame, 0);
@@ -1640,7 +1747,7 @@ mod tests {
         // stays armed.
         engine.apply(&SequencerCommand::TransportStop).expect("stop");
         out.clear();
-        engine.render_block(4_096, &mut out);
+        engine.render_block(4_096, &mut out, &mut Vec::new());
         assert!(out.iter().all(|event| event.data[0] == 0x80));
         assert!(!out.is_empty(), "the sounding note was left ringing");
         assert!(engine.status().lanes[0].playing, "stop must not clear the lane");
@@ -1648,7 +1755,7 @@ mod tests {
         // Panic instead clears everything.
         engine.apply(&SequencerCommand::TransportPanic).expect("panic");
         out.clear();
-        engine.render_block(4_096, &mut out);
+        engine.render_block(4_096, &mut out, &mut Vec::new());
         assert!(!engine.status().lanes[0].playing);
         assert_eq!(engine.status().lanes[0].pattern_name, None);
     }
@@ -1758,7 +1865,7 @@ mod tests {
             .expect("queue accepted");
         engine.apply(&SequencerCommand::TransportStart).expect("start");
         let mut out = Vec::new();
-        engine.render_block(16_384, &mut out);
+        engine.render_block(16_384, &mut out, &mut Vec::new());
         assert!(out.iter().any(|event| event.data[0] == 0x90));
 
         // Stop the lane; while the boundary is pending the status says so.
@@ -1772,7 +1879,7 @@ mod tests {
         // Run past the bar: the lane is silent but still remembers.
         for _ in 0..16 {
             out.clear();
-            engine.render_block(16_384, &mut out);
+            engine.render_block(16_384, &mut out, &mut Vec::new());
         }
         let status = engine.status();
         assert!(!status.lanes[0].playing);
@@ -1790,7 +1897,7 @@ mod tests {
         let mut sounded = false;
         for _ in 0..16 {
             out.clear();
-            engine.render_block(16_384, &mut out);
+            engine.render_block(16_384, &mut out, &mut Vec::new());
             sounded |= out.iter().any(|event| event.data[0] == 0x90);
         }
         assert!(sounded, "the relaunched lane never played");
@@ -1806,7 +1913,7 @@ mod tests {
         );
         engine.apply(&SequencerCommand::TransportPanic).expect("panic");
         out.clear();
-        engine.render_block(16_384, &mut out);
+        engine.render_block(16_384, &mut out, &mut Vec::new());
         assert!(
             engine
                 .apply(&SequencerCommand::LaunchLane {
@@ -1830,7 +1937,7 @@ mod tests {
             .expect("queue accepted");
         engine.apply(&SequencerCommand::TransportStart).expect("start");
         let mut out = Vec::new();
-        engine.render_block(16_384, &mut out);
+        engine.render_block(16_384, &mut out, &mut Vec::new());
         assert!(!out.is_empty());
         // Lane 2 emits on wire channel 2 — ons and offs alike — which a Rack
         // Slot filters as musician-facing channel 3.

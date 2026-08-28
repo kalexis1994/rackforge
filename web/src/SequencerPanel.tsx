@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   dispatchPerformanceEdit,
+  requestPluginParameters,
   sendSequencerCommand,
   subscribeSequencerStatus,
 } from "./gateway";
@@ -42,13 +43,21 @@ import {
   melodicStepNote,
   noteName,
   setMelodicStep,
+  setStepLock,
+  clearStepLock,
+  stepLock,
   stepCount,
   tapTempo,
   toggleStep,
   transposeMelodicStep,
   type SequencerStatus,
 } from "./sequencer";
-import type { PatternDefinition, PerformanceSnapshot } from "./types";
+import type {
+  PatternDefinition,
+  PerformanceSnapshot,
+  PluginParameterDescriptor,
+  SessionSnapshot,
+} from "./types";
 
 const OPEN_TABS_KEY = "rackforge.sequencer-tabs.v1";
 
@@ -73,9 +82,11 @@ function useSequencerStatus(): SequencerStatus | null {
 export function SequencerStrip({
   performance,
   surface,
+  session,
 }: {
   performance: PerformanceSnapshot;
   surface: "perform" | "configure";
+  session?: SessionSnapshot | null;
 }) {
   const status = useSequencerStatus();
   const [open, setOpen] = useState(false);
@@ -170,7 +181,13 @@ export function SequencerStrip({
         </button>
       </div>
       {surface === "perform" ? <LanePadDeck status={status} /> : null}
-      {open ? <SequencerDeck performance={performance} status={status} /> : null}
+      {open ? (
+        <SequencerDeck
+          performance={performance}
+          status={status}
+          activeInstanceId={session?.active_instance_id ?? null}
+        />
+      ) : null}
     </section>
   );
 }
@@ -300,9 +317,11 @@ function persistTabs(tabs: SequencerTab[]) {
 function SequencerDeck({
   performance,
   status,
+  activeInstanceId,
 }: {
   performance: PerformanceSnapshot;
   status: SequencerStatus | null;
+  activeInstanceId: string | null;
 }) {
   const patterns = performance.library.patterns ?? [];
   const beatsPerBar = status?.beats_per_bar ?? 4;
@@ -421,6 +440,7 @@ function SequencerDeck({
           status={status}
           busy={busy}
           setBusy={setBusy}
+          activeInstanceId={activeInstanceId}
           onChange={(update) => updateTab(active.lane, update)}
           onClose={() => closeTab(active.lane)}
         />
@@ -498,6 +518,7 @@ function SequencerTabEditor({
   revision,
   beatsPerBar,
   status,
+  activeInstanceId,
   busy,
   setBusy,
   onChange,
@@ -508,6 +529,7 @@ function SequencerTabEditor({
   revision: string;
   beatsPerBar: number;
   status: SequencerStatus | null;
+  activeInstanceId: string | null;
   busy: boolean;
   setBusy: (value: boolean) => void;
   onChange: (update: (tab: SequencerTab) => SequencerTab) => void;
@@ -732,7 +754,7 @@ function SequencerTabEditor({
         </div>
       </header>
       {draft.view === "melodic" ? (
-        <MelodicLane pattern={draft} onEdit={edit} />
+        <MelodicLane pattern={draft} onEdit={edit} activeInstanceId={activeInstanceId} />
       ) : (
         <DrumGrid pattern={draft} onEdit={edit} />
       )}
@@ -879,9 +901,11 @@ const DEFAULT_MELODIC_KEY = 48; // C2, where basses live
 function MelodicLane({
   pattern,
   onEdit,
+  activeInstanceId,
 }: {
   pattern: PatternDefinition;
   onEdit: (next: PatternDefinition) => void;
+  activeInstanceId: string | null;
 }) {
   const steps = stepCount(pattern);
   const stepsPerBeat = TICKS_PER_BEAT / STEP_TICKS;
@@ -889,6 +913,56 @@ function MelodicLane({
   const lastKey = useRef(DEFAULT_MELODIC_KEY);
   const note = melodicStepNote(pattern, selected);
   if (note) lastKey.current = note.key;
+
+  // The frozen-knob picker reads the active instrument's own schema, the
+  // way the rest of the machine names parameters.
+  const [lockParams, setLockParams] = useState<PluginParameterDescriptor[]>([]);
+  useEffect(() => {
+    let alive = true;
+    if (!activeInstanceId) {
+      setLockParams([]);
+      return;
+    }
+    requestPluginParameters(activeInstanceId)
+      .then((snapshot) => {
+        if (!alive) return;
+        setLockParams(
+          snapshot.schema.parameters.filter(
+            (parameter) => parameter.flags.automatable && !parameter.flags.read_only,
+          ),
+        );
+      })
+      .catch(() => alive && setLockParams([]));
+    return () => {
+      alive = false;
+    };
+  }, [activeInstanceId]);
+
+  const lock = stepLock(pattern, selected);
+  const lockDescriptor = lock
+    ? lockParams.find((parameter) => parameter.index === lock.parameter)
+    : undefined;
+  const lockRange = (descriptor: PluginParameterDescriptor | undefined) => {
+    const kind = descriptor?.kind;
+    if (kind && (kind.type === "float" || kind.type === "integer")) {
+      return { min: kind.minimum, max: kind.maximum, def: kind.default };
+    }
+    return { min: 0, max: 1, def: 0.5 };
+  };
+  const nudgeLock = (direction: 1 | -1) => {
+    if (!lock) return;
+    const { min, max } = lockRange(lockDescriptor);
+    const step = (max - min) / 20;
+    const next = Math.min(max, Math.max(min, lock.value + direction * step));
+    onEdit(setStepLock(pattern, selected, null, lock.parameter, next));
+  };
+  const lockPercent = lock
+    ? Math.round(
+        ((lock.value - lockRange(lockDescriptor).min) /
+          Math.max(1e-9, lockRange(lockDescriptor).max - lockRange(lockDescriptor).min)) *
+          100,
+      )
+    : 0;
 
   const press = (step: number) => {
     setSelected(step);
@@ -996,6 +1070,48 @@ function MelodicLane({
           >
             {`ROOT ${noteName(pattern.root_key ?? 48)}`}
           </button>
+        </div>
+        <div className="seq-keys melodic-lock-row" role="group" aria-label="Parameter lock">
+          <span className="seq-inline-label">LOCK</span>
+          <select
+            className="seq-load-select"
+            disabled={!note || lockParams.length === 0}
+            value={lock?.parameter ?? ""}
+            aria-label="Locked parameter"
+            title={
+              lockParams.length === 0
+                ? "The active instrument publishes no automatable parameters"
+                : "Freeze a knob into this step"
+            }
+            onChange={(event) => {
+              if (event.target.value === "") {
+                onEdit(clearStepLock(pattern, selected));
+                return;
+              }
+              const parameter = Number(event.target.value);
+              const descriptor = lockParams.find((entry) => entry.index === parameter);
+              const { def } = lockRange(descriptor);
+              onEdit(setStepLock(pattern, selected, null, parameter, lock?.value ?? def));
+            }}
+          >
+            <option value="">—</option>
+            {lockParams.map((parameter) => (
+              <option key={parameter.index} value={parameter.index}>
+                {parameter.name}
+              </option>
+            ))}
+          </select>
+          {lock ? (
+            <>
+              <button className="seq-key seq-key-narrow" onClick={() => nudgeLock(-1)}>
+                −
+              </button>
+              <span className="seq-lcd seq-lcd-swing">{`${lockPercent}%`}</span>
+              <button className="seq-key seq-key-narrow" onClick={() => nudgeLock(1)}>
+                +
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
     </div>

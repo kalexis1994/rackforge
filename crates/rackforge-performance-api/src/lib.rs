@@ -1034,10 +1034,27 @@ fn condition_is_default(value: &TrigCondition) -> bool {
     *value == TrigCondition::Always
 }
 
+/// Parameter locks a step may carry: the Elektron gesture of a knob frozen
+/// into a step. The value is in the plugin's own parameter domain — the
+/// editor writes what the schema says, the engine passes it through.
+pub const MAX_NOTE_LOCKS: usize = 4;
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterLockSpec {
+    pub parameter: u32,
+    pub value: f64,
+}
+
+fn locks_are_empty(locks: &[ParameterLockSpec]) -> bool {
+    locks.is_empty()
+}
+
 /// One note of a sequencer pattern. Positions and durations are in integer
 /// ticks from the pattern start, so a saved pattern carries no float in it
-/// for two platforms to disagree about.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+/// for two platforms to disagree about (parameter locks, which live in a
+/// plugin's own value domain, are the deliberate exception).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatternNoteSpec {
     pub tick: u32,
@@ -1051,6 +1068,9 @@ pub struct PatternNoteSpec {
     pub probability: u8,
     #[serde(default, skip_serializing_if = "condition_is_default")]
     pub condition: TrigCondition,
+    /// Knobs frozen into this step, fired with its note-on.
+    #[serde(default, skip_serializing_if = "locks_are_empty")]
+    pub locks: Vec<ParameterLockSpec>,
 }
 
 /// A sequencer pattern: a performance-library entity like a Rack or a Song,
@@ -1077,7 +1097,7 @@ fn default_swing() -> u8 {
     PATTERN_SWING_STRAIGHT
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatternDefinition {
     pub id: PatternId,
@@ -1121,6 +1141,8 @@ impl PatternDefinition {
                 || note.channel > 15
                 || note.probability == 0
                 || note.probability > 100
+                || note.locks.len() > MAX_NOTE_LOCKS
+                || note.locks.iter().any(|lock| !lock.value.is_finite())
             {
                 return Err(PerformanceError::InvalidPatternNote);
             }
@@ -1130,7 +1152,7 @@ impl PatternDefinition {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PerformanceLibrary {
     pub schema_version: u32,
@@ -1144,7 +1166,7 @@ pub struct PerformanceLibrary {
     pub patterns: Vec<PatternDefinition>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PerformanceEdit {
     PutRack { rack: RackDefinition },
@@ -1572,7 +1594,7 @@ impl LivePerformanceState {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PerformanceSnapshot {
     pub schema_version: u32,
@@ -1942,6 +1964,7 @@ mod tests {
                     channel: 0,
                     probability: 100,
                     condition: TrigCondition::Always,
+                    locks: Vec::new(),
                 }],
                 view: PatternView::default(),
                 swing_percent: PATTERN_SWING_STRAIGHT,

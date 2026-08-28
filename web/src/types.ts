@@ -383,6 +383,8 @@ export interface PatternDefinition {
   name: string;
   length_ticks: number;
   notes: PatternNoteSpec[];
+  /** Editor lens hint; the engine never reads it. */
+  view?: "drum" | "melodic";
 }
 
 export interface PerformanceLibrary {

@@ -30,6 +30,12 @@
 //! **Determinism.** The same documents, launches and blocks produce the same
 //! MIDI, bit for bit. There is no randomness and no wall clock here; time
 //! only enters as the beat positions the transport already fixed.
+//!
+//! **A lane speaks on its own MIDI channel** — lane N emits on wire channel
+//! N, which musicians read as channel N+1. That single rule is what lets a
+//! Rack cable lanes to Slots with the same channel filters it already uses
+//! for keyboards, instead of growing a second routing system. The per-note
+//! `channel` field in the document is reserved; emission is the lane's.
 
 use crate::transport::{TimeSignature, Transport};
 use rackforge_control_api::{
@@ -71,7 +77,6 @@ struct CompiledNote {
     duration_beats: f64,
     key: u8,
     velocity: u8,
-    channel: u8,
 }
 
 impl CompiledPattern {
@@ -100,7 +105,6 @@ impl CompiledPattern {
                 duration_beats: (end_tick - note.tick) as f64 / TICKS_PER_BEAT as f64,
                 key: note.key,
                 velocity: note.velocity,
-                channel: note.channel,
             });
         }
         notes.sort_by(|a, b| a.start_beat.total_cmp(&b.start_beat));
@@ -154,6 +158,8 @@ struct StagedEvent {
 /// One lane: one pattern at a time, one MIDI stream out. Routing the stream
 /// to an instrument is the integration's business; the lane speaks MIDI only.
 pub struct SequencerLane {
+    /// The wire channel every event this lane emits is stamped with.
+    channel: u8,
     playing: Option<PlayingPattern>,
     pending: Option<PendingLaunch>,
     /// The beat past which no new notes start, when a stop is queued.
@@ -173,7 +179,13 @@ impl Default for SequencerLane {
 
 impl SequencerLane {
     pub fn new() -> Self {
+        Self::with_channel(0)
+    }
+
+    /// A lane bound to one wire channel (`0..16`).
+    pub fn with_channel(channel: u8) -> Self {
         Self {
+            channel: channel & 0x0f,
             playing: None,
             pending: None,
             stop_at: None,
@@ -277,6 +289,7 @@ impl SequencerLane {
         if let Some(playing) = &self.playing {
             emit_pattern_notes(
                 playing,
+                self.channel,
                 self.muted,
                 &mut self.held,
                 &mut self.dropped_notes,
@@ -340,6 +353,7 @@ fn frame_of(beat: f64, start_beat: f64, frames_per_beat: f64, frames: u32) -> u3
 #[allow(clippy::too_many_arguments)]
 fn emit_pattern_notes(
     playing: &PlayingPattern,
+    channel: u8,
     muted: bool,
     held: &mut Vec<HeldNote>,
     dropped_notes: &mut u64,
@@ -384,11 +398,11 @@ fn emit_pattern_notes(
             staged.push(StagedEvent {
                 frame: frame_of(at, block_start, frames_per_beat, frames),
                 on: true,
-                data: note_on(note.key, note.velocity, note.channel),
+                data: note_on(note.key, note.velocity, channel),
             });
             held.push(HeldNote {
                 key: note.key,
-                channel: note.channel,
+                channel,
                 off_beat: at + note.duration_beats,
             });
         }
@@ -443,7 +457,9 @@ impl SequencerEngine {
         Some(Self {
             sample_rate,
             transport,
-            lanes: (0..MAX_SEQUENCER_LANES).map(|_| SequencerLane::new()).collect(),
+            lanes: (0..MAX_SEQUENCER_LANES)
+                .map(|lane| SequencerLane::with_channel(lane as u8))
+                .collect(),
             lane_names: vec![None; MAX_SEQUENCER_LANES],
             flush_pending: false,
             panic_pending: false,
@@ -897,6 +913,26 @@ mod tests {
         engine.render_block(4_096, &mut out);
         assert!(!engine.status().lanes[0].playing);
         assert_eq!(engine.status().lanes[0].pattern_name, None);
+    }
+
+    #[test]
+    fn each_lane_speaks_on_its_own_channel() {
+        let mut engine = SequencerEngine::new(48_000.0).expect("engine");
+        engine
+            .apply(&SequencerCommand::QueuePattern {
+                lane: 2,
+                pattern: definition(),
+                quantize: SequencerQuantize::Now,
+            })
+            .expect("queue accepted");
+        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        let mut out = Vec::new();
+        engine.render_block(16_384, &mut out);
+        assert!(!out.is_empty());
+        // Lane 2 emits on wire channel 2 — ons and offs alike — which a Rack
+        // Slot filters as musician-facing channel 3.
+        assert!(out.iter().all(|event| event.data[0] & 0x0f == 2));
+        assert!(out.iter().any(|event| event.data[0] & 0xf0 == 0x80));
     }
 
     #[test]

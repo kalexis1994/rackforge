@@ -42,9 +42,9 @@ use rackforge_control_api::{
     SequencerCommand, SequencerLaneStatus, SequencerQuantize, SequencerScale, SequencerStatusV1,
 };
 use rackforge_performance_api::{
-    MAX_NOTE_LOCKS, MAX_PART_PATTERN_BINDINGS, MAX_PATTERN_NOTES, MAX_PATTERN_TICKS,
-    PATTERN_SWING_MAX, PATTERN_SWING_STRAIGHT, PATTERN_TICKS_PER_BEAT, PatternDefinition,
-    SongPart, TrigCondition,
+    FollowAction, MAX_NOTE_LOCKS, MAX_PART_PATTERN_BINDINGS, MAX_PATTERN_NOTES,
+    MAX_PATTERN_TICKS, PATTERN_SWING_MAX, PATTERN_SWING_STRAIGHT, PATTERN_TICKS_PER_BEAT,
+    PatternDefinition, SongPart, TrigCondition,
 };
 use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use std::sync::Arc;
@@ -69,6 +69,8 @@ const OFF_HEADROOM: usize = MAX_HELD_NOTES;
 pub struct CompiledPattern {
     length_beats: f64,
     root_key: u8,
+    follow_after: u8,
+    follow_action: FollowAction,
     /// Sorted by start beat. Durations are clamped to the pattern end at
     /// compile, so a note never owes its off to a loop iteration that might
     /// play a different pattern.
@@ -145,6 +147,8 @@ impl CompiledPattern {
         Ok(Self {
             length_beats: document.length_ticks as f64 / TICKS_PER_BEAT as f64,
             root_key: document.root_key.min(127),
+            follow_after: document.follow_after.min(64),
+            follow_action: document.follow_action,
             notes,
         })
     }
@@ -220,6 +224,8 @@ pub struct SequencerLane {
     /// Whether the most recent conditional trig on this lane fired: what
     /// the pre / not-pre conditions read.
     pre_outcome: bool,
+    /// Follow-action jumps taken since launch: the seed of AnySlot's die.
+    follow_jumps: u64,
     held: Vec<HeldNote>,
     /// Per-block scratch, allocated once here so the render path never does.
     staged: Vec<StagedEvent>,
@@ -252,6 +258,7 @@ impl SequencerLane {
             retrigger_pending: false,
             gate_release_pending: false,
             pre_outcome: false,
+            follow_jumps: 0,
             held: Vec::with_capacity(MAX_HELD_NOTES),
             staged: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             muted: false,
@@ -294,6 +301,34 @@ impl SequencerLane {
 
     fn armed(&self) -> Option<Arc<CompiledPattern>> {
         self.slots[self.active_slot].clone()
+    }
+
+    /// Which slot a follow action lands on. Only loaded slots count; a rack
+    /// with no other loaded slot answers the current one, which re-anchors
+    /// seamlessly on the boundary — a loop by another name.
+    fn follow_target(&self, action: FollowAction) -> Option<usize> {
+        let loaded: Vec<usize> = (0..LANE_SLOTS)
+            .filter(|&slot| self.slots[slot].is_some())
+            .collect();
+        if loaded.is_empty() {
+            return None;
+        }
+        match action {
+            FollowAction::None | FollowAction::Stop => None,
+            FollowAction::NextSlot => (1..=LANE_SLOTS)
+                .map(|step| (self.active_slot + step) % LANE_SLOTS)
+                .find(|&slot| self.slots[slot].is_some()),
+            FollowAction::PreviousSlot => (1..=LANE_SLOTS)
+                .map(|step| (self.active_slot + LANE_SLOTS - (step % LANE_SLOTS)) % LANE_SLOTS)
+                .find(|&slot| self.slots[slot].is_some()),
+            FollowAction::FirstSlot => loaded.first().copied(),
+            FollowAction::AnySlot => {
+                // The same seeded die as the trig grammar: the jump sequence
+                // is a property of the pattern, not of the night.
+                let roll = trig_roll(self.follow_jumps, 0xF0110, self.active_slot as u8, self.channel);
+                Some(loaded[usize::from(roll) % loaded.len()])
+            }
+        }
     }
 
     /// Re-arms the pattern the lane already holds — the PERFORM pad's press.
@@ -397,6 +432,7 @@ impl SequencerLane {
         self.retrigger_pending = false;
         self.gate_release_pending = false;
         self.pre_outcome = false;
+        self.follow_jumps = 0;
     }
 
     /// Renders one block: pays note-offs falling inside it, executes a
@@ -450,6 +486,38 @@ impl SequencerLane {
                 });
             } else {
                 self.retrigger_pending = false;
+            }
+        }
+
+        // The playing pattern's will: after its agreed cycles it names its
+        // successor, and the jump lands on the exact cycle boundary through
+        // the same pending machinery a queued launch uses. Chains compose:
+        // the successor carries its own will.
+        if self.pending.is_none()
+            && let Some(playing) = &self.playing
+            && playing.pattern.follow_after > 0
+            && playing.pattern.follow_action != FollowAction::None
+        {
+            let boundary = playing.anchor_beat
+                + f64::from(playing.pattern.follow_after) * playing.pattern.length_beats;
+            if boundary < end_beat {
+                match playing.pattern.follow_action {
+                    FollowAction::Stop => {
+                        self.stop_at = Some(boundary.max(start_beat));
+                    }
+                    action => {
+                        if let Some(target) = self.follow_target(action) {
+                            self.follow_jumps = self.follow_jumps.wrapping_add(1);
+                            self.active_slot = target;
+                            if let Some(pattern) = self.slots[target].clone() {
+                                self.pending = Some(PendingLaunch {
+                                    pattern,
+                                    at_beat: boundary,
+                                });
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1090,6 +1158,8 @@ mod tests {
             view: Default::default(),
             swing_percent: 50,
             root_key: 48,
+            follow_after: 0,
+            follow_action: rackforge_performance_api::FollowAction::None,
         };
         CompiledPattern::compile(&document).expect("valid pattern")
     }
@@ -1135,6 +1205,8 @@ mod tests {
             view: Default::default(),
             swing_percent: 50,
             root_key: 48,
+            follow_after: 0,
+            follow_action: rackforge_performance_api::FollowAction::None,
         };
         let mut zero_length = base.clone();
         zero_length.length_ticks = 0;
@@ -1152,6 +1224,78 @@ mod tests {
         still.notes[0].duration_ticks = 0;
         assert_eq!(CompiledPattern::compile(&still).err(), Some(PatternError::ZeroDuration));
         assert!(CompiledPattern::compile(&base).is_ok());
+    }
+
+    #[test]
+    fn follow_actions_chain_slots_on_the_exact_boundary() {
+        let mut engine = SequencerEngine::new(48_000.0).expect("engine");
+        // A: one C2 per cycle, hands over to the next slot after 2 cycles.
+        let mut a = definition();
+        a.length_ticks = TICKS_PER_BEAT;
+        a.notes = vec![rackforge_performance_api::PatternNoteSpec {
+            tick: 0,
+            duration_ticks: TICKS_PER_BEAT / 4,
+            key: 36,
+            velocity: 100,
+            channel: 0,
+            probability: 100,
+            condition: TrigCondition::Always,
+            locks: Vec::new(),
+        }];
+        a.follow_after = 2;
+        a.follow_action = FollowAction::NextSlot;
+        // B: one D2 per cycle, loops forever.
+        let mut b = a.clone();
+        b.name = "four-b".into();
+        b.notes[0].key = 38;
+        b.follow_after = 0;
+        b.follow_action = FollowAction::None;
+
+        engine
+            .apply(&SequencerCommand::QueuePattern {
+                lane: 0,
+                pattern: a,
+                quantize: SequencerQuantize::Now,
+            })
+            .expect("queue A");
+        engine
+            .apply(&SequencerCommand::LoadSlot {
+                lane: 0,
+                slot: 1,
+                pattern: b,
+            })
+            .expect("load B");
+        engine.apply(&SequencerCommand::TransportStart).expect("start");
+
+        // Half-beat blocks (the transport's contract caps block size):
+        // cycles 0 and 1 are A, everything after is B, each note on the
+        // first frame of its cycle's first block.
+        let mut ons = Vec::new();
+        let mut out = Vec::new();
+        let mut params = Vec::new();
+        for block in 0..10 {
+            out.clear();
+            params.clear();
+            engine.render_block(12_000, &mut out, &mut params);
+            for event in &out {
+                if event.data[0] == 0x90 {
+                    ons.push((block, event.data[1], event.frame));
+                }
+            }
+        }
+        assert_eq!(
+            ons,
+            vec![
+                (0, 36, 0),
+                (2, 36, 0),
+                (4, 38, 0),
+                (6, 38, 0),
+                (8, 38, 0),
+            ],
+            "the handover lands exactly on the cycle boundary"
+        );
+        assert_eq!(engine.status().lanes[0].active_slot, 1);
+        assert_eq!(engine.status().lanes[0].pattern_name.as_deref(), Some("four-b"));
     }
 
     #[test]
@@ -1574,6 +1718,8 @@ mod tests {
             view: Default::default(),
             swing_percent: 50,
             root_key: 48,
+            follow_after: 0,
+            follow_action: rackforge_performance_api::FollowAction::None,
         };
         lane.queue(CompiledPattern::compile(&document).expect("valid"), 1.0);
         let events = render(&mut lane, 1, 24_000, 1.0);
@@ -1640,6 +1786,8 @@ mod tests {
             view: Default::default(),
             swing_percent: 50,
             root_key: 48,
+            follow_after: 0,
+            follow_action: rackforge_performance_api::FollowAction::None,
         };
         let mut lane = SequencerLane::new();
         lane.queue(CompiledPattern::compile(&document).expect("valid"), 0.0);
@@ -1674,6 +1822,8 @@ mod tests {
             view: Default::default(),
             swing_percent: 50,
             root_key: 48,
+            follow_after: 0,
+            follow_action: rackforge_performance_api::FollowAction::None,
         };
         let mut lane = SequencerLane::new();
         lane.queue(CompiledPattern::compile(&document).expect("valid"), 0.0);
@@ -1721,6 +1871,8 @@ mod tests {
             view: Default::default(),
             swing_percent: 50,
             root_key: 48,
+            follow_after: 0,
+            follow_action: rackforge_performance_api::FollowAction::None,
         }
     }
 

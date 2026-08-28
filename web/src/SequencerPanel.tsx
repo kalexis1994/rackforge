@@ -717,6 +717,44 @@ function SequencerTabEditor({
             +
           </button>
         </div>
+        <div className="seq-keys seq-chain-row" role="group" aria-label="Follow action">
+          <span className="seq-inline-label">CHAIN</span>
+          <select
+            className="seq-load-select"
+            value={draft.follow_action ?? "none"}
+            aria-label="What follows when this pattern's run ends"
+            onChange={(event) => {
+              const action = event.target.value as NonNullable<PatternDefinition["follow_action"]>;
+              edit({
+                ...draft,
+                follow_action: action,
+                follow_after:
+                  action === "none" ? 0 : draft.follow_after && draft.follow_after > 0 ? draft.follow_after : 2,
+              });
+            }}
+          >
+            <option value="none">LOOP</option>
+            <option value="next_slot">NEXT</option>
+            <option value="previous_slot">PREV</option>
+            <option value="first_slot">FIRST</option>
+            <option value="any_slot">ANY</option>
+            <option value="stop">STOP</option>
+          </select>
+          {(draft.follow_action ?? "none") !== "none" ? (
+            <select
+              className="seq-load-select"
+              value={draft.follow_after ?? 2}
+              aria-label="Cycles before the follow action"
+              onChange={(event) => edit({ ...draft, follow_after: Number(event.target.value) })}
+            >
+              {[1, 2, 4, 8, 16].map((cycles) => (
+                <option key={cycles} value={cycles}>
+                  {`×${cycles}`}
+                </option>
+              ))}
+            </select>
+          ) : null}
+        </div>
         <select
           className="seq-load-select"
           value=""

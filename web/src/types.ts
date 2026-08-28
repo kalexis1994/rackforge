@@ -407,6 +407,9 @@ export interface PatternDefinition {
   swing_percent?: number;
   /** The key the phrase was written in — what key-follow transposes from. */
   root_key?: number;
+  /** Full cycles to play before the follow action fires; 0 disables it. */
+  follow_after?: number;
+  follow_action?: "none" | "next_slot" | "previous_slot" | "first_slot" | "any_slot" | "stop";
 }
 
 export interface PerformanceLibrary {

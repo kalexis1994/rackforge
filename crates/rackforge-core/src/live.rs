@@ -34,7 +34,8 @@ use rackforge_audio_api::{
 use rackforge_control_api::{CONTROL_SOCKET_NAME, PluginParameterValue};
 use rackforge_midi_api::{
     CompiledMidiRoute, DEFAULT_INPUT_BUS_ID, IngressMidiEvent, MIDI_ROUTING_SCHEMA_VERSION,
-    MidiInputBusId, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget, MidiRouteTransform,
+    MidiInputBusId, MidiPacket, MidiRoute, MidiRouteId, MidiRouteMatch, MidiRouteTarget,
+    MidiRouteTransform,
     MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry, MidiSourceSelector,
     MidiTargetId, ParameterLink, ParameterLinkPassThrough, PluginChannelModel,
 };
@@ -1769,6 +1770,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     let mut mix_output = vec![0.0_f32; period_frames * channels];
     let mut device_output = vec![0_i32; period_frames * channels];
     let mut events = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
+    let mut sequencer_events: Vec<MidiEventV1> = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
     let mut parameter_events = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
     let mut meter_frames = 0_usize;
     let mut meter_peak = 0_f32;
@@ -2701,9 +2703,53 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         }
 
         // The sequencer advances whether or not anything is listening: the
-        // transport is the machine's clock, not the instrument's. Events are
-        // appended with their frame offsets and re-sorted inside.
-        sequencer.render_block(period_frames as u32, &mut events);
+        // transport is the machine's clock, not the instrument's.
+        //
+        // Each lane speaks on its own wire channel, so in Rack mode its
+        // events enter exactly where the machine's own keyboard enters — the
+        // virtual source, through every Slot's stage router — and the Rack's
+        // existing channel filters, key ranges, transposes and velocity
+        // curves decide who hears which lane. Frame offsets ride the packet
+        // the whole way: quantised launches stay sample-accurate per Slot.
+        sequencer_events.clear();
+        sequencer.render_block(period_frames as u32, &mut sequencer_events);
+        match render_mode {
+            AudioRenderMode::Silent => {}
+            AudioRenderMode::Plugin => {
+                for event in &sequencer_events {
+                    if events.len() < MAX_EVENTS_PER_BLOCK {
+                        events.push(*event);
+                    } else {
+                        dropped_events += 1;
+                    }
+                }
+            }
+            AudioRenderMode::Rack => {
+                for event in &sequencer_events {
+                    let ingress = IngressMidiEvent {
+                        source: virtual_midi_source,
+                        packet: MidiPacket {
+                            frame: event.frame,
+                            length: event.length,
+                            data: event.data,
+                        },
+                    };
+                    for voice in &mut rack_voices {
+                        if let Some(routed) = route_rack_event_through_stages(
+                            ingress,
+                            &voice.midi_stages,
+                            virtual_play_route,
+                        ) {
+                            if voice.events.len() < MAX_EVENTS_PER_BLOCK {
+                                voice.events.push(routed);
+                            } else {
+                                dropped_events += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         mix_output.fill(0.0);
         match render_mode {

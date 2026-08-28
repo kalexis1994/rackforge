@@ -1689,9 +1689,14 @@ impl BrowserHost {
         // transport is the machine's clock, not the instrument's.
         let mut sequenced = std::mem::take(&mut self.sequencer_events);
         sequenced.clear();
-        self.sequencer.render_block(frames, &mut sequenced);
+        let mut sequenced_params = Vec::new();
+        self.sequencer
+            .render_block(frames, &mut sequenced, &mut sequenced_params);
         for event in &sequenced {
             self.audio.push_midi(event.frame, event.data, event.length);
+        }
+        for event in sequenced_params {
+            self.audio.push_parameter(event);
         }
         self.sequencer_events = sequenced;
         let active = self.store.state().active_instance_id.clone();

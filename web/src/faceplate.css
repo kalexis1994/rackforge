@@ -5332,3 +5332,10 @@
 .seq-slot-key.sounding {
   box-shadow: var(--fp-well), inset 0 -3px 0 var(--red);
 }
+
+/* The lock row sits under the pitch cluster; its select carries the
+   instrument's own parameter names. */
+.melodic-lock-row {
+  gap: 6px;
+  align-items: center;
+}

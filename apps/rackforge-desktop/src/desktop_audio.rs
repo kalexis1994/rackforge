@@ -1711,7 +1711,12 @@ impl AudioProcessor {
         // transport is the machine's clock, not the instrument's. Its output
         // is appended after live input and the whole block is re-sorted by
         // frame inside render_block, offs before ons preserved.
-        self.sequencer.render_block(frames as u32, &mut self.events);
+        {
+            let mut sequenced_params = std::mem::take(&mut self.parameter_events);
+            self.sequencer
+                .render_block(frames as u32, &mut self.events, &mut sequenced_params);
+            self.parameter_events = sequenced_params;
+        }
         let samples = frames * PLUGIN_OUTPUT_CHANNELS;
         self.output[..samples].fill(0.0);
         if self.stopped {

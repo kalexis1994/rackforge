@@ -326,6 +326,55 @@ export function cycleCondition(
   });
 }
 
+/** The lock a step carries, if any. One editable lock per step in this
+ * surface; the engine honours up to four. */
+export function stepLock(
+  pattern: PatternDefinition,
+  step: number,
+  key: number | null = null,
+) {
+  const tick = step * STEP_TICKS;
+  const note = pattern.notes.find(
+    (candidate) => candidate.tick === tick && (key === null || candidate.key === key),
+  );
+  return note?.locks?.[0];
+}
+
+/** Freezes one knob into a step, replacing the step's existing lock. */
+export function setStepLock(
+  pattern: PatternDefinition,
+  step: number,
+  key: number | null,
+  parameter: number,
+  value: number,
+): PatternDefinition {
+  const tick = step * STEP_TICKS;
+  return {
+    ...pattern,
+    notes: pattern.notes.map((note) =>
+      note.tick === tick && (key === null || note.key === key)
+        ? { ...note, locks: [{ parameter, value }] }
+        : note,
+    ),
+  };
+}
+
+export function clearStepLock(
+  pattern: PatternDefinition,
+  step: number,
+  key: number | null = null,
+): PatternDefinition {
+  const tick = step * STEP_TICKS;
+  return {
+    ...pattern,
+    notes: pattern.notes.map((note) =>
+      note.tick === tick && (key === null || note.key === key)
+        ? { ...note, locks: [] }
+        : note,
+    ),
+  };
+}
+
 /**
  * Folds tap timestamps (seconds) into a tempo, mirroring the host's
  * `tap_tempo` exactly: the last five taps, and a long gap or a sudden

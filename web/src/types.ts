@@ -376,6 +376,11 @@ export type TrigCondition =
   | "pre"
   | "not_pre";
 
+export interface ParameterLockSpec {
+  parameter: number;
+  value: number;
+}
+
 export interface PatternNoteSpec {
   tick: number;
   duration_ticks: number;
@@ -385,6 +390,8 @@ export interface PatternNoteSpec {
   /** Chance this step fires, 1..=100; rolled deterministically per pass. */
   probability?: number;
   condition?: TrigCondition;
+  /** Knobs frozen into this step, fired with its note-on. */
+  locks?: ParameterLockSpec[];
 }
 
 /** A sequencer pattern: a performance-library entity like a Rack or a Song,

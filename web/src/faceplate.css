@@ -4581,3 +4581,91 @@
   max-height: 140px;
   overflow-y: auto;
 }
+
+/* -------------------------------------------- the slot instrument popover ---
+   The floating instrument editor inside the node screen was still smoked
+   cyan glass. Chrome becomes a plate — silkscreen header, inset preset well,
+   keys for Detach and close — while the surface inside stays dark: that part
+   belongs to the plugin's own screen. */
+
+.rack-slot-popover {
+  color: var(--ink) !important;
+  background: var(--paper) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), 0 18px 48px rgba(0, 0, 0, 0.45) !important;
+}
+
+.rack-slot-popover-tail {
+  background: var(--paper) !important;
+  border-color: var(--line) !important;
+}
+
+.rack-slot-popover-header {
+  border-bottom: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) var(--fp-radius) 0 0 !important;
+  background: var(--fp-panel) !important;
+}
+
+.rack-slot-popover-header .card-kicker {
+  color: var(--fp-rail-label) !important;
+  letter-spacing: var(--fp-track);
+}
+
+.rack-slot-popover select {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-well);
+  font-family: var(--display-font) !important;
+  font-size: 11px !important;
+}
+
+.rack-slot-popover button {
+  color: var(--fp-rail-label) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip);
+  font-family: var(--display-font) !important;
+  font-weight: 700 !important;
+  font-size: 10px !important;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.rack-slot-popover button:hover:not(:disabled),
+.rack-slot-popover button:focus-visible {
+  color: var(--ink) !important;
+  border-color: var(--line) !important;
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+}
+
+.rack-slot-popover button:active:not(:disabled) {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well);
+}
+
+.rack-slot-popover button:disabled {
+  opacity: 0.42;
+  box-shadow: none;
+}
+
+.rack-slot-popover-error {
+  color: var(--red) !important;
+  background: color-mix(in srgb, var(--red) 7%, var(--paper)) !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--red) 38%, var(--line)) !important;
+  font: 600 11px/1.45 var(--display-font) !important;
+}
+
+.rack-slot-popover footer {
+  border-top: var(--fp-seam) !important;
+  background: var(--fp-panel) !important;
+  color: var(--fp-rail-label);
+}
+
+.rack-slot-resize-handle::before,
+.rack-slot-resize-handle::after {
+  background: var(--fp-rail-label) !important;
+}

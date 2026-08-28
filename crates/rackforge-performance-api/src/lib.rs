@@ -991,6 +991,49 @@ impl SetlistDefinition {
     }
 }
 
+/// When a step actually fires — the Elektron grammar, evaluated
+/// deterministically so two passes of the same show are the same show.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrigCondition {
+    /// Every pass.
+    #[default]
+    Always,
+    /// Pass `hit` of every `of` — 1:2, 3:4, the cycle conditions.
+    Cycle { hit: u8, of: u8 },
+    /// Only while the FILL key is held.
+    Fill,
+    /// Only while it is not.
+    NotFill,
+    /// Only if the previous conditional trig on this lane fired.
+    Pre,
+    /// Only if it did not.
+    NotPre,
+}
+
+impl TrigCondition {
+    pub fn validate(self) -> Result<(), PerformanceError> {
+        if let Self::Cycle { hit, of } = self
+            && (!(2..=8).contains(&of) || hit == 0 || hit > of)
+        {
+            return Err(PerformanceError::InvalidTrigCondition);
+        }
+        Ok(())
+    }
+}
+
+fn default_probability() -> u8 {
+    100
+}
+
+fn probability_is_default(value: &u8) -> bool {
+    *value == 100
+}
+
+fn condition_is_default(value: &TrigCondition) -> bool {
+    *value == TrigCondition::Always
+}
+
 /// One note of a sequencer pattern. Positions and durations are in integer
 /// ticks from the pattern start, so a saved pattern carries no float in it
 /// for two platforms to disagree about.
@@ -1003,6 +1046,11 @@ pub struct PatternNoteSpec {
     pub velocity: u8,
     #[serde(default)]
     pub channel: u8,
+    /// Chance this step fires, 1..=100. Rolled deterministically per pass.
+    #[serde(default = "default_probability", skip_serializing_if = "probability_is_default")]
+    pub probability: u8,
+    #[serde(default, skip_serializing_if = "condition_is_default")]
+    pub condition: TrigCondition,
 }
 
 /// A sequencer pattern: a performance-library entity like a Rack or a Song,
@@ -1071,9 +1119,12 @@ impl PatternDefinition {
                 || note.velocity == 0
                 || note.velocity > 127
                 || note.channel > 15
+                || note.probability == 0
+                || note.probability > 100
             {
                 return Err(PerformanceError::InvalidPatternNote);
             }
+            note.condition.validate()?;
         }
         Ok(())
     }
@@ -1751,6 +1802,8 @@ pub enum PerformanceError {
     InvalidPatternLane(u8),
     #[error("pattern swing {0} is outside 50..=75")]
     InvalidPatternSwing(u8),
+    #[error("a trig cycle condition is outside hit 1..=of, of 2..=8")]
+    InvalidTrigCondition,
     #[error("{field} count {actual} is outside {minimum}..={maximum}")]
     InvalidCount {
         field: &'static str,
@@ -1887,6 +1940,8 @@ mod tests {
                     key: 36,
                     velocity: 100,
                     channel: 0,
+                    probability: 100,
+                    condition: TrigCondition::Always,
                 }],
                 view: PatternView::default(),
                 swing_percent: PATTERN_SWING_STRAIGHT,

@@ -5290,3 +5290,24 @@
   min-width: 58px;
   justify-content: center;
 }
+
+/* Chance and condition on the steps: a step that may not fire is set in a
+   fainter ink, and a conditional step wears a notch in its corner. */
+
+.seq-cell.on.chance-75 { opacity: 0.8; }
+.seq-cell.on.chance-50 { opacity: 0.62; }
+.seq-cell.on.chance-25 { opacity: 0.45; }
+
+.melodic-step.on.chance { opacity: 0.72; }
+
+.melodic-step.on.conditional::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.85;
+}

@@ -368,12 +368,23 @@ export interface SetlistDefinition {
   entries: SetlistEntry[];
 }
 
+export type TrigCondition =
+  | "always"
+  | { cycle: { hit: number; of: number } }
+  | "fill"
+  | "not_fill"
+  | "pre"
+  | "not_pre";
+
 export interface PatternNoteSpec {
   tick: number;
   duration_ticks: number;
   key: number;
   velocity: number;
   channel: number;
+  /** Chance this step fires, 1..=100; rolled deterministically per pass. */
+  probability?: number;
+  condition?: TrigCondition;
 }
 
 /** A sequencer pattern: a performance-library entity like a Rack or a Song,

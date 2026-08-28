@@ -190,6 +190,12 @@ pub enum SequencerCommand {
         lane: u8,
         muted: bool,
     },
+    /// Holds or releases FILL: the performance switch the fill/not-fill
+    /// trig conditions listen to. Momentary by design — the caller sends
+    /// press and release.
+    SetFill {
+        on: bool,
+    },
     /// Puts a lane in key-follow: its pattern sounds only while a key is
     /// held, transposed so the phrase's root follows the played note —
     /// the SH-101's party trick. `None` returns the lane to looping.
@@ -222,6 +228,9 @@ pub struct SequencerLaneStatus {
 #[serde(deny_unknown_fields)]
 pub struct SequencerStatusV1 {
     pub running: bool,
+    /// The FILL performance switch is held.
+    #[serde(default)]
+    pub fill: bool,
     pub tempo_bpm: f64,
     pub beats_per_bar: u8,
     pub beat_unit: u8,

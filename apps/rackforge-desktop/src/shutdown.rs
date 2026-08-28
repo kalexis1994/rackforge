@@ -6,6 +6,117 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Panels take radius 3 and keys radius 2, the same as the interface. Nothing
+/// in this design is a pill.
+const PANEL_RADIUS: f32 = 3.0;
+const KEY_RADIUS: f32 = 2.0;
+
+/// The faceplate palette, as the interface defines it in `styles.css`. Kept as
+/// literals rather than read from anywhere: this panel runs while the web stack
+/// is being torn down, so it cannot depend on it for its own colours.
+#[derive(Clone, Copy)]
+struct Palette {
+    chassis: Color32,
+    paper: Color32,
+    panel_inset: Color32,
+    line: Color32,
+    ink: Color32,
+    muted: Color32,
+    faint: Color32,
+    acid: Color32,
+    drop: Color32,
+    glow: Color32,
+    glow_peak: f32,
+}
+
+impl Palette {
+    const DAYLIGHT: Self = Self {
+        chassis: Color32::from_rgb(0xc9, 0xc1, 0xb3),
+        paper: Color32::from_rgb(0xeb, 0xe4, 0xd8),
+        panel_inset: Color32::from_rgb(0xde, 0xd6, 0xc7),
+        line: Color32::from_rgb(0xbd, 0xb3, 0xa2),
+        ink: Color32::from_rgb(0x22, 0x1e, 0x1a),
+        muted: Color32::from_rgb(0x6e, 0x65, 0x55),
+        faint: Color32::from_rgb(0x94, 0x8b, 0x79),
+        acid: Color32::from_rgb(0x2f, 0x4b, 0x7c),
+        drop: Color32::from_black_alpha(40),
+        glow: Color32::from_rgb(0xff, 0xfd, 0xf7),
+        glow_peak: 0.5,
+    };
+
+    const STAGE: Self = Self {
+        chassis: Color32::from_rgb(0x13, 0x14, 0x17),
+        paper: Color32::from_rgb(0x21, 0x23, 0x27),
+        panel_inset: Color32::from_rgb(0x19, 0x1b, 0x1e),
+        line: Color32::from_rgb(0x34, 0x38, 0x3e),
+        ink: Color32::from_rgb(0xef, 0xe9, 0xde),
+        muted: Color32::from_rgb(0x9d, 0x97, 0x8c),
+        faint: Color32::from_rgb(0x6b, 0x67, 0x60),
+        acid: Color32::from_rgb(0x7c, 0xa5, 0xe0),
+        drop: Color32::from_black_alpha(120),
+        glow: Color32::from_rgb(0x7c, 0xa5, 0xe0),
+        glow_peak: 0.15,
+    };
+
+    fn for_context(context: &egui::Context) -> Self {
+        if context.style().visuals.dark_mode {
+            Self::STAGE
+        } else {
+            Self::DAYLIGHT
+        }
+    }
+}
+
+/// Paints the pool of light behind the panel.
+///
+/// Light does not fall off linearly, and a linear ramp reads as a disc with an
+/// edge rather than as a glow. The profile here is a Gaussian,
+/// `alpha(t) = peak · exp(-4.6·t²)`, which reaches effectively zero at the rim.
+///
+/// It is painted as filled discs from the outside in, and a disc laid over what
+/// is already there does not add its alpha — it composites. So each step paints
+/// the increment that lands on the target instead of the target itself:
+///
+/// ```text
+///     a_k = (A_k - A_{k-1}) / (1 - A_{k-1})
+/// ```
+///
+/// which is the same correction the CSS ramp makes with its stops. Without it
+/// the middle of the pool piles up and the edge stays hard — exactly the
+/// blotchy halo this replaced.
+fn paint_glow(painter: &egui::Painter, center: egui::Pos2, radius: f32, palette: Palette) {
+    let [r, g, b, _] = palette.glow.to_array();
+    for (t, increment) in glow_discs(palette.glow_peak) {
+        painter.circle_filled(
+            center,
+            radius * t,
+            Color32::from_rgba_unmultiplied(r, g, b, (increment * 255.0).round() as u8),
+        );
+    }
+}
+
+/// The discs of [`paint_glow`], outside in, as `(radius fraction, own alpha)`.
+///
+/// Split out so the correction can be pinned by a test: written as the target
+/// alpha per disc instead of the increment, the pool piles up in the middle and
+/// keeps a hard rim, which is the artefact this exists to avoid.
+fn glow_discs(peak: f32) -> Vec<(f32, f32)> {
+    const STEPS: usize = 14;
+    let mut discs = Vec::with_capacity(STEPS);
+    let mut reached = 0.0_f32;
+    for step in 0..STEPS {
+        // t runs 1 → 0 as the discs shrink towards the centre.
+        let t = 1.0 - step as f32 / STEPS as f32;
+        let target = peak * (-4.6 * t * t).exp();
+        let increment = ((target - reached) / (1.0 - reached)).clamp(0.0, 1.0);
+        reached = target;
+        if increment > 0.002 {
+            discs.push((t, increment));
+        }
+    }
+    discs
+}
+
 const STATE_TIMEOUT: Duration = Duration::from_secs(1);
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -270,24 +381,27 @@ impl DesktopShutdown {
     }
 
     pub(super) fn render(&self, context: &egui::Context) {
+        // The lighting switch lives in the interface's own storage, which this
+        // side of the process cannot read, so the closing panel follows the
+        // system theme — the same thing the interface's AUTO setting does.
+        let palette = Palette::for_context(context);
+
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(Color32::from_rgb(4, 18, 27)))
+            .frame(egui::Frame::NONE.fill(palette.chassis))
             .show(context, |ui| {
                 let rect = ui.max_rect();
                 let painter = ui.painter();
+                // A seam, not a lit bar: red is reserved for LIVE, and this is
+                // the machine closing, not performing.
                 painter.rect_filled(
                     egui::Rect::from_min_max(
                         rect.left_top(),
-                        egui::pos2(rect.right(), rect.top() + 2.0),
+                        egui::pos2(rect.right(), rect.top() + 1.0),
                     ),
                     0.0,
-                    Color32::from_rgb(55, 205, 222),
+                    palette.line,
                 );
-                painter.circle_filled(
-                    rect.center_top() + egui::vec2(0.0, 72.0),
-                    170.0,
-                    Color32::from_rgba_unmultiplied(18, 103, 124, 18),
-                );
+                paint_glow(painter, rect.center(), rect.height() * 0.62, palette);
             });
 
         let modal_width = (context.screen_rect().width() - 48.0).clamp(320.0, 500.0);
@@ -296,30 +410,33 @@ impl DesktopShutdown {
             .order(egui::Order::Foreground)
             .show(context, |ui| {
                 egui::Frame::new()
-                    .fill(Color32::from_rgb(7, 28, 39))
-                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(38, 105, 122)))
-                    .corner_radius(18.0)
+                    .fill(palette.paper)
+                    .stroke(Stroke::new(1.0_f32, palette.line))
+                    .corner_radius(PANEL_RADIUS)
                     .shadow(egui::epaint::Shadow {
-                        offset: [0, 10],
-                        blur: 28,
-                        spread: 2,
-                        color: Color32::from_black_alpha(150),
+                        offset: [0, 3],
+                        blur: 12,
+                        spread: 0,
+                        color: palette.drop,
                     })
-                    .inner_margin(egui::Margin::symmetric(28, 26))
+                    .inner_margin(egui::Margin::symmetric(24, 22))
                     .show(ui, |ui| {
                         ui.set_width(modal_width);
 
                         ui.horizontal(|ui| {
+                            // A moulded plate carrying the monogram, not a lit
+                            // chip: nothing on a closing machine is powered.
                             egui::Frame::new()
-                                .fill(Color32::from_rgb(86, 221, 232))
-                                .corner_radius(11.0)
-                                .inner_margin(egui::Margin::same(10))
+                                .fill(palette.panel_inset)
+                                .stroke(Stroke::new(1.0_f32, palette.line))
+                                .corner_radius(KEY_RADIUS)
+                                .inner_margin(egui::Margin::symmetric(9, 7))
                                 .show(ui, |ui| {
                                     ui.label(
                                         RichText::new("RF")
                                             .strong()
                                             .size(15.0)
-                                            .color(Color32::from_rgb(4, 28, 38)),
+                                            .color(palette.ink),
                                     );
                                 });
                             ui.add_space(10.0);
@@ -327,38 +444,43 @@ impl DesktopShutdown {
                                 ui.label(
                                     RichText::new("CLOSING RACKFORGE")
                                         .strong()
-                                        .size(18.0)
-                                        .color(Color32::from_rgb(225, 250, 252)),
+                                        .size(17.0)
+                                        .color(palette.ink),
                                 );
                                 ui.add_space(2.0);
                                 ui.label(
                                     RichText::new("Finishing your session safely")
-                                        .size(13.0)
-                                        .color(Color32::from_rgb(133, 169, 181)),
+                                        .size(12.5)
+                                        .color(palette.muted),
                                 );
                             });
                         });
 
-                        ui.add_space(22.0);
+                        ui.add_space(20.0);
                         let progress = self.step.index() as f32 / Step::ALL.len() as f32;
+                        ui.visuals_mut().extreme_bg_color = palette.panel_inset;
                         ui.add(
                             egui::ProgressBar::new(progress)
                                 .desired_width(modal_width)
                                 .desired_height(4.0)
-                                .fill(Color32::from_rgb(86, 221, 232)),
+                                .corner_radius(1.0)
+                                .fill(palette.acid),
                         );
-                        ui.add_space(18.0);
+                        ui.add_space(16.0);
 
                         for step in Step::ALL {
                             let completed = step.index() < self.step.index();
                             let active = step == self.step;
+                            // The running step is the engaged one, so it is the
+                            // one that sits in a recess — same reading as every
+                            // engaged control in the interface.
                             let row_fill = if active {
-                                Color32::from_rgb(10, 42, 54)
+                                palette.panel_inset
                             } else {
                                 Color32::TRANSPARENT
                             };
                             let row_stroke = if active {
-                                Stroke::new(1.0_f32, Color32::from_rgb(34, 100, 116))
+                                Stroke::new(1.0_f32, palette.line)
                             } else {
                                 Stroke::NONE
                             };
@@ -366,7 +488,7 @@ impl DesktopShutdown {
                             egui::Frame::new()
                                 .fill(row_fill)
                                 .stroke(row_stroke)
-                                .corner_radius(9.0)
+                                .corner_radius(KEY_RADIUS)
                                 .inner_margin(egui::Margin::symmetric(12, 9))
                                 .show(ui, |ui| {
                                     ui.set_width(modal_width - 24.0);
@@ -375,7 +497,7 @@ impl DesktopShutdown {
                                             ui.add(
                                                 egui::Spinner::new()
                                                     .size(16.0)
-                                                    .color(Color32::from_rgb(86, 221, 232)),
+                                                    .color(palette.acid),
                                             );
                                         } else {
                                             let (icon_rect, _) = ui.allocate_exact_size(
@@ -383,9 +505,9 @@ impl DesktopShutdown {
                                                 egui::Sense::hover(),
                                             );
                                             let icon_color = if completed {
-                                                Color32::from_rgb(86, 221, 232)
+                                                palette.acid
                                             } else {
-                                                Color32::from_rgb(45, 74, 84)
+                                                palette.line
                                             };
                                             ui.painter().circle_stroke(
                                                 icon_rect.center(),
@@ -401,13 +523,13 @@ impl DesktopShutdown {
                                             }
                                         }
                                         ui.add_space(8.0);
-                                        ui.label(RichText::new(step.label()).size(13.5).color(
+                                        ui.label(RichText::new(step.label()).size(13.0).color(
                                             if active {
-                                                Color32::from_rgb(226, 249, 251)
+                                                palette.ink
                                             } else if completed {
-                                                Color32::from_rgb(153, 190, 199)
+                                                palette.muted
                                             } else {
-                                                Color32::from_rgb(91, 121, 132)
+                                                palette.faint
                                             },
                                         ));
                                         if active {
@@ -418,7 +540,7 @@ impl DesktopShutdown {
                                                         RichText::new("WORKING")
                                                             .strong()
                                                             .size(10.0)
-                                                            .color(Color32::from_rgb(86, 221, 232)),
+                                                            .color(palette.acid),
                                                     );
                                                 },
                                             );
@@ -429,13 +551,15 @@ impl DesktopShutdown {
                         }
 
                         ui.add_space(10.0);
+                        ui.visuals_mut().widgets.noninteractive.bg_stroke =
+                            Stroke::new(1.0_f32, palette.line);
                         ui.separator();
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
                             ui.label(
                                 RichText::new("Please keep RackForge open")
                                     .size(11.5)
-                                    .color(Color32::from_rgb(102, 136, 147)),
+                                    .color(palette.muted),
                             );
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
@@ -447,7 +571,7 @@ impl DesktopShutdown {
                                             Step::ALL.len()
                                         ))
                                         .size(11.5)
-                                        .color(Color32::from_rgb(102, 136, 147)),
+                                        .color(palette.muted),
                                     );
                                 },
                             );
@@ -460,6 +584,41 @@ impl DesktopShutdown {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn glow_discs_composite_onto_the_gaussian() {
+        let peak = 0.5_f32;
+        let discs = glow_discs(peak);
+        assert!(discs.len() > 6, "the ramp needs enough steps to read as light");
+
+        // Compositing the discs outside in has to land on alpha(t) = peak·e^(-4.6t²)
+        // at every radius, which is the whole point of using the increment.
+        let mut reached = 0.0_f32;
+        for (t, increment) in discs {
+            reached += increment * (1.0 - reached);
+            let expected = peak * (-4.6 * t * t).exp();
+            assert!(
+                (reached - expected).abs() < 0.01,
+                "at t={t} composited {reached} but wanted {expected}",
+            );
+        }
+
+        // The profile is sampled, so the centre approaches the peak without
+        // reaching it — the innermost disc still has a radius. What matters is
+        // that it never overshoots, which would blow out the middle of the pool.
+        assert!(reached <= peak, "centre overshot the peak: {reached}");
+        assert!(reached > peak * 0.95, "centre fell short of the peak: {reached}");
+    }
+
+    #[test]
+    fn glow_stays_inside_the_alpha_range() {
+        for peak in [0.15_f32, 0.5] {
+            for (t, increment) in glow_discs(peak) {
+                assert!((0.0..=1.0).contains(&t));
+                assert!((0.0..=1.0).contains(&increment));
+            }
+        }
+    }
 
     #[test]
     fn steps_are_ordered_and_user_facing() {

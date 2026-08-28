@@ -15,8 +15,12 @@ pub struct DesktopWebView {
 impl DesktopWebView {
     pub fn new(creation: &CreationContext<'_>) -> Result<Self> {
         let view = WebViewBuilder::new()
+            // The chassis colour, not a near-white. This is what shows in the
+            // gap whenever the WebView's bounds and the panel disagree by a
+            // pixel, or before the interface has painted — at #e9e7e1 that
+            // read as white light leaking in at the top of the window.
             .with_html(
-                "<!doctype html><html><body style=\"margin:0;background:#e9e7e1\"></body></html>",
+                "<!doctype html><html><body style=\"margin:0;background:#c9c1b3\"></body></html>",
             )
             .with_initialization_script("window.__RACKFORGE_HOST_SHELL__ = 'desktop';")
             .with_visible(false)

@@ -866,6 +866,8 @@ impl DesktopAudio {
         let stream_telemetry = Arc::clone(&telemetry);
         let callback_sample_rate = config.sample_rate.0;
         let callback_channels = device_channels;
+        let (clock_sender, clock_receiver) = mpsc::sync_channel::<u8>(1024);
+        spawn_clock_writer(clock_receiver);
         let mut processor = AudioProcessor {
             voices,
             active_voice,
@@ -897,6 +899,8 @@ impl DesktopAudio {
                 RenderPool::automatic(render_telemetry)
             },
             render_telemetry: RenderTelemetry::new(0),
+            clock_sender,
+            clock_scratch: Vec::with_capacity(64),
             sequencer: rackforge_core::SequencerEngine::new(f64::from(config.sample_rate.0))
                 .or_else(|| rackforge_core::SequencerEngine::new(48_000.0))
                 .expect("48 kHz is inside the transport bounds"),
@@ -1666,6 +1670,10 @@ struct AudioProcessor {
     /// The host sequencer: transport and lanes, advanced once per block so
     /// pattern MIDI joins `events` sample-accurately before instances run.
     sequencer: rackforge_core::SequencerEngine,
+    /// Realtime clock bytes leave the audio thread through here; a
+    /// dedicated thread owns the MIDI output ports and writes them.
+    clock_sender: SyncSender<u8>,
+    clock_scratch: Vec<MidiEventV1>,
 }
 
 impl AudioProcessor {
@@ -1713,8 +1721,22 @@ impl AudioProcessor {
         // frame inside render_block, offs before ons preserved.
         {
             let mut sequenced_params = std::mem::take(&mut self.parameter_events);
-            self.sequencer
-                .render_block(frames as u32, &mut self.events, &mut sequenced_params);
+            let mut clock = std::mem::take(&mut self.clock_scratch);
+            clock.clear();
+            self.sequencer.render_block(
+                frames as u32,
+                &mut self.events,
+                &mut sequenced_params,
+                &mut clock,
+            );
+            // Sub-block clock timing is bounded by the buffer size; the
+            // writer thread sends the bytes the moment they arrive. A full
+            // queue drops pulses rather than stalling the callback — a
+            // slave that missed one pulse free-wheels past it.
+            for event in &clock {
+                let _ = self.clock_sender.try_send(event.data[0]);
+            }
+            self.clock_scratch = clock;
             self.parameter_events = sequenced_params;
         }
         let samples = frames * PLUGIN_OUTPUT_CHANNELS;
@@ -2266,6 +2288,56 @@ fn prepare_audio_voice(
         parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
         process_faulted: false,
     })
+}
+
+/// The clock writer: owns every MIDI output port and forwards realtime
+/// bytes the moment the audio thread emits them. Ports are enumerated on
+/// first use and re-enumerated whenever a write fails, so replugging a
+/// box mid-set recovers on the next pulse.
+fn spawn_clock_writer(receiver: Receiver<u8>) {
+    let _ = thread::Builder::new()
+        .name("rackforge-midi-clock".into())
+        .spawn(move || {
+            let mut connections: Vec<midir::MidiOutputConnection> = Vec::new();
+            let mut connected = false;
+            while let Ok(byte) = receiver.recv() {
+                if !connected {
+                    connections = open_clock_outputs();
+                    connected = true;
+                }
+                let mut failed = false;
+                for connection in &mut connections {
+                    if connection.send(&[byte]).is_err() {
+                        failed = true;
+                    }
+                }
+                if failed || connections.is_empty() {
+                    connected = false;
+                }
+            }
+        });
+}
+
+fn open_clock_outputs() -> Vec<midir::MidiOutputConnection> {
+    let mut connections = Vec::new();
+    let Ok(probe) = midir::MidiOutput::new("rackforge clock probe") else {
+        return connections;
+    };
+    let count = probe.ports().len();
+    let _ = probe;
+    for index in 0..count {
+        let Ok(output) = midir::MidiOutput::new("rackforge MIDI clock") else {
+            continue;
+        };
+        let ports = output.ports();
+        let Some(port) = ports.get(index) else {
+            continue;
+        };
+        if let Ok(connection) = output.connect(port, "rackforge clock") {
+            connections.push(connection);
+        }
+    }
+    connections
 }
 
 /// Key-follow lanes listen to the player's keyboard: every live note that

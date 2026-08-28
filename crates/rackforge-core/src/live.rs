@@ -1771,6 +1771,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     let mut device_output = vec![0_i32; period_frames * channels];
     let mut events = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
     let mut sequencer_events: Vec<MidiEventV1> = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
+    let mut sequencer_clock: Vec<MidiEventV1> = Vec::with_capacity(64);
     let mut parameter_events = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
     let mut meter_frames = 0_usize;
     let mut meter_peak = 0_f32;
@@ -2738,10 +2739,15 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         sequencer_events.clear();
         // Lock events ride the block's parameter queue; Rack-mode parameter
         // routing (which Slot owns a lane's knobs) is future work.
+        // The appliance's ALSA clock-out wiring is future work; the stream
+        // is computed and discarded so the engine's state stays identical
+        // across hosts.
+        sequencer_clock.clear();
         sequencer.render_block(
             period_frames as u32,
             &mut sequencer_events,
             &mut parameter_events,
+            &mut sequencer_clock,
         );
         match render_mode {
             AudioRenderMode::Silent => {}

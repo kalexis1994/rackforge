@@ -3539,6 +3539,13 @@
   border-left-width: 1px;
 }
 
+/* A key outside a gang is a whole key: the shaved left edge exists only to
+   butt keys together, and −, +, TAP and NEW stand alone. */
+:not(.seq-keys) > .seq-key {
+  border-left-width: 1px;
+  border-radius: var(--fp-radius-key);
+}
+
 .seq-key:hover:not(:disabled) {
   color: var(--ink);
   background: linear-gradient(180deg, var(--glass), var(--glass));

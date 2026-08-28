@@ -4064,3 +4064,234 @@
   outline: 2px solid var(--acid);
   outline-offset: 1px;
 }
+
+/* ------------------------------------------- song part navigator, moulded ---
+   The Part cards predate the faceplate and still wore the dark glass: 10px
+   radii, entity tints, pill buttons. Rebuilt as panel plates — the selected
+   Part sinks into a well with a painted edge like every other engaged
+   control, the scene number is silkscreen, and the order controls become a
+   butted key gang. */
+
+.song-part-nav-item {
+  gap: 0 !important;
+  padding: 8px 10px !important;
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop);
+}
+
+.song-part-nav-item.active {
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--acid) !important;
+}
+
+.song-part-select {
+  padding: 4px 6px !important;
+}
+
+.song-part-select > span {
+  color: var(--fp-rail-label) !important;
+  font: 800 10px/1 var(--mono-font) !important;
+  letter-spacing: 0.08em;
+}
+
+.song-part-nav-item.active .song-part-select > span {
+  color: var(--acid) !important;
+}
+
+.song-part-select strong {
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.song-part-select small {
+  color: var(--fp-rail-label) !important;
+  font-family: var(--display-font);
+  font-weight: 800;
+  font-size: 8px !important;
+  letter-spacing: 0.12em !important;
+}
+
+/* The order controls: one butted gang of keys, momentary sink on press. */
+.song-part-order-actions {
+  grid-auto-flow: column;
+  align-content: center;
+  gap: 0 !important;
+}
+
+.song-part-order-actions button {
+  width: auto;
+  min-width: 30px;
+  height: 28px;
+  padding: 0 9px;
+  color: var(--fp-rail-label);
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-left-width: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: var(--fp-lip);
+  font-family: var(--display-font);
+  font-weight: 700;
+  font-size: var(--fp-label);
+  letter-spacing: var(--fp-track);
+}
+
+.song-part-order-actions button:first-child {
+  border-left-width: 1px !important;
+  border-radius: var(--fp-radius-key) 0 0 var(--fp-radius-key) !important;
+}
+
+.song-part-order-actions button:last-child {
+  border-radius: 0 var(--fp-radius-key) var(--fp-radius-key) 0 !important;
+}
+
+.song-part-order-actions button:hover:not(:disabled) {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+}
+
+.song-part-order-actions button:active:not(:disabled) {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well);
+}
+
+.song-part-order-actions button:disabled {
+  opacity: 0.42;
+  box-shadow: none;
+}
+
+.song-part-order-actions button:last-child:not(:disabled) {
+  color: var(--red) !important;
+}
+
+.song-part-order-actions .song-part-edit-graph {
+  color: var(--fp-rail-label) !important;
+  border-color: var(--line) !important;
+  text-transform: uppercase;
+}
+
+.song-part-order-actions .song-part-edit-graph:hover:not(:disabled) {
+  color: var(--ink) !important;
+}
+
+/* The immersive workspace header rides the same plate. */
+.song-part-graph-header {
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop);
+}
+
+/* ------------------------------------------ the PERFORM browser, moulded ---
+   The stage navigator and the target rows predate the faceplate: navy glass,
+   13px radii, entity tints unreadable on the daylight chassis. Rebuilt as
+   panel plates. The row on stage sinks into a well with a painted edge like
+   every engaged control, its state word is the screen's red, and the arrows
+   of the navigator become square keys that sink while pressed. */
+
+.live-stage-navigator {
+  color: var(--ink);
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+.live-stage-heading .card-kicker {
+  color: var(--fp-rail-label) !important;
+  letter-spacing: var(--fp-track);
+}
+
+.live-stage-heading small {
+  color: var(--muted) !important;
+}
+
+.live-stage-position {
+  color: var(--fp-rail-label) !important;
+  font-family: var(--mono-font) !important;
+}
+
+.live-stage-step {
+  color: var(--fp-rail-label) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip);
+}
+
+.live-stage-step:hover:not(:disabled) {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+}
+
+.live-stage-step:active:not(:disabled) {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well);
+}
+
+.live-stage-step:disabled {
+  opacity: 0.42;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  box-shadow: none;
+}
+
+/* Target rows: Racks, Songs, Setlists and Song Parts share one plate. */
+.live-part-target,
+.target-card,
+.sequence-row {
+  color: var(--ink) !important;
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop);
+}
+
+.live-part-target { cursor: pointer; }
+
+.live-part-target:hover,
+.target-card:hover {
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+}
+
+.live-selectable-item[class*="entity-"].active {
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--acid) !important;
+}
+
+.live-part-index,
+.target-index {
+  color: var(--fp-rail-label) !important;
+  font-family: var(--mono-font) !important;
+}
+
+.live-selectable-item.active .live-part-index,
+.live-selectable-item.active .target-index {
+  color: var(--acid) !important;
+}
+
+.live-part-copy strong,
+.target-card h3 {
+  color: var(--ink) !important;
+  font-family: var(--display-font);
+}
+
+.live-part-copy small,
+.target-card p {
+  color: var(--muted) !important;
+}
+
+/* The state word: silkscreen while available, the screen's red on stage. */
+.live-item-state {
+  color: var(--fp-rail-label) !important;
+  letter-spacing: var(--fp-track) !important;
+}
+
+.live-selectable-item.active .live-item-state,
+.live-part-target.active .live-part-state {
+  color: var(--red) !important;
+}

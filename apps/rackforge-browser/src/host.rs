@@ -829,6 +829,51 @@ impl BrowserHost {
                 SessionEvent::MasterPanChanged { pan }
             }
             SessionCommand::SetActiveMode { mode } => SessionEvent::ActiveModeChanged { mode },
+            SessionCommand::SetLiveBrowseMode { mode } => {
+                SessionEvent::LiveBrowseModeChanged { mode }
+            }
+            SessionCommand::ActivateLiveTarget { location } => {
+                // The browser host activates the LIVE *state* and the Part's
+                // sequencer freight. Multi-Slot Rack audio remains the
+                // appliance's: here the groove sounds through whichever
+                // instrument is active, which is everything a single-voice
+                // host can honestly offer.
+                if self.store.state().active_mode != SurfaceMode::Live {
+                    return Err(Failure::new(
+                        ControlErrorCode::Rejected,
+                        "LIVE targets can only be activated while LIVE is active",
+                    ));
+                }
+                let (rack_id, part_commands) = {
+                    let library = self.performance.library();
+                    let rack = library.resolve_playable(&location).map_err(|error| {
+                        Failure::new(ControlErrorCode::NotFound, error.to_string())
+                    })?;
+                    if !rack.enabled {
+                        return Err(Failure::new(
+                            ControlErrorCode::Rejected,
+                            "the selected Rack is disabled",
+                        ));
+                    }
+                    let commands = library
+                        .resolve_part(&location)
+                        .map(|part| {
+                            rackforge_core::sequencer::part_launch_commands(
+                                part,
+                                &library.patterns,
+                            )
+                        })
+                        .unwrap_or_default();
+                    (rack.id.clone(), commands)
+                };
+                // A binding that fails must never fail the activation.
+                for command in &part_commands {
+                    if let Err(reason) = self.sequencer.apply(command) {
+                        eprintln!("SEQUENCER_PART_QUEUE_REJECTED reason={reason}");
+                    }
+                }
+                SessionEvent::LiveTargetActivated { location, rack_id }
+            }
             SessionCommand::SelectPlugin { instance_id } => {
                 self.plugin_mut(&instance_id)?;
                 self.audio.silence();

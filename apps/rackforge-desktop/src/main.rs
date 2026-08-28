@@ -2951,6 +2951,13 @@ impl DesktopApp {
                     })()
                 }
             }
+            SessionCommand::SetLiveBrowseMode { mode } => self.apply_program_events(
+                vec![SessionEvent::LiveBrowseModeChanged { mode }],
+                Some(command_ref),
+            ),
+            SessionCommand::ActivateLiveTarget { location } => {
+                self.activate_live_target(location, Some(command_ref))
+            }
             other => Err(format!(
                 "Desktop does not support this command yet: {other:?}"
             )),
@@ -4146,6 +4153,66 @@ impl DesktopApp {
         };
         self.persist_session_checkpoint();
         Ok(vec![event])
+    }
+
+    /// Puts a LIVE target on stage: the session state and the Part's
+    /// sequencer freight. The Desktop keeps playing its active voice —
+    /// multi-Slot Rack audio remains the appliance's — so the Part's
+    /// patterns sound through it, quantised to the next bar.
+    fn activate_live_target(
+        &mut self,
+        location: rackforge_performance_api::LiveLocation,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        let active_mode = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .active_mode;
+        if active_mode != SurfaceMode::Live {
+            return Err("LIVE targets can only be activated while LIVE is active".into());
+        }
+        let (rack_id, part_commands) = {
+            let library = self.performance_repository.library();
+            let rack = library
+                .resolve_playable(&location)
+                .map_err(|error| error.to_string())?;
+            if !rack.enabled {
+                return Err("the selected Rack is disabled".into());
+            }
+            let commands = library
+                .resolve_part(&location)
+                .map(|part| {
+                    rackforge_core::sequencer::part_launch_commands(part, &library.patterns)
+                })
+                .unwrap_or_default();
+            (rack.id.clone(), commands)
+        };
+        // A binding that fails must never fail the activation: the show
+        // goes on with the lanes that resolve.
+        for part_command in part_commands {
+            match self
+                .audio
+                .as_ref()
+                .map(|audio| audio.sequencer_command(part_command))
+            {
+                Some(Ok(Ok(()))) => {}
+                Some(Ok(Err(reason))) => {
+                    eprintln!("SEQUENCER_PART_QUEUE_REJECTED reason={reason}");
+                }
+                Some(Err(error)) => {
+                    eprintln!("SEQUENCER_PART_QUEUE_UNREACHABLE reason={error:#}");
+                    break;
+                }
+                None => break,
+            }
+        }
+        let events = self.apply_program_events(
+            vec![SessionEvent::LiveTargetActivated { location, rack_id }],
+            command,
+        )?;
+        self.persist_session_checkpoint();
+        Ok(events)
     }
 
     fn set_active_mode(

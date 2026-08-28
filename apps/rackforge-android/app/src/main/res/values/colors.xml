@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="rackforge_forge_black">#050B11</color>
-    <color name="rackforge_signal_cyan">#55E7FF</color>
+    <!-- The mark is printed on the instrument plate, so the launcher tile is
+         the plate itself rather than a void. One ink per element of the
+         monogram; the stage set is the same inks mixed for a dark ground. -->
+    <color name="rackforge_plate_cream">#EBE4D8</color>
+    <color name="rackforge_mark_bowl">#C1273D</color>
+    <color name="rackforge_mark_leg">#1D3560</color>
+    <color name="rackforge_mark_arm">#D25A2B</color>
+
+    <color name="rackforge_mark_bowl_stage">#E0455C</color>
+    <color name="rackforge_mark_leg_stage">#4A79C8</color>
+    <color name="rackforge_mark_arm_stage">#F0813F</color>
 </resources>

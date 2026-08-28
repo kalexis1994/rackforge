@@ -1,29 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    RackForge mark for the adaptive launcher icon.
+
+    The mark is 704x308, held to 540 wide so its 589-unit diagonal stays inside
+    the 611-unit safe circle an adaptive icon guarantees (66dp of 108dp).
+
+    A VectorDrawable has no masks, so the two node knockouts are built from the
+    geometry instead: the strokes stop short of each node and the node itself is
+    an even-odd ring. That is why the bowl starts at x=92, the crossbar at
+    x=562, and the spines end at y=188 and y=212 rather than meeting at 200.
+
+    Paint order is the drawing: the leg is stroked before the bowl of the R so
+    the bar truncates it, and the nodes are filled last.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="1000"
     android:viewportHeight="1000">
     <group
-        android:pivotX="505"
-        android:pivotY="462.5"
-        android:scaleX="1.1"
-        android:scaleY="1.1"
-        android:translateX="-5"
-        android:translateY="37.5">
-        <path
-            android:pathData="M230,650H285L400,535V295L460,235H610V320L580,350H475V540Q475,560 495,560H620L735,675H780"
-            android:fillColor="@android:color/transparent"
-            android:strokeColor="@color/rackforge_signal_cyan"
-            android:strokeWidth="55"
-            android:strokeLineCap="square"
-            android:strokeLineJoin="bevel" />
-        <path
-            android:pathData="M475,430H620L660,470V520L620,560"
-            android:fillColor="@android:color/transparent"
-            android:strokeColor="@color/rackforge_signal_cyan"
-            android:strokeWidth="55"
-            android:strokeLineCap="square"
-            android:strokeLineJoin="bevel" />
+        android:translateX="230"
+        android:translateY="382"
+        android:scaleX="0.767"
+        android:scaleY="0.767">
+        <group
+            android:translateX="-58"
+            android:translateY="-51">
+            <path
+                android:pathData="M305,200L430,342H505Q550,342 550,297V212"
+                android:strokeColor="@color/rackforge_mark_leg"
+                android:strokeWidth="34"
+                android:strokeLineCap="butt"
+                android:strokeLineJoin="round" />
+            <path
+                android:pathData="M550,188V111Q550,68 595,68H720"
+                android:strokeColor="@color/rackforge_mark_arm"
+                android:strokeWidth="34"
+                android:strokeLineCap="butt"
+                android:strokeLineJoin="round" />
+            <path
+                android:pathData="M562,200H731"
+                android:strokeColor="@color/rackforge_mark_arm"
+                android:strokeWidth="34"
+                android:strokeLineCap="butt"
+                android:strokeLineJoin="round" />
+            <path
+                android:pathData="M92,200H360Q410,200 410,150V110Q410,68 365,68H155V145"
+                android:strokeColor="@color/rackforge_mark_bowl"
+                android:strokeWidth="34"
+                android:strokeLineCap="butt"
+                android:strokeLineJoin="round" />
+            <path
+                android:pathData="M58,200a22,22 0 1,0 44,0a22,22 0 1,0 -44,0M70,200a10,10 0 1,0 20,0a10,10 0 1,0 -20,0"
+                android:fillColor="@color/rackforge_mark_bowl"
+                android:fillType="evenOdd" />
+            <path
+                android:pathData="M526,200a24,24 0 1,0 48,0a24,24 0 1,0 -48,0M538,200a12,12 0 1,0 24,0a12,12 0 1,0 -24,0"
+                android:fillColor="@color/rackforge_mark_arm"
+                android:fillType="evenOdd" />
+            <path
+                android:pathData="M720,174L762,200L720,226Z"
+                android:fillColor="@color/rackforge_mark_arm" />
+        </group>
     </group>
 </vector>

@@ -128,6 +128,21 @@ pub fn parse_plugin_parameter_control_command(
     }
 }
 
+/// The scales key-follow can snap into. `Chromatic` is a pure transpose;
+/// the rest quantise every transposed note into the scale rooted at the
+/// held key — "suena en la escala de esa nota".
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SequencerScale {
+    Chromatic,
+    Major,
+    Minor,
+    Dorian,
+    Mixolydian,
+    PentatonicMajor,
+    PentatonicMinor,
+}
+
 /// Which grid line a launch or stop waits for. `Now` is this block.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -175,6 +190,14 @@ pub enum SequencerCommand {
         lane: u8,
         muted: bool,
     },
+    /// Puts a lane in key-follow: its pattern sounds only while a key is
+    /// held, transposed so the phrase's root follows the played note —
+    /// the SH-101's party trick. `None` returns the lane to looping.
+    SetLaneFollow {
+        lane: u8,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<SequencerScale>,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -185,6 +208,9 @@ pub struct SequencerLaneStatus {
     /// A stop boundary is set: still sounding, going quiet at the bar.
     #[serde(default)]
     pub stopping: bool,
+    /// The lane is in key-follow, waiting on (or following) a held key.
+    #[serde(default)]
+    pub following: bool,
     pub muted: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_name: Option<String>,

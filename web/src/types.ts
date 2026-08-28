@@ -385,6 +385,10 @@ export interface PatternDefinition {
   notes: PatternNoteSpec[];
   /** Editor lens hint; the engine never reads it. */
   view?: "drum" | "melodic";
+  /** The pattern's groove, 50 (straight) to 75 (dotted). */
+  swing_percent?: number;
+  /** The key the phrase was written in — what key-follow transposes from. */
+  root_key?: number;
 }
 
 export interface PerformanceLibrary {

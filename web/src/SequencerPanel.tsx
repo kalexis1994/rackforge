@@ -22,6 +22,9 @@ import {
 } from "./gateway";
 import {
   MAX_SEQUENCER_LANES,
+  SCALES,
+  setSwing,
+  type SequencerScale,
   MELODIC_VELOCITIES,
   STEP_ROWS,
   STEP_TICKS,
@@ -461,6 +464,7 @@ function SequencerTabEditor({
 }) {
   const { lane, draft, dirty } = tab;
   const laneState = status?.lanes[lane];
+  const [followScale, setFollowScale] = useState<SequencerScale>("chromatic");
   const inLibrary = patterns.some((pattern) => pattern.id === draft.id);
   const bars = Math.max(1, Math.round(draft.length_ticks / (beatsPerBar * TICKS_PER_BEAT)));
 
@@ -531,6 +535,26 @@ function SequencerTabEditor({
           ))}
           <span className="seq-inline-label">BARS</span>
         </div>
+        <div className="seq-keys" role="group" aria-label="Swing">
+          <button
+            className="seq-key seq-key-narrow"
+            disabled={(draft.swing_percent ?? 50) <= 50}
+            onClick={() => edit(setSwing(draft, (draft.swing_percent ?? 50) - 2))}
+          >
+            −
+          </button>
+          <span className="seq-lcd seq-lcd-swing">
+            {draft.swing_percent ?? 50}
+            <small>SWING</small>
+          </span>
+          <button
+            className="seq-key seq-key-narrow"
+            disabled={(draft.swing_percent ?? 50) >= 75}
+            onClick={() => edit(setSwing(draft, (draft.swing_percent ?? 50) + 2))}
+          >
+            +
+          </button>
+        </div>
         <select
           className="seq-load-select"
           value=""
@@ -568,6 +592,40 @@ function SequencerTabEditor({
       )}
       <footer className="seq-lanes" aria-label="Lane controls">
         <span className="seq-inline-label">{`LANE ${lane + 1} · CH ${lane + 1}`}</span>
+        <div className="seq-keys" role="group" aria-label="Key follow">
+          <button
+            className={`seq-key seq-lamp-key${laneState?.following ? " engaged" : ""}`}
+            aria-pressed={laneState?.following ?? false}
+            title="The phrase sounds while a key is held, transposed to it"
+            onClick={() =>
+              sendSequencerCommand(
+                laneState?.following
+                  ? { kind: "set_lane_follow", lane }
+                  : { kind: "set_lane_follow", lane, scale: followScale },
+              )
+            }
+          >
+            FOLLOW
+          </button>
+        </div>
+        {laneState?.following ? (
+          <select
+            className="seq-load-select"
+            value={followScale}
+            aria-label="Follow scale"
+            onChange={(event) => {
+              const scale = event.target.value as SequencerScale;
+              setFollowScale(scale);
+              sendSequencerCommand({ kind: "set_lane_follow", lane, scale });
+            }}
+          >
+            {SCALES.map((scale) => (
+              <option key={scale.id} value={scale.id}>
+                {scale.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <div className="seq-keys">
           <button className="seq-key seq-launch" onClick={launch}>
             LAUNCH
@@ -599,6 +657,8 @@ function SequencerTabEditor({
               : "PLAYING"
             : laneState?.queued
             ? "QUEUED"
+            : laneState?.following
+            ? "FOLLOW · HOLD A KEY"
             : laneState?.pattern_name
             ? "READY"
             : ""}
@@ -747,6 +807,14 @@ function MelodicLane({
           </button>
           <button className="seq-key" disabled={!note} onClick={() => onEdit(clearMelodicStep(pattern, selected))}>
             CLEAR
+          </button>
+          <button
+            className="seq-key"
+            disabled={!note}
+            title="The phrase's home: key-follow transposes from here"
+            onClick={() => note && onEdit({ ...pattern, root_key: note.key })}
+          >
+            {`ROOT ${noteName(pattern.root_key ?? 48)}`}
           </button>
         </div>
       </div>

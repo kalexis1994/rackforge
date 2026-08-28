@@ -5284,3 +5284,9 @@
 .graph-workspace-active .live-zone-performance > .live-surface-tabs {
   display: none;
 }
+
+/* The swing LCD sits in the tab header between its nudge keys. */
+.seq-lcd-swing {
+  min-width: 58px;
+  justify-content: center;
+}

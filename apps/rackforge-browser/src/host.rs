@@ -776,6 +776,7 @@ impl BrowserHost {
             _ => {}
         }
         let active_notes = notes.len() as u16;
+        self.feed_sequencer_input([message.status, message.data1, message.data2], 3);
         self.audio
             .push_midi(0, [message.status, message.data1, message.data2], 3);
         Ok(ControlResponse::VirtualMidiAccepted {
@@ -1307,7 +1308,21 @@ impl BrowserHost {
 
     /// Queues one live MIDI message for the next audio block.
     pub fn push_midi(&mut self, frame: u32, data: [u8; 3], length: u8) {
+        self.feed_sequencer_input(data, length);
         self.audio.push_midi(frame, data, length);
+    }
+
+    /// Key-follow lanes listen to the player's keyboard: every live note
+    /// that reaches the instrument also reaches the engine's gate.
+    fn feed_sequencer_input(&mut self, data: [u8; 3], length: u8) {
+        if length < 3 {
+            return;
+        }
+        match data[0] & 0xf0 {
+            0x90 if data[2] > 0 => self.sequencer.note_input(data[1], true),
+            0x80 | 0x90 => self.sequencer.note_input(data[1], false),
+            _ => {}
+        }
     }
 
     pub fn controller_connect(&mut self) {

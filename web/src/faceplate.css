@@ -5247,15 +5247,24 @@
   z-index: 1;
 }
 
-/* The sequencer's legend sits on its plate edge, so it wears the plate's
-   paper behind the text instead of the chassis. */
-.sequencer-shell {
-  position: relative;
-  margin-top: 8px;
+/* The sequencer is docked: the page sheds its padding and the plate fuses
+   with the header, edge to edge — a mounted console bar, not a floating
+   card. Its inline SEQ silkscreen is the zone label. The PERFORMANCE zone
+   below keeps its own margins on the chassis. */
+.page.live-host-page {
+  padding: 0 0 64px;
 }
 
-.sequencer-shell > .live-zone-legend {
-  background: var(--paper);
+.sequencer-shell {
+  margin: 0 0 12px;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  border-radius: 0;
+}
+
+.live-zone-performance {
+  margin: 0 clamp(16px, 3vw, 36px) 12px;
 }
 
 .live-zone-performance > .live-surface-tabs {

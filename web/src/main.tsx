@@ -12,6 +12,9 @@ import {
 import { startExperienceMonitoring } from "./ux/metrics";
 import "./design/tokens.css";
 import "./styles.css";
+import "./faceplate.css";
+import { applyLighting, readLighting } from "./lighting";
+import { applyScreenGlass, readScreenGlass } from "./screen";
 
 // A RackForge serving its own interface answers every path, so it uses real
 // URLs. The published demo is a static site with no server to answer them, so
@@ -32,6 +35,11 @@ if (IS_BROWSER_HOST && import.meta.env.PROD) {
     Promise.all(registrations.map((registration) => registration.unregister())),
   ).catch(() => undefined);
 }
+
+// Stamp the lighting condition before the first render so the faceplate
+// never flashes the wrong one on the way in, and the screen cover with it.
+applyLighting(readLighting());
+applyScreenGlass(readScreenGlass());
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

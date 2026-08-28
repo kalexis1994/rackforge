@@ -36,6 +36,21 @@
         "C:/Users/kalex/OneDrive/Documents/rackforge-plugin-rf-rig"
       ],
       "port": 8131
+    },
+    {
+      "name": "rf-web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "web",
+        "dev",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "5199",
+        "--strictPort"
+      ],
+      "port": 5199
     }
   ]
 }

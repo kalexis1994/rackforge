@@ -1,0 +1,3427 @@
+/* ==========================================================================
+   RackForge Faceplate — material layer
+   ==========================================================================
+   The palette lives in styles.css as tokens. This file replaces the
+   *material*: the host stops being backlit glass and becomes a moulded
+   instrument faceplate — cream ABS in DAYLIGHT, graphite under STAGE
+   lighting — with silkscreened labels, visible seams and inset LCD
+   windows that are the only surfaces allowed to glow.
+
+   No screws: the moulding reads as hardware through its seams and lit
+   lips, and fake fasteners on a touchscreen are costume, not structure.
+
+   Rules of the material:
+     · radius 3px on panels, 2px on keys and tags. Nothing is a pill.
+     · every raised surface has a lit top lip and a seam; glass and blur
+       are gone, and so are radial glows.
+     · labels are silkscreen: uppercase, tracked, display face.
+     · numbers are data: monospaced and tabular.
+     · red is a block, not a colour — one per screen, for LIVE.
+
+   BUTTON STATES — one reading, everywhere
+   ---------------------------------------
+   Sunken always means engaged. Raised always means available. A control is
+   never sunken because it is *off*, and never proud because it is *on*.
+
+     rest       raised: panel face, lit top lip, a shallow drop
+     hover      same geometry, face lightens — nothing moves
+     pressed    sunken while the finger is down (`:active`), lip gone
+     engaged    sunken and stays there, plus a painted edge in its ink
+     disabled   flat: no lip, no drop, no depth, 42%
+
+   A latching control may also carry a pilot lamp instead of a painted edge —
+   the lamp is what separates engaged from merely pressed, so it does not need
+   both.
+
+   The painted edge is what separates engaged from merely pressed, since both
+   are down. Momentary controls (Panic, Refresh) only ever pass through
+   pressed; latching ones (a nav key, a mode, Sustain) settle into engaged.
+
+   This is why a segmented selector's housing is a raised plate and not a
+   well: the selected position has to sink *below* its surroundings to be read
+   as chosen. Housed in a well it would have to rise instead, which is the
+   opposite reading of the same gesture — the machine would contradict itself
+   between the rail and a dialog.
+
+   There are no exceptions left. Tabs were one — indexed paper, selected page
+   forward — but a transport row on this machine is a gang of keys, and a strip
+   that lifted its selection while every other control sank it was the same
+   contradiction in a different place.
+   ========================================================================== */
+
+:root {
+  --fp-radius: 3px;
+  --fp-radius-key: 2px;
+  --fp-seam: 1px solid var(--line);
+  --fp-panel: linear-gradient(180deg, var(--glass) 0%, var(--paper) 26%, var(--paper) 100%);
+  --fp-lip: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.85);
+  --fp-well: inset 0 2px 4px rgba(var(--edge-dark-rgb), 0.22);
+  --fp-drop: 0 2px 5px rgba(var(--edge-dark-rgb), 0.16);
+  --fp-label: 0.72rem;
+  --fp-track: 0.22em;
+}
+
+/* Three states, not two: an explicit choice stamps `data-theme`, and AUTO
+   stamps nothing and must fall through to the system. `:not([data-theme=
+   "light"])` matches an unstamped root, so it only means "dark" inside the
+   media query — on its own it would darken the lit panel in daylight too. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fp-lip: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.09);
+    --fp-well: inset 0 2px 5px rgba(var(--edge-dark-rgb), 0.6);
+    --fp-drop: 0 3px 10px rgba(var(--edge-dark-rgb), 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  --fp-lip: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.09);
+  --fp-well: inset 0 2px 5px rgba(var(--edge-dark-rgb), 0.6);
+  --fp-drop: 0 3px 10px rgba(var(--edge-dark-rgb), 0.5);
+}
+
+/* ------------------------------------------------------------------ kill
+   the glass: no blur, no radial atmosphere, no oversized softness.      */
+
+.app-shell,
+.topbar,
+.hero-card,
+.sound-card,
+.session-card,
+.section-block,
+.plugin-card,
+.plugin-card-shell,
+.plugin-tile,
+.nav-item,
+.connection-badge,
+.primary-button,
+.text-button {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* ------------------------------------------------------------- chassis --- */
+
+.app-shell {
+  background: var(--chassis) !important;
+}
+
+.workspace {
+  background: var(--chassis);
+}
+
+/* --------------------------------------------------------------- rail ---- */
+
+.topbar {
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(var(--edge-dark-rgb), 0.05) 0 1px,
+      transparent 1px 6px
+    ),
+    linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border-bottom: var(--fp-seam) !important;
+  border-radius: 0 !important;
+  box-shadow: var(--fp-lip), 0 1px 0 var(--line), var(--fp-drop) !important;
+}
+
+/* --------------------------------------------------------- nameplate ---- */
+
+/* The mark is printed on the chassis, so it carries its own inks rather than
+   borrowing the panel accents: one per element of the monogram. The stage
+   values are not the daylight ones lightened — they are the same inks mixed
+   for a dark ground, the way a second silkscreen run would be. */
+:root {
+  --mark-bowl: #c1273d; /* la D de la R, y el jack por el que entra */
+  --mark-leg: #1d3560; /* la pierna inclinada y el pie de la F */
+  --mark-arm: #d25a2b; /* la F entera: brazo alto, travesaño, nodo y flecha */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --mark-bowl: #e0455c;
+    --mark-leg: #4a79c8;
+    --mark-arm: #f0813f;
+  }
+}
+
+:root[data-theme="dark"] {
+  --mark-bowl: #e0455c;
+  --mark-leg: #4a79c8;
+  --mark-arm: #f0813f;
+}
+
+/* The mark is 2.3:1, so it cannot sit beside the wordmark in a 220px rail.
+   Stacked, the two become a nameplate: mark over name, both flush left. */
+.brand-lockup {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.brand-mark {
+  width: 140px !important;
+  height: auto !important;
+  flex: none !important;
+  background: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+.brand-mark svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.about-card .brand-mark {
+  width: 164px !important;
+}
+
+.pairing-brand .brand-mark {
+  width: 118px !important;
+}
+
+/* Collapsed rail: the wordmark is already hidden here, so the mark carries
+   the identity alone and shrinks to the icon strip. */
+@media (max-width: 980px) {
+  .brand-mark {
+    width: 54px !important;
+  }
+
+  .brand-lockup {
+    align-items: center;
+  }
+}
+
+.brand-name {
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink) !important;
+}
+
+/* ------------------------------------------------------ selector keys --- */
+
+.nav-item {
+  border-radius: var(--fp-radius-key) !important;
+  border: var(--fp-seam) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  box-shadow: var(--fp-lip), 0 1px 2px rgba(var(--edge-dark-rgb), 0.18) !important;
+  color: var(--ink) !important;
+  font-family: var(--display-font);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.12s ease;
+}
+
+.nav-item .nav-copy {
+  color: inherit !important;
+  font-family: inherit;
+  letter-spacing: inherit;
+}
+
+/* Each surface owns an ink, and the chip carries it whether or not the key is
+   engaged — a rail that only shows colour where you already are tells you
+   nothing. At rest the chip is a wash of that ink with the glyph drawn in it;
+   engaged, the same ink fills the chip solid. Unlit lamp, then lit lamp. */
+.nav-tint-home { --nav-tint: var(--nav-home); }
+.nav-tint-live { --nav-tint: var(--nav-live); }
+.nav-tint-play { --nav-tint: var(--nav-play); }
+.nav-tint-controller { --nav-tint: var(--nav-controller); }
+.nav-tint-diagnostics { --nav-tint: var(--nav-diagnostics); }
+.nav-tint-system { --nav-tint: var(--nav-system); }
+
+.nav-item .nav-mark {
+  color: var(--nav-tint, var(--ink)) !important;
+  background: color-mix(in srgb, var(--nav-tint, var(--ink)) 13%, transparent) !important;
+  /* The last 10px corner in the rail: a chip inside a 2px key was the one
+     place the two radii disagreed. */
+  border-radius: var(--fp-radius-key) !important;
+  font-family: inherit;
+  letter-spacing: inherit;
+}
+
+.nav-item:hover {
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+  transform: none !important;
+}
+
+/* the engaged key is pushed in, not lit up */
+.nav-item.active {
+  background: var(--panel-inset) !important;
+  color: var(--ink) !important;
+  border-color: var(--line) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.nav-item.active .nav-copy {
+  color: var(--ink) !important;
+}
+
+/* The engaged chip fills solid, so the glyph rides on the ink rather than on
+   the panel and takes the contrasting one. Left on the panel ink it was
+   near-black on deep navy in daylight — the fill read as a smudge instead of a
+   lit indicator. The cyan bloom underneath went with it. */
+.nav-item.active .nav-mark {
+  color: var(--acid-ink) !important;
+  background: var(--nav-tint, var(--acid)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28) !important;
+}
+
+.nav-item:hover .nav-mark {
+  background: color-mix(in srgb, var(--nav-tint, var(--ink)) 22%, transparent) !important;
+  transform: none !important;
+}
+
+.nav-item.active:hover .nav-mark {
+  background: var(--nav-tint, var(--acid)) !important;
+}
+
+/* the engaged key carries a painted edge, the way a rack module does */
+.nav-item.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: var(--fp-radius-key) 0 0 var(--fp-radius-key);
+  background: var(--red);
+}
+
+.nav-item {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------- status --- */
+
+.connection-badge {
+  border-radius: var(--fp-radius-key) !important;
+  border: var(--fp-seam) !important;
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+  font-family: var(--mono-font);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted) !important;
+}
+
+.status-dot {
+  border-radius: 50% !important;
+  background: var(--green) !important;
+  box-shadow:
+    0 0 6px color-mix(in srgb, var(--green) 65%, transparent),
+    inset 0 0 2px rgba(255, 255, 255, 0.45) !important;
+}
+
+/* --------------------------------------------------------- LCD window --- */
+
+.now-playing {
+  position: relative;
+  overflow: hidden;
+  padding: 10px 14px !important;
+  border-radius: var(--fp-radius-key) !important;
+  border: none !important;
+  background: linear-gradient(170deg, var(--lcd-glass), var(--lcd-glass-2)) !important;
+  box-shadow:
+    inset 0 3px 8px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 1px var(--lcd-bezel) !important;
+  color: var(--lcd-phos) !important;
+}
+
+.now-playing::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--lcd-grid-op);
+  background:
+    repeating-linear-gradient(0deg, var(--lcd-grid) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, var(--lcd-grid) 0 1px, transparent 1px 3px);
+}
+
+.now-playing .eyebrow {
+  color: var(--lcd-phos-dim) !important;
+  font-family: var(--mono-font);
+  font-size: 0.64rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.now-playing strong {
+  color: var(--lcd-phos) !important;
+  font-family: var(--mono-font);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-shadow: 0 0 7px var(--lcd-bloom);
+}
+
+/* ------------------------------------------------------------- panels --- */
+
+.hero-card,
+.session-card,
+.section-block,
+.plugin-card,
+.plugin-card-shell {
+  border-radius: var(--fp-radius) !important;
+  border: var(--fp-seam) !important;
+  background: var(--fp-panel) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+/* the hero keeps one painted red edge — the LIVE block of the screen */
+.hero-card.sound-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-card.sound-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--red);
+}
+
+/* ------------------------------------------------------- silkscreening -- */
+
+.card-kicker,
+.section-title-row > h2,
+.section-title-row h3,
+.master-output-meter-label {
+  font-family: var(--display-font) !important;
+  font-weight: 700 !important;
+  font-size: var(--fp-label) !important;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase !important;
+  color: var(--muted) !important;
+}
+
+.hero-card h2 {
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.section-title-row {
+  border-bottom: var(--fp-seam);
+  padding-bottom: 8px;
+}
+
+/* --------------------------------------------------------------- keys --- */
+
+.primary-button {
+  border-radius: var(--fp-radius-key) !important;
+  background: var(--red) !important;
+  color: var(--red-ink) !important;
+  border: 1px solid color-mix(in srgb, var(--red) 70%, #000) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25) !important;
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  transition: transform 0.08s ease;
+}
+
+.primary-button:hover {
+  background: color-mix(in srgb, var(--red) 88%, #fff) !important;
+}
+
+.primary-button:active {
+  transform: translateY(1px);
+  box-shadow: var(--fp-well) !important;
+}
+
+.text-button {
+  border-radius: var(--fp-radius-key) !important;
+  border: var(--fp-seam) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  box-shadow: var(--fp-lip) !important;
+  color: var(--ink) !important;
+  font-family: var(--display-font);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------ rack modules ---- */
+
+.plugin-tile {
+  border-radius: var(--fp-radius) !important;
+  border: var(--fp-seam) !important;
+  background: var(--fp-panel) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  position: relative;
+  overflow: hidden;
+}
+
+/* each module carries its painted top edge, like a rack unit's front */
+.plugin-tile::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 5px;
+  background: var(--entity-instrument);
+}
+
+.plugin-tile.tile-0::before { background: var(--blue); }
+.plugin-tile.tile-1::before { background: var(--red); }
+.plugin-tile.tile-2::before { background: var(--amber); }
+.plugin-tile.tile-3::before { background: var(--ember); }
+
+.plugin-icon {
+  border-radius: var(--fp-radius-key) !important;
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+/* --------------------------------------------------- wells and meters --- */
+
+.compact-fader-rail,
+.master-output-meter-track {
+  border-radius: var(--fp-radius-key) !important;
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+  border: var(--fp-seam) !important;
+}
+
+.compact-fader-fill {
+  border-radius: var(--fp-radius-key) !important;
+  background: linear-gradient(90deg, var(--acid), color-mix(in srgb, var(--acid) 55%, var(--green))) !important;
+}
+
+.master-output-meter-bars {
+  gap: 2px;
+}
+
+/* --------------------------------------------------------------- data --- */
+
+.connection-badge,
+.master-output-meter-label,
+.compact-fader-center,
+.card-kicker + p,
+.plugin-card-button small {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------- photographed --- */
+
+/* A single grain plate over the whole faceplate: Polaroid, not plastic
+   render. Fixed so it never scrolls with the panels underneath. */
+.app-shell::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .app-shell::after {
+    opacity: 0.07;
+    mix-blend-mode: screen;
+  }
+}
+
+:root[data-theme="dark"] .app-shell::after {
+  opacity: 0.07;
+  mix-blend-mode: screen;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-item,
+  .primary-button {
+    transition: none !important;
+  }
+}
+
+/* ------------------------------------------- rail labels, tokenised ----
+   These two carried literal pale blue-grey from the glass theme, which is
+   invisible on a lit cream panel. They are labels: silkscreen colour. */
+
+.compact-control-label,
+.master-output-meter-channels,
+.master-output-meter-label {
+  color: var(--muted) !important;
+  font-family: var(--display-font);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.compact-control-center,
+.compact-fader-center {
+  color: var(--ink) !important;
+  font-family: var(--mono-font);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   The chassis rail
+   ==========================================================================
+   The left rail is not a panel — it is the structural side of the machine
+   that the module keys are mounted on. So it sits *below* the panels in
+   the material hierarchy: chassis colour, finely ribbed, with a lit lip on
+   the edge where it meets the workspace.
+   ========================================================================== */
+
+:root {
+  /* `--mono` is referenced 25 times across the host stylesheet but was
+     never defined; those labels silently fell back to the inherited face. */
+  --mono: var(--mono-font);
+  --fp-rail-label: #4a4234;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fp-rail-label: #9d978c;
+  }
+}
+
+:root[data-theme="dark"] {
+  --fp-rail-label: #9d978c;
+}
+
+.rail {
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(var(--edge-dark-rgb), 0.045) 0 1px,
+      transparent 1px 7px
+    ),
+    linear-gradient(180deg, var(--chassis), var(--chassis-deep)) !important;
+  border-right: var(--fp-seam) !important;
+  box-shadow:
+    inset -1px 0 0 rgba(var(--edge-light-rgb), 0.1),
+    2px 0 8px rgba(var(--edge-dark-rgb), 0.2) !important;
+  color: var(--ink) !important;
+}
+
+.rail-context-actions {
+  border-top: var(--fp-seam) !important;
+}
+
+.rail-context-label {
+  color: var(--fp-rail-label) !important;
+  font-family: var(--display-font) !important;
+  font-size: 0.66rem !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+}
+
+/* Secondary rail actions stay flat text on the chassis: only the section
+   keys are moulded, so the hierarchy survives the new material. */
+.rail-context-actions .nav-item,
+.rail .nav-item.controller-toggle {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: var(--fp-rail-label) !important;
+}
+
+.rail-context-actions .nav-item:hover,
+.rail .nav-item.controller-toggle:hover {
+  background: rgba(var(--edge-light-rgb), 0.06) !important;
+  color: var(--ink) !important;
+}
+
+/* The dock toggle is a button rather than a link, but it is still a surface,
+   so its chip carries the same tint as the rest. */
+.rail .nav-item.controller-toggle.dock-open .nav-mark {
+  color: var(--acid-ink) !important;
+  background: var(--nav-tint) !important;
+}
+
+.rail .nav-item.controller-toggle.dock-open {
+  color: var(--ink) !important;
+}
+
+/* the engaged dock marker is a painted edge, not a glowing pill */
+.rail .nav-item.controller-toggle.dock-open::before {
+  border-radius: 0 !important;
+  width: 3px !important;
+  height: 20px !important;
+  left: 0 !important;
+  background: var(--acid) !important;
+  box-shadow: none !important;
+}
+
+/* -------------------------------------------------- lighting selector --- */
+
+/* The switch and the status badge both anchor to the foot of the rail, so only
+   the first of them may claim the slack: two `margin-top: auto` in one flex
+   column split the free space between them, which left the switch hanging at
+   mid height with the badge floating below it. */
+.lighting-switch {
+  margin-top: auto;
+  padding: 12px 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rail .lighting-switch ~ .connection-badge {
+  margin-top: 0 !important;
+}
+
+.lighting-switch-label {
+  padding: 0 2px;
+  font-family: var(--display-font);
+  font-weight: 700;
+  font-size: 0.62rem;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  color: var(--fp-rail-label);
+}
+
+/* One moulded three-position selector, not three loose buttons. The housing is
+   a raised plate: the chosen position sinks into it, the way the rail keys do.
+   As a well it would have had to rise to mean "chosen", contradicting every
+   other control on the machine. */
+.lighting-switch-keys {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  box-shadow: var(--fp-lip), var(--fp-drop);
+  overflow: hidden;
+}
+
+.lighting-key {
+  appearance: none;
+  border: 0;
+  border-left: var(--fp-seam);
+  padding: 6px 2px 5px;
+  background: transparent;
+  color: var(--fp-rail-label);
+  font-family: var(--mono-font);
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.lighting-key:first-child {
+  border-left: 0;
+}
+
+.lighting-key:hover {
+  color: var(--ink);
+  background: rgba(var(--edge-light-rgb), 0.07);
+}
+
+/* the selected position is the one that is pushed in, and it says which one
+   it is with a painted edge — pressed and engaged are both down */
+.lighting-key.active {
+  background: var(--panel-inset);
+  color: var(--ink);
+  box-shadow: var(--fp-well), inset 0 -2px 0 var(--acid);
+}
+
+.lighting-key:active {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+.lighting-key:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: -2px;
+}
+
+/* Collapsed rail: three positions across 54px crushed the labels into each
+   other, so the selector stands the switch on end and drops its own caption —
+   the nav around it is already down to icons at this width. */
+@media (max-width: 980px) {
+  .lighting-switch-label {
+    display: none;
+  }
+
+  .lighting-switch-keys {
+    grid-template-columns: 1fr;
+  }
+
+  .lighting-key {
+    border-left: 0;
+    border-top: var(--fp-seam);
+    padding: 5px 2px 4px;
+  }
+
+  .lighting-key:first-child {
+    border-top: 0;
+  }
+}
+
+/* ==========================================================================
+   Spacing — panels need an interior
+   ==========================================================================
+   Promoting a container to a panel gives it an edge, and an edge needs
+   air behind it. `.section-block` and `.plugin-card-shell` were invisible
+   wrappers with zero padding; as panels they pressed their contents into
+   the moulding. One scale, applied where the material changed.
+   ========================================================================== */
+
+:root {
+  --fp-pad: 20px;        /* panel interior                       */
+  --fp-pad-tight: 16px;  /* dense panels: module cards           */
+  --fp-head-y: 12px;     /* panel head, vertical                 */
+}
+
+.section-block {
+  padding: var(--fp-pad) !important;
+}
+
+/* The section header becomes a proper panel head: it spans the full
+   moulding, carries the seam edge to edge, and puts the label on the same
+   left line as the cards below it. */
+.section-block > .section-title-row {
+  margin: calc(var(--fp-pad) * -1) calc(var(--fp-pad) * -1) var(--fp-pad) !important;
+  padding: var(--fp-head-y) var(--fp-pad) calc(var(--fp-head-y) - 2px) !important;
+  border-bottom: var(--fp-seam) !important;
+  background: linear-gradient(180deg, var(--glass), transparent);
+}
+
+/* The card shell is a wrapper, not a second panel — one module, one edge. */
+.plugin-card-shell {
+  background: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* The wide right gutter reserves room for the shell's overlay control. A
+   Plugin Manager card carries the same class but has no such control, so on
+   those it was 64px of dead space with the key gang stopping short of the
+   card edge. */
+.plugin-card:not(.plugin-manager-card),
+.plugin-card-button {
+  padding: var(--fp-pad-tight) 64px var(--fp-pad-tight) var(--fp-pad-tight) !important;
+}
+
+.plugin-manager-card {
+  padding: var(--fp-pad-tight) !important;
+}
+
+/* ==========================================================================
+   The plugin picker, the PLAY rail and the readout
+   ========================================================================== */
+
+/* ------------------------------------------------------------- dialog --- */
+
+.preset-modal-backdrop,
+.modal-dialog-backdrop {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background: rgba(var(--edge-dark-rgb), 0.62) !important;
+}
+
+.preset-modal,
+.modal-dialog {
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), 0 12px 32px rgba(var(--edge-dark-rgb), 0.45) !important;
+  color: var(--ink) !important;
+}
+
+/* the dialog head is a panel head: full bleed, seam edge to edge */
+.preset-modal-header,
+.modal-dialog-header {
+  padding: var(--fp-head-y) var(--fp-pad) !important;
+  border-bottom: var(--fp-seam) !important;
+  background: linear-gradient(180deg, var(--glass), transparent);
+}
+
+.modal-dialog-heading .eyebrow {
+  font-family: var(--display-font);
+  font-weight: 700;
+  font-size: 0.66rem;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  color: var(--muted) !important;
+}
+
+.preset-modal-header h2,
+.modal-dialog-heading h2 {
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--ink) !important;
+}
+
+.modal-dialog-message,
+.rack-instrument-picker-help {
+  padding-left: var(--fp-pad);
+  padding-right: var(--fp-pad);
+  color: var(--muted) !important;
+}
+
+.preset-modal-close,
+.modal-dialog-close {
+  border-radius: var(--fp-radius-key) !important;
+  border: var(--fp-seam) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  box-shadow: var(--fp-lip) !important;
+  color: var(--ink) !important;
+}
+
+/* -------------------------------------------------------- module rows --- */
+
+.play-plugin-selector,
+.modal-list,
+.rack-instrument-picker-list {
+  padding: var(--fp-pad) !important;
+  gap: 8px !important;
+}
+
+.plugin-picker-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--fp-radius) !important;
+  border: var(--fp-seam) !important;
+  background: var(--fp-panel) !important;
+  box-shadow: var(--fp-lip) !important;
+  color: var(--ink) !important;
+}
+
+/* the module's painted edge carries its state, so the row never needs a glow */
+.plugin-picker-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--line);
+  z-index: 2;
+}
+
+.plugin-picker-card.active::before,
+.plugin-picker-card[aria-current="true"]::before {
+  background: var(--red);
+}
+
+.plugin-picker-card:hover {
+  border-color: var(--acid) !important;
+}
+
+.plugin-picker-card.inactive {
+  background: var(--panel-inset) !important;
+  color: var(--muted) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+/* Artwork is the module's face, not a background for text: hold it back so
+   the name and status stay first.
+
+   It also fills the module now. It used to sit inset 3px behind its own 12px
+   border, which drew a rounded frame inside a square card — the card's edge
+   clips it, so the inner one was only ever a second, rounder outline. */
+.plugin-picker-banner,
+.plugin-picker-shade {
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+.plugin-picker-banner {
+  opacity: 0.3 !important;
+}
+
+.plugin-picker-shade {
+  background: linear-gradient(
+    90deg,
+    var(--paper) 0%,
+    color-mix(in srgb, var(--paper) 88%, transparent) 46%,
+    color-mix(in srgb, var(--paper) 30%, transparent) 100%
+  ) !important;
+}
+
+.plugin-picker-icon {
+  border-radius: var(--fp-radius-key) !important;
+  border: var(--fp-seam) !important;
+}
+
+.play-plugin-number {
+  font-family: var(--mono-font) !important;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted) !important;
+}
+
+.play-plugin-copy strong {
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink) !important;
+}
+
+/* --------------------------------------------------------- PLAY rail --- */
+
+.plugin-surface-toolbar {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(var(--edge-dark-rgb), 0.05) 0 1px,
+      transparent 1px 6px
+    ),
+    linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border-bottom: var(--fp-seam) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  color: var(--ink) !important;
+}
+
+.plugin-surface-shell,
+.plugin-frame {
+  background: var(--chassis) !important;
+}
+
+.plugin-surface-toolbar button {
+  border-radius: var(--fp-radius-key) !important;
+  border: var(--fp-seam) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  box-shadow: var(--fp-lip) !important;
+  color: var(--ink) !important;
+  font-family: var(--display-font);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.plugin-surface-toolbar button:hover {
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+}
+
+.plugin-surface-identity .card-kicker {
+  color: var(--muted) !important;
+}
+
+/* ==========================================================================
+   Readout legibility
+   ==========================================================================
+   The programme name is read at a metre, on a dark stage, by someone whose
+   hands are busy. Three things were fighting it: the pixel grid was dense
+   enough to eat the glyphs, the bloom smeared small type, and the plugin
+   name used `--muted` — a *panel* token — inside an LCD, where it has no
+   contrast against the glass.
+   ========================================================================== */
+
+.now-playing {
+  padding: 12px 16px !important;
+}
+
+.now-playing::after {
+  opacity: calc(var(--lcd-grid-op) * 0.45);
+}
+
+.now-playing .eyebrow {
+  font-size: 0.6rem;
+  letter-spacing: 0.2em;
+  color: var(--lcd-phos-dim) !important;
+}
+
+.now-playing strong {
+  display: block;
+  margin: 3px 0 1px;
+  font-size: 1.12rem;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+  text-shadow: 0 0 4px var(--lcd-bloom);
+}
+
+/* the secondary name belongs to the LCD, so it takes an LCD colour */
+.now-playing .muted-inline {
+  color: var(--lcd-phos-dim) !important;
+  font-family: var(--mono-font);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+}
+
+/* ==========================================================================
+   Touch controller — the surface that is actually played
+   ==========================================================================
+   Everywhere else in the host the faceplate decides the material. Here it
+   only decides the material of the *chassis*: the keybed keeps its own.
+
+   The keybed has its own two sets, and glare is why. Cream keys under stage
+   lighting are the brightest thing on the screen, sitting directly below the
+   panel you are trying to read. So STAGE is a dark-key instrument rather than
+   the daylight keys dimmed — the naturals stay clearly lighter than the
+   sharps, which is the relationship that makes a keyboard readable at all.
+
+   The rest follows the house rules: no blur, radius 3 on panels and 2 on
+   keys, silkscreen for labels, monospace for data, and one red block.
+   ========================================================================== */
+
+/* The keybed has a daylight set and a stage set, and the reason is glare
+   rather than theming. A cream keybed is a lit slab at the bottom of a dark
+   screen: on a stage it is the brightest thing in front of you while the panel
+   you are reading sits above it. The stage set is a dark-key instrument, which
+   is a thing that exists — not the daylight keys with a filter over them.
+
+   What does NOT change is the relationship: the naturals stay clearly lighter
+   than the sharps, because that is how a keyboard is read at a glance. */
+:root {
+  --key-white: linear-gradient(180deg, #fbf8f2 0%, #f0eade 58%, #ddd4c2 100%);
+  --key-white-ink: #6f6553;
+  --key-white-lip: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --key-white-well: inset 0 -14px 20px rgba(92, 76, 54, 0.14);
+  --key-black: linear-gradient(180deg, #3b3a37 0%, #24231f 42%, #121210 100%);
+  --key-black-ink: #b4aa96;
+  --key-black-edge: #0b0b09;
+  --key-seam: #a89e8b;
+  --key-shadow: 0 8px 12px rgba(24, 18, 10, 0.42);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --key-white: linear-gradient(180deg, #4a4d53 0%, #3a3d43 58%, #2b2e33 100%);
+    --key-white-ink: #a9aeb6;
+    --key-white-lip: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    --key-white-well: inset 0 -14px 20px rgba(0, 4, 8, 0.42);
+    --key-black: linear-gradient(180deg, #1b1d21 0%, #131417 42%, #08090b 100%);
+    --key-black-ink: #7c828c;
+    --key-black-edge: #050607;
+    --key-seam: #5a5f67;
+    --key-shadow: 0 8px 12px rgba(0, 3, 6, 0.6);
+  }
+}
+
+:root[data-theme="dark"] {
+  --key-white: linear-gradient(180deg, #4a4d53 0%, #3a3d43 58%, #2b2e33 100%);
+  --key-white-ink: #a9aeb6;
+  --key-white-lip: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  --key-white-well: inset 0 -14px 20px rgba(0, 4, 8, 0.42);
+  --key-black: linear-gradient(180deg, #1b1d21 0%, #131417 42%, #08090b 100%);
+  --key-black-ink: #7c828c;
+  --key-black-edge: #050607;
+  --key-seam: #5a5f67;
+  --key-shadow: 0 8px 12px rgba(0, 3, 6, 0.6);
+}
+
+/* ------------------------------------------------------- the enclosure --- */
+
+/* No interior here, unlike every other panel: the keybed is the instrument,
+   not content mounted on one, and 16px a side cost 34px of width and 34 of
+   height — on a 197px dock that is a sixth of the key height. The enclosure's
+   own seam is the frame; the keys run to it. */
+.touch-instrument {
+  padding: 0 !important;
+  background: linear-gradient(180deg, var(--chassis), var(--chassis-deep)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-well) !important;
+}
+
+.controller-surface-active .touch-instrument {
+  padding: 0 !important;
+  background: var(--chassis-deep) !important;
+  border: 0 !important;
+  border-top: var(--fp-seam) !important;
+  border-radius: 0 !important;
+  box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.1) !important;
+}
+
+/* The keybed is set into the chassis, so it reads as a well rather than as a
+   card floating on it: seam around, shadow falling inward. */
+.piano-keyboard {
+  background: var(--chassis-deep) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: inset 0 2px 6px rgba(var(--edge-dark-rgb), 0.45) !important;
+}
+
+.controller-surface-active .piano-keyboard {
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+/* ------------------------------------------------------------- the keys --- */
+
+.piano-key.white {
+  padding-bottom: 15px !important;
+  color: var(--key-white-ink) !important;
+  background: var(--key-white) !important;
+  border-right: 1px solid var(--key-seam) !important;
+  border-radius: 0 0 var(--fp-radius-key) var(--fp-radius-key) !important;
+  box-shadow: var(--key-white-lip), var(--key-white-well) !important;
+}
+
+.piano-key.black {
+  padding-bottom: 12px !important;
+  color: var(--key-black-ink) !important;
+  background: var(--key-black) !important;
+  border: 1px solid var(--key-black-edge) !important;
+  border-radius: 0 0 var(--fp-radius-key) var(--fp-radius-key) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    var(--key-shadow) !important;
+}
+
+.piano-key span {
+  font-family: var(--mono) !important;
+  letter-spacing: 0.02em;
+}
+
+/* A struck key is lit from under the plastic, and it is the same ink the
+   meters use — a played note is data, not an alarm. */
+.piano-key.white.active {
+  color: var(--red-ink) !important;
+  background: linear-gradient(180deg, var(--acid), color-mix(in srgb, var(--acid) 78%, #000)) !important;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.3) !important;
+}
+
+.piano-key.black.active {
+  color: var(--red-ink) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--acid) 88%, #fff), var(--acid)) !important;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.35) !important;
+}
+
+/* ------------------------------------------------------------- the pads --- */
+
+.touch-pad {
+  color: var(--ink) !important;
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+.touch-pad > span,
+.touch-pad > small {
+  color: var(--muted) !important;
+  font-family: var(--mono) !important;
+  letter-spacing: var(--fp-track);
+}
+
+.touch-pad > strong {
+  font-family: var(--display-font) !important;
+  font-weight: 700;
+}
+
+/* Struck pads go down into the panel rather than lighting up like a lamp. */
+.touch-pad.active {
+  color: var(--red-ink) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--acid) 88%, #000), var(--acid)) !important;
+  border-color: var(--acid) !important;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.34) !important;
+  transform: translateY(1px) scale(0.996) !important;
+}
+
+.touch-pad.active > span,
+.touch-pad.active > small {
+  color: rgba(255, 255, 255, 0.72) !important;
+}
+
+/* --------------------------------------------------------- the nameplate --- */
+
+/* The empty panel above the dock is the front of the machine, so it gets the
+   chassis vents and a silkscreened legend rather than a glow. */
+.touch-controller-stage {
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(var(--edge-dark-rgb), 0.04) 0 1px,
+      transparent 1px 7px
+    ),
+    linear-gradient(180deg, var(--chassis), var(--chassis-deep)) !important;
+}
+
+.touch-controller-stage > span {
+  color: var(--fp-rail-label) !important;
+  font-family: var(--display-font) !important;
+  font-size: var(--fp-label) !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+}
+
+.touch-controller-stage > strong {
+  color: var(--ink);
+  font-family: var(--display-font) !important;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.touch-controller-stage > small {
+  color: var(--muted) !important;
+  font-family: var(--mono) !important;
+  font-size: 0.68rem !important;
+  letter-spacing: 0.06em;
+}
+
+.controller-surface-active .touch-controller {
+  background: var(--chassis) !important;
+}
+
+/* ------------------------------------------------------------ the dockbar --- */
+
+.touch-controller-dockbar {
+  padding: 6px 10px !important;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(var(--edge-dark-rgb), 0.045) 0 1px,
+      transparent 1px 7px
+    ),
+    linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border-top: var(--fp-seam) !important;
+  box-shadow: var(--fp-lip) !important;
+}
+
+/* The selector still carried its old wrapper — a dark, rounded, 4px-padded
+   pill around the pair — which on the cream dockbar drew a frame around two
+   keys that already have edges of their own. In this row the two positions are
+   keys among keys, so the group is only a group. The drawer keeps the joined
+   selector, where there is room for one. */
+.touch-controller-dockbar .touch-mode-switch {
+  padding: 0 !important;
+  background: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.touch-controller-dockbar > button,
+.touch-controller-dockbar .touch-mode-switch button {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  font-family: var(--display-font) !important;
+  font-size: 0.68rem !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+}
+
+/* Engaged means pushed in: the lip goes, the well arrives, and the position
+   is painted on its edge — the same gesture as the rail keys. */
+.touch-controller-dockbar > button.active,
+.touch-controller-dockbar .touch-mode-switch button.active {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border-color: var(--line) !important;
+  box-shadow:
+    inset 0 2px 4px rgba(var(--edge-dark-rgb), 0.28),
+    inset 3px 0 0 var(--acid) !important;
+}
+
+.touch-controller-dockbar > button:disabled {
+  opacity: 0.42 !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.touch-controller-range-summary {
+  color: var(--muted) !important;
+  font-family: var(--mono) !important;
+  font-size: 0.6rem !important;
+  letter-spacing: 0.08em !important;
+}
+
+/* ---------------------------------------------------- the range navigator --- */
+
+.touch-keyboard-navigator {
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border-bottom: var(--fp-seam) !important;
+}
+
+.touch-keyboard-navigator-label {
+  color: var(--fp-rail-label) !important;
+  font-family: var(--mono) !important;
+}
+
+.touch-keyboard-navigator-track {
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.touch-keyboard-navigator-whites {
+  opacity: 0.5 !important;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent calc(100% / 52 - 1px),
+    rgba(var(--edge-dark-rgb), 0.4) calc(100% / 52 - 1px),
+    rgba(var(--edge-dark-rgb), 0.4) calc(100% / 52)
+  ) !important;
+}
+
+.touch-keyboard-navigator-black {
+  background: rgba(var(--edge-dark-rgb), 0.62) !important;
+}
+
+/* The window is a moulded cursor sliding in its slot, not a neon selection. */
+.touch-keyboard-navigator-window {
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: 1px solid var(--acid) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(var(--edge-light-rgb), 0.8),
+    0 2px 4px rgba(var(--edge-dark-rgb), 0.28) !important;
+}
+
+.touch-keyboard-navigator-window button {
+  color: var(--acid) !important;
+}
+
+/* ------------------------------------------------------- the menu button --- */
+
+.touch-controller-menu-button {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* ==========================================================================
+   Settings — a drawer of hardware, not a sheet of glass
+   ========================================================================== */
+
+.touch-controller-menu-backdrop {
+  background: rgba(var(--edge-dark-rgb), 0.42) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.touch-controller-menu {
+  padding: var(--fp-pad) !important;
+  gap: 18px !important;
+  color: var(--ink) !important;
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), 0 8px 24px rgba(var(--edge-dark-rgb), 0.3) !important;
+}
+
+/* -- header -- */
+
+.touch-controller-menu > header {
+  padding-bottom: 14px;
+  border-bottom: var(--fp-seam);
+}
+
+.touch-controller-menu > header .eyebrow {
+  color: var(--fp-rail-label) !important;
+  font-family: var(--display-font) !important;
+  font-size: var(--fp-label) !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+}
+
+.touch-controller-menu > header strong {
+  color: var(--ink) !important;
+  font-family: var(--display-font) !important;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.touch-controller-menu > header small {
+  color: var(--muted) !important;
+  font-family: var(--mono) !important;
+  font-size: 0.66rem !important;
+  letter-spacing: 0.05em;
+}
+
+.touch-controller-menu > header > button {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+/* -- the layout selector: one moulded two-position switch -- */
+
+/* Raised housing, sunken selection — see BUTTON STATES at the top. This was
+   the one control on the machine where a pushed-in position meant "not this
+   one", which made the same gesture read backwards from the rail. */
+.touch-controller-menu .touch-mode-switch {
+  gap: 0 !important;
+  padding: 0 !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  overflow: hidden;
+}
+
+.touch-controller-menu .touch-mode-switch button {
+  color: var(--muted) !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-left: var(--fp-seam) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  font-family: var(--display-font) !important;
+  font-size: 0.72rem !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+}
+
+.touch-controller-menu .touch-mode-switch button:first-child {
+  border-left: 0 !important;
+}
+
+/* Engaged is down, and the painted edge says it stayed down on purpose. */
+.touch-controller-menu .touch-mode-switch button.active {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--acid) !important;
+}
+
+.touch-controller-menu .touch-mode-switch button:active {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+/* -- silkscreen legends and monospaced readouts -- */
+
+.touch-octave-control > span,
+.touch-velocity-control > span,
+.touch-key-width-control span,
+.touch-pad-matrix-heading span {
+  color: var(--fp-rail-label) !important;
+  font-family: var(--display-font) !important;
+  font-size: var(--fp-label) !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+}
+
+.touch-octave-control output,
+.touch-velocity-control output,
+.touch-key-width-control output,
+.touch-pad-matrix-heading output {
+  color: var(--ink) !important;
+  font-family: var(--mono) !important;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0 !important;
+}
+
+/* -- sliders: a cap running in a cut slot -- */
+
+.touch-controller-menu input[type="range"],
+.touch-velocity-control input[type="range"],
+.touch-key-width-control input[type="range"] {
+  height: 22px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent !important;
+}
+
+.touch-controller-menu input[type="range"]::-webkit-slider-runnable-track,
+.touch-velocity-control input[type="range"]::-webkit-slider-runnable-track,
+.touch-key-width-control input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: 2px;
+  box-shadow: var(--fp-well);
+}
+
+.touch-controller-menu input[type="range"]::-moz-range-track,
+.touch-velocity-control input[type="range"]::-moz-range-track,
+.touch-key-width-control input[type="range"]::-moz-range-track {
+  height: 6px;
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: 2px;
+  box-shadow: var(--fp-well);
+}
+
+.touch-controller-menu input[type="range"]::-webkit-slider-thumb,
+.touch-velocity-control input[type="range"]::-webkit-slider-thumb,
+.touch-key-width-control input[type="range"]::-webkit-slider-thumb {
+  width: 14px;
+  height: 20px;
+  margin-top: -8px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow:
+    inset 0 1px 0 rgba(var(--edge-light-rgb), 0.85),
+    inset 0 0 0 1px rgba(var(--edge-dark-rgb), 0.05),
+    0 2px 4px rgba(var(--edge-dark-rgb), 0.3);
+}
+
+.touch-controller-menu input[type="range"]::-moz-range-thumb,
+.touch-velocity-control input[type="range"]::-moz-range-thumb,
+.touch-key-width-control input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 20px;
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: 0 2px 4px rgba(var(--edge-dark-rgb), 0.3);
+}
+
+/* -- stepper and preset keys -- */
+
+.touch-octave-control button,
+.touch-key-width-control button {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  font-family: var(--display-font) !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+}
+
+.touch-key-width-control button.active {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border-color: var(--line) !important;
+  box-shadow:
+    inset 0 2px 4px rgba(var(--edge-dark-rgb), 0.28),
+    inset 3px 0 0 var(--acid) !important;
+}
+
+/* -- the pad matrix picker: a grid of cut cells -- */
+
+.touch-pad-matrix-picker {
+  padding: 3px;
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+}
+
+.touch-pad-matrix-picker button {
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: 1px !important;
+}
+
+.touch-pad-matrix-picker button.selected {
+  background: color-mix(in srgb, var(--acid) 34%, var(--paper)) !important;
+  border-color: var(--acid) !important;
+}
+
+.touch-pad-matrix-picker button[aria-selected="true"] {
+  background: var(--acid) !important;
+  box-shadow: none !important;
+}
+
+/* -- performance and exit -- */
+
+.touch-performance-actions {
+  padding-top: 16px;
+  border-top: var(--fp-seam);
+}
+
+.touch-performance-actions button {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  font-family: var(--display-font) !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+}
+
+.touch-performance-actions .sustain.active {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  box-shadow:
+    inset 0 2px 4px rgba(var(--edge-dark-rgb), 0.28),
+    inset 3px 0 0 var(--acid) !important;
+}
+
+/* Panic is the one red block on this surface: it stops every note, and it is
+   the only control here you press because something has gone wrong. */
+.touch-performance-actions .touch-panic {
+  color: var(--red-ink) !important;
+  background: var(--red) !important;
+  border-color: var(--red) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.24) !important;
+}
+
+.touch-main-navigation,
+.touch-controller-exit {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  font-family: var(--display-font) !important;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.touch-main-navigation {
+  margin-top: 16px;
+  border-top: var(--fp-seam);
+}
+
+/* Leaving is not an error, so the exit is a plain key with the red painted on
+   its edge rather than a red panel competing with Panic. */
+.touch-controller-exit {
+  color: var(--ink) !important;
+  box-shadow:
+    var(--fp-lip),
+    var(--fp-drop),
+    inset 3px 0 0 var(--red) !important;
+}
+
+.touch-instrument-message svg {
+  color: var(--red) !important;
+}
+
+.touch-instrument-message span {
+  color: var(--muted) !important;
+  font-family: var(--mono) !important;
+  font-size: 0.72rem !important;
+}
+
+/* ------------------------------------------------- settings tab strip ---- */
+
+/* Still on the cyan palette: #7d949e labels and a #5ce2f5 selection measured
+   1.78:1 and 1.16:1 against the daylight chassis — invisible. The strip is a
+   row of index tabs on the panel edge, so it takes silkscreen labels and marks
+   the selected one by painting its edge rather than by tinting the text. */
+
+.settings-tabs {
+  gap: 0 !important;
+  padding-bottom: 0 !important;
+  border-bottom: 0 !important;
+  scrollbar-color: rgba(var(--ink-rgb), 0.28) transparent !important;
+}
+
+.settings-tabs::-webkit-scrollbar-thumb {
+  background: rgba(var(--ink-rgb), 0.28) !important;
+  border-radius: 1px !important;
+}
+
+/* `--muted` is calibrated against the panel; the strip sits on the bare
+   chassis, where it falls to 3.2:1. The silkscreen ink is the one mixed for
+   this surface and clears 5.5:1 on it. */
+/* Transport keys, not index tabs: chunky, butted against each other, and the
+   engaged one goes down and stays down like every other latching control. */
+.settings-tabs button {
+  min-height: 40px !important;
+  padding: 11px 18px !important;
+  color: var(--fp-rail-label) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-left-width: 0 !important;
+  border-bottom: var(--fp-seam) !important;
+  box-shadow: var(--fp-lip) !important;
+  font-family: var(--display-font) !important;
+  font-weight: 700;
+  font-size: var(--fp-label) !important;
+  letter-spacing: var(--fp-track) !important;
+}
+
+.settings-tabs button:first-child {
+  border-left-width: 1px !important;
+  border-radius: var(--fp-radius-key) 0 0 var(--fp-radius-key) !important;
+}
+
+.settings-tabs button:last-child {
+  border-radius: 0 var(--fp-radius-key) var(--fp-radius-key) 0 !important;
+}
+
+.settings-tabs button:hover {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+}
+
+.settings-tabs button:active,
+.settings-tabs button.active {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.settings-tabs button.active {
+  box-shadow: var(--fp-well), inset 0 -3px 0 var(--acid) !important;
+}
+
+/* ==================================================== momentary pressing ===
+   Every key sinks while the finger is down. This is what makes the rule
+   legible without a legend: you press a control, it goes in, and the ones
+   that stay in are the ones that are engaged. */
+
+.nav-item:active,
+.touch-controller-dockbar > button:not(:disabled):active,
+.touch-controller-dockbar .touch-mode-switch button:active,
+.touch-controller-menu > header > button:active,
+.touch-performance-actions button:not(:disabled):active,
+.touch-octave-control button:not(:disabled):active,
+.touch-key-width-control button:active,
+.touch-main-navigation:active,
+.touch-controller-exit:active,
+.touch-controller-menu-button:active {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+  transform: none !important;
+}
+
+/* Panic keeps its block while pressed — the colour is the point of it — so it
+   sinks by losing its lit lip and gaining the recess instead. */
+.touch-performance-actions .touch-panic:not(:disabled):active {
+  background: var(--red) !important;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* Disabled is flat: nothing to press, so no depth in either direction. */
+.touch-controller-dockbar > button:disabled,
+.touch-performance-actions button:disabled,
+.touch-octave-control button:disabled {
+  opacity: 0.42 !important;
+  background: var(--panel-inset) !important;
+  box-shadow: none !important;
+}
+
+/* ------------------------------------------------------------ fader caps --- */
+
+/* The cap is a moulded grip running in the slot: panel face, lit top lip, a
+   seam and a shadow it casts into the track. The dark line across it is the
+   pointer, and it is what you actually read the position from.
+
+   It gets its own tokens rather than borrowing the panel's, because on the
+   stage panel a cap made of panel colours is a dark grey part on a darker grey
+   slot — nothing separates them, and the lit lip is 0.09 alpha there, so it
+   cannot do the separating either. A real machine solves this the same way:
+   the cap is a machined part, lighter than the plate it runs on, and it is the
+   pointer that goes dark. So in DAYLIGHT the cap is panel-coloured with a dark
+   pointer, and under STAGE it is brushed metal with the pointer still dark —
+   the one place the interface does not simply restate the panel tokens. */
+
+:root {
+  --cap-face: linear-gradient(180deg, var(--glass), var(--paper));
+  --cap-edge: var(--line);
+  --cap-mark: rgba(var(--ink-rgb), 0.62);
+  --cap-lip: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.85);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --cap-face: linear-gradient(180deg, #8b929b, #5d636c 62%, #464b53);
+    --cap-edge: #9aa1aa;
+    --cap-mark: rgba(10, 12, 15, 0.72);
+    --cap-lip: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  }
+}
+
+:root[data-theme="dark"] {
+  --cap-face: linear-gradient(180deg, #8b929b, #5d636c 62%, #464b53);
+  --cap-edge: #9aa1aa;
+  --cap-mark: rgba(10, 12, 15, 0.72);
+  --cap-lip: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.compact-fader input[type="range"]::-webkit-slider-thumb {
+  width: 13px;
+  height: 20px;
+  margin-top: -7px;
+  background:
+    linear-gradient(90deg, transparent 45%, var(--cap-mark) 46% 54%, transparent 55%),
+    var(--cap-face) !important;
+  border: 1px solid var(--cap-edge) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow:
+    var(--cap-lip),
+    0 2px 4px rgba(var(--edge-dark-rgb), 0.4) !important;
+  transition: box-shadow 120ms ease, filter 120ms ease;
+}
+
+.compact-fader input[type="range"]::-moz-range-thumb {
+  width: 13px;
+  height: 20px;
+  background:
+    linear-gradient(90deg, transparent 45%, var(--cap-mark) 46% 54%, transparent 55%),
+    var(--cap-face) !important;
+  border: 1px solid var(--cap-edge) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow:
+    var(--cap-lip),
+    0 2px 4px rgba(var(--edge-dark-rgb), 0.4) !important;
+}
+
+/* Hover lightens the face and nothing moves, same as a key. */
+.compact-fader input[type="range"]:hover::-webkit-slider-thumb,
+.compact-fader input[type="range"]:focus-visible::-webkit-slider-thumb {
+  filter: brightness(1.12) !important;
+}
+
+/* Held, the cap is pressed down against the panel: its shadow shortens. It
+   does not sink like a key — a fader is grabbed, not pushed. */
+.compact-fader input[type="range"]:active::-webkit-slider-thumb {
+  filter: none !important;
+  box-shadow:
+    var(--cap-lip),
+    0 1px 2px rgba(var(--edge-dark-rgb), 0.5) !important;
+}
+
+.compact-fader-center {
+  background: rgba(var(--ink-rgb), 0.3) !important;
+}
+
+/* ==========================================================================
+   The boot surface — the machine before it wakes
+   ==========================================================================
+   Two real defects in the old halo, not matters of taste:
+
+   1. It ended in `transparent`, which is `rgba(0, 0, 0, 0)`. Fading a colour
+      to that interpolates towards transparent *black*, so the middle of the
+      ramp picks up a dirty grey cast and the glow reads blotchy. Ending on
+      the same colour at zero alpha keeps the hue constant the whole way and
+      lets the premultiplied interpolation do what it is for.
+
+   2. One stop is a linear ramp, and the eye reads a linear ramp as a disc
+      with an edge. Light does not fall off linearly — it falls off roughly
+      as a Gaussian, so the stops below follow alpha(t) = exp(-4.6·t²),
+      sampled every tenth of the radius. That is the whole trick: the same
+      peak brightness, spread the way light actually spreads.
+
+   What is left after those two is 8-bit banding, which no gradient can fix
+   because it is a quantisation artefact. It is dithered by the grain plate,
+   the same one the app shell wears.
+   ========================================================================== */
+
+:root {
+  --boot-glow-rgb: 255, 253, 247;
+  --boot-glow: 0.5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --boot-glow-rgb: 124, 165, 224;
+    --boot-glow: 0.15;
+  }
+}
+
+:root[data-theme="dark"] {
+  --boot-glow-rgb: 124, 165, 224;
+  --boot-glow: 0.15;
+}
+
+.pairing-shell {
+  position: relative;
+  color: var(--ink) !important;
+  background:
+    radial-gradient(
+      circle 58vmax at 50% 44%,
+      rgba(var(--boot-glow-rgb), calc(var(--boot-glow) * 1)) 0%,
+      rgba(var(--boot-glow-rgb), calc(var(--boot-glow) * 0.954)) 10%,
+      rgba(var(--boot-glow-rgb), calc(var(--boot-glow) * 0.831)) 20%,
+      rgba(var(--boot-glow-rgb), calc(var(--boot-glow) * 0.661)) 30%,
+      rgba(var(--boot-glow-rgb), calc(var(--boot-glow) * 0.48)) 40%,
+      rgba(var(--boot-glow-rgb), calc(var(--boot-glow) * 0.316)) 50%,
+      rgba(var(--boot-glow-rgb), calc(var(--boot-glow) * 0.19)) 60%,
+      rgba(var(--boot-glow-rgb), calc(var(--boot-glow) * 0.104)) 70%,
+      rgba(var(--boot-glow-rgb), calc(var(--boot-glow) * 0.052)) 80%,
+      rgba(var(--boot-glow-rgb), calc(var(--boot-glow) * 0.024)) 90%,
+      rgba(var(--boot-glow-rgb), 0) 100%
+    ),
+    var(--chassis) !important;
+}
+
+/* The dither plate: the shell is not an app shell, so it carries its own. */
+.pairing-shell::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .pairing-shell::after {
+    opacity: 0.07;
+    mix-blend-mode: screen;
+  }
+}
+
+:root[data-theme="dark"] .pairing-shell::after {
+  opacity: 0.07;
+  mix-blend-mode: screen;
+}
+
+/* The PIN panel is a panel like any other. */
+.pairing-panel {
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+/* ---------------------------------------------------------- the loader --- */
+
+/* The mark's limbs carry their own inks and fill themselves, so there is no
+   material to override here — only the copy underneath them. */
+
+.rf-async-loader__copy strong {
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.rf-async-loader__copy small {
+  color: var(--muted);
+  font-family: var(--mono-font);
+  letter-spacing: 0.05em;
+}
+
+/* ==========================================================================
+   Action keys
+   ==========================================================================
+   `.rf-button` is the shared key primitive and had never been re-materialised
+   — it was still the backlit cyan control, which is why every card in the
+   Plugin Manager still looked like the old host. It follows the same states as
+   the rail and dockbar keys: raised at rest, sunken while pressed.
+
+   Neither variant is a coloured block. Red is one block per screen and it
+   belongs to LIVE, so a Remove key in every card would spend that rule eight
+   times over; the recommended action and the destructive one are ordinary keys
+   that carry their meaning on a painted edge instead.
+   ========================================================================== */
+
+.rf-button {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  font-family: var(--display-font) !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+  transform: none !important;
+}
+
+.rf-button--primary {
+  box-shadow: var(--fp-lip), var(--fp-drop), inset 3px 0 0 var(--acid) !important;
+}
+
+.rf-button--danger {
+  box-shadow: var(--fp-lip), var(--fp-drop), inset 3px 0 0 var(--red) !important;
+}
+
+.rf-button--ghost {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+@media (hover: hover) {
+  .rf-button:hover:not(:disabled) {
+    background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+    transform: none !important;
+  }
+}
+
+.rf-button:active:not(:disabled) {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+  transform: none !important;
+}
+
+.rf-button--primary:active:not(:disabled) {
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--acid) !important;
+}
+
+.rf-button--danger:active:not(:disabled) {
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--red) !important;
+}
+
+.rf-button:disabled {
+  opacity: 0.42 !important;
+  background: var(--panel-inset) !important;
+  box-shadow: none !important;
+}
+
+.rf-button:focus-visible {
+  outline: 2px solid var(--acid) !important;
+  outline-offset: 2px !important;
+}
+
+/* --------------------------------------------------------- key banks ---- */
+
+/* The four card actions are one gang, not four loose controls: a single
+   housing with a lit lip across the top, the keys butted against each other
+   and told apart by the seam between them. Squarer, too — a synth key is a cap
+   you hit, not a strip of text.
+
+   The seams are 1px gaps over the housing's own colour rather than borders on
+   the keys. The gang folds to two rows when the card is narrow, and CSS cannot
+   know how many columns `auto-fit` produced, so per-key borders would put a
+   seam on the outside of a wrapped row. Gaps are right whichever way it lands.
+
+   Horizontally the gang spans the card and the four keys share the width
+   evenly, so the bank reads as one strip mounted across the panel. */
+.plugin-manager-card-actions {
+  gap: 1px !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  background: var(--line);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+  overflow: hidden;
+}
+
+/* A gang does not wrap. `auto-fit` folded it to three keys and a hole, which
+   is not a thing that exists on a panel, so the row is fixed at four and the
+   card decides between two whole arrangements instead: four across the bottom
+   while they fit, or a column down the right-hand side when they do not.
+   The card is the thing being measured, so it is the container. */
+.plugin-manager-card {
+  container-type: inline-size;
+}
+
+/* Only a genuinely narrow card — a phone, one column — reaches this. The grid
+   above guarantees every other card is wide enough for the row, so there is no
+   width at which the gang has to choose badly. The icon gives up room here:
+   the copy needs it more than the artwork does. */
+@container (max-width: 330px) {
+  .plugin-manager-card {
+    grid-template-columns: 56px minmax(0, 1fr) auto;
+  }
+
+  .plugin-manager-card-actions {
+    grid-column: 3 !important;
+    grid-row: 1 / -1 !important;
+    width: 92px;
+    max-width: none;
+    grid-template-columns: minmax(0, 1fr) !important;
+    align-self: stretch;
+  }
+
+  /* Stacked, a key is a strip rather than a cap: square was for the row. */
+  .plugin-manager-card-actions .rf-button {
+    min-height: 44px !important;
+  }
+}
+
+.plugin-manager-card-actions .rf-button {
+  min-height: 66px !important;
+  padding: 10px 6px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  font-size: 0.6rem !important;
+  line-height: 1.2;
+  white-space: normal;
+  text-align: center;
+}
+
+/* Inside the gang the housing carries the lip, so a key only has to show that
+   it is down. The painted edge stays: it is what says which one it is. */
+.plugin-manager-card-actions .rf-button--primary {
+  box-shadow: inset 3px 0 0 var(--acid) !important;
+}
+
+.plugin-manager-card-actions .rf-button--danger {
+  box-shadow: inset 3px 0 0 var(--red) !important;
+}
+
+.plugin-manager-card-actions .rf-button:active:not(:disabled) {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.plugin-manager-card-actions .rf-button--primary:active:not(:disabled) {
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--acid) !important;
+}
+
+.plugin-manager-card-actions .rf-button--danger:active:not(:disabled) {
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--red) !important;
+}
+
+.plugin-manager-card-actions .rf-button:disabled {
+  background: var(--panel-inset) !important;
+  box-shadow: none !important;
+}
+
+/* ==========================================================================
+   The PLAY toolbar
+   ==========================================================================
+   The strip above a plugin surface was still the backlit bar: a near-black
+   ground, pill keys with acid chips, and the plugin name at the same weight as
+   everything around it. On the faceplate it is the lip of the bay the plugin
+   is mounted in — chassis with its vent lines, a seam under it, and the name
+   silkscreened on it rather than lit.
+   ========================================================================== */
+
+.play-plugin-toolbar {
+  padding: 8px clamp(12px, 2.5vw, 26px) !important;
+  color: var(--ink) !important;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(var(--edge-dark-rgb), 0.05) 0 1px,
+      transparent 1px 6px
+    ),
+    linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border-bottom: var(--fp-seam) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+.play-plugin-identity span {
+  color: var(--fp-rail-label) !important;
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+}
+
+.play-plugin-identity strong {
+  color: var(--ink);
+  font-family: var(--display-font);
+  font-weight: 700;
+  font-size: 0.86rem !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase;
+}
+
+.play-plugin-icon {
+  border-radius: var(--fp-radius-key) !important;
+  border: var(--fp-seam);
+}
+
+.play-plugin-icon.plugin-icon-fallback {
+  color: var(--acid-ink) !important;
+  background: var(--acid) !important;
+  font-family: var(--mono-font) !important;
+}
+
+/* ---------------------------------------------------------- bay keys ---- */
+
+.play-header-button {
+  min-height: 38px !important;
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+}
+
+/* The glyph plate is inset into the key, the way a legend plate is. */
+.play-header-button > span {
+  color: var(--acid-ink) !important;
+  background: var(--acid) !important;
+  border-radius: 1px !important;
+  font-family: var(--mono-font) !important;
+}
+
+@media (hover: hover) {
+  .play-header-button:hover {
+    color: var(--ink) !important;
+    background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+    border-color: var(--line) !important;
+  }
+
+  .play-header-button:hover > span {
+    background: var(--acid) !important;
+  }
+}
+
+/* Engaged and pressed are both down — see BUTTON STATES. Hover no longer
+   fills the key with the accent: filling on hover made a key look engaged
+   just for having the pointer over it. */
+.play-header-button.active,
+.play-header-button:active {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border-color: var(--line) !important;
+  box-shadow: var(--fp-well) !important;
+  transform: none !important;
+}
+
+.play-header-button.active > span,
+.play-header-button:active > span {
+  background: var(--acid) !important;
+}
+
+.play-header-button:focus-visible {
+  outline: 2px solid var(--acid) !important;
+  outline-offset: 2px;
+}
+
+/* The preset sheet drops onto the panel; it does not frost it. */
+.preset-modal-backdrop {
+  background: rgba(var(--edge-dark-rgb), 0.42) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* ==========================================================================
+   Settings and LIVE
+   ==========================================================================
+   Both surfaces still carried the old geometry: 18px panels, 13px chips, 10px
+   keys and 9px fields. On this material a panel is 3 and a key is 2, and
+   nothing is a pill — a rounded rectangle is a screen convention, a moulded
+   part has an edge.
+
+   Fields and keys are not the same object and do not get the same treatment.
+   You type into a field, so it is a recess; you press a key, so it stands
+   proud. Giving both the same face is what made the old forms read as a wall
+   of identical rounded boxes.
+   ========================================================================== */
+
+/* ---------------------------------------------------------- as panels --- */
+
+.settings-card,
+.active-performance-card,
+.live-browser,
+.live-empty,
+.live-loading,
+.editor-empty,
+.config-library,
+.config-editor,
+.slot-editor,
+.sequence-editor-row,
+.host-runtime-health {
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.host-audio-form fieldset {
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+/* The card's glyph plate is a legend plate screwed to the panel, not a badge. */
+.settings-icon {
+  border-radius: var(--fp-radius-key) !important;
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  box-shadow: var(--fp-well) !important;
+  color: var(--ink) !important;
+}
+
+/* ---------------------------------------------------------- as fields --- */
+
+.host-audio-form select,
+.host-audio-form input[type="number"],
+.web-server-settings-form input[type="number"],
+.web-server-settings-form select {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-well) !important;
+  font-family: var(--mono-font) !important;
+}
+
+.host-audio-form select:focus-visible,
+.host-audio-form input[type="number"]:focus-visible,
+.web-server-settings-form input[type="number"]:focus-visible {
+  outline: 2px solid var(--acid) !important;
+  outline-offset: 1px;
+}
+
+/* ------------------------------------------------------------ as keys --- */
+
+.secondary-button,
+.live-surface-tabs button,
+.live-mode-tabs button,
+.config-kind-tabs button {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+}
+
+/* Engaged is down, with the painted edge saying which position it is — the
+   same reading as the rail. The old rule filled the key with the accent, which
+   is the one thing this design uses to mean "lit", not "chosen". */
+.live-surface-tabs button.active,
+.live-mode-tabs button.active,
+.config-kind-tabs button.active {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border-color: var(--line) !important;
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--acid) !important;
+}
+
+/* A LIVE entity keeps its own ink on the painted edge: that colour is what
+   carries rack / song / setlist across every screen, so it marks the key
+   rather than flooding it. */
+.live-mode-tabs button[class*="entity-"] {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border-color: var(--line) !important;
+}
+
+.live-mode-tabs button[class*="entity-"].active {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border-color: var(--line) !important;
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--entity-color) !important;
+}
+
+.secondary-button:active,
+.live-surface-tabs button:active,
+.live-mode-tabs button:active,
+.config-kind-tabs button:active {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+  transform: none !important;
+}
+
+/* The health readouts are data cut into the panel, so they are wells with a
+   seam — the cyan-tinted border and 8px corners were the last of the old
+   geometry on this surface. */
+.host-runtime-health dl > div {
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.host-runtime-health dd {
+  font-family: var(--mono-font);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Nothing is a pill: the kind tag is a stamped label, not a lozenge. */
+.plugin-kind-tag {
+  border-radius: var(--fp-radius-key) !important;
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+}
+
+/* --------------------------------------------------- the create key ----- */
+
+/* NEW RACK / SONG / SETLIST was the last of the tinted controls: acid type on
+   an acid wash inside a 10px box. It is the key that adds a module to the
+   library, so it is a key — raised, with the accent on its edge rather than
+   spread across its face. The plus stays as the only thing that is coloured,
+   which is what makes it read as "add" at a glance. */
+.new-performance-button {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop), inset 3px 0 0 var(--acid) !important;
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+}
+
+.new-performance-button span {
+  color: var(--acid);
+}
+
+.new-performance-button:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+}
+
+.new-performance-button:active:not(:disabled) {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--acid) !important;
+}
+
+.new-performance-button:disabled {
+  color: var(--muted) !important;
+  background: var(--panel-inset) !important;
+  border-color: var(--line) !important;
+  box-shadow: none !important;
+}
+
+/* The library rows are modules in a rack, same as the picker's. */
+.config-item-list button {
+  color: var(--ink) !important;
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip) !important;
+}
+
+.config-item-list button.active,
+.config-item-list button[aria-current="true"] {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--acid) !important;
+}
+
+/* ------------------------------------------------------ output meter ---- */
+
+/* The meter's grid reserves 9px for its label, and the silkscreen size above
+   is 0.72rem — so OUT overflowed its row and landed on the bars. A 34px-wide
+   instrument needs its own smaller stamp, and the rows size themselves rather
+   than being told a height the type no longer fits. */
+.master-output-meter {
+  height: auto !important;
+  grid-template-rows: auto 1fr auto !important;
+  gap: 3px;
+}
+
+.master-output-meter-label {
+  font-size: 0.56rem !important;
+  line-height: 1 !important;
+}
+
+/* The tracks stand on a plinth. Without one they ran off the bottom edge and
+   read as cut rather than as seated. */
+.master-output-meter-bars {
+  padding-bottom: 3px;
+  border-bottom: 2px solid var(--line);
+}
+
+/* --------------------------------------------------- picker readouts ---- */
+
+/* The shade was at its most transparent exactly where the status sits, so
+   SELECT was legible or not depending on the artwork behind it. It goes solid
+   again at the right-hand end; the artwork keeps the middle band. */
+.plugin-picker-shade {
+  background: linear-gradient(
+    90deg,
+    var(--paper) 0%,
+    color-mix(in srgb, var(--paper) 86%, transparent) 42%,
+    color-mix(in srgb, var(--paper) 60%, transparent) 68%,
+    var(--paper) 92%
+  ) !important;
+}
+
+/* A state readout is a label, not a measurement, so it is silkscreen rather
+   than monospaced. It used to be muted mono set from further up this file,
+   which is why SELECT read as a caption instead of an action. */
+.play-plugin-status {
+  color: var(--ink);
+  font-family: var(--display-font);
+  font-weight: 700;
+  font-size: 0.68rem;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+/* The playing module already carries a red painted edge, so its readout says
+   the same thing in the same ink — the state is stated twice, consistently,
+   instead of PLAYING and SELECT looking identical. */
+.plugin-picker-card.active .play-plugin-status,
+.plugin-picker-card[aria-current="true"] .play-plugin-status {
+  color: var(--red);
+}
+
+.plugin-picker-card.inactive .play-plugin-status {
+  color: var(--muted);
+}
+
+/* ==========================================================================
+   The hamburger drawer
+   ==========================================================================
+   Untouched by the redesign: a 24px rounded sheet on a blurred backdrop, in
+   navy with cyan-era literals. On this machine it is a drawer pulled out of
+   the chassis — square where it meets the edge it slides from, seam all round,
+   and a lit lip along the edge that is now exposed. The grab handle becomes a
+   milled pull rather than a floating pill.
+
+   These rules live inside the same breakpoints as the originals, so they only
+   apply where the drawer exists.
+   ========================================================================== */
+
+/* The drawer's own breakpoints, matched exactly. Scoped to 980px these
+   overrides missed the short-landscape case entirely — the drawer is shown
+   there and rendered in the old design — while applying between 761 and 980,
+   where the rail is merely collapsed and no drawer exists. A restyle has to
+   live at the same width as the thing it restyles. */
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .mobile-menu-backdrop {
+    background: rgba(var(--edge-dark-rgb), 0.5) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  .mobile-menu-panel {
+    color: var(--ink) !important;
+    background: var(--fp-panel) !important;
+    border: var(--fp-seam) !important;
+    border-bottom: 0 !important;
+    border-radius: var(--fp-radius) var(--fp-radius) 0 0 !important;
+    box-shadow: var(--fp-lip), 0 -6px 20px rgba(var(--edge-dark-rgb), 0.34) !important;
+  }
+
+  /* The pull is cut into the panel, not laid on it. */
+  .mobile-menu-panel::before {
+    width: 38px !important;
+    height: 4px !important;
+    background: var(--panel-inset) !important;
+    border-radius: 1px !important;
+    box-shadow:
+      inset 0 1px 2px rgba(var(--edge-dark-rgb), 0.5),
+      0 1px 0 rgba(var(--edge-light-rgb), 0.6) !important;
+  }
+
+  /* The header is the drawer's other fixed zone, so it is bounded the same way
+     the plinth is: a seam and a ground, with its shadow falling the other way.
+     The list then reads as running between two fixed edges instead of fading
+     out under a heading that happens to be there. */
+  .mobile-menu-panel > header {
+    background: var(--paper);
+    border-bottom: var(--fp-seam) !important;
+    box-shadow: 0 4px 12px rgba(var(--edge-dark-rgb), 0.16);
+    position: relative;
+    z-index: 1;
+  }
+
+  .mobile-menu-heading h2 {
+    color: var(--ink) !important;
+    font-family: var(--display-font);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .mobile-menu-heading p {
+    color: var(--muted) !important;
+  }
+
+  .mobile-menu-error {
+    color: var(--red) !important;
+  }
+
+  .mobile-menu-panel > header > button {
+    color: var(--ink) !important;
+    background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+    border: var(--fp-seam) !important;
+    border-radius: var(--fp-radius-key) !important;
+    box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  }
+
+  /* The rows are the same selector keys as the rail, at touch size. */
+  .mobile-menu-panel .nav-item {
+    color: var(--ink) !important;
+    background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+    border: var(--fp-seam) !important;
+    border-radius: var(--fp-radius-key) !important;
+    box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  }
+
+  .mobile-menu-panel .nav-item.active {
+    color: var(--ink) !important;
+    background: var(--panel-inset) !important;
+    border-color: var(--line) !important;
+    box-shadow: var(--fp-well) !important;
+  }
+
+  .mobile-menu-panel .nav-item.active .nav-copy small {
+    color: var(--muted) !important;
+  }
+
+  /* The chips keep the per-surface inks the rail uses, so the same key is the
+     same colour whichever way you reach it. */
+  .mobile-menu-panel .nav-item .nav-mark {
+    color: var(--nav-tint, var(--ink)) !important;
+    background: color-mix(in srgb, var(--nav-tint, var(--ink)) 13%, transparent) !important;
+    border-radius: var(--fp-radius-key) !important;
+  }
+
+  .mobile-menu-panel .nav-item.active .nav-mark {
+    color: var(--acid-ink) !important;
+    background: var(--nav-tint, var(--acid)) !important;
+    border-radius: var(--fp-radius-key) !important;
+  }
+
+  /* The foot of the drawer is one plinth: a ground of its own and a seam along
+     the top, so the controls on it stay put while the list scrolls past above
+     rather than appearing to float over it. */
+  .mobile-menu-footer {
+    padding: 12px 16px 14px;
+    display: grid;
+    gap: 10px;
+    background: var(--paper);
+    border-top: var(--fp-seam);
+    box-shadow: 0 -4px 12px rgba(var(--edge-dark-rgb), 0.16);
+  }
+
+  /* Lighting and status share the lower line. The caption is dropped: three
+     keys reading AUTO / DAY / STAGE say what they are, and on a phone the word
+     in front of them only crowds the row. The group keeps its accessible name
+     from `aria-label`, so nothing is lost to a screen reader. */
+  .mobile-menu-footer-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+
+  /* The switch keeps its legend here: the rule that drops it belongs to the
+     collapsed rail, where there is no room for words — here there are 343. */
+  .mobile-menu-footer .controller-dock-toggle {
+    margin: 0;
+    width: 100%;
+    min-height: 44px;
+    justify-content: flex-start;
+    padding: 8px 12px;
+    gap: 10px;
+  }
+
+  .mobile-menu-footer .controller-dock-toggle span {
+    display: block;
+  }
+
+  .mobile-menu-footer .controller-dock-toggle svg {
+    display: none;
+  }
+
+  .mobile-menu-footer-row .lighting-switch {
+    margin-top: 0;
+    padding: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 9px;
+  }
+
+  .mobile-menu-footer-row .lighting-switch-label {
+    display: none;
+  }
+
+  .mobile-menu-footer-row .lighting-switch-keys {
+    grid-template-columns: repeat(3, auto);
+  }
+
+  .mobile-menu-footer-row .lighting-key {
+    padding: 6px 11px 5px;
+    border-top: 0;
+    border-left: var(--fp-seam);
+  }
+
+  .mobile-menu-footer-row .lighting-key:first-child {
+    border-left: 0;
+  }
+
+  .mobile-menu-footer-row .connection-badge {
+    margin: 0;
+    padding: 8px 12px;
+  }
+}
+
+/* The side variant on a short landscape screen slides from the left edge, so
+   that edge is the square one. */
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .mobile-menu-panel {
+    border-radius: 0 var(--fp-radius) var(--fp-radius) 0 !important;
+    border-width: 0 1px 0 0 !important;
+  }
+}
+
+/* ------------------------------------------------------- the empty bay --- */
+
+/* An empty slot is a recess with nothing mounted in it, so it is a well rather
+   than a dashed outline — dashes are a screen convention for "drop here", and
+   nothing here is droppable. */
+.empty-state {
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-well) !important;
+  color: var(--muted) !important;
+}
+
+.empty-state .brand-mark {
+  width: 124px !important;
+  opacity: 0.45;
+}
+
+.empty-state h2 {
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  color: var(--ink) !important;
+}
+
+.empty-state p {
+  font-family: var(--mono-font);
+  letter-spacing: 0.04em;
+}
+
+/* ==========================================================================
+   Notices, boundaries and the drawer handle
+   ========================================================================== */
+
+/* A notice is a card that drops onto the panel, so it is panel material with a
+   seam — not frosted glass over the workspace. The tone lives on its painted
+   edge and its lamp, which is how every other state on this machine is said. */
+.rf-async-notice {
+  color: var(--ink) !important;
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.rf-async-notice--success {
+  box-shadow: var(--fp-lip), var(--fp-drop), inset 3px 0 0 var(--green) !important;
+}
+
+.rf-async-notice--error {
+  background: var(--fp-panel) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop), inset 3px 0 0 var(--red) !important;
+}
+
+/* The indicator stays a lamp — round, because a lamp is round. */
+.rf-async-notice__indicator {
+  color: var(--acid-ink) !important;
+  background: var(--acid) !important;
+  border: 0 !important;
+  font-family: var(--mono-font) !important;
+}
+
+.rf-async-notice--success .rf-async-notice__indicator {
+  color: var(--red-ink) !important;
+  background: var(--green) !important;
+}
+
+.rf-async-notice--error .rf-async-notice__indicator {
+  color: var(--red-ink) !important;
+  background: var(--red) !important;
+}
+
+.rf-async-notice__copy strong {
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+/* "Plugin library unavailable" and its kin. The bay is a recess with nothing
+   mounted in it; the red belongs to the *message*, not to the bay. Painted on
+   the bay it ran the full 394px of an empty area while the text occupied 70 in
+   the middle, so the edge read as a rule dangling past its block. */
+.rf-async-boundary--error {
+  /* The message is `min(460px, 100%)` in a bay with no padding, so as soon as
+     the bay is narrower than 460 the plate ran edge to edge. The bay needs an
+     interior for the same reason every other panel does. */
+  padding: var(--fp-pad-tight) !important;
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-well) !important;
+  color: var(--ink) !important;
+}
+
+.rf-async-boundary__error-copy {
+  color: var(--ink) !important;
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop), inset 3px 0 0 var(--red) !important;
+}
+
+/* The marker is a lamp: red on this machine is the palette's red. */
+.rf-async-boundary__error-copy > span {
+  color: var(--red-ink) !important;
+  background: var(--red) !important;
+  font-family: var(--display-font);
+}
+
+.rf-async-boundary__error-copy strong {
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.rf-async-boundary__error-copy small {
+  color: var(--muted);
+  font-family: var(--mono-font);
+}
+
+/* The key that opens the drawer is a key like any other. */
+/* The drawer's own breakpoints, matched exactly. Scoped to 980px these
+   overrides missed the short-landscape case entirely — the drawer is shown
+   there and rendered in the old design — while applying between 761 and 980,
+   where the rail is merely collapsed and no drawer exists. A restyle has to
+   live at the same width as the thing it restyles. */
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .mobile-menu-button {
+    color: var(--ink) !important;
+    background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+    border: var(--fp-seam) !important;
+    border-radius: var(--fp-radius-key) !important;
+    box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  }
+
+  .mobile-menu-button:active {
+    background: var(--panel-inset) !important;
+    box-shadow: var(--fp-well) !important;
+  }
+}
+
+/* ------------------------------------------------- empty PLAY surface --- */
+
+/* The empty PLAY bay is the chassis with nothing mounted in it — not a glass
+   card floating in the slot. A later rule was still giving it 18px corners,
+   a blur and a card shadow. */
+.plugin-surface-state {
+  background: var(--chassis) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  color: var(--muted) !important;
+}
+
+/* The mark replaces the accent square the two letters sat on, so the holder
+   stops being a chip and is just a place to put it. A later rule was still
+   painting a cyan gradient with an 11px radius and a glow behind it — that is
+   the block the mark looked trapped in. */
+.plugin-surface-state-mark,
+.empty-state > span {
+  width: auto !important;
+  height: auto !important;
+  background: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* An empty preset shelf is a recess, not a dashed drop target. */
+.preset-empty {
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-well) !important;
+  color: var(--muted) !important;
+}
+
+.preset-empty > span {
+  color: var(--muted) !important;
+  font-family: var(--mono-font) !important;
+}
+
+.plugin-surface-state-mark .brand-mark {
+  width: 132px !important;
+  opacity: 0.45;
+}
+
+.plugin-surface-state h2 {
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.plugin-surface-state p {
+  font-family: var(--mono-font);
+  font-size: 0.72rem;
+}
+
+/* ------------------------------------------------------- text buttons --- */
+
+/* The one control that stays flat — no key, no edge. It had no horizontal
+   padding at all, so with silkscreen tracking the label ran into whatever sat
+   beside it. Tracking needs room on both sides or it reads as crowding. */
+.text-button {
+  padding: 10px 12px !important;
+  color: var(--ink) !important;
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.text-button:hover:not(:disabled) {
+  background: rgba(var(--ink-rgb), 0.06) !important;
+  border-radius: var(--fp-radius-key);
+}
+
+/* A controller is hardware, so its tile mark is a legend plate like any other,
+   in the palette's amber rather than a hardcoded one. */
+.controller-tile-mark {
+  color: var(--amber-ink) !important;
+  background: color-mix(in srgb, var(--amber) 14%, transparent) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+}
+
+/* ------------------------------------------------ controller dock key --- */
+
+/* A latching pushbutton with a square pilot lamp, the way rack gear does a
+   switch: the cap goes down and stays down, and the lamp is what tells you it
+   latched rather than that your finger is on it. That is the job the painted
+   edge does on the other engaged controls, so this one does not carry both —
+   the lamp says it, and a lamp beside a painted edge is belt and braces.
+
+   The legend and the pictogram swap rather than stack: a switch has words on
+   it when there is room for words and a symbol when there is not. */
+.controller-dock-toggle {
+  margin-top: auto;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 11px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--fp-rail-label);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+  cursor: pointer;
+  font-family: var(--display-font);
+  font-weight: 700;
+  font-size: var(--fp-label);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+/* The lamp: square, small, set into the cap. Dark it is a lens with nothing
+   behind it, so it is the panel recess tinted by the ink it will show. */
+.controller-dock-toggle::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--nav-controller) 20%, var(--panel-inset));
+  box-shadow:
+    inset 0 1px 2px rgba(var(--edge-dark-rgb), 0.55),
+    0 1px 0 rgba(var(--edge-light-rgb), 0.55);
+}
+
+.controller-dock-toggle.open::before {
+  background: var(--nav-controller);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--nav-controller) 60%, #fff),
+    0 0 7px color-mix(in srgb, var(--nav-controller) 72%, transparent);
+}
+
+/* The pictogram is the fallback legend, so it is hidden while the words fit. */
+.controller-dock-toggle svg {
+  display: none;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.controller-dock-toggle:hover {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--glass));
+}
+
+.controller-dock-toggle:active {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+.controller-dock-toggle.open {
+  color: var(--ink);
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+.controller-dock-toggle:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+}
+
+/* It claims the slack at the foot of the rail now, so the lighting switch
+   below it must not also claim it — two `margin-top: auto` in one column split
+   the free space between them. */
+.controller-dock-toggle ~ .lighting-switch {
+  margin-top: 0;
+}
+
+/* Collapsed rail: no room for words, so the symbol takes over and the lamp
+   stays. Both centre on the cap. */
+@media (max-width: 980px) {
+  .controller-dock-toggle {
+    justify-content: center;
+    gap: 7px;
+    padding: 8px 4px;
+  }
+
+  .controller-dock-toggle svg {
+    display: block;
+  }
+
+  .controller-dock-toggle span {
+    display: none;
+  }
+}
+
+/* --------------------------------------------------------- rocker switch --- */
+
+/* The boolean was an iOS pill with a round knob sliding in it. On a faceplate
+   it is a rocker: a cap that sits at one end of a milled slot, and the end it
+   leaves shows the accent — which is how you read the position from across a
+   room. The whole control is still a key, so engaging it puts it down too. */
+.rf-switch {
+  position: relative;
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+/* The same recessed lens the controller switch carries — one lamp, one way of
+   drawing it, wherever a control needs to say it is live. As a flex child it
+   lands ahead of the copy without touching the markup. */
+.rf-switch::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--acid) 20%, var(--panel-inset));
+  box-shadow:
+    inset 0 1px 2px rgba(var(--edge-dark-rgb), 0.55),
+    0 1px 0 rgba(var(--edge-light-rgb), 0.55);
+}
+
+.rf-switch[aria-checked="true"]::before {
+  background: var(--acid);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--acid) 60%, #fff),
+    0 0 7px color-mix(in srgb, var(--acid) 72%, transparent);
+}
+
+.rf-switch:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+  border-color: var(--line) !important;
+}
+
+.rf-switch[aria-checked="true"] {
+  background: var(--panel-inset) !important;
+  border-color: var(--line) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.rf-switch:focus-visible {
+  outline: 2px solid var(--acid) !important;
+  outline-offset: 2px;
+  border-color: var(--line) !important;
+}
+
+.rf-switch-copy strong {
+  font-family: var(--display-font);
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+}
+
+.rf-switch-copy small {
+  color: var(--muted) !important;
+  font-family: var(--mono-font);
+}
+
+.rf-switch-state > span {
+  color: var(--fp-rail-label) !important;
+  font-family: var(--display-font) !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+}
+
+.rf-switch[aria-checked="true"] .rf-switch-state > span {
+  color: var(--ink) !important;
+}
+
+/* No sliding mechanism. The lamp says live and the cap being down says
+   latched, which is the whole statement — a track and a travelling knob on top
+   of that is a second way of saying the one thing this control does. */
+.rf-switch-state {
+  display: none !important;
+}
+
+/* ------------------------------------------------------- the dock grip --- */
+
+/* The handle that sets the dock height was a cyan lozenge that grew and lit on
+   hover. It is a thing you take hold of and drag, so it is a knurled grip:
+   panel material, a seam, a lit top edge and milled ridges across it. It sits
+   proud because it is grabbed from above — the drawer's pull is recessed
+   because that one is only pushed. */
+.touch-controller-dock-resizer > span {
+  width: 56px !important;
+  height: 10px !important;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(var(--edge-dark-rgb), 0.28) 0 1px,
+      transparent 1px 4px
+    ),
+    linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(var(--edge-light-rgb), 0.85),
+    0 2px 4px rgba(var(--edge-dark-rgb), 0.38) !important;
+}
+
+/* Taking hold of it presses it against the panel: the ridges bite and the
+   shadow shortens. It does not light up — nothing here is a lamp. */
+.touch-controller-dock-resizer:hover > span,
+.touch-controller-dock-resizer:focus-visible > span,
+.touch-controller-dock.resizing .touch-controller-dock-resizer > span {
+  width: 64px !important;
+  height: 10px !important;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(var(--edge-dark-rgb), 0.4) 0 1px,
+      transparent 1px 4px
+    ),
+    linear-gradient(180deg, var(--glass), var(--glass)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(var(--edge-light-rgb), 0.85),
+    0 1px 2px rgba(var(--edge-dark-rgb), 0.45) !important;
+}
+
+.touch-controller-dock-resizer:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Screen glass
+   ==========================================================================
+   A plugin does not render *in* RackForge — it renders on a screen that
+   RackForge is the machine for.
+
+   The signature of an eighties monitor is not the dirt, it is the raster:
+   scanlines you can count, a phosphor mask under them, corners that fall away
+   because the tube is curved and the gun is not, and a bloom in the middle
+   where the beam is strongest. The dirt is the last layer, not the first —
+   an earlier pass here had only the dirt and a whisper of a vignette, and it
+   read as a slightly grubby rectangle rather than as a screen.
+
+   Layers, and what each is for:
+
+     scanlines   a 3px pitch: one dark line per two lit. Fixed pixels, not
+                 relative units — it is the tube's grille, not the content's
+     grille      a finer vertical mask under it, the phosphor stripe
+     bloom       the centre runs hotter than the edge
+     vignette    an elliptical falloff that starts early and bites hard
+     sheen       one broad diagonal, the room reflected in the cover
+     grime       static noise, the film any panel picks up
+
+   All baked: nothing animates. `pointer-events: none` is the load-bearing
+   line — the layer covers the whole surface, and without it the cover would
+   eat every click meant for the plugin underneath.
+   ========================================================================== */
+
+.plugin-frame-stage::after,
+.plugin-frame-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* the raster: scanlines, phosphor mask, bloom, vignette and the cover's sheen */
+.plugin-frame-stage::before {
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.22) 0 1px,
+      rgba(0, 0, 0, 0) 1px 3px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.07) 0 1px,
+      rgba(0, 0, 0, 0) 1px 3px
+    ),
+    linear-gradient(
+      116deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.022) 24%,
+      rgba(255, 255, 255, 0.045) 32%,
+      rgba(255, 255, 255, 0.012) 42%,
+      transparent 56%
+    ),
+    radial-gradient(
+      120% 105% at 50% 44%,
+      rgba(255, 255, 255, 0.022) 0%,
+      rgba(255, 255, 255, 0) 38%
+    ),
+    radial-gradient(
+      118% 100% at 50% 46%,
+      rgba(0, 0, 0, 0) 0%,
+      rgba(0, 0, 0, 0.02) 34%,
+      rgba(0, 0, 0, 0.06) 52%,
+      rgba(0, 0, 0, 0.13) 68%,
+      rgba(0, 0, 0, 0.22) 82%,
+      rgba(0, 0, 0, 0.34) 100%
+    );
+  /* The aperture, and only that. The corners used to be crushed to near black,
+     which said "dark tube" when what the edge should say is "nobody has wiped
+     this far in" — that story is the grime plate's, not a shadow's. */
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.5),
+    inset 0 2px 0 rgba(255, 255, 255, 0.12),
+    inset 0 16px 26px -18px rgba(0, 0, 0, 0.45),
+    inset 0 -16px 26px -18px rgba(0, 0, 0, 0.38),
+    inset 16px 0 26px -20px rgba(0, 0, 0, 0.38),
+    inset -16px 0 26px -20px rgba(0, 0, 0, 0.38);
+}
+
+/* grime — smudges, haze and dust, plus the streaks a cloth leaves.
+
+   The chassis grain will not do here: fine uniform noise is film grain, and at
+   any opacity that reads as texture rather than as dirt. Dirt is low-frequency
+   — cloudy patches where a hand went, a haze between them, sparse specks on
+   top — so the plate below is three turbulences at scales an order of
+   magnitude apart, each mapped through a colour matrix that turns the noise
+   into *alpha* with an offset. The offset is the whole trick: only the
+   brightest part of each noise survives, which gives blotches and specks with
+   clean panel between them instead of an even grey wash. */
+.plugin-frame-stage::after {
+  /* Dialled well back from a first pass that read as a fogged window: this is
+     a cover someone wipes now and then, not one nobody has touched in years.
+
+     One plate stretched over the surface rather than a repeating tile: a tile
+     repeats, and a repeat is a pattern the eye finds — once you have seen the
+     seam you cannot unsee it, and dirt that recurs on a grid is not dirt. The
+     plate is drawn at 1200x800 so stretching it to a typical surface is close
+     to 1:1 and the specks stay specks. */
+  opacity: 0.58;
+  /* Dirt collects where the cloth does not reach. The mask keeps the plate
+     nearly clear through the middle and lets it run to full strength into the
+     corners, which is where a bezel traps it on a real screen — and it means
+     the centre, the part you are actually reading, stays clean. */
+  -webkit-mask-image: radial-gradient(
+    108% 94% at 50% 46%,
+    rgba(0, 0, 0, 0.12) 0%,
+    rgba(0, 0, 0, 0.18) 32%,
+    rgba(0, 0, 0, 0.4) 54%,
+    rgba(0, 0, 0, 0.72) 74%,
+    rgba(0, 0, 0, 0.95) 88%,
+    #000 100%
+  );
+  mask-image: radial-gradient(
+    108% 94% at 50% 46%,
+    rgba(0, 0, 0, 0.12) 0%,
+    rgba(0, 0, 0, 0.18) 32%,
+    rgba(0, 0, 0, 0.4) 54%,
+    rgba(0, 0, 0, 0.72) 74%,
+    rgba(0, 0, 0, 0.95) 88%,
+    #000 100%
+  );
+  background-image:
+    linear-gradient(
+      104deg,
+      transparent 18%,
+      rgba(255, 255, 255, 0.022) 23%,
+      transparent 27%,
+      transparent 39%,
+      rgba(255, 255, 255, 0.018) 44%,
+      transparent 49%
+    ),
+    url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%271200%27%20height%3D%27800%27%3E%3Cfilter%20id%3D%27smudge%27%20x%3D%270%27%20y%3D%270%27%20width%3D%27100%25%27%20height%3D%27100%25%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.004%27%20numOctaves%3D%274%27%20seed%3D%2711%27%2F%3E%3CfeColorMatrix%20type%3D%27matrix%27%20values%3D%270%200%200%200%201%200%200%200%200%201%200%200%200%200%201%201%200%200%200%20-0.6%27%2F%3E%3C%2Ffilter%3E%3Cfilter%20id%3D%27haze%27%20x%3D%270%27%20y%3D%270%27%20width%3D%27100%25%27%20height%3D%27100%25%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.016%27%20numOctaves%3D%273%27%20seed%3D%2729%27%2F%3E%3CfeColorMatrix%20type%3D%27matrix%27%20values%3D%270%200%200%200%200%200%200%200%200%200%200%200%200%200%200%201%200%200%200%20-0.68%27%2F%3E%3C%2Ffilter%3E%3Cfilter%20id%3D%27dust%27%20x%3D%270%27%20y%3D%270%27%20width%3D%27100%25%27%20height%3D%27100%25%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.62%27%20numOctaves%3D%271%27%20seed%3D%273%27%2F%3E%3CfeColorMatrix%20type%3D%27matrix%27%20values%3D%270%200%200%200%200%200%200%200%200%200%200%200%200%200%200%201%200%200%200%20-0.79%27%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%271200%27%20height%3D%27800%27%20filter%3D%27url%28%23smudge%29%27%2F%3E%3Crect%20width%3D%271200%27%20height%3D%27800%27%20filter%3D%27url%28%23haze%29%27%2F%3E%3Crect%20width%3D%271200%27%20height%3D%27800%27%20filter%3D%27url%28%23dust%29%27%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat, no-repeat;
+  background-size: auto, 100% 100%;
+}
+
+/* Off is off: no raster, no cover, no film. */
+:root[data-screen="clean"] .plugin-frame-stage::before,
+:root[data-screen="clean"] .plugin-frame-stage::after {
+  display: none;
+}
+
+/* ============================================ the compact performance bar ===
+   A short landscape window drops the topbar and the rail and replaces them
+   with a strip and a floating key. The strip itself already comes out right —
+   it is the PLAY toolbar, migrated earlier — but the readouts inside it kept
+   cyan hairlines between them, and the floating key was still navy over a
+   blur.
+
+   These live at the surface's own breakpoint rather than at a rounder one —
+   a restyle has to be scoped to exactly where the thing it restyles exists,
+   which is the mistake that left this corner on the old design in the first
+   place.                                                                    */
+
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .performance-surface-active .performance-info-slot + .performance-info-slot,
+  .live-surface-active .performance-info-slot + .performance-info-slot {
+    border-left: var(--fp-seam) !important;
+  }
+
+  .performance-surface-active .performance-info-bar span,
+  .live-surface-active .performance-info-bar span {
+    color: var(--fp-rail-label) !important;
+    font-family: var(--display-font);
+    font-weight: 700;
+  }
+
+  .performance-surface-active .performance-info-bar strong,
+  .live-surface-active .performance-info-bar strong {
+    color: var(--ink) !important;
+    font-family: var(--display-font);
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+}
+
+/* ----------------------------------------- the floating hamburger key ----- */
+
+/* It is dragged around the surface, so it is a key that has been unscrewed and
+   set down on the glass: same material as the rest, a heavier drop because it
+   is sitting on top of something rather than mounted in it. */
+.performance-menu-button {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow:
+    var(--fp-lip),
+    0 4px 12px rgba(var(--edge-dark-rgb), 0.4) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.performance-menu-button:active {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+}

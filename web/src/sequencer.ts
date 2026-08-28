@@ -17,6 +17,25 @@ export const MAX_SEQUENCER_LANES = 8;
 
 export type SequencerQuantize = "now" | "next_beat" | "next_bar";
 
+export type SequencerScale =
+  | "chromatic"
+  | "major"
+  | "minor"
+  | "dorian"
+  | "mixolydian"
+  | "pentatonic_major"
+  | "pentatonic_minor";
+
+export const SCALES: ReadonlyArray<{ id: SequencerScale; label: string }> = [
+  { id: "chromatic", label: "CHROMATIC" },
+  { id: "major", label: "MAJOR" },
+  { id: "minor", label: "MINOR" },
+  { id: "dorian", label: "DORIAN" },
+  { id: "mixolydian", label: "MIXOLYDIAN" },
+  { id: "pentatonic_major", label: "PENT MAJ" },
+  { id: "pentatonic_minor", label: "PENT MIN" },
+];
+
 export type SequencerCommand =
   | { kind: "transport_start" }
   | { kind: "transport_stop" }
@@ -31,13 +50,16 @@ export type SequencerCommand =
     }
   | { kind: "launch_lane"; lane: number; quantize: SequencerQuantize }
   | { kind: "stop_lane"; lane: number; quantize: SequencerQuantize }
-  | { kind: "set_lane_muted"; lane: number; muted: boolean };
+  | { kind: "set_lane_muted"; lane: number; muted: boolean }
+  | { kind: "set_lane_follow"; lane: number; scale?: SequencerScale };
 
 export interface SequencerLaneStatus {
   playing: boolean;
   queued: boolean;
   /** A stop boundary is set: still sounding, going quiet at the bar. */
   stopping?: boolean;
+  /** The lane is in key-follow, waiting on (or following) a held key. */
+  following?: boolean;
   muted: boolean;
   pattern_name?: string | null;
 }
@@ -78,6 +100,19 @@ export function emptyPattern(
     length_ticks: Math.max(1, bars) * beatsPerBar * TICKS_PER_BEAT,
     notes: [],
     view,
+    swing_percent: SWING_STRAIGHT,
+    root_key: 48,
+  };
+}
+
+export const SWING_STRAIGHT = 50;
+export const SWING_MAX = 75;
+
+/** Sets the pattern's groove, clamped to the MPC range. */
+export function setSwing(pattern: PatternDefinition, percent: number): PatternDefinition {
+  return {
+    ...pattern,
+    swing_percent: Math.min(SWING_MAX, Math.max(SWING_STRAIGHT, Math.round(percent))),
   };
 }
 

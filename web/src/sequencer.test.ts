@@ -7,6 +7,7 @@ import {
   melodicStepNote,
   noteName,
   setMelodicStep,
+  setSwing,
   transposeMelodicStep,
   TICKS_PER_BEAT,
   emptyPattern,
@@ -91,6 +92,16 @@ describe("the melodic lens", () => {
 
     pattern = clearMelodicStep(pattern, 0);
     expect(melodicStepNote(pattern, 0)).toBeUndefined();
+  });
+});
+
+describe("swing", () => {
+  it("stores clamped groove on the document", () => {
+    const pattern = emptyPattern("Groove", 1, 4);
+    expect(pattern.swing_percent).toBe(50);
+    expect(setSwing(pattern, 66).swing_percent).toBe(66);
+    expect(setSwing(pattern, 90).swing_percent).toBe(75);
+    expect(setSwing(pattern, 10).swing_percent).toBe(50);
   });
 });
 

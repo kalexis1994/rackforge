@@ -1703,6 +1703,7 @@ impl AudioProcessor {
                 }
             }
             if !consume {
+                feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
                 push_midi_event(&mut self.events, packet);
             }
         }
@@ -2095,7 +2096,10 @@ impl AudioProcessor {
                     self.parameter_links = links;
                     let _ = reply.try_send(Ok(()));
                 }
-                AudioCommand::InjectMidi(packet) => push_midi_event(&mut self.events, packet),
+                AudioCommand::InjectMidi(packet) => {
+                    feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
+                    push_midi_event(&mut self.events, packet);
+                }
                 AudioCommand::Sequencer { command, reply } => {
                     let _ = reply.try_send(self.sequencer.apply(&command));
                 }
@@ -2257,6 +2261,23 @@ fn prepare_audio_voice(
         parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
         process_faulted: false,
     })
+}
+
+/// Key-follow lanes listen to the player's keyboard: every live note that
+/// reaches the instrument also reaches the engine's gate.
+fn feed_sequencer_input(
+    sequencer: &mut rackforge_core::SequencerEngine,
+    data: [u8; 3],
+    length: u8,
+) {
+    if length < 3 {
+        return;
+    }
+    match data[0] & 0xf0 {
+        0x90 if data[2] > 0 => sequencer.note_input(data[1], true),
+        0x80 | 0x90 => sequencer.note_input(data[1], false),
+        _ => {}
+    }
 }
 
 fn push_midi_event(events: &mut Vec<MidiEventV1>, packet: MidiPacket) {

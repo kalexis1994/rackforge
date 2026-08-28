@@ -1019,6 +1019,16 @@ pub enum PatternView {
     Melodic,
 }
 
+/// Straight time. Swing walks 50..=75: the classic MPC range, where the
+/// number is how far into its eighth-note pair the off-sixteenth lands —
+/// 50 is half-way (straight), 66 is the triplet feel, 75 is dotted.
+pub const PATTERN_SWING_STRAIGHT: u8 = 50;
+pub const PATTERN_SWING_MAX: u8 = 75;
+
+fn default_swing() -> u8 {
+    PATTERN_SWING_STRAIGHT
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatternDefinition {
@@ -1029,6 +1039,16 @@ pub struct PatternDefinition {
     pub notes: Vec<PatternNoteSpec>,
     #[serde(default)]
     pub view: PatternView,
+    /// The pattern's own groove, carried wherever the pattern goes.
+    #[serde(default = "default_swing")]
+    pub swing_percent: u8,
+    /// The key the phrase was written in — what key-follow transposes from.
+    #[serde(default = "default_root_key")]
+    pub root_key: u8,
+}
+
+fn default_root_key() -> u8 {
+    48 // C2, where basses live
 }
 
 impl PatternDefinition {
@@ -1038,6 +1058,12 @@ impl PatternDefinition {
             return Err(PerformanceError::InvalidPatternLength(self.length_ticks));
         }
         validate_count("pattern notes", self.notes.len(), 0, MAX_PATTERN_NOTES)?;
+        if !(PATTERN_SWING_STRAIGHT..=PATTERN_SWING_MAX).contains(&self.swing_percent) {
+            return Err(PerformanceError::InvalidPatternSwing(self.swing_percent));
+        }
+        if self.root_key > 127 {
+            return Err(PerformanceError::InvalidPatternNote);
+        }
         for note in &self.notes {
             if note.tick >= self.length_ticks
                 || note.duration_ticks == 0
@@ -1723,6 +1749,8 @@ pub enum PerformanceError {
     MissingPattern(PatternId),
     #[error("pattern lane {0} is outside the lane deck")]
     InvalidPatternLane(u8),
+    #[error("pattern swing {0} is outside 50..=75")]
+    InvalidPatternSwing(u8),
     #[error("{field} count {actual} is outside {minimum}..={maximum}")]
     InvalidCount {
         field: &'static str,
@@ -1861,6 +1889,8 @@ mod tests {
                     channel: 0,
                 }],
                 view: PatternView::default(),
+                swing_percent: PATTERN_SWING_STRAIGHT,
+                root_key: 48,
             }],
         }
     }

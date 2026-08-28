@@ -39,11 +39,11 @@
 
 use crate::transport::{TimeSignature, Transport};
 use rackforge_control_api::{
-    SequencerCommand, SequencerLaneStatus, SequencerQuantize, SequencerStatusV1,
+    SequencerCommand, SequencerLaneStatus, SequencerQuantize, SequencerScale, SequencerStatusV1,
 };
 use rackforge_performance_api::{
-    MAX_PART_PATTERN_BINDINGS, MAX_PATTERN_NOTES, MAX_PATTERN_TICKS, PATTERN_TICKS_PER_BEAT,
-    PatternDefinition, SongPart,
+    MAX_PART_PATTERN_BINDINGS, MAX_PATTERN_NOTES, MAX_PATTERN_TICKS, PATTERN_SWING_MAX,
+    PATTERN_SWING_STRAIGHT, PATTERN_TICKS_PER_BEAT, PatternDefinition, SongPart,
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use std::sync::Arc;
@@ -67,6 +67,7 @@ const OFF_HEADROOM: usize = MAX_HELD_NOTES;
 #[derive(Clone, Debug)]
 pub struct CompiledPattern {
     length_beats: f64,
+    root_key: u8,
     /// Sorted by start beat. Durations are clamped to the pattern end at
     /// compile, so a note never owes its off to a loop iteration that might
     /// play a different pattern.
@@ -100,7 +101,19 @@ impl CompiledPattern {
             if note.key > 127 || note.velocity == 0 || note.velocity > 127 || note.channel > 15 {
                 return Err(PatternError::NoteValues);
             }
-            let start_beat = note.tick as f64 / TICKS_PER_BEAT as f64;
+            // Swing is baked here, at the trust boundary: the grid stays
+            // straight in the document, the off-sixteenths land late in the
+            // compiled timeline, and the render path never re-computes it.
+            let swing =
+                f64::from(document.swing_percent.clamp(PATTERN_SWING_STRAIGHT, PATTERN_SWING_MAX));
+            let pair = TICKS_PER_BEAT / 2;
+            let off = TICKS_PER_BEAT / 4;
+            let swung_tick = if note.tick % pair == off {
+                f64::from(note.tick - off) + f64::from(pair) * swing / 100.0
+            } else {
+                f64::from(note.tick)
+            };
+            let start_beat = swung_tick / f64::from(TICKS_PER_BEAT);
             let end_tick = note.tick.saturating_add(note.duration_ticks).min(document.length_ticks);
             notes.push(CompiledNote {
                 start_beat,
@@ -112,6 +125,7 @@ impl CompiledPattern {
         notes.sort_by(|a, b| a.start_beat.total_cmp(&b.start_beat));
         Ok(Self {
             length_beats: document.length_ticks as f64 / TICKS_PER_BEAT as f64,
+            root_key: document.root_key.min(127),
             notes,
         })
     }
@@ -171,6 +185,16 @@ pub struct SequencerLane {
     /// The pattern this lane holds, kept across stops the way a groovebox
     /// track keeps its clip. Panic is what empties a lane.
     armed: Option<Arc<CompiledPattern>>,
+    /// Key-follow: the phrase sounds only while a key is held, transposed so
+    /// its root follows the played note, snapped into this scale.
+    follow: Option<SequencerScale>,
+    /// Keys currently held on the player's keyboard, in press order; the
+    /// last one is the phrase's root of the moment.
+    input_keys: Vec<u8>,
+    /// A fresh press (from silence) restarts the phrase on the next 16th.
+    retrigger_pending: bool,
+    /// The last key was released: owed notes are flushed at the next block.
+    gate_release_pending: bool,
     held: Vec<HeldNote>,
     /// Per-block scratch, allocated once here so the render path never does.
     staged: Vec<StagedEvent>,
@@ -197,6 +221,10 @@ impl SequencerLane {
             pending: None,
             stop_at: None,
             armed: None,
+            follow: None,
+            input_keys: Vec::with_capacity(10),
+            retrigger_pending: false,
+            gate_release_pending: false,
             held: Vec::with_capacity(MAX_HELD_NOTES),
             staged: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             muted: false,
@@ -228,6 +256,41 @@ impl SequencerLane {
     /// Whether a stop boundary is set: still sounding, going quiet.
     pub fn is_stopping(&self) -> bool {
         self.stop_at.is_some()
+    }
+
+    /// Enters or leaves key-follow. Entering closes the gate until a key
+    /// arrives; leaving returns the lane to plain looping.
+    pub fn set_follow(&mut self, scale: Option<SequencerScale>) {
+        if self.follow.is_some() && scale.is_none() && !self.held.is_empty() {
+            // Leaving follow mid-phrase: silence what the gate was holding.
+            self.gate_release_pending = true;
+        }
+        self.follow = scale;
+        self.input_keys.clear();
+        self.retrigger_pending = false;
+    }
+
+    /// One key from the player's keyboard. Only follow lanes listen. A press
+    /// from silence restarts the phrase; legato presses re-root it without
+    /// restarting — the classic monosynth-sequencer feel.
+    pub fn note_input(&mut self, key: u8, on: bool) {
+        if self.follow.is_none() {
+            return;
+        }
+        if on {
+            if self.input_keys.is_empty() {
+                self.retrigger_pending = true;
+            }
+            self.input_keys.retain(|&held| held != key);
+            if self.input_keys.len() < 10 {
+                self.input_keys.push(key);
+            }
+        } else {
+            self.input_keys.retain(|&held| held != key);
+            if self.input_keys.is_empty() {
+                self.gate_release_pending = true;
+            }
+        }
     }
 
     /// Stops starting new notes from `at_beat`; owed note-offs still land on
@@ -271,6 +334,9 @@ impl SequencerLane {
         self.pending = None;
         self.stop_at = None;
         self.armed = None;
+        self.input_keys.clear();
+        self.retrigger_pending = false;
+        self.gate_release_pending = false;
     }
 
     /// Renders one block: pays note-offs falling inside it, executes a
@@ -299,6 +365,32 @@ impl SequencerLane {
         // room they release is available to this block's notes.
         pay_due_offs(&mut self.held, end_beat, start_beat, frames_per_beat, frames, &mut staged);
 
+        // Key-follow bookkeeping first: a released gate silences what it
+        // held, and a fresh press restarts the phrase on the next 16th.
+        if self.gate_release_pending {
+            self.gate_release_pending = false;
+            self.held.retain(|held| {
+                staged.push(StagedEvent {
+                    frame: 0,
+                    on: false,
+                    data: note_off(held.key, held.channel),
+                });
+                let _ = held;
+                false
+            });
+        }
+        if self.follow.is_some() && self.retrigger_pending && !self.input_keys.is_empty() {
+            if let Some(pattern) = self.armed.clone() {
+                self.retrigger_pending = false;
+                self.playing = Some(PlayingPattern {
+                    pattern,
+                    anchor_beat: (start_beat * 4.0).ceil() / 4.0,
+                });
+            } else {
+                self.retrigger_pending = false;
+            }
+        }
+
         // 2. Execute a pending launch whose boundary this block crosses.
         if self.pending.as_ref().is_some_and(|p| p.at_beat < end_beat) {
             let pending = self.pending.take().expect("pending checked above");
@@ -313,11 +405,21 @@ impl SequencerLane {
             Some(stop_at) if stop_at < end_beat => stop_at.max(start_beat),
             _ => end_beat,
         };
-        if let Some(playing) = &self.playing {
+        // A follow lane with no key held is gated silent; with keys held it
+        // transposes so the phrase's root is the last-pressed key.
+        let transpose = match self.follow {
+            None => Some(None),
+            Some(scale) => self
+                .input_keys
+                .last()
+                .map(|&played| Some((played, scale))),
+        };
+        if let (Some(playing), Some(transpose)) = (&self.playing, transpose) {
             emit_pattern_notes(
                 playing,
                 self.channel,
                 self.muted,
+                transpose,
                 &mut self.held,
                 &mut self.dropped_notes,
                 start_beat,
@@ -382,6 +484,7 @@ fn emit_pattern_notes(
     playing: &PlayingPattern,
     channel: u8,
     muted: bool,
+    transpose: Option<(u8, SequencerScale)>,
     held: &mut Vec<HeldNote>,
     dropped_notes: &mut u64,
     block_start: f64,
@@ -422,18 +525,62 @@ fn emit_pattern_notes(
                 *dropped_notes += 1;
                 continue;
             }
+            let key = match transpose {
+                None => note.key,
+                Some((played, scale)) => {
+                    let offset = i16::from(played) - i16::from(playing.pattern.root_key);
+                    match snap_to_scale(i16::from(note.key) + offset, played, scale) {
+                        Some(key) => key,
+                        // A phrase transposed off the ends of the keyboard
+                        // loses those notes rather than folding them.
+                        None => continue,
+                    }
+                }
+            };
             staged.push(StagedEvent {
                 frame: frame_of(at, block_start, frames_per_beat, frames),
                 on: true,
-                data: note_on(note.key, note.velocity, channel),
+                data: note_on(key, note.velocity, channel),
             });
             held.push(HeldNote {
-                key: note.key,
+                key,
                 channel,
                 off_beat: at + note.duration_beats,
             });
         }
     }
+}
+
+/// The scale's semitone set within one octave of its root.
+fn scale_semitones(scale: SequencerScale) -> &'static [u8] {
+    match scale {
+        SequencerScale::Chromatic => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        SequencerScale::Major => &[0, 2, 4, 5, 7, 9, 11],
+        SequencerScale::Minor => &[0, 2, 3, 5, 7, 8, 10],
+        SequencerScale::Dorian => &[0, 2, 3, 5, 7, 9, 10],
+        SequencerScale::Mixolydian => &[0, 2, 4, 5, 7, 9, 10],
+        SequencerScale::PentatonicMajor => &[0, 2, 4, 7, 9],
+        SequencerScale::PentatonicMinor => &[0, 3, 5, 7, 10],
+    }
+}
+
+/// Snaps a (possibly out-of-scale) key into `scale` rooted at `root`,
+/// taking the nearest scale tone at or below. Out of MIDI range is `None`:
+/// a transposed phrase loses its extremes rather than folding them.
+fn snap_to_scale(key: i16, root: u8, scale: SequencerScale) -> Option<u8> {
+    if !(0..=127).contains(&key) {
+        return None;
+    }
+    let steps = scale_semitones(scale);
+    let rel = (key - i16::from(root)).rem_euclid(12) as u8;
+    let snapped_rel = steps
+        .iter()
+        .rev()
+        .find(|&&step| step <= rel)
+        .copied()
+        .unwrap_or(0);
+    let snapped = key - i16::from(rel) + i16::from(snapped_rel);
+    (0..=127).contains(&snapped).then_some(snapped as u8)
 }
 
 fn note_on(key: u8, velocity: u8, channel: u8) -> [u8; 3] {
@@ -648,6 +795,11 @@ impl SequencerEngine {
                 self.lanes[index].set_muted(*muted);
                 Ok(())
             }
+            SequencerCommand::SetLaneFollow { lane, scale } => {
+                let index = self.lane_index(*lane)?;
+                self.lanes[index].set_follow(*scale);
+                Ok(())
+            }
         }
     }
 
@@ -665,6 +817,14 @@ impl SequencerEngine {
             SequencerQuantize::Now => self.transport.position_beats(),
             SequencerQuantize::NextBeat => self.transport.next_beat() as f64,
             SequencerQuantize::NextBar => self.transport.next_bar() as f64,
+        }
+    }
+
+    /// One key from the player's keyboard, fanned to every follow lane.
+    /// Hosts call this from wherever their live MIDI already flows.
+    pub fn note_input(&mut self, key: u8, on: bool) {
+        for lane in &mut self.lanes {
+            lane.note_input(key, on);
         }
     }
 
@@ -715,9 +875,13 @@ impl SequencerEngine {
                 .iter()
                 .zip(&self.lane_names)
                 .map(|(lane, name)| SequencerLaneStatus {
-                    playing: lane.playing.is_some(),
+                    // A follow lane reads as playing only while its gate is
+                    // open: the pad tells the truth about what sounds.
+                    playing: lane.playing.is_some()
+                        && (lane.follow.is_none() || !lane.input_keys.is_empty()),
                     queued: lane.pending.is_some(),
                     stopping: lane.stop_at.is_some(),
+                    following: lane.follow.is_some(),
                     muted: lane.muted,
                     pattern_name: name.clone(),
                 })
@@ -749,6 +913,8 @@ mod tests {
                 })
                 .collect(),
             view: Default::default(),
+            swing_percent: 50,
+            root_key: 48,
         };
         CompiledPattern::compile(&document).expect("valid pattern")
     }
@@ -789,6 +955,8 @@ mod tests {
                 channel: 0,
             }],
             view: Default::default(),
+            swing_percent: 50,
+            root_key: 48,
         };
         let mut zero_length = base.clone();
         zero_length.length_ticks = 0;
@@ -806,6 +974,112 @@ mod tests {
         still.notes[0].duration_ticks = 0;
         assert_eq!(CompiledPattern::compile(&still).err(), Some(PatternError::ZeroDuration));
         assert!(CompiledPattern::compile(&base).is_ok());
+    }
+
+    #[test]
+    fn key_follow_gates_transposes_and_snaps() {
+        let mut engine = SequencerEngine::new(48_000.0).expect("engine");
+        // A one-note phrase at its root, C2, on a 1-beat pattern.
+        let mut document = definition();
+        document.length_ticks = TICKS_PER_BEAT;
+        document.notes = vec![rackforge_performance_api::PatternNoteSpec {
+            // A full-beat note, so something is still ringing at release.
+            tick: 0,
+            duration_ticks: TICKS_PER_BEAT,
+            key: 48,
+            velocity: 100,
+            channel: 0,
+        }];
+        engine
+            .apply(&SequencerCommand::QueuePattern {
+                lane: 0,
+                pattern: document,
+                quantize: SequencerQuantize::Now,
+            })
+            .expect("queue");
+        engine
+            .apply(&SequencerCommand::SetLaneFollow {
+                lane: 0,
+                scale: Some(SequencerScale::Chromatic),
+            })
+            .expect("follow");
+        engine.apply(&SequencerCommand::TransportStart).expect("start");
+
+        // Gate closed: a full bar of silence.
+        let mut out = Vec::new();
+        engine.render_block(16_384, &mut out);
+        assert!(out.is_empty(), "a follow lane must be silent with no key held");
+        assert!(engine.status().lanes[0].following);
+        assert!(!engine.status().lanes[0].playing);
+
+        // Hold F2: the phrase restarts on the next 16th, five semitones up.
+        engine.note_input(53, true);
+        out.clear();
+        engine.render_block(16_384, &mut out);
+        let ons: Vec<u8> = out
+            .iter()
+            .filter(|event| event.data[0] == 0x90)
+            .map(|event| event.data[1])
+            .collect();
+        assert!(ons.iter().all(|&key| key == 53), "expected F2, got {ons:?}");
+        assert!(!ons.is_empty());
+        assert!(engine.status().lanes[0].playing);
+
+        // Release: the ringing note is silenced at the next block.
+        engine.note_input(53, false);
+        out.clear();
+        engine.render_block(16_384, &mut out);
+        assert!(out.iter().any(|event| event.data[0] == 0x80));
+        assert!(out.iter().all(|event| event.data[0] != 0x90));
+
+        // Scale snap: a phrase note a minor third over the root, held on F2
+        // in F major, snaps 56 (G#) down to 55 (G).
+        assert_eq!(snap_to_scale(48 + 5 + 3, 53, SequencerScale::Major), Some(55));
+        assert_eq!(snap_to_scale(200, 53, SequencerScale::Major), None);
+    }
+
+    #[test]
+    fn swing_moves_the_off_sixteenths_and_nothing_else() {
+        let mut document = definition();
+        document.length_ticks = TICKS_PER_BEAT;
+        document.notes = vec![
+            rackforge_performance_api::PatternNoteSpec {
+                tick: 0,
+                duration_ticks: TICKS_PER_BEAT / 4,
+                key: 36,
+                velocity: 100,
+                channel: 0,
+            },
+            rackforge_performance_api::PatternNoteSpec {
+                tick: TICKS_PER_BEAT / 4, // the off-sixteenth
+                duration_ticks: TICKS_PER_BEAT / 4,
+                key: 38,
+                velocity: 100,
+                channel: 0,
+            },
+            rackforge_performance_api::PatternNoteSpec {
+                tick: TICKS_PER_BEAT / 2, // the next pair's downbeat
+                duration_ticks: TICKS_PER_BEAT / 4,
+                key: 42,
+                velocity: 100,
+                channel: 0,
+            },
+        ];
+        document.swing_percent = 66;
+        let mut lane = SequencerLane::new();
+        lane.queue(
+            CompiledPattern::compile(&document).expect("valid pattern"),
+            0.0,
+        );
+        let events = render(&mut lane, 1, 24_000, 0.0);
+        let ons: Vec<(u32, u8)> = events
+            .iter()
+            .filter(|(_, _, data)| data[0] == 0x90)
+            .map(|(_, frame, data)| (*frame, data[1]))
+            .collect();
+        // Downbeats hold their frames; the off-sixteenth lands at 66% of
+        // its eighth-note pair: 0.33 beats -> frame 7 920, not 6 000.
+        assert_eq!(ons, vec![(0, 36), (7_920, 38), (12_000, 42)]);
     }
 
     #[test]
@@ -871,6 +1145,8 @@ mod tests {
                 channel: 0,
             }],
             view: Default::default(),
+            swing_percent: 50,
+            root_key: 48,
         };
         lane.queue(CompiledPattern::compile(&document).expect("valid"), 1.0);
         let events = render(&mut lane, 1, 24_000, 1.0);
@@ -932,6 +1208,8 @@ mod tests {
                 channel: 0,
             }],
             view: Default::default(),
+            swing_percent: 50,
+            root_key: 48,
         };
         let mut lane = SequencerLane::new();
         lane.queue(CompiledPattern::compile(&document).expect("valid"), 0.0);
@@ -961,6 +1239,8 @@ mod tests {
                 })
                 .collect(),
             view: Default::default(),
+            swing_percent: 50,
+            root_key: 48,
         };
         let mut lane = SequencerLane::new();
         lane.queue(CompiledPattern::compile(&document).expect("valid"), 0.0);
@@ -1003,6 +1283,8 @@ mod tests {
                 })
                 .collect(),
             view: Default::default(),
+            swing_percent: 50,
+            root_key: 48,
         }
     }
 

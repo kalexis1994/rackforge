@@ -1,23 +1,43 @@
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  viewBox="0 0 1000 1000"
-  role="img"
-  aria-labelledby="title description"
->
-  <title id="title">RackForge mark</title>
-  <desc id="description">
-    Transparent RackForge signal-path monogram for compositing on dark surfaces.
-  </desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" role="img" aria-labelledby="title description">
+  <title id="title">RackForge</title>
+  <desc id="description">RF monogram drawn as a signal path from input to output.</desc>
 
-  <g
-    fill="none"
-    stroke="#55e7ff"
-    stroke-width="55"
-    stroke-linecap="square"
-    stroke-linejoin="bevel"
-    transform="translate(500 500) scale(1.25) translate(-505 -462.5)"
-  >
-    <path d="M230 650H285L400 535V295L460 235H610V320L580 350H475V540Q475 560 495 560H620L735 675H780" />
-    <path d="M475 430H620L660 470V520L620 560" />
+  <!-- PAINT ORDER IS THE DRAWING. The leg is stroked before the bowl of the R so
+       the bar truncates it at its lower edge instead of letting the diagonal tip
+       run into the red, and the node at the crossbar is filled last because it
+       covers the seam where three strokes meet. Reordering these is a visual
+       change, not a tidy-up. The two nodes are knockouts, not painted dots. -->
+
+  <!-- Square and transparent. The boot loader stacks two copies of this file
+       and reveals the second from the bottom, so it has to sit on the same
+       square box as the ring it fills. The plate belongs to whatever is
+       behind, which is also what an adaptive-icon foreground expects. -->
+
+  <style>
+    svg { --bowl: #c1273d; --leg: #1d3560; --arm: #d25a2b; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bowl: #e0455c; --leg: #4a79c8; --arm: #f0813f; }
+    }
+  </style>
+
+  <defs>
+    <mask id="node-holes" maskUnits="userSpaceOnUse" x="0" y="0" width="800" height="400">
+      <rect width="800" height="400" fill="#fff"/>
+      <circle cx="80" cy="200" r="10" fill="#000"/>
+      <circle cx="550" cy="200" r="12" fill="#000"/>
+    </mask>
+  </defs>
+
+  <g transform="translate(120 334) scale(1.0795)">
+    <g mask="url(#node-holes)" transform="translate(-58 -51)"
+       fill="none" stroke-width="34" stroke-linecap="butt" stroke-linejoin="round">
+      <path d="M305 200L430 342H505Q550 342 550 297V200" stroke="var(--leg)"/>
+      <path d="M550 200V111Q550 68 595 68H720" stroke="var(--arm)"/>
+      <path d="M550 200H731" stroke="var(--arm)"/>
+      <path d="M80 200H360Q410 200 410 150V110Q410 68 365 68H155V145" stroke="var(--bowl)"/>
+      <circle cx="80" cy="200" r="22" fill="var(--bowl)" stroke="none"/>
+      <circle cx="550" cy="200" r="24" fill="var(--arm)" stroke="none"/>
+      <path d="M720 174L762 200L720 226Z" fill="var(--arm)" stroke="none"/>
+    </g>
   </g>
 </svg>

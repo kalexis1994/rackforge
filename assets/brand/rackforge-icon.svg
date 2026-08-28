@@ -8,17 +8,12 @@
        covers the seam where three strokes meet. Reordering these is a visual
        change, not a tidy-up. The two nodes are knockouts, not painted dots. -->
 
-  <!-- Square and transparent. The boot loader stacks two copies of this file
-       and reveals the second from the bottom, so it has to sit on the same
-       square box as the ring it fills. The plate belongs to whatever is
-       behind, which is also what an adaptive-icon foreground expects. -->
+  <!-- Launcher plate. Full bleed, because the manifest declares these maskable
+       and a platform may crop them to any shape. The mark is held to 600 units
+       wide so it stays inside the 66% safe circle: 600x262 has a 653 diagonal.
+       Flat inks, not variables: this file is rasterised into PNG and ICO. -->
 
-  <style>
-    svg { --bowl: #c1273d; --leg: #1d3560; --arm: #d25a2b; }
-    @media (prefers-color-scheme: dark) {
-      svg { --bowl: #e0455c; --leg: #4a79c8; --arm: #f0813f; }
-    }
-  </style>
+  <rect width="1000" height="1000" fill="#ebe4d8"/>
 
   <defs>
     <mask id="node-holes" maskUnits="userSpaceOnUse" x="0" y="0" width="800" height="400">
@@ -28,16 +23,16 @@
     </mask>
   </defs>
 
-  <g transform="translate(120 334) scale(1.0795)">
+  <g transform="translate(200 369) scale(0.852)">
     <g mask="url(#node-holes)" transform="translate(-58 -51)"
        fill="none" stroke-width="34" stroke-linecap="butt" stroke-linejoin="round">
-      <path d="M305 200L430 342H505Q550 342 550 297V200" stroke="var(--leg)"/>
-      <path d="M550 200V111Q550 68 595 68H720" stroke="var(--arm)"/>
-      <path d="M550 200H731" stroke="var(--arm)"/>
-      <path d="M80 200H360Q410 200 410 150V110Q410 68 365 68H155V145" stroke="var(--bowl)"/>
-      <circle cx="80" cy="200" r="22" fill="var(--bowl)" stroke="none"/>
-      <circle cx="550" cy="200" r="24" fill="var(--arm)" stroke="none"/>
-      <path d="M720 174L762 200L720 226Z" fill="var(--arm)" stroke="none"/>
+      <path d="M305 200L430 342H505Q550 342 550 297V200" stroke="#1d3560"/>
+      <path d="M550 200V111Q550 68 595 68H720" stroke="#d25a2b"/>
+      <path d="M550 200H731" stroke="#d25a2b"/>
+      <path d="M80 200H360Q410 200 410 150V110Q410 68 365 68H155V145" stroke="#c1273d"/>
+      <circle cx="80" cy="200" r="22" fill="#c1273d" stroke="none"/>
+      <circle cx="550" cy="200" r="24" fill="#d25a2b" stroke="none"/>
+      <path d="M720 174L762 200L720 226Z" fill="#d25a2b" stroke="none"/>
     </g>
   </g>
 </svg>

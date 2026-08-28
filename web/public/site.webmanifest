@@ -8,8 +8,8 @@
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone"],
   "orientation": "any",
-  "background_color": "#050b11",
-  "theme_color": "#050b11",
+  "background_color": "#ebe4d8",
+  "theme_color": "#c9c1b3",
   "categories": ["music", "productivity"],
   "icons": [
     {

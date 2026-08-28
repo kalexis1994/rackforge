@@ -1,29 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    RackForge mark for the in-app top bar. See ic_launcher_foreground.xml
+    for why the strokes stop short of the nodes.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="32dp"
     android:height="32dp"
     android:viewportWidth="1000"
     android:viewportHeight="1000">
     <group
-        android:pivotX="505"
-        android:pivotY="462.5"
-        android:scaleX="1.25"
-        android:scaleY="1.25"
-        android:translateX="-5"
-        android:translateY="37.5">
-        <path
-            android:pathData="M230,650H285L400,535V295L460,235H610V320L580,350H475V540Q475,560 495,560H620L735,675H780"
-            android:fillColor="@android:color/transparent"
-            android:strokeColor="@color/rackforge_signal_cyan"
-            android:strokeWidth="55"
-            android:strokeLineCap="square"
-            android:strokeLineJoin="bevel" />
-        <path
-            android:pathData="M475,430H620L660,470V520L620,560"
-            android:fillColor="@android:color/transparent"
-            android:strokeColor="@color/rackforge_signal_cyan"
-            android:strokeWidth="55"
-            android:strokeLineCap="square"
-            android:strokeLineJoin="bevel" />
+        android:translateX="50"
+        android:translateY="303.2"
+        android:scaleX="1.278"
+        android:scaleY="1.278">
+        <group
+            android:translateX="-58"
+            android:translateY="-51">
+            <path
+                android:pathData="M305,200L430,342H505Q550,342 550,297V212"
+                android:strokeColor="@color/rackforge_mark_leg_stage"
+                android:strokeWidth="34"
+                android:strokeLineCap="butt"
+                android:strokeLineJoin="round" />
+            <path
+                android:pathData="M550,188V111Q550,68 595,68H720"
+                android:strokeColor="@color/rackforge_mark_arm_stage"
+                android:strokeWidth="34"
+                android:strokeLineCap="butt"
+                android:strokeLineJoin="round" />
+            <path
+                android:pathData="M562,200H731"
+                android:strokeColor="@color/rackforge_mark_arm_stage"
+                android:strokeWidth="34"
+                android:strokeLineCap="butt"
+                android:strokeLineJoin="round" />
+            <path
+                android:pathData="M92,200H360Q410,200 410,150V110Q410,68 365,68H155V145"
+                android:strokeColor="@color/rackforge_mark_bowl_stage"
+                android:strokeWidth="34"
+                android:strokeLineCap="butt"
+                android:strokeLineJoin="round" />
+            <path
+                android:pathData="M58,200a22,22 0 1,0 44,0a22,22 0 1,0 -44,0M70,200a10,10 0 1,0 20,0a10,10 0 1,0 -20,0"
+                android:fillColor="@color/rackforge_mark_bowl_stage"
+                android:fillType="evenOdd" />
+            <path
+                android:pathData="M526,200a24,24 0 1,0 48,0a24,24 0 1,0 -48,0M538,200a12,12 0 1,0 24,0a12,12 0 1,0 -24,0"
+                android:fillColor="@color/rackforge_mark_arm_stage"
+                android:fillType="evenOdd" />
+            <path
+                android:pathData="M720,174L762,200L720,226Z"
+                android:fillColor="@color/rackforge_mark_arm_stage" />
+        </group>
     </group>
 </vector>

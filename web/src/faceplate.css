@@ -5261,3 +5261,17 @@
 .live-zone-performance > .live-surface-tabs {
   margin-top: -2px;
 }
+
+/* In the immersive graph workspace the editor owns the whole area and the
+   sizing chain runs from the shell to the canvas. The PERFORMANCE zone box
+   would break that chain, so it dissolves — its children join the shell's
+   layout directly — and its legend and selector stand aside. */
+
+.graph-workspace-active .live-zone-performance {
+  display: contents;
+}
+
+.graph-workspace-active .live-zone-performance > .live-zone-legend,
+.graph-workspace-active .live-zone-performance > .live-surface-tabs {
+  display: none;
+}

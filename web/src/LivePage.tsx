@@ -282,12 +282,6 @@ export function LivePage({
             : { label: "Library", value: liveContext }
         }
       />
-      <div className="live-toolbar">
-        <div>
-          <span className="eyebrow accent">Performance workspace</span>
-          <h1>LIVE</h1>
-        </div>
-      </div>
       {performance ? <SequencerStrip performance={performance} surface={surface} /> : null}
       <section className="live-zone live-zone-performance" aria-label="Performance">
       <span className="live-zone-legend">PERFORMANCE</span>

@@ -116,6 +116,12 @@ pub struct BrowserHost {
     state_store: PluginStateStore,
     plugins: Vec<HostedPlugin>,
     audio: AudioEngine,
+    /// The host sequencer: the transport and its lanes, advanced inside
+    /// [`BrowserHost::render`] so pattern MIDI is staged sample-accurately
+    /// before the active instrument runs.
+    sequencer: rackforge_core::SequencerEngine,
+    /// Per-block scratch for sequencer output, allocated once.
+    sequencer_events: Vec<rackforge_plugin_api::abi::MidiEventV1>,
     audio_state: AudioOutputState,
     /// Notes a browser client is holding down, so a disconnect can release
     /// exactly the notes that connection owns.
@@ -251,6 +257,8 @@ impl BrowserHost {
             session.master_level,
             session.master_pan,
         );
+        let sequencer = rackforge_core::SequencerEngine::new(sample_rate_hz)
+            .ok_or_else(|| anyhow::anyhow!("sample rate {sample_rate_hz} is outside the transport bounds"))?;
         let audio_state = browser_audio_state(sample_rate_hz, maximum_frames, output_channels);
 
         let mut host = Self {
@@ -258,6 +266,8 @@ impl BrowserHost {
             checkpoint,
             store: SessionStore::new(session)?,
             performance,
+            sequencer,
+            sequencer_events: Vec::with_capacity(rackforge_core::sequencer::MAX_EVENTS_PER_BLOCK),
             state_store,
             plugins,
             audio,
@@ -501,6 +511,15 @@ impl BrowserHost {
             ControlRequest::VirtualMidi {
                 client_id, message, ..
             } => self.virtual_midi(client_id, message),
+            ControlRequest::Sequencer { command } => {
+                self.sequencer
+                    .apply(&command)
+                    .map_err(|message| Failure::new(ControlErrorCode::InvalidRequest, message))?;
+                Ok(ControlResponse::SequencerAccepted)
+            }
+            ControlRequest::SequencerStatus => Ok(ControlResponse::SequencerStatus {
+                sequencer: self.sequencer.status(),
+            }),
             ControlRequest::ReleaseVirtualMidi { client_id } => {
                 self.release_virtual_midi(&client_id);
                 Ok(ControlResponse::VirtualMidiReleased { client_id })
@@ -1603,6 +1622,15 @@ impl BrowserHost {
         self.flush_live_parameters(false);
         let actions = self.controller.poll();
         self.apply_controller_actions(actions);
+        // The sequencer advances whether or not anything is listening: the
+        // transport is the machine's clock, not the instrument's.
+        let mut sequenced = std::mem::take(&mut self.sequencer_events);
+        sequenced.clear();
+        self.sequencer.render_block(frames, &mut sequenced);
+        for event in &sequenced {
+            self.audio.push_midi(event.frame, event.data, event.length);
+        }
+        self.sequencer_events = sequenced;
         let active = self.store.state().active_instance_id.clone();
         let request = RenderRequest { frames };
         let Some(index) = active.and_then(|id| {

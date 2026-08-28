@@ -4,7 +4,9 @@ pub use rackforge_midi_api::{
     MidiChannel, MidiSourceDescriptor, ParameterLink, ParameterLinkChannel, ParameterLinkId,
     ParameterLinkMessage, ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform,
 };
-pub use rackforge_performance_api::{LibraryRevision, PerformanceEdit, PerformanceSnapshot};
+pub use rackforge_performance_api::{
+    LibraryRevision, PatternDefinition, PerformanceEdit, PerformanceSnapshot,
+};
 pub use rackforge_plugin_api::{
     HostPreset, HostPresetSummary, ParameterSchema, PluginStateReference,
 };
@@ -124,6 +126,74 @@ pub fn parse_plugin_parameter_control_command(
         }
         _ => Err(format!("unknown plugin parameter command {method:?}")),
     }
+}
+
+/// Which grid line a launch or stop waits for. `Now` is this block.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SequencerQuantize {
+    Now,
+    NextBeat,
+    NextBar,
+}
+
+/// One instruction to the host sequencer. The quantise boundary is resolved
+/// by the host against its own transport, never by the client's clock.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SequencerCommand {
+    TransportStart,
+    /// Holds position and lets sounding notes finish; a paused show resumes
+    /// where it was.
+    TransportStop,
+    /// Ends every sounding note immediately and clears all lanes.
+    TransportPanic,
+    SetTempo {
+        bpm: f64,
+    },
+    SetSignature {
+        beats_per_bar: u8,
+        beat_unit: u8,
+    },
+    QueuePattern {
+        lane: u8,
+        pattern: PatternDefinition,
+        quantize: SequencerQuantize,
+    },
+    StopLane {
+        lane: u8,
+        quantize: SequencerQuantize,
+    },
+    SetLaneMuted {
+        lane: u8,
+        muted: bool,
+    },
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SequencerLaneStatus {
+    pub playing: bool,
+    pub queued: bool,
+    pub muted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_name: Option<String>,
+}
+
+/// What a transport display shows. Bars and beats are 1-based because that
+/// is how musicians count.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SequencerStatusV1 {
+    pub running: bool,
+    pub tempo_bpm: f64,
+    pub beats_per_bar: u8,
+    pub beat_unit: u8,
+    pub bar: u64,
+    pub beat_in_bar: u8,
+    /// Progress through the current beat, `0.0..1.0`.
+    pub beat_phase: f64,
+    pub lanes: Vec<SequencerLaneStatus>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -258,6 +328,15 @@ pub enum ControlRequest {
     ReleaseVirtualMidi {
         client_id: ClientId,
     },
+    /// Drives the host sequencer. Transient like `VirtualMidi`: the pattern
+    /// travels inline so the audio side never consults the library, and the
+    /// session revision never advances.
+    Sequencer {
+        command: SequencerCommand,
+    },
+    /// Reads the transport and lane state for display. Transient telemetry,
+    /// polled like `OutputMeter`.
+    SequencerStatus,
     Events {
         after_revision: Revision,
     },
@@ -375,6 +454,10 @@ pub enum ControlResponse {
     },
     OutputMeter {
         meter: OutputMeterSnapshot,
+    },
+    SequencerAccepted,
+    SequencerStatus {
+        sequencer: SequencerStatusV1,
     },
     AudioApplied {
         snapshot: Box<AudioOutputState>,

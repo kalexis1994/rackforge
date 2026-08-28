@@ -1217,7 +1217,7 @@ function NavigationLinks({
           <NavLink
             key={item.path}
             to={item.path}
-            end={item.path === "/"}
+            end={false}
             onClick={(event) => {
               if (item.path === "/play" && onPlayRequest) {
                 event.preventDefault();

@@ -18,6 +18,14 @@ pub const MAX_SONGS: usize = 256;
 pub const MAX_SONG_PARTS: usize = 64;
 pub const MAX_SETLISTS: usize = 128;
 pub const MAX_SETLIST_ENTRIES: usize = 256;
+pub const MAX_PATTERNS: usize = 512;
+pub const MAX_PATTERN_NOTES: usize = 2_048;
+/// Tick resolution of sequencer patterns: 960 divides every common figure —
+/// straight, dotted and triplet down to 64ths — so editors never round.
+pub const PATTERN_TICKS_PER_BEAT: u32 = 960;
+/// Longest pattern, in ticks: 256 beats is 64 bars of four — beyond a live
+/// pattern and into a timeline, which a pattern is not.
+pub const MAX_PATTERN_TICKS: u32 = 256 * PATTERN_TICKS_PER_BEAT;
 
 macro_rules! performance_id {
     ($name:ident) => {
@@ -54,6 +62,7 @@ performance_id!(SongId);
 performance_id!(SongPartId);
 performance_id!(SetlistId);
 performance_id!(SetlistEntryId);
+performance_id!(PatternId);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -944,6 +953,54 @@ impl SetlistDefinition {
     }
 }
 
+/// One note of a sequencer pattern. Positions and durations are in integer
+/// ticks from the pattern start, so a saved pattern carries no float in it
+/// for two platforms to disagree about.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatternNoteSpec {
+    pub tick: u32,
+    pub duration_ticks: u32,
+    pub key: u8,
+    pub velocity: u8,
+    #[serde(default)]
+    pub channel: u8,
+}
+
+/// A sequencer pattern: a performance-library entity like a Rack or a Song,
+/// edited in LIVE and launched quantised against the host transport.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatternDefinition {
+    pub id: PatternId,
+    pub name: String,
+    pub length_ticks: u32,
+    #[serde(default)]
+    pub notes: Vec<PatternNoteSpec>,
+}
+
+impl PatternDefinition {
+    pub fn validate(&self) -> Result<(), PerformanceError> {
+        validate_name(&self.name)?;
+        if self.length_ticks == 0 || self.length_ticks > MAX_PATTERN_TICKS {
+            return Err(PerformanceError::InvalidPatternLength(self.length_ticks));
+        }
+        validate_count("pattern notes", self.notes.len(), 0, MAX_PATTERN_NOTES)?;
+        for note in &self.notes {
+            if note.tick >= self.length_ticks
+                || note.duration_ticks == 0
+                || note.key > 127
+                || note.velocity == 0
+                || note.velocity > 127
+                || note.channel > 15
+            {
+                return Err(PerformanceError::InvalidPatternNote);
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PerformanceLibrary {
@@ -954,6 +1011,8 @@ pub struct PerformanceLibrary {
     pub songs: Vec<SongDefinition>,
     #[serde(default)]
     pub setlists: Vec<SetlistDefinition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<PatternDefinition>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -965,6 +1024,8 @@ pub enum PerformanceEdit {
     DeleteSong { song_id: SongId },
     PutSetlist { setlist: SetlistDefinition },
     DeleteSetlist { setlist_id: SetlistId },
+    PutPattern { pattern: PatternDefinition },
+    DeletePattern { pattern_id: PatternId },
 }
 
 impl PerformanceEdit {
@@ -986,6 +1047,13 @@ impl PerformanceEdit {
             Self::DeleteSetlist { setlist_id } => {
                 remove(&mut library.setlists, setlist_id, |item| &item.id)
                     .ok_or_else(|| PerformanceError::MissingSetlist(setlist_id.clone()))?;
+            }
+            Self::PutPattern { pattern } => {
+                upsert(&mut library.patterns, pattern.clone(), |item| &item.id)
+            }
+            Self::DeletePattern { pattern_id } => {
+                remove(&mut library.patterns, pattern_id, |item| &item.id)
+                    .ok_or_else(|| PerformanceError::MissingPattern(pattern_id.clone()))?;
             }
         }
         library.validate()
@@ -1014,6 +1082,7 @@ impl PerformanceLibrary {
             racks: Vec::new(),
             songs: Vec::new(),
             setlists: Vec::new(),
+            patterns: Vec::new(),
         }
     }
 
@@ -1022,12 +1091,20 @@ impl PerformanceLibrary {
         validate_count("racks", self.racks.len(), 0, MAX_RACKS)?;
         validate_count("songs", self.songs.len(), 0, MAX_SONGS)?;
         validate_count("setlists", self.setlists.len(), 0, MAX_SETLISTS)?;
+        validate_count("patterns", self.patterns.len(), 0, MAX_PATTERNS)?;
         unique(self.racks.iter().map(|rack| rack.id.as_str()), "rack")?;
         unique(self.songs.iter().map(|song| song.id.as_str()), "song")?;
         unique(
             self.setlists.iter().map(|setlist| setlist.id.as_str()),
             "setlist",
         )?;
+        unique(
+            self.patterns.iter().map(|pattern| pattern.id.as_str()),
+            "pattern",
+        )?;
+        for pattern in &self.patterns {
+            pattern.validate()?;
+        }
         for rack in &self.racks {
             rack.validate()?;
             if let Some(graph) = &rack.graph {
@@ -1550,6 +1627,12 @@ pub enum PerformanceError {
     InvalidReference(&'static str),
     #[error("performance name is empty, too long or contains NUL")]
     InvalidName,
+    #[error("pattern length {0} ticks is outside the pattern bounds")]
+    InvalidPatternLength(u32),
+    #[error("a pattern note is outside its pattern or carries invalid values")]
+    InvalidPatternNote,
+    #[error("pattern {0} does not exist")]
+    MissingPattern(PatternId),
     #[error("{field} count {actual} is outside {minimum}..={maximum}")]
     InvalidCount {
         field: &'static str,
@@ -1673,6 +1756,18 @@ mod tests {
                 entries: vec![SetlistEntry {
                     id: SetlistEntryId::new("entry.opener").unwrap(),
                     song_id,
+                }],
+            }],
+            patterns: vec![PatternDefinition {
+                id: PatternId::new("pattern.four-on-the-floor").unwrap(),
+                name: "Four on the floor".into(),
+                length_ticks: 4 * PATTERN_TICKS_PER_BEAT,
+                notes: vec![PatternNoteSpec {
+                    tick: 0,
+                    duration_ticks: PATTERN_TICKS_PER_BEAT / 2,
+                    key: 36,
+                    velocity: 100,
+                    channel: 0,
                 }],
             }],
         }

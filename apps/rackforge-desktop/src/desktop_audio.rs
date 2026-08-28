@@ -871,7 +871,10 @@ impl DesktopAudio {
             active_voice,
             midi_receiver,
             command_receiver,
-            events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
+            events: Vec::with_capacity(
+                MAX_MIDI_EVENTS_PER_BLOCK
+                    * (1 + rackforge_core::sequencer::MAX_SEQUENCER_LANES),
+            ),
             parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
             parameter_links: Vec::new(),
             output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
@@ -894,6 +897,9 @@ impl DesktopAudio {
                 RenderPool::automatic(render_telemetry)
             },
             render_telemetry: RenderTelemetry::new(0),
+            sequencer: rackforge_core::SequencerEngine::new(f64::from(config.sample_rate.0))
+                .or_else(|| rackforge_core::SequencerEngine::new(48_000.0))
+                .expect("48 kHz is inside the transport bounds"),
         };
         processor.render_telemetry = Arc::clone(processor.render_pool.telemetry());
         let engage_callback_thread = std::sync::Once::new();
@@ -1196,6 +1202,25 @@ impl DesktopAudio {
             .publish(screen, SurfaceUpdatePriority::Interactive);
     }
 
+    pub fn sequencer_command(
+        &self,
+        command: rackforge_control_api::SequencerCommand,
+    ) -> Result<std::result::Result<(), String>> {
+        let (reply, response) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::Sequencer { command, reply })?;
+        response
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|_| anyhow::anyhow!("the audio thread did not answer the sequencer command"))
+    }
+
+    pub fn sequencer_status(&self) -> Result<rackforge_control_api::SequencerStatusV1> {
+        let (reply, response) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::SequencerStatus { reply })?;
+        response
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|_| anyhow::anyhow!("the audio thread did not answer the status request"))
+    }
+
     pub fn test_note(&self) -> Result<()> {
         self.send_command(AudioCommand::InjectMidi(MidiPacket {
             source: VIRTUAL_MIDI_SOURCE_KEY,
@@ -1328,6 +1353,13 @@ enum AudioCommand {
         reply: SyncSender<Result<(), String>>,
     },
     InjectMidi(MidiPacket),
+    Sequencer {
+        command: rackforge_control_api::SequencerCommand,
+        reply: SyncSender<std::result::Result<(), String>>,
+    },
+    SequencerStatus {
+        reply: SyncSender<rackforge_control_api::SequencerStatusV1>,
+    },
     SetMasterLevel(MasterLevel),
     SetMasterPan(MasterPan),
     SetRunning(bool),
@@ -1631,6 +1663,9 @@ struct AudioProcessor {
     sample_rate: u32,
     render_pool: RenderPool,
     render_telemetry: Arc<RenderTelemetry>,
+    /// The host sequencer: transport and lanes, advanced once per block so
+    /// pattern MIDI joins `events` sample-accurately before instances run.
+    sequencer: rackforge_core::SequencerEngine,
 }
 
 impl AudioProcessor {
@@ -1671,6 +1706,11 @@ impl AudioProcessor {
                 push_midi_event(&mut self.events, packet);
             }
         }
+        // The sequencer advances whether or not anything is listening: the
+        // transport is the machine's clock, not the instrument's. Its output
+        // is appended after live input and the whole block is re-sorted by
+        // frame inside render_block, offs before ons preserved.
+        self.sequencer.render_block(frames as u32, &mut self.events);
         let samples = frames * PLUGIN_OUTPUT_CHANNELS;
         self.output[..samples].fill(0.0);
         if self.stopped {
@@ -2056,6 +2096,12 @@ impl AudioProcessor {
                     let _ = reply.try_send(Ok(()));
                 }
                 AudioCommand::InjectMidi(packet) => push_midi_event(&mut self.events, packet),
+                AudioCommand::Sequencer { command, reply } => {
+                    let _ = reply.try_send(self.sequencer.apply(&command));
+                }
+                AudioCommand::SequencerStatus { reply } => {
+                    let _ = reply.try_send(self.sequencer.status());
+                }
                 AudioCommand::SetMasterLevel(level) => self.master_gain.set_level(level),
                 AudioCommand::SetMasterPan(pan) => self.master_balance.set_pan(pan),
                 AudioCommand::SetRunning(running) => self.stopped = !running,

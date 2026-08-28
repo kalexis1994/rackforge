@@ -1783,6 +1783,13 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     let mut master_balance = MasterBalance::new(initial_master_pan);
     let mut reserved_midi_controls = ReservedMidiControls::with_sources(midi_source_count);
     let mut pending_virtual_midi = Vec::with_capacity(32);
+    // The host sequencer: transport and lanes, advanced once per period so
+    // pattern MIDI joins the block sample-accurately. Rack-mode distribution
+    // across Slot filters is the next stage; today the stream reaches the
+    // standalone voice the way the desktop host's does.
+    let mut sequencer = crate::sequencer::SequencerEngine::new(output_rate as f64)
+        .or_else(|| crate::sequencer::SequencerEngine::new(48_000.0))
+        .expect("48 kHz is inside the transport bounds");
     let (retired_sender, retired_receiver) = mpsc::sync_channel::<RetiredAudioRuntime>(16);
     let _retired_reclaimer = thread::Builder::new()
         .name("rackforge-live-voice-reclaimer".into())
@@ -1835,6 +1842,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     let omitted = events.len().saturating_sub(accepted);
                     pending_virtual_midi.extend(events.into_iter().take(accepted));
                     dropped_events += omitted;
+                }
+                AudioControlCommand::Sequencer { command, reply } => {
+                    let _ = reply.try_send(sequencer.apply(&command));
+                }
+                AudioControlCommand::SequencerStatus { reply } => {
+                    let _ = reply.try_send(Ok(sequencer.status()));
                 }
                 AudioControlCommand::ApplyAudioOutput { profile, reply } => {
                     let result = if input.as_ref().is_some_and(|capture| {
@@ -2686,6 +2699,11 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 eprintln!("AUDIO_INPUT_{report}");
             }
         }
+
+        // The sequencer advances whether or not anything is listening: the
+        // transport is the machine's clock, not the instrument's. Events are
+        // appended with their frame offsets and re-sorted inside.
+        sequencer.render_block(period_frames as u32, &mut events);
 
         mix_output.fill(0.0);
         match render_mode {

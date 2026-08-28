@@ -3462,3 +3462,405 @@
   background: var(--panel-inset) !important;
   box-shadow: var(--fp-well) !important;
 }
+
+/* ======================================================== the sequencer ===
+   The transport strip is the machine's clock made visible: a gang of keys, a
+   dark LCD, and one lamp that breathes on the beat. The workshop below it is
+   where patterns are edited — and edited loud: LAUNCH plays the draft you
+   are looking at, so the strip and the grid always tell the same story.
+
+   Keys follow the house rule: raised is available, sunken is engaged, and a
+   latching key carries a pilot lamp instead of a painted edge. The lane keys
+   are the one place a second colour appears — the red block of this screen —
+   and only on the lane actually sounding. */
+
+.sequencer-shell {
+  margin: 0 0 12px;
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  background: var(--fp-panel);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+}
+
+.sequencer-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 9px 12px;
+}
+
+.seq-legend {
+  color: var(--fp-rail-label);
+  font-family: var(--display-font);
+  font-weight: 800;
+  font-size: var(--fp-label);
+  letter-spacing: var(--fp-track);
+}
+
+.seq-keys {
+  display: flex;
+  align-items: center;
+}
+
+.seq-key {
+  min-height: 34px;
+  padding: 8px 13px;
+  color: var(--fp-rail-label);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-left-width: 0;
+  border-radius: 0;
+  box-shadow: var(--fp-lip);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--display-font);
+  font-weight: 700;
+  font-size: var(--fp-label);
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.seq-keys > .seq-key:first-child {
+  border-left-width: 1px;
+  border-radius: var(--fp-radius-key) 0 0 var(--fp-radius-key);
+}
+
+.seq-keys > .seq-key:last-child {
+  border-radius: 0 var(--fp-radius-key) var(--fp-radius-key) 0;
+}
+
+.seq-keys > .seq-key:only-child,
+.seq-open-key {
+  border-radius: var(--fp-radius-key);
+  border-left-width: 1px;
+}
+
+.seq-key:hover:not(:disabled) {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--glass));
+}
+
+.seq-key:active:not(:disabled),
+.seq-key.engaged {
+  color: var(--ink);
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+.seq-key:disabled {
+  opacity: 0.42;
+  cursor: default;
+  box-shadow: none;
+}
+
+.seq-key:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+}
+
+.seq-key-narrow {
+  padding: 8px 10px;
+  min-width: 34px;
+  justify-content: center;
+}
+
+/* The pilot lamp: a lens with nothing behind it until the key latches. */
+.seq-lamp-key::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--acid) 20%, var(--panel-inset));
+  box-shadow:
+    inset 0 1px 2px rgba(var(--edge-dark-rgb), 0.55),
+    0 1px 0 rgba(var(--edge-light-rgb), 0.55);
+}
+
+.seq-lamp-key.engaged::before {
+  background: var(--acid);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--acid) 60%, #fff),
+    0 0 7px color-mix(in srgb, var(--acid) 72%, transparent);
+}
+
+/* The LCD: mono data set into the panel, the strip's only glass. */
+.seq-lcd {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 7px 11px;
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 700 13px/1 var(--mono-font);
+  color: var(--ink);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
+.seq-lcd small {
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--fp-rail-label);
+  letter-spacing: 0.12em;
+}
+
+.seq-lcd-signature {
+  font-size: 11px;
+  color: var(--fp-rail-label);
+}
+
+.seq-beat-lamp {
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--acid) 18%, var(--panel-inset));
+  box-shadow: inset 0 1px 2px rgba(var(--edge-dark-rgb), 0.5);
+}
+
+.seq-beat-lamp.lit {
+  background: var(--acid);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--acid) 70%, transparent);
+}
+
+.seq-tempo {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.seq-open-key {
+  margin-left: auto;
+}
+
+/* ------------------------------------------------------- the workshop --- */
+
+.sequencer-workshop {
+  display: grid;
+  grid-template-columns: 176px 1fr;
+  border-top: var(--fp-seam);
+}
+
+.seq-library {
+  border-right: var(--fp-seam);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.seq-library > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.seq-library ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: 300px;
+}
+
+.seq-library-entry {
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--fp-radius-key);
+  cursor: pointer;
+  font: 600 12px/1.2 var(--display-font);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seq-library-entry:hover {
+  color: var(--ink);
+  background: var(--glass);
+}
+
+.seq-library-entry.selected {
+  color: var(--ink);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  box-shadow: var(--fp-well);
+}
+
+.seq-library-empty {
+  margin: 4px 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.seq-editor {
+  min-width: 0;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.seq-editor-empty {
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.seq-editor-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.seq-name-input {
+  flex: 1 1 160px;
+  min-width: 120px;
+  padding: 7px 10px;
+  color: var(--ink);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 700 13px/1.2 var(--display-font);
+  letter-spacing: 0.03em;
+}
+
+.seq-name-input:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 1px;
+}
+
+.seq-inline-label {
+  margin-left: 8px;
+  color: var(--fp-rail-label);
+  font-family: var(--display-font);
+  font-weight: 800;
+  font-size: 10px;
+  letter-spacing: var(--fp-track);
+}
+
+/* The grid: silkscreen row labels, one recessed cell per 16th. The beat
+   line is a machined groove, not a colour — data stays mono until a note
+   is actually placed. */
+.seq-grid-scroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.seq-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: max-content;
+}
+
+.seq-grid-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.seq-row-label {
+  flex: 0 0 58px;
+  color: var(--fp-rail-label);
+  font-family: var(--display-font);
+  font-weight: 800;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-align: right;
+  padding-right: 8px;
+}
+
+.seq-cell {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip);
+  cursor: pointer;
+}
+
+.seq-cell.beat:not(:nth-child(2)) {
+  margin-left: 6px;
+}
+
+.seq-cell:hover {
+  background: linear-gradient(180deg, var(--glass), var(--glass));
+}
+
+.seq-cell:active {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+.seq-cell.on {
+  background: var(--acid);
+  border-color: color-mix(in srgb, var(--acid) 70%, var(--line));
+  box-shadow: var(--fp-well), inset 0 0 0 1px color-mix(in srgb, var(--acid) 55%, #fff);
+}
+
+.seq-lanes {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding-top: 10px;
+  border-top: var(--fp-seam);
+}
+
+/* The sounding lane is this screen's red block; a queued lane warms up in
+   the accent until its bar arrives. */
+.seq-lane-key.playing {
+  color: var(--red-ink);
+  background: var(--red);
+  border-color: color-mix(in srgb, var(--red) 70%, var(--line));
+  box-shadow: var(--fp-well);
+}
+
+.seq-lane-key.queued {
+  box-shadow: var(--fp-lip), inset 0 -3px 0 var(--acid);
+}
+
+.seq-launch {
+  font-weight: 800;
+}
+
+@media (max-width: 760px) {
+  .sequencer-workshop {
+    grid-template-columns: 1fr;
+  }
+
+  .seq-library {
+    border-right: 0;
+    border-bottom: var(--fp-seam);
+  }
+
+  .seq-library ul {
+    max-height: 140px;
+  }
+
+  .seq-open-key {
+    margin-left: 0;
+  }
+}

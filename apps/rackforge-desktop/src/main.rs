@@ -2959,7 +2959,16 @@ impl DesktopApp {
                 self.activate_live_target(location, Some(command_ref))
             }
             other => Err(format!(
-                "Desktop does not support this command yet: {other:?}"
+                "Desktop does not support {} yet",
+                serde_json::to_value(&other)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("type")
+                            .and_then(|name| name.as_str())
+                            .map(str::to_owned)
+                    })
+                    .unwrap_or_else(|| "this command".to_owned())
             )),
         };
         match result {

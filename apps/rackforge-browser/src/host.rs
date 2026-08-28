@@ -939,7 +939,10 @@ impl BrowserHost {
             other => {
                 return Err(Failure::new(
                     ControlErrorCode::Unavailable,
-                    format!("the browser host does not implement {other:?} yet"),
+                    format!(
+                        "the browser host does not implement {} yet",
+                        command_name(&other)
+                    ),
                 ));
             }
         };
@@ -1742,6 +1745,20 @@ impl Failure {
             current_revision: self.current_revision,
         }
     }
+}
+
+/// The command's wire name — `preview_rack`, never its whole payload: an
+/// unsupported request is a sentence in a banner, not a debug dump.
+fn command_name(command: &SessionCommand) -> String {
+    serde_json::to_value(command)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("type")
+                .and_then(|name| name.as_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "this command".to_owned())
 }
 
 fn request_name(request: &ControlRequest) -> &'static str {

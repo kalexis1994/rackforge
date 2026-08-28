@@ -4748,3 +4748,17 @@
 .rack-graph-canvas .react-flow__minimap-mask {
   fill: rgba(8, 9, 10, 0.72) !important;
 }
+
+/* The strip's label and value sit on one baseline, like every other block. */
+.graph-workspace-active .performance-info-copy {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.graph-workspace-active .performance-info-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

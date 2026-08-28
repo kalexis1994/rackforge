@@ -1007,6 +1007,18 @@ pub struct PatternNoteSpec {
 
 /// A sequencer pattern: a performance-library entity like a Rack or a Song,
 /// edited in LIVE and launched quantised against the host transport.
+/// Which editor lens a pattern opens with. A hint for surfaces only: under
+/// every lens a pattern is the same thing — notes — and the engine never
+/// reads this field. Drum is the fixed-row grid; melodic is the step-and-
+/// pitch lane of the classic analog sequencers.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternView {
+    #[default]
+    Drum,
+    Melodic,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatternDefinition {
@@ -1015,6 +1027,8 @@ pub struct PatternDefinition {
     pub length_ticks: u32,
     #[serde(default)]
     pub notes: Vec<PatternNoteSpec>,
+    #[serde(default)]
+    pub view: PatternView,
 }
 
 impl PatternDefinition {
@@ -1846,6 +1860,7 @@ mod tests {
                     velocity: 100,
                     channel: 0,
                 }],
+                view: PatternView::default(),
             }],
         }
     }

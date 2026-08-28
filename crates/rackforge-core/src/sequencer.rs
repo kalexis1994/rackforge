@@ -748,6 +748,7 @@ mod tests {
                     channel: 0,
                 })
                 .collect(),
+            view: Default::default(),
         };
         CompiledPattern::compile(&document).expect("valid pattern")
     }
@@ -787,6 +788,7 @@ mod tests {
                 velocity: 100,
                 channel: 0,
             }],
+            view: Default::default(),
         };
         let mut zero_length = base.clone();
         zero_length.length_ticks = 0;
@@ -868,6 +870,7 @@ mod tests {
                 velocity: 90,
                 channel: 0,
             }],
+            view: Default::default(),
         };
         lane.queue(CompiledPattern::compile(&document).expect("valid"), 1.0);
         let events = render(&mut lane, 1, 24_000, 1.0);
@@ -928,6 +931,7 @@ mod tests {
                 velocity: 100,
                 channel: 0,
             }],
+            view: Default::default(),
         };
         let mut lane = SequencerLane::new();
         lane.queue(CompiledPattern::compile(&document).expect("valid"), 0.0);
@@ -956,6 +960,7 @@ mod tests {
                     channel: 0,
                 })
                 .collect(),
+            view: Default::default(),
         };
         let mut lane = SequencerLane::new();
         lane.queue(CompiledPattern::compile(&document).expect("valid"), 0.0);
@@ -997,6 +1002,7 @@ mod tests {
                     channel: 0,
                 })
                 .collect(),
+            view: Default::default(),
         }
     }
 

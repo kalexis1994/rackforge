@@ -4899,3 +4899,265 @@
   outline: 2px solid var(--acid);
   outline-offset: 2px;
 }
+
+/* -------------------------------------------------- the sequencer deck ---
+   Tabs: one per sequencer, one sequencer per engine lane. A tab is a key
+   that stays down while its editor is open, wears its lane's state colour
+   (red while sounding), and the + key at the end of the gang asks for a
+   name and a type before it claims the next free lane. */
+
+.sequencer-deck {
+  border-top: var(--fp-seam);
+}
+
+.seq-tabs {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  padding: 8px 10px 0;
+  gap: 0;
+}
+
+.seq-tab {
+  min-height: 36px;
+  padding: 7px 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fp-rail-label);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-left-width: 0;
+  border-radius: 0;
+  box-shadow: var(--fp-lip);
+  cursor: pointer;
+  font-family: var(--display-font);
+  font-weight: 700;
+  font-size: var(--fp-label);
+  letter-spacing: var(--fp-track);
+  white-space: nowrap;
+}
+
+.seq-tab:first-child {
+  border-left-width: 1px;
+  border-radius: var(--fp-radius-key) 0 0 var(--fp-radius-key);
+}
+
+.seq-tab:hover {
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--glass), var(--glass));
+}
+
+.seq-tab.active {
+  color: var(--ink);
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well), inset 0 -3px 0 var(--acid);
+}
+
+.seq-tab-lane {
+  font: 800 9px/1 var(--mono-font);
+  opacity: 0.75;
+}
+
+.seq-tab-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: none;
+}
+
+.seq-tab-kind {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  opacity: 0.65;
+}
+
+.seq-tab.playing {
+  color: var(--red-ink);
+  background: var(--red);
+  border-color: color-mix(in srgb, var(--red) 70%, var(--line));
+}
+
+.seq-tab.playing.active {
+  box-shadow: var(--fp-well), inset 0 -3px 0 color-mix(in srgb, var(--red-ink) 70%, var(--red));
+}
+
+.seq-tab.stopping {
+  color: var(--red);
+  background: var(--panel-inset);
+}
+
+.seq-tab.queued {
+  box-shadow: var(--fp-lip), inset 0 -3px 0 var(--acid);
+}
+
+.seq-tab-add {
+  margin-left: 8px;
+  min-width: 40px;
+  justify-content: center;
+  border-left-width: 1px;
+  border-radius: var(--fp-radius-key);
+}
+
+/* Name and type before a lane is claimed. */
+.seq-add-form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 10px 12px 0;
+  padding: 10px 12px;
+  background: var(--fp-panel);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  box-shadow: var(--fp-lip), var(--fp-drop);
+}
+
+.seq-add-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 200px;
+  min-width: 160px;
+}
+
+.seq-add-name > span {
+  color: var(--fp-rail-label);
+  font-family: var(--display-font);
+  font-weight: 800;
+  font-size: 10px;
+  letter-spacing: var(--fp-track);
+}
+
+.seq-load-select {
+  min-height: 34px;
+  padding: 0 8px;
+  color: var(--fp-rail-label);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 700 10px/1 var(--display-font);
+  letter-spacing: var(--fp-track);
+}
+
+.seq-lane-state-word {
+  margin-left: auto;
+  color: var(--red);
+  font: 800 10px/1 var(--mono-font);
+  letter-spacing: 0.14em;
+}
+
+/* ---------------------------------------------------- the melodic lens ---
+   One voice on a step lane. Each step is a taller key showing its note
+   name; ties draw as a bar growing to the right, the accent steps go full
+   ink, and the cluster below edits whichever step is selected — pick a
+   step, turn its pitch, exactly like the panels this grammar comes from. */
+
+.melodic-lane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.melodic-steps {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  min-width: max-content;
+  padding-bottom: 2px;
+}
+
+.melodic-step {
+  position: relative;
+  flex: 0 0 auto;
+  width: 44px;
+  min-height: 52px;
+  padding: 6px 4px 10px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  color: var(--fp-rail-label);
+  background: linear-gradient(180deg, var(--glass), var(--paper));
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-lip);
+  cursor: pointer;
+}
+
+.melodic-step.beat:not(:first-child) {
+  margin-left: 6px;
+}
+
+.melodic-step:hover {
+  background: linear-gradient(180deg, var(--glass), var(--glass));
+}
+
+.melodic-step.on {
+  color: var(--acid-ink);
+  background: var(--acid);
+  border-color: color-mix(in srgb, var(--acid) 70%, var(--line));
+}
+
+.melodic-step.on.soft {
+  background: color-mix(in srgb, var(--acid) 55%, var(--paper));
+  color: var(--ink);
+}
+
+.melodic-step.on.accent {
+  box-shadow: var(--fp-lip), inset 0 0 0 1px color-mix(in srgb, var(--acid) 45%, #fff);
+  font-weight: 800;
+}
+
+.melodic-step.selected {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+}
+
+.melodic-step.on.selected {
+  outline-color: color-mix(in srgb, var(--acid) 45%, var(--ink));
+}
+
+.melodic-step-note {
+  font: 700 11px/1 var(--mono-font);
+  letter-spacing: 0.04em;
+}
+
+/* The tie bar grows to the right, under the note, across the steps the
+   note sustains through. */
+.melodic-step-tie {
+  position: absolute;
+  left: 6px;
+  bottom: 5px;
+  height: 3px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0;
+}
+
+.melodic-step.on .melodic-step-tie.tie-1 { width: 10px; opacity: 0.45; }
+.melodic-step.on .melodic-step-tie.tie-2 { width: calc(100% + 5px); opacity: 0.8; }
+.melodic-step.on .melodic-step-tie.tie-4 { width: calc(300% + 15px); opacity: 0.8; z-index: 1; }
+
+.melodic-cluster {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.melodic-readout {
+  gap: 8px;
+  min-width: 170px;
+}
+
+.melodic-readout strong {
+  font: 800 14px/1 var(--mono-font);
+}
+
+.melodic-readout small {
+  color: var(--fp-rail-label);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}

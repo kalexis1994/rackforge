@@ -66,13 +66,94 @@ export const STEP_ROWS: ReadonlyArray<{ key: number; label: string }> = [
   { key: 36, label: "KICK" },
 ];
 
-export function emptyPattern(name: string, bars: number, beatsPerBar: number): PatternDefinition {
+export function emptyPattern(
+  name: string,
+  bars: number,
+  beatsPerBar: number,
+  view: "drum" | "melodic" = "drum",
+): PatternDefinition {
   return {
     id: scopedId("pattern"),
     name,
     length_ticks: Math.max(1, bars) * beatsPerBar * TICKS_PER_BEAT,
     notes: [],
+    view,
   };
+}
+
+/* ------------------------------------------------- the melodic lens ---
+   One voice, one step lane: the grammar of the classic analog sequencers.
+   Each step holds at most one note; ties stretch a note across following
+   steps; velocity walks three musical levels. All of it is plain notes in
+   the same document the drum lens edits. */
+
+export const MELODIC_VELOCITIES = [64, 100, 127] as const;
+
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+/** "C3" for MIDI 60, the convention synth panels print. */
+export function noteName(key: number): string {
+  return `${NOTE_NAMES[key % 12]}${Math.floor(key / 12) - 2}`;
+}
+
+export function melodicStepNote(
+  pattern: PatternDefinition,
+  step: number,
+): PatternNoteSpec | undefined {
+  const tick = step * STEP_TICKS;
+  return pattern.notes.find((note) => note.tick === tick);
+}
+
+/** Sets the single note of a step, replacing whatever the step held. */
+export function setMelodicStep(
+  pattern: PatternDefinition,
+  step: number,
+  key: number,
+  velocity = 100,
+  durationTicks = STEP_TICKS,
+): PatternDefinition {
+  const tick = step * STEP_TICKS;
+  const clamped = Math.min(127, Math.max(0, Math.round(key)));
+  const notes = pattern.notes.filter((note) => note.tick !== tick);
+  notes.push({ tick, duration_ticks: durationTicks, key: clamped, velocity, channel: 0 });
+  notes.sort((a, b) => a.tick - b.tick);
+  return { ...pattern, notes };
+}
+
+export function clearMelodicStep(pattern: PatternDefinition, step: number): PatternDefinition {
+  const tick = step * STEP_TICKS;
+  return { ...pattern, notes: pattern.notes.filter((note) => note.tick !== tick) };
+}
+
+/** Moves a step's pitch by semitones, clamped to the MIDI range. */
+export function transposeMelodicStep(
+  pattern: PatternDefinition,
+  step: number,
+  semitones: number,
+): PatternDefinition {
+  const note = melodicStepNote(pattern, step);
+  if (!note) return pattern;
+  return setMelodicStep(pattern, step, note.key + semitones, note.velocity, note.duration_ticks);
+}
+
+/** Cycles a step's length through 1, 2 and 4 steps — the tie ladder. */
+export function cycleMelodicTie(pattern: PatternDefinition, step: number): PatternDefinition {
+  const note = melodicStepNote(pattern, step);
+  if (!note) return pattern;
+  const steps = Math.round(note.duration_ticks / STEP_TICKS);
+  const next = steps >= 4 ? 1 : steps * 2;
+  return setMelodicStep(pattern, step, note.key, note.velocity, next * STEP_TICKS);
+}
+
+/** Walks soft, medium, accent. */
+export function cycleMelodicVelocity(pattern: PatternDefinition, step: number): PatternDefinition {
+  const note = melodicStepNote(pattern, step);
+  if (!note) return pattern;
+  const index = MELODIC_VELOCITIES.indexOf(
+    note.velocity as (typeof MELODIC_VELOCITIES)[number],
+  );
+  const next = MELODIC_VELOCITIES[(index + 1) % MELODIC_VELOCITIES.length] ?? 100;
+  return setMelodicStep(pattern, step, note.key, next, note.duration_ticks);
 }
 
 export function stepCount(pattern: PatternDefinition): number {

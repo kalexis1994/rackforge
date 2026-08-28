@@ -20,6 +20,7 @@ import {
   PreopenDirectory,
   WASI,
 } from "@bjorn3/browser_wasi_shim";
+import { ParallelBridge } from "./parallelBridge";
 import { PluginHost } from "./pluginHost";
 import {
   ENGINE_PROCESSOR,
@@ -149,6 +150,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
   /** The root the host reads and writes through WASI. */
   #storage: PreopenDirectory | null = null;
   #pluginHost = new PluginHost();
+  #parallel = new ParallelBridge();
   #decoder = new TextDecoder();
   #encoder = new TextEncoder();
   #channels = 2;
@@ -246,6 +248,9 @@ class RackForgeEngine extends AudioWorkletProcessor {
           response: this.#readResponse(this.#host?.rf_controller_catalog() ?? 0),
         });
         break;
+      case "pool_attach":
+        this.#parallel.adopt(command.buffer, command.workerCount, command.epoch);
+        break;
       case "controller_restore_plan":
         this.#post({
           kind: "response",
@@ -287,14 +292,22 @@ class RackForgeEngine extends AudioWorkletProcessor {
       { debug: false },
     );
     this.#storage = storage;
+    this.#parallel.configure(
+      (request) => this.#post(request),
+      (module) => this.#pluginHost.componentBytes(module),
+    );
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.slice().buffer), {
       wasi_snapshot_preview1: wasi.wasiImport,
-      rackforge_plugin_host: this.#pluginHost.imports,
+      rackforge_plugin_host: {
+        ...this.#pluginHost.imports,
+        ...this.#parallel.imports,
+      },
     });
     const exports = instance.exports as unknown as HostExports;
     // A cdylib is a reactor: it initialises rather than running a main.
     wasi.initialize(instance as { exports: { memory: WebAssembly.Memory } });
     this.#pluginHost.attach(exports.memory);
+    this.#parallel.attach(exports.memory);
     this.#host = exports;
     this.#sessionRevision = exports.rf_session_revision();
     this.#storageRevision = exports.rf_storage_revision?.() ?? 0;

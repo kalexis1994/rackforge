@@ -2576,6 +2576,17 @@ async fn spa_cache_headers(
             "no-cache"
         }),
     );
+    // Cross-origin isolation: what lets a browser host on this gateway share
+    // memory with its render workers. Everything the SPA loads is same-origin,
+    // so requiring CORP embeds costs nothing.
+    response.headers_mut().insert(
+        "Cross-Origin-Opener-Policy",
+        HeaderValue::from_static("same-origin"),
+    );
+    response.headers_mut().insert(
+        "Cross-Origin-Embedder-Policy",
+        HeaderValue::from_static("require-corp"),
+    );
     response
 }
 

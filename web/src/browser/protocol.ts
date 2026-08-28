@@ -91,6 +91,14 @@ export interface ControllerRestorePlanMessage {
   id: number;
 }
 
+/** The page attaches a built render pool to the worklet. */
+export interface PoolAttachCommand {
+  kind: "pool_attach";
+  buffer: SharedArrayBuffer;
+  workerCount: number;
+  epoch: number;
+}
+
 export type EngineCommand =
   | BootMessage
   | RequestMessage
@@ -100,6 +108,7 @@ export type EngineCommand =
   | ControllerConnectionMessage
   | ControllerSettingMessage
   | ControllerCatalogMessage
+  | PoolAttachCommand
   | ControllerRestorePlanMessage;
 
 /**
@@ -158,12 +167,36 @@ export interface ControllerOutputMessage {
   messages: Array<{ bytes: number[]; settle_after_ms: number }>;
 }
 
+/**
+ * The worklet asks the page to build a render pool: the worklet itself can
+ * neither spawn workers nor allocate a SharedArrayBuffer it could share
+ * forward. Carries everything a pool needs so the page stays policy-free.
+ */
+export interface PoolRequestEvent {
+  kind: "pool_request";
+  geometry: {
+    maxUnits: number;
+    dispatchStride: number;
+    mixSlotSamples: number;
+    sharedCapacity: number;
+  };
+  prepare: {
+    sampleRate: number;
+    maximumFrames: number;
+    inputChannels: number;
+    outputChannels: number;
+  };
+  component: ArrayBuffer;
+  epoch: number;
+}
+
 export type EngineEvent =
   | ReadyMessage
   | BootedMessage
   | ResponseMessage
   | StorageMessage
   | RevisionMessage
+  | PoolRequestEvent
   | ControllerOutputMessage;
 
 /** Constructs the only valid event order for a successful package mutation. */

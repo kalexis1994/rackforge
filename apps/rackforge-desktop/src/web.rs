@@ -2443,6 +2443,11 @@ async fn static_asset(uri: axum::http::Uri) -> Response {
     Response::builder()
         .header(header::CONTENT_TYPE, mime.as_ref())
         .header(header::CACHE_CONTROL, cache_control)
+        // Cross-origin isolation. It costs nothing here — everything the page
+        // loads is same-origin — and it is what lets a browser host on this
+        // gateway share memory with its render workers and use every core.
+        .header("Cross-Origin-Opener-Policy", "same-origin")
+        .header("Cross-Origin-Embedder-Policy", "require-corp")
         .body(Body::from(asset.contents().to_vec()))
         .expect("valid embedded asset response")
 }

@@ -2212,10 +2212,14 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         }
         request @ (ControlRequest::Dispatch { .. }
         | ControlRequest::VirtualMidi { .. }
-        | ControlRequest::ReleaseVirtualMidi { .. }) => {
+        | ControlRequest::ReleaseVirtualMidi { .. }
+        | ControlRequest::Sequencer { .. }
+        | ControlRequest::SequencerStatus) => {
             // A note is not a session command: it must reach the audio thread
-            // now, not on the next GUI frame. Everything else in this arm
-            // still takes the ordinary route.
+            // now, not on the next GUI frame. Everything else in this arm —
+            // sequencer transport included, whose quantise boundaries the
+            // audio thread resolves on its own clock — still takes the
+            // ordinary route.
             if let ControlRequest::VirtualMidi { message, .. } = &request
                 && let Err(error) = message.validate()
             {

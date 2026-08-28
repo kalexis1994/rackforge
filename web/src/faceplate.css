@@ -4846,3 +4846,56 @@
   font-size: 12px !important;
   line-height: 1.55;
 }
+
+/* ------------------------------------------------------ modal dialogs ---
+   The dialog shell was the old navy glass and its close glyph floated
+   naked. The shell is a plate, the header a panel strip with a seam, and
+   the X is a square key like every other momentary control. */
+
+.preset-modal,
+.modal-dialog {
+  color: var(--ink) !important;
+  background: var(--paper) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), 0 22px 60px rgba(0, 0, 0, 0.4) !important;
+}
+
+.preset-modal-header,
+.modal-dialog-header {
+  border-bottom: var(--fp-seam) !important;
+  background: var(--fp-panel);
+}
+
+.preset-modal-close,
+.modal-dialog-close,
+.rack-slot-close-button {
+  width: 36px;
+  height: 36px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--fp-rail-label) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip);
+  cursor: pointer;
+}
+
+.preset-modal-close:hover,
+.modal-dialog-close:hover {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+}
+
+.preset-modal-close:active,
+.modal-dialog-close:active {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well);
+}
+
+.preset-modal-close:focus-visible,
+.modal-dialog-close:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+}

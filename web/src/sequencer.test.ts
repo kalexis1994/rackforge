@@ -8,6 +8,9 @@ import {
   noteName,
   setMelodicStep,
   setSwing,
+  conditionLabel,
+  cycleCondition,
+  cycleProbability,
   transposeMelodicStep,
   TICKS_PER_BEAT,
   emptyPattern,
@@ -92,6 +95,35 @@ describe("the melodic lens", () => {
 
     pattern = clearMelodicStep(pattern, 0);
     expect(melodicStepNote(pattern, 0)).toBeUndefined();
+  });
+});
+
+describe("the trig grammar", () => {
+  it("walks the probability and condition ladders on one note", () => {
+    let pattern = setMelodicStep(emptyPattern("Odds", 1, 4, "melodic"), 0, 48);
+    pattern = cycleProbability(pattern, 0);
+    expect(melodicStepNote(pattern, 0)?.probability).toBe(75);
+    pattern = cycleProbability(pattern, 0);
+    pattern = cycleProbability(pattern, 0);
+    expect(melodicStepNote(pattern, 0)?.probability).toBe(25);
+    pattern = cycleProbability(pattern, 0);
+    expect(melodicStepNote(pattern, 0)?.probability).toBe(100);
+
+    pattern = cycleCondition(pattern, 0);
+    expect(conditionLabel(melodicStepNote(pattern, 0)?.condition)).toBe("1:2");
+    for (let i = 0; i < 4; i += 1) pattern = cycleCondition(pattern, 0);
+    expect(conditionLabel(melodicStepNote(pattern, 0)?.condition)).toBe("FILL");
+    for (let i = 0; i < 4; i += 1) pattern = cycleCondition(pattern, 0);
+    expect(conditionLabel(melodicStepNote(pattern, 0)?.condition)).toBe("ALWAYS");
+  });
+
+  it("targets one drum voice at a shared step", () => {
+    let pattern = toggleStep(toggleStep(emptyPattern("Kit", 1, 4), 36, 0), 38, 0);
+    pattern = cycleProbability(pattern, 0, 36);
+    const kick = pattern.notes.find((note) => note.key === 36);
+    const snare = pattern.notes.find((note) => note.key === 38);
+    expect(kick?.probability).toBe(75);
+    expect(snare?.probability ?? 100).toBe(100);
   });
 });
 

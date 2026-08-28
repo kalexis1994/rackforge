@@ -23,6 +23,9 @@ import {
 import {
   MAX_SEQUENCER_LANES,
   SCALES,
+  conditionLabel,
+  cycleCondition,
+  cycleProbability,
   setSwing,
   type SequencerScale,
   MELODIC_VELOCITIES,
@@ -140,6 +143,16 @@ export function SequencerStrip({
             TAP
           </button>
         </div>
+        <button
+          className={`seq-key seq-lamp-key${status?.fill ? " engaged" : ""}`}
+          aria-pressed={status?.fill ?? false}
+          title="Hold: steps with a fill condition fire while this is down"
+          onPointerDown={() => sendSequencerCommand({ kind: "set_fill", on: true })}
+          onPointerUp={() => sendSequencerCommand({ kind: "set_fill", on: false })}
+          onPointerLeave={() => status?.fill && sendSequencerCommand({ kind: "set_fill", on: false })}
+        >
+          FILL
+        </button>
         <button
           className={`seq-key seq-lamp-key seq-open-key${open ? " engaged" : ""}`}
           aria-expanded={open}
@@ -693,15 +706,24 @@ function DrumGrid({
             </span>
             {Array.from({ length: steps }, (_, step) => {
               const on = hasStep(pattern, row.key, step);
+              const note = pattern.notes.find(
+                (candidate) => candidate.key === row.key && candidate.tick === step * STEP_TICKS,
+              );
+              const chance = note?.probability ?? 100;
               return (
                 <button
                   key={step}
                   role="gridcell"
                   aria-selected={on}
+                  title={on && chance < 100 ? `${chance}% — right-click cycles` : undefined}
                   className={`seq-cell${on ? " on" : ""}${
                     step % stepsPerBeat === 0 ? " beat" : ""
-                  }`}
+                  }${on && chance < 100 ? ` chance-${chance}` : ""}`}
                   onClick={() => onEdit(toggleStep(pattern, row.key, step))}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    if (on) onEdit(cycleProbability(pattern, step, row.key));
+                  }}
                 />
               );
             })}
@@ -744,6 +766,7 @@ function MelodicLane({
 
   const velocityLabel = (velocity: number) =>
     velocity >= MELODIC_VELOCITIES[2] ? "ACC" : velocity <= MELODIC_VELOCITIES[0] ? "SOFT" : "MED";
+  const chance = note?.probability ?? 100;
 
   return (
     <div className="melodic-lane">
@@ -764,6 +787,8 @@ function MelodicLane({
                   step % stepsPerBeat === 0 ? "beat" : "",
                   stepNote && stepNote.velocity >= MELODIC_VELOCITIES[2] ? "accent" : "",
                   stepNote && stepNote.velocity <= MELODIC_VELOCITIES[0] ? "soft" : "",
+                  stepNote && (stepNote.probability ?? 100) < 100 ? "chance" : "",
+                  stepNote && conditionLabel(stepNote.condition) !== "ALWAYS" ? "conditional" : "",
                 ].join(" ").replace(/\s+/g, " ").trim()}
                 onClick={() => press(step)}
               >
@@ -779,7 +804,13 @@ function MelodicLane({
           {`STEP ${selected + 1}`}
           <strong>{note ? noteName(note.key) : "—"}</strong>
           {note ? (
-            <small>{`×${Math.round(note.duration_ticks / STEP_TICKS)} · ${velocityLabel(note.velocity)}`}</small>
+            <small>
+              {`×${Math.round(note.duration_ticks / STEP_TICKS)} · ${velocityLabel(note.velocity)}`}
+              {chance < 100 ? ` · ${chance}%` : ""}
+              {conditionLabel(note.condition) !== "ALWAYS"
+                ? ` · ${conditionLabel(note.condition)}`
+                : ""}
+            </small>
           ) : (
             <small>EMPTY</small>
           )}
@@ -807,6 +838,22 @@ function MelodicLane({
           </button>
           <button className="seq-key" disabled={!note} onClick={() => onEdit(clearMelodicStep(pattern, selected))}>
             CLEAR
+          </button>
+          <button
+            className="seq-key"
+            disabled={!note}
+            title="Chance this step fires: 100, 75, 50, 25"
+            onClick={() => onEdit(cycleProbability(pattern, selected))}
+          >
+            PROB
+          </button>
+          <button
+            className="seq-key"
+            disabled={!note}
+            title="When this step may fire: cycles, fill, pre"
+            onClick={() => onEdit(cycleCondition(pattern, selected))}
+          >
+            COND
           </button>
           <button
             className="seq-key"

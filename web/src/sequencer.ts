@@ -51,7 +51,8 @@ export type SequencerCommand =
   | { kind: "launch_lane"; lane: number; quantize: SequencerQuantize }
   | { kind: "stop_lane"; lane: number; quantize: SequencerQuantize }
   | { kind: "set_lane_muted"; lane: number; muted: boolean }
-  | { kind: "set_lane_follow"; lane: number; scale?: SequencerScale };
+  | { kind: "set_lane_follow"; lane: number; scale?: SequencerScale }
+  | { kind: "set_fill"; on: boolean };
 
 export interface SequencerLaneStatus {
   playing: boolean;
@@ -66,6 +67,8 @@ export interface SequencerLaneStatus {
 
 export interface SequencerStatus {
   running: boolean;
+  /** The FILL performance switch is held. */
+  fill?: boolean;
   tempo_bpm: number;
   beats_per_bar: number;
   beat_unit: number;
@@ -218,6 +221,100 @@ export function toggleStep(
           { tick, duration_ticks: STEP_TICKS, key, velocity, channel: 0 } satisfies PatternNoteSpec,
         ];
   return { ...pattern, notes };
+}
+
+/* --------------------------------------------------- the trig grammar ---
+   Per-step chance and condition, walked as ladders the way a panel key
+   cycles a setting. Both live on the note; the engine rolls a seeded die
+   so the same pattern is the same show every night. */
+
+import type { TrigCondition } from "./types";
+
+export const PROBABILITY_LADDER = [100, 75, 50, 25] as const;
+
+export const CONDITION_LADDER: ReadonlyArray<TrigCondition> = [
+  "always",
+  { cycle: { hit: 1, of: 2 } },
+  { cycle: { hit: 2, of: 2 } },
+  { cycle: { hit: 1, of: 4 } },
+  { cycle: { hit: 3, of: 4 } },
+  "fill",
+  "not_fill",
+  "pre",
+  "not_pre",
+];
+
+export function conditionLabel(condition: TrigCondition | undefined): string {
+  if (!condition || condition === "always") return "ALWAYS";
+  if (typeof condition === "object") return `${condition.cycle.hit}:${condition.cycle.of}`;
+  switch (condition) {
+    case "fill":
+      return "FILL";
+    case "not_fill":
+      return "NOT FILL";
+    case "pre":
+      return "PRE";
+    case "not_pre":
+      return "NOT PRE";
+    default:
+      return "ALWAYS";
+  }
+}
+
+function sameCondition(a: TrigCondition | undefined, b: TrigCondition): boolean {
+  const left = a ?? "always";
+  if (typeof left === "object" && typeof b === "object") {
+    return left.cycle.hit === b.cycle.hit && left.cycle.of === b.cycle.of;
+  }
+  return left === b;
+}
+
+function editNoteAt(
+  pattern: PatternDefinition,
+  tick: number,
+  key: number | null,
+  edit: (note: PatternNoteSpec) => PatternNoteSpec,
+): PatternDefinition {
+  return {
+    ...pattern,
+    notes: pattern.notes.map((note) =>
+      note.tick === tick && (key === null || note.key === key) ? edit(note) : note,
+    ),
+  };
+}
+
+/** Walks one step's chance down the ladder: 100 → 75 → 50 → 25 → 100. */
+export function cycleProbability(
+  pattern: PatternDefinition,
+  step: number,
+  key: number | null = null,
+): PatternDefinition {
+  return editNoteAt(pattern, step * STEP_TICKS, key, (note) => {
+    const index = PROBABILITY_LADDER.indexOf(
+      (note.probability ?? 100) as (typeof PROBABILITY_LADDER)[number],
+    );
+    return {
+      ...note,
+      probability: PROBABILITY_LADDER[(index + 1) % PROBABILITY_LADDER.length] ?? 100,
+    };
+  });
+}
+
+/** Walks one step's condition through the Elektron ladder. */
+export function cycleCondition(
+  pattern: PatternDefinition,
+  step: number,
+  key: number | null = null,
+): PatternDefinition {
+  return editNoteAt(pattern, step * STEP_TICKS, key, (note) => {
+    const index = CONDITION_LADDER.findIndex((candidate) =>
+      sameCondition(note.condition, candidate),
+    );
+    return {
+      ...note,
+      condition: CONDITION_LADDER[(index + 1) % CONDITION_LADDER.length],
+    };
+  });
 }
 
 /**

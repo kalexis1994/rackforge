@@ -43,7 +43,7 @@ use rackforge_control_api::{
 };
 use rackforge_performance_api::{
     MAX_PART_PATTERN_BINDINGS, MAX_PATTERN_NOTES, MAX_PATTERN_TICKS, PATTERN_SWING_MAX,
-    PATTERN_SWING_STRAIGHT, PATTERN_TICKS_PER_BEAT, PatternDefinition, SongPart,
+    PATTERN_SWING_STRAIGHT, PATTERN_TICKS_PER_BEAT, PatternDefinition, SongPart, TrigCondition,
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use std::sync::Arc;
@@ -80,6 +80,11 @@ struct CompiledNote {
     duration_beats: f64,
     key: u8,
     velocity: u8,
+    probability: u8,
+    condition: TrigCondition,
+    /// The grid tick the note was written on: the deterministic seed of its
+    /// probability roll, unmoved by swing.
+    seed_tick: u32,
 }
 
 impl CompiledPattern {
@@ -120,6 +125,9 @@ impl CompiledPattern {
                 duration_beats: (end_tick - note.tick) as f64 / TICKS_PER_BEAT as f64,
                 key: note.key,
                 velocity: note.velocity,
+                probability: note.probability.clamp(1, 100),
+                condition: note.condition,
+                seed_tick: note.tick,
             });
         }
         notes.sort_by(|a, b| a.start_beat.total_cmp(&b.start_beat));
@@ -195,6 +203,9 @@ pub struct SequencerLane {
     retrigger_pending: bool,
     /// The last key was released: owed notes are flushed at the next block.
     gate_release_pending: bool,
+    /// Whether the most recent conditional trig on this lane fired: what
+    /// the pre / not-pre conditions read.
+    pre_outcome: bool,
     held: Vec<HeldNote>,
     /// Per-block scratch, allocated once here so the render path never does.
     staged: Vec<StagedEvent>,
@@ -225,6 +236,7 @@ impl SequencerLane {
             input_keys: Vec::with_capacity(10),
             retrigger_pending: false,
             gate_release_pending: false,
+            pre_outcome: false,
             held: Vec::with_capacity(MAX_HELD_NOTES),
             staged: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             muted: false,
@@ -337,6 +349,7 @@ impl SequencerLane {
         self.input_keys.clear();
         self.retrigger_pending = false;
         self.gate_release_pending = false;
+        self.pre_outcome = false;
     }
 
     /// Renders one block: pays note-offs falling inside it, executes a
@@ -352,6 +365,7 @@ impl SequencerLane {
         start_beat: f64,
         frames_per_beat: f64,
         frames: u32,
+        fill: bool,
         out: &mut Vec<MidiEventV1>,
     ) {
         if frames == 0 || frames_per_beat <= 0.0 {
@@ -420,6 +434,8 @@ impl SequencerLane {
                 self.channel,
                 self.muted,
                 transpose,
+                fill,
+                &mut self.pre_outcome,
                 &mut self.held,
                 &mut self.dropped_notes,
                 start_beat,
@@ -485,6 +501,8 @@ fn emit_pattern_notes(
     channel: u8,
     muted: bool,
     transpose: Option<(u8, SequencerScale)>,
+    fill: bool,
+    pre_outcome: &mut bool,
     held: &mut Vec<HeldNote>,
     dropped_notes: &mut u64,
     block_start: f64,
@@ -515,6 +533,29 @@ fn emit_pattern_notes(
             }
             if at >= until {
                 break; // notes are sorted: nothing later in this cycle fits
+            }
+            // The trig grammar: the condition decides whether this pass may
+            // fire, the die decides whether it does. Both deterministic —
+            // conditions from the loop count, the die from a seed the show
+            // cannot change — so a rehearsal is the gig, roll for roll.
+            let permitted = match note.condition {
+                TrigCondition::Always => true,
+                TrigCondition::Cycle { hit, of } => {
+                    cycle % u64::from(of.max(1)) == u64::from(hit.saturating_sub(1))
+                }
+                TrigCondition::Fill => fill,
+                TrigCondition::NotFill => !fill,
+                TrigCondition::Pre => *pre_outcome,
+                TrigCondition::NotPre => !*pre_outcome,
+            };
+            let rolled = note.probability >= 100
+                || trig_roll(cycle, note.seed_tick, note.key, channel) < note.probability;
+            let fires = permitted && rolled;
+            if note.condition != TrigCondition::Always || note.probability < 100 {
+                *pre_outcome = fires;
+            }
+            if !fires {
+                continue;
             }
             if muted {
                 continue;
@@ -549,6 +590,24 @@ fn emit_pattern_notes(
             });
         }
     }
+}
+
+/// The deterministic dice: splitmix64 folded to 0..100. Seeded by the loop
+/// pass, the step's grid tick, its key and the lane's channel, so the same
+/// pattern rolls the same show every night on every host — and two lanes
+/// never share a die.
+fn trig_roll(cycle: u64, seed_tick: u32, key: u8, channel: u8) -> u8 {
+    let mut x = cycle
+        ^ (u64::from(seed_tick) << 32)
+        ^ (u64::from(key) << 16)
+        ^ (u64::from(channel) << 8)
+        ^ 0x9E37_79B9_7F4A_7C15;
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^= x >> 31;
+    (x % 100) as u8
 }
 
 /// The scale's semitone set within one octave of its root.
@@ -710,6 +769,8 @@ pub struct SequencerEngine {
     flush_pending: bool,
     /// A panic owes it a clean slate: notes off and every lane cleared.
     panic_pending: bool,
+    /// The FILL performance switch, held by the player.
+    fill: bool,
 }
 
 impl SequencerEngine {
@@ -725,6 +786,7 @@ impl SequencerEngine {
             lane_names: vec![None; MAX_SEQUENCER_LANES],
             flush_pending: false,
             panic_pending: false,
+            fill: false,
         })
     }
 
@@ -795,6 +857,10 @@ impl SequencerEngine {
                 self.lanes[index].set_muted(*muted);
                 Ok(())
             }
+            SequencerCommand::SetFill { on } => {
+                self.fill = *on;
+                Ok(())
+            }
             SequencerCommand::SetLaneFollow { lane, scale } => {
                 let index = self.lane_index(*lane)?;
                 self.lanes[index].set_follow(*scale);
@@ -852,7 +918,7 @@ impl SequencerEngine {
         }
         let frames_per_beat = self.sample_rate * 60.0 / block.tempo_bpm;
         for lane in &mut self.lanes {
-            lane.render_block(block.start_beat, frames_per_beat, frames, out);
+            lane.render_block(block.start_beat, frames_per_beat, frames, self.fill, out);
         }
         // Lanes emitted in sequence; instances expect one timeline. The sort
         // is stable, so each lane's off-before-on ordering survives.
@@ -864,6 +930,7 @@ impl SequencerEngine {
         let snapshot = self.transport.snapshot();
         SequencerStatusV1 {
             running: snapshot.running,
+            fill: self.fill,
             tempo_bpm: snapshot.tempo_bpm,
             beats_per_bar: snapshot.signature.beats_per_bar,
             beat_unit: snapshot.signature.beat_unit,
@@ -910,6 +977,8 @@ mod tests {
                     key: 36,
                     velocity: 100,
                     channel: 0,
+                    probability: 100,
+                    condition: rackforge_performance_api::TrigCondition::Always,
                 })
                 .collect(),
             view: Default::default(),
@@ -932,7 +1001,7 @@ mod tests {
         let mut beat = start_beat;
         for block in 0..blocks {
             let mut out = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
-            lane.render_block(beat, frames_per_beat, frames, &mut out);
+            lane.render_block(beat, frames_per_beat, frames, false, &mut out);
             for event in out {
                 all.push((block, event.frame, event.data));
             }
@@ -953,6 +1022,8 @@ mod tests {
                 key: 60,
                 velocity: 100,
                 channel: 0,
+                    probability: 100,
+                    condition: rackforge_performance_api::TrigCondition::Always,
             }],
             view: Default::default(),
             swing_percent: 50,
@@ -977,6 +1048,126 @@ mod tests {
     }
 
     #[test]
+    fn conditions_and_probability_are_the_same_show_every_night() {
+        // Four cycles of a 1-beat pattern with one note per grammar case.
+        let mut document = definition();
+        document.length_ticks = TICKS_PER_BEAT;
+        document.notes = vec![
+            rackforge_performance_api::PatternNoteSpec {
+                tick: 0,
+                duration_ticks: TICKS_PER_BEAT / 4,
+                key: 36, // always
+                velocity: 100,
+                channel: 0,
+                probability: 100,
+                condition: TrigCondition::Always,
+            },
+            rackforge_performance_api::PatternNoteSpec {
+                tick: TICKS_PER_BEAT / 4,
+                duration_ticks: TICKS_PER_BEAT / 4,
+                key: 38, // second pass of every two
+                velocity: 100,
+                channel: 0,
+                probability: 100,
+                condition: TrigCondition::Cycle { hit: 2, of: 2 },
+            },
+            rackforge_performance_api::PatternNoteSpec {
+                tick: TICKS_PER_BEAT / 2,
+                duration_ticks: TICKS_PER_BEAT / 4,
+                key: 42, // echoes the cycle note via pre
+                velocity: 100,
+                channel: 0,
+                probability: 100,
+                condition: TrigCondition::Pre,
+            },
+            rackforge_performance_api::PatternNoteSpec {
+                tick: 3 * TICKS_PER_BEAT / 4,
+                duration_ticks: TICKS_PER_BEAT / 4,
+                key: 46, // fill only
+                velocity: 100,
+                channel: 0,
+                probability: 100,
+                condition: TrigCondition::Fill,
+            },
+        ];
+        let run = |fill: bool| {
+            let mut lane = SequencerLane::new();
+            lane.queue(
+                CompiledPattern::compile(&document).expect("valid pattern"),
+                0.0,
+            );
+            let frames_per_beat = 24_000.0;
+            let mut all = Vec::new();
+            let mut beat = 0.0;
+            for cycle in 0..4 {
+                let mut out = Vec::new();
+                lane.render_block(beat, frames_per_beat, 24_000, fill, &mut out);
+                for event in out {
+                    if event.data[0] == 0x90 {
+                        all.push((cycle, event.data[1]));
+                    }
+                }
+                beat += 1.0;
+            }
+            all
+        };
+        let quiet = run(false);
+        // Kick every pass; snare on passes 1 and 3 (2:2); the pre note
+        // echoes the snare's outcome; no fill note.
+        assert_eq!(
+            quiet,
+            vec![
+                (0, 36),
+                (1, 36),
+                (1, 38),
+                (1, 42),
+                (2, 36),
+                (3, 36),
+                (3, 38),
+                (3, 42),
+            ]
+        );
+        // Determinism: the same show, note for note.
+        assert_eq!(quiet, run(false));
+        // FILL adds exactly the fill-gated note to every pass.
+        let loud = run(true);
+        assert_eq!(loud.iter().filter(|(_, key)| *key == 46).count(), 4);
+
+        // Probability rolls are deterministic and honour the odds shape:
+        // the same seeded die twice, and a 50 that neither always nor
+        // never fires across many cycles.
+        let mut chance = definition();
+        chance.length_ticks = TICKS_PER_BEAT;
+        chance.notes = vec![rackforge_performance_api::PatternNoteSpec {
+            tick: 0,
+            duration_ticks: TICKS_PER_BEAT / 4,
+            key: 36,
+            velocity: 100,
+            channel: 0,
+            probability: 50,
+            condition: TrigCondition::Always,
+        }];
+        let roll_run = || {
+            let mut lane = SequencerLane::new();
+            lane.queue(CompiledPattern::compile(&chance).expect("valid"), 0.0);
+            let mut fired = Vec::new();
+            let mut beat = 0.0;
+            for cycle in 0..32 {
+                let mut out = Vec::new();
+                lane.render_block(beat, 24_000.0, 24_000, false, &mut out);
+                if out.iter().any(|event| event.data[0] == 0x90) {
+                    fired.push(cycle);
+                }
+                beat += 1.0;
+            }
+            fired
+        };
+        let first = roll_run();
+        assert_eq!(first, roll_run(), "the die must be seeded, not random");
+        assert!(!first.is_empty() && first.len() < 32, "a 50 is neither 0 nor 100");
+    }
+
+    #[test]
     fn key_follow_gates_transposes_and_snaps() {
         let mut engine = SequencerEngine::new(48_000.0).expect("engine");
         // A one-note phrase at its root, C2, on a 1-beat pattern.
@@ -989,6 +1180,8 @@ mod tests {
             key: 48,
             velocity: 100,
             channel: 0,
+                    probability: 100,
+                    condition: rackforge_performance_api::TrigCondition::Always,
         }];
         engine
             .apply(&SequencerCommand::QueuePattern {
@@ -1049,6 +1242,8 @@ mod tests {
                 key: 36,
                 velocity: 100,
                 channel: 0,
+                    probability: 100,
+                    condition: rackforge_performance_api::TrigCondition::Always,
             },
             rackforge_performance_api::PatternNoteSpec {
                 tick: TICKS_PER_BEAT / 4, // the off-sixteenth
@@ -1056,6 +1251,8 @@ mod tests {
                 key: 38,
                 velocity: 100,
                 channel: 0,
+                    probability: 100,
+                    condition: rackforge_performance_api::TrigCondition::Always,
             },
             rackforge_performance_api::PatternNoteSpec {
                 tick: TICKS_PER_BEAT / 2, // the next pair's downbeat
@@ -1063,6 +1260,8 @@ mod tests {
                 key: 42,
                 velocity: 100,
                 channel: 0,
+                    probability: 100,
+                    condition: rackforge_performance_api::TrigCondition::Always,
             },
         ];
         document.swing_percent = 66;
@@ -1143,6 +1342,8 @@ mod tests {
                 key: 60,
                 velocity: 90,
                 channel: 0,
+                    probability: 100,
+                    condition: rackforge_performance_api::TrigCondition::Always,
             }],
             view: Default::default(),
             swing_percent: 50,
@@ -1206,6 +1407,8 @@ mod tests {
                 key: 60,
                 velocity: 100,
                 channel: 0,
+                    probability: 100,
+                    condition: rackforge_performance_api::TrigCondition::Always,
             }],
             view: Default::default(),
             swing_percent: 50,
@@ -1236,6 +1439,8 @@ mod tests {
                     key,
                     velocity: 100,
                     channel: 0,
+                    probability: 100,
+                    condition: rackforge_performance_api::TrigCondition::Always,
                 })
                 .collect(),
             view: Default::default(),
@@ -1280,6 +1485,8 @@ mod tests {
                     key: 36,
                     velocity: 100,
                     channel: 0,
+                    probability: 100,
+                    condition: rackforge_performance_api::TrigCondition::Always,
                 })
                 .collect(),
             view: Default::default(),

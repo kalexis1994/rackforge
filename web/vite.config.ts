@@ -47,12 +47,26 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
+    // Cross-origin isolation, which is what makes SharedArrayBuffer exist:
+    // without it the browser host cannot share memory with its render
+    // workers and stays on its sequential path. Same headers every RackForge
+    // gateway serves; the dev server must match or multicore is untestable.
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
     proxy: {
       "/api": "http://127.0.0.1:8787",
       "/ws": {
         target: "ws://127.0.0.1:8787",
         ws: true,
       },
+    },
+  },
+  preview: {
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
     },
   },
   build: {

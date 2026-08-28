@@ -32,6 +32,14 @@ import {
   writeStoredFiles,
 } from "./storage";
 import { assetUrl } from "../assets";
+import {
+  HEADER,
+  automaticWorkerCount,
+  poolLayout,
+  poolSupported,
+  type WorkerInit,
+} from "./renderPool";
+import type { PoolRequestEvent } from "./protocol";
 import { StartupTimeline } from "../startupPolicy";
 import type {
   HostAudioSettings,
@@ -288,6 +296,79 @@ function storeFiles(files: SeedFile[], publishAssets: boolean): Promise<void> {
   return publication;
 }
 
+/**
+ * The render pool, owned by the page because only the page can spawn workers
+ * or allocate a SharedArrayBuffer the worklet may adopt. Policy-free: the
+ * worklet decides when it wants one and what shape it must have; the page
+ * builds it and reports back.
+ */
+let enginePort: MessagePort | null = null;
+let poolWorkers: Worker[] = [];
+
+function releaseRenderPool() {
+  for (const worker of poolWorkers) worker.terminate();
+  poolWorkers = [];
+}
+
+function buildRenderPool(request: PoolRequestEvent) {
+  releaseRenderPool();
+  if (!poolSupported()) {
+    // Not cross-origin isolated: no shared memory, so the host simply stays
+    // on its sequential path. Deliberately quiet — this is a capability of
+    // the deployment, not an error in it.
+    return;
+  }
+  const workerCount = Math.min(
+    automaticWorkerCount(navigator.hardwareConcurrency || 2),
+    request.geometry.maxUnits,
+  );
+  if (workerCount < 1) return;
+  const layout = poolLayout(request.geometry);
+  const buffer = new SharedArrayBuffer(layout.totalBytes);
+  // The epoch lives in the buffer as well as in the messages: a worker's run
+  // loop retires the moment the buffer stops being its own, and a buffer that
+  // never carried its epoch retired every worker on their first iteration —
+  // ready bits set, then silence, which is exactly how it failed.
+  new Int32Array(buffer, 0, HEADER.WORDS)[HEADER.EPOCH] = request.epoch;
+  for (let index = 0; index < workerCount; index++) {
+    const worker = new Worker(new URL("./render.worker.ts", import.meta.url), {
+      type: "module",
+      name: `rackforge-render-${index}`,
+    });
+    worker.onerror = (event) => {
+      console.error(`rackforge render worker ${index} failed to start:`, event.message);
+    };
+    const init: WorkerInit = {
+      kind: "init",
+      buffer,
+      geometry: request.geometry,
+      prepare: request.prepare,
+      component: request.component,
+      workerIndex: index,
+      workerCount,
+      epoch: request.epoch,
+    };
+    worker.postMessage(init);
+    poolWorkers.push(worker);
+  }
+  // Observability for a thing that is otherwise invisible from devtools: the
+  // pool has no DOM, and the worklet cannot be inspected at all.
+  (window as unknown as { __rfRenderPool?: unknown }).__rfRenderPool = {
+    workers: workerCount,
+    epoch: request.epoch,
+    geometry: request.geometry,
+    control: new Int32Array(buffer, 0, 16),
+  };
+  // The worklet flips to the parallel path only once every worker has set its
+  // ready bit, so attaching before they are built is safe.
+  enginePort?.postMessage({
+    kind: "pool_attach",
+    buffer,
+    workerCount,
+    epoch: request.epoch,
+  });
+}
+
 /** Boot milestones the engine announces, awaited by [`startBrowserHost`]. */
 const milestones = {
   ready: null as (() => void) | null,
@@ -341,6 +422,9 @@ function handleEngineEvent(event: EngineEvent) {
     }
     case "ready":
       milestones.ready?.();
+      break;
+    case "pool_request":
+      buildRenderPool(event);
       break;
     case "revision":
       void publishSnapshot();
@@ -405,6 +489,7 @@ export async function startBrowserHost(): Promise<void> {
       numberOfOutputs: 1,
       outputChannelCount: [OUTPUT_CHANNELS],
     });
+    enginePort = node.port;
     node.port.onmessage = (message: MessageEvent<EngineEvent>) =>
       handleEngineEvent(message.data);
     node.onprocessorerror = () => {

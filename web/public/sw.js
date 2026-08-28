@@ -93,6 +93,32 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+/**
+ * Cross-origin isolation for hosts that cannot set headers.
+ *
+ * SharedArrayBuffer — and with it the multicore render pool — exists only on
+ * a cross-origin isolated page. A RackForge gateway sets the two headers at
+ * the server; GitHub Pages cannot set headers at all, so this worker stamps
+ * them onto every same-origin response it answers with. The first visit runs
+ * without isolation (the worker is not controlling yet) and every visit after
+ * is isolated, which mirrors how the offline cache already behaves.
+ *
+ * Every subresource here is same-origin, so require-corp costs nothing.
+ */
+function isolated(response) {
+  if (!response || response.status === 0 || response.type === "opaque") {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  headers.set("Cross-Origin-Opener-Policy", "same-origin");
+  headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
@@ -103,25 +129,25 @@ self.addEventListener("fetch", (event) => {
   // which is itself a navigation, and it must be answered from the package
   // rather than from the site.
   if (url.pathname.includes(PLUGIN_ASSETS)) {
-    event.respondWith(pluginAsset(request));
+    event.respondWith(pluginAsset(request).then(isolated));
     return;
   }
   if (request.mode === "navigate") {
-    event.respondWith(networkFirst(request));
+    event.respondWith(networkFirst(request).then(isolated));
     return;
   }
   if (DEVELOPMENT) {
     // Straight to the network and nothing kept: networkFirst files every
     // response under the scope root, which is right for navigations and
     // would overwrite the cached page with a wasm binary here.
-    event.respondWith(fetch(request));
+    event.respondWith(fetch(request).then(isolated));
     return;
   }
   if (url.pathname.includes(IMMUTABLE)) {
-    event.respondWith(cacheFirst(request));
+    event.respondWith(cacheFirst(request).then(isolated));
     return;
   }
-  event.respondWith(staleWhileRevalidate(request));
+  event.respondWith(staleWhileRevalidate(request).then(isolated));
 });
 
 async function networkFirst(request) {

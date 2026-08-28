@@ -318,3 +318,47 @@ AUDIO_RENDER_WORKERS units=[…] busy_pct=[…]
 
 Worker count remains automatic (`cpus - 1`, capped by the Slot limit) and
 `RACKFORGE_AUDIO_WORKERS` still overrides it.
+
+
+## The browser host
+
+The full-web RackForge runs the same extension on Web Workers. The mapping
+from the native design, piece for piece:
+
+| native                            | browser                                  |
+| --------------------------------- | ---------------------------------------- |
+| coordinator wasmtime instance     | coordinator instance in the AudioWorklet |
+| isolated worker instance per unit | unit instances in Web Workers            |
+| shared process memory             | one `SharedArrayBuffer`                  |
+| workers park on a futex           | workers sleep in `Atomics.wait`          |
+| audio thread parks briefly        | worklet spins with a bounded budget      |
+
+The audio thread cannot block (`Atomics.wait` is forbidden in an
+AudioWorkletGlobalScope) and cannot spawn workers, so the page owns the pool:
+the worklet asks for one (`pool_request`), the page builds workers and the
+buffer and attaches them (`pool_attach`), and until the attach lands — or on
+any page that is not cross-origin isolated, ever — every block takes the
+classic sequential `rackforge_process` path the extension guarantees.
+
+Two deliberate departures from native:
+
+* **Unit affinity replaces work stealing.** A unit's persistent state lives
+  inside one worker's wasm instance, so unit N is always rendered by worker
+  `N % workers`. Determinism is unaffected: the combine still happens in the
+  coordinator's `end_block` in ascending unit order.
+* **A missed deadline costs audio, not coherence.** The worklet spins for
+  three quarters of the block budget; a unit that does not arrive contributes
+  silence for that block and increments a miss counter in the shared header.
+  Its state still advanced inside its worker, so the next block is correct.
+
+Cross-origin isolation is served three ways: the desktop and Pi gateways set
+`Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp` on every SPA response, the Vite
+dev server mirrors them, and on hosts that cannot set headers (GitHub Pages)
+the service worker stamps them onto the responses it answers — the first
+visit runs sequential, every controlled visit after is isolated.
+
+Scope: the browser pool parallelises the units of the active instrument, the
+dominant browser-host case. Cabled-rack parallelism across plugin instances
+stays native-only — it rides on the core `RenderPool`, which needs threads
+the wasm host does not have.

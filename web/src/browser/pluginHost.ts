@@ -45,6 +45,17 @@ const EXPORTS = [
   "rackforge_program_preview",
   "rackforge_program_editor_view",
   "rackforge_program_apply_edit",
+  "rackforge_parallel_abi_version",
+  "rackforge_parallel_max_units",
+  "rackforge_parallel_dispatch_stride",
+  "rackforge_parallel_dispatch_ptr",
+  "rackforge_parallel_plan_ptr",
+  "rackforge_parallel_mix_ptr",
+  "rackforge_parallel_shared_ptr",
+  "rackforge_parallel_shared_capacity",
+  "rackforge_parallel_begin_block",
+  "rackforge_parallel_render_unit",
+  "rackforge_parallel_end_block",
 ] as const;
 
 interface PluginInstance {
@@ -60,6 +71,10 @@ interface PluginInstance {
  */
 export class PluginHost {
   #modules = new Map<number, WebAssembly.Module>();
+  /** The compiled bytes, kept so a render pool can build its own instances of
+   * the same component in Web Workers. A few megabytes per installed plugin,
+   * and exactly the bytes `#compile` already copied. */
+  #moduleBytes = new Map<number, Uint8Array>();
   #instances = new Map<number, PluginInstance>();
   #nextHandle = 1;
   #error: string | null = null;
@@ -70,11 +85,17 @@ export class PluginHost {
     this.#hostMemory = memory;
   }
 
+  /** The compiled component bytes for a live module handle, or null. */
+  componentBytes(module: number): Uint8Array | null {
+    return this.#moduleBytes.get(module) ?? null;
+  }
+
   get imports() {
     return {
       rf_compile: (pointer: number, length: number) => this.#compile(pointer, length),
       rf_module_release: (module: number) => {
         this.#modules.delete(module);
+        this.#moduleBytes.delete(module);
       },
       rf_instantiate: (module: number) => this.#instantiate(module),
       rf_instance_release: (instance: number) => {
@@ -108,6 +129,17 @@ export class PluginHost {
         this.#guard(-1, () => this.#call(instance, index) as number),
       rf_call_1: (instance: number, index: number, argument: number) =>
         this.#guard(-1, () => this.#call(instance, index, argument) as number),
+      rf_call_2: (instance: number, index: number, a: number, b: number) =>
+        this.#guard(-1, () => this.#call(instance, index, a, b) as number),
+      rf_call_5: (
+        instance: number,
+        index: number,
+        a: number,
+        b: number,
+        c: number,
+        d: number,
+        e: number,
+      ) => this.#guard(-1, () => this.#call(instance, index, a, b, c, d, e) as number),
       rf_call_f64: (instance: number, index: number, argument: number) =>
         this.#guard(Number.NaN, () => this.#call(instance, index, argument) as number),
       rf_call_set_parameter: (instance: number, index: number, value: number) =>
@@ -170,6 +202,7 @@ export class PluginHost {
       }
       const handle = this.#nextHandle++;
       this.#modules.set(handle, module);
+      this.#moduleBytes.set(handle, bytes);
       return handle;
     });
   }

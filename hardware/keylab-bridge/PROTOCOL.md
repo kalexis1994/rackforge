@@ -224,6 +224,28 @@ The portable controller runtime applies dim blue `R=10, G=40, B=64` to RGB
 IDs `00..2B`: mode buttons, transport, context controls, and all 16 pads. It
 turns the range off before releasing DAW mode and restoring the Arturia program.
 
+## Transport bridge (MCU/HUI port)
+
+The DAW preset emits the transport section as Mackie Control note-ons on the
+`MCU/HUI` USB port, the same dialect every DAW-mode controller speaks. The
+driver bridges that port to the host sequencer through the shared table in
+`rackforge_controller_api::mcu`:
+
+| Button | MCU note | Host action |
+| --- | ---: | --- |
+| Play | `0x5E` | `transport_play` |
+| Stop | `0x5D` | `transport_stop` |
+| Metro/Click | `0x59` | `tap_tempo` (folded in the driver) |
+
+Unmapped transport notes are logged as `MCU_TRANSPORT_UNMAPPED` so new
+buttons are claimed deliberately. LED feedback is the standard DAW echo on
+the same port: the driver sends `90 5E 7F/00` and the inverse for Stop as
+the host transport starts and stops, polled at 2 Hz.
+
+**Hardware validation pending**: the note numbers follow the public MCU
+standard and the mk3's documented DAW mode; confirm on the instrument and
+extend the table from the unmapped log.
+
 ## RackForge navigation contract
 
 ```text

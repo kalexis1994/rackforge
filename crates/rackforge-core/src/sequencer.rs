@@ -457,6 +457,66 @@ fn push_event(out: &mut Vec<MidiEventV1>, frame: u32, data: [u8; 3]) {
 /// control on the surface. The library's Part bindings count the same deck.
 pub const MAX_SEQUENCER_LANES: usize = MAX_PART_PATTERN_BINDINGS;
 
+/// Translates one pressed host action — the transport-independent vocabulary
+/// a `.rfcontroller` maps its buttons to — into the sequencer command it
+/// means, against the host's current state. `TapTempo` translates to nothing
+/// here: taps are timestamps, and the timestamps belong to the host's
+/// [`TapTempoFold`].
+///
+/// Every host resolves its buttons through this one function, so PLAY on a
+/// KeyLab, PLAY on the web strip and PLAY on any future controller are the
+/// same press.
+pub fn host_action_command(
+    target: rackforge_controller_api::HostActionTarget,
+    status: &SequencerStatusV1,
+) -> Option<SequencerCommand> {
+    use rackforge_controller_api::HostActionTarget as Target;
+    match target {
+        Target::KeyboardParts | Target::TapTempo => None,
+        Target::TransportPlay => Some(SequencerCommand::TransportStart),
+        Target::TransportStop => Some(SequencerCommand::TransportStop),
+        Target::SequencerLaunchLane { lane } => Some(SequencerCommand::LaunchLane {
+            lane,
+            quantize: SequencerQuantize::NextBar,
+        }),
+        Target::SequencerStopLane { lane } => Some(SequencerCommand::StopLane {
+            lane,
+            quantize: SequencerQuantize::NextBar,
+        }),
+        Target::SequencerMuteLane { lane } => Some(SequencerCommand::SetLaneMuted {
+            lane,
+            muted: !status
+                .lanes
+                .get(usize::from(lane))
+                .is_some_and(|state| state.muted),
+        }),
+    }
+}
+
+/// The host's side of tap tempo: it owns the timestamps, the transport owns
+/// the arithmetic. Feed it seconds from any monotonic clock; it keeps the
+/// last five taps and answers with a tempo once two of them agree.
+#[derive(Default)]
+pub struct TapTempoFold {
+    taps: Vec<f64>,
+}
+
+impl TapTempoFold {
+    pub fn new() -> Self {
+        Self {
+            taps: Vec::with_capacity(5),
+        }
+    }
+
+    pub fn tap(&mut self, now_seconds: f64) -> Option<f64> {
+        if self.taps.len() >= 5 {
+            self.taps.remove(0);
+        }
+        self.taps.push(now_seconds);
+        crate::transport::tap_tempo(&self.taps)
+    }
+}
+
 /// The sequencer side of putting a Song Part on stage: the commands that
 /// queue each bound pattern on its lane, all at the next bar, so the whole
 /// groove of the incoming Part lands together on one boundary.
@@ -974,6 +1034,51 @@ mod tests {
         engine.render_block(4_096, &mut out);
         assert!(!engine.status().lanes[0].playing);
         assert_eq!(engine.status().lanes[0].pattern_name, None);
+    }
+
+    #[test]
+    fn host_actions_translate_against_current_state() {
+        use rackforge_controller_api::HostActionTarget as Target;
+        let mut engine = SequencerEngine::new(48_000.0).expect("engine");
+        engine
+            .apply(&SequencerCommand::QueuePattern {
+                lane: 1,
+                pattern: definition(),
+                quantize: SequencerQuantize::Now,
+            })
+            .expect("queue accepted");
+
+        let status = engine.status();
+        assert_eq!(
+            host_action_command(Target::TransportPlay, &status),
+            Some(SequencerCommand::TransportStart)
+        );
+        assert_eq!(
+            host_action_command(Target::SequencerLaunchLane { lane: 1 }, &status),
+            Some(SequencerCommand::LaunchLane {
+                lane: 1,
+                quantize: SequencerQuantize::NextBar,
+            })
+        );
+        // Mute is a toggle against what the host reports right now.
+        assert_eq!(
+            host_action_command(Target::SequencerMuteLane { lane: 1 }, &status),
+            Some(SequencerCommand::SetLaneMuted { lane: 1, muted: true })
+        );
+        engine
+            .apply(&SequencerCommand::SetLaneMuted { lane: 1, muted: true })
+            .expect("mute");
+        assert_eq!(
+            host_action_command(Target::SequencerMuteLane { lane: 1 }, &engine.status()),
+            Some(SequencerCommand::SetLaneMuted { lane: 1, muted: false })
+        );
+        // Taps are the host's business, not a command.
+        assert_eq!(host_action_command(Target::TapTempo, &status), None);
+
+        let mut fold = TapTempoFold::new();
+        assert_eq!(fold.tap(0.0), None);
+        let bpm = fold.tap(0.5).expect("two taps make a tempo");
+        assert!((bpm - 120.0).abs() < 1e-6);
     }
 
     #[test]

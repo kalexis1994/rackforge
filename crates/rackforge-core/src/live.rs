@@ -1792,6 +1792,10 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     let mut sequencer = crate::sequencer::SequencerEngine::new(output_rate as f64)
         .or_else(|| crate::sequencer::SequencerEngine::new(48_000.0))
         .expect("48 kHz is inside the transport bounds");
+    // Reserved transport buttons act through the same translation every
+    // host uses; taps are folded against this loop's own monotonic clock.
+    let mut sequencer_taps = crate::sequencer::TapTempoFold::new();
+    let sequencer_tap_clock = Instant::now();
     let (retired_sender, retired_receiver) = mpsc::sync_channel::<RetiredAudioRuntime>(16);
     let _retired_reclaimer = thread::Builder::new()
         .name("rackforge-live-voice-reclaimer".into())
@@ -2530,6 +2534,16 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
             let packet = event.packet;
             controller_states.observe(event.source, plugin_midi_event(packet));
             if event.source != virtual_midi_source {
+                if let Some(action) =
+                    reserved_midi_controls.pressed_action(plugin_midi_event(packet))
+                {
+                    apply_sequencer_host_action(
+                        &mut sequencer,
+                        &mut sequencer_taps,
+                        sequencer_tap_clock.elapsed().as_secs_f64(),
+                        action,
+                    );
+                }
                 if reserved_midi_controls.consume(event.source, plugin_midi_event(packet)) {
                     continue;
                 }
@@ -2619,6 +2633,14 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         }
         while let Ok(event) = receiver.try_recv() {
             let plugin_event = plugin_midi_event(event.packet);
+            if let Some(action) = reserved_midi_controls.pressed_action(plugin_event) {
+                apply_sequencer_host_action(
+                    &mut sequencer,
+                    &mut sequencer_taps,
+                    sequencer_tap_clock.elapsed().as_secs_f64(),
+                    action,
+                );
+            }
             if reserved_midi_controls.consume(event.source, plugin_event) {
                 continue;
             }
@@ -3293,6 +3315,29 @@ fn route_rack_event_transformed(
 /// sees the physical/controller event, then each child Rack receives the
 /// packet produced by its parent. No allocation or transform approximation is
 /// performed on the realtime path.
+/// One reserved transport or lane button, pressed. Failure is reporting,
+/// never a stalled audio loop: an unresolvable action logs and the block
+/// carries on.
+fn apply_sequencer_host_action(
+    sequencer: &mut crate::sequencer::SequencerEngine,
+    taps: &mut crate::sequencer::TapTempoFold,
+    now_seconds: f64,
+    action: rackforge_controller_api::HostActionTarget,
+) {
+    if action == rackforge_controller_api::HostActionTarget::TapTempo {
+        if let Some(bpm) = taps.tap(now_seconds) {
+            let _ = sequencer.apply(&rackforge_control_api::SequencerCommand::SetTempo { bpm });
+        }
+        return;
+    }
+    let status = sequencer.status();
+    if let Some(command) = crate::sequencer::host_action_command(action, &status)
+        && let Err(reason) = sequencer.apply(&command)
+    {
+        eprintln!("SEQUENCER_HOST_ACTION_REJECTED reason={reason}");
+    }
+}
+
 fn route_rack_event_through_stages(
     event: IngressMidiEvent,
     stages: &[RackMidiStageRuntimeSpec],

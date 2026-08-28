@@ -4295,3 +4295,263 @@
 .live-part-target.active .live-part-state {
   color: var(--red) !important;
 }
+
+/* -------------------------------------------- config card actions, keys ---
+   EDIT and DELETE were the last pill buttons on the library cards. Keys
+   now: raised, momentary sink, and DELETE wears the red ink the way the
+   part gang's remove key does — destructive is an ink, not a balloon. */
+
+.config-card-edit,
+.config-card-delete {
+  min-width: 68px;
+  min-height: 34px;
+  padding: 8px 14px;
+  color: var(--fp-rail-label) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip);
+  cursor: pointer;
+  font-family: var(--display-font) !important;
+  font-weight: 700 !important;
+  font-size: var(--fp-label) !important;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+}
+
+.config-card-edit:hover:not(:disabled),
+.config-card-delete:hover:not(:disabled) {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+}
+
+.config-card-edit:active:not(:disabled),
+.config-card-delete:active:not(:disabled) {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well);
+}
+
+.config-card-delete {
+  color: var(--red) !important;
+}
+
+.config-card-delete:hover:not(:disabled) {
+  color: var(--red) !important;
+}
+
+.config-card-delete:disabled {
+  opacity: 0.42;
+  box-shadow: none;
+}
+
+/* --------------------------------------------- the node editor, moulded ---
+   The canvas is one of the machine's screens, so it stays dark in both
+   lighting modes — but it sheds the old cyan glass for neutral graphite,
+   and every piece of chrome floating over it becomes faceplate: plates,
+   seams, keys. Nodes are modules on the screen: dark cards, square-cut,
+   lit by their signal colour only when selected or cabled. */
+
+.rack-graph-editor {
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  background: #17181b !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.rack-flow-node {
+  border: 1px solid rgba(0, 0, 0, 0.55) !important;
+  border-radius: var(--fp-radius) !important;
+  background: linear-gradient(180deg, #232528, #1a1c1f) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 6px 16px rgba(0, 0, 0, 0.4) !important;
+}
+
+.rack-flow-node.midi_input,
+.rack-flow-node.audio_input,
+.rack-flow-node.audio_output {
+  background: linear-gradient(180deg, #202225, #17191c) !important;
+}
+
+.rack-flow-node.selected {
+  border-color: var(--node-color) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 3px 0 0 var(--node-color),
+    0 6px 18px rgba(0, 0, 0, 0.45) !important;
+}
+
+/* Chrome over the screen: the label toolbar, context menus, previews. */
+.rack-graph-label-tools {
+  background: var(--fp-panel) !important;
+  border-bottom: var(--fp-seam) !important;
+}
+
+.rack-graph-label-tools input,
+.rack-graph-label-tools select {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-well);
+}
+
+.rack-node-menu {
+  color: var(--ink) !important;
+  background: var(--paper) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), 0 10px 28px rgba(0, 0, 0, 0.35) !important;
+}
+
+.rack-node-menu button {
+  border-radius: var(--fp-radius-key);
+}
+
+.rack-node-menu button:hover:not(:disabled) {
+  background: var(--glass);
+}
+
+.rack-node-menu button:active:not(:disabled) {
+  background: var(--panel-inset);
+  box-shadow: var(--fp-well);
+}
+
+.rack-preview-status {
+  color: var(--fp-rail-label) !important;
+  background: var(--fp-panel) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  font-family: var(--mono-font) !important;
+}
+
+.rack-preview-status.ready {
+  color: var(--acid) !important;
+}
+
+/* The floating details panel: a plate, not smoked glass. */
+.rack-workspace-details {
+  color: var(--ink) !important;
+  background: var(--paper) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+  backdrop-filter: none !important;
+}
+
+.rack-workspace-details > header {
+  border-bottom: var(--fp-seam) !important;
+}
+
+.rack-workspace-details > footer {
+  border-top: var(--fp-seam) !important;
+}
+
+.rack-details-dismiss {
+  color: var(--fp-rail-label) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip);
+}
+
+.rack-details-dismiss:hover {
+  color: var(--ink) !important;
+}
+
+.rack-details-dismiss:active {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well);
+}
+
+.rack-details-fields input[type="text"],
+.rack-details-fields input:not([type]) {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-well);
+}
+
+.rack-details-fields input:focus-visible {
+  border-color: var(--line) !important;
+  outline: 2px solid var(--acid) !important;
+  outline-offset: 1px;
+}
+
+.rack-details-toggle i {
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: 2px !important;
+  box-shadow: var(--fp-well);
+}
+
+.rack-details-toggle i::after {
+  background: var(--fp-rail-label) !important;
+  border-radius: 1px !important;
+}
+
+.rack-details-toggle input:checked + i {
+  background: color-mix(in srgb, var(--acid) 24%, var(--panel-inset)) !important;
+  border-color: color-mix(in srgb, var(--acid) 55%, var(--line)) !important;
+}
+
+.rack-details-toggle input:checked + i::after {
+  background: var(--acid) !important;
+}
+
+/* Exit is a key; Save is the panel's one painted key. */
+.rack-workspace-details > footer .workspace-exit-button,
+.rack-workspace-details > footer .save-button {
+  min-height: 34px;
+  padding: 8px 14px !important;
+  border-radius: var(--fp-radius-key) !important;
+  font-family: var(--display-font) !important;
+  font-weight: 700 !important;
+  font-size: var(--fp-label) !important;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.rack-workspace-details > footer .workspace-exit-button {
+  color: var(--fp-rail-label) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  box-shadow: var(--fp-lip);
+}
+
+.rack-workspace-details > footer .workspace-exit-button:hover:not(:disabled) {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+}
+
+.rack-workspace-details > footer .workspace-exit-button:active:not(:disabled) {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well);
+}
+
+.rack-workspace-details > footer .save-button {
+  color: var(--acid-ink) !important;
+  background: var(--acid) !important;
+  border: 1px solid color-mix(in srgb, var(--acid) 70%, var(--line)) !important;
+  box-shadow: var(--fp-lip);
+}
+
+.rack-workspace-details > footer .save-button:disabled {
+  opacity: 0.42;
+  box-shadow: none;
+}
+
+.rack-workspace-details > footer .save-button:active:not(:disabled) {
+  box-shadow: var(--fp-well);
+}
+
+/* The MIDI cable editor rides the same plate. */
+.rack-midi-link-editor {
+  color: var(--ink) !important;
+  background: var(--paper) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip), 0 14px 36px rgba(0, 0, 0, 0.35) !important;
+}

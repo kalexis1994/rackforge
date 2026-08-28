@@ -3690,6 +3690,7 @@ version = "0.1.7"
 dependencies = [
  "rackforge-control-profile",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3747,6 +3748,7 @@ dependencies = [
  "midir",
  "rackforge-audio-api",
  "rackforge-control-api",
+ "rackforge-controller-api",
  "rackforge-midi-api",
  "rackforge-performance-api",
  "rackforge-plugin-api",

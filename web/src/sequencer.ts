@@ -52,9 +52,18 @@ export type SequencerCommand =
   | { kind: "stop_lane"; lane: number; quantize: SequencerQuantize }
   | { kind: "set_lane_muted"; lane: number; muted: boolean }
   | { kind: "set_lane_follow"; lane: number; scale?: SequencerScale }
-  | { kind: "set_fill"; on: boolean };
+  | { kind: "set_fill"; on: boolean }
+  | { kind: "load_slot"; lane: number; slot: number; pattern: PatternDefinition }
+  | { kind: "launch_slot"; lane: number; slot: number; quantize: SequencerQuantize };
+
+export const LANE_SLOTS = 4;
+export const SLOT_LABELS = ["A", "B", "C", "D"] as const;
 
 export interface SequencerLaneStatus {
+  /** Which variation slot is the lane's active one. */
+  active_slot?: number;
+  /** The names stored per slot; null is an empty slot. */
+  slots?: (string | null)[];
   playing: boolean;
   queued: boolean;
   /** A stop boundary is set: still sounding, going quiet at the bar. */

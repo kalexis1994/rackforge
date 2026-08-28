@@ -5311,3 +5311,24 @@
   background: currentColor;
   opacity: 0.85;
 }
+
+/* The variation slots: four keys, A to D. Empty caps are blank, loaded
+   ones raised, the active one sits down, and the one actually sounding
+   carries the red edge its pad carries. */
+
+.seq-slot-row {
+  gap: 0;
+  align-items: center;
+}
+
+.seq-slot-row .seq-inline-label {
+  margin-right: 8px;
+}
+
+.seq-slot-key.empty {
+  opacity: 0.5;
+}
+
+.seq-slot-key.sounding {
+  box-shadow: var(--fp-well), inset 0 -3px 0 var(--red);
+}

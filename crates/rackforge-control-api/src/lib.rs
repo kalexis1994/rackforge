@@ -175,6 +175,20 @@ pub enum SequencerCommand {
         pattern: PatternDefinition,
         quantize: SequencerQuantize,
     },
+    /// Stores a pattern in one of the lane's variation slots without
+    /// launching it — the quiet half of the Session grid.
+    LoadSlot {
+        lane: u8,
+        slot: u8,
+        pattern: PatternDefinition,
+    },
+    /// Switches the lane to a stored variation, quantised: the A/B/C/D
+    /// jump. The slot becomes the lane's active one; pads relaunch it.
+    LaunchSlot {
+        lane: u8,
+        slot: u8,
+        quantize: SequencerQuantize,
+    },
     /// Relaunches the pattern the lane already holds. A lane remembers its
     /// pattern across stops the way a groovebox track does, so a PERFORM
     /// pad needs no document to press play again.
@@ -217,6 +231,12 @@ pub struct SequencerLaneStatus {
     /// The lane is in key-follow, waiting on (or following) a held key.
     #[serde(default)]
     pub following: bool,
+    /// Which variation slot is the lane's active one.
+    #[serde(default)]
+    pub active_slot: u8,
+    /// The names of the patterns stored per slot; `None` is an empty slot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slots: Vec<Option<String>>,
     pub muted: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_name: Option<String>,

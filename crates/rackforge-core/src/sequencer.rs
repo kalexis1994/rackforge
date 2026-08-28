@@ -190,9 +190,12 @@ pub struct SequencerLane {
     pending: Option<PendingLaunch>,
     /// The beat past which no new notes start, when a stop is queued.
     stop_at: Option<f64>,
-    /// The pattern this lane holds, kept across stops the way a groovebox
-    /// track keeps its clip. Panic is what empties a lane.
-    armed: Option<Arc<CompiledPattern>>,
+    /// The lane's variation slots — A/B/C/D — kept across stops the way a
+    /// groovebox keeps its clips. Panic is what empties them.
+    slots: Vec<Option<Arc<CompiledPattern>>>,
+    /// Which slot is the lane's current one: what pads relaunch and what a
+    /// plain queue overwrites.
+    active_slot: usize,
     /// Key-follow: the phrase sounds only while a key is held, transposed so
     /// its root follows the played note, snapped into this scale.
     follow: Option<SequencerScale>,
@@ -231,7 +234,8 @@ impl SequencerLane {
             playing: None,
             pending: None,
             stop_at: None,
-            armed: None,
+            slots: vec![None; LANE_SLOTS],
+            active_slot: 0,
             follow: None,
             input_keys: Vec::with_capacity(10),
             retrigger_pending: false,
@@ -249,15 +253,42 @@ impl SequencerLane {
     /// first frame — a stale snapshot must not swallow a launch.
     pub fn queue(&mut self, pattern: CompiledPattern, at_beat: f64) {
         let pattern = Arc::new(pattern);
-        self.armed = Some(Arc::clone(&pattern));
+        self.slots[self.active_slot] = Some(Arc::clone(&pattern));
         self.stop_at = None;
         self.pending = Some(PendingLaunch { pattern, at_beat });
+    }
+
+    /// Stores a variation without touching what is sounding.
+    pub fn load_slot(&mut self, slot: usize, pattern: CompiledPattern) -> Result<(), String> {
+        if slot >= LANE_SLOTS {
+            return Err(format!("slot {slot} is outside 0..{LANE_SLOTS}"));
+        }
+        self.slots[slot] = Some(Arc::new(pattern));
+        Ok(())
+    }
+
+    /// The A/B/C/D jump: makes `slot` the active variation and queues it.
+    pub fn launch_slot(&mut self, slot: usize, at_beat: f64) -> Result<(), String> {
+        if slot >= LANE_SLOTS {
+            return Err(format!("slot {slot} is outside 0..{LANE_SLOTS}"));
+        }
+        let Some(pattern) = self.slots[slot].clone() else {
+            return Err(format!("slot {slot} holds no pattern"));
+        };
+        self.active_slot = slot;
+        self.stop_at = None;
+        self.pending = Some(PendingLaunch { pattern, at_beat });
+        Ok(())
+    }
+
+    fn armed(&self) -> Option<Arc<CompiledPattern>> {
+        self.slots[self.active_slot].clone()
     }
 
     /// Re-arms the pattern the lane already holds — the PERFORM pad's press.
     /// A lane that holds nothing has nothing to relaunch.
     pub fn relaunch(&mut self, at_beat: f64) -> Result<(), String> {
-        let Some(pattern) = self.armed.clone() else {
+        let Some(pattern) = self.armed() else {
             return Err("the lane holds no pattern".into());
         };
         self.stop_at = None;
@@ -317,6 +348,10 @@ impl SequencerLane {
         self.playing.is_some() || self.pending.is_some()
     }
 
+    pub fn active_slot(&self) -> usize {
+        self.active_slot
+    }
+
     /// A muted lane emits no new note-ons but keeps paying its note-offs:
     /// mute silences the future, never sustains the past.
     pub fn set_muted(&mut self, muted: bool) {
@@ -345,7 +380,8 @@ impl SequencerLane {
         self.playing = None;
         self.pending = None;
         self.stop_at = None;
-        self.armed = None;
+        self.slots.iter_mut().for_each(|slot| *slot = None);
+        self.active_slot = 0;
         self.input_keys.clear();
         self.retrigger_pending = false;
         self.gate_release_pending = false;
@@ -394,7 +430,7 @@ impl SequencerLane {
             });
         }
         if self.follow.is_some() && self.retrigger_pending && !self.input_keys.is_empty() {
-            if let Some(pattern) = self.armed.clone() {
+            if let Some(pattern) = self.armed() {
                 self.retrigger_pending = false;
                 self.playing = Some(PlayingPattern {
                     pattern,
@@ -658,6 +694,11 @@ fn push_event(out: &mut Vec<MidiEventV1>, frame: u32, data: [u8; 3]) {
     });
 }
 
+/// Variation slots each lane holds: A, B, C, D. Four is the Session-grid
+/// convention hardware and software converged on, and it keeps every slot
+/// reachable as a single key on a surface.
+pub const LANE_SLOTS: usize = 4;
+
 /// Lanes one engine drives. Eight is a hardware-groovebox count: enough for
 /// a full live arrangement, small enough that every lane earns a physical
 /// control on the surface. The library's Part bindings count the same deck.
@@ -763,7 +804,9 @@ pub struct SequencerEngine {
     sample_rate: f64,
     transport: Transport,
     lanes: Vec<SequencerLane>,
-    lane_names: Vec<Option<String>>,
+    /// The stored pattern names, lane by lane, slot by slot: the engine
+    /// compiles patterns namelessly, so the deck's labels live here.
+    slot_names: Vec<Vec<Option<String>>>,
     /// A transport stop owes the world silence: pay every held note at the
     /// top of the next block, but keep the patterns armed for resume.
     flush_pending: bool,
@@ -783,7 +826,7 @@ impl SequencerEngine {
             lanes: (0..MAX_SEQUENCER_LANES)
                 .map(|lane| SequencerLane::with_channel(lane as u8))
                 .collect(),
-            lane_names: vec![None; MAX_SEQUENCER_LANES],
+            slot_names: vec![vec![None; LANE_SLOTS]; MAX_SEQUENCER_LANES],
             flush_pending: false,
             panic_pending: false,
             fill: false,
@@ -838,8 +881,30 @@ impl SequencerEngine {
                     .map_err(|error| format!("pattern {:?} rejected: {error:?}", pattern.name))?;
                 let at_beat = self.boundary(*quantize);
                 self.lanes[index].queue(compiled, at_beat);
-                self.lane_names[index] = Some(pattern.name.clone());
+                let slot = self.lanes[index].active_slot();
+                self.slot_names[index][slot] = Some(pattern.name.clone());
                 Ok(())
+            }
+            SequencerCommand::LoadSlot {
+                lane,
+                slot,
+                pattern,
+            } => {
+                let index = self.lane_index(*lane)?;
+                let compiled = CompiledPattern::compile(pattern)
+                    .map_err(|error| format!("pattern {:?} rejected: {error:?}", pattern.name))?;
+                self.lanes[index].load_slot(usize::from(*slot), compiled)?;
+                self.slot_names[index][usize::from(*slot)] = Some(pattern.name.clone());
+                Ok(())
+            }
+            SequencerCommand::LaunchSlot {
+                lane,
+                slot,
+                quantize,
+            } => {
+                let index = self.lane_index(*lane)?;
+                let at_beat = self.boundary(*quantize);
+                self.lanes[index].launch_slot(usize::from(*slot), at_beat)
             }
             SequencerCommand::LaunchLane { lane, quantize } => {
                 let index = self.lane_index(*lane)?;
@@ -901,9 +966,9 @@ impl SequencerEngine {
         if self.panic_pending {
             self.panic_pending = false;
             self.flush_pending = false;
-            for (lane, name) in self.lanes.iter_mut().zip(&mut self.lane_names) {
+            for (lane, names) in self.lanes.iter_mut().zip(&mut self.slot_names) {
                 lane.panic_into(out);
-                *name = None;
+                names.iter_mut().for_each(|name| *name = None);
             }
         }
         if self.flush_pending {
@@ -940,8 +1005,8 @@ impl SequencerEngine {
             lanes: self
                 .lanes
                 .iter()
-                .zip(&self.lane_names)
-                .map(|(lane, name)| SequencerLaneStatus {
+                .zip(&self.slot_names)
+                .map(|(lane, names)| SequencerLaneStatus {
                     // A follow lane reads as playing only while its gate is
                     // open: the pad tells the truth about what sounds.
                     playing: lane.playing.is_some()
@@ -949,8 +1014,10 @@ impl SequencerEngine {
                     queued: lane.pending.is_some(),
                     stopping: lane.stop_at.is_some(),
                     following: lane.follow.is_some(),
+                    active_slot: lane.active_slot() as u8,
+                    slots: names.clone(),
                     muted: lane.muted,
-                    pattern_name: name.clone(),
+                    pattern_name: names[lane.active_slot()].clone(),
                 })
                 .collect(),
         }
@@ -1045,6 +1112,61 @@ mod tests {
         still.notes[0].duration_ticks = 0;
         assert_eq!(CompiledPattern::compile(&still).err(), Some(PatternError::ZeroDuration));
         assert!(CompiledPattern::compile(&base).is_ok());
+    }
+
+    #[test]
+    fn slots_hold_four_variations_and_switch_on_the_bar() {
+        let mut engine = SequencerEngine::new(48_000.0).expect("engine");
+        let mut variation = definition();
+        variation.name = "four-b".into();
+        variation.notes.truncate(1);
+        engine
+            .apply(&SequencerCommand::QueuePattern {
+                lane: 0,
+                pattern: definition(),
+                quantize: SequencerQuantize::Now,
+            })
+            .expect("queue into slot A");
+        engine
+            .apply(&SequencerCommand::LoadSlot {
+                lane: 0,
+                slot: 1,
+                pattern: variation,
+            })
+            .expect("load slot B");
+
+        let status = engine.status();
+        assert_eq!(status.lanes[0].active_slot, 0);
+        assert_eq!(
+            status.lanes[0].slots,
+            vec![Some("four".into()), Some("four-b".into()), None, None]
+        );
+        assert_eq!(status.lanes[0].pattern_name.as_deref(), Some("four"));
+
+        // The B jump: active slot moves, the pad's relaunch target with it.
+        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        engine
+            .apply(&SequencerCommand::LaunchSlot {
+                lane: 0,
+                slot: 1,
+                quantize: SequencerQuantize::Now,
+            })
+            .expect("launch B");
+        let status = engine.status();
+        assert_eq!(status.lanes[0].active_slot, 1);
+        assert_eq!(status.lanes[0].pattern_name.as_deref(), Some("four-b"));
+
+        // An empty slot refuses the jump and changes nothing.
+        assert!(
+            engine
+                .apply(&SequencerCommand::LaunchSlot {
+                    lane: 0,
+                    slot: 3,
+                    quantize: SequencerQuantize::Now,
+                })
+                .is_err()
+        );
+        assert_eq!(engine.status().lanes[0].active_slot, 1);
     }
 
     #[test]

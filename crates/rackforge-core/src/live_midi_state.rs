@@ -12,6 +12,10 @@ const CONTINUOUS_CONTROLLERS: usize = 120;
 pub(super) struct ReservedMidiControls {
     control_changes: [[bool; 120]; MIDI_CHANNELS],
     keyboard_parts: Option<MidiButtonBinding>,
+    /// Transport and lane buttons a controller reserved. Presses are looked
+    /// up by the audio loop *before* the generic consume, so the CC both
+    /// drives the sequencer and stays invisible to plugins.
+    sequencer_actions: Vec<(HostActionTarget, MidiButtonBinding)>,
     sources: Vec<ReservedMidiSourceState>,
 }
 
@@ -31,6 +35,7 @@ impl ReservedMidiControls {
         Self {
             control_changes: [[false; 120]; MIDI_CHANNELS],
             keyboard_parts: None,
+            sequencer_actions: Vec::new(),
             sources: (0..source_count)
                 .map(|_| ReservedMidiSourceState {
                     keyboard_parts_held: false,
@@ -47,6 +52,7 @@ impl ReservedMidiControls {
     ) {
         self.control_changes = [[false; CONTINUOUS_CONTROLLERS]; MIDI_CHANNELS];
         self.keyboard_parts = None;
+        self.sequencer_actions.clear();
         for source in &mut self.sources {
             source.keyboard_parts_held = false;
             source.suppressed_notes = [[false; 128]; MIDI_CHANNELS];
@@ -60,8 +66,20 @@ impl ReservedMidiControls {
                 [binding.midi_cc.controller as usize] = true;
             if binding.target == HostActionTarget::KeyboardParts {
                 self.keyboard_parts = Some(binding.midi_cc);
+            } else {
+                self.sequencer_actions.push((binding.target, binding.midi_cc));
             }
         }
+    }
+
+    /// The host action a pressed reserved button means, if this event is one.
+    /// Releases answer `None`: transport and lane keys act on the press.
+    pub(super) fn pressed_action(&self, event: MidiEventV1) -> Option<HostActionTarget> {
+        let message = &event.data[..usize::from(event.length.min(3))];
+        self.sequencer_actions
+            .iter()
+            .find(|(_, binding)| binding.phase(message) == Some(ButtonPhase::Press))
+            .map(|(target, _)| *target)
     }
 
     pub(super) fn consume(&mut self, source: MidiSourceKey, event: MidiEventV1) -> bool {

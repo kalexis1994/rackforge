@@ -4826,6 +4826,7 @@ mod tests {
                         }],
                         songs: Vec::new(),
                         setlists: Vec::new(),
+                        patterns: Vec::new(),
                     })
                     .unwrap(),
                 )),

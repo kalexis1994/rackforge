@@ -14,10 +14,92 @@ pub enum HostControlTarget {
     MasterPan,
 }
 
+/// Lanes the sequencer host actions may address. Mirrors the engine's deck.
+pub const HOST_ACTION_LANES: u8 = 8;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostActionTarget {
     KeyboardParts,
+    /// Starts the host transport. Deliberately not a toggle: a controller's
+    /// PLAY must never stop the show because a press was counted twice.
+    TransportPlay,
+    /// Stops the transport, holding position; sounding notes ring out.
+    TransportStop,
+    /// One tap of the shared tap-tempo fold. The host owns the timestamps.
+    TapTempo,
+    /// Relaunches the pattern the lane holds, quantised to the next bar.
+    SequencerLaunchLane { lane: u8 },
+    /// Stops the lane at the next bar; the lane keeps its pattern.
+    SequencerStopLane { lane: u8 },
+    /// Toggles the lane's mute against the host's current state.
+    SequencerMuteLane { lane: u8 },
+}
+
+impl HostActionTarget {
+    pub fn validate(self) -> Result<(), String> {
+        match self {
+            Self::SequencerLaunchLane { lane }
+            | Self::SequencerStopLane { lane }
+            | Self::SequencerMuteLane { lane }
+                if lane >= HOST_ACTION_LANES =>
+            {
+                Err(format!("lane {lane} is outside 0..{HOST_ACTION_LANES}"))
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// Mackie Control Universal, the de-facto transport standard over MIDI.
+///
+/// Most controllers with a DAW mode — Arturia, Novation, M-Audio, Nektar —
+/// emit their transport section as MCU note-ons on a dedicated port rather
+/// than as plain CCs. This module is the one shared translation from that
+/// dialect to RackForge's host-action vocabulary, so every `.rfcontroller`
+/// driver maps the same buttons the same way and none of them re-learns the
+/// note table. A DAW lights those buttons by echoing the same notes back;
+/// [`mcu::led_message`] builds that echo.
+pub mod mcu {
+    use super::{ButtonPhase, HostActionTarget};
+
+    pub const NOTE_REWIND: u8 = 0x5b;
+    pub const NOTE_FAST_FORWARD: u8 = 0x5c;
+    pub const NOTE_STOP: u8 = 0x5d;
+    pub const NOTE_PLAY: u8 = 0x5e;
+    pub const NOTE_RECORD: u8 = 0x5f;
+    pub const NOTE_CYCLE: u8 = 0x56;
+    pub const NOTE_CLICK: u8 = 0x59;
+
+    /// The host action an MCU transport message means, with its phase.
+    /// MCU buttons are note-ons on channel 1: velocity 127 pressed, 0
+    /// released. Unmapped transport notes answer `None` — drivers log them
+    /// so new buttons can be claimed deliberately, never by accident.
+    pub fn transport_action(message: &[u8]) -> Option<(HostActionTarget, ButtonPhase)> {
+        let [status, note, velocity] = message else {
+            return None;
+        };
+        if *status != 0x90 {
+            return None;
+        }
+        let target = match *note {
+            NOTE_PLAY => HostActionTarget::TransportPlay,
+            NOTE_STOP => HostActionTarget::TransportStop,
+            NOTE_CLICK => HostActionTarget::TapTempo,
+            _ => return None,
+        };
+        let phase = if *velocity > 0 {
+            ButtonPhase::Press
+        } else {
+            ButtonPhase::Release
+        };
+        Some((target, phase))
+    }
+
+    /// The LED echo a host sends to light or clear one MCU button.
+    pub fn led_message(note: u8, lit: bool) -> [u8; 3] {
+        [0x90, note, if lit { 0x7f } else { 0x00 }]
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -528,7 +610,8 @@ impl ControllerProfile {
         let mut action_targets = BTreeSet::new();
         for binding in &self.host_actions {
             binding.midi_cc.validate()?;
-            if !action_targets.insert(binding.target as u8) {
+            binding.target.validate()?;
+            if !action_targets.insert(format!("{:?}", binding.target)) {
                 return Err(format!(
                     "duplicate reserved host action {:?}",
                     binding.target
@@ -802,6 +885,36 @@ mod tests {
             .validate()
             .is_err()
         );
+    }
+
+    #[test]
+    fn mcu_transport_translates_and_new_targets_round_trip() {
+        assert_eq!(
+            mcu::transport_action(&[0x90, mcu::NOTE_PLAY, 0x7f]),
+            Some((HostActionTarget::TransportPlay, ButtonPhase::Press))
+        );
+        assert_eq!(
+            mcu::transport_action(&[0x90, mcu::NOTE_STOP, 0x00]),
+            Some((HostActionTarget::TransportStop, ButtonPhase::Release))
+        );
+        assert_eq!(
+            mcu::transport_action(&[0x90, mcu::NOTE_CLICK, 0x7f]),
+            Some((HostActionTarget::TapTempo, ButtonPhase::Press))
+        );
+        // Unmapped transport notes and non-note messages stay unclaimed.
+        assert_eq!(mcu::transport_action(&[0x90, mcu::NOTE_RECORD, 0x7f]), None);
+        assert_eq!(mcu::transport_action(&[0xb0, 0x5e, 0x7f]), None);
+        assert_eq!(mcu::led_message(mcu::NOTE_PLAY, true), [0x90, 0x5e, 0x7f]);
+
+        // The manifest dialect: unit targets stay strings, lane targets
+        // carry their lane — both shapes a rackforge-controller.toml writes.
+        let play: HostActionTarget = serde_json::from_str("\"transport_play\"").unwrap();
+        assert_eq!(play, HostActionTarget::TransportPlay);
+        let launch: HostActionTarget =
+            serde_json::from_str("{\"sequencer_launch_lane\":{\"lane\":2}}").unwrap();
+        assert_eq!(launch, HostActionTarget::SequencerLaunchLane { lane: 2 });
+        assert!(HostActionTarget::SequencerLaunchLane { lane: 8 }.validate().is_err());
+        assert!(launch.validate().is_ok());
     }
 
     #[test]

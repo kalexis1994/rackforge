@@ -9,9 +9,10 @@ use midir::{
 #[cfg(target_os = "linux")]
 use rackforge_control_api::CONTROL_SOCKET_NAME;
 use rackforge_control_api::{
-    ControlRequest, ControlResponse, VirtualMidiMessage, transport::ControlConnection,
+    ControlRequest, ControlResponse, SequencerCommand, SequencerStatusV1, VirtualMidiMessage,
+    transport::ControlConnection,
 };
-use rackforge_controller_api::{ButtonPhase, HostActionBinding, HostActionTarget};
+use rackforge_controller_api::{ButtonPhase, HostActionBinding, HostActionTarget, mcu};
 use rackforge_controller_api::{
     LITTLE_V1, rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
 };
@@ -397,6 +398,162 @@ struct KeyLabInput {
 struct MidiForwarder {
     sender: Option<SyncSender<VirtualMidiMessage>>,
     worker: Option<thread::JoinHandle<()>>,
+}
+
+/// The controller's MCU/HUI endpoint, bridged to the host sequencer.
+///
+/// The transport section of a DAW-mode controller speaks Mackie Control on
+/// its dedicated port; the shared table in `rackforge_controller_api::mcu`
+/// translates it, this driver only knows which port is the KeyLab's. The
+/// output half carries the LED echo a DAW would send, so PLAY lights when
+/// the host transport actually runs.
+struct TransportBridge {
+    _connection: MidiInputConnection<()>,
+    output: Option<MidiOutputConnection>,
+    receiver: Receiver<(HostActionTarget, ButtonPhase)>,
+    play_lit: Option<bool>,
+}
+
+fn is_mcu_port_name(name: &str) -> bool {
+    let folded = name.to_ascii_lowercase();
+    (folded.contains("keylab") || folded.contains("kl essential")) && folded.contains("mcu")
+}
+
+fn open_transport_bridge() -> Option<TransportBridge> {
+    let mut midi = MidiInput::new("rackforge KeyLab transport").ok()?;
+    midi.ignore(Ignore::None);
+    let port = enumerate_input_ports(&midi)
+        .ok()?
+        .into_iter()
+        .find(|port| is_mcu_port_name(&port.name))?;
+    let (sender, receiver) = mpsc::channel();
+    let connection = midi
+        .connect(
+            &port.handle,
+            "rackforge KeyLab MCU transport",
+            move |_timestamp, message, _context| {
+                if let Some(action) = mcu::transport_action(message) {
+                    let _ = sender.send(action);
+                } else if message.len() == 3 && message[0] & 0xf0 == 0x90 && message[2] > 0 {
+                    println!(
+                        "MCU_TRANSPORT_UNMAPPED note=0x{:02x} — a button waiting for a target",
+                        message[1]
+                    );
+                }
+            },
+            (),
+        )
+        .ok()?;
+    let output = MidiOutput::new("rackforge KeyLab transport LEDs")
+        .ok()
+        .and_then(|midi| {
+            let port = enumerate_ports(&midi)
+                .ok()?
+                .into_iter()
+                .find(|port| is_mcu_port_name(&port.name))?;
+            midi.connect(&port.handle, "rackforge KeyLab MCU LEDs").ok()
+        });
+    println!("MCU_TRANSPORT_BRIDGED port={:?} leds={}", port.name, output.is_some());
+    Some(TransportBridge {
+        _connection: connection,
+        output,
+        receiver,
+        play_lit: None,
+    })
+}
+
+impl TransportBridge {
+    /// Reflects the host transport on the controller: the same LED echo a
+    /// DAW sends. Only rewrites the lamps when the state actually changed.
+    fn sync_leds(&mut self, running: bool) {
+        if self.play_lit == Some(running) {
+            return;
+        }
+        self.play_lit = Some(running);
+        if let Some(output) = self.output.as_mut() {
+            let _ = output.send(&mcu::led_message(mcu::NOTE_PLAY, running));
+            let _ = output.send(&mcu::led_message(mcu::NOTE_STOP, !running));
+        }
+    }
+}
+
+/// Mirrors the host's tap fold (`rackforge-core/src/transport.rs::tap_tempo`)
+/// the way the web strip mirrors it: last five taps, a long gap or a sudden
+/// halving/doubling starts a fresh session.
+#[derive(Default)]
+struct TapFold {
+    taps: Vec<f64>,
+}
+
+impl TapFold {
+    fn tap(&mut self, now_seconds: f64) -> Option<f64> {
+        if self.taps.len() >= 5 {
+            self.taps.remove(0);
+        }
+        self.taps.push(now_seconds);
+        if self.taps.len() < 2 {
+            return None;
+        }
+        let mut intervals = Vec::with_capacity(4);
+        for pair in self.taps.windows(2) {
+            let interval = pair[1] - pair[0];
+            if interval <= 0.0 {
+                return None;
+            }
+            intervals.push(interval);
+        }
+        let mut start = 0;
+        for index in 1..intervals.len() {
+            let previous = intervals[index - 1];
+            let current = intervals[index];
+            if current > 2.0 || current > previous * 2.0 || current < previous / 2.0 {
+                start = index;
+            }
+        }
+        let used = &intervals[start..];
+        if used.is_empty() {
+            return None;
+        }
+        let mean = used.iter().sum::<f64>() / used.len() as f64;
+        Some((60.0 / mean).clamp(20.0, 400.0))
+    }
+}
+
+fn dispatch_sequencer_command(command: SequencerCommand) {
+    match control_request(&ControlRequest::Sequencer { command }) {
+        Ok(ControlResponse::SequencerAccepted) => {}
+        Ok(ControlResponse::Error { message, .. }) => {
+            eprintln!("SEQUENCER_ACTION_REJECTED reason={message}");
+        }
+        Ok(_) => eprintln!("SEQUENCER_ACTION_UNEXPECTED_RESPONSE"),
+        Err(error) => eprintln!("SEQUENCER_ACTION_FAILED reason={error}"),
+    }
+}
+
+fn sequencer_status() -> Option<SequencerStatusV1> {
+    match control_request(&ControlRequest::SequencerStatus) {
+        Ok(ControlResponse::SequencerStatus { sequencer }) => Some(sequencer),
+        _ => None,
+    }
+}
+
+/// One pressed transport button, resolved against the host's state the way
+/// every host resolves its own: PLAY starts, STOP stops, CLICK taps.
+fn apply_transport_action(target: HostActionTarget, taps: &mut TapFold, now_seconds: f64) {
+    match target {
+        HostActionTarget::TransportPlay => {
+            dispatch_sequencer_command(SequencerCommand::TransportStart);
+        }
+        HostActionTarget::TransportStop => {
+            dispatch_sequencer_command(SequencerCommand::TransportStop);
+        }
+        HostActionTarget::TapTempo => {
+            if let Some(bpm) = taps.tap(now_seconds) {
+                dispatch_sequencer_command(SequencerCommand::SetTempo { bpm });
+            }
+        }
+        _ => {}
+    }
 }
 
 impl MidiForwarder {
@@ -1227,6 +1384,13 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
             thread::sleep(Duration::from_millis(500));
             continue;
         }
+        let mut transport_bridge = open_transport_bridge();
+        if transport_bridge.is_none() {
+            eprintln!("El puerto MCU del KeyLab no está disponible; transporte sin botones físicos.");
+        }
+        let mut transport_taps = TapFold::default();
+        let transport_clock = Instant::now();
+        let mut next_transport_poll = Instant::now();
         menu.clear_pressed_button();
         let mut messages = render_menu_messages(&menu)?;
         let port_name = port.name.clone();
@@ -1319,6 +1483,23 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 }
             }
 
+            if let Some(bridge) = transport_bridge.as_mut() {
+                while let Ok((target, phase)) = bridge.receiver.try_recv() {
+                    if phase == ButtonPhase::Press {
+                        apply_transport_action(
+                            target,
+                            &mut transport_taps,
+                            transport_clock.elapsed().as_secs_f64(),
+                        );
+                    }
+                }
+                if Instant::now() >= next_transport_poll {
+                    next_transport_poll = Instant::now() + Duration::from_millis(500);
+                    if let Some(status) = sequencer_status() {
+                        bridge.sync_leds(status.running);
+                    }
+                }
+            }
             match input.input_receiver.recv_timeout(Duration::from_millis(20)) {
                 Ok(event) => {
                     let mut navigation_input = None;
@@ -2796,6 +2977,9 @@ fn parse_host_action(message: &[u8], bindings: &[HostActionBinding]) -> Option<P
     bindings.iter().find_map(|binding| {
         let input = match binding.target {
             HostActionTarget::KeyboardParts => menu::Input::KeyboardParts,
+            // Transport and lane targets act on the sequencer, not on the
+            // LITTLE surface; they are dispatched by the transport bridge.
+            _ => return None,
         };
         let phase = match binding.midi_cc.phase(message)? {
             ButtonPhase::Press => InputPhase::Press,

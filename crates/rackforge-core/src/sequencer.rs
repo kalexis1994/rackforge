@@ -45,6 +45,7 @@ use rackforge_performance_api::{
     MAX_PATTERN_NOTES, MAX_PATTERN_TICKS, PATTERN_TICKS_PER_BEAT, PatternDefinition,
 };
 use rackforge_plugin_api::abi::MidiEventV1;
+use std::sync::Arc;
 
 /// Tick resolution of pattern documents, re-exported from the library schema:
 /// the durable shape and the playable shape count time identically.
@@ -136,15 +137,17 @@ struct HeldNote {
     off_beat: f64,
 }
 
-/// A pattern armed to begin at an absolute beat.
+/// A pattern armed to begin at an absolute beat. Patterns are shared by
+/// `Arc`: the playing copy, the pending copy and the lane's memory are the
+/// same compiled data, so re-arming from a PERFORM pad costs a refcount.
 struct PendingLaunch {
-    pattern: CompiledPattern,
+    pattern: Arc<CompiledPattern>,
     at_beat: f64,
 }
 
 /// A pattern currently sounding, anchored at the beat it began.
 struct PlayingPattern {
-    pattern: CompiledPattern,
+    pattern: Arc<CompiledPattern>,
     anchor_beat: f64,
 }
 
@@ -164,6 +167,9 @@ pub struct SequencerLane {
     pending: Option<PendingLaunch>,
     /// The beat past which no new notes start, when a stop is queued.
     stop_at: Option<f64>,
+    /// The pattern this lane holds, kept across stops the way a groovebox
+    /// track keeps its clip. Panic is what empties a lane.
+    armed: Option<Arc<CompiledPattern>>,
     held: Vec<HeldNote>,
     /// Per-block scratch, allocated once here so the render path never does.
     staged: Vec<StagedEvent>,
@@ -189,6 +195,7 @@ impl SequencerLane {
             playing: None,
             pending: None,
             stop_at: None,
+            armed: None,
             held: Vec::with_capacity(MAX_HELD_NOTES),
             staged: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             muted: false,
@@ -200,8 +207,26 @@ impl SequencerLane {
     /// A boundary already behind the playhead begins at the next block's
     /// first frame — a stale snapshot must not swallow a launch.
     pub fn queue(&mut self, pattern: CompiledPattern, at_beat: f64) {
+        let pattern = Arc::new(pattern);
+        self.armed = Some(Arc::clone(&pattern));
         self.stop_at = None;
         self.pending = Some(PendingLaunch { pattern, at_beat });
+    }
+
+    /// Re-arms the pattern the lane already holds — the PERFORM pad's press.
+    /// A lane that holds nothing has nothing to relaunch.
+    pub fn relaunch(&mut self, at_beat: f64) -> Result<(), String> {
+        let Some(pattern) = self.armed.clone() else {
+            return Err("the lane holds no pattern".into());
+        };
+        self.stop_at = None;
+        self.pending = Some(PendingLaunch { pattern, at_beat });
+        Ok(())
+    }
+
+    /// Whether a stop boundary is set: still sounding, going quiet.
+    pub fn is_stopping(&self) -> bool {
+        self.stop_at.is_some()
     }
 
     /// Stops starting new notes from `at_beat`; owed note-offs still land on
@@ -244,6 +269,7 @@ impl SequencerLane {
         self.playing = None;
         self.pending = None;
         self.stop_at = None;
+        self.armed = None;
     }
 
     /// Renders one block: pays note-offs falling inside it, executes a
@@ -517,6 +543,11 @@ impl SequencerEngine {
                 self.lane_names[index] = Some(pattern.name.clone());
                 Ok(())
             }
+            SequencerCommand::LaunchLane { lane, quantize } => {
+                let index = self.lane_index(*lane)?;
+                let at_beat = self.boundary(*quantize);
+                self.lanes[index].relaunch(at_beat)
+            }
             SequencerCommand::StopLane { lane, quantize } => {
                 let index = self.lane_index(*lane)?;
                 let at_beat = self.boundary(*quantize);
@@ -597,6 +628,7 @@ impl SequencerEngine {
                 .map(|(lane, name)| SequencerLaneStatus {
                     playing: lane.playing.is_some(),
                     queued: lane.pending.is_some(),
+                    stopping: lane.stop_at.is_some(),
                     muted: lane.muted,
                     pattern_name: name.clone(),
                 })
@@ -913,6 +945,78 @@ mod tests {
         engine.render_block(4_096, &mut out);
         assert!(!engine.status().lanes[0].playing);
         assert_eq!(engine.status().lanes[0].pattern_name, None);
+    }
+
+    #[test]
+    fn a_pad_relaunches_what_the_lane_remembers() {
+        let mut engine = SequencerEngine::new(48_000.0).expect("engine");
+        engine
+            .apply(&SequencerCommand::QueuePattern {
+                lane: 0,
+                pattern: definition(),
+                quantize: SequencerQuantize::Now,
+            })
+            .expect("queue accepted");
+        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        let mut out = Vec::new();
+        engine.render_block(16_384, &mut out);
+        assert!(out.iter().any(|event| event.data[0] == 0x90));
+
+        // Stop the lane; while the boundary is pending the status says so.
+        engine
+            .apply(&SequencerCommand::StopLane {
+                lane: 0,
+                quantize: SequencerQuantize::NextBar,
+            })
+            .expect("stop accepted");
+        assert!(engine.status().lanes[0].stopping);
+        // Run past the bar: the lane is silent but still remembers.
+        for _ in 0..16 {
+            out.clear();
+            engine.render_block(16_384, &mut out);
+        }
+        let status = engine.status();
+        assert!(!status.lanes[0].playing);
+        assert!(!status.lanes[0].stopping);
+        assert_eq!(status.lanes[0].pattern_name.as_deref(), Some("four"));
+
+        // The pad press: no document travels, the lane re-arms itself.
+        engine
+            .apply(&SequencerCommand::LaunchLane {
+                lane: 0,
+                quantize: SequencerQuantize::NextBar,
+            })
+            .expect("relaunch accepted");
+        assert!(engine.status().lanes[0].queued);
+        let mut sounded = false;
+        for _ in 0..16 {
+            out.clear();
+            engine.render_block(16_384, &mut out);
+            sounded |= out.iter().any(|event| event.data[0] == 0x90);
+        }
+        assert!(sounded, "the relaunched lane never played");
+
+        // An empty lane refuses the pad, and panic empties the memory.
+        assert!(
+            engine
+                .apply(&SequencerCommand::LaunchLane {
+                    lane: 3,
+                    quantize: SequencerQuantize::Now,
+                })
+                .is_err()
+        );
+        engine.apply(&SequencerCommand::TransportPanic).expect("panic");
+        out.clear();
+        engine.render_block(16_384, &mut out);
+        assert!(
+            engine
+                .apply(&SequencerCommand::LaunchLane {
+                    lane: 0,
+                    quantize: SequencerQuantize::Now,
+                })
+                .is_err(),
+            "panic must empty every lane's memory"
+        );
     }
 
     #[test]

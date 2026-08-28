@@ -300,7 +300,7 @@ export function LivePage({
           </button>
         </div>
       </div>
-      {performance ? <SequencerStrip performance={performance} /> : null}
+      {performance ? <SequencerStrip performance={performance} surface={surface} /> : null}
       {!performance ? (
         <LiveLoading />
       ) : surface === "perform" ? (

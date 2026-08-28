@@ -4555,3 +4555,22 @@
   border-radius: var(--fp-radius) !important;
   box-shadow: var(--fp-lip), 0 14px 36px rgba(0, 0, 0, 0.35) !important;
 }
+
+/* ------------------------------------------------- the error plate ---
+   Form errors predate the faceplate: a pink balloon that once swallowed a
+   whole debug dump. A message plate now — seam, square cut, the red as
+   ink on a faint tint, and long content wraps inside its own bounds. */
+
+.form-error {
+  padding: 10px 12px !important;
+  color: var(--red) !important;
+  background: color-mix(in srgb, var(--red) 7%, var(--paper)) !important;
+  border: 1px solid color-mix(in srgb, var(--red) 38%, var(--line)) !important;
+  border-radius: var(--fp-radius) !important;
+  box-shadow: var(--fp-lip);
+  font: 600 12px/1.5 var(--display-font) !important;
+  letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
+  max-height: 140px;
+  overflow-y: auto;
+}

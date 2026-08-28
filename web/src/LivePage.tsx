@@ -21,7 +21,7 @@ import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
 import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
 import { ModalDialog } from "./components/ModalDialog";
 import { scopedId } from "./ids";
-import { isNativeHost } from "./host";
+import { isRemoteWebClient } from "./host";
 import {
   addSlotToRack,
   graphFromRackReference,
@@ -287,22 +287,24 @@ export function LivePage({
           <span className="eyebrow accent">Performance workspace</span>
           <h1>LIVE</h1>
         </div>
-        <div className="live-surface-tabs" role="tablist" aria-label="LIVE views">
-          <button
-            className={surface === "perform" ? "active" : ""}
-            onClick={() => onSurfaceChange("perform")}
-          >
-            Perform
-          </button>
-          <button
-            className={surface === "configure" ? "active" : ""}
-            onClick={() => onSurfaceChange("configure")}
-          >
-            Configure
-          </button>
-        </div>
       </div>
       {performance ? <SequencerStrip performance={performance} surface={surface} /> : null}
+      <section className="live-zone live-zone-performance" aria-label="Performance">
+      <span className="live-zone-legend">PERFORMANCE</span>
+      <div className="live-surface-tabs" role="tablist" aria-label="LIVE views">
+        <button
+          className={surface === "perform" ? "active" : ""}
+          onClick={() => onSurfaceChange("perform")}
+        >
+          Perform
+        </button>
+        <button
+          className={surface === "configure" ? "active" : ""}
+          onClick={() => onSurfaceChange("configure")}
+        >
+          Configure
+        </button>
+      </div>
       {!performance ? (
         <LiveLoading />
       ) : surface === "perform" ? (
@@ -317,6 +319,7 @@ export function LivePage({
           renderPluginSurface={renderPluginSurface}
         />
       )}
+      </section>
     </section>
   );
 }
@@ -1578,7 +1581,11 @@ function useSongPartPreview(
   session: SessionSnapshot | null,
   performance: PerformanceSnapshot,
 ) {
-  const previewSupported = !isNativeHost();
+  // Rack preview is a host capability, not a UI default: only the appliance
+  // implements PreviewRack today. The desktop and the in-page browser host
+  // reject it, and an editor must not greet every added instrument with an
+  // error banner for asking.
+  const previewSupported = isRemoteWebClient();
   const initialMode = session?.active_mode ?? "idle";
   const originRef = useRef({ mode: initialMode, active: performance.live.active });
   const sequenceRef = useRef(0);
@@ -1698,7 +1705,11 @@ function RackEditor({
     position?: RackGraphPosition;
     role: RackPluginRole;
   } | null>(null);
-  const previewSupported = !isNativeHost();
+  // Rack preview is a host capability, not a UI default: only the appliance
+  // implements PreviewRack today. The desktop and the in-page browser host
+  // reject it, and an editor must not greet every added instrument with an
+  // error banner for asking.
+  const previewSupported = isRemoteWebClient();
   const initialPreviewMode = session?.active_mode ?? "idle";
   const previewOriginRef = useRef({
     mode: initialPreviewMode,

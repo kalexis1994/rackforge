@@ -35,6 +35,9 @@ pub mod storage;
 /// like the render pool, and the browser, Android and desktop hosts advance
 /// the same arithmetic the Linux LIVE host does.
 pub mod transport;
+/// The sequencer engine rides the same rule: patterns into sample-accurate
+/// MIDI on every platform, gated by nothing.
+pub mod sequencer;
 
 pub use hosted::{LoadedPlugin, PluginInstance};
 pub use isolated_state::{
@@ -53,4 +56,5 @@ pub use parameter_link::{
 };
 pub use state_store::{MAX_PLUGIN_STATE_BYTES, PluginStateStore};
 pub use transport::{Transport, TransportBlock, TransportSnapshot};
+pub use sequencer::{CompiledPattern, PatternDocument, PatternNote, SequencerLane};
 pub use storage::{PluginDirectory, PluginStorage, RECOMMENDED_PROGRAM_SUFFIX};

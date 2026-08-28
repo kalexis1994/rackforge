@@ -360,11 +360,29 @@ export interface SetlistDefinition {
   entries: SetlistEntry[];
 }
 
+export interface PatternNoteSpec {
+  tick: number;
+  duration_ticks: number;
+  key: number;
+  velocity: number;
+  channel: number;
+}
+
+/** A sequencer pattern: a performance-library entity like a Rack or a Song,
+ * edited in LIVE and launched quantised against the host transport. */
+export interface PatternDefinition {
+  id: string;
+  name: string;
+  length_ticks: number;
+  notes: PatternNoteSpec[];
+}
+
 export interface PerformanceLibrary {
   schema_version: number;
   racks: RackDefinition[];
   songs: SongDefinition[];
   setlists: SetlistDefinition[];
+  patterns?: PatternDefinition[];
 }
 
 export interface PerformanceSnapshot {
@@ -380,7 +398,9 @@ export type PerformanceEdit =
   | { kind: "put_song"; song: SongDefinition }
   | { kind: "delete_song"; song_id: string }
   | { kind: "put_setlist"; setlist: SetlistDefinition }
-  | { kind: "delete_setlist"; setlist_id: string };
+  | { kind: "delete_setlist"; setlist_id: string }
+  | { kind: "put_pattern"; pattern: PatternDefinition }
+  | { kind: "delete_pattern"; pattern_id: string };
 
 export interface AuditionState {
   lease_id: number;

@@ -2615,6 +2615,45 @@ impl DesktopApp {
 
     fn handle_web_control(&mut self, request: ControlRequest) -> ControlResponse {
         let envelope = match request {
+            ControlRequest::Sequencer { command } => {
+                let result = self
+                    .audio
+                    .as_ref()
+                    .ok_or_else(|| "Desktop audio is unavailable".to_owned())
+                    .and_then(|audio| {
+                        audio
+                            .sequencer_command(command)
+                            .map_err(|error| error.to_string())
+                            .and_then(|applied| applied)
+                    });
+                return match result {
+                    Ok(()) => ControlResponse::SequencerAccepted,
+                    Err(message) => ControlResponse::Error {
+                        code: ControlErrorCode::InvalidRequest,
+                        message,
+                        current_revision: Some(
+                            self.session.read().expect("session lock poisoned").revision,
+                        ),
+                    },
+                };
+            }
+            ControlRequest::SequencerStatus => {
+                let status = self
+                    .audio
+                    .as_ref()
+                    .ok_or_else(|| "Desktop audio is unavailable".to_owned())
+                    .and_then(|audio| audio.sequencer_status().map_err(|error| error.to_string()));
+                return match status {
+                    Ok(sequencer) => ControlResponse::SequencerStatus { sequencer },
+                    Err(message) => ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message,
+                        current_revision: Some(
+                            self.session.read().expect("session lock poisoned").revision,
+                        ),
+                    },
+                };
+            }
             ControlRequest::VirtualMidi {
                 client_id,
                 source_name,

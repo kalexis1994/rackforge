@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { ChevronLeft, ChevronRight, LogOut, Save } from "lucide-react";
+import { SequencerStrip } from "./SequencerPanel";
 import {
   dispatchCommand,
   dispatchCommandAwait,
@@ -299,6 +300,7 @@ export function LivePage({
           </button>
         </div>
       </div>
+      {performance ? <SequencerStrip performance={performance} /> : null}
       {!performance ? (
         <LiveLoading />
       ) : surface === "perform" ? (

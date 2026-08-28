@@ -11,6 +11,7 @@ import { isVstHost, openSessionChannel, type SessionChannel } from "./host";
 import { randomIdToken } from "./ids";
 import { invalidatePluginCatalog } from "./pluginCatalog";
 import { serializeSessionCommand } from "./sessionCommandProtocol";
+import type { SequencerCommand, SequencerStatus } from "./sequencer";
 import {
   CONNECTION_INTERRUPTED_MESSAGE,
   DeferredConnectionOutage,
@@ -46,6 +47,8 @@ const RECONNECT_DELAY_MS = 1200;
 const CONNECTION_NOTICE_DELAY_MS = 4_000;
 const PERFORMANCE_REFRESH_MS = 2000;
 const OUTPUT_METER_REFRESH_MS = 50;
+// Ten frames a second reads as a moving clock without competing with audio.
+const SEQUENCER_STATUS_REFRESH_MS = 100;
 const COMMAND_TIMEOUT_MS = 8_000;
 
 let socket: SessionChannel | null = null;
@@ -56,6 +59,8 @@ let commandId = 0;
 let reconnectTimer: number | null = null;
 let performanceTimer: number | null = null;
 let outputMeterTimer: number | null = null;
+let sequencerStatusTimer: number | null = null;
+let sequencerStatusInFlight = false;
 let gatewayGeneration = 0;
 let performanceSnapshotInFlight = false;
 let outputMeterInFlight = false;
@@ -97,6 +102,7 @@ const pendingSnapshotRefreshes = new Set<{
   timeout: number;
 }>();
 const outputMeterListeners = new Set<(meter: OutputMeterSnapshot) => void>();
+const sequencerStatusListeners = new Set<(status: SequencerStatus) => void>();
 const connectionOutage = new DeferredConnectionOutage(
   CONNECTION_NOTICE_DELAY_MS,
   () => {
@@ -247,6 +253,11 @@ export function connectGateway() {
         sendOutputMeterRequest,
         OUTPUT_METER_REFRESH_MS,
       );
+      if (sequencerStatusTimer !== null) window.clearInterval(sequencerStatusTimer);
+      sequencerStatusTimer = window.setInterval(
+        sendSequencerStatusRequest,
+        SEQUENCER_STATUS_REFRESH_MS,
+      );
     },
     onMessage: (payload) => {
       if (generation !== gatewayGeneration) return;
@@ -278,6 +289,10 @@ export function connectGateway() {
         } else if (message.status === "host_idle") {
           coreReady = false;
           store.dispatch(hostIdleReceived());
+        } else if (message.status === "sequencer_status" && "sequencer" in message) {
+          sequencerStatusInFlight = false;
+          const status = (message as unknown as { sequencer: SequencerStatus }).sequencer;
+          for (const listener of sequencerStatusListeners) listener(status);
         } else if (message.status === "output_meter" && "meter" in message) {
           outputMeterInFlight = false;
           const meterMessage = message as unknown as OutputMeterMessage;
@@ -531,9 +546,12 @@ export function stopGateway() {
   if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
   if (performanceTimer !== null) window.clearInterval(performanceTimer);
   if (outputMeterTimer !== null) window.clearInterval(outputMeterTimer);
+  if (sequencerStatusTimer !== null) window.clearInterval(sequencerStatusTimer);
   reconnectTimer = null;
   performanceTimer = null;
   outputMeterTimer = null;
+  sequencerStatusTimer = null;
+  sequencerStatusInFlight = false;
   releaseVirtualMidi();
   const closingSocket = socket;
   socket = null;
@@ -640,6 +658,35 @@ function sendOutputMeterRequest() {
     outputMeterInFlight = true;
     socket.send(JSON.stringify({ op: "output_meter" }));
   }
+}
+
+function sendSequencerStatusRequest() {
+  if (
+    !isVstHost()
+    && socket
+    && sessionConnected
+    && coreReady
+    && !sequencerStatusInFlight
+    && sequencerStatusListeners.size > 0
+  ) {
+    sequencerStatusInFlight = true;
+    socket.send(JSON.stringify({ op: "sequencer_status" }));
+  }
+}
+
+/** Sends one sequencer instruction. Fire-and-forget by design: quantise
+ * boundaries are resolved by the host transport, so nothing here waits. */
+export function sendSequencerCommand(command: SequencerCommand): boolean {
+  if (!socket || !sessionConnected || !coreReady) return false;
+  socket.send(JSON.stringify({ op: "sequencer", command }));
+  return true;
+}
+
+export function subscribeSequencerStatus(listener: (status: SequencerStatus) => void) {
+  sequencerStatusListeners.add(listener);
+  return () => {
+    sequencerStatusListeners.delete(listener);
+  };
 }
 
 export function subscribeOutputMeter(listener: (meter: OutputMeterSnapshot) => void) {

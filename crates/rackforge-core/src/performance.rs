@@ -273,6 +273,7 @@ impl PerformanceRepository {
         self.library.racks = load_documents(&root.join("racks"))?;
         self.library.songs = load_documents(&root.join("songs"))?;
         self.library.setlists = load_documents(&root.join("setlists"))?;
+        self.library.patterns = load_documents(&root.join("patterns"))?;
         Ok(())
     }
 
@@ -347,6 +348,12 @@ impl PerformanceRepository {
             PerformanceEdit::DeleteSetlist { setlist_id } => {
                 delete_document(&root.join("setlists"), setlist_id.as_str())
             }
+            PerformanceEdit::PutPattern { pattern } => {
+                write_document(&root.join("patterns"), pattern.id.as_str(), pattern)
+            }
+            PerformanceEdit::DeletePattern { pattern_id } => {
+                delete_document(&root.join("patterns"), pattern_id.as_str())
+            }
         }
     }
 }
@@ -410,6 +417,7 @@ fn bootstrap_library(bootstrap: PerformanceBootstrap) -> Result<PerformanceLibra
                 song_id,
             }],
         }],
+        patterns: Vec::new(),
     };
     library.validate()?;
     Ok(library)

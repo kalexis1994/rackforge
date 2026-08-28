@@ -90,6 +90,13 @@ pub enum AudioControlCommand {
     InjectVirtualMidi {
         events: Vec<IngressMidiEvent>,
     },
+    Sequencer {
+        command: rackforge_control_api::SequencerCommand,
+        reply: SyncSender<Result<(), String>>,
+    },
+    SequencerStatus {
+        reply: SyncSender<Result<rackforge_control_api::SequencerStatusV1, String>>,
+    },
     ApplyAudioOutput {
         profile: AudioOutputProfile,
         reply: SyncSender<Result<AudioOutputState, String>>,
@@ -628,6 +635,8 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
         ControlRequest::ReleaseVirtualMidi { client_id } => {
             release_virtual_midi(context, client_id)
         }
+        ControlRequest::Sequencer { command } => sequencer_command(context, command),
+        ControlRequest::SequencerStatus => sequencer_status(context),
         ControlRequest::Events { after_revision } => match context.store.lock() {
             Ok(store) => match store.events_after(after_revision) {
                 Ok(events) => ControlResponse::Events {
@@ -645,6 +654,42 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
         ControlRequest::Dispatch { envelope } => dispatch_command(context, envelope),
     };
     write_response(&mut stream, &response)
+}
+
+fn sequencer_command(
+    context: &ControlContext,
+    command: rackforge_control_api::SequencerCommand,
+) -> ControlResponse {
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    if let Err(failure) = send_audio(
+        context,
+        AudioControlCommand::Sequencer {
+            command,
+            reply: reply_sender,
+        },
+    ) {
+        return failure.into_response();
+    }
+    match receive_audio(reply_receiver, "apply sequencer command") {
+        Ok(()) => ControlResponse::SequencerAccepted,
+        Err(failure) => failure.into_response(),
+    }
+}
+
+fn sequencer_status(context: &ControlContext) -> ControlResponse {
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    if let Err(failure) = send_audio(
+        context,
+        AudioControlCommand::SequencerStatus {
+            reply: reply_sender,
+        },
+    ) {
+        return failure.into_response();
+    }
+    match receive_audio(reply_receiver, "read sequencer status") {
+        Ok(sequencer) => ControlResponse::SequencerStatus { sequencer },
+        Err(failure) => failure.into_response(),
+    }
 }
 
 fn accept_virtual_midi(

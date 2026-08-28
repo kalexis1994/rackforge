@@ -56,5 +56,5 @@ pub use parameter_link::{
 };
 pub use state_store::{MAX_PLUGIN_STATE_BYTES, PluginStateStore};
 pub use transport::{Transport, TransportBlock, TransportSnapshot};
-pub use sequencer::{CompiledPattern, PatternDocument, PatternNote, SequencerLane};
+pub use sequencer::{CompiledPattern, SequencerEngine, SequencerLane};
 pub use storage::{PluginDirectory, PluginStorage, RECOMMENDED_PROGRAM_SUFFIX};

@@ -194,14 +194,17 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
     Atomics.notify(control, HEADER.READY_MASK);
 
     // The block loop. Sleeping on SEQ costs nothing while the instrument is
-    // sequential or idle; a notify wakes every worker for the new block.
-    let lastSeq = Atomics.load(control, HEADER.SEQ);
+    // sequential or idle; a notify wakes every worker for the new block. The
+    // local binding is what lets the closure keep the non-null narrowing.
+    const seqControl = control;
+    if (!seqControl) return;
+    let lastSeq = Atomics.load(seqControl, HEADER.SEQ);
     const run = () => {
       for (;;) {
         if (closed) return;
-        if (Atomics.load(control, HEADER.EPOCH) !== epoch) return;
-        const wait = Atomics.wait(control, HEADER.SEQ, lastSeq, 250);
-        const seq = Atomics.load(control, HEADER.SEQ);
+        if (Atomics.load(seqControl, HEADER.EPOCH) !== epoch) return;
+        const wait = Atomics.wait(seqControl, HEADER.SEQ, lastSeq, 250);
+        const seq = Atomics.load(seqControl, HEADER.SEQ);
         if (seq !== lastSeq) {
           lastSeq = seq;
           renderBlock(seq);

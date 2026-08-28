@@ -4704,3 +4704,47 @@
   font-weight: 700;
   font-size: 10px !important;
 }
+
+/* ------------------------------------------ canvas controls and minimap ---
+   The zoom keys and the minimap float over the node screen, so they are
+   chrome: the keys ride one small plate as a butted vertical gang, and the
+   minimap gets a bezel — a seam around a dark inset, because what it shows
+   is the screen itself. */
+
+.rack-graph-canvas .react-flow__controls {
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  background: var(--paper) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+.rack-graph-canvas .react-flow__controls-button {
+  color: var(--fp-rail-label) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border-bottom: var(--fp-seam) !important;
+}
+
+.rack-graph-canvas .react-flow__controls-button:last-child {
+  border-bottom: 0 !important;
+}
+
+.rack-graph-canvas .react-flow__controls-button:hover {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+}
+
+.rack-graph-canvas .react-flow__controls-button:active {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well);
+}
+
+.rack-graph-canvas .react-flow__minimap {
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius) !important;
+  background: #101113 !important;
+  box-shadow: var(--fp-well), 0 2px 6px rgba(0, 0, 0, 0.35) !important;
+}
+
+.rack-graph-canvas .react-flow__minimap-mask {
+  fill: rgba(8, 9, 10, 0.72) !important;
+}

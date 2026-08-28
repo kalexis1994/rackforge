@@ -163,6 +163,16 @@ export function SequencerStrip({
           </button>
         </div>
         <button
+          className={`seq-key seq-lamp-key${status?.clock_out ? " engaged" : ""}`}
+          aria-pressed={status?.clock_out ?? false}
+          title="MIDI clock out: conduct external hardware at 24 PPQN"
+          onClick={() =>
+            sendSequencerCommand({ kind: "set_clock_out", on: !(status?.clock_out ?? false) })
+          }
+        >
+          SYNC
+        </button>
+        <button
           className={`seq-key seq-lamp-key${status?.fill ? " engaged" : ""}`}
           aria-pressed={status?.fill ?? false}
           title="Hold: steps with a fill condition fire while this is down"

@@ -204,6 +204,11 @@ pub enum SequencerCommand {
         lane: u8,
         muted: bool,
     },
+    /// Enables or disables MIDI clock out: the machine as the backline's
+    /// conductor, 24 pulses per quarter plus start/continue/stop.
+    SetClockOut {
+        on: bool,
+    },
     /// Holds or releases FILL: the performance switch the fill/not-fill
     /// trig conditions listen to. Momentary by design — the caller sends
     /// press and release.
@@ -251,6 +256,9 @@ pub struct SequencerStatusV1 {
     /// The FILL performance switch is held.
     #[serde(default)]
     pub fill: bool,
+    /// MIDI clock out is running.
+    #[serde(default)]
+    pub clock_out: bool,
     pub tempo_bpm: f64,
     pub beats_per_bar: u8,
     pub beat_unit: u8,

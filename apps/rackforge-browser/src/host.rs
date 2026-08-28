@@ -1690,8 +1690,15 @@ impl BrowserHost {
         let mut sequenced = std::mem::take(&mut self.sequencer_events);
         sequenced.clear();
         let mut sequenced_params = Vec::new();
-        self.sequencer
-            .render_block(frames, &mut sequenced, &mut sequenced_params);
+        // Clock out has no wire to ride in the page host yet: Web MIDI
+        // outputs live page-side. The stream is discarded here.
+        let mut sequenced_clock = Vec::new();
+        self.sequencer.render_block(
+            frames,
+            &mut sequenced,
+            &mut sequenced_params,
+            &mut sequenced_clock,
+        );
         for event in &sequenced {
             self.audio.push_midi(event.frame, event.data, event.length);
         }

@@ -907,6 +907,14 @@ pub struct SequencerEngine {
     panic_pending: bool,
     /// The FILL performance switch, held by the player.
     fill: bool,
+    /// Whether the machine conducts the backline: MIDI clock out.
+    clock_enabled: bool,
+    /// The next pulse the clock owes, as an absolute 1/24-beat tick index —
+    /// an integer, so the grid never drifts by accumulated float error.
+    next_clock_tick: u64,
+    /// Whether the transport was running when the last block ended — what
+    /// turns edges into start/continue/stop bytes.
+    clock_was_running: bool,
 }
 
 impl SequencerEngine {
@@ -923,6 +931,9 @@ impl SequencerEngine {
             flush_pending: false,
             panic_pending: false,
             fill: false,
+            clock_enabled: false,
+            next_clock_tick: 0,
+            clock_was_running: false,
         })
     }
 
@@ -1015,6 +1026,10 @@ impl SequencerEngine {
                 self.lanes[index].set_muted(*muted);
                 Ok(())
             }
+            SequencerCommand::SetClockOut { on } => {
+                self.clock_enabled = *on;
+                Ok(())
+            }
             SequencerCommand::SetFill { on } => {
                 self.fill = *on;
                 Ok(())
@@ -1060,6 +1075,7 @@ impl SequencerEngine {
         frames: u32,
         out: &mut Vec<MidiEventV1>,
         params_out: &mut Vec<ParameterEventV1>,
+        clock_out: &mut Vec<MidiEventV1>,
     ) {
         if self.panic_pending {
             self.panic_pending = false;
@@ -1076,10 +1092,11 @@ impl SequencerEngine {
             }
         }
         let block = self.transport.advance(frames);
+        let frames_per_beat = self.sample_rate * 60.0 / block.tempo_bpm;
+        self.emit_clock(&block, frames, frames_per_beat, clock_out);
         if !block.running {
             return;
         }
-        let frames_per_beat = self.sample_rate * 60.0 / block.tempo_bpm;
         for lane in &mut self.lanes {
             lane.render_block(
                 block.start_beat,
@@ -1096,12 +1113,60 @@ impl SequencerEngine {
         params_out.sort_by_key(|event| event.frame);
     }
 
+    /// The conductor's beat: 24 pulses per quarter with exact frame
+    /// offsets, plus the start/continue/stop edges the backline expects.
+    /// Silent while disabled — and an enable mid-run starts conducting from
+    /// the next pulse, no edge byte, the way a chained box would join.
+    fn emit_clock(
+        &mut self,
+        block: &crate::transport::TransportBlock,
+        frames: u32,
+        frames_per_beat: f64,
+        clock_out: &mut Vec<MidiEventV1>,
+    ) {
+        const TICK: f64 = 1.0 / 24.0;
+        let realtime = |frame: u32, byte: u8| MidiEventV1 {
+            frame,
+            length: 1,
+            data: [byte, 0, 0],
+        };
+        if !self.clock_enabled {
+            self.clock_was_running = false;
+            return;
+        }
+        let start_beat = block.start_beat;
+        if block.running && !self.clock_was_running {
+            // A start edge: 0xFA from the top, 0xFB when resuming mid-song.
+            let byte = if start_beat <= f64::EPSILON { 0xfa } else { 0xfb };
+            clock_out.push(realtime(0, byte));
+            self.next_clock_tick = (start_beat / TICK).ceil() as u64;
+        }
+        if !block.running && self.clock_was_running {
+            clock_out.push(realtime(0, 0xfc));
+        }
+        self.clock_was_running = block.running;
+        if !block.running {
+            return;
+        }
+        let end_beat = start_beat + f64::from(frames) / frames_per_beat;
+        loop {
+            let pulse_beat = self.next_clock_tick as f64 * TICK;
+            if pulse_beat >= end_beat {
+                break;
+            }
+            let offset = ((pulse_beat - start_beat) * frames_per_beat).max(0.0).round() as u32;
+            clock_out.push(realtime(offset.min(frames - 1), 0xf8));
+            self.next_clock_tick += 1;
+        }
+    }
+
     /// What a surface shows. Cheap enough to poll.
     pub fn status(&self) -> SequencerStatusV1 {
         let snapshot = self.transport.snapshot();
         SequencerStatusV1 {
             running: snapshot.running,
             fill: self.fill,
+            clock_out: self.clock_enabled,
             tempo_bpm: snapshot.tempo_bpm,
             beats_per_bar: snapshot.signature.beats_per_bar,
             beat_unit: snapshot.signature.beat_unit,
@@ -1227,6 +1292,50 @@ mod tests {
     }
 
     #[test]
+    fn the_clock_conducts_at_24_ppqn_with_exact_edges() {
+        let mut engine = SequencerEngine::new(48_000.0).expect("engine");
+        engine.apply(&SequencerCommand::SetClockOut { on: true }).expect("sync on");
+        let mut out = Vec::new();
+        let mut params = Vec::new();
+        let mut clock = Vec::new();
+
+        // Silent while stopped.
+        engine.render_block(12_000, &mut out, &mut params, &mut clock);
+        assert!(clock.is_empty());
+
+        // Start from the top: 0xFA, then a pulse every 1 000 frames at
+        // 120 bpm / 48 kHz (24 000 frames per beat / 24).
+        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        clock.clear();
+        engine.render_block(12_000, &mut out, &mut params, &mut clock);
+        assert_eq!(clock[0].data[0], 0xfa);
+        let pulses: Vec<u32> = clock[1..]
+            .iter()
+            .map(|event| {
+                assert_eq!(event.data[0], 0xf8);
+                event.frame
+            })
+            .collect();
+        assert_eq!(pulses, (0..12).map(|tick| tick * 1_000).collect::<Vec<_>>());
+
+        // The next block continues the grid without a seam.
+        clock.clear();
+        engine.render_block(12_000, &mut out, &mut params, &mut clock);
+        let pulses: Vec<u32> = clock.iter().map(|event| event.frame).collect();
+        assert_eq!(pulses, (0..12).map(|tick| tick * 1_000).collect::<Vec<_>>());
+
+        // Stop sends its edge once; resuming mid-song is a continue.
+        engine.apply(&SequencerCommand::TransportStop).expect("stop");
+        clock.clear();
+        engine.render_block(12_000, &mut out, &mut params, &mut clock);
+        assert_eq!(clock.iter().map(|e| e.data[0]).collect::<Vec<_>>(), vec![0xfc]);
+        engine.apply(&SequencerCommand::TransportStart).expect("resume");
+        clock.clear();
+        engine.render_block(12_000, &mut out, &mut params, &mut clock);
+        assert_eq!(clock[0].data[0], 0xfb);
+    }
+
+    #[test]
     fn follow_actions_chain_slots_on_the_exact_boundary() {
         let mut engine = SequencerEngine::new(48_000.0).expect("engine");
         // A: one C2 per cycle, hands over to the next slot after 2 cycles.
@@ -1276,7 +1385,7 @@ mod tests {
         for block in 0..10 {
             out.clear();
             params.clear();
-            engine.render_block(12_000, &mut out, &mut params);
+            engine.render_block(12_000, &mut out, &mut params, &mut Vec::new());
             for event in &out {
                 if event.data[0] == 0x90 {
                     ons.push((block, event.data[1], event.frame));
@@ -1566,7 +1675,7 @@ mod tests {
 
         // Gate closed: a full bar of silence.
         let mut out = Vec::new();
-        engine.render_block(16_384, &mut out, &mut Vec::new());
+        engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(out.is_empty(), "a follow lane must be silent with no key held");
         assert!(engine.status().lanes[0].following);
         assert!(!engine.status().lanes[0].playing);
@@ -1574,7 +1683,7 @@ mod tests {
         // Hold F2: the phrase restarts on the next 16th, five semitones up.
         engine.note_input(53, true);
         out.clear();
-        engine.render_block(16_384, &mut out, &mut Vec::new());
+        engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         let ons: Vec<u8> = out
             .iter()
             .filter(|event| event.data[0] == 0x90)
@@ -1587,7 +1696,7 @@ mod tests {
         // Release: the ringing note is silenced at the next block.
         engine.note_input(53, false);
         out.clear();
-        engine.render_block(16_384, &mut out, &mut Vec::new());
+        engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(out.iter().any(|event| event.data[0] == 0x80));
         assert!(out.iter().all(|event| event.data[0] != 0x90));
 
@@ -1888,7 +1997,7 @@ mod tests {
             .expect("queue accepted");
         engine.apply(&SequencerCommand::TransportStart).expect("start");
         let mut out = Vec::new();
-        engine.render_block(4_096, &mut out, &mut Vec::new());
+        engine.render_block(4_096, &mut out, &mut Vec::new(), &mut Vec::new());
         // At bar one beat zero the pattern begins on frame 0.
         assert_eq!(out[0].data, [0x90, 36, 100]);
         assert_eq!(out[0].frame, 0);
@@ -1899,7 +2008,7 @@ mod tests {
         // stays armed.
         engine.apply(&SequencerCommand::TransportStop).expect("stop");
         out.clear();
-        engine.render_block(4_096, &mut out, &mut Vec::new());
+        engine.render_block(4_096, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(out.iter().all(|event| event.data[0] == 0x80));
         assert!(!out.is_empty(), "the sounding note was left ringing");
         assert!(engine.status().lanes[0].playing, "stop must not clear the lane");
@@ -1907,7 +2016,7 @@ mod tests {
         // Panic instead clears everything.
         engine.apply(&SequencerCommand::TransportPanic).expect("panic");
         out.clear();
-        engine.render_block(4_096, &mut out, &mut Vec::new());
+        engine.render_block(4_096, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(!engine.status().lanes[0].playing);
         assert_eq!(engine.status().lanes[0].pattern_name, None);
     }
@@ -2017,7 +2126,7 @@ mod tests {
             .expect("queue accepted");
         engine.apply(&SequencerCommand::TransportStart).expect("start");
         let mut out = Vec::new();
-        engine.render_block(16_384, &mut out, &mut Vec::new());
+        engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(out.iter().any(|event| event.data[0] == 0x90));
 
         // Stop the lane; while the boundary is pending the status says so.
@@ -2031,7 +2140,7 @@ mod tests {
         // Run past the bar: the lane is silent but still remembers.
         for _ in 0..16 {
             out.clear();
-            engine.render_block(16_384, &mut out, &mut Vec::new());
+            engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         }
         let status = engine.status();
         assert!(!status.lanes[0].playing);
@@ -2049,7 +2158,7 @@ mod tests {
         let mut sounded = false;
         for _ in 0..16 {
             out.clear();
-            engine.render_block(16_384, &mut out, &mut Vec::new());
+            engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
             sounded |= out.iter().any(|event| event.data[0] == 0x90);
         }
         assert!(sounded, "the relaunched lane never played");
@@ -2065,7 +2174,7 @@ mod tests {
         );
         engine.apply(&SequencerCommand::TransportPanic).expect("panic");
         out.clear();
-        engine.render_block(16_384, &mut out, &mut Vec::new());
+        engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(
             engine
                 .apply(&SequencerCommand::LaunchLane {
@@ -2089,7 +2198,7 @@ mod tests {
             .expect("queue accepted");
         engine.apply(&SequencerCommand::TransportStart).expect("start");
         let mut out = Vec::new();
-        engine.render_block(16_384, &mut out, &mut Vec::new());
+        engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(!out.is_empty());
         // Lane 2 emits on wire channel 2 — ons and offs alike — which a Rack
         // Slot filters as musician-facing channel 3.

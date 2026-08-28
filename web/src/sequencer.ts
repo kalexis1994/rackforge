@@ -53,6 +53,7 @@ export type SequencerCommand =
   | { kind: "set_lane_muted"; lane: number; muted: boolean }
   | { kind: "set_lane_follow"; lane: number; scale?: SequencerScale }
   | { kind: "set_fill"; on: boolean }
+  | { kind: "set_clock_out"; on: boolean }
   | { kind: "load_slot"; lane: number; slot: number; pattern: PatternDefinition }
   | { kind: "launch_slot"; lane: number; slot: number; quantize: SequencerQuantize };
 
@@ -78,6 +79,8 @@ export interface SequencerStatus {
   running: boolean;
   /** The FILL performance switch is held. */
   fill?: boolean;
+  /** MIDI clock out is running. */
+  clock_out?: boolean;
   tempo_bpm: number;
   beats_per_bar: number;
   beat_unit: number;

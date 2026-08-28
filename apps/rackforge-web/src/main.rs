@@ -2576,17 +2576,11 @@ async fn spa_cache_headers(
             "no-cache"
         }),
     );
-    // Cross-origin isolation: what lets a browser host on this gateway share
-    // memory with its render workers. Everything the SPA loads is same-origin,
-    // so requiring CORP embeds costs nothing.
-    response.headers_mut().insert(
-        "Cross-Origin-Opener-Policy",
-        HeaderValue::from_static("same-origin"),
-    );
-    response.headers_mut().insert(
-        "Cross-Origin-Embedder-Policy",
-        HeaderValue::from_static("require-corp"),
-    );
+    // No cross-origin isolation here, deliberately: COEP: require-corp
+    // demands COEP on even same-origin nested documents, and the plugin
+    // panel iframes do not carry it — isolating the shell blocked every
+    // instrument panel. The appliance renders audio natively; isolation
+    // belongs to the hosts that run the in-page render pool.
     response
 }
 

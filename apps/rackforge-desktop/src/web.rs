@@ -2443,11 +2443,12 @@ async fn static_asset(uri: axum::http::Uri) -> Response {
     Response::builder()
         .header(header::CONTENT_TYPE, mime.as_ref())
         .header(header::CACHE_CONTROL, cache_control)
-        // Cross-origin isolation. It costs nothing here — everything the page
-        // loads is same-origin — and it is what lets a browser host on this
-        // gateway share memory with its render workers and use every core.
-        .header("Cross-Origin-Opener-Policy", "same-origin")
-        .header("Cross-Origin-Embedder-Policy", "require-corp")
+        // No cross-origin isolation here, deliberately. COEP: require-corp
+        // demands that even same-origin *nested documents* carry COEP, and
+        // the plugin panels under /plugin-assets do not — isolating the shell
+        // blocked every instrument iframe. Isolation belongs only to the
+        // hosts that actually run the in-page render pool (vite dev/preview
+        // and the Pages service worker); this host renders audio natively.
         .body(Body::from(asset.contents().to_vec()))
         .expect("valid embedded asset response")
 }

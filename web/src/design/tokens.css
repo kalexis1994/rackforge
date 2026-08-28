@@ -11,10 +11,14 @@
   --rf-space-10: 40px;
   --rf-space-12: 48px;
 
-  --rf-radius-small: 8px;
-  --rf-radius-control: 11px;
-  --rf-radius-card: 18px;
-  --rf-radius-dialog: 24px;
+  /* Retuned to the faceplate: a panel is 3 and a key is 2, and nothing is a
+     pill. These were 8 / 11 / 18 / 24 / 999 — the geometry of the backlit host
+     — and every component built on them kept arriving rounded no matter how
+     many of them were corrected one at a time. The scale is the source. */
+  --rf-radius-small: 2px;
+  --rf-radius-control: 2px;
+  --rf-radius-card: 3px;
+  --rf-radius-dialog: 3px;
   --rf-radius-pill: 999px;
 
   --rf-target-compact: 36px;

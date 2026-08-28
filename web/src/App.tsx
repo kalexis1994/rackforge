@@ -3,13 +3,13 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
   type FormEvent,
 } from "react";
-import { assetUrl } from "./assets";
 import { useSelector } from "react-redux";
 import {
   Activity,
@@ -17,11 +17,11 @@ import {
   Download,
   FileUp,
   FolderOpen,
-  House,
   Info,
   LogOut,
   Menu,
   Keyboard,
+  MonitorSmartphone,
   Piano,
   Play,
   RadioTower,
@@ -38,6 +38,7 @@ import {
   useLocation,
   useNavigate,
   useParams,
+  useSearchParams,
 } from "react-router";
 import {
   connectGateway,
@@ -61,6 +62,12 @@ import {
   sendVirtualMidi,
   subscribeOutputMeter,
 } from "./gateway";
+import {
+  type LightingMode,
+  readLighting,
+  storeLighting,
+} from "./lighting";
+import { readScreenGlass, storeScreenGlass, type ScreenGlass } from "./screen";
 import { RfLoader } from "./components/RfLoader";
 import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
 import { PluginRuntimeStatus } from "./components/PluginRuntimeStatus";
@@ -138,10 +145,48 @@ const ResourceExplorerDialog = lazy(() =>
   })),
 );
 
+// Inline rather than an <img> so the mark reads the lighting tokens: an image
+// is its own document and cannot see the faceplate's palette.
+//
+// The paint order is the drawing. The leg is stroked first and the bowl of the
+// R over it, so the bar truncates the leg at its lower edge instead of letting
+// the diagonal tip run into the red; the node at the crossbar goes last because
+// it covers the seam where three strokes meet. Reordering these is a visual
+// change, not a refactor.
 function BrandMark() {
+  // Two node holes are punched through the strokes underneath, so the knockout
+  // has to be a mask. Ids must not collide between the rail and the about card.
+  const maskId = `rf-mark-${useId().replace(/:/g, "")}`;
   return (
     <span className="brand-mark" aria-hidden="true">
-      <img src={assetUrl("brand/rackforge-mark.svg")} alt="" />
+      <svg viewBox="0 0 704 308" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="800" height="400">
+            <rect width="800" height="400" fill="#fff" />
+            <circle cx="80" cy="200" r="10" fill="#000" />
+            <circle cx="550" cy="200" r="12" fill="#000" />
+          </mask>
+        </defs>
+        <g
+          mask={`url(#${maskId})`}
+          transform="translate(-58 -51)"
+          fill="none"
+          strokeWidth="34"
+          strokeLinecap="butt"
+          strokeLinejoin="round"
+        >
+          <path d="M305 200L430 342H505Q550 342 550 297V200" stroke="var(--mark-leg)" />
+          <path d="M550 200V111Q550 68 595 68H720" stroke="var(--mark-arm)" />
+          <path d="M550 200H731" stroke="var(--mark-arm)" />
+          <path
+            d="M80 200H360Q410 200 410 150V110Q410 68 365 68H155V145"
+            stroke="var(--mark-bowl)"
+          />
+          <circle cx="80" cy="200" r="22" fill="var(--mark-bowl)" stroke="none" />
+          <circle cx="550" cy="200" r="24" fill="var(--mark-arm)" stroke="none" />
+          <path d="M720 174L762 200L720 226Z" fill="var(--mark-arm)" stroke="none" />
+        </g>
+      </svg>
     </span>
   );
 }
@@ -217,19 +262,13 @@ function isProgramEditorValue(value: unknown): value is ProgramEditorValue {
   }
 }
 
-const homeNavItem = {
-    path: "/",
-    label: "Home",
-    detail: "Current instrument and system overview",
-    section: "workspace",
-    icon: House,
-  } as const;
 const liveNavItem = {
     path: "/live",
     label: "Live",
     detail: "Performance racks, songs and setlists",
     section: "workspace",
     icon: RadioTower,
+    tint: "live",
   } as const;
 const playNavItem = {
     path: "/play",
@@ -237,6 +276,7 @@ const playNavItem = {
     detail: "Play and edit the active instrument",
     section: "workspace",
     icon: Play,
+    tint: "play",
   } as const;
 const touchControllerNavItem = {
     path: "/controller",
@@ -244,6 +284,7 @@ const touchControllerNavItem = {
     detail: "On-screen keyboard and pads",
     section: "workspace",
     icon: Piano,
+    tint: "controller",
   } as const;
 const pluginManagerNavItem = {
     path: "/plugins",
@@ -251,6 +292,7 @@ const pluginManagerNavItem = {
     detail: "Install, manage and configure instruments",
     section: "system",
     icon: Blocks,
+    tint: "system",
   } as const;
 const settingsNavItem = {
     path: "/settings",
@@ -258,15 +300,8 @@ const settingsNavItem = {
     detail: "Audio, MIDI and host configuration",
     section: "system",
     icon: Settings2,
+    tint: "system",
   } as const;
-
-const diagnosticsItem = {
-  path: "/diagnostics",
-  label: "Diagnostics",
-  detail: "Connected audio, MIDI and USB devices",
-  section: "workspace",
-  icon: Activity,
-} as const;
 
 const aboutItem = {
   path: "/about",
@@ -274,18 +309,23 @@ const aboutItem = {
   detail: "Version and runtime information",
   section: "system",
   icon: Info,
+  tint: "system",
 } as const;
 
+/* No Home. RackForge is for playing, so you are either in LIVE or in PLAY —
+   a dashboard that restated the topbar's readout and the rail's own list was
+   a page about the machine rather than a place to work. The compact layout on
+   a hardware controller still has a root to navigate from; that lives in the
+   `little@1` contract, where four soft keys genuinely need somewhere to start
+   from, not here where the rail is always on screen. */
 const workspaceNavItems = [
-  homeNavItem,
   liveNavItem,
   playNavItem,
   touchControllerNavItem,
-  diagnosticsItem,
 ];
 const systemNavItems = [pluginManagerNavItem, settingsNavItem, aboutItem];
 const navItems = [...workspaceNavItems, ...systemNavItems];
-const vstWorkspaceNavItems = [homeNavItem, playNavItem];
+const vstWorkspaceNavItems = [playNavItem];
 const vstSystemNavItems = [pluginManagerNavItem, aboutItem];
 const vstNavItems = [...vstWorkspaceNavItems, ...vstSystemNavItems];
 
@@ -393,6 +433,36 @@ export function App() {
     );
   }
   return <RackForgeApp />;
+}
+
+/**
+ * The lighting condition the interface is actually rendering in.
+ *
+ * Plugins are told the condition, never the preference. "Auto" is a statement
+ * about *who decides*, which is the host's business; a plugin surface only
+ * needs to know which of the two it is being drawn next to. So this resolves
+ * auto and reports "day" or "stage".
+ *
+ * Two things can change it — the player throwing the switch, which stamps the
+ * document, and the operating system flipping underneath an unstamped one —
+ * so both are watched.
+ */
+function useResolvedLighting(): "day" | "stage" {
+  const systemDark = useMediaQuery("(prefers-color-scheme: dark)");
+  const [stamp, setStamp] = useState<string | null>(() =>
+    document.documentElement.getAttribute("data-theme"),
+  );
+  useEffect(() => {
+    const root = document.documentElement;
+    const observer = new MutationObserver(() =>
+      setStamp(root.getAttribute("data-theme")),
+    );
+    observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
+  if (stamp === "dark") return "stage";
+  if (stamp === "light") return "day";
+  return systemDark ? "stage" : "day";
 }
 
 function RackForgeApp() {
@@ -562,13 +632,16 @@ function RackForgeApp() {
           <BrandMark />
           <span className="brand-name">RACKFORGE</span>
         </div>
+        {/* The rail lists destinations. The Touch Controller is not one — it
+            pulls a dock out over whatever surface you are already on — so it
+            sits with the chassis furniture at the foot instead, and only where
+            it is actually a dock. On a phone it stays in the drawer's list,
+            where it really is a route. */}
         <NavigationLinks
-          items={vstHost ? vstNavItems : navItems}
+          items={(vstHost ? vstNavItems : navItems).filter(
+            (item) => !(dockableController && item.path === "/controller"),
+          )}
           onPlayRequest={requestPlayNavigation}
-          controllerDockOpen={showControllerDock}
-          onControllerToggle={dockableController
-            ? () => setControllerDockOpen((open) => !open)
-            : undefined}
         />
         {liveWorkspace ? (
           <nav className="rail-context-actions" aria-label="Graph editor actions">
@@ -597,6 +670,13 @@ function RackForgeApp() {
             </button>
           </nav>
         ) : null}
+        {dockableController ? (
+          <ControllerDockToggle
+            open={showControllerDock}
+            onToggle={() => setControllerDockOpen((open) => !open)}
+          />
+        ) : null}
+        <LightingSwitch />
         <ConnectionBadge status={connection} />
       </aside>
 
@@ -622,16 +702,11 @@ function RackForgeApp() {
           className={`page${isPluginSurface ? " plugin-host-page" : ""}${
             isControllerSurface ? " controller-host-page" : ""
           }${
-            location.pathname === "/" ? " home-page" : ""
-          }${
             isLiveSurface ? " live-host-page" : ""
           }`}
         >
           <Routes>
-            <Route
-              path="/"
-              element={<HomePage snapshot={snapshot} onOpenPlay={requestPlayNavigation} />}
-            />
+            <Route path="/" element={<Navigate to="/play" replace />} />
             <Route
               path="/live"
               element={vstHost ? <Navigate to="/play" replace /> :
@@ -700,7 +775,10 @@ function RackForgeApp() {
                 <RfLoader label="Settings" detail="Reading host capabilities…" size="medium" />
               )}
             />
-            <Route path="/diagnostics" element={vstHost ? <Navigate to="/play" replace /> : <DiagnosticsPage />} />
+            <Route
+              path="/diagnostics"
+              element={<Navigate to={vstHost ? "/play" : "/settings?tab=diagnostics"} replace />}
+            />
             <Route path="/about" element={<AboutPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
@@ -732,6 +810,9 @@ function RackForgeApp() {
           }
           liveWorkspaceActive={liveWorkspace !== null}
           liveWorkspaceKind={liveWorkspace?.kind}
+          dockableController={dockableController}
+          controllerDockOpen={showControllerDock}
+          onControllerToggle={() => setControllerDockOpen((open) => !open)}
           liveSetlistSelected={
             liveSurface === "perform" &&
             performance?.live.mode === "setlist" &&
@@ -1021,6 +1102,74 @@ function FloatingPerformanceMenuButton({
   );
 }
 
+
+const LIGHTING_CHOICES: ReadonlyArray<{
+  value: LightingMode;
+  key: string;
+  title: string;
+}> = [
+  { value: "auto", key: "AUTO", title: "Follow the system setting" },
+  { value: "light", key: "DAY", title: "DAYLIGHT — bench and rehearsal" },
+  { value: "dark", key: "STAGE", title: "STAGE — house lights down" },
+];
+
+/**
+ * Slides the on-screen keyboard out over the current surface.
+ *
+ * Deliberately quieter than a nav key: it is a latching switch on the chassis,
+ * not a place you go, and it sits with the lighting selector rather than among
+ * the destinations it opens on top of.
+ */
+function ControllerDockToggle({
+  open,
+  onToggle,
+}: {
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`controller-dock-toggle${open ? " open" : ""}`}
+      aria-pressed={open}
+      onClick={onToggle}
+    >
+      <Piano aria-hidden="true" strokeWidth={1.9} />
+      <span>Touch Controller</span>
+    </button>
+  );
+}
+
+/** Three-position lighting selector, mounted on the chassis rail. */
+function LightingSwitch() {
+  const [mode, setMode] = useState<LightingMode>(() => readLighting());
+
+  const choose = (next: LightingMode) => {
+    setMode(next);
+    storeLighting(next);
+  };
+
+  return (
+    <div className="lighting-switch" role="group" aria-label="Lighting condition">
+      <span className="lighting-switch-label">Lighting</span>
+      <div className="lighting-switch-keys">
+        {LIGHTING_CHOICES.map((choice) => (
+          <button
+            key={choice.value}
+            type="button"
+            className={`lighting-key${mode === choice.value ? " active" : ""}`}
+            aria-pressed={mode === choice.value}
+            title={choice.title}
+            onClick={() => choose(choice.value)}
+          >
+            {choice.key}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function NavigationLinks({
   items = navItems,
   detailed = false,
@@ -1049,7 +1198,9 @@ function NavigationLinks({
                 onControllerToggle();
                 onNavigate?.();
               }}
-              className={`nav-item controller-toggle${controllerDockOpen ? " dock-open" : ""}`}
+              className={`nav-item nav-tint-${item.tint} controller-toggle${
+                controllerDockOpen ? " dock-open" : ""
+              }`}
               aria-pressed={controllerDockOpen}
             >
               <span className="nav-mark">
@@ -1077,7 +1228,7 @@ function NavigationLinks({
               onNavigate?.();
             }}
             className={({ isActive }) =>
-              `nav-item${isActive ? " active" : ""}`
+              `nav-item nav-tint-${item.tint}${isActive ? " active" : ""}`
             }
           >
             <span className="nav-mark">
@@ -1103,6 +1254,9 @@ function MobileNavigation({
   liveWorkspaceKind,
   liveSetlistSelected,
   onPlayRequest,
+  dockableController,
+  controllerDockOpen,
+  onControllerToggle,
   onPerformanceAction,
 }: {
   vstHost: boolean;
@@ -1113,6 +1267,9 @@ function MobileNavigation({
   liveWorkspaceKind?: PerformanceGraphWorkspace["kind"];
   liveSetlistSelected: boolean;
   onPlayRequest: () => void;
+  dockableController: boolean;
+  controllerDockOpen: boolean;
+  onControllerToggle: () => void;
   onPerformanceAction: (
     action: "select-plugin" | "presets" | "live-perform" | "live-configure" | "live-exit-setlist" | "live-save-editor" | "live-close-editor",
   ) => void;
@@ -1261,8 +1418,13 @@ function MobileNavigation({
             </>
           ) : null}
           <span className="mobile-menu-section">Workspace</span>
+          {/* Same reasoning as the rail: where the controller is a dock it is
+              not a destination, so it leaves this list and becomes the switch
+              below. In landscape it really is a route, and it stays here. */}
           <NavigationLinks
-            items={vstHost ? vstWorkspaceNavItems : workspaceNavItems}
+            items={(vstHost ? vstWorkspaceNavItems : workspaceNavItems).filter(
+              (item) => !(dockableController && item.path === "/controller"),
+            )}
             detailed
             onNavigate={requestClose}
             onPlayRequest={onPlayRequest}
@@ -1275,7 +1437,28 @@ function MobileNavigation({
           />
           <RevisionFooter />
         </div>
-        <ConnectionBadge status={connection} />
+        {/* The drawer is the only way to reach the lighting switch on a phone,
+            where the rail that normally carries it is collapsed to icons. It
+            shares the footer strip with the status badge: both are chassis
+            furniture rather than workspace controls. */}
+        {/* One plinth at the foot rather than a switch floating between the
+            scroll area and the strip: everything here is chassis furniture and
+            it all sits on the same ground. */}
+        <div className="mobile-menu-footer">
+          {dockableController ? (
+            <ControllerDockToggle
+              open={controllerDockOpen}
+              onToggle={() => {
+                onControllerToggle();
+                requestClose();
+              }}
+            />
+          ) : null}
+          <div className="mobile-menu-footer-row">
+            <LightingSwitch />
+            <ConnectionBadge status={connection} />
+          </div>
+        </div>
       </section>
     </div>
   );
@@ -2295,84 +2478,6 @@ function PageHeading({
       <h1>{title}</h1>
       <p>{detail}</p>
     </div>
-  );
-}
-
-function HomePage({
-  snapshot,
-  onOpenPlay,
-}: {
-  snapshot: SessionSnapshot | null;
-  onOpenPlay: (instance?: PluginInstance) => void;
-}) {
-  const active = snapshot?.instances.find(
-    (instance) => instance.instance_id === snapshot.active_instance_id,
-  );
-  const selected = active?.sounds.find(
-    (sound) => sound.id === active.selected_sound_id,
-  );
-  const masterLevel = snapshot
-    ? `${Math.round(snapshot.master_level / 10)}%`
-    : "—";
-  const masterPan = snapshot
-    ? snapshot.master_pan === 0
-      ? "CENTER"
-      : `${snapshot.master_pan < 0 ? "L" : "R"}${Math.round(Math.abs(snapshot.master_pan) / 10)}`
-    : "—";
-  const navigate = useNavigate();
-  return (
-    <>
-      <section className="hero-grid">
-        <article className="hero-card sound-card">
-          <span className="card-kicker">
-            {snapshot?.active_mode.toUpperCase() ?? "OFFLINE"} MODE
-          </span>
-          <div>
-            <h2>{selected?.name ?? "No program selected"}</h2>
-            <p>{selected?.detail ?? active?.plugin_name ?? "Connect RackForge Core"}</p>
-          </div>
-          <button className="primary-button" onClick={() => onOpenPlay()}>
-            Open instrument <span>→</span>
-          </button>
-        </article>
-        <article className="hero-card session-card">
-          <span className="card-kicker">Live status</span>
-          <dl className="session-stats">
-            <div>
-              <dt>Mode</dt>
-              <dd>{snapshot?.active_mode.toUpperCase() ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>Master</dt>
-              <dd>{masterLevel}</dd>
-            </div>
-            <div>
-              <dt>Pan</dt>
-              <dd>{masterPan}</dd>
-            </div>
-          </dl>
-          <div className="signal-line">
-            <span />
-            <small>Controller and sound engine synchronized</small>
-          </div>
-        </article>
-      </section>
-      <section className="section-block">
-        <div className="section-title-row">
-          <div>
-            <span className="eyebrow">Available</span>
-            <h2>Instruments</h2>
-          </div>
-          <button className="text-button" onClick={() => navigate("/plugins")}>
-            Browse →
-          </button>
-        </div>
-        <PluginGrid
-          instances={snapshot?.instances ?? []}
-          onOpenPlay={onOpenPlay}
-        />
-      </section>
-    </>
   );
 }
 
@@ -3699,75 +3804,6 @@ function PluginsPage({
   );
 }
 
-function PluginGrid({
-  instances,
-  plugins,
-  expanded = false,
-  onRemove,
-  onOpenPlay,
-}: {
-  instances: PluginInstance[];
-  plugins?: PluginWebDescriptor[];
-  expanded?: boolean;
-  onRemove?: (plugin: PluginWebDescriptor) => void;
-  onOpenPlay: (instance: PluginInstance) => void;
-}) {
-  const pluginCatalog = usePluginCatalog();
-  const { plugins: loadedCatalog } = pluginCatalog;
-  const catalog = plugins ?? loadedCatalog;
-  if (
-    instances.length === 0 &&
-    (pluginCatalog.status === "idle" || pluginCatalog.status === "loading")
-  ) {
-    return (
-      <RfLoader
-        className="plugin-grid-loader"
-        label="Loading plugins"
-        detail="Waiting for installed plugins and their runtime instances…"
-      />
-    );
-  }
-  if (instances.length === 0) return <EmptyState title="No plugins available" />;
-  return (
-    <div className={`plugin-grid${expanded ? " expanded" : ""}`}>
-      {instances.map((instance, index) => {
-        const plugin = catalog.find((candidate) => candidate.plugin_id === instance.plugin_id);
-        const selected = instance.sounds.find(
-          (sound) => sound.id === instance.selected_sound_id,
-        );
-        const kind = pluginKindPresentation(plugin?.kind);
-        return (
-          <div className="plugin-card-shell" key={instance.instance_id}>
-            <button
-              type="button"
-              className="plugin-card plugin-card-button"
-              onClick={() => onOpenPlay(instance)}
-              aria-label={`Open ${instance.plugin_name} in PLAY`}
-            >
-              <div className={`plugin-tile tile-${index % 4}${plugin?.branding ? " branded" : ""}`}>
-                <PluginIcon plugin={plugin} name={instance.plugin_name} />
-                {!plugin?.branding && <i />}
-              </div>
-              <div>
-                <span className="card-kicker">
-                  Plugin <span className={`plugin-kind-tag ${kind.className}`}>{kind.label}</span>
-                </span>
-                <h3>{instance.plugin_name}</h3>
-                <p>{selected?.name ?? `${instance.sounds.length} programs`}</p>
-              </div>
-            </button>
-            {plugin?.managed && onRemove ? (
-              <button className="plugin-card-remove" onClick={() => onRemove(plugin)} aria-label={`Remove ${plugin.plugin_name}`} title="Remove plugin">
-                <Trash2 aria-hidden="true" />
-              </button>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function PluginPage({
   snapshot,
   connection,
@@ -3847,7 +3883,9 @@ function PluginSurfaceState({
 }) {
   return (
     <div className="plugin-surface-state">
-      <span className="plugin-surface-state-mark">RF</span>
+      {/* Same two-letter stand-in the empty bay carried, from before the mark
+          existed. */}
+      <span className="plugin-surface-state-mark"><BrandMark /></span>
       <div>
         <h2>{title}</h2>
         <p>{detail}</p>
@@ -4266,6 +4304,7 @@ export function PluginFrame({
   ]);
 
   const pluginContextReady = !isolated || isolatedContextState !== undefined;
+  const lighting = useResolvedLighting();
   const pluginContext = useMemo(() => {
     const contextInstance = pluginContextInstance(
       instance,
@@ -4289,9 +4328,13 @@ export function PluginFrame({
         active_mode: snapshot?.active_mode ?? "play",
         master_level: snapshot?.master_level ?? 0,
         master_pan: snapshot?.master_pan ?? 0,
+        // A plugin draws its own surface and may want to sit in the same light
+        // as the machine around it. Advisory: nothing obliges a plugin to read
+        // this, and a plugin that ignores it is not broken.
+        lighting,
       },
     };
-  }, [instance, isolated, isolatedContextState, snapshot, surface]);
+  }, [instance, isolated, isolatedContextState, lighting, snapshot, surface]);
 
   // Parameter changes can originate outside the iframe (MIDI Learn links,
   // semantic .rfcontroller profiles, automation, or another RackForge
@@ -5381,6 +5424,64 @@ function TypingKeyboardCard() {
   );
 }
 
+/**
+ * The cover over a plugin surface.
+ *
+ * On by default because it is what says the plugin is running *on* something.
+ * Off is a real option, not a debug flag: a dense panel is easier to read
+ * through nothing at all, and that trade belongs to whoever is playing.
+ */
+function ScreenGlassCard() {
+  const [glass, setGlass] = useState<ScreenGlass>(() => readScreenGlass());
+  const on = glass === "glass";
+  const choose = (next: ScreenGlass) => {
+    setGlass(next);
+    storeScreenGlass(next);
+  };
+
+  return (
+    <article className="settings-card">
+      <div className="settings-icon settings-icon-svg">
+        <MonitorSmartphone aria-hidden="true" />
+      </div>
+      <div className="settings-copy">
+        <span className="card-kicker">Plugin surface</span>
+        <h2>Screen glass</h2>
+        <p>
+          Shows plugin panels behind an acrylic cover: the corners fall off, a
+          sheen crosses the sheet, and it carries the film any panel picks up.
+          Turn it off for a bare surface.
+        </p>
+      </div>
+      <ToggleSwitch
+        className="typing-keyboard-switch"
+        checked={on}
+        label="Screen glass"
+        description={on ? "Panels sit behind the cover" : "Panels render bare"}
+        checkedLabel="On"
+        uncheckedLabel="Off"
+        onChange={(next) => choose(next ? "glass" : "clean")}
+      />
+    </article>
+  );
+}
+
+const SETTINGS_TABS = [
+  ["audio", "Audio"],
+  ["midi", "MIDI"],
+  ["input", "Input"],
+  ["screen", "Screen"],
+  ["network", "Network"],
+  ["security", "Security"],
+  ["diagnostics", "Diagnostics"],
+] as const;
+
+type SettingsTab = (typeof SETTINGS_TABS)[number][0];
+
+function isSettingsTab(value: string | null): value is SettingsTab {
+  return SETTINGS_TABS.some(([id]) => id === value);
+}
+
 function SettingsPage({
   initial,
   onConfigChange,
@@ -5401,9 +5502,15 @@ function SettingsPage({
   const [audioOperation, setAudioOperation] = useState<"refresh" | "test" | "save" | null>(null);
   const audioBusy = audioOperation !== null;
   const [audioMessage, setAudioMessage] = useState<string | null>(null);
-  const [settingsTab, setSettingsTab] = useState<
-    "audio" | "input" | "network" | "security"
-  >("audio");
+  // The tab lives in the URL so a section stays linkable now that Diagnostics
+  // is one of them: /diagnostics used to be its own route and still redirects
+  // here. `replace` keeps tab-hopping out of the back button.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const settingsTab: SettingsTab = isSettingsTab(requestedTab) ? requestedTab : "audio";
+  const setSettingsTab = (tab: SettingsTab) => {
+    setSearchParams(tab === "audio" ? {} : { tab }, { replace: true });
+  };
   const loadAudioSettings = useCallback(async () => {
     setAudioOperation("refresh");
     setAudioMessage(null);
@@ -5537,12 +5644,7 @@ function SettingsPage({
         detail="Host-wide configuration. Plugin-specific controls live inside each plugin."
       />
       <nav className="settings-tabs" role="tablist" aria-label="Settings sections">
-        {([
-          ["audio", "Audio & MIDI"],
-          ["input", "Input"],
-          ["network", "Network"],
-          ["security", "Security"],
-        ] as const).map(([id, label]) => (
+        {SETTINGS_TABS.map(([id, label]) => (
           <button
             key={id}
             role="tab"
@@ -5556,15 +5658,26 @@ function SettingsPage({
       </nav>
       <section className="settings-grid">
         {settingsTab === "input" ? <TypingKeyboardCard /> : null}
-        {settingsTab === "audio" && audioSettings && audioDraft ? (
+        {settingsTab === "screen" ? <ScreenGlassCard /> : null}
+        {/* Audio and MIDI are separate sections of one card: they are different
+            things to set up, but they share a draft and one Apply commits both,
+            so splitting them into two cards would put two save buttons on the
+            same pending edit. */}
+        {(settingsTab === "audio" || settingsTab === "midi") && audioSettings && audioDraft ? (
           <article className="settings-card host-audio-settings-card">
-            <div className="settings-icon">♫</div>
+            <div className="settings-icon">{settingsTab === "midi" ? "⌸" : "♫"}</div>
             <div className="settings-copy">
               <span className="card-kicker">{audioSettings.host} host</span>
-              <h2>Audio & MIDI</h2>
-              <p>Available controls are provided by this device and applied by its native audio runtime.</p>
+              <h2>{settingsTab === "midi" ? "MIDI" : "Audio"}</h2>
+              <p>
+                {settingsTab === "midi"
+                  ? "Inputs this device offers. Enabled ports are opened by the native runtime."
+                  : "Available controls are provided by this device and applied by its native audio runtime."}
+              </p>
             </div>
             <div className="host-audio-form">
+              {settingsTab === "audio" ? (
+              <>
               <label>
                 <span>Driver</span>
                 <select value={audioDraft.driver} onChange={(event) => selectAudioDriver(event.target.value)}>
@@ -5677,6 +5790,9 @@ function SettingsPage({
                   {[0, 3, 6, 9, 12].map((gain) => <option key={gain} value={gain}>+{gain} dB</option>)}
                 </select>
               </label>
+              </>
+              ) : null}
+              {settingsTab === "midi" ? (
               <fieldset>
                 <legend>MIDI inputs</legend>
                 {audioSettings.inventory.midi_inputs.length ? audioSettings.inventory.midi_inputs.map((input) => (
@@ -5695,7 +5811,8 @@ function SettingsPage({
                   </label>
                 )) : <p>No MIDI inputs detected.</p>}
               </fieldset>
-              {audioSettings.runtime ? (() => {
+              ) : null}
+              {settingsTab === "audio" && audioSettings.runtime ? (() => {
                 const runtime = audioSettings.runtime;
                 const health = runtime.stream_health ?? (runtime.running ? "healthy" : "stopped");
                 const metrics = [
@@ -5756,12 +5873,12 @@ function SettingsPage({
             </div>
           </article>
         ) : null}
-        {settingsTab === "audio" && (!audioSettings || !audioDraft) ? (
+        {(settingsTab === "audio" || settingsTab === "midi") && (!audioSettings || !audioDraft) ? (
           <article className="settings-card host-audio-settings-card unavailable">
-            <div className="settings-icon">♫</div>
+            <div className="settings-icon">{settingsTab === "midi" ? "⌸" : "♫"}</div>
             <div className="settings-copy">
               <span className="card-kicker">Host capabilities</span>
-              <h2>Audio & MIDI unavailable</h2>
+              <h2>{settingsTab === "midi" ? "MIDI" : "Audio"} unavailable</h2>
               <p>The current host did not publish its audio and MIDI settings.</p>
             </div>
             <div className="host-audio-actions">
@@ -5828,6 +5945,7 @@ function SettingsPage({
         ) : null}
         {settingsTab === "security" ? <ChangePinCard /> : null}
       </section>
+      {settingsTab === "diagnostics" ? <DiagnosticsPanel /> : null}
     </>
   );
 }
@@ -5843,7 +5961,11 @@ interface HostDiagnostics {
   usb_devices: Array<{ name: string; detail: string }>;
 }
 
-function DiagnosticsPage() {
+/* Diagnostics is a section of Settings rather than a rail destination: it is
+   something you consult while configuring a host, not a place you work in. The
+   panel keeps its own fetch and refresh so the surrounding page stays unaware
+   of it, and /diagnostics still resolves here. */
+function DiagnosticsPanel() {
   const [diagnostics, setDiagnostics] = useState<HostDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -5882,11 +6004,6 @@ function DiagnosticsPage() {
   const status = diagnostics?.audio_status ?? {};
   return (
     <>
-      <PageHeading
-        eyebrow="Runtime status"
-        title="Diagnostics"
-        detail="Live information from the native audio, MIDI and USB host."
-      />
       <div className="diagnostics-actions">
         <button className="primary-button" disabled={refreshing} onClick={() => void refresh()}>
           <AsyncActionLabel active={refreshing} activeLabel="Refreshing…">
@@ -5974,7 +6091,9 @@ function AboutPage() {
 function EmptyState({ title }: { title: string }) {
   return (
     <div className="empty-state">
-      <span>RF</span>
+      {/* Was the letters "RF" on an accent square — a stand-in from before the
+          mark existed. There is a real one now, and it follows the lighting. */}
+      <BrandMark />
       <h2>{title}</h2>
       <p>RackForge will update this view as soon as Core is available.</p>
     </div>

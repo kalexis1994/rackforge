@@ -93,7 +93,47 @@ The plugin announces readiness:
 RackForge responds with `kind: "context"`, the requested surface, the plugin's
 own instance state, an optional matching program draft, an optional matching
 audition lease and limited host state. A fresh context is sent whenever the
-session revision changes.
+session revision changes, and whenever any value inside it changes.
+
+### Host state
+
+`host` carries what a surface may reasonably need to know about the machine it
+is mounted in:
+
+| field | value |
+| --- | --- |
+| `active_mode` | `"play"` or `"live"` |
+| `master_level` | integer, tenths of a percent |
+| `master_pan` | integer, negative left |
+| `lighting` | `"day"` or `"stage"` |
+
+`lighting` is the condition RackForge is **actually rendering in**, never the
+player's preference. RackForge's own setting has three positions — daylight,
+stage, and follow-the-system — but "follow the system" is a statement about who
+decides, and a plugin does not need to know that. It needs to know which of the
+two it is being drawn next to, so the host resolves it first. A plugin that
+wants both conditions can read this once from the context and re-read it from
+every later context; the host sends a fresh one when the player throws the
+switch and when the operating system flips underneath the automatic setting.
+
+This is advisory. A plugin owns its surface, and one that ignores `lighting`
+and ships a single fixed appearance is not misbehaving — the field exists so a
+plugin *may* sit in the same light as the machine around it, not so that it
+must.
+
+Reading it costs nothing and requires no method call:
+
+```js
+window.addEventListener("message", (event) => {
+  const message = event.data;
+  if (message?.protocol !== "rackforge.plugin.web@1") return;
+  if (message.kind !== "context") return;
+  document.documentElement.dataset.lighting = message.host.lighting;
+});
+```
+
+Adding a field to `host` is additive: a plugin built against an earlier
+RackForge ignores what it does not read, and the protocol version is unchanged.
 
 Plugin calls are requests with a unique string `request_id`:
 

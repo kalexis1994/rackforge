@@ -22,25 +22,123 @@
   font-display: swap;
 }
 
+/* RackForge Faceplate — industrial silkscreen, text and data faces. */
+@font-face {
+  font-family: "Barlow Semi Condensed";
+  src: url("/fonts/BarlowSemiCondensed-Medium.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Barlow Semi Condensed";
+  src: url("/fonts/BarlowSemiCondensed-SemiBold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Barlow Semi Condensed";
+  src: url("/fonts/BarlowSemiCondensed-Bold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Barlow";
+  src: url("/fonts/Barlow-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Barlow";
+  src: url("/fonts/Barlow-Medium.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono[wght].ttf") format("truetype-variations");
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+}
+
 :root {
-  color: #171714;
-  background: #e9e7e1;
-  font-family: "Segoe UI", Arial, sans-serif;
+  color-scheme: light;
+  color: #221e1a;
+  background: #c9c1b3;
+  font-family: "Barlow", "Segoe UI", Arial, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --ink: #171714;
-  --paper: #f4f2ec;
-  --muted: #77756e;
-  --line: #d5d2ca;
-  --acid: #c9f254;
-  --orange: #ff7557;
-  --blue: #6d91f7;
-  --entity-instrument: #4d8dff;
-  --entity-rack: #ad7cff;
-  --entity-song: #55d98b;
-  --entity-song-part: #c7df62;
-  --entity-setlist: #ff9b4a;
-  --display-font: "Chakra Petch", "Segoe UI", Arial, sans-serif;
+  /* ------------------------------------------------------------------
+     RackForge Faceplate — DAYLIGHT (bench / rehearsal).
+     The complete palette lives here; STAGE below redefines only tokens.
+     ------------------------------------------------------------------ */
+  --chassis: #c9c1b3;
+  --chassis-deep: #b4ab9b;
+  --panel-inset: #ded6c7;
+  --ink: #221e1a;
+  --ink-rgb: 34, 30, 26;
+  --paper: #ebe4d8;
+  --muted: #6e6555;
+  --line: #bdb3a2;
+  --acid: #2f4b7c;
+  --acid-rgb: 47, 75, 124;
+  /* The ink that rides on an --acid fill. The accent is a deep navy in
+     daylight, so a glyph sitting on it has to be cream, not the panel ink. */
+  --acid-ink: #fdfbf6;
+  /* One ink per surface, for the rail chips. Daylight uses the deep mixes so
+     the cream glyph clears 4.5:1 on every one of them; the system pages stay
+     unpainted graphite, because colour here marks where you perform from. */
+  --nav-home: #2f4b7c;
+  --nav-live: #c1273d;
+  --nav-play: #a8420f;
+  --nav-controller: #7e5a10;
+  --nav-diagnostics: #2c6b4f;
+  --nav-system: #4a4234;
+  --orange: #d25a2b;
+  --blue: #2f4b7c;
+  --red: #c1273d;
+  --red-ink: #fff6f0;
+  --ember: #d25a2b;
+  --ember-ink: #a8420f;
+  --amber: #b07f1e;
+  --amber-ink: #7e5a10;
+  --green: #2c6b4f;
+  --edge-light-rgb: 255, 253, 247;
+  --edge-dark-rgb: 92, 76, 54;
+  --glass: #f5f1e8;
+  --glass-strong: #ebe4d8;
+  --cyan-soft: rgba(var(--acid-rgb), 0.1);
+  --inner-light: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.9);
+  --glass-shadow:
+    inset 0 1px 0 rgba(var(--edge-light-rgb), 0.9),
+    inset 0 -1px 0 rgba(var(--edge-dark-rgb), 0.12),
+    0 2px 6px rgba(var(--edge-dark-rgb), 0.16);
+  --lcd-glass: #8fb9a6;
+  --lcd-glass-2: #7fac98;
+  --lcd-phos: #10231c;
+  --lcd-phos-dim: #2a4238;
+  --lcd-accent: #7a2318;
+  --lcd-bezel: #55605a;
+  --lcd-grid: rgba(10, 32, 24, 0.16);
+  --lcd-grid-op: 0.5;
+  --lcd-bloom: transparent;
+  --entity-instrument: #2f4b7c;
+  --entity-rack: #b07f1e;
+  --entity-song: #2c6b4f;
+  --entity-song-part: #d25a2b;
+  --entity-setlist: #c1273d;
+  --display-font: "Barlow Semi Condensed", "Arial Narrow", "Segoe UI", sans-serif;
+  --mono-font: "JetBrains Mono", ui-monospace, Consolas, monospace;
   --rackforge-system-top-inset: 0px;
   --rackforge-system-right-inset: 0px;
   --rackforge-system-bottom-inset: 0px;
@@ -141,7 +239,7 @@ textarea {
   background: rgba(4, 15, 23, 0.62);
   border: 1px solid rgba(91, 223, 242, 0.14);
   border-radius: 16px;
-  box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.045);
+  box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.045);
   cursor: pointer;
   transition:
     border-color var(--rf-motion-fast) var(--rf-ease-standard),
@@ -167,7 +265,7 @@ textarea {
   height: calc(100% - 6px);
   box-sizing: border-box;
   object-fit: cover;
-  border: 1px solid color-mix(in srgb, var(--plugin-accent, #55e7ff) 34%, transparent);
+  border: 1px solid color-mix(in srgb, var(--plugin-accent, var(--acid)) 34%, transparent);
 }
 
 .plugin-picker-shade {
@@ -185,14 +283,14 @@ textarea {
   background:
     radial-gradient(
       circle at 84% 28%,
-      color-mix(in srgb, var(--plugin-accent, #55e7ff) 34%, transparent),
+      color-mix(in srgb, var(--plugin-accent, var(--acid)) 34%, transparent),
       transparent 48%
     ),
     linear-gradient(
       112deg,
-      color-mix(in srgb, var(--plugin-accent, #55e7ff) 28%, rgba(3, 14, 21, 0.54)) 0%,
-      color-mix(in srgb, var(--plugin-accent, #55e7ff) 10%, transparent) 52%,
-      color-mix(in srgb, var(--plugin-accent, #55e7ff) 22%, rgba(2, 10, 16, 0.48)) 100%
+      color-mix(in srgb, var(--plugin-accent, var(--acid)) 28%, rgba(3, 14, 21, 0.54)) 0%,
+      color-mix(in srgb, var(--plugin-accent, var(--acid)) 10%, transparent) 52%,
+      color-mix(in srgb, var(--plugin-accent, var(--acid)) 22%, rgba(2, 10, 16, 0.48)) 100%
     );
   opacity: 0;
   transition: opacity 180ms ease;
@@ -211,14 +309,14 @@ textarea {
 .plugin-picker-card.branded {
   color: #edfaff;
   background: var(--plugin-background, #07131c);
-  border-color: color-mix(in srgb, var(--plugin-accent, #55e7ff) 45%, transparent);
+  border-color: color-mix(in srgb, var(--plugin-accent, var(--acid)) 45%, transparent);
 }
 
 .play-plugin-selector button.plugin-picker-card.branded.active {
   color: #fff;
   background: var(--plugin-background, #07131c);
-  border-color: var(--plugin-accent, #55e7ff);
-  box-shadow: inset 4px 0 0 var(--plugin-accent, #55e7ff), 0 13px 38px rgba(0, 0, 0, 0.24);
+  border-color: var(--plugin-accent, var(--acid));
+  box-shadow: inset 4px 0 0 var(--plugin-accent, var(--acid)), 0 13px 38px rgba(0, 0, 0, 0.24);
 }
 
 .plugin-picker-icon {
@@ -312,7 +410,7 @@ textarea {
   color: var(--ink);
   background: rgba(7, 18, 27, 0.94);
   border-bottom: 1px solid var(--line);
-  box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.055);
+  box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.055);
   z-index: 4;
 }
 
@@ -611,8 +709,8 @@ textarea {
 .modal-dialog-close:hover:not(:disabled),
 .modal-dialog-close:focus-visible {
   color: var(--ink);
-  background: rgba(85, 231, 255, 0.1);
-  border-color: rgba(85, 231, 255, 0.42);
+  background: rgba(var(--acid-rgb), 0.1);
+  border-color: rgba(var(--acid-rgb), 0.42);
 }
 
 .modal-dialog-close:active:not(:disabled) {
@@ -1267,9 +1365,13 @@ body {
   overflow: hidden;
 }
 
+/* The plugin surface is a flex column, so the bar needs to be told not to
+   flex — but pinning it to 78px also *shrank* it: the bar is 107px tall
+   everywhere else, and the readout inside it got squeezed until the program
+   name wrapped. `auto` holds it at its own height, which is what the rest of
+   the interface shows. */
 .plugin-surface-active .topbar {
-  min-height: 78px;
-  flex: 0 0 78px;
+  flex: 0 0 auto;
 }
 
 .rail {
@@ -1299,9 +1401,9 @@ body {
   display: block;
   overflow: hidden;
   background: #050b11;
-  border: 1px solid rgba(85, 231, 255, 0.28);
+  border: 1px solid rgba(var(--acid-rgb), 0.28);
   border-radius: 8px;
-  box-shadow: 0 0 20px rgba(85, 231, 255, 0.12);
+  box-shadow: 0 0 20px rgba(var(--acid-rgb), 0.12);
 }
 
 .brand-mark img {
@@ -1392,14 +1494,14 @@ body {
 
 .nav-item:hover .nav-mark {
   color: var(--acid);
-  background: rgba(85, 231, 255, 0.08);
+  background: rgba(var(--acid-rgb), 0.08);
   transform: translateY(-1px);
 }
 
 .nav-item.active {
   color: var(--acid);
-  background: rgba(85, 231, 255, 0.08);
-  border-color: rgba(85, 231, 255, 0.14);
+  background: rgba(var(--acid-rgb), 0.08);
+  border-color: rgba(var(--acid-rgb), 0.14);
 }
 
 .nav-item.active .nav-mark {
@@ -1438,13 +1540,13 @@ body {
   height: 18px;
   background: var(--acid);
   border-radius: 999px;
-  box-shadow: 0 0 8px rgba(85, 231, 255, 0.44);
+  box-shadow: 0 0 8px rgba(var(--acid-rgb), 0.44);
 }
 
 .rail .nav-item.controller-toggle:hover .nav-mark,
 .rail .nav-item.controller-toggle.dock-open:hover .nav-mark {
   color: var(--acid);
-  background: rgba(85, 231, 255, 0.08);
+  background: rgba(var(--acid-rgb), 0.08);
 }
 
 .connection-badge {
@@ -1742,9 +1844,14 @@ body {
   font-size: 12px;
 }
 
+/* A route fills its container. It used to be a 1240px column centred in the
+   workspace, which on a wide window left a band of bare chassis down each side
+   and stranded the scrollbar far to the right of where the content ended.
+   Measure is not the page's job: sections set their own, and the grids below
+   reflow into more columns instead of stretching their cards. */
 .page {
-  width: min(1240px, 100%);
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   padding: clamp(38px, 6vw, 78px) clamp(24px, 5vw, 72px) 80px;
 }
 
@@ -2001,12 +2108,20 @@ body {
 
 .plugin-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
 }
 
+/* Three fixed columns squeezed the cards on anything narrow and left the key
+   bank inside them 46px wide — unreadable labels. A minimum width instead of a
+   count means the row drops to two and then to one on its own.
+
+   372px is not a round number: it is what the card needs for its key gang to
+   stay one row of four (315px of keys plus 36px of card padding, with a little
+   air). Below it the card would land between arrangements — too tight for the
+   row, too wide to need the column — so the grid never produces that width. */
 .plugin-grid.expanded {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(372px, 1fr));
 }
 
 .plugin-card-shell {
@@ -2019,6 +2134,7 @@ body {
   padding-right: 64px;
   grid-template-columns: 82px minmax(0, 1fr);
 }
+
 
 .plugin-section-heading {
   margin: 18px 0 9px;
@@ -2190,26 +2306,29 @@ body {
   box-shadow: 0 0 0 3px rgba(113, 129, 138, 0.1);
 }
 
+/* The lamp label takes the palette's green, which is mixed per lighting
+   condition; the pale mint here was a dark-ground colour and washed out to
+   about 1.4:1 on the cream panel. The lamp itself keeps a lit face. */
 .plugin-runtime-status.is-ready {
-  color: #9decbc;
+  color: var(--green);
 }
 
 .plugin-runtime-status.is-ready > i {
-  background: #63e79a;
-  box-shadow: 0 0 0 3px rgba(99, 231, 154, 0.12), 0 0 12px rgba(99, 231, 154, 0.34);
+  background: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent);
 }
 
 .plugin-runtime-status.is-loading {
-  color: #8fdff0;
+  color: var(--acid);
 }
 
 .plugin-runtime-status.is-unhealthy {
-  color: #ff9cac;
+  color: var(--red);
 }
 
 .plugin-runtime-status.is-unhealthy > i {
-  background: #ff7890;
-  box-shadow: 0 0 0 3px rgba(255, 120, 144, 0.12), 0 0 12px rgba(255, 120, 144, 0.26);
+  background: var(--red);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent);
 }
 
 .plugin-runtime-status.is-available > i {
@@ -3022,9 +3141,11 @@ body {
   text-align: right;
 }
 
+/* auto-fill, not auto-fit: a lone card keeps its column instead of stretching
+   across the whole panel. The rhythm is the card width, not the window. */
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 16px;
 }
 
@@ -3150,10 +3271,12 @@ body {
   min-height: 0;
 }
 
+/* The audio card spans every column, so its fields have to hold their own
+   width — two tracks across a wide panel would be a pair of enormous inputs. */
 .host-audio-form {
   margin-top: 24px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 14px;
 }
 
@@ -3297,9 +3420,6 @@ body {
     justify-content: center;
   }
 
-  .plugin-grid.expanded {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }
 
 @media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
@@ -3440,7 +3560,7 @@ body {
     display: grid;
     place-items: center;
     color: var(--acid);
-    background: rgba(85, 231, 255, 0.07);
+    background: rgba(var(--acid-rgb), 0.07);
     border: 1px solid var(--line);
     border-radius: 11px;
   }
@@ -3484,7 +3604,7 @@ body {
     border: 1px solid var(--line);
     border-bottom: 0;
     border-radius: 24px 24px 0 0;
-    box-shadow: 0 -24px 64px rgba(0, 4, 8, 0.52);
+    box-shadow: 0 -24px 64px rgba(var(--edge-dark-rgb), 0.52);
     outline: none;
     transform-origin: bottom center;
     animation: mobile-sheet-in 300ms cubic-bezier(0.2, 0.85, 0.2, 1) both;
@@ -3548,7 +3668,7 @@ body {
   }
 
   .mobile-menu-panel > header > button:active {
-    background: rgba(118, 225, 245, 0.09);
+    background: rgba(var(--acid-rgb), 0.09);
     transform: scale(0.94);
   }
 
@@ -3768,7 +3888,7 @@ body {
   padding: 12px 14px;
   display: grid;
   gap: 3px;
-  background: rgba(85, 231, 255, 0.045);
+  background: rgba(var(--acid-rgb), 0.045);
   border: 1px solid var(--line);
   border-radius: 12px;
 }
@@ -3995,7 +4115,7 @@ body {
   overflow: auto;
   color: #f4f2ec;
   background: #07131c;
-  border: 1px solid rgba(85, 231, 255, 0.24);
+  border: 1px solid rgba(var(--acid-rgb), 0.24);
   border-radius: 18px;
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.58);
 }
@@ -4028,7 +4148,7 @@ body {
 }
 
 .plugin-install-preview {
-  --preview-accent: #55e7ff;
+  --preview-accent: var(--acid);
   --preview-background: #07131c;
   display: grid;
   gap: 18px;
@@ -4135,14 +4255,14 @@ body {
   gap: 15px;
   color: #f4f2ec;
   background: #0b1b27;
-  border: 1px solid rgba(85, 231, 255, 0.17);
+  border: 1px solid rgba(var(--acid-rgb), 0.17);
   border-radius: 13px;
   cursor: pointer;
   text-align: left;
 }
 
 .install-source-card:hover {
-  border-color: rgba(85, 231, 255, 0.55);
+  border-color: rgba(var(--acid-rgb), 0.55);
   background: #102534;
 }
 
@@ -4173,7 +4293,7 @@ body {
   display: grid;
   place-items: center;
   color: #07131c;
-  background: #55e7ff;
+  background: var(--acid);
   border-radius: 11px;
 }
 
@@ -4321,7 +4441,7 @@ body {
   overflow: hidden;
   color: var(--ink);
   background: #07131c;
-  border: 1px solid rgba(85, 231, 255, 0.24);
+  border: 1px solid rgba(var(--acid-rgb), 0.24);
   border-radius: 18px;
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.58);
 }
@@ -4341,7 +4461,7 @@ body {
 }
 
 .resource-explorer-header {
-  border-bottom: 1px solid rgba(85, 231, 255, 0.14);
+  border-bottom: 1px solid rgba(var(--acid-rgb), 0.14);
 }
 
 .resource-explorer-header h2 {
@@ -4358,7 +4478,7 @@ body {
   gap: 18px;
   color: var(--muted);
   background: rgba(9, 23, 34, 0.82);
-  border-bottom: 1px solid rgba(85, 231, 255, 0.12);
+  border-bottom: 1px solid rgba(var(--acid-rgb), 0.12);
 }
 
 .resource-explorer-source-bar > div {
@@ -4437,7 +4557,7 @@ body {
 
 .resource-explorer-footer {
   min-height: 74px;
-  border-top: 1px solid rgba(85, 231, 255, 0.14);
+  border-top: 1px solid rgba(var(--acid-rgb), 0.14);
 }
 
 .resource-explorer-footer > div:first-child {
@@ -4695,9 +4815,9 @@ body {
   padding: clamp(13px, 2vw, 22px);
   overflow: hidden;
   background:
-    radial-gradient(circle at 50% 120%, rgba(85, 231, 255, 0.13), transparent 46%),
+    radial-gradient(circle at 50% 120%, rgba(var(--acid-rgb), 0.13), transparent 46%),
     rgba(3, 11, 17, 0.94);
-  border: 1px solid rgba(85, 231, 255, 0.22);
+  border: 1px solid rgba(var(--acid-rgb), 0.22);
   border-radius: 24px;
   box-shadow: var(--glass-shadow);
 }
@@ -4894,7 +5014,7 @@ body {
 .piano-key.black.active {
   color: #021016;
   background: linear-gradient(180deg, #79efff, #25c7e3);
-  box-shadow: 0 0 30px rgba(85, 231, 255, 0.48);
+  box-shadow: 0 0 30px rgba(var(--acid-rgb), 0.48);
 }
 
 .touch-pad-grid {
@@ -5019,7 +5139,7 @@ body {
   color: #021016;
   background: linear-gradient(145deg, #9bf4ff, #3dd7ef);
   border-color: #c6f9ff;
-  box-shadow: 0 0 36px rgba(85, 231, 255, 0.35);
+  box-shadow: 0 0 36px rgba(var(--acid-rgb), 0.35);
   transform: scale(0.985);
 }
 
@@ -5214,7 +5334,7 @@ body {
   place-items: center;
   color: var(--acid);
   background: rgba(4, 17, 26, 0.82);
-  border: 1px solid rgba(85, 231, 255, 0.32);
+  border: 1px solid rgba(var(--acid-rgb), 0.32);
   border-radius: 14px;
   box-shadow: 0 8px 28px rgba(0, 3, 7, 0.34);
   backdrop-filter: blur(14px);
@@ -5257,7 +5377,7 @@ body {
   overscroll-behavior: contain;
   color: var(--ink);
   background: rgba(5, 18, 27, 0.97);
-  border: 1px solid rgba(85, 231, 255, 0.26);
+  border: 1px solid rgba(var(--acid-rgb), 0.26);
   border-radius: 18px;
   box-shadow: 0 22px 70px rgba(0, 2, 6, 0.58);
 }
@@ -5422,13 +5542,13 @@ body {
 }
 
 .touch-pad-matrix-picker button.selected {
-  background: rgba(85, 231, 255, 0.58);
+  background: rgba(var(--acid-rgb), 0.58);
   border-color: var(--acid);
 }
 
 .touch-pad-matrix-picker button[aria-selected="true"] {
   background: var(--acid);
-  box-shadow: 0 0 0 2px rgba(85, 231, 255, 0.18);
+  box-shadow: 0 0 0 2px rgba(var(--acid-rgb), 0.18);
 }
 
 .touch-main-navigation,
@@ -5440,7 +5560,7 @@ body {
   justify-content: center;
   gap: 9px;
   color: var(--ink);
-  background: rgba(85, 231, 255, 0.07);
+  background: rgba(var(--acid-rgb), 0.07);
   border: 1px solid var(--line);
   border-radius: 11px;
   font-weight: 700;
@@ -5525,7 +5645,7 @@ body {
     display: grid;
     grid-template-rows: minmax(80px, 1fr) var(--controller-dock-height, 360px);
     background:
-      radial-gradient(circle at 50% 80%, rgba(85, 231, 255, 0.07), transparent 42%),
+      radial-gradient(circle at 50% 80%, rgba(var(--acid-rgb), 0.07), transparent 42%),
       #030b11;
   }
 
@@ -5650,7 +5770,7 @@ body {
     background: rgba(104, 169, 184, 0.65);
     border: 1px solid rgba(158, 225, 238, 0.42);
     border-radius: 999px;
-    box-shadow: 0 2px 12px rgba(0, 4, 8, 0.54);
+    box-shadow: 0 2px 12px rgba(var(--edge-dark-rgb), 0.54);
     transition: width 140ms ease, height 140ms ease, background 140ms ease;
   }
 
@@ -5711,7 +5831,7 @@ body {
     height: 100%;
     min-height: 0;
     align-self: end;
-    border-top: 1px solid rgba(85, 231, 255, 0.22);
+    border-top: 1px solid rgba(var(--acid-rgb), 0.22);
   }
 
   .touch-controller.docked .touch-instrument {
@@ -5723,7 +5843,7 @@ body {
     overflow: hidden;
     background: #030b11;
     border: 0;
-    border-top: 1px solid rgba(85, 231, 255, 0.22);
+    border-top: 1px solid rgba(var(--acid-rgb), 0.22);
     border-radius: 0;
     box-shadow: none;
   }
@@ -5794,7 +5914,7 @@ body {
 
   .global-controller-dock {
     width: 100%;
-    border-top: 1px solid rgba(85, 231, 255, 0.24);
+    border-top: 1px solid rgba(var(--acid-rgb), 0.24);
     box-shadow: 0 -10px 30px rgba(0, 3, 7, 0.28);
   }
 
@@ -5833,7 +5953,7 @@ body {
     gap: 6px;
     overflow: hidden;
     background: rgba(3, 11, 17, 0.99);
-    border-bottom: 1px solid rgba(85, 231, 255, 0.16);
+    border-bottom: 1px solid rgba(var(--acid-rgb), 0.16);
     user-select: none;
     -webkit-user-select: none;
   }
@@ -5930,7 +6050,7 @@ body {
     display: block;
     background: currentColor;
     border-radius: 999px;
-    box-shadow: 0 0 6px rgba(85, 231, 255, 0.52);
+    box-shadow: 0 0 6px rgba(var(--acid-rgb), 0.52);
   }
 
   .touch-keyboard-navigator-move > span {
@@ -6048,7 +6168,7 @@ body {
     background: rgba(104, 169, 184, 0.78);
     border: 1px solid rgba(158, 225, 238, 0.48);
     border-radius: 999px;
-    box-shadow: 0 2px 12px rgba(0, 4, 8, 0.54);
+    box-shadow: 0 2px 12px rgba(var(--edge-dark-rgb), 0.54);
     transition: width 140ms ease, height 140ms ease, background 140ms ease;
   }
 
@@ -6068,7 +6188,7 @@ body {
     overflow: hidden;
     background: #030b11;
     border: 0;
-    border-top: 1px solid rgba(85, 231, 255, 0.18);
+    border-top: 1px solid rgba(var(--acid-rgb), 0.18);
     border-radius: 0;
     box-shadow: none;
   }
@@ -6180,7 +6300,7 @@ body {
   min-height: 40px;
   padding: 0 17px;
   color: var(--muted);
-  background: rgba(118, 225, 245, 0.045);
+  background: rgba(var(--acid-rgb), 0.045);
   border: 1px solid var(--line);
   border-radius: 10px;
   cursor: pointer;
@@ -6255,7 +6375,7 @@ body {
   flex-direction: column;
   justify-content: space-between;
   background:
-    radial-gradient(circle at 90% 8%, rgba(85, 231, 255, 0.17), transparent 34%),
+    radial-gradient(circle at 90% 8%, rgba(var(--acid-rgb), 0.17), transparent 34%),
     var(--glass);
 }
 
@@ -6295,7 +6415,7 @@ body {
 
 .live-state.online i {
   background: var(--acid);
-  box-shadow: 0 0 0 4px rgba(85, 231, 255, 0.1);
+  box-shadow: 0 0 0 4px rgba(var(--acid-rgb), 0.1);
 }
 
 .live-browser {
@@ -6396,7 +6516,7 @@ body {
 .live-stage-step:disabled {
   color: color-mix(in srgb, var(--muted) 46%, transparent);
   background: transparent;
-  border-color: rgba(118, 225, 245, 0.08);
+  border-color: rgba(var(--acid-rgb), 0.08);
   cursor: default;
 }
 
@@ -6494,8 +6614,8 @@ body {
   grid-template-columns: 42px minmax(0, 1fr) auto;
   align-items: center;
   gap: 13px;
-  background: rgba(118, 225, 245, 0.035);
-  border: 1px solid rgba(118, 225, 245, 0.1);
+  background: rgba(var(--acid-rgb), 0.035);
+  border: 1px solid rgba(var(--acid-rgb), 0.1);
   border-radius: 13px;
 }
 
@@ -6542,7 +6662,7 @@ body {
 .sequence-group {
   padding: 14px;
   background: rgba(4, 11, 17, 0.24);
-  border: 1px solid rgba(118, 225, 245, 0.08);
+  border: 1px solid rgba(var(--acid-rgb), 0.08);
   border-radius: 14px;
 }
 
@@ -6750,8 +6870,8 @@ body {
   min-width: 72px;
   min-height: 34px;
   color: var(--acid);
-  background: rgba(85, 231, 255, 0.08);
-  border: 1px solid rgba(85, 231, 255, 0.24);
+  background: rgba(var(--acid-rgb), 0.08);
+  border: 1px solid rgba(var(--acid-rgb), 0.24);
   border-radius: 9px;
   cursor: pointer;
   font-size: 9px;
@@ -6909,7 +7029,7 @@ body {
   margin: 11px;
   color: var(--acid);
   background: var(--cyan-soft);
-  border: 1px solid rgba(85, 231, 255, 0.23);
+  border: 1px solid rgba(var(--acid-rgb), 0.23);
   border-radius: 10px;
   cursor: pointer;
   font-size: 10px;
@@ -6941,7 +7061,7 @@ body {
   color: var(--ink);
   background: transparent;
   border: 0;
-  border-bottom: 1px solid rgba(118, 225, 245, 0.08);
+  border-bottom: 1px solid rgba(var(--acid-rgb), 0.08);
   cursor: pointer;
   text-align: left;
 }
@@ -6965,8 +7085,8 @@ body {
   flex: 0 0 auto;
   padding: 5px 8px;
   color: var(--acid);
-  background: rgba(85, 231, 255, 0.08);
-  border: 1px solid rgba(85, 231, 255, 0.2);
+  background: rgba(var(--acid-rgb), 0.08);
+  border: 1px solid rgba(var(--acid-rgb), 0.2);
   border-radius: 7px;
   font-size: 8px;
   font-weight: 800;
@@ -6975,7 +7095,7 @@ body {
 }
 
 .config-item-list button.active {
-  background: rgba(85, 231, 255, 0.1);
+  background: rgba(var(--acid-rgb), 0.1);
   border-radius: 10px;
 }
 
@@ -7028,7 +7148,7 @@ body {
   min-height: 36px;
   padding: 0 13px;
   color: var(--muted);
-  background: rgba(118, 225, 245, 0.05);
+  background: rgba(var(--acid-rgb), 0.05);
   border: 1px solid var(--line);
   border-radius: 9px;
   cursor: pointer;
@@ -7098,7 +7218,7 @@ body {
   height: 40px;
   padding: 0 11px;
   color: var(--ink);
-  background: rgba(118, 225, 245, 0.055);
+  background: rgba(var(--acid-rgb), 0.055);
   border: 1px solid var(--line);
   border-radius: 9px;
   outline: 0;
@@ -7109,8 +7229,8 @@ body {
 .form-grid select:focus,
 .sequence-editor-row input:focus,
 .sequence-editor-row select:focus {
-  border-color: rgba(85, 231, 255, 0.55);
-  box-shadow: 0 0 0 3px rgba(85, 231, 255, 0.07);
+  border-color: rgba(var(--acid-rgb), 0.55);
+  box-shadow: 0 0 0 3px rgba(var(--acid-rgb), 0.07);
 }
 
 .toggle-field {
@@ -7148,8 +7268,8 @@ body {
 }
 
 .toggle-field input:checked + i {
-  background: rgba(85, 231, 255, 0.22);
-  border-color: rgba(85, 231, 255, 0.5);
+  background: rgba(var(--acid-rgb), 0.22);
+  border-color: rgba(var(--acid-rgb), 0.5);
 }
 
 .toggle-field input:checked + i::after {
@@ -7210,7 +7330,7 @@ body {
   grid-template-columns: 36px minmax(0, 1fr) auto;
   align-items: center;
   gap: 9px;
-  border-bottom: 1px solid rgba(118, 225, 245, 0.09);
+  border-bottom: 1px solid rgba(var(--acid-rgb), 0.09);
 }
 
 .slot-editor > header strong {
@@ -8348,7 +8468,7 @@ body {
   color: var(--ink);
   background: rgba(5, 16, 24, 0.96);
   border-bottom: 1px solid var(--line);
-  box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.04);
+  box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.04);
   z-index: 4;
 }
 
@@ -8412,7 +8532,7 @@ body {
     place-items: center;
     color: var(--acid);
     background: rgba(4, 17, 26, 0.84);
-    border: 1px solid rgba(85, 231, 255, 0.34);
+    border: 1px solid rgba(var(--acid-rgb), 0.34);
     border-radius: 13px;
     box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
     backdrop-filter: blur(14px) saturate(120%);
@@ -8475,7 +8595,7 @@ body {
   background: rgba(7, 22, 31, 0.94);
   border: 1px solid rgba(91, 223, 243, 0.3);
   border-radius: 14px;
-  box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.08), 0 16px 44px rgba(0, 3, 7, 0.42);
+  box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.08), 0 16px 44px rgba(0, 3, 7, 0.42);
   backdrop-filter: blur(16px) saturate(125%);
   pointer-events: auto;
 }
@@ -8763,7 +8883,7 @@ body {
     place-items: center;
     color: var(--acid);
     background: rgba(4, 17, 26, 0.84);
-    border: 1px solid rgba(85, 231, 255, 0.34);
+    border: 1px solid rgba(var(--acid-rgb), 0.34);
     border-radius: 12px;
     box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
     backdrop-filter: blur(14px) saturate(120%);
@@ -9267,41 +9387,136 @@ body {
   }
 }
 
-/* Midnight Cyan Glass — RackForge host theme */
-:root {
+/* ----------------------------------------------------------------------
+   RackForge Faceplate — STAGE (house lights down).
+   The same machine, not an inverted palette: the panel goes to graphite,
+   the silkscreen goes to cream, and the LCD becomes the light source.
+   Only tokens are redefined here; components never branch on the theme.
+   ---------------------------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
   color-scheme: dark;
-  color: #e9faff;
-  background: #050b11;
-  --ink: #e9faff;
-  --paper: #0b1620;
-  --muted: #86a1ad;
-  --line: rgba(118, 225, 245, 0.16);
-  --acid: #55e7ff;
-  --orange: #ff7890;
-  --blue: #7697ff;
-  --glass: rgba(10, 25, 36, 0.72);
-  --glass-strong: rgba(12, 30, 43, 0.92);
-  --cyan-soft: rgba(85, 231, 255, 0.11);
-  --inner-light: inset 0 1px 0 rgba(225, 250, 255, 0.08);
+  color: #efe9de;
+  background: #131417;
+  --chassis: #131417;
+  --chassis-deep: #0c0d0f;
+  --panel-inset: #191b1e;
+  --ink: #efe9de;
+  --ink-rgb: 239, 233, 222;
+  --paper: #212327;
+  --muted: #9d978c;
+  --line: #34383e;
+  --acid: #7ca5e0;
+  --acid-rgb: 124, 165, 224;
+  --acid-ink: #0f1318;
+  --nav-home: #7ca5e0;
+  --nav-live: #e0455c;
+  --nav-play: #f0813f;
+  --nav-controller: #e3b45c;
+  --nav-diagnostics: #57c48c;
+  --nav-system: #9d978c;
+  --orange: #f0813f;
+  --blue: #7ca5e0;
+  --red: #e0455c;
+  --red-ink: #14080a;
+  --ember: #f0813f;
+  --ember-ink: #f0813f;
+  --amber: #e3b45c;
+  --amber-ink: #e3b45c;
+  --green: #57c48c;
+  --edge-light-rgb: 235, 245, 255;
+  --edge-dark-rgb: 0, 4, 8;
+  --glass: #2b2e33;
+  --glass-strong: #212327;
+  --cyan-soft: rgba(var(--acid-rgb), 0.12);
+  --inner-light: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.08);
   --glass-shadow:
-    inset 0 1px 0 rgba(225, 250, 255, 0.08),
-    inset 0 -1px 0 rgba(0, 5, 10, 0.42),
-    0 18px 50px rgba(0, 4, 8, 0.32);
+    inset 0 1px 0 rgba(var(--edge-light-rgb), 0.08),
+    inset 0 -1px 0 rgba(var(--edge-dark-rgb), 0.42),
+    0 3px 10px rgba(var(--edge-dark-rgb), 0.5);
+  --lcd-glass: #06100c;
+  --lcd-glass-2: #030907;
+  --lcd-phos: #7fe3b0;
+  --lcd-phos-dim: #55a37c;
+  --lcd-accent: #f2b24c;
+  --lcd-bezel: #0b1512;
+  --lcd-grid: rgba(0, 0, 0, 0.55);
+  --lcd-grid-op: 0.75;
+  --lcd-bloom: rgba(127, 227, 176, 0.45);
+  --entity-instrument: #7ca5e0;
+  --entity-rack: #e3b45c;
+  --entity-song: #57c48c;
+  --entity-song-part: #f0813f;
+  --entity-setlist: #e0455c;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  color: #efe9de;
+  background: #131417;
+  --chassis: #131417;
+  --chassis-deep: #0c0d0f;
+  --panel-inset: #191b1e;
+  --ink: #efe9de;
+  --ink-rgb: 239, 233, 222;
+  --paper: #212327;
+  --muted: #9d978c;
+  --line: #34383e;
+  --acid: #7ca5e0;
+  --acid-rgb: 124, 165, 224;
+  --acid-ink: #0f1318;
+  --nav-home: #7ca5e0;
+  --nav-live: #e0455c;
+  --nav-play: #f0813f;
+  --nav-controller: #e3b45c;
+  --nav-diagnostics: #57c48c;
+  --nav-system: #9d978c;
+  --orange: #f0813f;
+  --blue: #7ca5e0;
+  --red: #e0455c;
+  --red-ink: #14080a;
+  --ember: #f0813f;
+  --ember-ink: #f0813f;
+  --amber: #e3b45c;
+  --amber-ink: #e3b45c;
+  --green: #57c48c;
+  --edge-light-rgb: 235, 245, 255;
+  --edge-dark-rgb: 0, 4, 8;
+  --glass: #2b2e33;
+  --glass-strong: #212327;
+  --cyan-soft: rgba(var(--acid-rgb), 0.12);
+  --inner-light: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.08);
+  --glass-shadow:
+    inset 0 1px 0 rgba(var(--edge-light-rgb), 0.08),
+    inset 0 -1px 0 rgba(var(--edge-dark-rgb), 0.42),
+    0 3px 10px rgba(var(--edge-dark-rgb), 0.5);
+  --lcd-glass: #06100c;
+  --lcd-glass-2: #030907;
+  --lcd-phos: #7fe3b0;
+  --lcd-phos-dim: #55a37c;
+  --lcd-accent: #f2b24c;
+  --lcd-bezel: #0b1512;
+  --lcd-grid: rgba(0, 0, 0, 0.55);
+  --lcd-grid-op: 0.75;
+  --lcd-bloom: rgba(127, 227, 176, 0.45);
+  --entity-instrument: #7ca5e0;
+  --entity-rack: #e3b45c;
+  --entity-song: #57c48c;
+  --entity-song-part: #f0813f;
+  --entity-setlist: #e0455c;
 }
 
 body {
   color: var(--ink);
-  background:
-    radial-gradient(circle at 82% 8%, rgba(41, 199, 228, 0.13), transparent 28%),
-    radial-gradient(circle at 18% 88%, rgba(59, 113, 183, 0.12), transparent 34%),
-    linear-gradient(135deg, #04090f, #07121b 50%, #050c13);
+  background: var(--chassis);
 }
 
 .rf-async-loader {
   --rf-loader-width: 150px;
   --rf-loader-height: 108px;
   --rf-loader-gap: 18px;
-  --rf-loader-duration: 2.8s;
+  --rf-loader-duration: 5.2s;
   --rf-loader-ring: 16px;
   --rf-loader-glow: 50px;
   display: grid;
@@ -9327,63 +9542,85 @@ body {
   --rf-loader-glow: 70px;
 }
 
+/* The mark is 2.29:1 and sets its own height. The ring and the sweeping line
+   are gone: the limbs filling *are* the loader now, and a halo around them was
+   the old idea of one. */
 .rf-async-loader__mark {
   width: var(--rf-loader-width);
-  height: var(--rf-loader-height);
-  position: relative;
-  display: grid;
-  place-items: center;
-  isolation: isolate;
+  display: block;
 }
 
-.rf-async-loader__mark::before {
-  content: "";
-  width: 83%;
-  aspect-ratio: 1;
-  position: absolute;
-  border: 1px solid rgba(85, 231, 255, 0.08);
-  border-radius: 50%;
-  box-shadow:
-    0 0 0 var(--rf-loader-ring) rgba(85, 231, 255, 0.018),
-    0 0 var(--rf-loader-glow) rgba(85, 231, 255, 0.08);
-  animation: rf-loader-breathe var(--rf-loader-duration) ease-in-out infinite;
+.rf-async-loader__mark svg {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
-.rf-async-loader__logo {
-  position: absolute;
-  width: var(--rf-loader-height);
-  height: var(--rf-loader-height);
-  object-fit: contain;
-  user-select: none;
-  pointer-events: none;
+/* Unlit is the ink carried towards the ground, so it reads as *not yet* rather
+   than as a second colour — which means it darkens on the stage panel and
+   washes out on the cream one. Fixing it to "darker" would have made the unlit
+   half the more visible one in daylight. */
+.rf-limb__unlit {
+  stroke: color-mix(in srgb, var(--limb-ink) 26%, var(--chassis));
 }
 
-.rf-async-loader__logo--base {
-  opacity: 0.13;
-  filter: saturate(0.6) drop-shadow(0 0 20px rgba(85, 231, 255, 0.08));
+.rf-limb__lit {
+  stroke: var(--limb-ink);
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation:
+    rf-limb-fill var(--rf-loader-duration) cubic-bezier(0.55, 0, 0.25, 1) infinite,
+    rf-limb-hold var(--rf-loader-duration) steps(1, end) infinite;
 }
 
-.rf-async-loader__logo--fill {
-  clip-path: inset(100% 0 0);
-  filter: drop-shadow(0 0 12px rgba(85, 231, 255, 0.3));
-  animation: rf-loader-fill var(--rf-loader-duration) cubic-bezier(0.65, 0, 0.2, 1)
-    infinite;
+.rf-limb--bowl { --limb-ink: var(--mark-bowl); }
+.rf-limb--leg { --limb-ink: var(--mark-leg); }
+.rf-limb--arm,
+.rf-limb--spine { --limb-ink: var(--mark-arm); }
+
+.rf-node--jack { --limb-ink: var(--mark-bowl); }
+.rf-node--patch { --limb-ink: var(--mark-arm); }
+
+.rf-node__unlit {
+  fill: color-mix(in srgb, var(--limb-ink) 26%, var(--chassis));
 }
 
-.rf-async-loader__scanner {
-  width: 89%;
-  height: 1px;
-  position: absolute;
-  left: 5.5%;
-  bottom: -12%;
-  z-index: 3;
+.rf-node__lit {
+  fill: var(--limb-ink);
   opacity: 0;
-  background: #d9fcff;
-  box-shadow:
-    0 0 8px var(--acid),
-    0 0 22px rgba(85, 231, 255, 0.8);
-  animation: rf-loader-scan var(--rf-loader-duration) cubic-bezier(0.65, 0, 0.2, 1)
-    infinite;
+}
+
+.rf-node--jack .rf-node__lit {
+  animation: rf-strike-jack var(--rf-loader-duration) steps(1, end) infinite;
+}
+
+.rf-node--patch .rf-node__lit {
+  animation: rf-strike-patch var(--rf-loader-duration) steps(1, end) infinite;
+}
+
+.rf-tip--unlit {
+  fill: color-mix(in srgb, var(--mark-arm) 26%, var(--chassis));
+}
+
+.rf-tip--lit {
+  fill: var(--mark-arm);
+}
+
+/* The arm runs on past its stroke and into the arrow, so it is revealed by a
+   wipe rather than by the dash: one sweep from the node to the point. */
+.rf-limb__lit--undashed {
+  stroke-dasharray: none;
+  stroke-dashoffset: 0;
+  animation: none;
+}
+
+.rf-arm-wipe {
+  width: 0;
+  animation: rf-arm-wipe var(--rf-loader-duration) cubic-bezier(0.55, 0, 0.25, 1) infinite;
+}
+
+.rf-arm__lit {
+  animation: rf-limb-hold var(--rf-loader-duration) steps(1, end) infinite;
 }
 
 .rf-async-loader__copy {
@@ -9478,57 +9715,373 @@ body {
   align-content: center;
 }
 
-@keyframes rf-loader-fill {
+/* ------------------------------------------------------------------------
+   The ignition chain.
+
+   Power reaches the input jack first, then the patch node, and only once both
+   are alight does the signal run out along the limbs. Once the mark is whole
+   it holds while its halo flickers, then cuts out and the cycle starts again.
+
+        0 →  9%   the left node strikes
+        9 → 19%   the right node strikes
+       19 → 50%   the limbs fill
+       50 → 93%   the mark browns out and surges
+       96%        it cuts out
+
+   Two different jitters, deliberately. Striking is the lamp not catching, so
+   the ink cuts out entirely; once it is lit it only browns out — the halo
+   collapses and the limb loses luminosity, but it never goes dark. That is
+   what a tube that has caught but has not settled does.
+
+   The brown-out is opacity rather than a brightness filter, because the unlit
+   copy is right underneath: compositing over it drops the luminosity while
+   keeping the hue, and it stays correct in both lighting conditions. A
+   brightness filter would darken the ink, which reads as dimmer on the stage
+   panel but as *more* present on the cream one.
+
+   The tail is the long half of the cycle and carries nineteen events rather
+   than the ten it started with. Stretching the original ten over a longer
+   window only made the flicker slow; an unsettled tube misfires often, it does
+   not misfire lazily.
+
+   The jitter is in the spacing, not in the values: the events land on
+   irregular percentages at uneven depths, because evenly spaced ones read as
+   a metronome instead of a bad tube. Everything is stepped, so a flicker is a
+   flicker and not a crossfade — a lamp does not ramp on its way out.
+
+   Identical percentages in all three tracks, so the nodes and the limbs pulse
+   as one fitting rather than as separate lights.
+   ------------------------------------------------------------------------ */
+
+@keyframes rf-limb-fill {
   0%,
-  20% {
-    clip-path: inset(100% 0 0);
-    opacity: 0.35;
+  19% {
+    stroke-dashoffset: 1;
   }
-  60%,
-  86% {
-    clip-path: inset(0 0 0);
-    opacity: 1;
-  }
+  50%,
   100% {
-    clip-path: inset(0 0 0);
-    opacity: 0;
+    stroke-dashoffset: 0;
   }
 }
 
-@keyframes rf-loader-scan {
+@keyframes rf-arm-wipe {
   0%,
-  9% {
-    bottom: -12%;
-    opacity: 0;
-    transform: scaleX(0.58);
+  19% {
+    width: 0;
   }
-  20% {
-    bottom: -3%;
-    opacity: 1;
-    transform: scaleX(1);
-  }
-  60% {
-    bottom: 88%;
-    opacity: 1;
-    transform: scaleX(1);
-  }
-  76%,
+  50%,
   100% {
-    bottom: 119%;
-    opacity: 0;
-    transform: scaleX(0.64);
+    width: 212px;
   }
 }
 
-@keyframes rf-loader-breathe {
+@keyframes rf-limb-hold {
   0%,
-  100% {
-    opacity: 0.45;
-    transform: scale(0.97);
+  49% {
+    opacity: 1;
+    filter: none;
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 5px var(--limb-ink));
+  }
+  53% {
+    opacity: 1;
+    filter: drop-shadow(0 0 12px var(--limb-ink));
+  }
+  54% {
+    opacity: 0.62;
+    filter: drop-shadow(0 0 2px var(--limb-ink));
+  }
+  57% {
+    opacity: 1;
+    filter: drop-shadow(0 0 9px var(--limb-ink));
   }
   58% {
+    opacity: 0.5;
+    filter: none;
+  }
+  60% {
     opacity: 1;
-    transform: scale(1.02);
+    filter: drop-shadow(0 0 7px var(--limb-ink));
+  }
+  64% {
+    opacity: 1;
+    filter: drop-shadow(0 0 14px var(--limb-ink));
+  }
+  65% {
+    opacity: 0.58;
+    filter: drop-shadow(0 0 3px var(--limb-ink));
+  }
+  67% {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px var(--limb-ink));
+  }
+  71% {
+    opacity: 0.72;
+    filter: drop-shadow(0 0 4px var(--limb-ink));
+  }
+  72% {
+    opacity: 1;
+    filter: drop-shadow(0 0 11px var(--limb-ink));
+  }
+  77% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px var(--limb-ink));
+  }
+  78% {
+    opacity: 0.55;
+    filter: drop-shadow(0 0 2px var(--limb-ink));
+  }
+  80% {
+    opacity: 1;
+    filter: drop-shadow(0 0 13px var(--limb-ink));
+  }
+  84% {
+    opacity: 0.66;
+    filter: drop-shadow(0 0 3px var(--limb-ink));
+  }
+  86% {
+    opacity: 1;
+    filter: drop-shadow(0 0 9px var(--limb-ink));
+  }
+  89% {
+    opacity: 0.5;
+    filter: none;
+  }
+  90% {
+    opacity: 1;
+    filter: drop-shadow(0 0 12px var(--limb-ink));
+  }
+  93% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px var(--limb-ink));
+  }
+  96%,
+  100% {
+    opacity: 0;
+    filter: none;
+  }
+}
+
+@keyframes rf-strike-jack {
+  0% {
+    opacity: 0;
+  }
+  1.5% {
+    opacity: 0.85;
+  }
+  2.5% {
+    opacity: 0.12;
+  }
+  4.5% {
+    opacity: 1;
+  }
+  5.5% {
+    opacity: 0.2;
+  }
+  6.5% {
+    opacity: 0.9;
+  }
+  8% {
+    opacity: 0.35;
+  }
+  9%,
+  49% {
+    opacity: 1;
+    filter: none;
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 5px var(--limb-ink));
+  }
+  53% {
+    opacity: 1;
+    filter: drop-shadow(0 0 12px var(--limb-ink));
+  }
+  54% {
+    opacity: 0.62;
+    filter: drop-shadow(0 0 2px var(--limb-ink));
+  }
+  57% {
+    opacity: 1;
+    filter: drop-shadow(0 0 9px var(--limb-ink));
+  }
+  58% {
+    opacity: 0.5;
+    filter: none;
+  }
+  60% {
+    opacity: 1;
+    filter: drop-shadow(0 0 7px var(--limb-ink));
+  }
+  64% {
+    opacity: 1;
+    filter: drop-shadow(0 0 14px var(--limb-ink));
+  }
+  65% {
+    opacity: 0.58;
+    filter: drop-shadow(0 0 3px var(--limb-ink));
+  }
+  67% {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px var(--limb-ink));
+  }
+  71% {
+    opacity: 0.72;
+    filter: drop-shadow(0 0 4px var(--limb-ink));
+  }
+  72% {
+    opacity: 1;
+    filter: drop-shadow(0 0 11px var(--limb-ink));
+  }
+  77% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px var(--limb-ink));
+  }
+  78% {
+    opacity: 0.55;
+    filter: drop-shadow(0 0 2px var(--limb-ink));
+  }
+  80% {
+    opacity: 1;
+    filter: drop-shadow(0 0 13px var(--limb-ink));
+  }
+  84% {
+    opacity: 0.66;
+    filter: drop-shadow(0 0 3px var(--limb-ink));
+  }
+  86% {
+    opacity: 1;
+    filter: drop-shadow(0 0 9px var(--limb-ink));
+  }
+  89% {
+    opacity: 0.5;
+    filter: none;
+  }
+  90% {
+    opacity: 1;
+    filter: drop-shadow(0 0 12px var(--limb-ink));
+  }
+  93% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px var(--limb-ink));
+  }
+  96%,
+  100% {
+    opacity: 0;
+    filter: none;
+  }
+}
+
+@keyframes rf-strike-patch {
+  0%,
+  10% {
+    opacity: 0;
+  }
+  11.5% {
+    opacity: 0.9;
+  }
+  12.5% {
+    opacity: 0.15;
+  }
+  14% {
+    opacity: 1;
+  }
+  15% {
+    opacity: 0.25;
+  }
+  16.5% {
+    opacity: 0.85;
+  }
+  18% {
+    opacity: 0.4;
+  }
+  19%,
+  49% {
+    opacity: 1;
+    filter: none;
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 5px var(--limb-ink));
+  }
+  53% {
+    opacity: 1;
+    filter: drop-shadow(0 0 12px var(--limb-ink));
+  }
+  54% {
+    opacity: 0.62;
+    filter: drop-shadow(0 0 2px var(--limb-ink));
+  }
+  57% {
+    opacity: 1;
+    filter: drop-shadow(0 0 9px var(--limb-ink));
+  }
+  58% {
+    opacity: 0.5;
+    filter: none;
+  }
+  60% {
+    opacity: 1;
+    filter: drop-shadow(0 0 7px var(--limb-ink));
+  }
+  64% {
+    opacity: 1;
+    filter: drop-shadow(0 0 14px var(--limb-ink));
+  }
+  65% {
+    opacity: 0.58;
+    filter: drop-shadow(0 0 3px var(--limb-ink));
+  }
+  67% {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px var(--limb-ink));
+  }
+  71% {
+    opacity: 0.72;
+    filter: drop-shadow(0 0 4px var(--limb-ink));
+  }
+  72% {
+    opacity: 1;
+    filter: drop-shadow(0 0 11px var(--limb-ink));
+  }
+  77% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px var(--limb-ink));
+  }
+  78% {
+    opacity: 0.55;
+    filter: drop-shadow(0 0 2px var(--limb-ink));
+  }
+  80% {
+    opacity: 1;
+    filter: drop-shadow(0 0 13px var(--limb-ink));
+  }
+  84% {
+    opacity: 0.66;
+    filter: drop-shadow(0 0 3px var(--limb-ink));
+  }
+  86% {
+    opacity: 1;
+    filter: drop-shadow(0 0 9px var(--limb-ink));
+  }
+  89% {
+    opacity: 0.5;
+    filter: none;
+  }
+  90% {
+    opacity: 1;
+    filter: drop-shadow(0 0 12px var(--limb-ink));
+  }
+  93% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px var(--limb-ink));
+  }
+  96%,
+  100% {
+    opacity: 0;
+    filter: none;
   }
 }
 
@@ -9539,26 +10092,31 @@ body {
     animation: none;
   }
 
-  .rf-async-loader__mark::before,
-  .rf-async-loader__logo--fill,
-  .rf-async-loader__scanner {
+  /* Reduced motion still has to say "working", so the mark is shown finished
+     rather than frozen half-drawn: every limb full, the arrow lit. */
+  .rf-limb__lit,
+  .rf-arm__lit,
+  .rf-arm-wipe,
+  .rf-node__lit {
     animation: none;
   }
 
-  .rf-async-loader__logo--fill {
-    clip-path: inset(28% 0 0);
-    opacity: 1;
+  .rf-limb__lit {
+    stroke-dashoffset: 0;
   }
 
-  .rf-async-loader__scanner {
-    bottom: 70%;
-    opacity: 0.7;
+  .rf-arm-wipe {
+    width: 212px;
+  }
+
+  .rf-node__lit {
+    opacity: 1;
   }
 }
 
 .pairing-shell {
   background:
-    radial-gradient(circle at 72% 18%, rgba(85, 231, 255, 0.16), transparent 28%),
+    radial-gradient(circle at 72% 18%, rgba(var(--acid-rgb), 0.16), transparent 28%),
     #040a10;
 }
 
@@ -9585,7 +10143,7 @@ body {
 .search-field input,
 .browser-toolbar select {
   color: var(--ink);
-  background: rgba(118, 225, 245, 0.07);
+  background: rgba(var(--acid-rgb), 0.07);
   border-color: var(--line);
   border-radius: 10px;
   box-shadow: var(--inner-light);
@@ -9597,7 +10155,7 @@ body {
   border-color: var(--line);
   box-shadow:
     inset -1px 0 0 rgba(163, 239, 252, 0.05),
-    16px 0 44px rgba(0, 4, 8, 0.28);
+    16px 0 44px rgba(var(--edge-dark-rgb), 0.28);
 }
 
 .plugin-surface-state-mark,
@@ -9607,7 +10165,7 @@ body {
   border-radius: 11px;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.7),
-    0 0 24px rgba(85, 231, 255, 0.22);
+    0 0 24px rgba(var(--acid-rgb), 0.22);
 }
 
 .nav-item {
@@ -9616,7 +10174,7 @@ body {
 
 .nav-item:hover {
   color: #dffaff;
-  background: rgba(85, 231, 255, 0.07);
+  background: rgba(var(--acid-rgb), 0.07);
 }
 
 .nav-item.active {
@@ -9663,15 +10221,15 @@ body {
 
 .sound-card {
   background:
-    radial-gradient(circle at 84% 18%, rgba(85, 231, 255, 0.2), transparent 27%),
+    radial-gradient(circle at 84% 18%, rgba(var(--acid-rgb), 0.2), transparent 27%),
     linear-gradient(145deg, rgba(14, 37, 52, 0.96), rgba(5, 14, 22, 0.98));
-  border-color: rgba(85, 231, 255, 0.22);
+  border-color: rgba(var(--acid-rgb), 0.22);
 }
 
 .sound-card::after {
   border-color: var(--acid);
   opacity: 0.62;
-  filter: drop-shadow(0 0 16px rgba(85, 231, 255, 0.2));
+  filter: drop-shadow(0 0 16px rgba(var(--acid-rgb), 0.2));
 }
 
 .session-card {
@@ -9694,11 +10252,11 @@ body {
 }
 
 .plugin-card:hover {
-  border-color: rgba(85, 231, 255, 0.45);
+  border-color: rgba(var(--acid-rgb), 0.45);
   box-shadow:
-    inset 0 1px 0 rgba(225, 250, 255, 0.12),
-    0 20px 54px rgba(0, 4, 8, 0.4),
-    0 0 0 1px rgba(85, 231, 255, 0.08);
+    inset 0 1px 0 rgba(var(--edge-light-rgb), 0.12),
+    0 20px 54px rgba(var(--edge-dark-rgb), 0.4),
+    0 0 0 1px rgba(var(--acid-rgb), 0.08);
 }
 
 .plugin-tile {
@@ -9756,7 +10314,7 @@ body {
 
 .secondary-button {
   color: var(--muted);
-  background: rgba(118, 225, 245, 0.07);
+  background: rgba(var(--acid-rgb), 0.07);
   box-shadow: var(--inner-light);
 }
 
@@ -9773,11 +10331,11 @@ body {
 .plugin-manager-card-actions .secondary-button:not(:disabled):hover,
 .plugin-manager-card-actions .secondary-button:not(:disabled):focus-visible {
   color: #dffbff;
-  background: rgba(85, 231, 255, 0.16);
-  border-color: rgba(85, 231, 255, 0.48);
+  background: rgba(var(--acid-rgb), 0.16);
+  border-color: rgba(var(--acid-rgb), 0.48);
   box-shadow:
     var(--inner-light),
-    0 0 0 1px rgba(85, 231, 255, 0.08),
+    0 0 0 1px rgba(var(--acid-rgb), 0.08),
     0 8px 22px rgba(22, 178, 205, 0.14);
 }
 
@@ -9788,7 +10346,7 @@ body {
   border-color: rgba(192, 248, 255, 0.92);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.86),
-    0 0 0 1px rgba(85, 231, 255, 0.16),
+    0 0 0 1px rgba(var(--acid-rgb), 0.16),
     0 10px 26px rgba(40, 201, 228, 0.28);
 }
 
@@ -9823,7 +10381,7 @@ body {
 .signal-line span,
 .status-value span {
   background: var(--acid);
-  box-shadow: 0 0 0 4px rgba(85, 231, 255, 0.1);
+  box-shadow: 0 0 0 4px rgba(var(--acid-rgb), 0.1);
 }
 
 @media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
@@ -9865,7 +10423,7 @@ body {
 .pin-note {
   margin-top: 8px;
   font-size: 0.8rem;
-  color: var(--accent, #55e7ff);
+  color: var(--accent, var(--acid));
 }
 
 @media (max-width: 480px) {
@@ -9981,12 +10539,6 @@ body {
 
   .section-title-row {
     margin-bottom: 12px;
-  }
-
-  .plugin-grid,
-  .plugin-grid.expanded,
-  .settings-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .settings-card {
@@ -10243,7 +10795,7 @@ body {
     place-items: center;
     color: var(--acid);
     background: rgba(4, 17, 26, 0.84);
-    border: 1px solid rgba(85, 231, 255, 0.34);
+    border: 1px solid rgba(var(--acid-rgb), 0.34);
     border-radius: 13px;
     box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
     backdrop-filter: blur(14px) saturate(120%);
@@ -10292,7 +10844,7 @@ body {
     color: var(--ink);
     background: rgba(5, 16, 24, 0.96);
     border-bottom: 1px solid var(--line);
-    box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.04);
+    box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.04);
     z-index: 4;
   }
 
@@ -10470,7 +11022,7 @@ body {
     place-items: center;
     color: var(--acid);
     background: rgba(4, 17, 26, 0.84);
-    border: 1px solid rgba(85, 231, 255, 0.34);
+    border: 1px solid rgba(var(--acid-rgb), 0.34);
     border-radius: 13px;
     box-shadow: 0 8px 26px rgba(0, 3, 7, 0.38);
     backdrop-filter: blur(14px) saturate(120%);
@@ -10524,7 +11076,7 @@ body {
     background: rgba(5, 16, 24, 0.96);
     border: 0;
     border-bottom: 1px solid var(--line);
-    box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.04);
+    box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.04);
     display: flex;
     align-items: center;
     z-index: 4;
@@ -10638,7 +11190,7 @@ body {
     color: var(--ink);
     background: rgba(5, 16, 24, 0.96);
     border-bottom: 1px solid var(--line);
-    box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.04);
+    box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.04);
     z-index: 4;
   }
 
@@ -10773,7 +11325,7 @@ body {
   background: linear-gradient(145deg, rgba(15, 36, 48, 0.86), rgba(5, 17, 25, 0.96));
   border: 1px solid rgba(130, 216, 232, 0.2);
   border-radius: 12px;
-  box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.055);
+  box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.055);
   cursor: pointer;
   text-align: left;
   transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
@@ -10786,7 +11338,7 @@ body {
 
 .rf-switch:focus-visible {
   border-color: var(--acid);
-  outline: 2px solid rgba(85, 231, 255, 0.2);
+  outline: 2px solid rgba(var(--acid-rgb), 0.2);
   outline-offset: 2px;
 }
 
@@ -10851,8 +11403,8 @@ body {
 }
 
 .rf-switch[aria-checked="true"] {
-  border-color: rgba(85, 231, 255, 0.38);
-  box-shadow: inset 0 1px 0 rgba(225, 250, 255, 0.07), 0 0 24px rgba(53, 205, 230, 0.07);
+  border-color: rgba(var(--acid-rgb), 0.38);
+  box-shadow: inset 0 1px 0 rgba(var(--edge-light-rgb), 0.07), 0 0 24px rgba(53, 205, 230, 0.07);
 }
 
 .rf-switch[aria-checked="true"] .rf-switch-state > span {
@@ -10861,7 +11413,7 @@ body {
 
 .rf-switch[aria-checked="true"] .rf-switch-state i {
   background: rgba(42, 178, 200, 0.24);
-  border-color: rgba(85, 231, 255, 0.62);
+  border-color: rgba(var(--acid-rgb), 0.62);
   box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.5), 0 0 12px rgba(54, 211, 235, 0.2);
 }
 
@@ -11089,10 +11641,10 @@ body {
 @media (hover: hover) {
   .rf-button:hover:not(:disabled) {
     color: #eaffff;
-    background-color: rgba(85, 231, 255, 0.12);
-    border-color: rgba(85, 231, 255, 0.46);
+    background-color: rgba(var(--acid-rgb), 0.12);
+    border-color: rgba(var(--acid-rgb), 0.46);
     box-shadow:
-      inset 0 1px 0 rgba(225, 250, 255, 0.12),
+      inset 0 1px 0 rgba(var(--edge-light-rgb), 0.12),
       0 10px 28px rgba(26, 191, 219, 0.14);
   }
 
@@ -11239,7 +11791,7 @@ body {
   gap: 10px;
   color: var(--ink);
   background: color-mix(in srgb, var(--glass-strong) 94%, transparent);
-  border: 1px solid rgba(118, 225, 245, 0.2);
+  border: 1px solid rgba(var(--acid-rgb), 0.2);
   border-radius: var(--rf-radius-control);
   box-shadow: var(--rf-elevation-card);
   backdrop-filter: blur(18px) saturate(120%);
@@ -11261,8 +11813,8 @@ body {
   display: grid;
   place-items: center;
   color: var(--acid);
-  background: rgba(85, 231, 255, 0.09);
-  border: 1px solid rgba(85, 231, 255, 0.22);
+  background: rgba(var(--acid-rgb), 0.09);
+  border: 1px solid rgba(var(--acid-rgb), 0.22);
   border-radius: 50%;
   font: 900 12px/1 var(--display-font);
 }
@@ -11358,9 +11910,10 @@ body {
   .rf-async-notice,
   .page.rf-route-enter,
   .async-spinner > span,
-  .rf-async-loader__mark::before,
-  .rf-async-loader__logo--fill,
-  .rf-async-loader__scanner {
+  .rf-limb__lit,
+  .rf-arm__lit,
+  .rf-arm-wipe,
+  .rf-node__lit {
     animation: none !important;
     transition-duration: 1ms !important;
   }

@@ -5163,3 +5163,101 @@
   font-size: 9px;
   letter-spacing: 0.1em;
 }
+
+/* ------------------------------------------------ the surface selector ---
+   PERFORM / CONFIGURE switches the performance area, so it sits directly
+   above it — under the sequencer strip, which is the whole machine's and
+   owes it nothing. Two butted transport keys; the engaged view sits down
+   with the painted edge, like every latching selector on the panel. */
+
+.live-surface-tabs {
+  display: flex;
+  align-items: stretch;
+  margin: 0 0 10px;
+}
+
+.live-surface-tabs button {
+  min-height: 36px;
+  padding: 9px 20px;
+  color: var(--fp-rail-label) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-left-width: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: var(--fp-lip);
+  cursor: pointer;
+  font-family: var(--display-font) !important;
+  font-weight: 700 !important;
+  font-size: var(--fp-label) !important;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+}
+
+.live-surface-tabs button:first-child {
+  border-left-width: 1px !important;
+  border-radius: var(--fp-radius-key) 0 0 var(--fp-radius-key) !important;
+}
+
+.live-surface-tabs button:last-child {
+  border-radius: 0 var(--fp-radius-key) var(--fp-radius-key) 0 !important;
+}
+
+.live-surface-tabs button:hover {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+}
+
+.live-surface-tabs button:active,
+.live-surface-tabs button.active {
+  color: var(--ink) !important;
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well);
+}
+
+.live-surface-tabs button.active {
+  box-shadow: var(--fp-well), inset 0 -3px 0 var(--acid);
+}
+
+/* ----------------------------------------------------- panel zones ---
+   Two kinds of territory on the LIVE panel, told apart the way a synth
+   panel tells its sections apart: the SEQUENCER is a raised plate, the
+   PERFORMANCE area is an engraved outline on the bare chassis, and each
+   wears its silkscreen legend breaking the top border. */
+
+.live-zone {
+  position: relative;
+  padding: 16px 12px 12px;
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius);
+  margin-bottom: 12px;
+}
+
+.live-zone-legend {
+  position: absolute;
+  top: -7px;
+  left: 12px;
+  padding: 0 7px;
+  color: var(--fp-rail-label);
+  background: var(--chassis);
+  font-family: var(--display-font);
+  font-weight: 800;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  line-height: 13px;
+  z-index: 1;
+}
+
+/* The sequencer's legend sits on its plate edge, so it wears the plate's
+   paper behind the text instead of the chassis. */
+.sequencer-shell {
+  position: relative;
+  margin-top: 8px;
+}
+
+.sequencer-shell > .live-zone-legend {
+  background: var(--paper);
+}
+
+.live-zone-performance > .live-surface-tabs {
+  margin-top: -2px;
+}

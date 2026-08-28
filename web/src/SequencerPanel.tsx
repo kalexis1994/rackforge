@@ -87,6 +87,7 @@ export function SequencerStrip({
   const running = status?.running ?? false;
   return (
     <section className="sequencer-shell" aria-label="Sequencer">
+      <span className="live-zone-legend">SEQUENCER</span>
       <div className="sequencer-strip">
         <span className="seq-legend">SEQ</span>
         <div className="seq-keys" role="group" aria-label="Transport">

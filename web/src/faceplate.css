@@ -4669,3 +4669,38 @@
 .rack-slot-resize-handle::after {
   background: var(--fp-rail-label) !important;
 }
+
+/* ----------------------------------------- the immersive info strip ---
+   The thin Mode/Rack/Editor strip over the graph workspace was dark navy
+   with 6px muted ink — unreadable, and the wrong material. It is silkscreen
+   on the chassis: a shallow plate, engraved labels, real values in ink. */
+
+.graph-workspace-active .live-performance-bar {
+  color: var(--ink);
+  background: var(--fp-panel) !important;
+  border-bottom: var(--fp-seam) !important;
+  box-shadow: var(--fp-lip);
+  min-height: 26px !important;
+  height: 26px !important;
+  flex: 0 0 26px !important;
+}
+
+.graph-workspace-active .performance-info-slot + .performance-info-slot {
+  border-left: var(--fp-seam) !important;
+}
+
+.graph-workspace-active .performance-info-bar span {
+  color: var(--fp-rail-label) !important;
+  font-family: var(--display-font);
+  font-weight: 800;
+  font-size: 8px !important;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+}
+
+.graph-workspace-active .performance-info-bar strong {
+  color: var(--ink) !important;
+  font-family: var(--display-font);
+  font-weight: 700;
+  font-size: 10px !important;
+}

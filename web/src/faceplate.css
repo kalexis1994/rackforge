@@ -356,12 +356,49 @@
   text-transform: uppercase;
 }
 
+/* The readout stacks: label, then the program across the full window, then
+   the plugin under it. The base layout sat program and plugin side by side,
+   which crushed the program to three glyphs while the plugin name wrapped —
+   backwards, since the program is the thing a player glances down for. */
+.now-playing {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 2px !important;
+  align-items: start !important;
+}
+
+.now-playing .eyebrow {
+  grid-column: auto !important;
+}
+
+/* The program truncates as late as possible: the full window width, and two
+   lines of it before the ellipsis. A name that still does not fit is genuinely
+   long, and two lines is what the window can give without growing the bar. */
 .now-playing strong {
   color: var(--lcd-phos) !important;
   font-family: var(--mono-font);
   font-weight: 700;
+  font-size: 16px !important;
+  line-height: 1.15;
   letter-spacing: 0.03em;
   text-shadow: 0 0 7px var(--lcd-bloom);
+  white-space: normal !important;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/* The plugin is context, not the headline: one dim line, no descriptions. */
+.now-playing .muted-inline {
+  color: var(--lcd-phos-dim) !important;
+  font-family: var(--mono-font);
+  font-size: 10px !important;
+  letter-spacing: 0.06em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ------------------------------------------------------------- panels --- */

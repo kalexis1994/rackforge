@@ -31,6 +31,10 @@ pub mod session_checkpoint;
 pub use rackforge_startup as startup;
 pub mod state_store;
 pub mod storage;
+/// Deliberately outside every platform gate: the clock is host infrastructure
+/// like the render pool, and the browser, Android and desktop hosts advance
+/// the same arithmetic the Linux LIVE host does.
+pub mod transport;
 
 pub use hosted::{LoadedPlugin, PluginInstance};
 pub use isolated_state::{
@@ -48,4 +52,5 @@ pub use parameter_link::{
     compile_semantic_parameter_links,
 };
 pub use state_store::{MAX_PLUGIN_STATE_BYTES, PluginStateStore};
+pub use transport::{Transport, TransportBlock, TransportSnapshot};
 pub use storage::{PluginDirectory, PluginStorage, RECOMMENDED_PROGRAM_SUFFIX};

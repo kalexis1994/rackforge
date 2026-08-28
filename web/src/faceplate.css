@@ -5066,7 +5066,9 @@
   align-items: stretch;
   gap: 3px;
   min-width: max-content;
-  padding-bottom: 2px;
+  /* The selected step wears an offset outline; without this breathing room
+     the scroll container clips it at the top and left. */
+  padding: 5px 4px 5px;
 }
 
 .melodic-step {

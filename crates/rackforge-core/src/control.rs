@@ -3080,11 +3080,40 @@ fn dispatch_command(context: &Arc<ControlContext>, envelope: CommandEnvelope) ->
                 return failure.into_response();
             }
             match receive_audio(reply_receiver, "activate LIVE Rack") {
-                Ok(()) => record_command_event(
-                    context,
-                    command_ref,
-                    SessionEvent::LiveTargetActivated { location, rack_id },
-                ),
+                Ok(()) => {
+                    // The Part carries its groove on stage with it: queue its
+                    // bound patterns, each on its lane, all on the next bar.
+                    // A lane the Part does not bind is left alone, and a
+                    // binding that fails must never fail the activation —
+                    // the Rack is already sounding.
+                    if let Some(part) = library.resolve_part(&location) {
+                        for command in
+                            crate::sequencer::part_launch_commands(part, &library.patterns)
+                        {
+                            let (reply_sender, reply_receiver) = sync_channel(1);
+                            if send_audio(
+                                context,
+                                AudioControlCommand::Sequencer {
+                                    command,
+                                    reply: reply_sender,
+                                },
+                            )
+                            .is_err()
+                            {
+                                eprintln!("SEQUENCER_PART_QUEUE_UNREACHABLE");
+                                break;
+                            }
+                            if receive_audio(reply_receiver, "queue Part pattern").is_err() {
+                                eprintln!("SEQUENCER_PART_QUEUE_REJECTED");
+                            }
+                        }
+                    }
+                    record_command_event(
+                        context,
+                        command_ref,
+                        SessionEvent::LiveTargetActivated { location, rack_id },
+                    )
+                }
                 Err(failure) => failure.into_response(),
             }
         }

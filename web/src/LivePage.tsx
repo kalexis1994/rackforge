@@ -54,6 +54,8 @@ import type {
   SetlistDefinition,
   SongDefinition,
   SongPart,
+  PatternDefinition,
+  SongPartPatternBinding,
 } from "./types";
 
 const RackGraphEditor = lazy(() => import("./components/RackGraphEditor"));
@@ -1252,6 +1254,62 @@ function newRack(): RackDefinition {
     slots,
     graph: graphFromSlots(slots),
   };
+}
+
+/**
+ * The Part's sequencer freight: one selector per lane. When this Part goes
+ * on stage the host queues every bound pattern on its lane at the next bar;
+ * lanes left on dash are left alone, so hand-launched grooves survive a
+ * Part change. Lane N speaks MIDI channel N+1 — the Rack's own channel
+ * filters decide which Slot hears it.
+ */
+function PartLaneBindings({
+  part,
+  patterns,
+  onChange,
+}: {
+  part: SongPart;
+  patterns: PatternDefinition[];
+  onChange: (bindings: SongPartPatternBinding[]) => void;
+}) {
+  const bindings = part.patterns ?? [];
+  const bindingFor = (lane: number) =>
+    bindings.find((binding) => binding.lane === lane)?.pattern_id ?? "";
+  const setLane = (lane: number, patternId: string) => {
+    const next = bindings.filter((binding) => binding.lane !== lane);
+    if (patternId) next.push({ lane, pattern_id: patternId });
+    next.sort((a, b) => a.lane - b.lane);
+    onChange(next);
+  };
+  return (
+    <div className="part-lane-bindings" aria-label={`${part.name} sequencer lanes`}>
+      <span className="part-lane-bindings-legend">SEQ LANES</span>
+      {patterns.length === 0 ? (
+        <p className="part-lane-bindings-empty">
+          No patterns in the library yet — create them from the SEQ strip.
+        </p>
+      ) : (
+        <div className="part-lane-bindings-grid">
+          {Array.from({ length: 8 }, (_, lane) => (
+            <label key={lane} className="part-lane-binding">
+              <span>{lane + 1}</span>
+              <select
+                value={bindingFor(lane)}
+                onChange={(event) => setLane(lane, event.target.value)}
+              >
+                <option value="">—</option>
+                {patterns.map((pattern) => (
+                  <option key={pattern.id} value={pattern.id}>
+                    {pattern.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function newSongPart(performance: PerformanceSnapshot, name: string): SongPart {
@@ -2467,6 +2525,13 @@ function SongEditor({
                     onClick={() => removePart(index)}
                   >×</button>
                 </div>
+                {part.id === selectedPart?.id ? (
+                  <PartLaneBindings
+                    part={part}
+                    patterns={performance.library.patterns ?? []}
+                    onChange={(patterns) => updatePart(index, (item) => ({ ...item, patterns }))}
+                  />
+                ) : null}
               </article>
             ))}
           </aside> : null}

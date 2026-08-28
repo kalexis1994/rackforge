@@ -405,6 +405,7 @@ fn bootstrap_library(bootstrap: PerformanceBootstrap) -> Result<PerformanceLibra
                 name: "Main".into(),
                 rack_id,
                 content: None,
+                patterns: Vec::new(),
             }],
         }],
         setlists: vec![SetlistDefinition {

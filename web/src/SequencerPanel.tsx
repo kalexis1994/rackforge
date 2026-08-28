@@ -21,8 +21,10 @@ import {
   subscribeSequencerStatus,
 } from "./gateway";
 import {
+  LANE_SLOTS,
   MAX_SEQUENCER_LANES,
   SCALES,
+  SLOT_LABELS,
   conditionLabel,
   cycleCondition,
   cycleProbability,
@@ -52,8 +54,14 @@ const OPEN_TABS_KEY = "rackforge.sequencer-tabs.v1";
 
 interface SequencerTab {
   lane: number;
-  draft: PatternDefinition;
+  /** One draft per variation slot: A, B, C, D. */
+  drafts: (PatternDefinition | null)[];
+  activeSlot: number;
   dirty: boolean;
+}
+
+function activeDraft(tab: SequencerTab): PatternDefinition | null {
+  return tab.drafts[tab.activeSlot] ?? null;
 }
 
 function useSequencerStatus(): SequencerStatus | null {
@@ -245,13 +253,26 @@ function restoreTabs(patterns: PatternDefinition[]): SequencerTab[] {
   try {
     const raw = JSON.parse(localStorage.getItem(OPEN_TABS_KEY) ?? "[]") as {
       lane: number;
-      pattern_id: string;
+      pattern_id?: string;
+      slot_ids?: (string | null)[];
+      active_slot?: number;
     }[];
     return raw
       .filter((entry) => Number.isInteger(entry.lane) && entry.lane >= 0 && entry.lane < 8)
       .flatMap((entry) => {
-        const pattern = patterns.find((candidate) => candidate.id === entry.pattern_id);
-        return pattern ? [{ lane: entry.lane, draft: pattern, dirty: false }] : [];
+        const ids = entry.slot_ids ?? [entry.pattern_id ?? null, null, null, null];
+        const drafts = Array.from({ length: LANE_SLOTS }, (_, slot) => {
+          const id = ids[slot];
+          return id ? patterns.find((candidate) => candidate.id === id) ?? null : null;
+        });
+        if (!drafts.some(Boolean)) return [];
+        const active = Math.min(entry.active_slot ?? 0, LANE_SLOTS - 1);
+        return [{
+          lane: entry.lane,
+          drafts,
+          activeSlot: drafts[active] ? active : drafts.findIndex(Boolean),
+          dirty: false,
+        }];
       });
   } catch {
     return [];
@@ -262,7 +283,13 @@ function persistTabs(tabs: SequencerTab[]) {
   try {
     localStorage.setItem(
       OPEN_TABS_KEY,
-      JSON.stringify(tabs.map((tab) => ({ lane: tab.lane, pattern_id: tab.draft.id }))),
+      JSON.stringify(
+        tabs.map((tab) => ({
+          lane: tab.lane,
+          slot_ids: tab.drafts.map((draft) => draft?.id ?? null),
+          active_slot: tab.activeSlot,
+        })),
+      ),
     );
   } catch {
     // A browser that blocks storage just loses tab restoration.
@@ -291,8 +318,14 @@ function SequencerDeck({
     setTabs((current) =>
       current.map((tab) => {
         if (tab.dirty) return tab;
-        const library = patterns.find((pattern) => pattern.id === tab.draft.id);
-        return library && library !== tab.draft ? { ...tab, draft: library } : tab;
+        const drafts = tab.drafts.map((draft) => {
+          if (!draft) return draft;
+          const library = patterns.find((pattern) => pattern.id === draft.id);
+          return library ?? draft;
+        });
+        return drafts.some((draft, slot) => draft !== tab.drafts[slot])
+          ? { ...tab, drafts }
+          : tab;
       }),
     );
   }, [patterns]);
@@ -309,7 +342,10 @@ function SequencerDeck({
     (name: string, view: "drum" | "melodic") => {
       if (freeLane === undefined) return;
       const draft = emptyPattern(name, 1, beatsPerBar, view);
-      setTabs((current) => [...current, { lane: freeLane, draft, dirty: true }]);
+      setTabs((current) => [
+        ...current,
+        { lane: freeLane, drafts: [draft, null, null, null], activeSlot: 0, dirty: true },
+      ]);
       setActiveLane(freeLane);
       setAdding(false);
     },
@@ -346,10 +382,12 @@ function SequencerDeck({
             >
               <span className="seq-tab-lane">{tab.lane + 1}</span>
               <span className="seq-tab-name">
-                {tab.draft.name}
+                {activeDraft(tab)?.name ?? "empty"}
                 {tab.dirty ? " *" : ""}
               </span>
-              <span className="seq-tab-kind">{tab.draft.view === "melodic" ? "MEL" : "DRM"}</span>
+              <span className="seq-tab-kind">
+                {activeDraft(tab)?.view === "melodic" ? "MEL" : "DRM"}
+              </span>
             </button>
           );
         })}
@@ -475,21 +513,65 @@ function SequencerTabEditor({
   onChange: (update: (tab: SequencerTab) => SequencerTab) => void;
   onClose: () => void;
 }) {
-  const { lane, draft, dirty } = tab;
+  const { lane, dirty } = tab;
+  const draft = activeDraft(tab);
   const laneState = status?.lanes[lane];
   const [followScale, setFollowScale] = useState<SequencerScale>("chromatic");
-  const inLibrary = patterns.some((pattern) => pattern.id === draft.id);
-  const bars = Math.max(1, Math.round(draft.length_ticks / (beatsPerBar * TICKS_PER_BEAT)));
+  const inLibrary = draft !== null && patterns.some((pattern) => pattern.id === draft.id);
+  const bars = draft
+    ? Math.max(1, Math.round(draft.length_ticks / (beatsPerBar * TICKS_PER_BEAT)))
+    : 1;
 
   const edit = useCallback(
     (next: PatternDefinition) => {
-      onChange((current) => ({ ...current, draft: next, dirty: true }));
+      onChange((current) => ({
+        ...current,
+        drafts: current.drafts.map((slotDraft, slot) =>
+          slot === current.activeSlot ? next : slotDraft,
+        ),
+        dirty: true,
+      }));
     },
     [onChange],
   );
 
+  /// The Session gesture: clicking a loaded slot launches it on the bar and
+  /// follows it with the editor; clicking an empty one starts a variation.
+  const pressSlot = useCallback(
+    (slot: number) => {
+      const stored = tab.drafts[slot];
+      if (stored) {
+        sendSequencerCommand({ kind: "load_slot", lane, slot, pattern: stored });
+        sendSequencerCommand({ kind: "launch_slot", lane, slot, quantize: "next_bar" });
+        if (!status?.running) {
+          sendSequencerCommand({ kind: "transport_start" });
+        }
+        onChange((current) => ({ ...current, activeSlot: slot }));
+      } else {
+        const base = activeDraft(tab);
+        const variation = base
+          ? {
+              ...base,
+              id: `${base.id}.${SLOT_LABELS[slot].toLowerCase()}${Date.now() % 1_000_000}`,
+              name: `${base.name.replace(/ [BCD]$/, "")} ${SLOT_LABELS[slot]}`,
+            }
+          : null;
+        onChange((current) => ({
+          ...current,
+          drafts: current.drafts.map((slotDraft, index) =>
+            index === slot ? variation : slotDraft,
+          ),
+          activeSlot: slot,
+          dirty: variation !== null,
+        }));
+      }
+    },
+    [tab, lane, status?.running, onChange],
+  );
+
   const setBars = useCallback(
     (value: number) => {
+      if (!draft) return;
       const length = value * beatsPerBar * TICKS_PER_BEAT;
       edit({
         ...draft,
@@ -501,7 +583,7 @@ function SequencerTabEditor({
   );
 
   const save = useCallback(() => {
-    if (busy) return;
+    if (busy || !draft) return;
     setBusy(true);
     dispatchPerformanceEdit(revision, { kind: "put_pattern", pattern: draft })
       .then(() => onChange((current) => ({ ...current, dirty: false })))
@@ -510,23 +592,68 @@ function SequencerTabEditor({
   }, [busy, setBusy, revision, draft, onChange]);
 
   const remove = useCallback(() => {
-    if (busy || !inLibrary) return;
+    if (busy || !inLibrary || !draft) return;
     setBusy(true);
     dispatchPerformanceEdit(revision, { kind: "delete_pattern", pattern_id: draft.id })
       .then(() => onClose())
       .catch(() => undefined)
       .finally(() => setBusy(false));
-  }, [busy, setBusy, inLibrary, revision, draft.id, onClose]);
+  }, [busy, setBusy, inLibrary, revision, draft, onClose]);
 
+  /// LAUNCH stores the draft into its slot and jumps to it — the editor's
+  /// audition and the Session grid are the same machinery.
   const launch = useCallback(() => {
-    sendSequencerCommand({ kind: "queue_pattern", lane, pattern: draft, quantize: "next_bar" });
+    if (!draft) return;
+    const slot = tab.activeSlot;
+    sendSequencerCommand({ kind: "load_slot", lane, slot, pattern: draft });
+    sendSequencerCommand({ kind: "launch_slot", lane, slot, quantize: "next_bar" });
     if (!status?.running) {
       sendSequencerCommand({ kind: "transport_start" });
     }
-  }, [lane, draft, status?.running]);
+  }, [lane, draft, tab.activeSlot, status?.running]);
+
+  const slotRow = (
+    <div className="seq-keys seq-slot-row" role="group" aria-label="Variation slots">
+      <span className="seq-inline-label">SLOT</span>
+      {SLOT_LABELS.map((label, slot) => {
+        const stored = tab.drafts[slot];
+        const engineActive = laneState?.active_slot ?? tab.activeSlot;
+        return (
+          <button
+            key={label}
+            className={[
+              "seq-key",
+              "seq-key-narrow",
+              "seq-slot-key",
+              slot === tab.activeSlot ? "engaged" : "",
+              stored ? "loaded" : "empty",
+              laneState?.playing && slot === engineActive ? "sounding" : "",
+            ].join(" ").replace(/\s+/g, " ").trim()}
+            aria-pressed={slot === tab.activeSlot}
+            title={stored ? `${stored.name} — click launches on the bar` : "Empty — click starts a variation"}
+            onClick={() => pressSlot(slot)}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  if (!draft) {
+    return (
+      <div className="seq-editor">
+        {slotRow}
+        <div className="seq-editor-empty">
+          <p>Empty slot. Click a loaded slot to edit it, or LOAD a pattern here.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="seq-editor">
+      {slotRow}
       <header className="seq-editor-header">
         <input
           className="seq-name-input"
@@ -575,7 +702,13 @@ function SequencerTabEditor({
           onChange={(event) => {
             const pattern = patterns.find((candidate) => candidate.id === event.target.value);
             if (pattern) {
-              onChange((current) => ({ ...current, draft: pattern, dirty: false }));
+              onChange((current) => ({
+                ...current,
+                drafts: current.drafts.map((slotDraft, slot) =>
+                  slot === current.activeSlot ? pattern : slotDraft,
+                ),
+                dirty: false,
+              }));
             }
           }}
         >

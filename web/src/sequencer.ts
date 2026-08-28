@@ -29,12 +29,15 @@ export type SequencerCommand =
       pattern: PatternDefinition;
       quantize: SequencerQuantize;
     }
+  | { kind: "launch_lane"; lane: number; quantize: SequencerQuantize }
   | { kind: "stop_lane"; lane: number; quantize: SequencerQuantize }
   | { kind: "set_lane_muted"; lane: number; muted: boolean };
 
 export interface SequencerLaneStatus {
   playing: boolean;
   queued: boolean;
+  /** A stop boundary is set: still sounding, going quiet at the bar. */
+  stopping?: boolean;
   muted: boolean;
   pattern_name?: string | null;
 }

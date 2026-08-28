@@ -35,7 +35,13 @@ function useSequencerStatus(): SequencerStatus | null {
   return status;
 }
 
-export function SequencerStrip({ performance }: { performance: PerformanceSnapshot }) {
+export function SequencerStrip({
+  performance,
+  surface,
+}: {
+  performance: PerformanceSnapshot;
+  surface: "perform" | "configure";
+}) {
   const status = useSequencerStatus();
   const [open, setOpen] = useState(false);
   const taps = useRef<number[]>([]);
@@ -118,8 +124,80 @@ export function SequencerStrip({ performance }: { performance: PerformanceSnapsh
           PATTERNS
         </button>
       </div>
+      {surface === "perform" ? <LanePadDeck status={status} /> : null}
       {open ? <SequencerWorkshop performance={performance} status={status} /> : null}
     </section>
+  );
+}
+
+/**
+ * The PERFORM pad deck: one pad per lane, playable without opening the
+ * workshop. The machine remembers what each lane holds, so a pad press is
+ * `launch_lane` — no document travels. Press again while sounding to stop
+ * at the bar; press a stopping pad to change your mind before it arrives.
+ */
+function LanePadDeck({ status }: { status: SequencerStatus | null }) {
+  const lanes = status?.lanes ?? [];
+  const press = useCallback(
+    (lane: number, state: { playing: boolean; queued: boolean; stopping: boolean }) => {
+      if (state.queued) {
+        // A pending launch cancelled before its bar arrives.
+        sendSequencerCommand({ kind: "stop_lane", lane, quantize: "now" });
+        return;
+      }
+      if (state.playing && !state.stopping) {
+        sendSequencerCommand({ kind: "stop_lane", lane, quantize: "next_bar" });
+        return;
+      }
+      sendSequencerCommand({ kind: "launch_lane", lane, quantize: "next_bar" });
+      if (!status?.running) {
+        sendSequencerCommand({ kind: "transport_start" });
+      }
+    },
+    [status?.running],
+  );
+  return (
+    <div className="seq-pads" role="group" aria-label="Lane pads">
+      {Array.from({ length: MAX_SEQUENCER_LANES }, (_, lane) => {
+        const state = lanes[lane];
+        const loaded = Boolean(state?.pattern_name);
+        const playing = state?.playing ?? false;
+        const queued = state?.queued ?? false;
+        const stopping = state?.stopping ?? false;
+        const face = playing
+          ? stopping
+            ? "stopping"
+            : "playing"
+          : queued
+          ? "queued"
+          : loaded
+          ? "loaded"
+          : "empty";
+        return (
+          <button
+            key={lane}
+            className={`seq-pad ${face}${state?.muted ? " muted" : ""}`}
+            disabled={!loaded}
+            aria-pressed={playing || queued}
+            onClick={() => press(lane, { playing, queued, stopping })}
+          >
+            <span className="seq-pad-lane">{lane + 1}</span>
+            <span className="seq-pad-name">{state?.pattern_name ?? "empty"}</span>
+            <span className="seq-pad-state">
+              {playing
+                ? stopping
+                  ? "STOPPING"
+                  : "PLAYING"
+                : queued
+                ? "QUEUED"
+                : loaded
+                ? "READY"
+                : " "}
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

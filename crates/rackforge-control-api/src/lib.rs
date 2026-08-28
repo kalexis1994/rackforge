@@ -160,6 +160,13 @@ pub enum SequencerCommand {
         pattern: PatternDefinition,
         quantize: SequencerQuantize,
     },
+    /// Relaunches the pattern the lane already holds. A lane remembers its
+    /// pattern across stops the way a groovebox track does, so a PERFORM
+    /// pad needs no document to press play again.
+    LaunchLane {
+        lane: u8,
+        quantize: SequencerQuantize,
+    },
     StopLane {
         lane: u8,
         quantize: SequencerQuantize,
@@ -175,6 +182,9 @@ pub enum SequencerCommand {
 pub struct SequencerLaneStatus {
     pub playing: bool,
     pub queued: bool,
+    /// A stop boundary is set: still sounding, going quiet at the bar.
+    #[serde(default)]
+    pub stopping: bool,
     pub muted: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_name: Option<String>,

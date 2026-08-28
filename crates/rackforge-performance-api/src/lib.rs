@@ -1097,6 +1097,30 @@ fn default_swing() -> u8 {
     PATTERN_SWING_STRAIGHT
 }
 
+/// What a pattern does when its run is over — the clip's will, executed by
+/// the lane at the exact cycle boundary, seamlessly. `Any` rolls the same
+/// seeded die as the trig grammar: deterministic across nights and hosts.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FollowAction {
+    /// Loop forever: no action.
+    #[default]
+    None,
+    NextSlot,
+    PreviousSlot,
+    FirstSlot,
+    AnySlot,
+    Stop,
+}
+
+fn follow_action_is_default(value: &FollowAction) -> bool {
+    *value == FollowAction::None
+}
+
+fn follow_after_is_default(value: &u8) -> bool {
+    *value == 0
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatternDefinition {
@@ -1113,6 +1137,11 @@ pub struct PatternDefinition {
     /// The key the phrase was written in — what key-follow transposes from.
     #[serde(default = "default_root_key")]
     pub root_key: u8,
+    /// Full cycles to play before `follow_action` fires. 0 disables it.
+    #[serde(default, skip_serializing_if = "follow_after_is_default")]
+    pub follow_after: u8,
+    #[serde(default, skip_serializing_if = "follow_action_is_default")]
+    pub follow_action: FollowAction,
 }
 
 fn default_root_key() -> u8 {
@@ -1131,6 +1160,9 @@ impl PatternDefinition {
         }
         if self.root_key > 127 {
             return Err(PerformanceError::InvalidPatternNote);
+        }
+        if self.follow_after > 64 {
+            return Err(PerformanceError::InvalidFollowAfter(self.follow_after));
         }
         for note in &self.notes {
             if note.tick >= self.length_ticks
@@ -1826,6 +1858,8 @@ pub enum PerformanceError {
     InvalidPatternSwing(u8),
     #[error("a trig cycle condition is outside hit 1..=of, of 2..=8")]
     InvalidTrigCondition,
+    #[error("follow-after {0} is outside 0..=64 cycles")]
+    InvalidFollowAfter(u8),
     #[error("{field} count {actual} is outside {minimum}..={maximum}")]
     InvalidCount {
         field: &'static str,
@@ -1969,6 +2003,8 @@ mod tests {
                 view: PatternView::default(),
                 swing_percent: PATTERN_SWING_STRAIGHT,
                 root_key: 48,
+                follow_after: 0,
+                follow_action: FollowAction::None,
             }],
         }
     }

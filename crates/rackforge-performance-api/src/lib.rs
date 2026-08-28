@@ -26,6 +26,8 @@ pub const PATTERN_TICKS_PER_BEAT: u32 = 960;
 /// Longest pattern, in ticks: 256 beats is 64 bars of four — beyond a live
 /// pattern and into a timeline, which a pattern is not.
 pub const MAX_PATTERN_TICKS: u32 = 256 * PATTERN_TICKS_PER_BEAT;
+/// Sequencer lanes a Part may bind — one per engine lane.
+pub const MAX_PART_PATTERN_BINDINGS: usize = 8;
 
 macro_rules! performance_id {
     ($name:ident) => {
@@ -828,6 +830,17 @@ impl RackDefinition {
     }
 }
 
+/// One Part-to-sequencer binding: when the Part goes on stage, this pattern
+/// is queued on this lane at the next bar. The lane number is the routing —
+/// lane N speaks wire channel N, so the Rack's own channel filters decide
+/// which Slot hears it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SongPartPatternBinding {
+    pub lane: u8,
+    pub pattern_id: PatternId,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SongPart {
@@ -842,11 +855,36 @@ pub struct SongPart {
     /// complete Part, preserving the original v1 Song contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<SongPartGraph>,
+    /// Sequencer patterns this Part carries on stage with it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<SongPartPatternBinding>,
 }
+
+const LANE_NAMES: [&str; MAX_PART_PATTERN_BINDINGS] =
+    ["lane 1", "lane 2", "lane 3", "lane 4", "lane 5", "lane 6", "lane 7", "lane 8"];
 
 impl SongPart {
     fn validate(&self) -> Result<(), PerformanceError> {
         validate_name(&self.name)?;
+        validate_count(
+            "part pattern bindings",
+            self.patterns.len(),
+            0,
+            MAX_PART_PATTERN_BINDINGS,
+        )?;
+        for binding in &self.patterns {
+            if usize::from(binding.lane) >= MAX_PART_PATTERN_BINDINGS {
+                return Err(PerformanceError::InvalidPatternLane(binding.lane));
+            }
+        }
+        unique(
+            self.patterns.iter().map(|binding| {
+                // Lanes are the uniqueness key: a Part queues one pattern per
+                // lane. The leak-proof str comes from a static table.
+                LANE_NAMES[usize::from(binding.lane) % MAX_PART_PATTERN_BINDINGS]
+            }),
+            "part pattern lane",
+        )?;
         if let Some(content) = &self.content {
             content.as_rack(self).validate()?;
         }
@@ -1121,6 +1159,15 @@ impl PerformanceLibrary {
         for song in &self.songs {
             song.validate()?;
             for part in &song.parts {
+                for binding in &part.patterns {
+                    if !self
+                        .patterns
+                        .iter()
+                        .any(|pattern| pattern.id == binding.pattern_id)
+                    {
+                        return Err(PerformanceError::MissingPattern(binding.pattern_id.clone()));
+                    }
+                }
                 if part.content.is_none() && !self.racks.iter().any(|rack| rack.id == part.rack_id)
                 {
                     return Err(PerformanceError::MissingRack(part.rack_id.clone()));
@@ -1290,6 +1337,33 @@ pub enum LiveLocation {
         entry_id: SetlistEntryId,
         part_id: SongPartId,
     },
+}
+
+impl PerformanceLibrary {
+    /// The Song Part a LIVE location puts on stage, when it names one.
+    /// Rack locations carry no Part and resolve to `None`.
+    pub fn resolve_part(&self, location: &LiveLocation) -> Option<&SongPart> {
+        let (song_id, part_id) = match location {
+            LiveLocation::Rack { .. } => return None,
+            LiveLocation::Song { song_id, part_id } => (song_id.clone(), part_id),
+            LiveLocation::Setlist {
+                setlist_id,
+                entry_id,
+                part_id,
+            } => {
+                let entry = self
+                    .setlist(setlist_id)?
+                    .entries
+                    .iter()
+                    .find(|entry| &entry.id == entry_id)?;
+                (entry.song_id.clone(), part_id)
+            }
+        };
+        self.song(&song_id)?
+            .parts
+            .iter()
+            .find(|part| &part.id == part_id)
+    }
 }
 
 impl LiveLocation {
@@ -1633,6 +1707,8 @@ pub enum PerformanceError {
     InvalidPatternNote,
     #[error("pattern {0} does not exist")]
     MissingPattern(PatternId),
+    #[error("pattern lane {0} is outside the lane deck")]
+    InvalidPatternLane(u8),
     #[error("{field} count {actual} is outside {minimum}..={maximum}")]
     InvalidCount {
         field: &'static str,
@@ -1746,6 +1822,7 @@ mod tests {
                     name: "Intro".into(),
                     rack_id,
                     content: None,
+                    patterns: Vec::new(),
                 }],
             }],
             setlists: vec![SetlistDefinition {
@@ -1771,6 +1848,47 @@ mod tests {
                 }],
             }],
         }
+    }
+
+    #[test]
+    fn part_pattern_bindings_are_validated_against_the_library() {
+        let mut library = library();
+        let pattern_id = library.patterns[0].id.clone();
+        library.songs[0].parts[0].patterns = vec![SongPartPatternBinding {
+            lane: 2,
+            pattern_id: pattern_id.clone(),
+        }];
+        library.validate().expect("a resolvable binding validates");
+        assert_eq!(
+            library.resolve_part(&LiveLocation::Song {
+                song_id: library.songs[0].id.clone(),
+                part_id: library.songs[0].parts[0].id.clone(),
+            })
+            .expect("the part resolves")
+            .patterns
+            .len(),
+            1
+        );
+
+        library.songs[0].parts[0].patterns[0].pattern_id =
+            PatternId::new("pattern.vanished").unwrap();
+        assert!(matches!(
+            library.validate(),
+            Err(PerformanceError::MissingPattern(_))
+        ));
+
+        library.songs[0].parts[0].patterns[0].pattern_id = pattern_id.clone();
+        library.songs[0].parts[0].patterns[0].lane = 8;
+        assert!(matches!(
+            library.validate(),
+            Err(PerformanceError::InvalidPatternLane(8))
+        ));
+
+        library.songs[0].parts[0].patterns = vec![
+            SongPartPatternBinding { lane: 1, pattern_id: pattern_id.clone() },
+            SongPartPatternBinding { lane: 1, pattern_id },
+        ];
+        assert!(library.validate().is_err(), "one pattern per lane per Part");
     }
 
     #[test]

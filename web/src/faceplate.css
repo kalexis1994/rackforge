@@ -3997,3 +3997,70 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* --------------------------------------------- part sequencer freight ---
+   The bindings a Song Part carries on stage: one selector per lane, folded
+   into the selected Part's card. Dash means the lane is left alone — a
+   hand-launched groove survives a Part change. */
+
+.part-lane-bindings {
+  margin-top: 8px;
+  padding: 8px 10px 10px;
+  border-top: var(--fp-seam);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.part-lane-bindings-legend {
+  color: var(--fp-rail-label);
+  font-family: var(--display-font);
+  font-weight: 800;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+
+.part-lane-bindings-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.part-lane-bindings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 8px;
+}
+
+.part-lane-binding {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.part-lane-binding > span {
+  flex: 0 0 12px;
+  color: var(--fp-rail-label);
+  font-family: var(--display-font);
+  font-weight: 800;
+  font-size: 9px;
+  text-align: right;
+}
+
+.part-lane-binding > select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 6px;
+  color: var(--ink);
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+  font: 600 11px/1.2 var(--display-font);
+}
+
+.part-lane-binding > select:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 1px;
+}

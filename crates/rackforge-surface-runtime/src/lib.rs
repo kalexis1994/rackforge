@@ -2493,6 +2493,7 @@ impl Menu {
                         name: "MAIN".into(),
                         rack_id: rack.id.clone(),
                         content: None,
+                        patterns: Vec::new(),
                     }],
                 }))
             }
@@ -3006,6 +3007,7 @@ impl Menu {
                     name: format!("PART {}", song.parts.len() + 1),
                     rack_id: rack.id.clone(),
                     content: None,
+                    patterns: Vec::new(),
                 });
                 self.performance_child_index = song.parts.len();
                 self.performance_dirty = true;
@@ -8121,6 +8123,7 @@ mod tests {
                 name: "Intro".into(),
                 rack_id: rack_id.clone(),
                 content: None,
+                patterns: Vec::new(),
             }],
         };
         let setlist = SetlistDefinition {
@@ -8144,6 +8147,7 @@ mod tests {
                 racks: vec![rack],
                 songs: vec![song],
                 setlists: vec![setlist],
+                patterns: Vec::new(),
             },
             live: LivePerformanceState {
                 mode: LiveBrowseMode::Rack,

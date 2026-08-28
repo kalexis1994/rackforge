@@ -42,7 +42,8 @@ use rackforge_control_api::{
     SequencerCommand, SequencerLaneStatus, SequencerQuantize, SequencerStatusV1,
 };
 use rackforge_performance_api::{
-    MAX_PATTERN_NOTES, MAX_PATTERN_TICKS, PATTERN_TICKS_PER_BEAT, PatternDefinition,
+    MAX_PART_PATTERN_BINDINGS, MAX_PATTERN_NOTES, MAX_PATTERN_TICKS, PATTERN_TICKS_PER_BEAT,
+    PatternDefinition, SongPart,
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use std::sync::Arc;
@@ -453,8 +454,36 @@ fn push_event(out: &mut Vec<MidiEventV1>, frame: u32, data: [u8; 3]) {
 
 /// Lanes one engine drives. Eight is a hardware-groovebox count: enough for
 /// a full live arrangement, small enough that every lane earns a physical
-/// control on the surface.
-pub const MAX_SEQUENCER_LANES: usize = 8;
+/// control on the surface. The library's Part bindings count the same deck.
+pub const MAX_SEQUENCER_LANES: usize = MAX_PART_PATTERN_BINDINGS;
+
+/// The sequencer side of putting a Song Part on stage: the commands that
+/// queue each bound pattern on its lane, all at the next bar, so the whole
+/// groove of the incoming Part lands together on one boundary.
+///
+/// This is a pure translation — every host calls it at its own activation
+/// site and feeds its own engine. A binding whose pattern has since left the
+/// library is skipped rather than failing the activation: the show goes on
+/// with the lanes that resolve. Lanes the Part does not bind are left alone;
+/// what a musician launched by hand stays theirs across a Part change.
+pub fn part_launch_commands(
+    part: &SongPart,
+    patterns: &[PatternDefinition],
+) -> Vec<SequencerCommand> {
+    part.patterns
+        .iter()
+        .filter_map(|binding| {
+            let pattern = patterns
+                .iter()
+                .find(|pattern| pattern.id == binding.pattern_id)?;
+            Some(SequencerCommand::QueuePattern {
+                lane: binding.lane,
+                pattern: pattern.clone(),
+                quantize: SequencerQuantize::NextBar,
+            })
+        })
+        .collect()
+}
 
 /// The whole sequencer as one host-side object: the transport, the lanes,
 /// and the translation from wire commands to sample positions.
@@ -945,6 +974,54 @@ mod tests {
         engine.render_block(4_096, &mut out);
         assert!(!engine.status().lanes[0].playing);
         assert_eq!(engine.status().lanes[0].pattern_name, None);
+    }
+
+    #[test]
+    fn a_part_activation_queues_what_it_binds_and_skips_what_left() {
+        use rackforge_performance_api::{
+            PatternId, RackId, SongPartId, SongPartPatternBinding,
+        };
+        let library_patterns = vec![definition()];
+        let part = SongPart {
+            id: SongPartId::new("part.chorus").expect("valid id"),
+            name: "Chorus".into(),
+            rack_id: RackId::new("rack.main").expect("valid id"),
+            content: None,
+            patterns: vec![
+                SongPartPatternBinding {
+                    lane: 2,
+                    pattern_id: library_patterns[0].id.clone(),
+                },
+                SongPartPatternBinding {
+                    lane: 5,
+                    pattern_id: PatternId::new("pattern.deleted").expect("valid id"),
+                },
+            ],
+        };
+        let commands = part_launch_commands(&part, &library_patterns);
+        // The resolvable binding queues on its lane at the bar; the stale
+        // one is skipped — the show goes on.
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            SequencerCommand::QueuePattern {
+                lane,
+                pattern,
+                quantize,
+            } => {
+                assert_eq!(*lane, 2);
+                assert_eq!(pattern.name, "four");
+                assert_eq!(*quantize, SequencerQuantize::NextBar);
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+
+        // And the commands drive the engine as-is: lane 2 ends up armed.
+        let mut engine = SequencerEngine::new(48_000.0).expect("engine");
+        for command in &commands {
+            engine.apply(command).expect("part command accepted");
+        }
+        assert!(engine.status().lanes[2].queued);
+        assert_eq!(engine.status().lanes[2].pattern_name.as_deref(), Some("four"));
     }
 
     #[test]

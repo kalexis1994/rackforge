@@ -331,6 +331,14 @@ export interface SongPart {
   name: string;
   rack_id: string;
   content?: SongPartGraph;
+  /** Sequencer patterns this Part carries on stage: lane N speaks MIDI
+   * channel N+1, so the Rack's channel filters route them to Slots. */
+  patterns?: SongPartPatternBinding[];
+}
+
+export interface SongPartPatternBinding {
+  lane: number;
+  pattern_id: string;
 }
 
 export interface SongPartGraph {

@@ -4837,3 +4837,12 @@
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* Dialog intro copy reads in full ink strength: instructions are content,
+   not decoration. */
+.install-plugin-intro {
+  color: var(--ink) !important;
+  opacity: 0.82;
+  font-size: 12px !important;
+  line-height: 1.55;
+}

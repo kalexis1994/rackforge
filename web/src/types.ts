@@ -257,9 +257,15 @@ export interface RfLiveFile {
   exported_by: string;
   exported_unix_ms: number;
   name: string;
-  library: unknown;
+  library: PerformanceLibrary;
   states: unknown[];
   requirements: RfLiveRequirement[];
+  /** The transport as it stood at export: the show's tempo and meter. */
+  tempo_bpm?: number;
+  beats_per_bar?: number;
+  beat_unit?: number;
+  /** Where the artist stood; the importing surface reactivates it. */
+  live?: LivePerformanceState;
 }
 
 export interface RfLiveImportPreview {
@@ -269,6 +275,7 @@ export interface RfLiveImportPreview {
   setlists: number;
   patterns: number;
   states: number;
+  tabs?: number;
   missing_plugins: RfLiveRequirement[];
   warnings: string[];
 }
@@ -442,12 +449,22 @@ export interface PatternDefinition {
   follow_action?: "none" | "next_slot" | "previous_slot" | "first_slot" | "any_slot" | "stop";
 }
 
+/** One sequencer of the tabbed deck, keyed by engine lane. Library-owned
+ * so every host shows the same deck and a show file carries it. */
+export interface SequencerTabDefinition {
+  lane: number;
+  view?: "drum" | "melodic";
+  slot_ids?: (string | null)[];
+  active_slot?: number;
+}
+
 export interface PerformanceLibrary {
   schema_version: number;
   racks: RackDefinition[];
   songs: SongDefinition[];
   setlists: SetlistDefinition[];
   patterns?: PatternDefinition[];
+  sequencer_tabs?: SequencerTabDefinition[];
 }
 
 export interface PerformanceSnapshot {
@@ -465,7 +482,9 @@ export type PerformanceEdit =
   | { kind: "put_setlist"; setlist: SetlistDefinition }
   | { kind: "delete_setlist"; setlist_id: string }
   | { kind: "put_pattern"; pattern: PatternDefinition }
-  | { kind: "delete_pattern"; pattern_id: string };
+  | { kind: "delete_pattern"; pattern_id: string }
+  | { kind: "put_sequencer_tab"; tab: SequencerTabDefinition }
+  | { kind: "delete_sequencer_tab"; lane: number };
 
 export interface AuditionState {
   lease_id: number;

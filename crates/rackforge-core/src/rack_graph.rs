@@ -401,6 +401,7 @@ mod tests {
             songs: Vec::new(),
             setlists: Vec::new(),
             patterns: Vec::new(),
+            sequencer_tabs: Vec::new(),
         }
     }
 

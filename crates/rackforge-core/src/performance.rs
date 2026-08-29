@@ -274,6 +274,7 @@ impl PerformanceRepository {
         self.library.songs = load_documents(&root.join("songs"))?;
         self.library.setlists = load_documents(&root.join("setlists"))?;
         self.library.patterns = load_documents(&root.join("patterns"))?;
+        self.library.sequencer_tabs = load_documents(&root.join("sequencer-tabs"))?;
         Ok(())
     }
 
@@ -354,6 +355,14 @@ impl PerformanceRepository {
             PerformanceEdit::DeletePattern { pattern_id } => {
                 delete_document(&root.join("patterns"), pattern_id.as_str())
             }
+            PerformanceEdit::PutSequencerTab { tab } => write_document(
+                &root.join("sequencer-tabs"),
+                &format!("lane-{:02}", tab.lane),
+                tab,
+            ),
+            PerformanceEdit::DeleteSequencerTab { lane } => {
+                delete_document(&root.join("sequencer-tabs"), &format!("lane-{lane:02}"))
+            }
         }
     }
 }
@@ -419,6 +428,7 @@ fn bootstrap_library(bootstrap: PerformanceBootstrap) -> Result<PerformanceLibra
             }],
         }],
         patterns: Vec::new(),
+        sequencer_tabs: Vec::new(),
     };
     library.validate()?;
     Ok(library)

@@ -5,7 +5,8 @@ pub use rackforge_midi_api::{
     ParameterLinkMessage, ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform,
 };
 pub use rackforge_performance_api::{
-    LibraryRevision, PatternDefinition, PerformanceEdit, PerformanceLibrary, PerformanceSnapshot,
+    LibraryRevision, LivePerformanceState, PatternDefinition, PerformanceEdit, PerformanceLibrary,
+    PerformanceSnapshot,
 };
 pub use rackforge_plugin_api::{
     HostPreset, HostPresetSummary, ParameterSchema, PluginStateReference,
@@ -76,6 +77,17 @@ pub struct RfLiveFile {
     /// What the show needs installed to sound.
     #[serde(default)]
     pub requirements: Vec<RfLiveRequirement>,
+    /// The transport as it stood at export: the show's tempo and meter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tempo_bpm: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beats_per_bar: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beat_unit: Option<u8>,
+    /// Where the artist stood: browse mode and active Rack/Song/Setlist.
+    /// The importing surface reactivates it so the show opens sounding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live: Option<LivePerformanceState>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -104,6 +116,8 @@ pub struct RfLiveImportPreview {
     pub setlists: u32,
     pub patterns: u32,
     pub states: u32,
+    #[serde(default)]
+    pub tabs: u32,
     pub missing_plugins: Vec<RfLiveRequirement>,
     pub warnings: Vec<String>,
 }

@@ -9,6 +9,7 @@ import {
 } from "react";
 import { ChevronLeft, ChevronRight, LogOut, Save } from "lucide-react";
 import { SequencerStrip } from "./SequencerPanel";
+import { sendSequencerCommand } from "./gateway";
 import {
   dispatchCommand,
   dispatchCommandAwait,
@@ -858,16 +859,47 @@ function ShowTransfer({ performance }: { performance: PerformanceSnapshot }) {
     }
     importInputRef.current?.click();
   };
+  // The snapshot half of the import: the library edits made the show
+  // exist; these gestures make it sound — tempo, meter, the deck's slots
+  // loaded into the engine, and the artist's place on stage reactivated.
+  const restoreShowMoment = (file: RfLiveFile) => {
+    if (typeof file.tempo_bpm === "number") {
+      sendSequencerCommand({ kind: "set_tempo", bpm: file.tempo_bpm });
+    }
+    if (file.beats_per_bar && file.beat_unit) {
+      sendSequencerCommand({
+        kind: "set_signature",
+        beats_per_bar: file.beats_per_bar,
+        beat_unit: file.beat_unit,
+      });
+    }
+    const patterns = file.library.patterns ?? [];
+    for (const tab of file.library.sequencer_tabs ?? []) {
+      (tab.slot_ids ?? []).forEach((id, slot) => {
+        if (!id) return;
+        const pattern = patterns.find((candidate) => candidate.id === id);
+        if (pattern) {
+          sendSequencerCommand({ kind: "load_slot", lane: tab.lane, slot, pattern });
+        }
+      });
+    }
+    if (file.live?.active) {
+      dispatchCommand({ type: "activate_live_target", location: file.live.active });
+    }
+  };
   const commitImport = () => {
     if (!candidate) return;
     setBusy("import");
     setMessage(null);
-    importLiveShow(candidate.file)
+    const { file } = candidate;
+    importLiveShow(file)
       .then((preview) => {
         setCandidate(null);
+        restoreShowMoment(file);
         setMessage(
           `Imported ${preview.name}: ${preview.racks} Racks, ${preview.songs} Songs, ` +
-            `${preview.setlists} Setlists, ${preview.patterns} Patterns.`,
+            `${preview.setlists} Setlists, ${preview.patterns} Patterns, ` +
+            `${preview.tabs ?? 0} Sequencers — deck loaded, stage restored.`,
         );
       })
       .catch((error: Error) => setMessage(error.message))
@@ -946,6 +978,7 @@ function ShowTransfer({ performance }: { performance: PerformanceSnapshot }) {
             <div><dt>Setlists</dt><dd>{candidate.preview.setlists}</dd></div>
             <div><dt>Patterns</dt><dd>{candidate.preview.patterns}</dd></div>
             <div><dt>States</dt><dd>{candidate.preview.states}</dd></div>
+            <div><dt>Sequencers</dt><dd>{candidate.preview.tabs ?? 0}</dd></div>
           </dl>
           {candidate.preview.missing_plugins.length > 0 ? (
             <div className="show-import-warnings" role="alert">

@@ -1889,11 +1889,32 @@ fn export_live_show(context: &ControlContext, name: &str) -> ControlResponse {
     let exported = crate::live_show::now_unix_ms().and_then(|now| {
         crate::live_show::assemble_live_show(name, repository.library(), &store, now)
     });
+    drop(store);
+    drop(repository);
     match exported {
-        Ok(file) => ControlResponse::LiveShowExported {
-            file_name: crate::live_show::live_show_file_name(name),
-            file: Box::new(file),
-        },
+        Ok(mut file) => {
+            let (reply_sender, reply_receiver) = sync_channel(1);
+            if send_audio(
+                context,
+                AudioControlCommand::SequencerStatus {
+                    reply: reply_sender,
+                },
+            )
+            .is_ok()
+                && let Ok(status) = receive_audio(reply_receiver, "read sequencer status")
+            {
+                file.tempo_bpm = Some(status.tempo_bpm);
+                file.beats_per_bar = Some(status.beats_per_bar);
+                file.beat_unit = Some(status.beat_unit);
+            }
+            if let Ok(session) = context.store.lock() {
+                file.live = Some(session.state().live.clone());
+            }
+            ControlResponse::LiveShowExported {
+                file_name: crate::live_show::live_show_file_name(name),
+                file: Box::new(file),
+            }
+        }
         Err(error) => error_response(
             ControlErrorCode::Rejected,
             format!("exporting the show: {error:#}"),
@@ -4981,6 +5002,7 @@ mod tests {
                         songs: Vec::new(),
                         setlists: Vec::new(),
                         patterns: Vec::new(),
+                        sequencer_tabs: Vec::new(),
                     })
                     .unwrap(),
                 )),

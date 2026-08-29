@@ -1121,6 +1121,40 @@ fn follow_after_is_default(value: &u8) -> bool {
     *value == 0
 }
 
+pub const MAX_SEQUENCER_TAB_LANES: usize = 8;
+pub const SEQUENCER_TAB_SLOTS: usize = 4;
+
+/// One sequencer of the tabbed deck, keyed by its engine lane: which
+/// patterns sit in its A-D variation slots and which slot fronts the
+/// editor. Library-owned so every host shows the same deck and a show
+/// file carries it. Slot references are soft — a deleted pattern leaves
+/// an empty slot, never a broken deck.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SequencerTabDefinition {
+    pub lane: u8,
+    #[serde(default)]
+    pub view: PatternView,
+    #[serde(default)]
+    pub slot_ids: Vec<Option<PatternId>>,
+    #[serde(default)]
+    pub active_slot: u8,
+}
+
+impl SequencerTabDefinition {
+    fn validate(&self) -> Result<(), PerformanceError> {
+        if usize::from(self.lane) >= MAX_SEQUENCER_TAB_LANES {
+            return Err(PerformanceError::InvalidSequencerTab(self.lane));
+        }
+        if self.slot_ids.len() > SEQUENCER_TAB_SLOTS
+            || usize::from(self.active_slot) >= SEQUENCER_TAB_SLOTS
+        {
+            return Err(PerformanceError::InvalidSequencerTab(self.lane));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatternDefinition {
@@ -1196,6 +1230,9 @@ pub struct PerformanceLibrary {
     pub setlists: Vec<SetlistDefinition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub patterns: Vec<PatternDefinition>,
+    /// The tabbed sequencer deck, one entry per engine lane in use.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sequencer_tabs: Vec<SequencerTabDefinition>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1209,6 +1246,8 @@ pub enum PerformanceEdit {
     DeleteSetlist { setlist_id: SetlistId },
     PutPattern { pattern: PatternDefinition },
     DeletePattern { pattern_id: PatternId },
+    PutSequencerTab { tab: SequencerTabDefinition },
+    DeleteSequencerTab { lane: u8 },
 }
 
 impl PerformanceEdit {
@@ -1238,6 +1277,13 @@ impl PerformanceEdit {
                 remove(&mut library.patterns, pattern_id, |item| &item.id)
                     .ok_or_else(|| PerformanceError::MissingPattern(pattern_id.clone()))?;
             }
+            Self::PutSequencerTab { tab } => {
+                upsert(&mut library.sequencer_tabs, tab.clone(), |item| &item.lane)
+            }
+            Self::DeleteSequencerTab { lane } => {
+                remove(&mut library.sequencer_tabs, lane, |item| &item.lane)
+                    .ok_or(PerformanceError::MissingSequencerTab(*lane))?;
+            }
         }
         library.validate()
     }
@@ -1266,6 +1312,7 @@ impl PerformanceLibrary {
             songs: Vec::new(),
             setlists: Vec::new(),
             patterns: Vec::new(),
+            sequencer_tabs: Vec::new(),
         }
     }
 
@@ -1287,6 +1334,21 @@ impl PerformanceLibrary {
         )?;
         for pattern in &self.patterns {
             pattern.validate()?;
+        }
+        validate_count(
+            "sequencer tabs",
+            self.sequencer_tabs.len(),
+            0,
+            MAX_SEQUENCER_TAB_LANES,
+        )?;
+        {
+            let mut lanes = std::collections::BTreeSet::new();
+            for tab in &self.sequencer_tabs {
+                tab.validate()?;
+                if !lanes.insert(tab.lane) {
+                    return Err(PerformanceError::InvalidSequencerTab(tab.lane));
+                }
+            }
         }
         for rack in &self.racks {
             rack.validate()?;
@@ -1908,6 +1970,10 @@ pub enum PerformanceError {
     InvalidKeyboardSplit,
     #[error("Rack Slot level or pan is outside its supported range")]
     InvalidSlotMix,
+    #[error("sequencer tab for lane {0} does not exist")]
+    MissingSequencerTab(u8),
+    #[error("sequencer tab for lane {0} is invalid")]
+    InvalidSequencerTab(u8),
     #[error("Rack Slot plugin state reference is invalid")]
     InvalidPluginState,
     #[error("Rack Slot state belongs to a different plugin")]
@@ -2006,6 +2072,7 @@ mod tests {
                 follow_after: 0,
                 follow_action: FollowAction::None,
             }],
+            sequencer_tabs: Vec::new(),
         }
     }
 

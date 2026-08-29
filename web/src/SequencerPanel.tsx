@@ -75,6 +75,38 @@ function activeDraft(tab: SequencerTab): PatternDefinition | null {
   return tab.drafts[tab.activeSlot] ?? null;
 }
 
+/// What the library remembers about a tab: everything but the unsaved
+/// draft edits, which stay in this browser until SAVE.
+function tabDocument(tab: SequencerTab): import("./types").SequencerTabDefinition {
+  return {
+    lane: tab.lane,
+    view: activeDraft(tab)?.view === "melodic" ? "melodic" : "drum",
+    slot_ids: tab.drafts.map((draft) => draft?.id ?? null),
+    active_slot: tab.activeSlot,
+  };
+}
+
+/// A tab as the library describes it, drafts hydrated from the patterns.
+function hydrateTab(
+  document: import("./types").SequencerTabDefinition,
+  patterns: PatternDefinition[],
+  activeSlot?: number,
+): SequencerTab {
+  const ids = document.slot_ids ?? [];
+  const drafts = Array.from({ length: LANE_SLOTS }, (_, slot) => {
+    const id = ids[slot];
+    return id ? patterns.find((candidate) => candidate.id === id) ?? null : null;
+  });
+  const preferred = activeSlot ?? document.active_slot ?? 0;
+  const bounded = Math.min(Math.max(preferred, 0), LANE_SLOTS - 1);
+  return {
+    lane: document.lane,
+    drafts,
+    activeSlot: drafts[bounded] ? bounded : Math.max(drafts.findIndex(Boolean), 0),
+    dirty: false,
+  };
+}
+
 function useSequencerStatus(): SequencerStatus | null {
   const [status, setStatus] = useState<SequencerStatus | null>(null);
   useEffect(() => subscribeSequencerStatus(setStatus), []);
@@ -308,23 +340,6 @@ function restoreTabs(patterns: PatternDefinition[]): SequencerTab[] {
   }
 }
 
-function persistTabs(tabs: SequencerTab[]) {
-  try {
-    localStorage.setItem(
-      OPEN_TABS_KEY,
-      JSON.stringify(
-        tabs.map((tab) => ({
-          lane: tab.lane,
-          slot_ids: tab.drafts.map((draft) => draft?.id ?? null),
-          active_slot: tab.activeSlot,
-        })),
-      ),
-    );
-  } catch {
-    // A browser that blocks storage just loses tab restoration.
-  }
-}
-
 /** The tabbed deck: one tab per sequencer, one sequencer per engine lane. */
 function SequencerDeck({
   performance,
@@ -336,34 +351,105 @@ function SequencerDeck({
   activeInstanceId: string | null;
 }) {
   const patterns = performance.library.patterns ?? [];
+  const libraryTabs = performance.library.sequencer_tabs ?? [];
   const beatsPerBar = status?.beats_per_bar ?? 4;
-  const [tabs, setTabs] = useState<SequencerTab[]>(() => restoreTabs(patterns));
-  const [activeLane, setActiveLane] = useState<number | null>(tabs[0]?.lane ?? null);
+  // The library owns the deck: which tabs exist and what sits in their
+  // slots. This browser only overlays unsaved drafts and UI focus.
+  const [overlays, setOverlays] = useState<Record<number, SequencerTab>>({});
+  const [activeLane, setActiveLane] = useState<number | null>(
+    libraryTabs[0]?.lane ?? null,
+  );
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => persistTabs(tabs), [tabs]);
-
-  // A clean tab follows its library pattern when someone else edits it.
+  // One-time adoption of the pre-library localStorage deck.
+  const migrated = useRef(false);
   useEffect(() => {
-    setTabs((current) =>
-      current.map((tab) => {
-        if (tab.dirty) return tab;
-        const drafts = tab.drafts.map((draft) => {
-          if (!draft) return draft;
-          const library = patterns.find((pattern) => pattern.id === draft.id);
-          return library ?? draft;
-        });
-        return drafts.some((draft, slot) => draft !== tab.drafts[slot])
-          ? { ...tab, drafts }
-          : tab;
-      }),
-    );
-  }, [patterns]);
-
-  const updateTab = useCallback((lane: number, update: (tab: SequencerTab) => SequencerTab) => {
-    setTabs((current) => current.map((tab) => (tab.lane === lane ? update(tab) : tab)));
+    if (migrated.current) return;
+    migrated.current = true;
+    if (libraryTabs.length > 0) {
+      try {
+        localStorage.removeItem(OPEN_TABS_KEY);
+      } catch {
+        // Blocked storage has nothing to migrate.
+      }
+      return;
+    }
+    const legacy = restoreTabs(patterns);
+    if (legacy.length === 0) return;
+    void (async () => {
+      let revision = performance.revision;
+      for (const tab of legacy) {
+        try {
+          const snapshot = await dispatchPerformanceEdit(revision, {
+            kind: "put_sequencer_tab",
+            tab: tabDocument(tab),
+          });
+          revision = snapshot.revision;
+        } catch {
+          return;
+        }
+      }
+      try {
+        localStorage.removeItem(OPEN_TABS_KEY);
+      } catch {
+        // Best effort; a re-run upserts the same documents.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A clean overlay follows the library when someone else edits it.
+  useEffect(() => {
+    setOverlays((current) => {
+      let changed = false;
+      const next: Record<number, SequencerTab> = { ...current };
+      for (const document of libraryTabs) {
+        const overlay = next[document.lane];
+        if (overlay && !overlay.dirty) {
+          next[document.lane] = hydrateTab(document, patterns, overlay.activeSlot);
+          changed = true;
+        }
+      }
+      for (const key of Object.keys(next)) {
+        const lane = Number(key);
+        const overlay = next[lane];
+        if (!overlay.dirty && !libraryTabs.some((document) => document.lane === lane)) {
+          delete next[lane];
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [libraryTabs, patterns]);
+
+  const tabs: SequencerTab[] = [
+    ...libraryTabs.map(
+      (document) => overlays[document.lane] ?? hydrateTab(document, patterns),
+    ),
+    // Tabs created locally whose library document has not landed yet.
+    ...Object.values(overlays).filter(
+      (overlay) => !libraryTabs.some((document) => document.lane === overlay.lane),
+    ),
+  ].sort((a, b) => a.lane - b.lane);
+
+  const updateTab = useCallback(
+    (lane: number, update: (tab: SequencerTab) => SequencerTab) => {
+      setOverlays((current) => {
+        const base =
+          current[lane] ??
+          (() => {
+            const document = (performance.library.sequencer_tabs ?? []).find(
+              (candidate) => candidate.lane === lane,
+            );
+            return document ? hydrateTab(document, performance.library.patterns ?? []) : null;
+          })();
+        if (!base) return current;
+        return { ...current, [lane]: update(base) };
+      });
+    },
+    [performance.library],
+  );
 
   const freeLane = Array.from({ length: MAX_SEQUENCER_LANES }, (_, lane) => lane).find(
     (lane) => !tabs.some((tab) => tab.lane === lane),
@@ -373,26 +459,44 @@ function SequencerDeck({
     (name: string, view: "drum" | "melodic") => {
       if (freeLane === undefined) return;
       const draft = emptyPattern(name, 1, beatsPerBar, view);
-      setTabs((current) => [
-        ...current,
-        { lane: freeLane, drafts: [draft, null, null, null], activeSlot: 0, dirty: true },
-      ]);
+      const tab: SequencerTab = {
+        lane: freeLane,
+        drafts: [draft, null, null, null],
+        activeSlot: 0,
+        dirty: true,
+      };
+      setOverlays((current) => ({ ...current, [freeLane]: tab }));
       setActiveLane(freeLane);
       setAdding(false);
+      dispatchPerformanceEdit(performance.revision, {
+        kind: "put_sequencer_tab",
+        tab: tabDocument(tab),
+      }).catch(() => undefined);
     },
-    [freeLane, beatsPerBar],
+    [freeLane, beatsPerBar, performance.revision],
   );
 
   const closeTab = useCallback(
-    (lane: number) => {
+    (lane: number, revisionOverride?: string) => {
       sendSequencerCommand({ kind: "stop_lane", lane, quantize: "now" });
-      setTabs((current) => {
-        const next = current.filter((tab) => tab.lane !== lane);
-        setActiveLane((active) => (active === lane ? next[0]?.lane ?? null : active));
+      setOverlays((current) => {
+        const next = { ...current };
+        delete next[lane];
         return next;
       });
+      if (libraryTabs.some((document) => document.lane === lane)) {
+        // A caller that just edited the library hands over the fresh
+        // revision; the prop lags one snapshot behind in that window.
+        dispatchPerformanceEdit(revisionOverride ?? performance.revision, {
+          kind: "delete_sequencer_tab",
+          lane,
+        }).catch(() => undefined);
+      }
+      setActiveLane((active) =>
+        active === lane ? tabs.find((tab) => tab.lane !== lane)?.lane ?? null : active,
+      );
     },
-    [],
+    [libraryTabs, performance.revision, tabs],
   );
 
   const active = tabs.find((tab) => tab.lane === activeLane) ?? tabs[0] ?? null;
@@ -454,7 +558,7 @@ function SequencerDeck({
           setBusy={setBusy}
           activeInstanceId={activeInstanceId}
           onChange={(update) => updateTab(active.lane, update)}
-          onClose={() => closeTab(active.lane)}
+          onClose={(revision) => closeTab(active.lane, revision)}
         />
       )}
     </div>
@@ -545,7 +649,7 @@ function SequencerTabEditor({
   busy: boolean;
   setBusy: (value: boolean) => void;
   onChange: (update: (tab: SequencerTab) => SequencerTab) => void;
-  onClose: () => void;
+  onClose: (revisionOverride?: string) => void;
 }) {
   const { lane, dirty } = tab;
   const draft = activeDraft(tab);
@@ -620,16 +724,24 @@ function SequencerTabEditor({
     if (busy || !draft) return;
     setBusy(true);
     dispatchPerformanceEdit(revision, { kind: "put_pattern", pattern: draft })
+      .then((snapshot) =>
+        // The deck document rides along: the saved pattern's slot seat is
+        // part of the show, not of this browser.
+        dispatchPerformanceEdit(snapshot.revision, {
+          kind: "put_sequencer_tab",
+          tab: tabDocument(tab),
+        }),
+      )
       .then(() => onChange((current) => ({ ...current, dirty: false })))
       .catch(() => undefined)
       .finally(() => setBusy(false));
-  }, [busy, setBusy, revision, draft, onChange]);
+  }, [busy, setBusy, revision, draft, onChange, tab]);
 
   const remove = useCallback(() => {
     if (busy || !inLibrary || !draft) return;
     setBusy(true);
     dispatchPerformanceEdit(revision, { kind: "delete_pattern", pattern_id: draft.id })
-      .then(() => onClose())
+      .then((snapshot) => onClose(snapshot.revision))
       .catch(() => undefined)
       .finally(() => setBusy(false));
   }, [busy, setBusy, inLibrary, revision, draft, onClose]);
@@ -713,6 +825,46 @@ function SequencerTabEditor({
         {slotRow}
         <div className="seq-editor-empty">
           <p>Empty slot. Click a loaded slot to edit it, or LOAD a pattern here.</p>
+        </div>
+        <div className="seq-keys">
+          <select
+            className="seq-load-select"
+            value=""
+            aria-label="Load a pattern from the library"
+            onChange={(event) => {
+              const pattern = patterns.find(
+                (candidate) => candidate.id === event.target.value,
+              );
+              if (pattern) {
+                const next = {
+                  ...tab,
+                  drafts: tab.drafts.map((slotDraft, slot) =>
+                    slot === tab.activeSlot ? pattern : slotDraft,
+                  ),
+                  dirty: false,
+                };
+                onChange(() => next);
+                dispatchPerformanceEdit(revision, {
+                  kind: "put_sequencer_tab",
+                  tab: tabDocument(next),
+                }).catch(() => undefined);
+              }
+            }}
+          >
+            <option value="">LOAD…</option>
+            {patterns.map((pattern) => (
+              <option key={pattern.id} value={pattern.id}>
+                {pattern.name}
+              </option>
+            ))}
+          </select>
+          <button
+            className="seq-key"
+            onClick={() => onClose()}
+            title="Close this sequencer's tab"
+          >
+            CLOSE
+          </button>
         </div>
       </div>
     );
@@ -807,13 +959,19 @@ function SequencerTabEditor({
           onChange={(event) => {
             const pattern = patterns.find((candidate) => candidate.id === event.target.value);
             if (pattern) {
-              onChange((current) => ({
-                ...current,
-                drafts: current.drafts.map((slotDraft, slot) =>
-                  slot === current.activeSlot ? pattern : slotDraft,
+              const next = {
+                ...tab,
+                drafts: tab.drafts.map((slotDraft, slot) =>
+                  slot === tab.activeSlot ? pattern : slotDraft,
                 ),
                 dirty: false,
-              }));
+              };
+              onChange(() => next);
+              // Loading a library pattern reseats the deck document too.
+              dispatchPerformanceEdit(revision, {
+                kind: "put_sequencer_tab",
+                tab: tabDocument(next),
+              }).catch(() => undefined);
             }
           }}
         >
@@ -831,7 +989,7 @@ function SequencerTabEditor({
           <button className="seq-key" onClick={remove} disabled={busy || !inLibrary}>
             DELETE
           </button>
-          <button className="seq-key" onClick={onClose} title="Close this sequencer's tab">
+          <button className="seq-key" onClick={() => onClose()} title="Close this sequencer's tab">
             CLOSE
           </button>
         </div>

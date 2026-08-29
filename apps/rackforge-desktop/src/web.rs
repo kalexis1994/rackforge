@@ -56,6 +56,11 @@ fn plugin_install_cancellations() -> &'static Mutex<BTreeMap<String, Arc<AtomicB
 #[derive(Clone)]
 struct WebState {
     session: Arc<RwLock<SessionState>>,
+    /// The performance library's current revision, published by the app
+    /// thread after every edit so each session socket can push a fresh
+    /// snapshot to ITS client — a deck edited in one window must appear
+    /// in every other window without a reload.
+    performance_revision: Arc<RwLock<String>>,
     plugin_catalog_revision: Arc<AtomicU64>,
     legacy_plugins_root: PathBuf,
     plugin_store_root: Option<PathBuf>,
@@ -411,6 +416,7 @@ struct PluginWebPackage {
 
 pub fn start(
     session: Arc<RwLock<SessionState>>,
+    performance_revision: Arc<RwLock<String>>,
     options: &Options,
     preferences: WebServerPreferences,
     control: Sender<DesktopControlCall>,
@@ -421,6 +427,7 @@ pub fn start(
     let state = WebState {
         injected_midi: Arc::clone(&injected_midi),
         session,
+        performance_revision,
         plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
         web_packages_cache: Arc::new(Mutex::new(None)),
         package_scan_revision: Arc::new(AtomicU64::new(0)),
@@ -2040,6 +2047,11 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
     let mut virtual_midi_clients = std::collections::BTreeSet::<ClientId>::new();
     let mut published_revision = state.session.read().expect("session lock").revision;
     let mut published_catalog_revision = state.plugin_catalog_revision.load(Ordering::Acquire);
+    let mut published_performance_revision = state
+        .performance_revision
+        .read()
+        .expect("performance revision lock")
+        .clone();
     if sender
         .send(Message::Text(snapshot_json(&state).into()))
         .await
@@ -2063,6 +2075,26 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
                         break;
                     }
                     published_revision = revision;
+                }
+                let performance_revision = state
+                    .performance_revision
+                    .read()
+                    .expect("performance revision lock")
+                    .clone();
+                if performance_revision != published_performance_revision {
+                    // Another client edited the library; hand this one the
+                    // fresh snapshot through the same message its own
+                    // requests use.
+                    let response =
+                        response_for(ControlRequest::PerformanceSnapshot, &state);
+                    if sender
+                        .send(Message::Text(response.to_string().into()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                    published_performance_revision = performance_revision;
                 }
                 let catalog_revision = state.plugin_catalog_revision.load(Ordering::Acquire);
                 if catalog_revision != published_catalog_revision {
@@ -2515,6 +2547,7 @@ mod tests {
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
+            performance_revision: Arc::new(RwLock::new(String::new())),
             plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
             legacy_plugins_root: PathBuf::new(),
             plugin_store_root: None,
@@ -2556,6 +2589,7 @@ mod tests {
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
+            performance_revision: Arc::new(RwLock::new(String::new())),
             plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
             legacy_plugins_root: PathBuf::new(),
             plugin_store_root: None,
@@ -2614,6 +2648,7 @@ mod tests {
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
+            performance_revision: Arc::new(RwLock::new(String::new())),
             plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
             legacy_plugins_root: PathBuf::new(),
             plugin_store_root: None,
@@ -2676,6 +2711,7 @@ mod tests {
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
+            performance_revision: Arc::new(RwLock::new(String::new())),
             plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
             legacy_plugins_root: PathBuf::new(),
             plugin_store_root: None,
@@ -2738,6 +2774,7 @@ mod tests {
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
+            performance_revision: Arc::new(RwLock::new(String::new())),
             plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
             legacy_plugins_root: PathBuf::new(),
             plugin_store_root: None,
@@ -2800,6 +2837,7 @@ mod tests {
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
+            performance_revision: Arc::new(RwLock::new(String::new())),
             plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
             legacy_plugins_root: PathBuf::new(),
             plugin_store_root: None,
@@ -2853,6 +2891,7 @@ mod tests {
             session: Arc::new(RwLock::new(SessionState::new(
                 SessionId::new(DEFAULT_LIVE_SESSION_ID).unwrap(),
             ))),
+            performance_revision: Arc::new(RwLock::new(String::new())),
             plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
             legacy_plugins_root: PathBuf::new(),
             plugin_store_root: None,

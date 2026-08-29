@@ -3702,6 +3702,29 @@
   color: var(--fp-rail-label);
 }
 
+/* The playhead: the step the lane is sounding right now, chased the way
+   a hardware step LED runs the row. Present tense only — it never
+   competes with the engraved on/off state of the step itself. */
+.seq-cell.playhead {
+  box-shadow: inset 0 -2px 0 0 var(--acid);
+}
+
+.seq-cell.on.playhead {
+  box-shadow:
+    inset 0 -2px 0 0 var(--acid),
+    0 0 6px color-mix(in srgb, var(--acid) 60%, transparent);
+}
+
+.melodic-step.playhead {
+  box-shadow: inset 0 -2px 0 0 var(--acid);
+}
+
+.melodic-step.on.playhead {
+  box-shadow:
+    inset 0 -2px 0 0 var(--acid),
+    0 0 6px color-mix(in srgb, var(--acid) 60%, transparent);
+}
+
 /* REC burns red while armed: recording is the one act the player must
    never mistake for playback. */
 .seq-rec::before {

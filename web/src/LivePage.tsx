@@ -13,6 +13,9 @@ import {
   dispatchCommand,
   dispatchCommandAwait,
   dispatchPerformanceEdit,
+  exportLiveShow,
+  importLiveShow,
+  inspectLiveShow,
   requestPluginPreset,
   requestPluginPresets,
 } from "./gateway";
@@ -21,7 +24,13 @@ import { AsyncActionLabel, AsyncSpinner } from "./components/AsyncSpinner";
 import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
 import { ModalDialog } from "./components/ModalDialog";
 import { scopedId } from "./ids";
-import { isRemoteWebClient } from "./host";
+import {
+  isDesktopHost,
+  isNativeHost,
+  isRemoteWebClient,
+  readNativeTextFile,
+  savePortableTextFile,
+} from "./host";
 import {
   addSlotToRack,
   graphFromRackReference,
@@ -43,6 +52,8 @@ import type {
   LiveLocation,
   HostPresetSummary,
   PerformanceEdit,
+  RfLiveFile,
+  RfLiveImportPreview,
   PerformanceSnapshot,
   PluginInstance,
   PluginWebDescriptor,
@@ -786,6 +797,183 @@ function LiveEmpty({ label }: { label: string }) {
   );
 }
 
+/// The whole library as one portable document: what a musician carries to
+/// the venue machine. Export embeds every plugin state a Rack references;
+/// import upserts and never deletes.
+function ShowTransfer({ performance }: { performance: PerformanceSnapshot }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState<null | "export" | "inspect" | "import">(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [candidate, setCandidate] = useState<{
+    fileName: string;
+    file: RfLiveFile;
+    preview: RfLiveImportPreview;
+  } | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const defaultName = performance.library.setlists[0]?.name ?? "RackForge Show";
+  const exportShow = () => {
+    setBusy("export");
+    setMessage(null);
+    exportLiveShow(name.trim() || defaultName)
+      .then(({ file_name, file }) =>
+        savePortableTextFile({
+          file_name,
+          mime_type: "application/vnd.rackforge.live+json",
+          text: `${JSON.stringify(file, null, 2)}
+`,
+        }),
+      )
+      .then(() => setMessage("Show exported."))
+      .catch((error: Error) => setMessage(error.message))
+      .finally(() => setBusy(null));
+  };
+  const inspectText = async (fileName: string, text: string) => {
+    setBusy("inspect");
+    setMessage(null);
+    try {
+      if (!fileName.toLowerCase().endsWith(".rflive")) {
+        throw new Error("Choose a .rflive file.");
+      }
+      if (!text || new TextEncoder().encode(text).byteLength > 16 * 1024 * 1024) {
+        throw new Error("The show file is empty or larger than 16 MiB.");
+      }
+      const file = JSON.parse(text) as RfLiveFile;
+      const preview = await inspectLiveShow(file);
+      setCandidate({ fileName, file, preview });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not validate the show file.");
+    } finally {
+      setBusy(null);
+    }
+  };
+  const chooseImport = () => {
+    if (isNativeHost() || isDesktopHost()) {
+      setBusy("inspect");
+      setMessage(null);
+      readNativeTextFile({ extensions: ["rflive"], maximum_bytes: 16 * 1024 * 1024 })
+        .then(({ file_name, text }) => inspectText(file_name, text))
+        .catch((error: Error) => setMessage(error.message))
+        .finally(() => setBusy((current) => (current === "inspect" ? null : current)));
+      return;
+    }
+    importInputRef.current?.click();
+  };
+  const commitImport = () => {
+    if (!candidate) return;
+    setBusy("import");
+    setMessage(null);
+    importLiveShow(candidate.file)
+      .then((preview) => {
+        setCandidate(null);
+        setMessage(
+          `Imported ${preview.name}: ${preview.racks} Racks, ${preview.songs} Songs, ` +
+            `${preview.setlists} Setlists, ${preview.patterns} Patterns.`,
+        );
+      })
+      .catch((error: Error) => setMessage(error.message))
+      .finally(() => setBusy(null));
+  };
+  return (
+    <section className="show-transfer" aria-label="Show file">
+      <span className="show-transfer-legend">SHOW FILE · .RFLIVE</span>
+      <p className="show-transfer-note">
+        The whole library — Racks, Songs, Setlists, Patterns — with every plugin
+        state embedded. Plugins themselves travel separately; importing replaces
+        entries with the same id and keeps everything else.
+      </p>
+      <div className="show-transfer-controls">
+        <input
+          className="show-transfer-name"
+          value={name}
+          placeholder={defaultName}
+          maxLength={80}
+          onChange={(event) => setName(event.target.value)}
+          aria-label="Show name"
+        />
+        <button className="seq-key" onClick={exportShow} disabled={busy !== null}>
+          {busy === "export" ? "EXPORTING…" : "EXPORT"}
+        </button>
+        <button className="seq-key" onClick={chooseImport} disabled={busy !== null}>
+          {busy === "inspect" ? "READING…" : "IMPORT"}
+        </button>
+      </div>
+      {message ? <p className="show-transfer-message" role="status">{message}</p> : null}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".rflive,application/vnd.rackforge.live+json,application/json"
+        hidden
+        onChange={(event) => {
+          const chosen = event.target.files?.[0];
+          event.target.value = "";
+          if (!chosen) return;
+          chosen
+            .text()
+            .then((text) => inspectText(chosen.name, text))
+            .catch(() => setMessage("Could not read the chosen file."));
+        }}
+      />
+      {candidate ? (
+        <ModalDialog
+          eyebrow={candidate.fileName}
+          title={`Import ${candidate.preview.name}`}
+          onClose={() => {
+            if (busy === "import") return;
+            setCandidate(null);
+          }}
+          actions={
+            <>
+              <button
+                className="seq-key"
+                onClick={() => setCandidate(null)}
+                disabled={busy === "import"}
+              >
+                CANCEL
+              </button>
+              <button
+                className="seq-key seq-launch"
+                onClick={commitImport}
+                disabled={busy === "import"}
+              >
+                {busy === "import" ? "IMPORTING…" : "IMPORT SHOW"}
+              </button>
+            </>
+          }
+        >
+          <dl className="show-import-counts">
+            <div><dt>Racks</dt><dd>{candidate.preview.racks}</dd></div>
+            <div><dt>Songs</dt><dd>{candidate.preview.songs}</dd></div>
+            <div><dt>Setlists</dt><dd>{candidate.preview.setlists}</dd></div>
+            <div><dt>Patterns</dt><dd>{candidate.preview.patterns}</dd></div>
+            <div><dt>States</dt><dd>{candidate.preview.states}</dd></div>
+          </dl>
+          {candidate.preview.missing_plugins.length > 0 ? (
+            <div className="show-import-warnings" role="alert">
+              <strong>Missing plugins on this machine:</strong>
+              <ul>
+                {candidate.preview.missing_plugins.map((requirement) => (
+                  <li key={requirement.plugin_id}>
+                    {requirement.plugin_id}
+                    {requirement.version ? ` (v${requirement.version})` : ""}
+                  </li>
+                ))}
+              </ul>
+              <p>The show imports anyway; those Racks stay silent until the plugins are installed.</p>
+            </div>
+          ) : null}
+          {candidate.preview.warnings.length > 0 ? (
+            <ul className="show-import-notes">
+              {candidate.preview.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          ) : null}
+        </ModalDialog>
+      ) : null}
+    </section>
+  );
+}
+
 function PerformanceConfig({
   session,
   performance,
@@ -1047,6 +1235,7 @@ function PerformanceConfig({
           </div>
         )}
       </div>
+      <ShowTransfer performance={performance} />
       {activePendingDelete ? (
         <PerformanceDeleteDialog
           target={activePendingDelete}

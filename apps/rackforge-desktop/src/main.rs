@@ -3388,6 +3388,48 @@ impl DesktopApp {
                     },
                 }
             }
+            ControlRequest::ExportLiveShow { name } => {
+                let exported = rackforge_core::live_show::now_unix_ms().and_then(|now| {
+                    rackforge_core::live_show::assemble_live_show(
+                        &name,
+                        self.performance_repository.library(),
+                        &self.state_store,
+                        now,
+                    )
+                });
+                match exported {
+                    Ok(file) => ControlResponse::LiveShowExported {
+                        file_name: rackforge_core::live_show::live_show_file_name(&name),
+                        file: Box::new(file),
+                    },
+                    Err(error) => ControlResponse::Error {
+                        code: ControlErrorCode::Rejected,
+                        message: format!("Could not export the show: {error:#}"),
+                        current_revision: Some(
+                            self.session.read().expect("session lock poisoned").revision,
+                        ),
+                    },
+                }
+            }
+            ControlRequest::InspectLiveShow { file } => {
+                match rackforge_core::live_show::inspect_live_show(
+                    &file,
+                    &self.installed_plugin_versions(),
+                    self.performance_repository.library(),
+                ) {
+                    Ok(preview) => ControlResponse::LiveShowInspected {
+                        preview: Box::new(preview),
+                    },
+                    Err(error) => ControlResponse::Error {
+                        code: ControlErrorCode::InvalidRequest,
+                        message: format!("Could not validate the .rflive file: {error:#}"),
+                        current_revision: Some(
+                            self.session.read().expect("session lock poisoned").revision,
+                        ),
+                    },
+                }
+            }
+            ControlRequest::ImportLiveShow { file } => self.import_live_show(&file),
             ControlRequest::PluginPresets { plugin_id } => {
                 match self.state_store.list_presets(&plugin_id) {
                     Ok(presets) => ControlResponse::PluginPresets { plugin_id, presets },
@@ -4096,6 +4138,87 @@ impl DesktopApp {
                 message: format!("Could not store edited Rack Slot state: {error:#}"),
                 current_revision: Some(revision),
             },
+        }
+    }
+
+    fn installed_plugin_versions(&self) -> std::collections::BTreeMap<String, String> {
+        self.plugins
+            .iter()
+            .map(|plugin| (plugin.plugin_id.clone(), plugin.version.to_string()))
+            .collect()
+    }
+
+    /// Imports a `.rflive` show: authenticate and store the embedded
+    /// states first (so every reference resolves), then upsert each
+    /// document through the library's own edit machinery, reconciling the
+    /// LIVE state once at the end the way a single edit would.
+    fn import_live_show(&mut self, file: &rackforge_control_api::RfLiveFile) -> ControlResponse {
+        let error_response = |code: ControlErrorCode, message: String, revision: Revision| {
+            ControlResponse::Error {
+                code,
+                message,
+                current_revision: Some(revision),
+            }
+        };
+        let revision = self.session.read().expect("session lock poisoned").revision;
+        let preview = match rackforge_core::live_show::inspect_live_show(
+            file,
+            &self.installed_plugin_versions(),
+            self.performance_repository.library(),
+        ) {
+            Ok(preview) => preview,
+            Err(error) => {
+                return error_response(
+                    ControlErrorCode::InvalidRequest,
+                    format!("Could not validate the .rflive file: {error:#}"),
+                    revision,
+                );
+            }
+        };
+        if let Err(error) =
+            rackforge_core::live_show::store_live_show_states(file, &mut self.state_store)
+        {
+            return error_response(
+                ControlErrorCode::Rejected,
+                format!("Could not store the show's plugin states: {error:#}"),
+                revision,
+            );
+        }
+        let mut live = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .live
+            .clone();
+        let previous_live = live.clone();
+        for edit in rackforge_core::live_show::live_show_edits(file) {
+            let current_revision = self.performance_repository.revision();
+            if let Err(error) =
+                self.performance_repository
+                    .apply_edit(&current_revision, edit, &mut live)
+            {
+                return error_response(
+                    ControlErrorCode::Rejected,
+                    format!("Could not import the show: {error:#}"),
+                    revision,
+                );
+            }
+        }
+        if live != previous_live {
+            if let Err(error) =
+                self.apply_program_events(vec![SessionEvent::LiveStateReconciled { live }], None)
+            {
+                return error_response(
+                    ControlErrorCode::Internal,
+                    format!("Show imported, but LIVE navigation could not be saved: {error}"),
+                    revision,
+                );
+            }
+            self.persist_session_checkpoint();
+        }
+        ControlResponse::LiveShowImported {
+            preview: Box::new(preview),
+            snapshot: Box::new(self.performance_snapshot()),
         }
     }
 

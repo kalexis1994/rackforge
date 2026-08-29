@@ -748,6 +748,49 @@ export function importPluginPreset(
   );
 }
 
+export function exportLiveShow(
+  name: string,
+): Promise<{ file_name: string; file: import("./types").RfLiveFile }> {
+  return requestPresetOperation(
+    { op: "export_live_show", name },
+    "live_show_exported",
+    (message) => ({
+      file_name: String(message.file_name),
+      file: message.file as import("./types").RfLiveFile,
+    }),
+  );
+}
+
+export function inspectLiveShow(
+  file: import("./types").RfLiveFile,
+): Promise<import("./types").RfLiveImportPreview> {
+  return requestPresetOperation(
+    { op: "inspect_live_show", file },
+    "live_show_inspected",
+    (message) => message.preview as import("./types").RfLiveImportPreview,
+  );
+}
+
+export function importLiveShow(
+  file: import("./types").RfLiveFile,
+): Promise<import("./types").RfLiveImportPreview> {
+  return requestPresetOperation(
+    { op: "import_live_show", file },
+    "live_show_imported",
+    (message) => {
+      // The import already carries the resulting library; feed it to the
+      // same store the edit path uses so every surface refreshes at once.
+      store.dispatch(
+        performanceReceived({
+          snapshot: message.snapshot as PerformanceSnapshot,
+          edited: false,
+        }),
+      );
+      return message.preview as import("./types").RfLiveImportPreview;
+    },
+  );
+}
+
 export function requestMidiSources(): Promise<MidiSourceStatus[]> {
   return requestPresetOperation(
     { op: "midi_sources" },

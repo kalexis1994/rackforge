@@ -8148,6 +8148,7 @@ mod tests {
                 songs: vec![song],
                 setlists: vec![setlist],
                 patterns: Vec::new(),
+                sequencer_tabs: Vec::new(),
             },
             live: LivePerformanceState {
                 mode: LiveBrowseMode::Rack,

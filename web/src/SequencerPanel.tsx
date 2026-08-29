@@ -909,6 +909,16 @@ function SequencerTabEditor({
             ))}
           </select>
           <button
+            className={`seq-key seq-lamp-key seq-rec${capturing ? " engaged" : ""}`}
+            aria-pressed={capturing}
+            title="Live capture: recording into the empty slot creates the pattern"
+            onClick={() => {
+              sendSequencerCommand({ kind: "set_capture", lane, on: !capturing });
+            }}
+          >
+            REC
+          </button>
+          <button
             className="seq-key"
             onClick={() => onClose()}
             title="Close this sequencer's tab"

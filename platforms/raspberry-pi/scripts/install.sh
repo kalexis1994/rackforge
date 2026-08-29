@@ -69,12 +69,17 @@ for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
     "$official_plugin" \
     "$root/plugin-store")"
   printf '%s\n' "$install_output"
-  official_plugin_id="$(printf '%s\n' "$install_output" |
-    sed -n 's/.*PLUGIN_INSTALLED id=\([^ ]*\).*/\1/p' | head -1)"
-  [[ -n "$official_plugin_id" ]] || {
+  # Read the id the store just reported. No pipeline here on purpose:
+  # under `set -o pipefail` a `... | head -1` ends in SIGPIPE and takes
+  # the whole installer down after the first plugin.
+  official_plugin_id=""
+  if [[ "$install_output" =~ PLUGIN_INSTALLED[[:space:]]+id=([^[:space:]]+) ]]; then
+    official_plugin_id="${BASH_REMATCH[1]}"
+  fi
+  if [[ -z "$official_plugin_id" ]]; then
     printf 'could not read the plugin id installed from %s\n' "$official_plugin" >&2
     exit 1
-  }
+  fi
   if [[ "$known_ids" != *" $official_plugin_id "* ]]; then
     "$root/bin/rackforge-store" enable \
       "$official_plugin_id" \

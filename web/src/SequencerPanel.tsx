@@ -1391,6 +1391,17 @@ function MelodicLane({
                   (candidate) =>
                     candidate.tick < tick && candidate.tick + candidate.duration_ticks > tick,
                 );
+            // The tie line: opens in the note's own block, runs through the
+            // steps it holds, closes inside the last one.
+            const segment = stepNote
+              ? ties > 1
+                ? "tie-start"
+                : "tie-stub"
+              : heldBy
+                ? heldBy.tick + heldBy.duration_ticks <= tick + STEP_TICKS
+                  ? "tie-end"
+                  : "tie-through"
+                : "";
             return (
               <button
                 key={step}
@@ -1424,8 +1435,8 @@ function MelodicLane({
                 }
               >
                 <span className="melodic-step-note">{stepNote ? noteName(stepNote.key) : "·"}</span>
-                {stepNote && ties > 1 ? (
-                  <span className="melodic-step-length" aria-hidden="true">{`×${ties}`}</span>
+                {segment ? (
+                  <span className={`melodic-step-tie ${segment}`} aria-hidden="true" />
                 ) : null}
               </button>
             );

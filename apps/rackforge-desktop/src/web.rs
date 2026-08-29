@@ -2214,7 +2214,8 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         | ControlRequest::VirtualMidi { .. }
         | ControlRequest::ReleaseVirtualMidi { .. }
         | ControlRequest::Sequencer { .. }
-        | ControlRequest::SequencerStatus) => {
+        | ControlRequest::SequencerStatus
+        | ControlRequest::SequencerCaptureTake { .. }) => {
             // A note is not a session command: it must reach the audio thread
             // now, not on the next GUI frame. Everything else in this arm —
             // sequencer transport included, whose quantise boundaries the

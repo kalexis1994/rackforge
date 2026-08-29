@@ -520,6 +520,11 @@ impl BrowserHost {
             ControlRequest::SequencerStatus => Ok(ControlResponse::SequencerStatus {
                 sequencer: self.sequencer.status(),
             }),
+            ControlRequest::SequencerCaptureTake { lane } => {
+                Ok(ControlResponse::SequencerCapture {
+                    notes: self.sequencer.capture_take(lane),
+                })
+            }
             ControlRequest::ReleaseVirtualMidi { client_id } => {
                 self.release_virtual_midi(&client_id);
                 Ok(ControlResponse::VirtualMidiReleased { client_id })
@@ -1319,8 +1324,8 @@ impl BrowserHost {
             return;
         }
         match data[0] & 0xf0 {
-            0x90 if data[2] > 0 => self.sequencer.note_input(data[1], true),
-            0x80 | 0x90 => self.sequencer.note_input(data[1], false),
+            0x90 if data[2] > 0 => self.sequencer.note_input(data[1], data[2], true),
+            0x80 | 0x90 => self.sequencer.note_input(data[1], 0, false),
             _ => {}
         }
     }

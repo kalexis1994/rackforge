@@ -39,7 +39,8 @@
 
 use crate::transport::{TimeSignature, Transport};
 use rackforge_control_api::{
-    SequencerCommand, SequencerLaneStatus, SequencerQuantize, SequencerScale, SequencerStatusV1,
+    CapturedNoteV1, SequencerCommand, SequencerLaneStatus, SequencerQuantize, SequencerScale,
+    SequencerStatusV1,
 };
 use rackforge_performance_api::{
     FollowAction, MAX_NOTE_LOCKS, MAX_PART_PATTERN_BINDINGS, MAX_PATTERN_NOTES,
@@ -226,6 +227,15 @@ pub struct SequencerLane {
     pre_outcome: bool,
     /// Follow-action jumps taken since launch: the seed of AnySlot's die.
     follow_jumps: u64,
+    /// Live capture: armed by the surface whose REC key is down.
+    capture: bool,
+    /// Notes pressed but not yet released, beat-stamped at the block they
+    /// arrived in: (key, velocity, onset beat).
+    capture_held: Vec<(u8, u8, f64)>,
+    /// Finished notes waiting for the surface to take them.
+    captured: Vec<CapturedNoteV1>,
+    /// Inputs that arrived since the last block, waiting for a beat stamp.
+    capture_inbox: Vec<(u8, u8, bool)>,
     held: Vec<HeldNote>,
     /// Per-block scratch, allocated once here so the render path never does.
     staged: Vec<StagedEvent>,
@@ -259,6 +269,10 @@ impl SequencerLane {
             gate_release_pending: false,
             pre_outcome: false,
             follow_jumps: 0,
+            capture: false,
+            capture_held: Vec::with_capacity(16),
+            captured: Vec::with_capacity(64),
+            capture_inbox: Vec::with_capacity(32),
             held: Vec::with_capacity(MAX_HELD_NOTES),
             staged: Vec::with_capacity(MAX_EVENTS_PER_BLOCK),
             muted: false,
@@ -359,10 +373,27 @@ impl SequencerLane {
         self.retrigger_pending = false;
     }
 
-    /// One key from the player's keyboard. Only follow lanes listen. A press
-    /// from silence restarts the phrase; legato presses re-root it without
-    /// restarting — the classic monosynth-sequencer feel.
-    pub fn note_input(&mut self, key: u8, on: bool) {
+    /// Arms or disarms live capture. Disarming abandons unreleased notes.
+    pub fn set_capture(&mut self, on: bool) {
+        self.capture = on;
+        if !on {
+            self.capture_held.clear();
+            self.capture_inbox.clear();
+        }
+    }
+
+    /// Everything the lane captured since the last take.
+    pub fn capture_take(&mut self) -> Vec<CapturedNoteV1> {
+        std::mem::take(&mut self.captured)
+    }
+
+    /// One key from the player's keyboard. Follow lanes gate and transpose
+    /// on it; an armed lane records it. A press from silence restarts the
+    /// phrase; legato presses re-root it without restarting.
+    pub fn note_input(&mut self, key: u8, velocity: u8, on: bool) {
+        if self.capture && self.capture_inbox.len() < 32 {
+            self.capture_inbox.push((key, velocity.max(1), on));
+        }
         if self.follow.is_none() {
             return;
         }
@@ -433,6 +464,10 @@ impl SequencerLane {
         self.gate_release_pending = false;
         self.pre_outcome = false;
         self.follow_jumps = 0;
+        self.capture = false;
+        self.capture_held.clear();
+        self.captured.clear();
+        self.capture_inbox.clear();
     }
 
     /// Renders one block: pays note-offs falling inside it, executes a
@@ -462,6 +497,34 @@ impl SequencerLane {
         // 1. Pay the offs owed from earlier blocks first, so the held-note
         // room they release is available to this block's notes.
         pay_due_offs(&mut self.held, end_beat, start_beat, frames_per_beat, frames, &mut staged);
+
+        // Capture bookkeeping: inputs that arrived since the last block are
+        // stamped with this block's opening beat — the finest truth the
+        // engine has for them — and releases close their notes.
+        if self.capture {
+            let inbox = std::mem::take(&mut self.capture_inbox);
+            for (key, velocity, on) in inbox {
+                if on {
+                    if self.capture_held.len() < 16 {
+                        self.capture_held.push((key, velocity, start_beat));
+                    }
+                } else if let Some(index) = self
+                    .capture_held
+                    .iter()
+                    .position(|&(held, _, _)| held == key)
+                {
+                    let (_, velocity, onset) = self.capture_held.swap_remove(index);
+                    if self.captured.len() < 256 {
+                        self.captured.push(CapturedNoteV1 {
+                            beat: onset,
+                            key,
+                            velocity,
+                            duration_beats: (start_beat - onset).max(0.0),
+                        });
+                    }
+                }
+            }
+        }
 
         // Key-follow bookkeeping first: a released gate silences what it
         // held, and a fresh press restarts the phrase on the next 16th.
@@ -1026,6 +1089,11 @@ impl SequencerEngine {
                 self.lanes[index].set_muted(*muted);
                 Ok(())
             }
+            SequencerCommand::SetCapture { lane, on } => {
+                let index = self.lane_index(*lane)?;
+                self.lanes[index].set_capture(*on);
+                Ok(())
+            }
             SequencerCommand::SetClockOut { on } => {
                 self.clock_enabled = *on;
                 Ok(())
@@ -1061,10 +1129,17 @@ impl SequencerEngine {
 
     /// One key from the player's keyboard, fanned to every follow lane.
     /// Hosts call this from wherever their live MIDI already flows.
-    pub fn note_input(&mut self, key: u8, on: bool) {
+    pub fn note_input(&mut self, key: u8, velocity: u8, on: bool) {
         for lane in &mut self.lanes {
-            lane.note_input(key, on);
+            lane.note_input(key, velocity, on);
         }
+    }
+
+    /// Drains one lane's capture buffer for the recording surface.
+    pub fn capture_take(&mut self, lane: u8) -> Vec<CapturedNoteV1> {
+        self.lane_index(lane)
+            .map(|index| self.lanes[index].capture_take())
+            .unwrap_or_default()
     }
 
     /// One audio block: debts owed by stops and panics first, then every
@@ -1185,6 +1260,7 @@ impl SequencerEngine {
                     queued: lane.pending.is_some(),
                     stopping: lane.stop_at.is_some(),
                     following: lane.follow.is_some(),
+                    capturing: lane.capture,
                     active_slot: lane.active_slot() as u8,
                     slots: names.clone(),
                     muted: lane.muted,
@@ -1289,6 +1365,42 @@ mod tests {
         still.notes[0].duration_ticks = 0;
         assert_eq!(CompiledPattern::compile(&still).err(), Some(PatternError::ZeroDuration));
         assert!(CompiledPattern::compile(&base).is_ok());
+    }
+
+    #[test]
+    fn capture_records_what_the_player_did_against_the_transport() {
+        let mut engine = SequencerEngine::new(48_000.0).expect("engine");
+        engine
+            .apply(&SequencerCommand::SetCapture { lane: 0, on: true })
+            .expect("arm");
+        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        assert!(engine.status().lanes[0].capturing);
+
+        let mut out = Vec::new();
+        let mut params = Vec::new();
+        let mut clock = Vec::new();
+        // Press C2 before the second half-beat block, release before the
+        // fourth: onset at beat 0.5, duration one beat.
+        engine.render_block(12_000, &mut out, &mut params, &mut clock);
+        engine.note_input(48, 96, true);
+        engine.render_block(12_000, &mut out, &mut params, &mut clock);
+        engine.render_block(12_000, &mut out, &mut params, &mut clock);
+        engine.note_input(48, 0, false);
+        engine.render_block(12_000, &mut out, &mut params, &mut clock);
+
+        let take = engine.capture_take(0);
+        assert_eq!(take.len(), 1);
+        let note = take[0];
+        assert_eq!(note.key, 48);
+        assert_eq!(note.velocity, 96);
+        assert!((note.beat - 0.5).abs() < 1e-9);
+        assert!((note.duration_beats - 1.0).abs() < 1e-9);
+        // A take drains; disarming clears the held state.
+        assert!(engine.capture_take(0).is_empty());
+        engine
+            .apply(&SequencerCommand::SetCapture { lane: 0, on: false })
+            .expect("disarm");
+        assert!(!engine.status().lanes[0].capturing);
     }
 
     #[test]
@@ -1681,7 +1793,7 @@ mod tests {
         assert!(!engine.status().lanes[0].playing);
 
         // Hold F2: the phrase restarts on the next 16th, five semitones up.
-        engine.note_input(53, true);
+        engine.note_input(53, 100, true);
         out.clear();
         engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         let ons: Vec<u8> = out
@@ -1694,7 +1806,7 @@ mod tests {
         assert!(engine.status().lanes[0].playing);
 
         // Release: the ringing note is silenced at the next block.
-        engine.note_input(53, false);
+        engine.note_input(53, 0, false);
         out.clear();
         engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(out.iter().any(|event| event.data[0] == 0x80));

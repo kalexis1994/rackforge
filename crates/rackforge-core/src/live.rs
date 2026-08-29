@@ -1856,6 +1856,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 AudioControlCommand::SequencerStatus { reply } => {
                     let _ = reply.try_send(Ok(sequencer.status()));
                 }
+                AudioControlCommand::SequencerCaptureTake { lane, reply } => {
+                    let _ = reply.try_send(Ok(sequencer.capture_take(lane)));
+                }
                 AudioControlCommand::ApplyAudioOutput { profile, reply } => {
                     let result = if input.as_ref().is_some_and(|capture| {
                         capture.profile.sample_rate_hz != profile.sample_rate_hz
@@ -3340,8 +3343,8 @@ fn feed_sequencer_input(
         return;
     }
     match data[0] & 0xf0 {
-        0x90 if data[2] > 0 => sequencer.note_input(data[1], true),
-        0x80 | 0x90 => sequencer.note_input(data[1], false),
+        0x90 if data[2] > 0 => sequencer.note_input(data[1], data[2], true),
+        0x80 | 0x90 => sequencer.note_input(data[1], 0, false),
         _ => {}
     }
 }

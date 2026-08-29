@@ -461,6 +461,16 @@ export function deletePluginPreset(
   );
 }
 
+export function requestSequencerCaptureTake(
+  lane: number,
+): Promise<{ notes: import("./sequencer").CapturedNote[] }> {
+  return requestPresetOperation(
+    { op: "sequencer_capture_take", lane },
+    "sequencer_capture",
+    (message) => message as unknown as { notes: import("./sequencer").CapturedNote[] },
+  );
+}
+
 export function requestPluginParameters(
   instanceId: string,
 ): Promise<PluginParameterSnapshot> {

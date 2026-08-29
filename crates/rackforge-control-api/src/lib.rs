@@ -204,6 +204,13 @@ pub enum SequencerCommand {
         lane: u8,
         muted: bool,
     },
+    /// Arms or disarms live capture on a lane: while armed and the
+    /// transport runs, played notes are recorded against the transport's
+    /// beat, to be drained by `SequencerCaptureTake`.
+    SetCapture {
+        lane: u8,
+        on: bool,
+    },
     /// Enables or disables MIDI clock out: the machine as the backline's
     /// conductor, 24 pulses per quarter plus start/continue/stop.
     SetClockOut {
@@ -236,6 +243,9 @@ pub struct SequencerLaneStatus {
     /// The lane is in key-follow, waiting on (or following) a held key.
     #[serde(default)]
     pub following: bool,
+    /// The lane is armed for live capture.
+    #[serde(default)]
+    pub capturing: bool,
     /// Which variation slot is the lane's active one.
     #[serde(default)]
     pub active_slot: u8,
@@ -245,6 +255,18 @@ pub struct SequencerLaneStatus {
     pub muted: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_name: Option<String>,
+}
+
+/// One note the player performed while a lane was armed for capture:
+/// absolute transport beats, exactly as the engine heard them. Quantising
+/// belongs to the editing surface, which knows the pattern's grid.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CapturedNoteV1 {
+    pub beat: f64,
+    pub key: u8,
+    pub velocity: u8,
+    pub duration_beats: f64,
 }
 
 /// What a transport display shows. Bars and beats are 1-based because that
@@ -410,6 +432,11 @@ pub enum ControlRequest {
     /// Reads the transport and lane state for display. Transient telemetry,
     /// polled like `OutputMeter`.
     SequencerStatus,
+    /// Drains the notes a lane captured since the last take. Transient,
+    /// polled by the recording surface while its REC key is down.
+    SequencerCaptureTake {
+        lane: u8,
+    },
     Events {
         after_revision: Revision,
     },
@@ -531,6 +558,9 @@ pub enum ControlResponse {
     SequencerAccepted,
     SequencerStatus {
         sequencer: SequencerStatusV1,
+    },
+    SequencerCapture {
+        notes: Vec<CapturedNoteV1>,
     },
     AudioApplied {
         snapshot: Box<AudioOutputState>,

@@ -1217,6 +1217,17 @@ impl DesktopAudio {
             .map_err(|_| anyhow::anyhow!("the audio thread did not answer the sequencer command"))
     }
 
+    pub fn sequencer_capture_take(
+        &self,
+        lane: u8,
+    ) -> Result<Vec<rackforge_control_api::CapturedNoteV1>> {
+        let (reply, response) = mpsc::sync_channel(1);
+        self.send_command(AudioCommand::SequencerCaptureTake { lane, reply })?;
+        response
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|_| anyhow::anyhow!("the audio thread did not answer the capture take"))
+    }
+
     pub fn sequencer_status(&self) -> Result<rackforge_control_api::SequencerStatusV1> {
         let (reply, response) = mpsc::sync_channel(1);
         self.send_command(AudioCommand::SequencerStatus { reply })?;
@@ -1363,6 +1374,10 @@ enum AudioCommand {
     },
     SequencerStatus {
         reply: SyncSender<rackforge_control_api::SequencerStatusV1>,
+    },
+    SequencerCaptureTake {
+        lane: u8,
+        reply: SyncSender<Vec<rackforge_control_api::CapturedNoteV1>>,
     },
     SetMasterLevel(MasterLevel),
     SetMasterPan(MasterPan),
@@ -2133,6 +2148,9 @@ impl AudioProcessor {
                 AudioCommand::SequencerStatus { reply } => {
                     let _ = reply.try_send(self.sequencer.status());
                 }
+                AudioCommand::SequencerCaptureTake { lane, reply } => {
+                    let _ = reply.try_send(self.sequencer.capture_take(lane));
+                }
                 AudioCommand::SetMasterLevel(level) => self.master_gain.set_level(level),
                 AudioCommand::SetMasterPan(pan) => self.master_balance.set_pan(pan),
                 AudioCommand::SetRunning(running) => self.stopped = !running,
@@ -2351,8 +2369,8 @@ fn feed_sequencer_input(
         return;
     }
     match data[0] & 0xf0 {
-        0x90 if data[2] > 0 => sequencer.note_input(data[1], true),
-        0x80 | 0x90 => sequencer.note_input(data[1], false),
+        0x90 if data[2] > 0 => sequencer.note_input(data[1], data[2], true),
+        0x80 | 0x90 => sequencer.note_input(data[1], 0, false),
         _ => {}
     }
 }

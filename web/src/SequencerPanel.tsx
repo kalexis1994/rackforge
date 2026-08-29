@@ -1162,6 +1162,16 @@ function DrumGrid({
 }) {
   const steps = stepCount(pattern);
   const stepsPerBeat = TICKS_PER_BEAT / STEP_TICKS;
+  // The grid shows the fixed kit — and reveals every key the pattern
+  // actually holds beyond it. A capture played on piano keys must be as
+  // visible as it is audible; a lens must never hide what will sound.
+  const extraKeys = [...new Set(pattern.notes.map((note) => note.key))]
+    .filter((key) => !STEP_ROWS.some((row) => row.key === key))
+    .sort((a, b) => b - a);
+  const rows = [
+    ...STEP_ROWS,
+    ...extraKeys.map((key) => ({ key, label: noteName(key) })),
+  ];
   return (
     <div className="seq-grid-scroll">
       <div
@@ -1170,7 +1180,7 @@ function DrumGrid({
         aria-label={`Step grid, ${steps} steps`}
         style={{ ["--seq-steps" as string]: steps }}
       >
-        {STEP_ROWS.map((row) => (
+        {rows.map((row) => (
           <div className="seq-grid-row" role="row" key={row.key}>
             <span className="seq-row-label" role="rowheader">
               {row.label}

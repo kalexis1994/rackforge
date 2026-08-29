@@ -216,8 +216,8 @@
   letter-spacing: 0.16em;
   text-transform: uppercase;
   transition:
-    transform 0.08s ease,
-    box-shadow 0.12s ease;
+    transform var(--rf-motion-instant) var(--rf-ease-standard),
+    box-shadow var(--rf-motion-instant) var(--rf-ease-standard);
 }
 
 .nav-item .nav-copy {
@@ -480,7 +480,7 @@
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  transition: transform 0.08s ease;
+  transition: transform var(--rf-motion-instant) var(--rf-ease-standard);
 }
 
 .primary-button:hover {
@@ -592,12 +592,11 @@
   mix-blend-mode: screen;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .nav-item,
-  .primary-button {
-    transition: none !important;
-  }
-}
+/* No prefers-reduced-motion block here on purpose: every duration on this
+   panel comes from the shared motion vocabulary, and tokens.css collapses
+   that vocabulary to 1ms under the reduce preference. The guard this
+   replaced named two selectors by hand, so the three transitions added
+   after it kept moving for a player who had asked the system to stop. */
 
 /* ------------------------------------------- rail labels, tokenised ----
    These two carried literal pale blue-grey from the glass theme, which is
@@ -762,7 +761,9 @@
   font-size: 0.58rem;
   letter-spacing: 0.1em;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition:
+    background var(--rf-motion-instant) var(--rf-ease-standard),
+    color var(--rf-motion-instant) var(--rf-ease-standard);
 }
 
 .lighting-key:first-child {
@@ -1907,7 +1908,9 @@
   box-shadow:
     var(--cap-lip),
     0 2px 4px rgba(var(--edge-dark-rgb), 0.4) !important;
-  transition: box-shadow 120ms ease, filter 120ms ease;
+  transition:
+    box-shadow var(--rf-motion-instant) var(--rf-ease-standard),
+    filter var(--rf-motion-instant) var(--rf-ease-standard);
 }
 
 .compact-fader input[type="range"]::-moz-range-thumb {

@@ -897,6 +897,22 @@ pub fn host_action_command(
         // here could strand FILL on. Drivers with both phases (the MCU
         // bridge) dispatch SetFill themselves.
         Target::SequencerFill => None,
+        // One REC button, per-lane capture: disarm whoever is armed,
+        // otherwise arm the focus lane. Safe on the press alone.
+        Target::SequencerCaptureToggle => {
+            let armed = status
+                .lanes
+                .iter()
+                .position(|lane| lane.capturing)
+                .map(|lane| lane as u8);
+            Some(match armed {
+                Some(lane) => SequencerCommand::SetCapture { lane, on: false },
+                None => SequencerCommand::SetCapture {
+                    lane: status.focus_lane,
+                    on: true,
+                },
+            })
+        }
     }
 }
 
@@ -982,6 +998,9 @@ pub struct SequencerEngine {
     /// Whether the transport was running when the last block ended — what
     /// turns edges into start/continue/stop bytes.
     clock_was_running: bool,
+    /// The lane the player is working on: the deck's open tab, told to the
+    /// engine by the surface so lane-less hardware gestures can resolve.
+    focus_lane: u8,
 }
 
 impl SequencerEngine {
@@ -1001,6 +1020,7 @@ impl SequencerEngine {
             clock_enabled: false,
             next_clock_tick: 0,
             clock_was_running: false,
+            focus_lane: 0,
         })
     }
 
@@ -1093,9 +1113,18 @@ impl SequencerEngine {
                 self.lanes[index].set_muted(*muted);
                 Ok(())
             }
+            SequencerCommand::SetFocusLane { lane } => {
+                self.focus_lane = self.lane_index(*lane)? as u8;
+                Ok(())
+            }
             SequencerCommand::SetCapture { lane, on } => {
                 let index = self.lane_index(*lane)?;
                 self.lanes[index].set_capture(*on);
+                // REC means ready to record: nothing lands on a stopped
+                // clock, so arming brings the transport with it.
+                if *on {
+                    self.transport.start();
+                }
                 Ok(())
             }
             SequencerCommand::SetClockOut { on } => {
@@ -1246,6 +1275,7 @@ impl SequencerEngine {
             running: snapshot.running,
             fill: self.fill,
             clock_out: self.clock_enabled,
+            focus_lane: self.focus_lane,
             tempo_bpm: snapshot.tempo_bpm,
             beats_per_bar: snapshot.signature.beats_per_bar,
             beat_unit: snapshot.signature.beat_unit,
@@ -1405,6 +1435,43 @@ mod tests {
             .apply(&SequencerCommand::SetCapture { lane: 0, on: false })
             .expect("disarm");
         assert!(!engine.status().lanes[0].capturing);
+    }
+
+    #[test]
+    fn one_rec_button_resolves_against_the_focus_lane() {
+        let mut engine = SequencerEngine::new(48_000.0).expect("engine");
+        engine
+            .apply(&SequencerCommand::SetFocusLane { lane: 3 })
+            .expect("focus");
+        let status = engine.status();
+        assert_eq!(status.focus_lane, 3);
+        assert!(!status.running);
+
+        // No lane armed: the toggle arms the focus lane, and arming
+        // brings the transport with it.
+        let command = host_action_command(
+            rackforge_controller_api::HostActionTarget::SequencerCaptureToggle,
+            &status,
+        )
+        .expect("arm");
+        assert_eq!(command, SequencerCommand::SetCapture { lane: 3, on: true });
+        engine.apply(&command).expect("armed");
+        let status = engine.status();
+        assert!(status.running, "arming REC starts the transport");
+        assert!(status.lanes[3].capturing);
+
+        // A lane armed: the toggle disarms it, wherever focus points now.
+        engine
+            .apply(&SequencerCommand::SetFocusLane { lane: 0 })
+            .expect("refocus");
+        let command = host_action_command(
+            rackforge_controller_api::HostActionTarget::SequencerCaptureToggle,
+            &engine.status(),
+        )
+        .expect("disarm");
+        assert_eq!(command, SequencerCommand::SetCapture { lane: 3, on: false });
+        engine.apply(&command).expect("disarmed");
+        assert!(!engine.status().lanes[3].capturing);
     }
 
     #[test]

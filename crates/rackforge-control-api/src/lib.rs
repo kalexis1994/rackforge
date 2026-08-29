@@ -278,9 +278,16 @@ pub enum SequencerCommand {
         lane: u8,
         muted: bool,
     },
+    /// Names the lane the player is working on — the deck's open tab.
+    /// Lane-less hardware gestures (a controller's single REC button)
+    /// resolve against it.
+    SetFocusLane {
+        lane: u8,
+    },
     /// Arms or disarms live capture on a lane: while armed and the
     /// transport runs, played notes are recorded against the transport's
-    /// beat, to be drained by `SequencerCaptureTake`.
+    /// beat, to be drained by `SequencerCaptureTake`. Arming while the
+    /// transport is stopped starts it — REC means ready to record.
     SetCapture {
         lane: u8,
         on: bool,
@@ -355,6 +362,9 @@ pub struct SequencerStatusV1 {
     /// MIDI clock out is running.
     #[serde(default)]
     pub clock_out: bool,
+    /// The lane the player is working on (the deck's open tab).
+    #[serde(default)]
+    pub focus_lane: u8,
     pub tempo_bpm: f64,
     pub beats_per_bar: u8,
     pub beat_unit: u8,

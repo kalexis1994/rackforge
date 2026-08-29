@@ -391,6 +391,7 @@ struct KeyLabInput {
     source_name: String,
     ack_receiver: Receiver<()>,
     input_receiver: Receiver<PhysicalInputEvent>,
+    transport_receiver: Receiver<(HostActionTarget, ButtonPhase)>,
     rackforge_parameter_receiver: Receiver<RackForgeParameterInput>,
     semantic_feedback_receiver: Receiver<SemanticControlInput>,
 }
@@ -398,6 +399,43 @@ struct KeyLabInput {
 struct MidiForwarder {
     sender: Option<SyncSender<VirtualMidiMessage>>,
     worker: Option<thread::JoinHandle<()>>,
+}
+
+/// The mk3 transport strip as heard on the instrument itself (validated
+/// against the hardware, 2026-08-28): plain CCs on the MAIN MIDI port,
+/// channel 1, value 127 pressed / 0 released — not MCU notes on the
+/// MCU/HUI port, which stayed silent while every button was pressed.
+/// Unclaimed strip CCs (record 0x16, metro 0x1B, rewind 0x19, forward
+/// 0x1A, save 0x28, quant 0x29, undo 0x2A, redo 0x2B) keep logging as
+/// MIDI_SURFACE_UNCLAIMED until a target is claimed deliberately.
+const CC_TRANSPORT_STOP: u8 = 0x14;
+const CC_TRANSPORT_PLAY: u8 = 0x15;
+const CC_TRANSPORT_RECORD: u8 = 0x16;
+const CC_TRANSPORT_TAP: u8 = 0x17;
+const CC_TRANSPORT_LOOP: u8 = 0x18;
+
+fn keylab_transport_action(message: &[u8]) -> Option<(HostActionTarget, ButtonPhase)> {
+    let [status, controller, value] = message else {
+        return None;
+    };
+    if *status != 0xb0 {
+        return None;
+    }
+    let target = match *controller {
+        CC_TRANSPORT_PLAY => HostActionTarget::TransportPlay,
+        CC_TRANSPORT_STOP => HostActionTarget::TransportStop,
+        CC_TRANSPORT_TAP => HostActionTarget::TapTempo,
+        // Loop doubles as the performance FILL: held, never toggled.
+        CC_TRANSPORT_LOOP => HostActionTarget::SequencerFill,
+        CC_TRANSPORT_RECORD => HostActionTarget::SequencerCaptureToggle,
+        _ => return None,
+    };
+    let phase = if *value > 0 {
+        ButtonPhase::Press
+    } else {
+        ButtonPhase::Release
+    };
+    Some((target, phase))
 }
 
 /// The controller's MCU/HUI endpoint, bridged to the host sequencer.
@@ -434,11 +472,14 @@ fn open_transport_bridge() -> Option<TransportBridge> {
             move |_timestamp, message, _context| {
                 if let Some(action) = mcu::transport_action(message) {
                     let _ = sender.send(action);
-                } else if message.len() == 3 && message[0] & 0xf0 == 0x90 && message[2] > 0 {
-                    println!(
-                        "MCU_TRANSPORT_UNMAPPED note=0x{:02x} — a button waiting for a target",
-                        message[1]
-                    );
+                } else {
+                    // Hardware validation: everything the port says and the
+                    // table does not claim is evidence, not noise. Transport
+                    // presses are rare; log them raw and extend the table
+                    // deliberately.
+                    let hex: Vec<String> =
+                        message.iter().map(|byte| format!("{byte:02x}")).collect();
+                    println!("MCU_TRANSPORT_UNMAPPED raw=[{}]", hex.join(" "));
                 }
             },
             (),
@@ -555,6 +596,28 @@ fn apply_transport_action(
         return;
     }
     if phase != ButtonPhase::Press {
+        return;
+    }
+    if target == HostActionTarget::SequencerCaptureToggle {
+        // One REC button, per-lane capture: disarm whoever is armed,
+        // otherwise arm the host's focus lane (the deck's open tab).
+        let Some(status) = sequencer_status() else {
+            eprintln!("SEQUENCER_ACTION_FAILED reason=no status for REC");
+            return;
+        };
+        let armed = status
+            .lanes
+            .iter()
+            .position(|lane| lane.capturing)
+            .map(|lane| lane as u8);
+        let command = match armed {
+            Some(lane) => SequencerCommand::SetCapture { lane, on: false },
+            None => SequencerCommand::SetCapture {
+                lane: status.focus_lane,
+                on: true,
+            },
+        };
+        dispatch_sequencer_command(command);
         return;
     }
     match target {
@@ -1500,6 +1563,14 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                 }
             }
 
+            while let Ok((target, phase)) = input.transport_receiver.try_recv() {
+                apply_transport_action(
+                    target,
+                    phase,
+                    &mut transport_taps,
+                    transport_clock.elapsed().as_secs_f64(),
+                );
+            }
             if let Some(bridge) = transport_bridge.as_mut() {
                 while let Ok((target, phase)) = bridge.receiver.try_recv() {
                     apply_transport_action(
@@ -2893,6 +2964,7 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
     let (ack_sender, ack_receiver) = mpsc::channel();
     let (input_sender, input_receiver) = mpsc::channel();
     let (rackforge_parameter_sender, rackforge_parameter_receiver) = mpsc::channel();
+    let (transport_sender, transport_receiver) = mpsc::channel();
     let (semantic_feedback_sender, semantic_feedback_receiver) = mpsc::channel();
     let semantic_profile = controller::package_profile().semantic_profile.clone();
     let host_actions = controller::package_profile().host_actions.clone();
@@ -2911,6 +2983,10 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
             }
             if let Some(input) = parse_physical_input(message) {
                 let _ = input_sender.send(input);
+                consumed_by_surface = true;
+            }
+            if let Some(action) = keylab_transport_action(message) {
+                let _ = transport_sender.send(action);
                 consumed_by_surface = true;
             }
             if let Some(input) = parse_host_action(message, &host_actions) {
@@ -2953,6 +3029,17 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
             {
                 eprintln!("MIDI_FORWARD_QUEUE_FULL");
             }
+            // Hardware validation: surface-shaped traffic nobody claimed is
+            // evidence for the transport table. Keys and wheels stay quiet —
+            // only unclaimed CCs and SysEx (MMC lives there) get logged.
+            if !consumed_by_surface
+                && (message.first().is_some_and(|status| status & 0xf0 == 0xb0)
+                    || message.first() == Some(&0xf0))
+            {
+                let hex: Vec<String> =
+                    message.iter().map(|byte| format!("{byte:02x}")).collect();
+                println!("MIDI_SURFACE_UNCLAIMED raw=[{}]", hex.join(" "));
+            }
         },
         (),
     )?;
@@ -2962,6 +3049,7 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
         source_name: port.name.clone(),
         ack_receiver,
         input_receiver,
+        transport_receiver,
         rackforge_parameter_receiver,
         semantic_feedback_receiver,
     })

@@ -242,9 +242,33 @@ buttons are claimed deliberately. LED feedback is the standard DAW echo on
 the same port: the driver sends `90 5E 7F/00` and the inverse for Stop as
 the host transport starts and stops, polled at 2 Hz.
 
-**Hardware validation pending**: the note numbers follow the public MCU
-standard and the mk3's documented DAW mode; confirm on the instrument and
-extend the table from the unmapped log.
+**Hardware validation (2026-08-28, on the instrument)**: in the RackForge
+DAW session the mk3's transport strip does NOT emit MCU notes on the
+MCU/HUI port — that port stayed silent while every button was pressed.
+The strip speaks plain CCs on the MAIN MIDI port, channel 1, value 127
+pressed / 0 released:
+
+| Button | CC | Claimed as |
+| --- | ---: | --- |
+| Stop | `0x14` | `transport_stop` |
+| Play | `0x15` | `transport_play` |
+| Record | `0x16` | `sequencer_capture_toggle` (focus lane) |
+| Tap | `0x17` | `tap_tempo` |
+| Loop | `0x18` | `sequencer_fill` (held) |
+| Rewind | `0x19` | — (logged) |
+| Forward | `0x1A` | — (logged) |
+| Metro | `0x1B` | — (logged) |
+| Save | `0x28` | — (logged) |
+| Quant | `0x29` | — (logged) |
+| Undo | `0x2A` | — (logged) |
+| Redo | `0x2B` | — (logged) |
+
+The MCU bridge stays: a DAW-configured mk3 (or another MCU surface on
+that port) still reaches the same table. Unclaimed strip CCs log as
+`MIDI_SURFACE_UNCLAIMED raw=[..]`; MCU-port strays log as
+`MCU_TRANSPORT_UNMAPPED raw=[..]`. LED echo on the strip's RGB buttons
+needs the `04 01 16 <button_id>` id map for the transport ids and is
+not yet wired for the CC dialect.
 
 ## RackForge navigation contract
 

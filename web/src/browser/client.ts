@@ -36,6 +36,7 @@ import {
   HEADER,
   automaticWorkerCount,
   poolLayout,
+  deviceIsMobile,
   poolSupported,
   type WorkerInit,
 } from "./renderPool";
@@ -305,24 +306,70 @@ function storeFiles(files: SeedFile[], publishAssets: boolean): Promise<void> {
 let enginePort: MessagePort | null = null;
 let poolWorkers: Worker[] = [];
 
+/**
+ * What the pool is doing, for anyone who asks.
+ *
+ * The pool used to be unobservable: it counted every missed block into the
+ * shared header and nothing ever read that word, so an instrument rendering
+ * sequentially on one core looked exactly like one spread across four. The
+ * page owns the buffer, so the page is where the counter can be read without
+ * troubling the audio thread.
+ */
+interface RenderPoolReport {
+  isolated: boolean;
+  workers: number;
+  missedBlocks: number;
+  reason?: string;
+}
+
+let poolControl: Int32Array | null = null;
+let poolReason: string | undefined;
+
+export function renderPoolReport(): RenderPoolReport {
+  const isolated = poolSupported();
+  // A page that cannot host a pool should say so before an instrument asks
+  // for one, not after: the answer does not depend on what is loaded.
+  const reason = isolated
+    ? poolReason
+    : "this page is not cross-origin isolated, so instruments render on one core";
+  return {
+    isolated,
+    workers: poolWorkers.length,
+    missedBlocks: poolControl ? Atomics.load(poolControl, HEADER.MISSES) : 0,
+    reason,
+  };
+}
+
 function releaseRenderPool() {
   for (const worker of poolWorkers) worker.terminate();
   poolWorkers = [];
+  poolControl = null;
 }
 
 function buildRenderPool(request: PoolRequestEvent) {
   releaseRenderPool();
   if (!poolSupported()) {
-    // Not cross-origin isolated: no shared memory, so the host simply stays
-    // on its sequential path. Deliberately quiet — this is a capability of
-    // the deployment, not an error in it.
+    // Not cross-origin isolated: no shared memory, so the host stays on its
+    // sequential path. This is a capability of the deployment rather than an
+    // error in it, but staying quiet about it meant a player could wonder why
+    // a parallel instrument sounded like it was running on one core — because
+    // it was. Say it once, and answer for it in the runtime readout.
+    console.warn(
+      "rackforge render pool: the page is not cross-origin isolated, so a"
+        + " parallel instrument will render on the audio thread alone",
+    );
     return;
   }
+  poolReason = undefined;
   const workerCount = Math.min(
-    automaticWorkerCount(navigator.hardwareConcurrency || 2),
+    automaticWorkerCount(navigator.hardwareConcurrency || 2, deviceIsMobile()),
     request.geometry.maxUnits,
   );
-  if (workerCount < 1) return;
+  if (workerCount < 1) {
+    poolReason = "this machine has too few cores to spare one for rendering";
+    console.warn(`rackforge render pool: ${poolReason}`);
+    return;
+  }
   const layout = poolLayout(request.geometry);
   const buffer = new SharedArrayBuffer(layout.totalBytes);
   // The epoch lives in the buffer as well as in the messages: a worker's run
@@ -330,12 +377,14 @@ function buildRenderPool(request: PoolRequestEvent) {
   // never carried its epoch retired every worker on their first iteration —
   // ready bits set, then silence, which is exactly how it failed.
   new Int32Array(buffer, 0, HEADER.WORDS)[HEADER.EPOCH] = request.epoch;
+  poolControl = new Int32Array(buffer, 0, HEADER.WORDS);
   for (let index = 0; index < workerCount; index++) {
     const worker = new Worker(new URL("./render.worker.ts", import.meta.url), {
       type: "module",
       name: `rackforge-render-${index}`,
     });
     worker.onerror = (event) => {
+      poolReason = `render worker ${index} failed to start: ${event.message}`;
       console.error(`rackforge render worker ${index} failed to start:`, event.message);
     };
     const init: WorkerInit = {
@@ -1236,6 +1285,15 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
         stream_health: engine ? "healthy" : "lost",
         sample_rate: rate,
         buffer_size_frames: RENDER_FRAMES,
+        render_pool: (() => {
+          const report = renderPoolReport();
+          return {
+            isolated: report.isolated,
+            workers: report.workers,
+            missed_blocks: report.missedBlocks,
+            ...(report.reason ? { reason: report.reason } : {}),
+          };
+        })(),
       },
       runtime_status: engine ? "running" : "stopped",
     } satisfies HostAudioSettings as T;

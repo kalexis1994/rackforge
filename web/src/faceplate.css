@@ -2483,6 +2483,15 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Why the pool is not there. A sentence, so it sits as silkscreen under the
+   metrics rather than pretending to be one of them. */
+.host-runtime-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(var(--ink-rgb), 0.72);
+}
+
 /* Nothing is a pill: the kind tag is a stamped label, not a lozenge. */
 .plugin-kind-tag {
   border-radius: var(--fp-radius-key) !important;

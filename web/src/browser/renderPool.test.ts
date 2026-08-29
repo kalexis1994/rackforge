@@ -49,10 +49,23 @@ describe("the render pool layout", () => {
 
 describe("worker policy", () => {
   it("reserves cores for the audio and main threads and caps at four", () => {
-    expect(automaticWorkerCount(2)).toBe(1);
-    expect(automaticWorkerCount(4)).toBe(2);
-    expect(automaticWorkerCount(6)).toBe(4);
-    expect(automaticWorkerCount(16)).toBe(4);
+    expect(automaticWorkerCount(2, false)).toBe(1);
+    expect(automaticWorkerCount(4, false)).toBe(2);
+    expect(automaticWorkerCount(6, false)).toBe(4);
+    expect(automaticWorkerCount(16, false)).toBe(4);
+  });
+
+  /** Measured on a Galaxy S24 Ultra: a fixed load split across the pool took
+   *  7.69 ms on one worker, 4.26 on two, 5.25 on three and 4.32 on four. Two
+   *  is the whole of the win, because `collect` waits for every unit and a
+   *  slow core always holds one share. */
+  it("gives a phone two workers however many cores it advertises", () => {
+    expect(automaticWorkerCount(8, true)).toBe(2);
+    expect(automaticWorkerCount(16, true)).toBe(2);
+    expect(automaticWorkerCount(4, true)).toBe(2);
+    // Still never more than the cores can carry.
+    expect(automaticWorkerCount(3, true)).toBe(1);
+    expect(automaticWorkerCount(2, true)).toBe(1);
   });
 
   it("assigns every unit a stable owner inside the pool", () => {

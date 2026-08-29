@@ -5831,6 +5831,24 @@ function SettingsPage({
                   typeof runtime.midi_dropped_events === "number"
                     ? ["Dropped MIDI", String(runtime.midi_dropped_events)]
                     : null,
+                  // Whether the instrument is actually spread across cores.
+                  // Without this the sequential fallback is indistinguishable
+                  // from the pool, which is how a silent one went unnoticed.
+                  runtime.render_pool
+                    ? [
+                        "Render pool",
+                        runtime.render_pool.workers > 0
+                          ? `${runtime.render_pool.workers} worker${
+                              runtime.render_pool.workers === 1 ? "" : "s"
+                            }`
+                          : runtime.render_pool.isolated
+                            ? "sequential"
+                            : "sequential · unavailable",
+                      ]
+                    : null,
+                  runtime.render_pool && runtime.render_pool.workers > 0
+                    ? ["Late blocks", String(runtime.render_pool.missed_blocks)]
+                    : null,
                 ].filter((metric): metric is [string, string] => metric !== null);
                 return (
                   <section className={`host-runtime-health ${health}`} aria-label="Audio runtime health">
@@ -5850,6 +5868,9 @@ function SettingsPage({
                           </div>
                         ))}
                       </dl>
+                    ) : null}
+                    {runtime.render_pool?.reason ? (
+                      <p className="host-runtime-note">{runtime.render_pool.reason}</p>
                     ) : null}
                   </section>
                 );

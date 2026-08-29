@@ -360,20 +360,33 @@
    the plugin under it. The base layout sat program and plugin side by side,
    which crushed the program to three glyphs while the plugin name wrapped —
    backwards, since the program is the thing a player glances down for. */
+/* The readout is a screen, and a screen has a size: it holds its width
+   whatever is playing, so the bar never shifts when a program name
+   changes under it. Names truncate inside the glass instead. */
 .now-playing {
   display: grid !important;
   grid-template-columns: minmax(0, 1fr) !important;
   gap: 2px !important;
   align-items: start !important;
+  flex: 0 0 288px !important;
+  width: 288px !important;
+  max-width: 100%;
+}
+
+/* Below the compact breakpoint the bar needs the room back. */
+@media (max-width: 760px), (orientation: landscape) and (max-height: 600px) and (max-width: 1200px) {
+  .now-playing {
+    flex: 1 1 auto !important;
+    width: auto !important;
+  }
 }
 
 .now-playing .eyebrow {
   grid-column: auto !important;
 }
 
-/* The program truncates as late as possible: the full window width, and two
-   lines of it before the ellipsis. A name that still does not fit is genuinely
-   long, and two lines is what the window can give without growing the bar. */
+/* The program takes one line of the window and ends in an ellipsis: a
+   fixed screen must not reflow into a taller one. */
 .now-playing strong {
   color: var(--lcd-phos) !important;
   font-family: var(--mono-font);
@@ -382,12 +395,10 @@
   line-height: 1.15;
   letter-spacing: 0.03em;
   text-shadow: 0 0 7px var(--lcd-bloom);
-  white-space: normal !important;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  display: block;
+  white-space: nowrap !important;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The plugin is context, not the headline: one dim line, no descriptions. */
@@ -5293,21 +5304,30 @@
 
 /* The tie bar grows to the right, under the note, across the steps the
    note sustains through. */
-.melodic-step-tie {
-  position: absolute;
-  left: 6px;
-  bottom: 5px;
-  height: 3px;
-  border-radius: 1px;
-  background: currentColor;
+/* A held note reads like a piano roll: the FILL is the duration. The
+   steps it covers wear a dimmer shade of the same light, so the run is
+   one gesture — no line is drawn across territory, which is what used to
+   escape the block and flip colour against whatever it crossed. */
+.melodic-step.sustained {
+  background: color-mix(in srgb, var(--acid) 42%, var(--panel-inset));
+  border-color: color-mix(in srgb, var(--acid) 45%, var(--line));
+}
+
+.melodic-step.sustained .melodic-step-note {
   opacity: 0;
 }
 
-/* A single step wears a stub; a tie stretches to end just inside its
-   last covered step — the width is computed inline for ANY duration, so
-   a captured x3 or x5 never spills past its own territory. */
-.melodic-step.on .melodic-step-tie { width: 10px; opacity: 0.45; }
-.melodic-step.on .melodic-step-tie.tied { opacity: 0.8; z-index: 1; }
+/* How many steps the note holds, engraved in its own block. */
+.melodic-step-length {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  font: 700 9px/1 var(--mono-font);
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 
 .melodic-cluster {
   display: flex;

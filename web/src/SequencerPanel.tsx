@@ -1381,6 +1381,16 @@ function MelodicLane({
           {Array.from({ length: steps }, (_, step) => {
             const stepNote = melodicStepNote(pattern, step);
             const ties = stepNote ? Math.round(stepNote.duration_ticks / STEP_TICKS) : 1;
+            // A held note reads like a piano roll: every step it covers
+            // paints its OWN segment, so a long note never draws a line
+            // across territory that is not its own.
+            const tick = step * STEP_TICKS;
+            const heldBy = stepNote
+              ? null
+              : pattern.notes.find(
+                  (candidate) =>
+                    candidate.tick < tick && candidate.tick + candidate.duration_ticks > tick,
+                );
             return (
               <button
                 key={step}
@@ -1395,25 +1405,28 @@ function MelodicLane({
                   stepNote && stepNote.velocity <= MELODIC_VELOCITIES[0] ? "soft" : "",
                   stepNote && (stepNote.probability ?? 100) < 100 ? "chance" : "",
                   stepNote && conditionLabel(stepNote.condition) !== "ALWAYS" ? "conditional" : "",
+                  heldBy ? "sustained" : "",
                   step === playhead ? "playhead" : "",
                 ].join(" ").replace(/\s+/g, " ").trim()}
                 onClick={() => press(step)}
                 onContextMenu={(event) => {
                   event.preventDefault();
-                  if (stepNote) onEdit(clearMelodicStep(pattern, step));
+                  // A held step answers for the note holding it.
+                  const owner = stepNote ? step : heldBy ? heldBy.tick / STEP_TICKS : null;
+                  if (owner !== null) onEdit(clearMelodicStep(pattern, owner));
                 }}
-                title={stepNote ? "Right-click clears the note" : undefined}
+                title={
+                  stepNote
+                    ? "Right-click clears the note"
+                    : heldBy
+                      ? `Held by ${noteName(heldBy.key)} — right-click clears it`
+                      : undefined
+                }
               >
                 <span className="melodic-step-note">{stepNote ? noteName(stepNote.key) : "·"}</span>
-                <span
-                  className={`melodic-step-tie${ties > 1 ? " tied" : ""}`}
-                  style={
-                    ties > 1
-                      ? { width: `calc(${ties * 100}% + ${(ties - 1) * 3 - 12}px)` }
-                      : undefined
-                  }
-                  aria-hidden="true"
-                />
+                {stepNote && ties > 1 ? (
+                  <span className="melodic-step-length" aria-hidden="true">{`×${ties}`}</span>
+                ) : null}
               </button>
             );
           })}

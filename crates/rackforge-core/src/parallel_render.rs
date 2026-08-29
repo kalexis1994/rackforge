@@ -2090,20 +2090,39 @@ mod tests {
             (worst, telemetry.snapshot_and_reset(), elapsed)
         };
 
-        // The previous scheduler could not split a plugin: the heavy
-        // instrument was one indivisible job, so its worker carried
-        // 5 x unit_ns alone while the others idled after their lights.
-        let (old_worst, old_snapshot, _) = run(vec![
-            MockSlot::single(5 * unit_ns),
-            MockSlot::single(light_ns),
-            MockSlot::single(light_ns),
-        ]);
-        // The unit-aware scheduler: same total work, five stealable units.
-        let (new_worst, new_snapshot, new_elapsed) = run(vec![
-            MockSlot::parallel(5, 0b11111, unit_ns),
-            MockSlot::single(light_ns),
-            MockSlot::single(light_ns),
-        ]);
+        // A wall-clock comparison on a shared runner is noisy: one stolen
+        // timeslice in the wrong run flips it. The structural claims stay
+        // strict on every attempt; the speed claim gets three tries.
+        let mut attempt = 0;
+        let (old_worst, old_snapshot, new_worst, new_snapshot, new_elapsed) = loop {
+            attempt += 1;
+            // The previous scheduler could not split a plugin: the heavy
+            // instrument was one indivisible job, so its worker carried
+            // 5 x unit_ns alone while the others idled after their lights.
+            let (old_worst, old_snapshot, _) = run(vec![
+                MockSlot::single(5 * unit_ns),
+                MockSlot::single(light_ns),
+                MockSlot::single(light_ns),
+            ]);
+            // The unit-aware scheduler: same total work, five stealable units.
+            let (new_worst, new_snapshot, new_elapsed) = run(vec![
+                MockSlot::parallel(5, 0b11111, unit_ns),
+                MockSlot::single(light_ns),
+                MockSlot::single(light_ns),
+            ]);
+            if new_worst < old_worst * 8 / 10 || attempt >= 3 {
+                break (
+                    old_worst,
+                    old_snapshot,
+                    new_worst,
+                    new_snapshot,
+                    new_elapsed,
+                );
+            }
+            eprintln!(
+                "noisy runner (attempt {attempt}): unit-aware {new_worst}ns vs                  indivisible {old_worst}ns; retrying"
+            );
+        };
 
         let report = |label: &str, worst: u64, snapshot: &TelemetrySnapshot| {
             println!(

@@ -855,9 +855,10 @@ impl BrowserHost {
             _ => {}
         }
         let active_notes = notes.len() as u16;
-        self.feed_sequencer_input([message.status, message.data1, message.data2], 3);
-        self.audio
-            .push_midi(0, [message.status, message.data1, message.data2], 3);
+        if !self.feed_sequencer_input([message.status, message.data1, message.data2], 3) {
+            self.audio
+                .push_midi(0, [message.status, message.data1, message.data2], 3);
+        }
         Ok(ControlResponse::VirtualMidiAccepted {
             client_id,
             active_notes,
@@ -1382,22 +1383,27 @@ impl BrowserHost {
         Ok(warnings)
     }
 
-    /// Queues one live MIDI message for the next audio block.
+    /// Queues one live MIDI message for the next audio block. A note a
+    /// FOLLOW lane claims is a conducting gesture and stops here.
     pub fn push_midi(&mut self, frame: u32, data: [u8; 3], length: u8) {
-        self.feed_sequencer_input(data, length);
+        if self.feed_sequencer_input(data, length) {
+            return;
+        }
         self.audio.push_midi(frame, data, length);
     }
 
     /// Key-follow lanes listen to the player's keyboard: every live note
-    /// that reaches the instrument also reaches the engine's gate.
-    fn feed_sequencer_input(&mut self, data: [u8; 3], length: u8) {
+    /// that reaches the instrument also reaches the engine's gate. True
+    /// when a FOLLOW lane claimed the note.
+    fn feed_sequencer_input(&mut self, data: [u8; 3], length: u8) -> bool {
         if length < 3 {
-            return;
+            return false;
         }
+        let channel = data[0] & 0x0f;
         match data[0] & 0xf0 {
-            0x90 if data[2] > 0 => self.sequencer.note_input(data[1], data[2], true),
-            0x80 | 0x90 => self.sequencer.note_input(data[1], 0, false),
-            _ => {}
+            0x90 if data[2] > 0 => self.sequencer.note_input(channel, data[1], data[2], true),
+            0x80 | 0x90 => self.sequencer.note_input(channel, data[1], 0, false),
+            _ => false,
         }
     }
 

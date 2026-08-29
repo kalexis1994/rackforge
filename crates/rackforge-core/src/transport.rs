@@ -412,9 +412,17 @@ mod tests {
         assert_eq!(
             marks,
             vec![
-                BeatMark { frame: 0, beat: 0, is_bar: true },
+                BeatMark {
+                    frame: 0,
+                    beat: 0,
+                    is_bar: true
+                },
                 // 24 000 = 5 * 4 096 + 3 520: the mark lands mid-block.
-                BeatMark { frame: 3_520, beat: 1, is_bar: false },
+                BeatMark {
+                    frame: 3_520,
+                    beat: 1,
+                    is_bar: false
+                },
             ]
         );
     }
@@ -427,7 +435,14 @@ mod tests {
         // The next block crosses beat one at offset 1 000.
         let block = clock.advance(4_096);
         assert_eq!(block.marks().len(), 1);
-        assert_eq!(block.marks()[0], BeatMark { frame: 1_000, beat: 1, is_bar: false });
+        assert_eq!(
+            block.marks()[0],
+            BeatMark {
+                frame: 1_000,
+                beat: 1,
+                is_bar: false
+            }
+        );
     }
 
     #[test]
@@ -436,7 +451,11 @@ mod tests {
         clock.set_signature(TimeSignature::new(3, 4).expect("valid"));
         clock.start();
         let marks = run(&mut clock, 24_000 * 10);
-        let bars: Vec<u64> = marks.iter().filter(|mark| mark.is_bar).map(|mark| mark.beat).collect();
+        let bars: Vec<u64> = marks
+            .iter()
+            .filter(|mark| mark.is_bar)
+            .map(|mark| mark.beat)
+            .collect();
         assert_eq!(bars, vec![0, 3, 6, 9]);
     }
 
@@ -448,7 +467,10 @@ mod tests {
         let before = clock.position_beats();
         clock.set_tempo(240.0);
         let after = clock.position_beats();
-        assert!((before - after).abs() < 1e-9, "position moved on tempo change");
+        assert!(
+            (before - after).abs() < 1e-9,
+            "position moved on tempo change"
+        );
         // At 240 bpm a beat is 12 000 frames: beat 2 lands 6 000 frames on.
         let marks = run(&mut clock, 12_000);
         assert_eq!(marks.len(), 1);

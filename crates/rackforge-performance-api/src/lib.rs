@@ -860,8 +860,9 @@ pub struct SongPart {
     pub patterns: Vec<SongPartPatternBinding>,
 }
 
-const LANE_NAMES: [&str; MAX_PART_PATTERN_BINDINGS] =
-    ["lane 1", "lane 2", "lane 3", "lane 4", "lane 5", "lane 6", "lane 7", "lane 8"];
+const LANE_NAMES: [&str; MAX_PART_PATTERN_BINDINGS] = [
+    "lane 1", "lane 2", "lane 3", "lane 4", "lane 5", "lane 6", "lane 7", "lane 8",
+];
 
 impl SongPart {
     fn validate(&self) -> Result<(), PerformanceError> {
@@ -1064,7 +1065,10 @@ pub struct PatternNoteSpec {
     #[serde(default)]
     pub channel: u8,
     /// Chance this step fires, 1..=100. Rolled deterministically per pass.
-    #[serde(default = "default_probability", skip_serializing_if = "probability_is_default")]
+    #[serde(
+        default = "default_probability",
+        skip_serializing_if = "probability_is_default"
+    )]
     pub probability: u8,
     #[serde(default, skip_serializing_if = "condition_is_default")]
     pub condition: TrigCondition,
@@ -2086,13 +2090,14 @@ mod tests {
         }];
         library.validate().expect("a resolvable binding validates");
         assert_eq!(
-            library.resolve_part(&LiveLocation::Song {
-                song_id: library.songs[0].id.clone(),
-                part_id: library.songs[0].parts[0].id.clone(),
-            })
-            .expect("the part resolves")
-            .patterns
-            .len(),
+            library
+                .resolve_part(&LiveLocation::Song {
+                    song_id: library.songs[0].id.clone(),
+                    part_id: library.songs[0].parts[0].id.clone(),
+                })
+                .expect("the part resolves")
+                .patterns
+                .len(),
             1
         );
 
@@ -2111,8 +2116,14 @@ mod tests {
         ));
 
         library.songs[0].parts[0].patterns = vec![
-            SongPartPatternBinding { lane: 1, pattern_id: pattern_id.clone() },
-            SongPartPatternBinding { lane: 1, pattern_id },
+            SongPartPatternBinding {
+                lane: 1,
+                pattern_id: pattern_id.clone(),
+            },
+            SongPartPatternBinding {
+                lane: 1,
+                pattern_id,
+            },
         ];
         assert!(library.validate().is_err(), "one pattern per lane per Part");
     }

@@ -43,9 +43,9 @@ use rackforge_control_api::{
     SequencerStatusV1,
 };
 use rackforge_performance_api::{
-    FollowAction, MAX_NOTE_LOCKS, MAX_PART_PATTERN_BINDINGS, MAX_PATTERN_NOTES,
-    MAX_PATTERN_TICKS, PATTERN_SWING_MAX, PATTERN_SWING_STRAIGHT, PATTERN_TICKS_PER_BEAT,
-    PatternDefinition, SongPart, TrigCondition,
+    FollowAction, MAX_NOTE_LOCKS, MAX_PART_PATTERN_BINDINGS, MAX_PATTERN_NOTES, MAX_PATTERN_TICKS,
+    PATTERN_SWING_MAX, PATTERN_SWING_STRAIGHT, PATTERN_TICKS_PER_BEAT, PatternDefinition, SongPart,
+    TrigCondition,
 };
 use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use std::sync::Arc;
@@ -116,8 +116,11 @@ impl CompiledPattern {
             // Swing is baked here, at the trust boundary: the grid stays
             // straight in the document, the off-sixteenths land late in the
             // compiled timeline, and the render path never re-computes it.
-            let swing =
-                f64::from(document.swing_percent.clamp(PATTERN_SWING_STRAIGHT, PATTERN_SWING_MAX));
+            let swing = f64::from(
+                document
+                    .swing_percent
+                    .clamp(PATTERN_SWING_STRAIGHT, PATTERN_SWING_MAX),
+            );
             let pair = TICKS_PER_BEAT / 2;
             let off = TICKS_PER_BEAT / 4;
             let swung_tick = if note.tick % pair == off {
@@ -126,7 +129,10 @@ impl CompiledPattern {
                 f64::from(note.tick)
             };
             let start_beat = swung_tick / f64::from(TICKS_PER_BEAT);
-            let end_tick = note.tick.saturating_add(note.duration_ticks).min(document.length_ticks);
+            let end_tick = note
+                .tick
+                .saturating_add(note.duration_ticks)
+                .min(document.length_ticks);
             notes.push(CompiledNote {
                 start_beat,
                 duration_beats: (end_tick - note.tick) as f64 / TICKS_PER_BEAT as f64,
@@ -339,7 +345,12 @@ impl SequencerLane {
             FollowAction::AnySlot => {
                 // The same seeded die as the trig grammar: the jump sequence
                 // is a property of the pattern, not of the night.
-                let roll = trig_roll(self.follow_jumps, 0xF0110, self.active_slot as u8, self.channel);
+                let roll = trig_roll(
+                    self.follow_jumps,
+                    0xF0110,
+                    self.active_slot as u8,
+                    self.channel,
+                );
                 Some(loaded[usize::from(roll) % loaded.len()])
             }
         }
@@ -496,7 +507,14 @@ impl SequencerLane {
 
         // 1. Pay the offs owed from earlier blocks first, so the held-note
         // room they release is available to this block's notes.
-        pay_due_offs(&mut self.held, end_beat, start_beat, frames_per_beat, frames, &mut staged);
+        pay_due_offs(
+            &mut self.held,
+            end_beat,
+            start_beat,
+            frames_per_beat,
+            frames,
+            &mut staged,
+        );
 
         // Capture bookkeeping: inputs that arrived since the last block are
         // stamped with this block's opening beat — the finest truth the
@@ -602,10 +620,7 @@ impl SequencerLane {
         // transposes so the phrase's root is the last-pressed key.
         let transpose = match self.follow {
             None => Some(None),
-            Some(scale) => self
-                .input_keys
-                .last()
-                .map(|&played| Some((played, scale))),
+            Some(scale) => self.input_keys.last().map(|&played| Some((played, scale))),
         };
         if let (Some(playing), Some(transpose)) = (&self.playing, transpose) {
             emit_pattern_notes(
@@ -632,7 +647,14 @@ impl SequencerLane {
 
         // 4. A note born in this block may owe its off inside it too — a
         // debt is paid the block it falls due, never the block after.
-        pay_due_offs(&mut self.held, end_beat, start_beat, frames_per_beat, frames, &mut staged);
+        pay_due_offs(
+            &mut self.held,
+            end_beat,
+            start_beat,
+            frames_per_beat,
+            frames,
+            &mut staged,
+        );
 
         // 5. Frame order, offs first on ties.
         staged.sort_unstable_by(|a, b| a.frame.cmp(&b.frame).then(a.on.cmp(&b.on)));
@@ -1245,7 +1267,11 @@ impl SequencerEngine {
         let start_beat = block.start_beat;
         if block.running && !self.clock_was_running {
             // A start edge: 0xFA from the top, 0xFB when resuming mid-song.
-            let byte = if start_beat <= f64::EPSILON { 0xfa } else { 0xfb };
+            let byte = if start_beat <= f64::EPSILON {
+                0xfa
+            } else {
+                0xfb
+            };
             clock_out.push(realtime(0, byte));
             self.next_clock_tick = (start_beat / TICK).ceil() as u64;
         }
@@ -1262,7 +1288,9 @@ impl SequencerEngine {
             if pulse_beat >= end_beat {
                 break;
             }
-            let offset = ((pulse_beat - start_beat) * frames_per_beat).max(0.0).round() as u32;
+            let offset = ((pulse_beat - start_beat) * frames_per_beat)
+                .max(0.0)
+                .round() as u32;
             clock_out.push(realtime(offset.min(frames - 1), 0xf8));
             self.next_clock_tick += 1;
         }
@@ -1352,7 +1380,14 @@ mod tests {
         let mut beat = start_beat;
         for block in 0..blocks {
             let mut out = Vec::with_capacity(MAX_EVENTS_PER_BLOCK);
-            lane.render_block(beat, frames_per_beat, frames, false, &mut out, &mut Vec::new());
+            lane.render_block(
+                beat,
+                frames_per_beat,
+                frames,
+                false,
+                &mut out,
+                &mut Vec::new(),
+            );
             for event in out {
                 all.push((block, event.frame, event.data));
             }
@@ -1373,9 +1408,9 @@ mod tests {
                 key: 60,
                 velocity: 100,
                 channel: 0,
-                    probability: 100,
-                    condition: rackforge_performance_api::TrigCondition::Always,
-                    locks: Vec::new(),
+                probability: 100,
+                condition: rackforge_performance_api::TrigCondition::Always,
+                locks: Vec::new(),
             }],
             view: Default::default(),
             swing_percent: 50,
@@ -1385,7 +1420,10 @@ mod tests {
         };
         let mut zero_length = base.clone();
         zero_length.length_ticks = 0;
-        assert_eq!(CompiledPattern::compile(&zero_length).err(), Some(PatternError::Length));
+        assert_eq!(
+            CompiledPattern::compile(&zero_length).err(),
+            Some(PatternError::Length)
+        );
         let mut outside = base.clone();
         outside.notes[0].tick = TICKS_PER_BEAT;
         assert_eq!(
@@ -1394,10 +1432,16 @@ mod tests {
         );
         let mut silent = base.clone();
         silent.notes[0].velocity = 0;
-        assert_eq!(CompiledPattern::compile(&silent).err(), Some(PatternError::NoteValues));
+        assert_eq!(
+            CompiledPattern::compile(&silent).err(),
+            Some(PatternError::NoteValues)
+        );
         let mut still = base.clone();
         still.notes[0].duration_ticks = 0;
-        assert_eq!(CompiledPattern::compile(&still).err(), Some(PatternError::ZeroDuration));
+        assert_eq!(
+            CompiledPattern::compile(&still).err(),
+            Some(PatternError::ZeroDuration)
+        );
         assert!(CompiledPattern::compile(&base).is_ok());
     }
 
@@ -1407,7 +1451,9 @@ mod tests {
         engine
             .apply(&SequencerCommand::SetCapture { lane: 0, on: true })
             .expect("arm");
-        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        engine
+            .apply(&SequencerCommand::TransportStart)
+            .expect("start");
         assert!(engine.status().lanes[0].capturing);
 
         let mut out = Vec::new();
@@ -1477,7 +1523,9 @@ mod tests {
     #[test]
     fn the_clock_conducts_at_24_ppqn_with_exact_edges() {
         let mut engine = SequencerEngine::new(48_000.0).expect("engine");
-        engine.apply(&SequencerCommand::SetClockOut { on: true }).expect("sync on");
+        engine
+            .apply(&SequencerCommand::SetClockOut { on: true })
+            .expect("sync on");
         let mut out = Vec::new();
         let mut params = Vec::new();
         let mut clock = Vec::new();
@@ -1488,7 +1536,9 @@ mod tests {
 
         // Start from the top: 0xFA, then a pulse every 1 000 frames at
         // 120 bpm / 48 kHz (24 000 frames per beat / 24).
-        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        engine
+            .apply(&SequencerCommand::TransportStart)
+            .expect("start");
         clock.clear();
         engine.render_block(12_000, &mut out, &mut params, &mut clock);
         assert_eq!(clock[0].data[0], 0xfa);
@@ -1508,11 +1558,18 @@ mod tests {
         assert_eq!(pulses, (0..12).map(|tick| tick * 1_000).collect::<Vec<_>>());
 
         // Stop sends its edge once; resuming mid-song is a continue.
-        engine.apply(&SequencerCommand::TransportStop).expect("stop");
+        engine
+            .apply(&SequencerCommand::TransportStop)
+            .expect("stop");
         clock.clear();
         engine.render_block(12_000, &mut out, &mut params, &mut clock);
-        assert_eq!(clock.iter().map(|e| e.data[0]).collect::<Vec<_>>(), vec![0xfc]);
-        engine.apply(&SequencerCommand::TransportStart).expect("resume");
+        assert_eq!(
+            clock.iter().map(|e| e.data[0]).collect::<Vec<_>>(),
+            vec![0xfc]
+        );
+        engine
+            .apply(&SequencerCommand::TransportStart)
+            .expect("resume");
         clock.clear();
         engine.render_block(12_000, &mut out, &mut params, &mut clock);
         assert_eq!(clock[0].data[0], 0xfb);
@@ -1557,7 +1614,9 @@ mod tests {
                 pattern: b,
             })
             .expect("load B");
-        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        engine
+            .apply(&SequencerCommand::TransportStart)
+            .expect("start");
 
         // Half-beat blocks (the transport's contract caps block size):
         // cycles 0 and 1 are A, everything after is B, each note on the
@@ -1577,17 +1636,14 @@ mod tests {
         }
         assert_eq!(
             ons,
-            vec![
-                (0, 36, 0),
-                (2, 36, 0),
-                (4, 38, 0),
-                (6, 38, 0),
-                (8, 38, 0),
-            ],
+            vec![(0, 36, 0), (2, 36, 0), (4, 38, 0), (6, 38, 0), (8, 38, 0),],
             "the handover lands exactly on the cycle boundary"
         );
         assert_eq!(engine.status().lanes[0].active_slot, 1);
-        assert_eq!(engine.status().lanes[0].pattern_name.as_deref(), Some("four-b"));
+        assert_eq!(
+            engine.status().lanes[0].pattern_name.as_deref(),
+            Some("four-b")
+        );
     }
 
     #[test]
@@ -1630,8 +1686,16 @@ mod tests {
         // Both frozen knobs land on the note's exact frame, values intact.
         assert_eq!(params.len(), 2);
         assert!(params.iter().all(|event| event.frame == note_frame));
-        assert!(params.iter().any(|e| e.parameter_index == 3 && (e.value - 0.42).abs() < 1e-12));
-        assert!(params.iter().any(|e| e.parameter_index == 7 && (e.value - 12_000.0).abs() < 1e-9));
+        assert!(
+            params
+                .iter()
+                .any(|e| e.parameter_index == 3 && (e.value - 0.42).abs() < 1e-12)
+        );
+        assert!(
+            params
+                .iter()
+                .any(|e| e.parameter_index == 7 && (e.value - 12_000.0).abs() < 1e-9)
+        );
 
         // A skipped step keeps its knobs frozen: no note, no lock.
         let mut chance = document.clone();
@@ -1674,7 +1738,9 @@ mod tests {
         assert_eq!(status.lanes[0].pattern_name.as_deref(), Some("four"));
 
         // The B jump: active slot moves, the pad's relaunch target with it.
-        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        engine
+            .apply(&SequencerCommand::TransportStart)
+            .expect("start");
         engine
             .apply(&SequencerCommand::LaunchSlot {
                 lane: 0,
@@ -1757,7 +1823,14 @@ mod tests {
             let mut beat = 0.0;
             for cycle in 0..4 {
                 let mut out = Vec::new();
-                lane.render_block(beat, frames_per_beat, 24_000, fill, &mut out, &mut Vec::new());
+                lane.render_block(
+                    beat,
+                    frames_per_beat,
+                    24_000,
+                    fill,
+                    &mut out,
+                    &mut Vec::new(),
+                );
                 for event in out {
                     if event.data[0] == 0x90 {
                         all.push((cycle, event.data[1]));
@@ -1802,7 +1875,7 @@ mod tests {
             channel: 0,
             probability: 50,
             condition: TrigCondition::Always,
-                locks: Vec::new(),
+            locks: Vec::new(),
         }];
         let roll_run = || {
             let mut lane = SequencerLane::new();
@@ -1821,7 +1894,10 @@ mod tests {
         };
         let first = roll_run();
         assert_eq!(first, roll_run(), "the die must be seeded, not random");
-        assert!(!first.is_empty() && first.len() < 32, "a 50 is neither 0 nor 100");
+        assert!(
+            !first.is_empty() && first.len() < 32,
+            "a 50 is neither 0 nor 100"
+        );
     }
 
     #[test]
@@ -1837,9 +1913,9 @@ mod tests {
             key: 48,
             velocity: 100,
             channel: 0,
-                    probability: 100,
-                    condition: rackforge_performance_api::TrigCondition::Always,
-                    locks: Vec::new(),
+            probability: 100,
+            condition: rackforge_performance_api::TrigCondition::Always,
+            locks: Vec::new(),
         }];
         engine
             .apply(&SequencerCommand::QueuePattern {
@@ -1854,12 +1930,17 @@ mod tests {
                 scale: Some(SequencerScale::Chromatic),
             })
             .expect("follow");
-        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        engine
+            .apply(&SequencerCommand::TransportStart)
+            .expect("start");
 
         // Gate closed: a full bar of silence.
         let mut out = Vec::new();
         engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
-        assert!(out.is_empty(), "a follow lane must be silent with no key held");
+        assert!(
+            out.is_empty(),
+            "a follow lane must be silent with no key held"
+        );
         assert!(engine.status().lanes[0].following);
         assert!(!engine.status().lanes[0].playing);
 
@@ -1885,7 +1966,10 @@ mod tests {
 
         // Scale snap: a phrase note a minor third over the root, held on F2
         // in F major, snaps 56 (G#) down to 55 (G).
-        assert_eq!(snap_to_scale(48 + 5 + 3, 53, SequencerScale::Major), Some(55));
+        assert_eq!(
+            snap_to_scale(48 + 5 + 3, 53, SequencerScale::Major),
+            Some(55)
+        );
         assert_eq!(snap_to_scale(200, 53, SequencerScale::Major), None);
     }
 
@@ -1900,9 +1984,9 @@ mod tests {
                 key: 36,
                 velocity: 100,
                 channel: 0,
-                    probability: 100,
-                    condition: rackforge_performance_api::TrigCondition::Always,
-                    locks: Vec::new(),
+                probability: 100,
+                condition: rackforge_performance_api::TrigCondition::Always,
+                locks: Vec::new(),
             },
             rackforge_performance_api::PatternNoteSpec {
                 tick: TICKS_PER_BEAT / 4, // the off-sixteenth
@@ -1910,9 +1994,9 @@ mod tests {
                 key: 38,
                 velocity: 100,
                 channel: 0,
-                    probability: 100,
-                    condition: rackforge_performance_api::TrigCondition::Always,
-                    locks: Vec::new(),
+                probability: 100,
+                condition: rackforge_performance_api::TrigCondition::Always,
+                locks: Vec::new(),
             },
             rackforge_performance_api::PatternNoteSpec {
                 tick: TICKS_PER_BEAT / 2, // the next pair's downbeat
@@ -1920,9 +2004,9 @@ mod tests {
                 key: 42,
                 velocity: 100,
                 channel: 0,
-                    probability: 100,
-                    condition: rackforge_performance_api::TrigCondition::Always,
-                    locks: Vec::new(),
+                probability: 100,
+                condition: rackforge_performance_api::TrigCondition::Always,
+                locks: Vec::new(),
             },
         ];
         document.swing_percent = 66;
@@ -2003,9 +2087,9 @@ mod tests {
                 key: 60,
                 velocity: 90,
                 channel: 0,
-                    probability: 100,
-                    condition: rackforge_performance_api::TrigCondition::Always,
-                    locks: Vec::new(),
+                probability: 100,
+                condition: rackforge_performance_api::TrigCondition::Always,
+                locks: Vec::new(),
             }],
             view: Default::default(),
             swing_percent: 50,
@@ -2071,9 +2155,9 @@ mod tests {
                 key: 60,
                 velocity: 100,
                 channel: 0,
-                    probability: 100,
-                    condition: rackforge_performance_api::TrigCondition::Always,
-                    locks: Vec::new(),
+                probability: 100,
+                condition: rackforge_performance_api::TrigCondition::Always,
+                locks: Vec::new(),
             }],
             view: Default::default(),
             swing_percent: 50,
@@ -2129,7 +2213,6 @@ mod tests {
         assert!(lane.dropped_notes() > 0);
     }
 
-
     #[test]
     fn rendering_is_deterministic() {
         let run = || {
@@ -2178,7 +2261,9 @@ mod tests {
                 quantize: SequencerQuantize::NextBar,
             })
             .expect("queue accepted");
-        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        engine
+            .apply(&SequencerCommand::TransportStart)
+            .expect("start");
         let mut out = Vec::new();
         engine.render_block(4_096, &mut out, &mut Vec::new(), &mut Vec::new());
         // At bar one beat zero the pattern begins on frame 0.
@@ -2189,15 +2274,22 @@ mod tests {
 
         // Stop: silence is owed at the top of the next block, the pattern
         // stays armed.
-        engine.apply(&SequencerCommand::TransportStop).expect("stop");
+        engine
+            .apply(&SequencerCommand::TransportStop)
+            .expect("stop");
         out.clear();
         engine.render_block(4_096, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(out.iter().all(|event| event.data[0] == 0x80));
         assert!(!out.is_empty(), "the sounding note was left ringing");
-        assert!(engine.status().lanes[0].playing, "stop must not clear the lane");
+        assert!(
+            engine.status().lanes[0].playing,
+            "stop must not clear the lane"
+        );
 
         // Panic instead clears everything.
-        engine.apply(&SequencerCommand::TransportPanic).expect("panic");
+        engine
+            .apply(&SequencerCommand::TransportPanic)
+            .expect("panic");
         out.clear();
         engine.render_block(4_096, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(!engine.status().lanes[0].playing);
@@ -2231,14 +2323,23 @@ mod tests {
         // Mute is a toggle against what the host reports right now.
         assert_eq!(
             host_action_command(Target::SequencerMuteLane { lane: 1 }, &status),
-            Some(SequencerCommand::SetLaneMuted { lane: 1, muted: true })
+            Some(SequencerCommand::SetLaneMuted {
+                lane: 1,
+                muted: true
+            })
         );
         engine
-            .apply(&SequencerCommand::SetLaneMuted { lane: 1, muted: true })
+            .apply(&SequencerCommand::SetLaneMuted {
+                lane: 1,
+                muted: true,
+            })
             .expect("mute");
         assert_eq!(
             host_action_command(Target::SequencerMuteLane { lane: 1 }, &engine.status()),
-            Some(SequencerCommand::SetLaneMuted { lane: 1, muted: false })
+            Some(SequencerCommand::SetLaneMuted {
+                lane: 1,
+                muted: false
+            })
         );
         // Taps are the host's business, not a command.
         assert_eq!(host_action_command(Target::TapTempo, &status), None);
@@ -2251,9 +2352,7 @@ mod tests {
 
     #[test]
     fn a_part_activation_queues_what_it_binds_and_skips_what_left() {
-        use rackforge_performance_api::{
-            PatternId, RackId, SongPartId, SongPartPatternBinding,
-        };
+        use rackforge_performance_api::{PatternId, RackId, SongPartId, SongPartPatternBinding};
         let library_patterns = vec![definition()];
         let part = SongPart {
             id: SongPartId::new("part.chorus").expect("valid id"),
@@ -2294,7 +2393,10 @@ mod tests {
             engine.apply(command).expect("part command accepted");
         }
         assert!(engine.status().lanes[2].queued);
-        assert_eq!(engine.status().lanes[2].pattern_name.as_deref(), Some("four"));
+        assert_eq!(
+            engine.status().lanes[2].pattern_name.as_deref(),
+            Some("four")
+        );
     }
 
     #[test]
@@ -2307,7 +2409,9 @@ mod tests {
                 quantize: SequencerQuantize::Now,
             })
             .expect("queue accepted");
-        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        engine
+            .apply(&SequencerCommand::TransportStart)
+            .expect("start");
         let mut out = Vec::new();
         engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(out.iter().any(|event| event.data[0] == 0x90));
@@ -2355,7 +2459,9 @@ mod tests {
                 })
                 .is_err()
         );
-        engine.apply(&SequencerCommand::TransportPanic).expect("panic");
+        engine
+            .apply(&SequencerCommand::TransportPanic)
+            .expect("panic");
         out.clear();
         engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(
@@ -2379,7 +2485,9 @@ mod tests {
                 quantize: SequencerQuantize::Now,
             })
             .expect("queue accepted");
-        engine.apply(&SequencerCommand::TransportStart).expect("start");
+        engine
+            .apply(&SequencerCommand::TransportStart)
+            .expect("start");
         let mut out = Vec::new();
         engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(!out.is_empty());
@@ -2403,13 +2511,22 @@ mod tests {
         );
         assert!(
             engine
-                .apply(&SequencerCommand::SetSignature { beats_per_bar: 0, beat_unit: 4 })
+                .apply(&SequencerCommand::SetSignature {
+                    beats_per_bar: 0,
+                    beat_unit: 4
+                })
                 .is_err()
         );
-        assert!(engine.apply(&SequencerCommand::SetTempo { bpm: f64::NAN }).is_err());
+        assert!(
+            engine
+                .apply(&SequencerCommand::SetTempo { bpm: f64::NAN })
+                .is_err()
+        );
         // Out-of-range tempo clamps rather than failing: a torn tap on stage
         // must never leave the old tempo standing.
-        engine.apply(&SequencerCommand::SetTempo { bpm: 9_000.0 }).expect("clamped");
+        engine
+            .apply(&SequencerCommand::SetTempo { bpm: 9_000.0 })
+            .expect("clamped");
         assert!(engine.status().tempo_bpm <= 400.0);
     }
 

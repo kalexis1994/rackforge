@@ -494,7 +494,11 @@ fn open_transport_bridge() -> Option<TransportBridge> {
                 .find(|port| is_mcu_port_name(&port.name))?;
             midi.connect(&port.handle, "rackforge KeyLab MCU LEDs").ok()
         });
-    println!("MCU_TRANSPORT_BRIDGED port={:?} leds={}", port.name, output.is_some());
+    println!(
+        "MCU_TRANSPORT_BRIDGED port={:?} leds={}",
+        port.name,
+        output.is_some()
+    );
     Some(TransportBridge {
         _connection: connection,
         output,
@@ -1466,7 +1470,9 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         }
         let mut transport_bridge = open_transport_bridge();
         if transport_bridge.is_none() {
-            eprintln!("El puerto MCU del KeyLab no está disponible; transporte sin botones físicos.");
+            eprintln!(
+                "El puerto MCU del KeyLab no está disponible; transporte sin botones físicos."
+            );
         }
         let mut transport_taps = TapFold::default();
         let transport_clock = Instant::now();
@@ -3036,8 +3042,7 @@ fn open_keylab_input(selector: Option<&str>) -> Result<KeyLabInput, Box<dyn Erro
                 && (message.first().is_some_and(|status| status & 0xf0 == 0xb0)
                     || message.first() == Some(&0xf0))
             {
-                let hex: Vec<String> =
-                    message.iter().map(|byte| format!("{byte:02x}")).collect();
+                let hex: Vec<String> = message.iter().map(|byte| format!("{byte:02x}")).collect();
                 println!("MIDI_SURFACE_UNCLAIMED raw=[{}]", hex.join(" "));
             }
         },

@@ -18,13 +18,13 @@
 //! The embedder is expected to reject components that declare imports, which is
 //! the check the native backend performs in [`PortableEngine::compile`].
 
+use crate::ParallelLayout;
 use crate::shared::{
     MAX_PARALLEL_UNITS, PARALLEL_ABI_VERSION_V1, PARALLEL_PLAN_ENTRY_BYTES,
     PARALLEL_PLAN_HEADER_BYTES, PROGRAM_EDIT_KNOWN_CAPABILITIES, ParallelPlanEntry, byte_range,
-    check_status, checked_samples, memory_range, ranges_overlap, read_f32,
-    validate_parallel_plan, validate_realtime_events, write_f32, write_midi, write_parameters,
+    check_status, checked_samples, memory_range, ranges_overlap, read_f32, validate_parallel_plan,
+    validate_realtime_events, write_f32, write_midi, write_parameters,
 };
-use crate::ParallelLayout;
 use crate::{ABI_VERSION_V1, ABI_VERSION_V1_1, MidiEvent, ParameterEvent, RuntimeLimits};
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -138,10 +138,13 @@ pub mod host {
             input_channels: i32,
             output_channels: i32,
         );
-        pub fn rf_par_begin(frames: i32, active: i32, shared_len: i32, shared_ptr: *const u8)
-        -> i32;
-        pub fn rf_par_entry(slot: i32, unit: i32, payload_len: i32, payload_ptr: *const u8)
-        -> i32;
+        pub fn rf_par_begin(
+            frames: i32,
+            active: i32,
+            shared_len: i32,
+            shared_ptr: *const u8,
+        ) -> i32;
+        pub fn rf_par_entry(slot: i32, unit: i32, payload_len: i32, payload_ptr: *const u8) -> i32;
         pub fn rf_par_commit() -> i32;
         pub fn rf_par_collect(budget_micros: i32) -> i32;
         pub fn rf_par_mix_read(unit: i32, destination: *mut u8, length_samples: i32) -> i32;
@@ -422,8 +425,14 @@ impl PortableModule {
                 memory_size,
             )?;
             for (index, name) in [
-                (export::PARALLEL_BEGIN_BLOCK, "rackforge_parallel_begin_block"),
-                (export::PARALLEL_RENDER_UNIT, "rackforge_parallel_render_unit"),
+                (
+                    export::PARALLEL_BEGIN_BLOCK,
+                    "rackforge_parallel_begin_block",
+                ),
+                (
+                    export::PARALLEL_RENDER_UNIT,
+                    "rackforge_parallel_render_unit",
+                ),
                 (export::PARALLEL_END_BLOCK, "rackforge_parallel_end_block"),
             ] {
                 if !raw.export_present(index) {

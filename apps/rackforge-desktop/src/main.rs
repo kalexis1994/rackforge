@@ -4181,13 +4181,12 @@ impl DesktopApp {
     /// document through the library's own edit machinery, reconciling the
     /// LIVE state once at the end the way a single edit would.
     fn import_live_show(&mut self, file: &rackforge_control_api::RfLiveFile) -> ControlResponse {
-        let error_response = |code: ControlErrorCode, message: String, revision: Revision| {
-            ControlResponse::Error {
+        let error_response =
+            |code: ControlErrorCode, message: String, revision: Revision| ControlResponse::Error {
                 code,
                 message,
                 current_revision: Some(revision),
-            }
-        };
+            };
         let revision = self.session.read().expect("session lock poisoned").revision;
         let preview = match rackforge_core::live_show::inspect_live_show(
             file,

@@ -874,8 +874,7 @@ impl DesktopAudio {
             midi_receiver,
             command_receiver,
             events: Vec::with_capacity(
-                MAX_MIDI_EVENTS_PER_BLOCK
-                    * (1 + rackforge_core::sequencer::MAX_SEQUENCER_LANES),
+                MAX_MIDI_EVENTS_PER_BLOCK * (1 + rackforge_core::sequencer::MAX_SEQUENCER_LANES),
             ),
             parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
             parameter_links: Vec::new(),

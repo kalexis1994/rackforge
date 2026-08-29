@@ -77,14 +77,28 @@ function activeDraft(tab: SequencerTab): PatternDefinition | null {
 }
 
 /// What the library remembers about a tab: everything but the unsaved
-/// draft edits, which stay in this browser until SAVE.
-function tabDocument(tab: SequencerTab): import("./types").SequencerTabDefinition {
+/// draft edits, which stay in this browser until SAVE. A seat names a
+/// pattern only once the library actually has it — writing the id of an
+/// unsaved draft left a tab pointing at nothing, which reopened as a
+/// nameless "empty" sequencer.
+function tabDocument(
+  tab: SequencerTab,
+  patterns: PatternDefinition[],
+): import("./types").SequencerTabDefinition {
+  const seated = (draft: PatternDefinition | null) =>
+    draft && patterns.some((pattern) => pattern.id === draft.id) ? draft.id : null;
   return {
     lane: tab.lane,
     view: activeDraft(tab)?.view === "melodic" ? "melodic" : "drum",
-    slot_ids: tab.drafts.map((draft) => draft?.id ?? null),
+    slot_ids: tab.drafts.map(seated),
     active_slot: tab.activeSlot,
   };
+}
+
+/// A deck tab is worth remembering once it holds a saved pattern; until
+/// then it lives only in the surface that is drafting it.
+function worthPersisting(document: import("./types").SequencerTabDefinition) {
+  return (document.slot_ids ?? []).some((id) => id !== null);
 }
 
 /// A tab as the library describes it, drafts hydrated from the patterns.
@@ -383,11 +397,10 @@ function SequencerDeck({
     if (legacy.length === 0) return;
     void (async () => {
       for (const tab of legacy) {
+        const document = tabDocument(tab, patterns);
+        if (!worthPersisting(document)) continue;
         try {
-          await dispatchPerformanceEditLatest({
-            kind: "put_sequencer_tab",
-            tab: tabDocument(tab),
-          });
+          await dispatchPerformanceEditLatest({ kind: "put_sequencer_tab", tab: document });
         } catch {
           return;
         }
@@ -474,12 +487,7 @@ function SequencerDeck({
       setOverlays((current) => ({ ...current, [freeLane]: tab }));
       setActiveLane(freeLane);
       setAdding(false);
-      dispatchPerformanceEditLatest({
-        kind: "put_sequencer_tab",
-        tab: tabDocument(tab),
-      }).catch((error: Error) =>
-        console.error("SEQUENCER_TAB_PERSIST_FAILED", error.message),
-      );
+      // The library learns about the tab when its first pattern is saved.
     },
     [freeLane, beatsPerBar],
   );
@@ -767,16 +775,17 @@ function SequencerTabEditor({
     dispatchPerformanceEdit(revision, { kind: "put_pattern", pattern: draft })
       .then(() =>
         // The deck document rides along: the saved pattern's slot seat is
-        // part of the show, not of this browser.
+        // part of the show, not of this browser. The draft is in the
+        // library now, so it may take its seat.
         dispatchPerformanceEditLatest({
           kind: "put_sequencer_tab",
-          tab: tabDocument(tab),
+          tab: tabDocument(tab, [...patterns, draft]),
         }),
       )
       .then(() => onChange((current) => ({ ...current, dirty: false })))
       .catch(() => undefined)
       .finally(() => setBusy(false));
-  }, [busy, setBusy, revision, draft, onChange, tab]);
+  }, [busy, setBusy, revision, draft, onChange, tab, patterns]);
 
   const remove = useCallback(() => {
     if (busy || !inLibrary || !draft) return;
@@ -927,9 +936,9 @@ function SequencerTabEditor({
                   dirty: false,
                 };
                 onChange(() => next);
-                dispatchPerformanceEdit(revision, {
+                dispatchPerformanceEditLatest({
                   kind: "put_sequencer_tab",
-                  tab: tabDocument(next),
+                  tab: tabDocument(next, patterns),
                 }).catch(() => undefined);
               }
             }}
@@ -1063,7 +1072,7 @@ function SequencerTabEditor({
               // Loading a library pattern reseats the deck document too.
               dispatchPerformanceEditLatest({
                 kind: "put_sequencer_tab",
-                tab: tabDocument(next),
+                tab: tabDocument(next, patterns),
               }).catch((error: Error) =>
                 console.error("SEQUENCER_TAB_PERSIST_FAILED", error.message),
               );

@@ -311,6 +311,15 @@ pub enum SequencerCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scale: Option<SequencerScale>,
     },
+    /// Which MIDI channel this lane listens to for key-follow and capture.
+    /// `None` is OMNI — the whole keyboard speaks to the lane. A defined
+    /// channel lets a keyboard split conduct one lane from its lower zone
+    /// while the upper zone plays normally.
+    SetLaneListenChannel {
+        lane: u8,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel: Option<u8>,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -327,6 +336,9 @@ pub struct SequencerLaneStatus {
     /// The lane is armed for live capture.
     #[serde(default)]
     pub capturing: bool,
+    /// The MIDI channel the lane listens to; `None` is OMNI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listen_channel: Option<u8>,
     /// Which variation slot is the lane's active one.
     #[serde(default)]
     pub active_slot: u8,

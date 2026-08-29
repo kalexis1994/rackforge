@@ -1112,6 +1112,27 @@ function SequencerTabEditor({
             FOLLOW
           </button>
         </div>
+        <select
+          className="seq-load-select"
+          value={laneState?.listen_channel ?? -1}
+          aria-label="Input channel: which MIDI channel drives follow and capture"
+          title="IN: the channel this sequencer listens to — OMNI hears the whole keyboard; a channel lets a keyboard split conduct while the other zone plays"
+          onChange={(event) => {
+            const value = Number(event.target.value);
+            sendSequencerCommand({
+              kind: "set_lane_listen_channel",
+              lane,
+              ...(value >= 0 ? { channel: value } : {}),
+            });
+          }}
+        >
+          <option value={-1}>IN OMNI</option>
+          {Array.from({ length: 16 }, (_, channel) => (
+            <option key={channel} value={channel}>
+              {`IN CH ${channel + 1}`}
+            </option>
+          ))}
+        </select>
         {laneState?.following ? (
           <select
             className="seq-load-select"
@@ -1274,9 +1295,9 @@ function MelodicLane({
 }) {
   const steps = stepCount(pattern);
   const stepsPerBeat = TICKS_PER_BEAT / STEP_TICKS;
-  const [selected, setSelected] = useState(0);
+  const [selected, setSelected] = useState<number | null>(null);
   const lastKey = useRef(DEFAULT_MELODIC_KEY);
-  const note = melodicStepNote(pattern, selected);
+  const note = selected !== null ? melodicStepNote(pattern, selected) : null;
   useEffect(() => {
     if (note) lastKey.current = note.key;
   }, [note]);
@@ -1308,7 +1329,7 @@ function MelodicLane({
     };
   }, [activeInstanceId]);
 
-  const lock = stepLock(pattern, selected);
+  const lock = selected !== null ? stepLock(pattern, selected) : undefined;
   const lockDescriptor = lock
     ? lockParams.find((parameter) => parameter.index === lock.parameter)
     : undefined;
@@ -1320,7 +1341,7 @@ function MelodicLane({
     return { min: 0, max: 1, def: 0.5 };
   };
   const nudgeLock = (direction: 1 | -1) => {
-    if (!lock) return;
+    if (!lock || selected === null) return;
     const { min, max } = lockRange(lockDescriptor);
     const step = (max - min) / 20;
     const next = Math.min(max, Math.max(min, lock.value + direction * step));
@@ -1347,7 +1368,15 @@ function MelodicLane({
 
   return (
     <div className="melodic-lane">
-      <div className="seq-grid-scroll">
+      {/* Clicking the open air releases the step focus. */}
+      <div
+        className="seq-grid-scroll"
+        onClick={(event) => {
+          if (!(event.target as HTMLElement).closest(".melodic-step")) {
+            setSelected(null);
+          }
+        }}
+      >
         <div className="melodic-steps" role="listbox" aria-label={`Melodic lane, ${steps} steps`}>
           {Array.from({ length: steps }, (_, step) => {
             const stepNote = melodicStepNote(pattern, step);
@@ -1369,9 +1398,22 @@ function MelodicLane({
                   step === playhead ? "playhead" : "",
                 ].join(" ").replace(/\s+/g, " ").trim()}
                 onClick={() => press(step)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  if (stepNote) onEdit(clearMelodicStep(pattern, step));
+                }}
+                title={stepNote ? "Right-click clears the note" : undefined}
               >
                 <span className="melodic-step-note">{stepNote ? noteName(stepNote.key) : "·"}</span>
-                <span className={`melodic-step-tie tie-${ties}`} aria-hidden="true" />
+                <span
+                  className={`melodic-step-tie${ties > 1 ? " tied" : ""}`}
+                  style={
+                    ties > 1
+                      ? { width: `calc(${ties * 100}% + ${(ties - 1) * 3 - 12}px)` }
+                      : undefined
+                  }
+                  aria-hidden="true"
+                />
               </button>
             );
           })}
@@ -1379,7 +1421,7 @@ function MelodicLane({
       </div>
       <div className="melodic-cluster" role="group" aria-label="Step editing">
         <span className="seq-lcd melodic-readout">
-          {`STEP ${selected + 1}`}
+          {selected !== null ? `STEP ${selected + 1}` : "STEP —"}
           <strong>{note ? noteName(note.key) : "—"}</strong>
           {note ? (
             <small>
@@ -1394,34 +1436,34 @@ function MelodicLane({
           )}
         </span>
         <div className="seq-keys" role="group" aria-label="Pitch">
-          <button className="seq-key seq-key-narrow" disabled={!note} onClick={() => onEdit(transposeMelodicStep(pattern, selected, -1))}>
+          <button className="seq-key seq-key-narrow" disabled={!note} onClick={() => selected !== null && onEdit(transposeMelodicStep(pattern, selected, -1))}>
             −
           </button>
-          <button className="seq-key seq-key-narrow" disabled={!note} onClick={() => onEdit(transposeMelodicStep(pattern, selected, 1))}>
+          <button className="seq-key seq-key-narrow" disabled={!note} onClick={() => selected !== null && onEdit(transposeMelodicStep(pattern, selected, 1))}>
             +
           </button>
-          <button className="seq-key" disabled={!note} onClick={() => onEdit(transposeMelodicStep(pattern, selected, -12))}>
+          <button className="seq-key" disabled={!note} onClick={() => selected !== null && onEdit(transposeMelodicStep(pattern, selected, -12))}>
             OCT−
           </button>
-          <button className="seq-key" disabled={!note} onClick={() => onEdit(transposeMelodicStep(pattern, selected, 12))}>
+          <button className="seq-key" disabled={!note} onClick={() => selected !== null && onEdit(transposeMelodicStep(pattern, selected, 12))}>
             OCT+
           </button>
         </div>
         <div className="seq-keys" role="group" aria-label="Shape">
-          <button className="seq-key" disabled={!note} onClick={() => onEdit(cycleMelodicTie(pattern, selected))}>
+          <button className="seq-key" disabled={!note} onClick={() => selected !== null && onEdit(cycleMelodicTie(pattern, selected))}>
             TIE
           </button>
-          <button className="seq-key" disabled={!note} onClick={() => onEdit(cycleMelodicVelocity(pattern, selected))}>
+          <button className="seq-key" disabled={!note} onClick={() => selected !== null && onEdit(cycleMelodicVelocity(pattern, selected))}>
             VEL
           </button>
-          <button className="seq-key" disabled={!note} onClick={() => onEdit(clearMelodicStep(pattern, selected))}>
+          <button className="seq-key" disabled={!note} onClick={() => selected !== null && onEdit(clearMelodicStep(pattern, selected))}>
             CLEAR
           </button>
           <button
             className="seq-key"
             disabled={!note}
             title="Chance this step fires: 100, 75, 50, 25"
-            onClick={() => onEdit(cycleProbability(pattern, selected))}
+            onClick={() => selected !== null && onEdit(cycleProbability(pattern, selected))}
           >
             PROB
           </button>
@@ -1429,7 +1471,7 @@ function MelodicLane({
             className="seq-key"
             disabled={!note}
             title="When this step may fire: cycles, fill, pre"
-            onClick={() => onEdit(cycleCondition(pattern, selected))}
+            onClick={() => selected !== null && onEdit(cycleCondition(pattern, selected))}
           >
             COND
           </button>
@@ -1455,6 +1497,7 @@ function MelodicLane({
                 : "Freeze a knob into this step"
             }
             onChange={(event) => {
+              if (selected === null) return;
               if (event.target.value === "") {
                 onEdit(clearStepLock(pattern, selected));
                 return;

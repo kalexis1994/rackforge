@@ -3703,26 +3703,35 @@
 }
 
 /* The playhead: the step the lane is sounding right now, chased the way
-   a hardware step LED runs the row. Present tense only — it never
-   competes with the engraved on/off state of the step itself. */
-.seq-cell.playhead {
-  box-shadow: inset 0 -2px 0 0 var(--acid);
+   a hardware step LED runs the row. It lives BELOW the block, in its own
+   air — inside the cell it drowned under the note's paint. */
+.seq-cell,
+.melodic-step {
+  position: relative;
 }
 
-.seq-cell.on.playhead {
-  box-shadow:
-    inset 0 -2px 0 0 var(--acid),
-    0 0 6px color-mix(in srgb, var(--acid) 60%, transparent);
+.seq-cell.playhead::after,
+.melodic-step.playhead::after {
+  content: "";
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: -5px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--acid);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--acid) 65%, transparent);
+  pointer-events: none;
 }
 
-.melodic-step.playhead {
-  box-shadow: inset 0 -2px 0 0 var(--acid);
+/* Air for the chase line: the drum rows open up between themselves, the
+   melodic lane keeps a runway under its steps. */
+.seq-grid {
+  row-gap: 8px;
 }
 
-.melodic-step.on.playhead {
-  box-shadow:
-    inset 0 -2px 0 0 var(--acid),
-    0 0 6px color-mix(in srgb, var(--acid) 60%, transparent);
+.seq-grid-scroll {
+  padding-bottom: 7px;
 }
 
 /* The take readout: what the REC loop is doing, said out loud. */
@@ -5288,9 +5297,11 @@
   opacity: 0;
 }
 
-.melodic-step.on .melodic-step-tie.tie-1 { width: 10px; opacity: 0.45; }
-.melodic-step.on .melodic-step-tie.tie-2 { width: calc(100% + 5px); opacity: 0.8; }
-.melodic-step.on .melodic-step-tie.tie-4 { width: calc(300% + 15px); opacity: 0.8; z-index: 1; }
+/* A single step wears a stub; a tie stretches to end just inside its
+   last covered step — the width is computed inline for ANY duration, so
+   a captured x3 or x5 never spills past its own territory. */
+.melodic-step.on .melodic-step-tie { width: 10px; opacity: 0.45; }
+.melodic-step.on .melodic-step-tie.tied { opacity: 0.8; z-index: 1; }
 
 .melodic-cluster {
   display: flex;

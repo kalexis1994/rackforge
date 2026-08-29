@@ -1725,8 +1725,11 @@ impl AudioProcessor {
                 }
             }
             if !consume {
-                feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
-                push_midi_event(&mut self.events, packet);
+                let conducted =
+                    feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
+                if !conducted {
+                    push_midi_event(&mut self.events, packet);
+                }
             }
         }
         // The sequencer advances whether or not anything is listening: the
@@ -2138,8 +2141,11 @@ impl AudioProcessor {
                     let _ = reply.try_send(Ok(()));
                 }
                 AudioCommand::InjectMidi(packet) => {
-                    feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
-                    push_midi_event(&mut self.events, packet);
+                    let conducted =
+                        feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
+                    if !conducted {
+                        push_midi_event(&mut self.events, packet);
+                    }
                 }
                 AudioCommand::Sequencer { command, reply } => {
                     let _ = reply.try_send(self.sequencer.apply(&command));
@@ -2358,19 +2364,22 @@ fn open_clock_outputs() -> Vec<midir::MidiOutputConnection> {
 }
 
 /// Key-follow lanes listen to the player's keyboard: every live note that
-/// reaches the instrument also reaches the engine's gate.
+/// reaches the instrument also reaches the engine's gate. Answers true
+/// when a FOLLOW lane claimed the note as a conducting gesture — the
+/// caller must not let it reach the instrument.
 fn feed_sequencer_input(
     sequencer: &mut rackforge_core::SequencerEngine,
     data: [u8; 3],
     length: u8,
-) {
+) -> bool {
     if length < 3 {
-        return;
+        return false;
     }
+    let channel = data[0] & 0x0f;
     match data[0] & 0xf0 {
-        0x90 if data[2] > 0 => sequencer.note_input(data[1], data[2], true),
-        0x80 | 0x90 => sequencer.note_input(data[1], 0, false),
-        _ => {}
+        0x90 if data[2] > 0 => sequencer.note_input(channel, data[1], data[2], true),
+        0x80 | 0x90 => sequencer.note_input(channel, data[1], 0, false),
+        _ => false,
     }
 }
 

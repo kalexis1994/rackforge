@@ -56,6 +56,7 @@ export type SequencerCommand =
   | { kind: "set_clock_out"; on: boolean }
   | { kind: "set_capture"; lane: number; on: boolean }
   | { kind: "set_focus_lane"; lane: number }
+  | { kind: "set_lane_listen_channel"; lane: number; channel?: number }
   | { kind: "load_slot"; lane: number; slot: number; pattern: PatternDefinition }
   | { kind: "launch_slot"; lane: number; slot: number; quantize: SequencerQuantize };
 
@@ -75,6 +76,8 @@ export interface SequencerLaneStatus {
   following?: boolean;
   /** The lane is armed for live capture. */
   capturing?: boolean;
+  /** The MIDI channel the lane listens to; absent is OMNI. */
+  listen_channel?: number;
   muted: boolean;
   pattern_name?: string | null;
 }

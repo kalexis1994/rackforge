@@ -2536,7 +2536,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         for event in pending_virtual_midi.drain(..) {
             let packet = event.packet;
             controller_states.observe(event.source, plugin_midi_event(packet));
-            feed_sequencer_input(&mut sequencer, packet.data, packet.length);
+            if feed_sequencer_input(&mut sequencer, packet.data, packet.length) {
+                continue;
+            }
             if event.source != virtual_midi_source {
                 if let Some(action) =
                     reserved_midi_controls.pressed_action(plugin_midi_event(packet))
@@ -2637,7 +2639,9 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         }
         while let Ok(event) = receiver.try_recv() {
             let plugin_event = plugin_midi_event(event.packet);
-            feed_sequencer_input(&mut sequencer, event.packet.data, event.packet.length);
+            if feed_sequencer_input(&mut sequencer, event.packet.data, event.packet.length) {
+                continue;
+            }
             if let Some(action) = reserved_midi_controls.pressed_action(plugin_event) {
                 apply_sequencer_host_action(
                     &mut sequencer,
@@ -3337,14 +3341,15 @@ fn feed_sequencer_input(
     sequencer: &mut crate::sequencer::SequencerEngine,
     data: [u8; 3],
     length: u8,
-) {
+) -> bool {
     if length < 3 {
-        return;
+        return false;
     }
+    let channel = data[0] & 0x0f;
     match data[0] & 0xf0 {
-        0x90 if data[2] > 0 => sequencer.note_input(data[1], data[2], true),
-        0x80 | 0x90 => sequencer.note_input(data[1], 0, false),
-        _ => {}
+        0x90 if data[2] > 0 => sequencer.note_input(channel, data[1], data[2], true),
+        0x80 | 0x90 => sequencer.note_input(channel, data[1], 0, false),
+        _ => false,
     }
 }
 

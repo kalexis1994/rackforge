@@ -233,6 +233,9 @@ pub struct SequencerLane {
     pre_outcome: bool,
     /// Follow-action jumps taken since launch: the seed of AnySlot's die.
     follow_jumps: u64,
+    /// The MIDI channel this lane listens to for follow and capture;
+    /// `None` is OMNI.
+    listen_channel: Option<u8>,
     /// Live capture: armed by the surface whose REC key is down.
     capture: bool,
     /// Notes pressed but not yet released, beat-stamped at the block they
@@ -275,6 +278,7 @@ impl SequencerLane {
             gate_release_pending: false,
             pre_outcome: false,
             follow_jumps: 0,
+            listen_channel: None,
             capture: false,
             capture_held: Vec::with_capacity(16),
             captured: Vec::with_capacity(64),
@@ -400,13 +404,21 @@ impl SequencerLane {
 
     /// One key from the player's keyboard. Follow lanes gate and transpose
     /// on it; an armed lane records it. A press from silence restarts the
-    /// phrase; legato presses re-root it without restarting.
-    pub fn note_input(&mut self, key: u8, velocity: u8, on: bool) {
+    /// phrase; legato presses re-root it without restarting. Answers true
+    /// when a FOLLOW lane claimed the note: a conducting key is a gesture,
+    /// not a voice, and the host must not let it sound on its own —
+    /// capture alone never claims, an overdub must stay audible.
+    pub fn note_input(&mut self, channel: u8, key: u8, velocity: u8, on: bool) -> bool {
+        if let Some(listen) = self.listen_channel
+            && listen != channel
+        {
+            return false;
+        }
         if self.capture && self.capture_inbox.len() < 32 {
             self.capture_inbox.push((key, velocity.max(1), on));
         }
         if self.follow.is_none() {
-            return;
+            return false;
         }
         if on {
             if self.input_keys.is_empty() {
@@ -422,6 +434,7 @@ impl SequencerLane {
                 self.gate_release_pending = true;
             }
         }
+        true
     }
 
     /// Stops starting new notes from `at_beat`; owed note-offs still land on
@@ -1157,6 +1170,14 @@ impl SequencerEngine {
                 self.fill = *on;
                 Ok(())
             }
+            SequencerCommand::SetLaneListenChannel { lane, channel } => {
+                if channel.is_some_and(|value| value > 15) {
+                    return Err("MIDI channel must be 0..=15".into());
+                }
+                let index = self.lane_index(*lane)?;
+                self.lanes[index].listen_channel = *channel;
+                Ok(())
+            }
             SequencerCommand::SetLaneFollow { lane, scale } => {
                 let index = self.lane_index(*lane)?;
                 self.lanes[index].set_follow(*scale);
@@ -1182,12 +1203,17 @@ impl SequencerEngine {
         }
     }
 
-    /// One key from the player's keyboard, fanned to every follow lane.
-    /// Hosts call this from wherever their live MIDI already flows.
-    pub fn note_input(&mut self, key: u8, velocity: u8, on: bool) {
+    /// One key from the player's keyboard, fanned to every lane that
+    /// listens on its channel. Hosts call this from wherever their live
+    /// MIDI already flows, and must swallow the note (not pass it to the
+    /// instrument) when this answers true: a FOLLOW lane claimed it as a
+    /// conducting gesture.
+    pub fn note_input(&mut self, channel: u8, key: u8, velocity: u8, on: bool) -> bool {
+        let mut consumed = false;
         for lane in &mut self.lanes {
-            lane.note_input(key, velocity, on);
+            consumed |= lane.note_input(channel, key, velocity, on);
         }
+        consumed
     }
 
     /// Drains one lane's capture buffer for the recording surface.
@@ -1323,6 +1349,7 @@ impl SequencerEngine {
                     stopping: lane.stop_at.is_some(),
                     following: lane.follow.is_some(),
                     capturing: lane.capture,
+                    listen_channel: lane.listen_channel,
                     active_slot: lane.active_slot() as u8,
                     slots: names.clone(),
                     muted: lane.muted,
@@ -1462,10 +1489,13 @@ mod tests {
         // Press C2 before the second half-beat block, release before the
         // fourth: onset at beat 0.5, duration one beat.
         engine.render_block(12_000, &mut out, &mut params, &mut clock);
-        engine.note_input(48, 96, true);
+        assert!(
+            !engine.note_input(0, 48, 96, true),
+            "capture alone never claims"
+        );
         engine.render_block(12_000, &mut out, &mut params, &mut clock);
         engine.render_block(12_000, &mut out, &mut params, &mut clock);
-        engine.note_input(48, 0, false);
+        engine.note_input(0, 48, 0, false);
         engine.render_block(12_000, &mut out, &mut params, &mut clock);
 
         let take = engine.capture_take(0);
@@ -1481,6 +1511,52 @@ mod tests {
             .apply(&SequencerCommand::SetCapture { lane: 0, on: false })
             .expect("disarm");
         assert!(!engine.status().lanes[0].capturing);
+    }
+
+    #[test]
+    fn a_conducting_key_is_claimed_and_a_recorded_key_is_not() {
+        let mut engine = SequencerEngine::new(48_000.0).expect("engine");
+        // Capture alone never claims: an overdub must stay audible.
+        engine
+            .apply(&SequencerCommand::SetCapture { lane: 0, on: true })
+            .expect("armed");
+        assert!(!engine.note_input(0, 60, 100, true));
+        assert!(!engine.note_input(0, 60, 0, false));
+
+        // FOLLOW claims the note on its listen channel only.
+        engine
+            .apply(&SequencerCommand::SetLaneFollow {
+                lane: 1,
+                scale: Some(rackforge_control_api::SequencerScale::Minor),
+            })
+            .expect("following");
+        engine
+            .apply(&SequencerCommand::SetLaneListenChannel {
+                lane: 1,
+                channel: Some(2),
+            })
+            .expect("listen");
+        assert!(
+            !engine.note_input(0, 60, 100, true),
+            "wrong channel passes through"
+        );
+        assert!(
+            engine.note_input(2, 60, 100, true),
+            "the conducting zone is claimed"
+        );
+        assert!(
+            engine.note_input(2, 60, 0, false),
+            "its release is claimed too"
+        );
+
+        // OMNI follow claims everything.
+        engine
+            .apply(&SequencerCommand::SetLaneListenChannel {
+                lane: 1,
+                channel: None,
+            })
+            .expect("omni");
+        assert!(engine.note_input(7, 61, 100, true));
     }
 
     #[test]
@@ -1945,7 +2021,7 @@ mod tests {
         assert!(!engine.status().lanes[0].playing);
 
         // Hold F2: the phrase restarts on the next 16th, five semitones up.
-        engine.note_input(53, 100, true);
+        engine.note_input(0, 53, 100, true);
         out.clear();
         engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         let ons: Vec<u8> = out
@@ -1958,7 +2034,7 @@ mod tests {
         assert!(engine.status().lanes[0].playing);
 
         // Release: the ringing note is silenced at the next block.
-        engine.note_input(53, 0, false);
+        engine.note_input(0, 53, 0, false);
         out.clear();
         engine.render_block(16_384, &mut out, &mut Vec::new(), &mut Vec::new());
         assert!(out.iter().any(|event| event.data[0] == 0x80));

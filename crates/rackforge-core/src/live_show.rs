@@ -83,6 +83,10 @@ pub fn assemble_live_show(
             .into_iter()
             .map(|(plugin_id, version)| RfLiveRequirement { plugin_id, version })
             .collect(),
+        tempo_bpm: None,
+        beats_per_bar: None,
+        beat_unit: None,
+        live: None,
     })
 }
 
@@ -205,6 +209,7 @@ pub fn inspect_live_show(
         setlists: file.library.setlists.len() as u32,
         patterns: file.library.patterns.len() as u32,
         states: file.states.len() as u32,
+        tabs: file.library.sequencer_tabs.len() as u32,
         missing_plugins,
         warnings,
     })
@@ -278,6 +283,9 @@ pub fn live_show_edits(file: &RfLiveFile) -> Vec<PerformanceEdit> {
             pattern: pattern.clone(),
         });
     }
+    for tab in &library.sequencer_tabs {
+        edits.push(PerformanceEdit::PutSequencerTab { tab: tab.clone() });
+    }
     edits
 }
 
@@ -334,6 +342,7 @@ mod tests {
             songs: Vec::new(),
             setlists: Vec::new(),
             patterns: Vec::new(),
+            sequencer_tabs: Vec::new(),
         }
     }
 
@@ -365,6 +374,28 @@ mod tests {
         // The imported Rack's reference now resolves on the venue machine.
         let slot_state = library.racks[0].slots[0].state.as_ref().unwrap();
         assert_eq!(venue.read(slot_state).expect("blob"), b"the sound");
+    }
+
+    #[test]
+    fn the_deck_travels_with_the_show() {
+        use rackforge_performance_api::{PatternId, SequencerTabDefinition};
+        let mut studio = PluginStateStore::new(None).expect("store");
+        let mut library = library_with_one_state(&mut studio);
+        library.sequencer_tabs = vec![SequencerTabDefinition {
+            lane: 2,
+            view: Default::default(),
+            slot_ids: vec![Some(PatternId::new("pattern.groove").unwrap()), None],
+            active_slot: 0,
+        }];
+        let file = assemble_live_show("Set", &library, &studio, 1_000).expect("assembled");
+        let preview = inspect_live_show(&file, &BTreeMap::new(), &PerformanceLibrary::default())
+            .expect("inspected");
+        assert_eq!(preview.tabs, 1);
+        let edits = live_show_edits(&file);
+        assert!(edits.iter().any(|edit| matches!(
+            edit,
+            PerformanceEdit::PutSequencerTab { tab } if tab.lane == 2
+        )));
     }
 
     #[test]

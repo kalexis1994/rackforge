@@ -534,9 +534,16 @@ impl BrowserHost {
                     &self.state_store,
                     exported_unix_ms,
                 )
-                .map(|file| ControlResponse::LiveShowExported {
-                    file_name: rackforge_core::live_show::live_show_file_name(&name),
-                    file: Box::new(file),
+                .map(|mut file| {
+                    let status = self.sequencer.status();
+                    file.tempo_bpm = Some(status.tempo_bpm);
+                    file.beats_per_bar = Some(status.beats_per_bar);
+                    file.beat_unit = Some(status.beat_unit);
+                    file.live = Some(self.store.state().live.clone());
+                    ControlResponse::LiveShowExported {
+                        file_name: rackforge_core::live_show::live_show_file_name(&name),
+                        file: Box::new(file),
+                    }
                 })
                 .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))
             }

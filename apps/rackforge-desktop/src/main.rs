@@ -3398,10 +3398,28 @@ impl DesktopApp {
                     )
                 });
                 match exported {
-                    Ok(file) => ControlResponse::LiveShowExported {
-                        file_name: rackforge_core::live_show::live_show_file_name(&name),
-                        file: Box::new(file),
-                    },
+                    Ok(mut file) => {
+                        if let Some(status) = self
+                            .audio
+                            .as_ref()
+                            .and_then(|audio| audio.sequencer_status().ok())
+                        {
+                            file.tempo_bpm = Some(status.tempo_bpm);
+                            file.beats_per_bar = Some(status.beats_per_bar);
+                            file.beat_unit = Some(status.beat_unit);
+                        }
+                        file.live = Some(
+                            self.session
+                                .read()
+                                .expect("session lock poisoned")
+                                .live
+                                .clone(),
+                        );
+                        ControlResponse::LiveShowExported {
+                            file_name: rackforge_core::live_show::live_show_file_name(&name),
+                            file: Box::new(file),
+                        }
+                    }
                     Err(error) => ControlResponse::Error {
                         code: ControlErrorCode::Rejected,
                         message: format!("Could not export the show: {error:#}"),

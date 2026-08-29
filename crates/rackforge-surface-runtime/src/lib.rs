@@ -768,9 +768,9 @@ impl PerformanceDraft {
     }
 }
 
-#[derive(Debug)]
 /// Where the player's cursor was standing in the LIVE lists, held by
 /// identity so it can be found again after the library changes underneath.
+#[derive(Debug)]
 struct BrowsedLive {
     mode_index: usize,
     rack: Option<rackforge_performance_api::RackId>,
@@ -783,6 +783,7 @@ struct BrowsedLive {
     )>,
 }
 
+#[derive(Debug)]
 pub struct Menu {
     page: Page,
     active_mode: ActiveMode,

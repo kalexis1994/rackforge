@@ -792,6 +792,17 @@ function SequencerTabEditor({
   // audible on the next pass — the groovebox loop.
   const capturing = laneState?.capturing ?? false;
   const draftRef = useRef(draft);
+  // What the take loop is doing, said out loud next to REC: silence here
+  // cost a whole night of debugging once. Never swallow the tape.
+  const [takenCount, setTakenCount] = useState(0);
+  const [takeError, setTakeError] = useState<string | null>(null);
+  // Arming resets the readout — adjusted during render, the allowed lane.
+  const [prevCapturing, setPrevCapturing] = useState(capturing);
+  if (prevCapturing !== capturing) {
+    setPrevCapturing(capturing);
+    setTakenCount(0);
+    setTakeError(null);
+  }
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
@@ -801,6 +812,7 @@ function SequencerTabEditor({
       requestSequencerCaptureTake(lane)
         .then((take) => {
           if (take.notes.length === 0) return;
+          setTakenCount((count) => count + take.notes.length);
           // Recording into an empty slot creates the pattern right there:
           // a take must never be drained into the void.
           const current =
@@ -826,7 +838,9 @@ function SequencerTabEditor({
             quantize: "next_bar",
           });
         })
-        .catch(() => undefined);
+        .catch((error: Error) => {
+          setTakeError(error.message);
+        });
     }, 600);
     return () => window.clearInterval(timer);
   }, [capturing, lane, onChange, beatsPerBar, fallbackView]);
@@ -846,6 +860,15 @@ function SequencerTabEditor({
   const slotRow = (
     <div className="seq-keys seq-slot-row" role="group" aria-label="Variation slots">
       <span className="seq-inline-label">SLOT</span>
+      {capturing ? (
+        <span className="seq-inline-label seq-take-info" role="status">
+          {takeError
+            ? `REC FAILED: ${takeError}`
+            : takenCount > 0
+              ? `REC · ${takenCount} notes taken`
+              : "REC · waiting for notes…"}
+        </span>
+      ) : null}
       {SLOT_LABELS.map((label, slot) => {
         const stored = tab.drafts[slot];
         const engineActive = laneState?.active_slot ?? tab.activeSlot;

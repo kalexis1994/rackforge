@@ -3724,14 +3724,9 @@
   pointer-events: none;
 }
 
-/* Air for the chase line: the drum rows open up between themselves, the
-   melodic lane keeps a runway under its steps. */
+/* Air for the chase line: the drum rows open up between themselves. */
 .seq-grid {
   row-gap: 8px;
-}
-
-.seq-grid-scroll {
-  padding-bottom: 7px;
 }
 
 /* The take readout: what the REC loop is doing, said out loud. */
@@ -3755,6 +3750,15 @@
 }
 
 /* The LCD: mono data set into the panel, the strip's only glass. */
+/* An LCD sitting inside a key group belongs to that group: it takes the
+   keys' height so the row reads as one machined block instead of a
+   readout floating between two switches. */
+.seq-keys > .seq-lcd {
+  min-height: 34px;
+  padding-top: 9px;
+  padding-bottom: 10px;
+}
+
 .seq-lcd {
   display: inline-flex;
   align-items: baseline;
@@ -3928,7 +3932,9 @@
    is actually placed. */
 .seq-grid-scroll {
   overflow-x: auto;
-  padding-bottom: 4px;
+  /* The chase line runs below the last row; without this runway the
+     scroll container clips it. */
+  padding-bottom: 9px;
 }
 
 .seq-grid {
@@ -5225,9 +5231,8 @@
   align-items: stretch;
   gap: 3px;
   min-width: max-content;
-  /* The selected step wears an offset outline; without this breathing room
-     the scroll container clips it at the top and left. */
-  padding: 5px 4px 5px;
+  /* Room under the steps for the chase line to run. */
+  padding: 4px 4px 11px;
 }
 
 .melodic-step {
@@ -5271,13 +5276,14 @@
   font-weight: 800;
 }
 
+/* Focus belongs to the block, time belongs to the air below it: the ring
+   is inset so it never reaches out over the chase line. */
 .melodic-step.selected {
-  outline: 2px solid var(--acid);
-  outline-offset: 2px;
+  box-shadow: inset 0 0 0 2px var(--acid);
 }
 
 .melodic-step.on.selected {
-  outline-color: color-mix(in srgb, var(--acid) 45%, var(--ink));
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--acid) 45%, var(--ink));
 }
 
 .melodic-step-note {

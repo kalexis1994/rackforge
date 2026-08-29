@@ -3304,8 +3304,8 @@
    eat every click meant for the plugin underneath.
    ========================================================================== */
 
-.plugin-frame-stage::after,
-.plugin-frame-stage::before {
+:root[data-screen="glass"] .plugin-frame-stage::after,
+:root[data-screen="glass"] .plugin-frame-stage::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -3314,7 +3314,7 @@
 }
 
 /* the raster: scanlines, phosphor mask, bloom, vignette and the cover's sheen */
-.plugin-frame-stage::before {
+:root[data-screen="glass"] .plugin-frame-stage::before {
   background:
     repeating-linear-gradient(
       180deg,
@@ -3370,7 +3370,7 @@
    into *alpha* with an offset. The offset is the whole trick: only the
    brightest part of each noise survives, which gives blotches and specks with
    clean panel between them instead of an even grey wash. */
-.plugin-frame-stage::after {
+:root[data-screen="glass"] .plugin-frame-stage::after {
   /* Dialled well back from a first pass that read as a fogged window: this is
      a cover someone wipes now and then, not one nobody has touched in years.
 
@@ -3417,11 +3417,8 @@
   background-size: auto, 100% 100%;
 }
 
-/* Off is off: no raster, no cover, no film. */
-:root[data-screen="clean"] .plugin-frame-stage::before,
-:root[data-screen="clean"] .plugin-frame-stage::after {
-  display: none;
-}
+/* Off is the default, and off is off: with no stamp there is no cover to
+   hide, so nothing is drawn in the first place. */
 
 /* ============================================ the compact performance bar ===
    A short landscape window drops the topbar and the rail and replaces them

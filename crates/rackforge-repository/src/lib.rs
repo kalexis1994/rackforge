@@ -705,6 +705,37 @@ pub fn install_local_archive(
     install_local_archive_cancellable(store_root, bytes, &AtomicBool::new(false))
 }
 
+/// What to do when the store already holds this version with other bytes.
+///
+/// A version is immutable because saved state points at it: a package that
+/// changes underneath a reference is how a rack loads something other than
+/// what it saved. `Keep` is therefore the default everywhere.
+///
+/// `Replace` exists for one caller: a platform installer laying down the
+/// official set that shipped with the release. Those packages arrive pinned
+/// by URL and checked against a SHA-256 the source tree carries, so the
+/// release — not whatever a previous build left behind — is the authority on
+/// what that version contains.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExistingVersion {
+    Keep,
+    Replace,
+}
+
+/// Installs a local package, replacing a same-version package whose contents
+/// differ. See [`ExistingVersion::Replace`] for when that is legitimate.
+pub fn install_local_archive_replacing(
+    store_root: impl AsRef<Path>,
+    bytes: &[u8],
+) -> Result<InstalledPackage, RepositoryError> {
+    install_local_archive_with(
+        store_root,
+        bytes,
+        &AtomicBool::new(false),
+        ExistingVersion::Replace,
+    )
+}
+
 /// Installs a local package while allowing the host to cancel before the
 /// immutable package is committed. Extraction checks the flag between chunks,
 /// and the staging directory is removed on every cancellation path.
@@ -712,6 +743,15 @@ pub fn install_local_archive_cancellable(
     store_root: impl AsRef<Path>,
     bytes: &[u8],
     cancelled: &AtomicBool,
+) -> Result<InstalledPackage, RepositoryError> {
+    install_local_archive_with(store_root, bytes, cancelled, ExistingVersion::Keep)
+}
+
+fn install_local_archive_with(
+    store_root: impl AsRef<Path>,
+    bytes: &[u8],
+    cancelled: &AtomicBool,
+    existing_version: ExistingVersion,
 ) -> Result<InstalledPackage, RepositoryError> {
     if bytes.is_empty() || bytes.len() as u64 > MAX_PACKAGE_BYTES {
         return Err(RepositoryError::Integrity(
@@ -768,7 +808,13 @@ pub fn install_local_archive_cancellable(
                     already_installed: true,
                 });
             }
-            return Err(RepositoryError::ImmutableConflict);
+            if existing_version == ExistingVersion::Keep {
+                return Err(RepositoryError::ImmutableConflict);
+            }
+            // The replacement is already staged and validated, so the old
+            // copy goes only once there is something to put in its place.
+            ensure_installation_not_cancelled(cancelled)?;
+            fs::remove_dir_all(&destination)?;
         }
 
         // Rename is the transaction commit. Cancellation is deliberately
@@ -1900,6 +1946,62 @@ preset_catalog = "metadata/presets.json"
             repository.validate(),
             Err(RepositoryError::UnsafeTransport(_))
         ));
+    }
+
+    /// The guarantee runs both ways: a version never changes under a
+    /// reference by accident, and the release's own pinned package is
+    /// allowed to correct a copy that no longer matches it.
+    #[test]
+    fn a_version_is_immutable_unless_the_release_replaces_it() {
+        // A portable package, so the test builds a valid one on any host.
+        let portable = |wasm: &[u8]| {
+            archive(&[
+                ("rackforge-plugin.toml", portable_manifest()),
+                ("component.wasm", wasm),
+                ("metadata/runtime.json", portable_runtime()),
+                ("metadata/parameters.json", portable_parameters()),
+                ("metadata/presets.json", portable_presets()),
+            ])
+        };
+        let first = portable(b" asm   ");
+        let rebuilt = portable(b" asm    ");
+        let root = std::env::temp_dir().join(format!(
+            "rackforge-replace-{}-{}",
+            std::process::id(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+
+        let installed = install_local_archive(&root, &first).expect("first install");
+        assert!(!installed.already_installed);
+        let version = installed.record.version.clone();
+        let plugin_id = installed.record.plugin_id.clone();
+
+        // Re-installing the same bytes is a no-op, not a conflict.
+        let again = install_local_archive(&root, &first).expect("same bytes again");
+        assert!(again.already_installed);
+
+        // Different bytes under the same version are refused by default.
+        assert!(matches!(
+            install_local_archive(&root, &rebuilt),
+            Err(RepositoryError::ImmutableConflict)
+        ));
+
+        // The release may correct it, and what lands is the new package.
+        let replaced = install_local_archive_replacing(&root, &rebuilt).expect("replacement");
+        assert!(!replaced.already_installed);
+        assert_eq!(replaced.record.version, version);
+        assert_eq!(replaced.record.plugin_id, plugin_id);
+        let payload = std::fs::read(replaced.path.join("component.wasm")).expect("payload");
+        assert_eq!(payload, b" asm    ");
+
+        // And the record now describes what is actually on disk.
+        let record_path = root
+            .join("records")
+            .join(&plugin_id)
+            .join(format!("{version}.json"));
+        let record = read_installation_record(&record_path).expect("record");
+        assert_eq!(record.artifact_sha256, replaced.record.artifact_sha256);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

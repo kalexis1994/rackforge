@@ -81,7 +81,7 @@ shopt -s nullglob
 for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
   [[ "$(basename "$official_plugin")" == "RackForge-Concert-Grand.rfplugin" ]] && continue
   install_output="$("$root/bin/rackforge-store" install-local \
-    "$official_plugin" "$root/plugin-store")"
+    "$official_plugin" "$root/plugin-store" --replace)"
   printf '%s\n' "$install_output"
   # Read the id the store just reported. No pipeline here on purpose:
   # under `set -o pipefail` a `... | head -1` ends in SIGPIPE and takes

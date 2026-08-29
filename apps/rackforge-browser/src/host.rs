@@ -525,6 +525,58 @@ impl BrowserHost {
                     notes: self.sequencer.capture_take(lane),
                 })
             }
+            ControlRequest::ExportLiveShow { name } => {
+                let exported_unix_ms = rackforge_core::live_show::now_unix_ms()
+                    .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
+                rackforge_core::live_show::assemble_live_show(
+                    &name,
+                    self.performance.library(),
+                    &self.state_store,
+                    exported_unix_ms,
+                )
+                .map(|file| ControlResponse::LiveShowExported {
+                    file_name: rackforge_core::live_show::live_show_file_name(&name),
+                    file: Box::new(file),
+                })
+                .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))
+            }
+            ControlRequest::InspectLiveShow { file } => {
+                let installed = self.installed_plugin_versions();
+                rackforge_core::live_show::inspect_live_show(
+                    &file,
+                    &installed,
+                    self.performance.library(),
+                )
+                .map(|preview| ControlResponse::LiveShowInspected {
+                    preview: Box::new(preview),
+                })
+                .map_err(|error| {
+                    Failure::new(ControlErrorCode::InvalidRequest, format!("{error:#}"))
+                })
+            }
+            ControlRequest::ImportLiveShow { file } => {
+                let installed = self.installed_plugin_versions();
+                let preview = rackforge_core::live_show::inspect_live_show(
+                    &file,
+                    &installed,
+                    self.performance.library(),
+                )
+                .map_err(|error| {
+                    Failure::new(ControlErrorCode::InvalidRequest, format!("{error:#}"))
+                })?;
+                rackforge_core::live_show::store_live_show_states(&file, &mut self.state_store)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                for edit in rackforge_core::live_show::live_show_edits(&file) {
+                    let revision = self.performance.revision();
+                    self.edit_performance(revision, edit)?;
+                }
+                Ok(ControlResponse::LiveShowImported {
+                    preview: Box::new(preview),
+                    snapshot: Box::new(self.performance_snapshot()),
+                })
+            }
             ControlRequest::ReleaseVirtualMidi { client_id } => {
                 self.release_virtual_midi(&client_id);
                 Ok(ControlResponse::VirtualMidiReleased { client_id })
@@ -587,6 +639,18 @@ impl BrowserHost {
         Ok(ControlResponse::PerformanceEdited {
             snapshot: Box::new(snapshot),
         })
+    }
+
+    fn installed_plugin_versions(&self) -> std::collections::BTreeMap<String, String> {
+        self.plugins
+            .iter()
+            .map(|plugin| {
+                (
+                    plugin.plugin_id.clone(),
+                    plugin.runtime.manifest().version.clone(),
+                )
+            })
+            .collect()
     }
 
     fn performance_snapshot(&self) -> PerformanceSnapshot {

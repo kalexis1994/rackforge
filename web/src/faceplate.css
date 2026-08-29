@@ -3595,6 +3595,113 @@
     0 0 7px color-mix(in srgb, var(--acid) 72%, transparent);
 }
 
+/* The SHOW FILE plate: the library's luggage. An engraved outline like
+   the PERFORMANCE zone, sized as a footer under the library grid. */
+.show-transfer {
+  position: relative;
+  margin: 18px 0 4px;
+  padding: 18px 14px 14px;
+  border: 1px solid var(--fp-seam);
+  border-radius: var(--fp-radius);
+  background: var(--fp-panel);
+}
+
+.show-transfer-legend {
+  position: absolute;
+  top: -8px;
+  left: 12px;
+  padding: 0 6px;
+  background: var(--fp-panel);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--fp-rail-label);
+}
+
+.show-transfer-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--fp-rail-label);
+  max-width: 62ch;
+}
+
+.show-transfer-controls {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.show-transfer-name {
+  flex: 1 1 180px;
+  min-width: 140px;
+  padding: 6px 10px;
+  border: 1px solid var(--fp-seam);
+  border-radius: var(--fp-radius);
+  background: var(--fp-well);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.show-transfer-message {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--fp-rail-label);
+}
+
+.show-import-counts {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+}
+
+.show-import-counts div {
+  padding: 6px 12px;
+  border: 1px solid var(--fp-seam);
+  border-radius: var(--fp-radius);
+  background: var(--fp-well);
+  text-align: center;
+}
+
+.show-import-counts dt {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fp-rail-label);
+}
+
+.show-import-counts dd {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.show-import-warnings {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--red) 55%, var(--fp-seam));
+  border-radius: var(--fp-radius);
+  font-size: 12px;
+}
+
+.show-import-warnings ul {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+
+.show-import-warnings p {
+  margin: 6px 0 0;
+  color: var(--fp-rail-label);
+}
+
+.show-import-notes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--fp-rail-label);
+}
+
 /* REC burns red while armed: recording is the one act the player must
    never mistake for playback. */
 .seq-rec::before {

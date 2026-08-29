@@ -243,6 +243,36 @@ export interface RfPresetImportPreview {
   warnings: string[];
 }
 
+export interface RfLiveRequirement {
+  plugin_id: string;
+  version: string;
+}
+
+/** A portable `.rflive` show: the whole performance library plus every
+ * plugin state its Racks reference. The surface treats the payload as
+ * opaque — it validates, transports and displays, never edits. */
+export interface RfLiveFile {
+  format: "org.rackforge.live";
+  schema_version: number;
+  exported_by: string;
+  exported_unix_ms: number;
+  name: string;
+  library: unknown;
+  states: unknown[];
+  requirements: RfLiveRequirement[];
+}
+
+export interface RfLiveImportPreview {
+  name: string;
+  racks: number;
+  songs: number;
+  setlists: number;
+  patterns: number;
+  states: number;
+  missing_plugins: RfLiveRequirement[];
+  warnings: string[];
+}
+
 export interface RackGraphPosition {
   x: number;
   y: number;

@@ -7,6 +7,7 @@ pub mod hosted;
 pub mod isolated_state;
 #[cfg(target_os = "linux")]
 pub mod live;
+pub mod live_show;
 #[cfg(any(target_os = "linux", test))]
 mod live_midi_state;
 pub mod live_parameter_state;

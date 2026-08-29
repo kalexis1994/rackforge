@@ -2174,6 +2174,9 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
         | ControlRequest::ExportPluginPreset { .. }
         | ControlRequest::InspectPluginPreset { .. }
         | ControlRequest::ImportPluginPreset { .. }
+        | ControlRequest::ExportLiveShow { .. }
+        | ControlRequest::InspectLiveShow { .. }
+        | ControlRequest::ImportLiveShow { .. }
         | ControlRequest::MaterializePluginState { .. }
         | ControlRequest::PluginParameters { .. }
         | ControlRequest::SetPluginParameter { .. }

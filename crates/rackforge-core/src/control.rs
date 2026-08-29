@@ -560,6 +560,9 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
             file,
             conflict_policy,
         } => import_plugin_preset(context, &target_plugin_id, &file, conflict_policy),
+        ControlRequest::ExportLiveShow { name } => export_live_show(context, &name),
+        ControlRequest::InspectLiveShow { file } => inspect_live_show_request(context, &file),
+        ControlRequest::ImportLiveShow { file } => import_live_show(context, &file),
         ControlRequest::MaterializePluginState {
             plugin_id,
             sound_id,
@@ -1866,6 +1869,135 @@ fn export_plugin_preset(
             ),
         },
         Err(_) => internal_error("plugin state store lock is poisoned", revision),
+    }
+}
+
+fn installed_plugin_versions(context: &ControlContext) -> BTreeMap<String, String> {
+    context
+        .plugin_manifests
+        .iter()
+        .map(|(plugin_id, manifest)| (plugin_id.clone(), manifest.version.clone()))
+        .collect()
+}
+
+fn export_live_show(context: &ControlContext, name: &str) -> ControlResponse {
+    let revision = current_revision(context);
+    let (repository, store) = match (context.performance_repository.lock(), context.state_store.lock()) {
+        (Ok(repository), Ok(store)) => (repository, store),
+        _ => return internal_error("library or state store lock is poisoned", revision),
+    };
+    let exported = crate::live_show::now_unix_ms().and_then(|now| {
+        crate::live_show::assemble_live_show(name, repository.library(), &store, now)
+    });
+    match exported {
+        Ok(file) => ControlResponse::LiveShowExported {
+            file_name: crate::live_show::live_show_file_name(name),
+            file: Box::new(file),
+        },
+        Err(error) => error_response(
+            ControlErrorCode::Rejected,
+            format!("exporting the show: {error:#}"),
+            revision,
+        ),
+    }
+}
+
+fn inspect_live_show_request(
+    context: &ControlContext,
+    file: &rackforge_control_api::RfLiveFile,
+) -> ControlResponse {
+    let revision = current_revision(context);
+    let repository = match context.performance_repository.lock() {
+        Ok(repository) => repository,
+        Err(_) => return internal_error("performance repository lock is poisoned", revision),
+    };
+    match crate::live_show::inspect_live_show(
+        file,
+        &installed_plugin_versions(context),
+        repository.library(),
+    ) {
+        Ok(preview) => ControlResponse::LiveShowInspected {
+            preview: Box::new(preview),
+        },
+        Err(error) => error_response(
+            ControlErrorCode::InvalidRequest,
+            format!("validating the .rflive file: {error:#}"),
+            revision,
+        ),
+    }
+}
+
+/// Imports a show: authenticate and store the embedded states first so
+/// every reference resolves, then upsert each document through the same
+/// revisioned edit path a surface would use — LIVE reconciliation,
+/// checkpointing and Rack materialization included.
+fn import_live_show(
+    context: &Arc<ControlContext>,
+    file: &rackforge_control_api::RfLiveFile,
+) -> ControlResponse {
+    let revision = current_revision(context);
+    let preview = {
+        let repository = match context.performance_repository.lock() {
+            Ok(repository) => repository,
+            Err(_) => return internal_error("performance repository lock is poisoned", revision),
+        };
+        match crate::live_show::inspect_live_show(
+            file,
+            &installed_plugin_versions(context),
+            repository.library(),
+        ) {
+            Ok(preview) => preview,
+            Err(error) => {
+                return error_response(
+                    ControlErrorCode::InvalidRequest,
+                    format!("validating the .rflive file: {error:#}"),
+                    revision,
+                );
+            }
+        }
+    };
+    {
+        let mut store = match context.state_store.lock() {
+            Ok(store) => store,
+            Err(_) => return internal_error("state store lock is poisoned", revision),
+        };
+        if let Err(error) = crate::live_show::store_live_show_states(file, &mut store) {
+            return error_response(
+                ControlErrorCode::Rejected,
+                format!("storing the show's plugin states: {error:#}"),
+                revision,
+            );
+        }
+    }
+    let mut last_snapshot = None;
+    for edit in crate::live_show::live_show_edits(file) {
+        let current = match context.performance_repository.lock() {
+            Ok(repository) => repository.revision(),
+            Err(_) => return internal_error("performance repository lock is poisoned", revision),
+        };
+        match edit_performance(context, current, edit) {
+            ControlResponse::PerformanceEdited { snapshot } => last_snapshot = Some(snapshot),
+            other => return other,
+        }
+    }
+    let snapshot = match last_snapshot {
+        Some(snapshot) => snapshot,
+        None => {
+            // An empty show is legal; answer with the library as it stands.
+            match (context.performance_repository.lock(), context.store.lock()) {
+                (Ok(repository), Ok(store)) => Box::new(PerformanceSnapshot {
+                    schema_version: PERFORMANCE_SNAPSHOT_SCHEMA_VERSION,
+                    revision: repository.revision(),
+                    library: repository.library().clone(),
+                    live: store.state().live.clone(),
+                }),
+                _ => return internal_error("library or session lock is poisoned", revision),
+            }
+        }
+    };
+    ControlResponse::LiveShowImported {
+        preview: Box::new(preview),
+        snapshot,
     }
 }
 

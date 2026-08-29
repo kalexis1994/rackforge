@@ -5,7 +5,7 @@ pub use rackforge_midi_api::{
     ParameterLinkMessage, ParameterLinkPassThrough, ParameterLinkSource, ParameterLinkTransform,
 };
 pub use rackforge_performance_api::{
-    LibraryRevision, PatternDefinition, PerformanceEdit, PerformanceSnapshot,
+    LibraryRevision, PatternDefinition, PerformanceEdit, PerformanceLibrary, PerformanceSnapshot,
 };
 pub use rackforge_plugin_api::{
     HostPreset, HostPresetSummary, ParameterSchema, PluginStateReference,
@@ -22,8 +22,10 @@ pub use rackforge_session_api::{
 
 pub const CONTROL_SCHEMA_VERSION: u32 = 16;
 pub const CONTROL_SOCKET_NAME: &str = "live-control.sock";
-/// Includes a complete base64-encoded 1 MiB plugin state inside `.rfpreset`.
-pub const MAX_CONTROL_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
+/// Sized for the largest documents the wire carries: a `.rfpreset` embeds
+/// one base64-encoded 1 MiB plugin state; a `.rflive` show embeds every
+/// state its racks reference.
+pub const MAX_CONTROL_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 
 pub const RFPRESET_FORMAT: &str = "org.rackforge.preset";
 pub const RFPRESET_SCHEMA_VERSION: u32 = 1;
@@ -46,6 +48,64 @@ pub struct RfPresetFile {
 #[serde(rename_all = "snake_case")]
 pub enum RfPresetStateEncoding {
     Base64,
+}
+
+pub const RFLIVE_FORMAT: &str = "org.rackforge.live";
+pub const RFLIVE_SCHEMA_VERSION: u32 = 1;
+
+/// Portable, self-contained show file: the whole performance library plus
+/// every plugin state its Racks reference, embedded the way `.rfpreset`
+/// embeds one. Carries a manifest of the plugins the show needs — never
+/// the plugins themselves.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RfLiveFile {
+    pub format: String,
+    pub schema_version: u32,
+    pub exported_by: String,
+    pub exported_unix_ms: u64,
+    /// The show's display name; also seeds the file name.
+    pub name: String,
+    /// Racks, songs, setlists and sequencer patterns, exactly as edited.
+    pub library: PerformanceLibrary,
+    /// Every plugin state a Rack Slot references, one entry per unique
+    /// blob. The state stays opaque: RackForge authenticates and
+    /// transports it, the plugin owns it.
+    #[serde(default)]
+    pub states: Vec<RfLiveEmbeddedState>,
+    /// What the show needs installed to sound.
+    #[serde(default)]
+    pub requirements: Vec<RfLiveRequirement>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RfLiveEmbeddedState {
+    pub reference: PluginStateReference,
+    pub state_base64: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RfLiveRequirement {
+    pub plugin_id: String,
+    /// The version the embedded states were made with.
+    pub version: String,
+}
+
+/// What an importing musician is told before committing: sizes, what the
+/// upsert would replace, and which plugins are missing on this machine.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RfLiveImportPreview {
+    pub name: String,
+    pub racks: u32,
+    pub songs: u32,
+    pub setlists: u32,
+    pub patterns: u32,
+    pub states: u32,
+    pub missing_plugins: Vec<RfLiveRequirement>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -338,6 +398,24 @@ pub enum ControlRequest {
         #[serde(default)]
         conflict_policy: PresetImportConflictPolicy,
     },
+    /// Assembles the whole performance library and every referenced plugin
+    /// state into one portable `.rflive` document.
+    ExportLiveShow {
+        name: String,
+    },
+    /// Validates a `.rflive` document against this machine without
+    /// changing anything: what it holds, what it would replace, what is
+    /// missing.
+    InspectLiveShow {
+        file: Box<RfLiveFile>,
+    },
+    /// Imports a `.rflive` document: stores the embedded states, then
+    /// upserts every document through the library's own edit machinery.
+    /// Existing entries with the same id are replaced; everything else is
+    /// kept.
+    ImportLiveShow {
+        file: Box<RfLiveFile>,
+    },
     /// Creates an immutable state snapshot in an isolated plugin instance.
     ///
     /// This is the safe path used by Rack Slot editors: selecting a sound for
@@ -499,6 +577,17 @@ pub enum ControlResponse {
     },
     PluginPresetInspected {
         preview: Box<RfPresetImportPreview>,
+    },
+    LiveShowExported {
+        file_name: String,
+        file: Box<RfLiveFile>,
+    },
+    LiveShowInspected {
+        preview: Box<RfLiveImportPreview>,
+    },
+    LiveShowImported {
+        preview: Box<RfLiveImportPreview>,
+        snapshot: Box<PerformanceSnapshot>,
     },
     PluginPresetImported {
         preset: Box<HostPreset>,

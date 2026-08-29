@@ -806,6 +806,14 @@ function SequencerTabEditor({
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
+  // The interval must OUTLIVE the renders: onChange is a fresh closure on
+  // every 100ms status tick, and depending on it re-armed the timer so
+  // often the 600ms drain almost never fired. The latest handler rides a
+  // ref; the timer's lifetime follows only the arm state.
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
   useEffect(() => {
     if (!capturing) return;
     const timer = window.setInterval(() => {
@@ -824,7 +832,7 @@ function SequencerTabEditor({
               fallbackView,
             );
           const merged = mergeCapturedNotes(current, take.notes);
-          onChange((tab) => ({
+          onChangeRef.current((tab) => ({
             ...tab,
             drafts: tab.drafts.map((slotDraft, slot) =>
               slot === tab.activeSlot ? merged : slotDraft,
@@ -843,7 +851,7 @@ function SequencerTabEditor({
         });
     }, 600);
     return () => window.clearInterval(timer);
-  }, [capturing, lane, onChange, beatsPerBar, fallbackView]);
+  }, [capturing, lane, beatsPerBar, fallbackView]);
 
   /// LAUNCH stores the draft into its slot and jumps to it — the editor's
   /// audition and the Session grid are the same machinery.

@@ -34,6 +34,11 @@ pub enum HostActionTarget {
     SequencerStopLane { lane: u8 },
     /// Toggles the lane's mute against the host's current state.
     SequencerMuteLane { lane: u8 },
+    /// Momentary FILL: press holds the performance switch, release clears
+    /// it. Only bind this where the wire carries both button phases — a
+    /// press-only path must leave it unmapped rather than invent a toggle
+    /// that could strand FILL on mid-song.
+    SequencerFill,
 }
 
 impl HostActionTarget {
@@ -86,6 +91,9 @@ pub mod mcu {
             NOTE_PLAY => HostActionTarget::TransportPlay,
             NOTE_STOP => HostActionTarget::TransportStop,
             NOTE_CLICK => HostActionTarget::TapTempo,
+            // The loop key doubles as the performance FILL: held, not
+            // toggled - exactly how the surface's FILL key behaves.
+            NOTE_CYCLE => HostActionTarget::SequencerFill,
             _ => return None,
         };
         let phase = if *velocity > 0 {
@@ -902,6 +910,14 @@ mod tests {
             Some((HostActionTarget::TapTempo, ButtonPhase::Press))
         );
         // Unmapped transport notes and non-note messages stay unclaimed.
+        assert_eq!(
+            mcu::transport_action(&[0x90, mcu::NOTE_CYCLE, 0x7f]),
+            Some((HostActionTarget::SequencerFill, ButtonPhase::Press))
+        );
+        assert_eq!(
+            mcu::transport_action(&[0x90, mcu::NOTE_CYCLE, 0x00]),
+            Some((HostActionTarget::SequencerFill, ButtonPhase::Release))
+        );
         assert_eq!(mcu::transport_action(&[0x90, mcu::NOTE_RECORD, 0x7f]), None);
         assert_eq!(mcu::transport_action(&[0xb0, 0x5e, 0x7f]), None);
         assert_eq!(mcu::led_message(mcu::NOTE_PLAY, true), [0x90, 0x5e, 0x7f]);

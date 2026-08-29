@@ -1280,6 +1280,18 @@ impl PerformanceEdit {
             Self::DeletePattern { pattern_id } => {
                 remove(&mut library.patterns, pattern_id, |item| &item.id)
                     .ok_or_else(|| PerformanceError::MissingPattern(pattern_id.clone()))?;
+                // A deleted pattern leaves no ghost in the deck: its seats
+                // empty, and a tab left holding nothing at all goes with it.
+                for tab in &mut library.sequencer_tabs {
+                    for slot in &mut tab.slot_ids {
+                        if slot.as_ref() == Some(pattern_id) {
+                            *slot = None;
+                        }
+                    }
+                }
+                library
+                    .sequencer_tabs
+                    .retain(|tab| tab.slot_ids.iter().any(Option::is_some));
             }
             Self::PutSequencerTab { tab } => {
                 upsert(&mut library.sequencer_tabs, tab.clone(), |item| &item.lane)
@@ -2275,6 +2287,44 @@ mod tests {
             invalid_part_channel.validate(),
             Err(PerformanceError::InvalidMidiChannel)
         );
+    }
+
+    #[test]
+    fn deleting_a_pattern_leaves_no_ghost_in_the_deck() {
+        let mut library = library();
+        let pattern_id = library.patterns[0].id.clone();
+        library.sequencer_tabs = vec![
+            SequencerTabDefinition {
+                lane: 0,
+                view: PatternView::Drum,
+                slot_ids: vec![Some(pattern_id.clone()), None, None, None],
+                active_slot: 0,
+            },
+            SequencerTabDefinition {
+                lane: 1,
+                view: PatternView::Melodic,
+                slot_ids: vec![
+                    Some(pattern_id.clone()),
+                    Some(PatternId::new("pattern.other").unwrap()),
+                    None,
+                    None,
+                ],
+                active_slot: 0,
+            },
+        ];
+        PerformanceEdit::DeletePattern {
+            pattern_id: pattern_id.clone(),
+        }
+        .apply_to(&mut library)
+        .expect("deleted");
+
+        // The tab that held only that pattern is gone; the one that still
+        // holds another keeps its seat, emptied of the ghost.
+        assert_eq!(library.sequencer_tabs.len(), 1);
+        let survivor = &library.sequencer_tabs[0];
+        assert_eq!(survivor.lane, 1);
+        assert_eq!(survivor.slot_ids[0], None);
+        assert!(survivor.slot_ids[1].is_some());
     }
 
     #[test]

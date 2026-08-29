@@ -45,8 +45,9 @@ use rackforge_plugin_api::{
 };
 use rackforge_repository::{
     InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions,
-    RepositoryError, cleanup_uninstall_tombstones, inspect_local_archive, install_local_archive,
-    plugin_is_enabled, remove_plugin_user_data, set_plugin_enabled, uninstall_plugin,
+    cleanup_uninstall_tombstones, inspect_local_archive, install_local_archive,
+    install_local_archive_replacing, plugin_is_enabled, remove_plugin_user_data,
+    set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
     AuditionEndReason, BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId,
@@ -6411,25 +6412,13 @@ fn install_bundled_official_plugins(options: &Options) -> Result<()> {
             .join("packages")
             .join(&inspection.plugin_id)
             .is_dir();
-        let installed = match install_local_archive(store_root, bytes) {
-            Ok(installed) => installed,
-            Err(RepositoryError::ImmutableConflict) => {
-                // A published plugin version is immutable. A locally installed
-                // build with the same version but different bytes must win:
-                // replacing it would violate repository guarantees, while
-                // refusing to start RackForge turns a harmless packaging
-                // mismatch into a total application outage.
-                eprintln!(
-                    "DESKTOP_OFFICIAL_PLUGIN_CONFLICT id={} version={} archive={} action=keep-installed",
-                    inspection.plugin_id, inspection.version, archive_name
-                );
-                continue;
-            }
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("installing bundled official plugin {archive_name}"));
-            }
-        };
+        // The official set this build carries is pinned upstream and checked
+        // against a SHA-256 the source tree holds, so it is the authority on
+        // what its versions contain. A same-version copy left by an earlier
+        // build is corrected rather than kept: keeping it meant a player ran
+        // a stale instrument that no release could ever replace.
+        let installed = install_local_archive_replacing(store_root, bytes)
+            .with_context(|| format!("installing bundled official plugin {archive_name}"))?;
         if !known_plugin {
             set_plugin_enabled(store_root, &inspection.plugin_id, true).with_context(|| {
                 format!("enabling bundled official plugin {}", inspection.plugin_id)

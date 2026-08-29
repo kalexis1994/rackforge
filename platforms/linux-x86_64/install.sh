@@ -73,17 +73,27 @@ if [[ ! -f "$default_marker" ]]; then
   fi
 fi
 
-official_plugin="$source_root/bundled-plugins/RF-106.rfplugin"
-if [[ -f "$official_plugin" ]]; then
-  official_known=false
-  if [[ -d "$root/plugin-store/packages/org.rackforge.rf-106" ]]; then
-    official_known=true
+# Every official instrument the release carries; see the Raspberry Pi
+# installer for the same rule. A newcomer is enabled, a plugin the store
+# already knows keeps whatever the player chose.
+known_ids=" $(ls "$root/plugin-store/packages" 2>/dev/null | tr '\n' ' ') "
+shopt -s nullglob
+for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
+  [[ "$(basename "$official_plugin")" == "RackForge-Concert-Grand.rfplugin" ]] && continue
+  install_output="$("$root/bin/rackforge-store" install-local \
+    "$official_plugin" "$root/plugin-store")"
+  printf '%s\n' "$install_output"
+  official_plugin_id="$(printf '%s\n' "$install_output" |
+    sed -n 's/.*PLUGIN_INSTALLED id=\([^ ]*\).*/\1/p' | head -1)"
+  [[ -n "$official_plugin_id" ]] || {
+    printf 'could not read the plugin id installed from %s\n' "$official_plugin" >&2
+    exit 1
+  }
+  if [[ "$known_ids" != *" $official_plugin_id "* ]]; then
+    "$root/bin/rackforge-store" enable "$official_plugin_id" "$root/plugin-store"
   fi
-  "$root/bin/rackforge-store" install-local "$official_plugin" "$root/plugin-store"
-  if [[ "$official_known" == false ]]; then
-    "$root/bin/rackforge-store" enable org.rackforge.rf-106 "$root/plugin-store"
-  fi
-fi
+done
+shopt -u nullglob
 
 controller_package="$source_root/controller-packages/org.rackforge.arturia-keylab-essential-mk3.rfcontroller"
 if [[ -d "$controller_package" ]]; then

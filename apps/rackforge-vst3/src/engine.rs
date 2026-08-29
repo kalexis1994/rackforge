@@ -297,10 +297,12 @@ fn install_bundled_packages_at(root: &Path) -> Result<Vec<PathBuf>> {
         fs::create_dir_all(&path).with_context(|| format!("creating {}", path.display()))?;
     }
     let mut installed = Vec::new();
-    for (name, bytes) in [
-        ("Concert Grand", BUNDLED_PLUGIN),
-        ("RF-106", BUNDLED_RF106_PLUGIN),
-    ] {
+    let carried = std::iter::once(("Concert Grand", BUNDLED_PLUGIN)).chain(
+        BUNDLED_OFFICIAL_PLUGINS
+            .iter()
+            .map(|(name, bytes)| (*name, Some(*bytes))),
+    );
+    for (name, bytes) in carried {
         if let Some(bytes) = bytes {
             installed.push(
                 install_local_archive(&store, bytes)
@@ -471,9 +473,11 @@ mod tests {
         assert_eq!(newest_installed_instrument(root.path()).unwrap(), None);
     }
 
+    /// Every instrument the build carried must reach the store: the plug-in
+    /// ships the same official set the desktop does, not one chosen name.
     #[test]
-    fn configured_bundle_exposes_both_official_instruments() {
-        if BUNDLED_PLUGIN.is_none() || BUNDLED_RF106_PLUGIN.is_none() {
+    fn a_configured_bundle_exposes_every_instrument_it_carries() {
+        if BUNDLED_PLUGIN.is_none() || BUNDLED_OFFICIAL_PLUGINS.is_empty() {
             return;
         }
         let root = TestRoot::create();
@@ -482,12 +486,20 @@ mod tests {
             .into_iter()
             .map(|model| model.plugin_id)
             .collect::<Vec<_>>();
-        assert_eq!(ids, ["org.rackforge.concert-grand", "org.rackforge.rf-106"]);
+        assert!(ids.contains(&"org.rackforge.concert-grand".to_owned()));
+        assert_eq!(
+            ids.len(),
+            BUNDLED_OFFICIAL_PLUGINS.len() + 1,
+            "an instrument was carried but never installed: {ids:?}"
+        );
     }
 
     #[test]
     fn bundled_rf106_preserves_sound_banks_for_its_web_contract() {
-        if BUNDLED_RF106_PLUGIN.is_none() {
+        if !BUNDLED_OFFICIAL_PLUGINS
+            .iter()
+            .any(|(name, _)| *name == "RF-106")
+        {
             return;
         }
         let root = TestRoot::create();

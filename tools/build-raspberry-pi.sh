@@ -34,7 +34,7 @@ if [[ -n "$official_plugin_override" ]]; then
   }
   install -d "$official_plugins"
   install -m 0644 "$official_plugin_override" \
-    "$official_plugins/RF-106.rfplugin"
+    "$official_plugins/$(basename "$official_plugin_override")"
 else
   python3 "$repository/tools/fetch-official-plugins.py" \
     --output-directory "$official_plugins"
@@ -134,25 +134,27 @@ default_plugin=none
 if [[ -f "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
   default_plugin=org.rackforge.concert-grand
 fi
-official_plugin=none
-if [[ -f "$release/bundled-plugins/RF-106.rfplugin" ]]; then
-  official_plugin_version="$(python3 - "$release/bundled-plugins/RF-106.rfplugin" <<'PY'
+official_plugin="$(python3 - "$release/bundled-plugins" <<'PY'
+import pathlib
 import re
 import sys
 import zipfile
 
-with zipfile.ZipFile(sys.argv[1]) as archive:
-    manifest = archive.read("rackforge-plugin.toml").decode("utf-8")
-
-plugin_id = re.search(r'^id = "([^"]+)"$', manifest, re.MULTILINE)
-version = re.search(r'^version = "([^"]+)"$', manifest, re.MULTILINE)
-if plugin_id is None or plugin_id.group(1) != "org.rackforge.rf-106" or version is None:
-    raise SystemExit("bundled RF-106 package has invalid identity metadata")
-print(version.group(1))
+directory = pathlib.Path(sys.argv[1])
+carried = []
+for archive_path in sorted(directory.glob("*.rfplugin")):
+    if archive_path.name == "RackForge-Concert-Grand.rfplugin":
+        continue
+    with zipfile.ZipFile(archive_path) as archive:
+        manifest = archive.read("rackforge-plugin.toml").decode("utf-8")
+    plugin_id = re.search(r'^id = "([^"]+)"$', manifest, re.MULTILINE)
+    version = re.search(r'^version = "([^"]+)"$', manifest, re.MULTILINE)
+    if plugin_id is None or version is None:
+        raise SystemExit(f"{archive_path.name} has invalid identity metadata")
+    carried.append(f"{plugin_id.group(1)}@{version.group(1)}")
+print(",".join(carried) if carried else "none")
 PY
 )"
-  official_plugin="org.rackforge.rf-106@$official_plugin_version"
-fi
 printf 'revision=%s\narchitecture=linux-aarch64\ndefault_plugin=%s\nofficial_plugin=%s\n' \
   "$revision" "$default_plugin" "$official_plugin" >"$release/build-info.txt"
 
@@ -160,8 +162,9 @@ cat >"$release/INSTALL.md" <<'EOF'
 # RackForge for Raspberry Pi ARM64
 
 This artifact contains the RackForge hosts, Raspberry Pi integration, the
-RackForge Concert Grand, and the pinned official RF-106 package. Instruments
-such as RF-Soundfonts are versioned and distributed by their own pipelines.
+RackForge Concert Grand, and the pinned official instrument packages listed
+in build-info.txt. Instruments such as RF-Soundfonts are versioned and
+distributed by their own pipelines.
 
 Extract it for the user who will run RackForge. The installer derives the
 deployment root from that user's home directory; it can also be overridden

@@ -69,11 +69,12 @@ $officialPlugins = Join-Path $repository "dist/bundled-plugins/official"
 if ($LASTEXITCODE -ne 0) {
     throw "RackForge official plugin download failed."
 }
-$rf106 = Join-Path $officialPlugins "RF-106.rfplugin"
-if (-not (Test-Path -LiteralPath $rf106 -PathType Leaf)) {
-    throw "The pinned RF-106 package was not produced at $rf106"
+$carried = @(Get-ChildItem -LiteralPath $officialPlugins -Filter *.rfplugin -File -ErrorAction SilentlyContinue)
+if ($carried.Count -eq 0) {
+    throw "No pinned official plugins were produced in $officialPlugins"
 }
-$env:RACKFORGE_BUNDLED_RF106_PLUGIN = $rf106
+Write-Host ("   embedding official instruments: " + (($carried | ForEach-Object { $_.BaseName }) -join ", "))
+$env:RACKFORGE_BUNDLED_OFFICIAL_PLUGINS = $officialPlugins
 
 Push-Location $repository
 try {

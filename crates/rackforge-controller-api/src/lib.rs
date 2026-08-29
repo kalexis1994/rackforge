@@ -39,6 +39,10 @@ pub enum HostActionTarget {
     /// press-only path must leave it unmapped rather than invent a toggle
     /// that could strand FILL on mid-song.
     SequencerFill,
+    /// One REC button for a per-lane machine: disarms whichever lane is
+    /// capturing; otherwise arms the host's focus lane (the deck's open
+    /// tab). A toggle on the press, safe for press-only wires.
+    SequencerCaptureToggle,
 }
 
 impl HostActionTarget {
@@ -94,6 +98,7 @@ pub mod mcu {
             // The loop key doubles as the performance FILL: held, not
             // toggled - exactly how the surface's FILL key behaves.
             NOTE_CYCLE => HostActionTarget::SequencerFill,
+            NOTE_RECORD => HostActionTarget::SequencerCaptureToggle,
             _ => return None,
         };
         let phase = if *velocity > 0 {
@@ -918,7 +923,11 @@ mod tests {
             mcu::transport_action(&[0x90, mcu::NOTE_CYCLE, 0x00]),
             Some((HostActionTarget::SequencerFill, ButtonPhase::Release))
         );
-        assert_eq!(mcu::transport_action(&[0x90, mcu::NOTE_RECORD, 0x7f]), None);
+        assert_eq!(
+            mcu::transport_action(&[0x90, mcu::NOTE_RECORD, 0x7f]),
+            Some((HostActionTarget::SequencerCaptureToggle, ButtonPhase::Press))
+        );
+        assert_eq!(mcu::transport_action(&[0x90, mcu::NOTE_REWIND, 0x7f]), None);
         assert_eq!(mcu::transport_action(&[0xb0, 0x5e, 0x7f]), None);
         assert_eq!(mcu::led_message(mcu::NOTE_PLAY, true), [0x90, 0x5e, 0x7f]);
 

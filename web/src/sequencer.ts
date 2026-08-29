@@ -55,6 +55,7 @@ export type SequencerCommand =
   | { kind: "set_fill"; on: boolean }
   | { kind: "set_clock_out"; on: boolean }
   | { kind: "set_capture"; lane: number; on: boolean }
+  | { kind: "set_focus_lane"; lane: number }
   | { kind: "load_slot"; lane: number; slot: number; pattern: PatternDefinition }
   | { kind: "launch_slot"; lane: number; slot: number; quantize: SequencerQuantize };
 
@@ -84,6 +85,8 @@ export interface SequencerStatus {
   fill?: boolean;
   /** MIDI clock out is running. */
   clock_out?: boolean;
+  /** The lane the player is working on (the deck's open tab). */
+  focus_lane?: number;
   tempo_bpm: number;
   beats_per_bar: number;
   beat_unit: number;

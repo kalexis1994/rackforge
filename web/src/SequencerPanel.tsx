@@ -501,6 +501,15 @@ function SequencerDeck({
 
   const active = tabs.find((tab) => tab.lane === activeLane) ?? tabs[0] ?? null;
 
+  // The engine follows the deck's focus: a controller's single REC button
+  // arms whatever sequencer the player is looking at.
+  useEffect(() => {
+    if (active) {
+      sendSequencerCommand({ kind: "set_focus_lane", lane: active.lane });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.lane]);
+
   return (
     <div className="sequencer-deck">
       <div className="seq-tabs" role="tablist" aria-label="Sequencers">

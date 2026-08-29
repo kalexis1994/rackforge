@@ -195,10 +195,12 @@
   }
 }
 
+/* One word. At 0.3em the tracking pulled it apart into RACK FORGE, so it
+   takes the same silkscreen tracking as the panel's other legends. */
 .brand-name {
   font-family: var(--display-font);
   font-weight: 700;
-  letter-spacing: 0.3em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--ink) !important;
 }

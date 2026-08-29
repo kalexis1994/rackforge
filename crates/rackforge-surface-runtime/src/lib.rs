@@ -769,6 +769,20 @@ impl PerformanceDraft {
 }
 
 #[derive(Debug)]
+/// Where the player's cursor was standing in the LIVE lists, held by
+/// identity so it can be found again after the library changes underneath.
+struct BrowsedLive {
+    mode_index: usize,
+    rack: Option<rackforge_performance_api::RackId>,
+    song: Option<rackforge_performance_api::SongId>,
+    song_part: Option<rackforge_performance_api::SongPartId>,
+    setlist: Option<rackforge_performance_api::SetlistId>,
+    setlist_entry: Option<(
+        rackforge_performance_api::SetlistEntryId,
+        rackforge_performance_api::SongPartId,
+    )>,
+}
+
 pub struct Menu {
     page: Page,
     active_mode: ActiveMode,
@@ -1266,6 +1280,35 @@ impl Menu {
         if snapshot.validate().is_err() {
             return;
         }
+        // What the player is looking at, held by identity rather than by
+        // position. A library edit — a deck tab saved in another window, a
+        // Rack renamed on the web surface — must not move the cursor out
+        // from under a hand that is browsing. Only a change in what is
+        // actually LIVE re-anchors the screen to what is sounding.
+        let live_changed = self.live_performance != snapshot.live;
+        let browsed = (!live_changed).then(|| BrowsedLive {
+            mode_index: self.live_index,
+            rack: self
+                .live_racks()
+                .get(self.live_rack_index)
+                .map(|rack| rack.id.clone()),
+            song: self
+                .live_songs()
+                .get(self.live_song_index)
+                .map(|song| song.id.clone()),
+            song_part: self
+                .selected_live_song()
+                .and_then(|song| song.parts.get(self.live_song_part_index))
+                .map(|part| part.id.clone()),
+            setlist: self
+                .live_setlists()
+                .get(self.live_setlist_index)
+                .map(|setlist| setlist.id.clone()),
+            setlist_entry: self
+                .selected_setlist_parts()
+                .get(self.live_setlist_entry_index)
+                .map(|(entry, _, part)| (entry.id.clone(), part.id.clone())),
+        });
         self.performance_library = snapshot.library;
         self.performance_revision = snapshot.revision;
         self.live_performance = snapshot.live;
@@ -1316,6 +1359,50 @@ impl Menu {
         } else {
             self.live_setlist_index = 0;
             self.live_setlist_entry_index = 0;
+        }
+        if let Some(browsed) = browsed {
+            self.restore_browsed_live(browsed);
+        }
+    }
+
+    /// Puts the cursor back on whatever the player had it on, when that
+    /// thing survived the edit. Anything that did not survive keeps the
+    /// position just derived from the LIVE location — the cursor falls back
+    /// to what is sounding only when what it held is gone.
+    fn restore_browsed_live(&mut self, browsed: BrowsedLive) {
+        self.live_index = browsed.mode_index;
+        if let Some(rack_id) = browsed.rack
+            && let Some(index) = self.live_racks().iter().position(|rack| rack.id == rack_id)
+        {
+            self.live_rack_index = index;
+        }
+        if let Some(song_id) = browsed.song
+            && let Some(index) = self.live_songs().iter().position(|song| song.id == song_id)
+        {
+            self.live_song_index = index;
+            if let Some(part_id) = browsed.song_part
+                && let Some(part_index) = self
+                    .selected_live_song()
+                    .and_then(|song| song.parts.iter().position(|part| part.id == part_id))
+            {
+                self.live_song_part_index = part_index;
+            }
+        }
+        if let Some(setlist_id) = browsed.setlist
+            && let Some(index) = self
+                .live_setlists()
+                .iter()
+                .position(|setlist| setlist.id == setlist_id)
+        {
+            self.live_setlist_index = index;
+            if let Some((entry_id, part_id)) = browsed.setlist_entry
+                && let Some(entry_index) = self
+                    .selected_setlist_parts()
+                    .iter()
+                    .position(|(entry, _, part)| entry.id == entry_id && part.id == part_id)
+            {
+                self.live_setlist_entry_index = entry_index;
+            }
         }
     }
 
@@ -8159,6 +8246,97 @@ mod tests {
                 active_rack_id: Some(rack_id),
             },
         }
+    }
+
+    /// The fixture holds one Rack, which cannot show a cursor moving. This
+    /// one has somewhere to move to.
+    fn snapshot_with_two_racks() -> PerformanceSnapshot {
+        let mut snapshot = test_performance_snapshot();
+        let mut organ = snapshot.library.racks[0].clone();
+        organ.id = RackId::new("rack.organ").unwrap();
+        organ.name = "Organ".into();
+        snapshot.library.racks.push(organ);
+        snapshot
+    }
+
+    /// Walks into LIVE and opens the Rack list, leaving the cursor on the
+    /// Rack that is sounding.
+    fn browse_live_racks(menu: &mut Menu) {
+        menu.apply(Action::Select);
+        menu.apply(Action::Select);
+        let _ = menu.take_command();
+    }
+
+    #[test]
+    fn a_library_edit_leaves_the_browsing_cursor_where_the_player_put_it() {
+        let mut menu = plugin_menu();
+        menu.sync_performance_snapshot(snapshot_with_two_racks());
+        browse_live_racks(&mut menu);
+        assert_eq!(menu.render().line_1, "Stage Piano");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "Organ");
+
+        // Someone saves a deck tab on the web surface: the library changes,
+        // what is sounding does not. Every client is handed the snapshot.
+        let mut edited = snapshot_with_two_racks();
+        edited.revision = LibraryRevision::new("1".repeat(64)).unwrap();
+        edited
+            .library
+            .sequencer_tabs
+            .push(rackforge_performance_api::SequencerTabDefinition {
+                lane: 0,
+                view: Default::default(),
+                slot_ids: Vec::new(),
+                active_slot: 0,
+            });
+        menu.sync_performance_snapshot(edited);
+
+        assert_eq!(
+            menu.render().line_1,
+            "Organ",
+            "an unrelated edit pulled the cursor back to what is sounding"
+        );
+    }
+
+    #[test]
+    fn a_new_live_target_still_takes_the_screen_to_what_is_sounding() {
+        let mut menu = plugin_menu();
+        menu.sync_performance_snapshot(snapshot_with_two_racks());
+        browse_live_racks(&mut menu);
+        assert_eq!(menu.render().line_1, "Stage Piano");
+
+        // Another surface activates the Organ. The screen belongs to the
+        // machine's state, so the cursor follows it there.
+        let organ_id = RackId::new("rack.organ").unwrap();
+        let organ = LiveLocation::Rack {
+            rack_id: organ_id.clone(),
+        };
+        let mut activated = snapshot_with_two_racks();
+        activated.live.rack = Some(organ.clone());
+        activated.live.active = Some(organ);
+        activated.live.active_rack_id = Some(organ_id);
+        menu.sync_performance_snapshot(activated);
+
+        assert_eq!(menu.render().line_1, "Organ");
+    }
+
+    #[test]
+    fn a_cursor_whose_rack_was_deleted_falls_back_to_what_is_sounding() {
+        let mut menu = plugin_menu();
+        menu.sync_performance_snapshot(snapshot_with_two_racks());
+        browse_live_racks(&mut menu);
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "Organ");
+
+        // The Organ is deleted elsewhere; the cursor has nothing to hold.
+        let mut without_organ = snapshot_with_two_racks();
+        without_organ
+            .library
+            .racks
+            .retain(|rack| rack.name != "Organ");
+        menu.sync_performance_snapshot(without_organ);
+
+        assert_eq!(menu.render().line_1, "Stage Piano");
     }
 
     #[test]

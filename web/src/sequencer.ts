@@ -54,6 +54,7 @@ export type SequencerCommand =
   | { kind: "set_lane_follow"; lane: number; scale?: SequencerScale }
   | { kind: "set_fill"; on: boolean }
   | { kind: "set_clock_out"; on: boolean }
+  | { kind: "set_capture"; lane: number; on: boolean }
   | { kind: "load_slot"; lane: number; slot: number; pattern: PatternDefinition }
   | { kind: "launch_slot"; lane: number; slot: number; quantize: SequencerQuantize };
 
@@ -71,6 +72,8 @@ export interface SequencerLaneStatus {
   stopping?: boolean;
   /** The lane is in key-follow, waiting on (or following) a held key. */
   following?: boolean;
+  /** The lane is armed for live capture. */
+  capturing?: boolean;
   muted: boolean;
   pattern_name?: string | null;
 }
@@ -376,6 +379,55 @@ export function clearStepLock(
         : note,
     ),
   };
+}
+
+/* --------------------------------------------------- live capture ---
+   The engine records what the player did in absolute transport beats;
+   the surface owns the grid, so quantising and merging happen here. */
+
+export interface CapturedNote {
+  beat: number;
+  key: number;
+  velocity: number;
+  duration_beats: number;
+}
+
+/**
+ * Merges a capture take into a pattern: onsets snap to the nearest 16th,
+ * wrap around the loop, durations round up to at least one step, and a
+ * captured note replaces whatever its step held — the last performance
+ * wins, which is how overdubbing a groovebox feels.
+ */
+export function mergeCapturedNotes(
+  pattern: PatternDefinition,
+  captured: CapturedNote[],
+): PatternDefinition {
+  if (captured.length === 0) return pattern;
+  const lengthSteps = stepCount(pattern);
+  const melodic = pattern.view === "melodic";
+  let notes = [...pattern.notes];
+  for (const take of captured) {
+    const step =
+      ((Math.round((take.beat * TICKS_PER_BEAT) / STEP_TICKS) % lengthSteps) + lengthSteps) %
+      lengthSteps;
+    const tick = step * STEP_TICKS;
+    const durationSteps = Math.max(
+      1,
+      Math.min(lengthSteps, Math.round((take.duration_beats * TICKS_PER_BEAT) / STEP_TICKS)),
+    );
+    notes = notes.filter(
+      (note) => !(note.tick === tick && (melodic || note.key === take.key)),
+    );
+    notes.push({
+      tick,
+      duration_ticks: durationSteps * STEP_TICKS,
+      key: take.key,
+      velocity: Math.min(127, Math.max(1, take.velocity)),
+      channel: 0,
+    });
+  }
+  notes.sort((a, b) => a.tick - b.tick || a.key - b.key);
+  return { ...pattern, notes };
 }
 
 /**

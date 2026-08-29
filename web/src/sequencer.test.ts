@@ -8,6 +8,7 @@ import {
   noteName,
   setMelodicStep,
   setSwing,
+  mergeCapturedNotes,
   setStepLock,
   clearStepLock,
   stepLock,
@@ -127,6 +128,30 @@ describe("the trig grammar", () => {
     const snare = pattern.notes.find((note) => note.key === 38);
     expect(kick?.probability).toBe(75);
     expect(snare?.probability ?? 100).toBe(100);
+  });
+});
+
+describe("live capture", () => {
+  it("quantises onsets, wraps the loop, and the last performance wins", () => {
+    let pattern = emptyPattern("Take", 1, 4, "melodic");
+    pattern = mergeCapturedNotes(pattern, [
+      { beat: 0.02, key: 48, velocity: 100, duration_beats: 0.4 },
+      { beat: 1.26, key: 50, velocity: 90, duration_beats: 0.1 },
+      { beat: 4.51, key: 52, velocity: 80, duration_beats: 0.25 },
+    ]);
+    expect(
+      pattern.notes.map((note) => [note.tick / STEP_TICKS, note.key, note.duration_ticks / STEP_TICKS]),
+    ).toEqual([
+      [0, 48, 2],
+      [2, 52, 1],
+      [5, 50, 1],
+    ]);
+    pattern = mergeCapturedNotes(pattern, [
+      { beat: 0.0, key: 55, velocity: 110, duration_beats: 0.25 },
+    ]);
+    const step0 = pattern.notes.filter((note) => note.tick === 0);
+    expect(step0).toHaveLength(1);
+    expect(step0[0].key).toBe(55);
   });
 });
 

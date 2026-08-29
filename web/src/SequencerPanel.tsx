@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   dispatchPerformanceEdit,
   requestPluginParameters,
+  requestSequencerCaptureTake,
   sendSequencerCommand,
   subscribeSequencerStatus,
 } from "./gateway";
@@ -29,6 +30,7 @@ import {
   conditionLabel,
   cycleCondition,
   cycleProbability,
+  mergeCapturedNotes,
   setSwing,
   type SequencerScale,
   MELODIC_VELOCITIES,
@@ -632,6 +634,39 @@ function SequencerTabEditor({
       .finally(() => setBusy(false));
   }, [busy, setBusy, inLibrary, revision, draft, onClose]);
 
+  // While REC is down, drain the engine's take and write it into the
+  // draft; if the lane is sounding, requeue on the bar so the overdub is
+  // audible on the next pass — the groovebox loop.
+  const capturing = laneState?.capturing ?? false;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  useEffect(() => {
+    if (!capturing) return;
+    const timer = window.setInterval(() => {
+      requestSequencerCaptureTake(lane)
+        .then((take) => {
+          const current = draftRef.current;
+          if (!current || take.notes.length === 0) return;
+          const merged = mergeCapturedNotes(current, take.notes);
+          onChange((tab) => ({
+            ...tab,
+            drafts: tab.drafts.map((slotDraft, slot) =>
+              slot === tab.activeSlot ? merged : slotDraft,
+            ),
+            dirty: true,
+          }));
+          sendSequencerCommand({
+            kind: "queue_pattern",
+            lane,
+            pattern: merged,
+            quantize: "next_bar",
+          });
+        })
+        .catch(() => undefined);
+    }, 600);
+    return () => window.clearInterval(timer);
+  }, [capturing, lane, onChange]);
+
   /// LAUNCH stores the draft into its slot and jumps to it — the editor's
   /// audition and the Session grid are the same machinery.
   const launch = useCallback(() => {
@@ -843,6 +878,19 @@ function SequencerTabEditor({
           </select>
         ) : null}
         <div className="seq-keys">
+          <button
+            className={`seq-key seq-lamp-key seq-rec${capturing ? " engaged" : ""}`}
+            aria-pressed={capturing}
+            title="Live capture: what you play is written into this pattern, quantised"
+            onClick={() => {
+              sendSequencerCommand({ kind: "set_capture", lane, on: !capturing });
+              if (!capturing && !status?.running) {
+                sendSequencerCommand({ kind: "transport_start" });
+              }
+            }}
+          >
+            REC
+          </button>
           <button className="seq-key seq-launch" onClick={launch}>
             LAUNCH
           </button>

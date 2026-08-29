@@ -97,6 +97,10 @@ pub enum AudioControlCommand {
     SequencerStatus {
         reply: SyncSender<Result<rackforge_control_api::SequencerStatusV1, String>>,
     },
+    SequencerCaptureTake {
+        lane: u8,
+        reply: SyncSender<Result<Vec<rackforge_control_api::CapturedNoteV1>, String>>,
+    },
     ApplyAudioOutput {
         profile: AudioOutputProfile,
         reply: SyncSender<Result<AudioOutputState, String>>,
@@ -637,6 +641,7 @@ fn handle_connection(mut stream: UnixStream, context: &Arc<ControlContext>) -> R
         }
         ControlRequest::Sequencer { command } => sequencer_command(context, command),
         ControlRequest::SequencerStatus => sequencer_status(context),
+        ControlRequest::SequencerCaptureTake { lane } => sequencer_capture_take(context, lane),
         ControlRequest::Events { after_revision } => match context.store.lock() {
             Ok(store) => match store.events_after(after_revision) {
                 Ok(events) => ControlResponse::Events {
@@ -688,6 +693,23 @@ fn sequencer_status(context: &ControlContext) -> ControlResponse {
     }
     match receive_audio(reply_receiver, "read sequencer status") {
         Ok(sequencer) => ControlResponse::SequencerStatus { sequencer },
+        Err(failure) => failure.into_response(),
+    }
+}
+
+fn sequencer_capture_take(context: &ControlContext, lane: u8) -> ControlResponse {
+    let (reply_sender, reply_receiver) = sync_channel(1);
+    if let Err(failure) = send_audio(
+        context,
+        AudioControlCommand::SequencerCaptureTake {
+            lane,
+            reply: reply_sender,
+        },
+    ) {
+        return failure.into_response();
+    }
+    match receive_audio(reply_receiver, "drain the capture take") {
+        Ok(notes) => ControlResponse::SequencerCapture { notes },
         Err(failure) => failure.into_response(),
     }
 }

@@ -2654,6 +2654,27 @@ impl DesktopApp {
                     },
                 };
             }
+            ControlRequest::SequencerCaptureTake { lane } => {
+                let notes = self
+                    .audio
+                    .as_ref()
+                    .ok_or_else(|| "Desktop audio is unavailable".to_owned())
+                    .and_then(|audio| {
+                        audio
+                            .sequencer_capture_take(lane)
+                            .map_err(|error| error.to_string())
+                    });
+                return match notes {
+                    Ok(notes) => ControlResponse::SequencerCapture { notes },
+                    Err(message) => ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message,
+                        current_revision: Some(
+                            self.session.read().expect("session lock poisoned").revision,
+                        ),
+                    },
+                };
+            }
             ControlRequest::VirtualMidi {
                 client_id,
                 source_name,

@@ -3595,6 +3595,19 @@
     0 0 7px color-mix(in srgb, var(--acid) 72%, transparent);
 }
 
+/* REC burns red while armed: recording is the one act the player must
+   never mistake for playback. */
+.seq-rec::before {
+  background: color-mix(in srgb, var(--red) 22%, var(--panel-inset));
+}
+
+.seq-rec.engaged::before {
+  background: var(--red);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--red) 60%, #fff),
+    0 0 7px color-mix(in srgb, var(--red) 78%, transparent);
+}
+
 /* The LCD: mono data set into the panel, the strip's only glass. */
 .seq-lcd {
   display: inline-flex;

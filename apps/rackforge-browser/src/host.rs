@@ -257,8 +257,9 @@ impl BrowserHost {
             session.master_level,
             session.master_pan,
         );
-        let sequencer = rackforge_core::SequencerEngine::new(sample_rate_hz)
-            .ok_or_else(|| anyhow::anyhow!("sample rate {sample_rate_hz} is outside the transport bounds"))?;
+        let sequencer = rackforge_core::SequencerEngine::new(sample_rate_hz).ok_or_else(|| {
+            anyhow::anyhow!("sample rate {sample_rate_hz} is outside the transport bounds")
+        })?;
         let audio_state = browser_audio_state(sample_rate_hz, maximum_frames, output_channels);
 
         let mut host = Self {
@@ -526,8 +527,10 @@ impl BrowserHost {
                 })
             }
             ControlRequest::ExportLiveShow { name } => {
-                let exported_unix_ms = rackforge_core::live_show::now_unix_ms()
-                    .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
+                let exported_unix_ms =
+                    rackforge_core::live_show::now_unix_ms().map_err(|error| {
+                        Failure::new(ControlErrorCode::Internal, format!("{error:#}"))
+                    })?;
                 rackforge_core::live_show::assemble_live_show(
                     &name,
                     self.performance.library(),
@@ -935,10 +938,7 @@ impl BrowserHost {
                     let commands = library
                         .resolve_part(&location)
                         .map(|part| {
-                            rackforge_core::sequencer::part_launch_commands(
-                                part,
-                                &library.patterns,
-                            )
+                            rackforge_core::sequencer::part_launch_commands(part, &library.patterns)
                         })
                         .unwrap_or_default();
                     (rack.id.clone(), commands)

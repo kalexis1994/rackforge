@@ -7,10 +7,10 @@ pub mod hosted;
 pub mod isolated_state;
 #[cfg(target_os = "linux")]
 pub mod live;
-pub mod live_show;
 #[cfg(any(target_os = "linux", test))]
 mod live_midi_state;
 pub mod live_parameter_state;
+pub mod live_show;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod loader;
 /// Browsers cannot load native plugin binaries, so the wasm host compiles a
@@ -30,15 +30,15 @@ pub mod realtime;
 pub mod session;
 pub mod session_checkpoint;
 pub use rackforge_startup as startup;
+/// The sequencer engine rides the same rule: patterns into sample-accurate
+/// MIDI on every platform, gated by nothing.
+pub mod sequencer;
 pub mod state_store;
 pub mod storage;
 /// Deliberately outside every platform gate: the clock is host infrastructure
 /// like the render pool, and the browser, Android and desktop hosts advance
 /// the same arithmetic the Linux LIVE host does.
 pub mod transport;
-/// The sequencer engine rides the same rule: patterns into sample-accurate
-/// MIDI on every platform, gated by nothing.
-pub mod sequencer;
 
 pub use hosted::{LoadedPlugin, PluginInstance};
 pub use isolated_state::{
@@ -55,7 +55,7 @@ pub use parameter_link::{
     CompiledParameterLink, ParameterLinkOutput, SemanticParameterLinkContext,
     compile_semantic_parameter_links,
 };
-pub use state_store::{MAX_PLUGIN_STATE_BYTES, PluginStateStore};
-pub use transport::{Transport, TransportBlock, TransportSnapshot};
 pub use sequencer::{CompiledPattern, SequencerEngine, SequencerLane};
+pub use state_store::{MAX_PLUGIN_STATE_BYTES, PluginStateStore};
 pub use storage::{PluginDirectory, PluginStorage, RECOMMENDED_PROGRAM_SUFFIX};
+pub use transport::{Transport, TransportBlock, TransportSnapshot};

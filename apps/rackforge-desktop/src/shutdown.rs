@@ -433,10 +433,7 @@ impl DesktopShutdown {
                                 .inner_margin(egui::Margin::symmetric(9, 7))
                                 .show(ui, |ui| {
                                     ui.label(
-                                        RichText::new("RF")
-                                            .strong()
-                                            .size(15.0)
-                                            .color(palette.ink),
+                                        RichText::new("RF").strong().size(15.0).color(palette.ink),
                                     );
                                 });
                             ui.add_space(10.0);
@@ -495,9 +492,7 @@ impl DesktopShutdown {
                                     ui.horizontal(|ui| {
                                         if active {
                                             ui.add(
-                                                egui::Spinner::new()
-                                                    .size(16.0)
-                                                    .color(palette.acid),
+                                                egui::Spinner::new().size(16.0).color(palette.acid),
                                             );
                                         } else {
                                             let (icon_rect, _) = ui.allocate_exact_size(
@@ -589,7 +584,10 @@ mod tests {
     fn glow_discs_composite_onto_the_gaussian() {
         let peak = 0.5_f32;
         let discs = glow_discs(peak);
-        assert!(discs.len() > 6, "the ramp needs enough steps to read as light");
+        assert!(
+            discs.len() > 6,
+            "the ramp needs enough steps to read as light"
+        );
 
         // Compositing the discs outside in has to land on alpha(t) = peak·e^(-4.6t²)
         // at every radius, which is the whole point of using the increment.
@@ -607,7 +605,10 @@ mod tests {
         // reaching it — the innermost disc still has a radius. What matters is
         // that it never overshoots, which would blow out the middle of the pool.
         assert!(reached <= peak, "centre overshot the peak: {reached}");
-        assert!(reached > peak * 0.95, "centre fell short of the peak: {reached}");
+        assert!(
+            reached > peak * 0.95,
+            "centre fell short of the peak: {reached}"
+        );
     }
 
     #[test]

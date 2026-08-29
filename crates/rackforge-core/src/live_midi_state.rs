@@ -67,7 +67,8 @@ impl ReservedMidiControls {
             if binding.target == HostActionTarget::KeyboardParts {
                 self.keyboard_parts = Some(binding.midi_cc);
             } else {
-                self.sequencer_actions.push((binding.target, binding.midi_cc));
+                self.sequencer_actions
+                    .push((binding.target, binding.midi_cc));
             }
         }
     }

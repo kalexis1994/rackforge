@@ -2085,8 +2085,7 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
                     // Another client edited the library; hand this one the
                     // fresh snapshot through the same message its own
                     // requests use.
-                    let response =
-                        response_for(ControlRequest::PerformanceSnapshot, &state);
+                    let response = response_for(ControlRequest::PerformanceSnapshot, &state);
                     if sender
                         .send(Message::Text(response.to_string().into()))
                         .await

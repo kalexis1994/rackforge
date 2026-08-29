@@ -1882,7 +1882,10 @@ fn installed_plugin_versions(context: &ControlContext) -> BTreeMap<String, Strin
 
 fn export_live_show(context: &ControlContext, name: &str) -> ControlResponse {
     let revision = current_revision(context);
-    let (repository, store) = match (context.performance_repository.lock(), context.state_store.lock()) {
+    let (repository, store) = match (
+        context.performance_repository.lock(),
+        context.state_store.lock(),
+    ) {
         (Ok(repository), Ok(store)) => (repository, store),
         _ => return internal_error("library or state store lock is poisoned", revision),
     };

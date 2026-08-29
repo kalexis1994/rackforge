@@ -29,11 +29,17 @@ pub enum HostActionTarget {
     /// One tap of the shared tap-tempo fold. The host owns the timestamps.
     TapTempo,
     /// Relaunches the pattern the lane holds, quantised to the next bar.
-    SequencerLaunchLane { lane: u8 },
+    SequencerLaunchLane {
+        lane: u8,
+    },
     /// Stops the lane at the next bar; the lane keeps its pattern.
-    SequencerStopLane { lane: u8 },
+    SequencerStopLane {
+        lane: u8,
+    },
     /// Toggles the lane's mute against the host's current state.
-    SequencerMuteLane { lane: u8 },
+    SequencerMuteLane {
+        lane: u8,
+    },
     /// Momentary FILL: press holds the performance switch, release clears
     /// it. Only bind this where the wire carries both button phases — a
     /// press-only path must leave it unmapped rather than invent a toggle
@@ -938,7 +944,11 @@ mod tests {
         let launch: HostActionTarget =
             serde_json::from_str("{\"sequencer_launch_lane\":{\"lane\":2}}").unwrap();
         assert_eq!(launch, HostActionTarget::SequencerLaunchLane { lane: 2 });
-        assert!(HostActionTarget::SequencerLaunchLane { lane: 8 }.validate().is_err());
+        assert!(
+            HostActionTarget::SequencerLaunchLane { lane: 8 }
+                .validate()
+                .is_err()
+        );
         assert!(launch.validate().is_ok());
     }
 

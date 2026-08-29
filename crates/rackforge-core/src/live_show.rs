@@ -350,25 +350,25 @@ mod tests {
     fn a_show_round_trips_through_a_second_machine() {
         let mut studio = PluginStateStore::new(None).expect("store");
         let library = library_with_one_state(&mut studio);
-        let file =
-            assemble_live_show("Friday Set", &library, &studio, 1_000).expect("assembled");
+        let file = assemble_live_show("Friday Set", &library, &studio, 1_000).expect("assembled");
         assert_eq!(file.states.len(), 1);
         assert_eq!(file.requirements.len(), 1);
         assert_eq!(file.requirements[0].version, "1.2.3");
 
         // The venue machine has the plugin but has never seen the state.
         let mut venue = PluginStateStore::new(None).expect("store");
-        let installed =
-            BTreeMap::from([("org.rackforge.rf-dls".to_owned(), "1.2.3".to_owned())]);
-        let preview =
-            inspect_live_show(&file, &installed, &PerformanceLibrary::default())
-                .expect("inspected");
+        let installed = BTreeMap::from([("org.rackforge.rf-dls".to_owned(), "1.2.3".to_owned())]);
+        let preview = inspect_live_show(&file, &installed, &PerformanceLibrary::default())
+            .expect("inspected");
         assert_eq!(preview.racks, 1);
         assert_eq!(preview.states, 1);
         assert!(preview.missing_plugins.is_empty());
         assert!(preview.warnings.is_empty());
 
-        assert_eq!(store_live_show_states(&file, &mut venue).expect("stored"), 1);
+        assert_eq!(
+            store_live_show_states(&file, &mut venue).expect("stored"),
+            1
+        );
         let edits = live_show_edits(&file);
         assert_eq!(edits.len(), 1);
         // The imported Rack's reference now resolves on the venue machine.
@@ -417,8 +417,9 @@ mod tests {
         let mut file = assemble_live_show("Set", &library, &studio, 1_000).expect("assembled");
         file.states[0].state_base64 = BASE64.encode(b"hostile bytes");
         // Inspection catches the length lie; the store catches the hash lie.
-        assert!(inspect_live_show(&file, &BTreeMap::new(), &PerformanceLibrary::default())
-            .is_err());
+        assert!(
+            inspect_live_show(&file, &BTreeMap::new(), &PerformanceLibrary::default()).is_err()
+        );
         let mut venue = PluginStateStore::new(None).expect("store");
         assert!(store_live_show_states(&file, &mut venue).is_err());
     }
@@ -427,6 +428,9 @@ mod tests {
     fn show_file_names_stay_portable() {
         assert_eq!(live_show_file_name("Friday Set"), "Friday Set.rflive");
         assert_eq!(live_show_file_name("  "), "RackForge Show.rflive");
-        assert_eq!(live_show_file_name("Jarre / Lyon: 2026"), "Jarre _ Lyon_ 2026.rflive");
+        assert_eq!(
+            live_show_file_name("Jarre / Lyon: 2026"),
+            "Jarre _ Lyon_ 2026.rflive"
+        );
     }
 }

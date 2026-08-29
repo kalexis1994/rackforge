@@ -5304,29 +5304,59 @@
 
 /* The tie bar grows to the right, under the note, across the steps the
    note sustains through. */
-/* A held note reads like a piano roll: the FILL is the duration. The
-   steps it covers wear a dimmer shade of the same light, so the run is
-   one gesture — no line is drawn across territory, which is what used to
-   escape the block and flip colour against whatever it crossed. */
+/* A held note, told twice over: the steps it covers wear a dimmer shade
+   of its own light, and one tie line runs the whole length of the hold.
+
+   The line takes --acid-ink — the ink the palette already made to sit on
+   that light — so it holds its contrast on the note's bright block and on
+   the quieter held ones alike. That is also why the held shade stays at
+   70%: the themes invert (a held step is lighter than its note in light,
+   darker in dark), and only a shade this close to the note lets one ink
+   read on both. */
 .melodic-step.sustained {
-  background: color-mix(in srgb, var(--acid) 42%, var(--panel-inset));
-  border-color: color-mix(in srgb, var(--acid) 45%, var(--line));
+  background: color-mix(in srgb, var(--acid) 70%, var(--panel-inset));
+  border-color: color-mix(in srgb, var(--acid) 60%, var(--line));
 }
 
 .melodic-step.sustained .melodic-step-note {
   opacity: 0;
 }
 
-/* How many steps the note holds, engraved in its own block. */
-.melodic-step-length {
+.melodic-step-tie {
   position: absolute;
-  right: 4px;
-  bottom: 3px;
-  font: 700 9px/1 var(--mono-font);
-  letter-spacing: 0.04em;
-  opacity: 0.6;
+  bottom: 6px;
+  height: 3px;
+  background: var(--acid-ink);
+  opacity: 0.82;
   pointer-events: none;
 }
+
+/* A one-step note wears a short mark; a hold opens, runs and closes —
+   caps rounded, seams square, so the run reads as one gesture. */
+.melodic-step-tie.tie-stub {
+  left: 8px;
+  width: 12px;
+  border-radius: 2px;
+  opacity: 0.5;
+}
+
+.melodic-step-tie.tie-start {
+  left: 8px;
+  right: -1px;
+  border-radius: 2px 0 0 2px;
+}
+
+.melodic-step-tie.tie-through {
+  left: -1px;
+  right: -1px;
+}
+
+.melodic-step-tie.tie-end {
+  left: -1px;
+  right: 8px;
+  border-radius: 0 2px 2px 0;
+}
+
 
 
 .melodic-cluster {

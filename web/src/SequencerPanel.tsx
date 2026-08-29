@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   dispatchPerformanceEdit,
+  dispatchPerformanceEditLatest,
   requestPluginParameters,
   requestSequencerCaptureTake,
   sendSequencerCommand,
@@ -381,14 +382,12 @@ function SequencerDeck({
     const legacy = restoreTabs(patterns);
     if (legacy.length === 0) return;
     void (async () => {
-      let revision = performance.revision;
       for (const tab of legacy) {
         try {
-          const snapshot = await dispatchPerformanceEdit(revision, {
+          await dispatchPerformanceEditLatest({
             kind: "put_sequencer_tab",
             tab: tabDocument(tab),
           });
-          revision = snapshot.revision;
         } catch {
           return;
         }
@@ -475,12 +474,14 @@ function SequencerDeck({
       setOverlays((current) => ({ ...current, [freeLane]: tab }));
       setActiveLane(freeLane);
       setAdding(false);
-      dispatchPerformanceEdit(performance.revision, {
+      dispatchPerformanceEditLatest({
         kind: "put_sequencer_tab",
         tab: tabDocument(tab),
-      }).catch(() => undefined);
+      }).catch((error: Error) =>
+        console.error("SEQUENCER_TAB_PERSIST_FAILED", error.message),
+      );
     },
-    [freeLane, beatsPerBar, performance.revision],
+    [freeLane, beatsPerBar],
   );
 
   const closeTab = useCallback(
@@ -492,18 +493,19 @@ function SequencerDeck({
         return next;
       });
       if (libraryTabs.some((document) => document.lane === lane)) {
-        // A caller that just edited the library hands over the fresh
-        // revision; the prop lags one snapshot behind in that window.
-        dispatchPerformanceEdit(revisionOverride ?? performance.revision, {
+        void revisionOverride;
+        dispatchPerformanceEditLatest({
           kind: "delete_sequencer_tab",
           lane,
-        }).catch(() => undefined);
+        }).catch((error: Error) =>
+          console.error("SEQUENCER_TAB_DELETE_FAILED", error.message),
+        );
       }
       setActiveLane((active) =>
         active === lane ? tabs.find((tab) => tab.lane !== lane)?.lane ?? null : active,
       );
     },
-    [libraryTabs, performance.revision, tabs],
+    [libraryTabs, tabs],
   );
 
   const active = tabs.find((tab) => tab.lane === activeLane) ?? tabs[0] ?? null;
@@ -763,10 +765,10 @@ function SequencerTabEditor({
     if (busy || !draft) return;
     setBusy(true);
     dispatchPerformanceEdit(revision, { kind: "put_pattern", pattern: draft })
-      .then((snapshot) =>
+      .then(() =>
         // The deck document rides along: the saved pattern's slot seat is
         // part of the show, not of this browser.
-        dispatchPerformanceEdit(snapshot.revision, {
+        dispatchPerformanceEditLatest({
           kind: "put_sequencer_tab",
           tab: tabDocument(tab),
         }),
@@ -1028,10 +1030,12 @@ function SequencerTabEditor({
               };
               onChange(() => next);
               // Loading a library pattern reseats the deck document too.
-              dispatchPerformanceEdit(revision, {
+              dispatchPerformanceEditLatest({
                 kind: "put_sequencer_tab",
                 tab: tabDocument(next),
-              }).catch(() => undefined);
+              }).catch((error: Error) =>
+                console.error("SEQUENCER_TAB_PERSIST_FAILED", error.message),
+              );
             }
           }}
         >

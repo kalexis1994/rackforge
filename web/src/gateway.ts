@@ -618,6 +618,29 @@ export function releaseVirtualMidi() {
   }));
 }
 
+/// Dispatches an edit against the revision the store holds RIGHT NOW,
+/// waiting out any in-flight edit and retrying once on a conflict. For
+/// last-writer-wins documents (sequencer tabs); revisioned callers that
+/// must detect races keep using dispatchPerformanceEdit directly.
+export async function dispatchPerformanceEditLatest(
+  edit: PerformanceEdit,
+): Promise<PerformanceSnapshot> {
+  for (let attempt = 0; ; attempt += 1) {
+    // An edit already in flight resolves quickly; give it room instead of
+    // being refused by the pending gate.
+    for (let waited = 0; store.getState().rackforge.performancePending && waited < 20; waited += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const revision = store.getState().rackforge.performance?.revision;
+    if (!revision) throw new Error("The performance library is not loaded yet.");
+    try {
+      return await dispatchPerformanceEdit(revision, edit);
+    } catch (error) {
+      if (attempt >= 2) throw error;
+    }
+  }
+}
+
 export function dispatchPerformanceEdit(
   expectedRevision: string,
   edit: PerformanceEdit,

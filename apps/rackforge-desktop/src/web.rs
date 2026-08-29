@@ -2060,61 +2060,68 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, state: WebState) {
         return;
     }
     loop {
+        // Publish what changed BEFORE waiting for the next request.
+        // These checks used to live in the idle branch of the timeout
+        // below, so a client only learned about a knob turned on the
+        // controller when it happened to fall silent for a whole tick —
+        // and a surface that polls its sequencer status or output meter
+        // never falls silent. What a musician can see must not depend on
+        // how chatty their own screen is.
+
+        let revision = state.session.read().expect("session lock").revision;
+        if revision != published_revision {
+            if sender
+                .send(Message::Text(snapshot_json(&state).into()))
+                .await
+                .is_err()
+            {
+                break;
+            }
+            published_revision = revision;
+        }
+        let performance_revision = state
+            .performance_revision
+            .read()
+            .expect("performance revision lock")
+            .clone();
+        if performance_revision != published_performance_revision {
+            // Another client edited the library; hand this one the
+            // fresh snapshot through the same message its own
+            // requests use.
+            let response = response_for(ControlRequest::PerformanceSnapshot, &state);
+            if sender
+                .send(Message::Text(response.to_string().into()))
+                .await
+                .is_err()
+            {
+                break;
+            }
+            published_performance_revision = performance_revision;
+        }
+        let catalog_revision = state.plugin_catalog_revision.load(Ordering::Acquire);
+        if catalog_revision != published_catalog_revision {
+            if sender
+                .send(Message::Text(
+                    json!({
+                        "status":"plugin_catalog_changed",
+                        "revision":catalog_revision,
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .is_err()
+            {
+                break;
+            }
+            published_catalog_revision = catalog_revision;
+        }
         let message = match tokio::time::timeout(Duration::from_millis(100), receiver.next()).await
         {
             Ok(Some(Ok(message))) => message,
             Ok(Some(Err(_))) | Ok(None) => break,
-            Err(_) => {
-                let revision = state.session.read().expect("session lock").revision;
-                if revision != published_revision {
-                    if sender
-                        .send(Message::Text(snapshot_json(&state).into()))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                    published_revision = revision;
-                }
-                let performance_revision = state
-                    .performance_revision
-                    .read()
-                    .expect("performance revision lock")
-                    .clone();
-                if performance_revision != published_performance_revision {
-                    // Another client edited the library; hand this one the
-                    // fresh snapshot through the same message its own
-                    // requests use.
-                    let response = response_for(ControlRequest::PerformanceSnapshot, &state);
-                    if sender
-                        .send(Message::Text(response.to_string().into()))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                    published_performance_revision = performance_revision;
-                }
-                let catalog_revision = state.plugin_catalog_revision.load(Ordering::Acquire);
-                if catalog_revision != published_catalog_revision {
-                    if sender
-                        .send(Message::Text(
-                            json!({
-                                "status":"plugin_catalog_changed",
-                                "revision":catalog_revision,
-                            })
-                            .to_string()
-                            .into(),
-                        ))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                    published_catalog_revision = catalog_revision;
-                }
-                continue;
-            }
+            // Idle: loop back and publish anything that moved meanwhile.
+            Err(_) => continue,
         };
         match message {
             Message::Text(text) => {

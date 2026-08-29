@@ -5450,7 +5450,7 @@ function ScreenGlassCard() {
         <p>
           Shows plugin panels behind an acrylic cover: the corners fall off, a
           sheen crosses the sheet, and it carries the film any panel picks up.
-          Turn it off for a bare surface.
+          Panels render bare unless you turn it on.
         </p>
       </div>
       <ToggleSwitch

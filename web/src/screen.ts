@@ -10,14 +10,13 @@
  * because the plugin surface is mounted in several places — PLAY, a rack slot
  * popover — and they all sit behind the same cover:
  *
- *   (no stamp)           → glass on
- *   data-screen="clean"  → glass off
+ *   (no stamp)           → glass off
+ *   data-screen="glass"  → glass on
  *
- * Off is a real setting rather than a debug flag: reading a dense plugin panel
- * through a dirty cover is harder, and that trade is the player's to make.
- *
- * Applied before the first render so the surface never appears bare and then
- * gets covered a frame later.
+ * Off is the default, and the default carries no stamp: reading a dense plugin
+ * panel through a cover is harder, so the panel is bare until a player asks
+ * for the glass. That way the surface also never flashes covered before the
+ * stored choice is read.
  */
 
 export type ScreenGlass = "glass" | "clean";
@@ -32,17 +31,17 @@ export function readScreenGlass(): ScreenGlass {
       return saved as ScreenGlass;
     }
   } catch {
-    // A private window or a host with storage disabled: show the cover.
+    // A private window or a host with storage disabled: no cover.
   }
-  return "glass";
+  return "clean";
 }
 
 export function applyScreenGlass(mode: ScreenGlass): void {
   const root = document.documentElement;
   if (mode === "glass") {
-    root.removeAttribute("data-screen");
-  } else {
     root.setAttribute("data-screen", mode);
+  } else {
+    root.removeAttribute("data-screen");
   }
 }
 

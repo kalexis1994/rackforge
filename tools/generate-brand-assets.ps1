@@ -4,6 +4,10 @@ param()
 # Regenerates every raster brand asset from the SVGs in assets/brand, and
 # copies the vector originals into web/public where the interface loads them.
 #
+# The nameplate is drawn by tools/generate-brand-logo.py, which outlines the
+# wordmark from the interface's own typeface. Run that first if the mark or
+# the type changed; this script only carries the result across.
+#
 # Two masters are rendered rather than one: the launcher plate is full bleed
 # because the platform may crop it to any shape, and the favicon is a rounded
 # plate with the mark set wider, because a browser tab has no safe zone to
@@ -64,6 +68,7 @@ try {
 
     foreach ($vector in @(
         "rackforge-logo.svg",
+        "rackforge-lockup.svg",
         "rackforge-mark.svg",
         "rackforge-icon.svg",
         "rackforge-mark-foreground.svg"

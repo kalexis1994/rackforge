@@ -128,6 +128,21 @@ const pluginHost = {
     guard(0, () => (typeof instanceOf(instance).exports[EXPORTS[index]] === "function" ? 1 : 0)),
   rf_call_0: (instance, index) => guard(-1, () => call(instance, index)),
   rf_call_1: (instance, index, argument) => guard(-1, () => call(instance, index, argument)),
+  rf_call_2: (instance, index, a, b) => guard(-1, () => call(instance, index, a, b)),
+  rf_call_5: (instance, index, a, b, c, d, e) =>
+    guard(-1, () => call(instance, index, a, b, c, d, e)),
+  // The parallel-render pool does not exist under the probe: ready
+  // answers zero workers and the host renders serially, exactly like a
+  // browser without cross-origin isolation.
+  rf_par_ready: () => 0,
+  rf_par_request: () => -1,
+  rf_par_begin: () => -1,
+  rf_par_entry: () => -1,
+  rf_par_commit: () => -1,
+  rf_par_collect: () => -1,
+  rf_par_mix_read: () => -1,
+  rf_par_unit_mask: () => 0,
+  rf_par_misses: () => 0,
   rf_call_f64: (instance, index, argument) => guard(NaN, () => call(instance, index, argument)),
   rf_call_set_parameter: (instance, index, value) => guard(-1, () => call(instance, 14, index, value)),
   rf_call_prepare: (instance, rate, frames, inputs, outputs) =>

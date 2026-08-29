@@ -14,7 +14,7 @@
  * you are looking at, so editing is auditioning on every tab.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   dispatchPerformanceEdit,
   requestPluginParameters,
@@ -351,7 +351,10 @@ function SequencerDeck({
   activeInstanceId: string | null;
 }) {
   const patterns = performance.library.patterns ?? [];
-  const libraryTabs = performance.library.sequencer_tabs ?? [];
+  const libraryTabs = useMemo(
+    () => performance.library.sequencer_tabs ?? [],
+    [performance.library.sequencer_tabs],
+  );
   const beatsPerBar = status?.beats_per_bar ?? 4;
   // The library owns the deck: which tabs exist and what sits in their
   // slots. This browser only overlays unsaved drafts and UI focus.
@@ -399,8 +402,12 @@ function SequencerDeck({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // A clean overlay follows the library when someone else edits it.
-  useEffect(() => {
+  // A clean overlay follows the library when someone else edits it —
+  // adjusted during render (the documented pattern), keyed on the
+  // snapshot's library identity.
+  const [reconciledLibrary, setReconciledLibrary] = useState(performance.library);
+  if (reconciledLibrary !== performance.library) {
+    setReconciledLibrary(performance.library);
     setOverlays((current) => {
       let changed = false;
       const next: Record<number, SequencerTab> = { ...current };
@@ -421,7 +428,7 @@ function SequencerDeck({
       }
       return changed ? next : current;
     });
-  }, [libraryTabs, patterns]);
+  }
 
   const tabs: SequencerTab[] = [
     ...libraryTabs.map(
@@ -783,7 +790,9 @@ function SequencerTabEditor({
   // audible on the next pass — the groovebox loop.
   const capturing = laneState?.capturing ?? false;
   const draftRef = useRef(draft);
-  draftRef.current = draft;
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
   useEffect(() => {
     if (!capturing) return;
     const timer = window.setInterval(() => {
@@ -1213,27 +1222,32 @@ function MelodicLane({
   const [selected, setSelected] = useState(0);
   const lastKey = useRef(DEFAULT_MELODIC_KEY);
   const note = melodicStepNote(pattern, selected);
-  if (note) lastKey.current = note.key;
+  useEffect(() => {
+    if (note) lastKey.current = note.key;
+  }, [note]);
 
   // The frozen-knob picker reads the active instrument's own schema, the
   // way the rest of the machine names parameters.
   const [lockParams, setLockParams] = useState<PluginParameterDescriptor[]>([]);
   useEffect(() => {
     let alive = true;
-    if (!activeInstanceId) {
-      setLockParams([]);
-      return;
-    }
-    requestPluginParameters(activeInstanceId)
+    const load = activeInstanceId
+      ? requestPluginParameters(activeInstanceId)
+      : Promise.resolve(null);
+    load
       .then((snapshot) => {
         if (!alive) return;
         setLockParams(
-          snapshot.schema.parameters.filter(
-            (parameter) => parameter.flags.automatable && !parameter.flags.read_only,
-          ),
+          snapshot
+            ? snapshot.schema.parameters.filter(
+                (parameter) => parameter.flags.automatable && !parameter.flags.read_only,
+              )
+            : [],
         );
       })
-      .catch(() => alive && setLockParams([]));
+      .catch(() => {
+        if (alive) setLockParams([]);
+      });
     return () => {
       alive = false;
     };

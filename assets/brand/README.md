@@ -4,9 +4,11 @@
 path, from the input jack on the left to the output arrow on the right. Every
 other file here is the same geometry in a different frame.
 
-Run `tools/generate-brand-assets.ps1` after changing any SVG in this directory.
-It re-renders every raster and copies the vectors into `web/public`; editing
-those copies directly is wasted work, because the next run overwrites them.
+Run `tools/generate-brand-logo.py` after changing the mark or the interface's
+display typeface, then `tools/generate-brand-assets.ps1` after changing any SVG
+in this directory. The first draws the nameplate, the second re-renders every
+raster and copies the vectors into `web/public`; editing generated files
+directly is wasted work, because the next run overwrites them.
 
 ## The paint order is the drawing
 
@@ -45,7 +47,22 @@ piece of the monogram; three arbitrary colours read as a rainbow.
 - `rackforge-mark.svg`: the mark, trimmed to the ink (704×308). Use it on a
   surface that already provides its own ground.
 - `rackforge-logo.svg`: the mark on a plate with its clear space measured in —
-  148 units on every side. Use where the artwork needs a frame of its own.
+  148 units at the sides, 76 above and below. Use where the artwork needs a
+  frame of its own.
+- `rackforge-lockup.svg`: the nameplate — mark over the word, flush left, on the
+  same plate. **Generated** by `tools/generate-brand-logo.py`, which outlines
+  RACKFORGE from the Barlow Semi Condensed the interface itself loads, at the
+  proportion the rail sets it: 13px of type under a 140px mark, 9px apart. This
+  is the logo to hand to anything outside the app — a README, a store listing,
+  a slide. Inside the app the rail composes the same lockup live, from the
+  inlined mark and real text.
+
+  It carries the plate rather than sitting transparent, and that is not
+  decoration. The mark survives any ground because its three inks are
+  mid-tone; the word is a single ink, so on a light card while the system is
+  in dark mode it renders cream on cream. Ink and ground have to travel
+  together. Artwork that must sit on a surface you already control is
+  `rackforge-mark.svg`.
 - `rackforge-icon.svg`: the launcher plate. Full bleed, because the platform may
   crop it to any shape, with the mark held to 600 units wide so it stays inside
   the 66/108 adaptive-icon safe circle. This is the master for every raster.

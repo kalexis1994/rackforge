@@ -11,8 +11,9 @@
   <!-- The mark with its clear space measured in: 148 units on every side, which
        is a little over 20% of the mark height. Use this where the artwork needs
        a frame of its own rather than sitting on a surface that provides one.
-       No wordmark: RACKFORGE is set live in Barlow Semi Condensed, and outlines
-       drift from the typeface the moment the interface changes weight. -->
+       No wordmark: the mark alone. For the nameplate — mark over word — take
+       rackforge-lockup.svg, whose outlines are generated from the interface's
+       own typeface rather than drawn by hand, so they cannot drift from it. -->
 
   <style>
     svg { --plate: #ebe4d8; --bowl: #c1273d; --leg: #1d3560; --arm: #d25a2b; }

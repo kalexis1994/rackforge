@@ -411,7 +411,7 @@ struct TransportBridge {
     _connection: MidiInputConnection<()>,
     output: Option<MidiOutputConnection>,
     receiver: Receiver<(HostActionTarget, ButtonPhase)>,
-    play_lit: Option<bool>,
+    state_lit: Option<(bool, bool)>,
 }
 
 fn is_mcu_port_name(name: &str) -> bool {
@@ -458,21 +458,22 @@ fn open_transport_bridge() -> Option<TransportBridge> {
         _connection: connection,
         output,
         receiver,
-        play_lit: None,
+        state_lit: None,
     })
 }
 
 impl TransportBridge {
     /// Reflects the host transport on the controller: the same LED echo a
     /// DAW sends. Only rewrites the lamps when the state actually changed.
-    fn sync_leds(&mut self, running: bool) {
-        if self.play_lit == Some(running) {
+    fn sync_leds(&mut self, running: bool, fill: bool) {
+        if self.state_lit == Some((running, fill)) {
             return;
         }
-        self.play_lit = Some(running);
+        self.state_lit = Some((running, fill));
         if let Some(output) = self.output.as_mut() {
             let _ = output.send(&mcu::led_message(mcu::NOTE_PLAY, running));
             let _ = output.send(&mcu::led_message(mcu::NOTE_STOP, !running));
+            let _ = output.send(&mcu::led_message(mcu::NOTE_CYCLE, fill));
         }
     }
 }
@@ -537,9 +538,25 @@ fn sequencer_status() -> Option<SequencerStatusV1> {
     }
 }
 
-/// One pressed transport button, resolved against the host's state the way
-/// every host resolves its own: PLAY starts, STOP stops, CLICK taps.
-fn apply_transport_action(target: HostActionTarget, taps: &mut TapFold, now_seconds: f64) {
+/// One transport button with its phase, resolved against the host's state
+/// the way every host resolves its own: PLAY starts, STOP stops, CLICK
+/// taps - on the press. FILL is the exception that needs both phases:
+/// held down, exactly like the surface's FILL key.
+fn apply_transport_action(
+    target: HostActionTarget,
+    phase: ButtonPhase,
+    taps: &mut TapFold,
+    now_seconds: f64,
+) {
+    if target == HostActionTarget::SequencerFill {
+        dispatch_sequencer_command(SequencerCommand::SetFill {
+            on: phase == ButtonPhase::Press,
+        });
+        return;
+    }
+    if phase != ButtonPhase::Press {
+        return;
+    }
     match target {
         HostActionTarget::TransportPlay => {
             dispatch_sequencer_command(SequencerCommand::TransportStart);
@@ -1485,18 +1502,17 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
 
             if let Some(bridge) = transport_bridge.as_mut() {
                 while let Ok((target, phase)) = bridge.receiver.try_recv() {
-                    if phase == ButtonPhase::Press {
-                        apply_transport_action(
-                            target,
-                            &mut transport_taps,
-                            transport_clock.elapsed().as_secs_f64(),
-                        );
-                    }
+                    apply_transport_action(
+                        target,
+                        phase,
+                        &mut transport_taps,
+                        transport_clock.elapsed().as_secs_f64(),
+                    );
                 }
                 if Instant::now() >= next_transport_poll {
                     next_transport_poll = Instant::now() + Duration::from_millis(500);
                     if let Some(status) = sequencer_status() {
-                        bridge.sync_leds(status.running);
+                        bridge.sync_leds(status.running, status.fill);
                     }
                 }
             }

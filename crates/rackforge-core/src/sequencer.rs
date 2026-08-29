@@ -893,6 +893,10 @@ pub fn host_action_command(
                 .get(usize::from(lane))
                 .is_some_and(|state| state.muted),
         }),
+        // FILL is momentary and this path only hears presses; a toggle
+        // here could strand FILL on. Drivers with both phases (the MCU
+        // bridge) dispatch SetFill themselves.
+        Target::SequencerFill => None,
     }
 }
 

@@ -35,9 +35,38 @@
  * The audio thread and the main thread are both real consumers of cores, so
  * two are reserved, and four workers is where fan-out stops paying for block
  * sizes this small — the same ceiling the native pool lands on.
+ *
+ * A phone gets two, and that number is measured rather than reasoned. On a
+ * Galaxy S24 Ultra (one core at 3.4 GHz, five between 2.9 and 3.1, two at
+ * 2.3) one instrument's worth of DSP split across the pool finished in:
+ *
+ *   1 worker  7.69 ms      2 workers 4.26 ms  (1.80x)
+ *   3 workers 5.25 ms      4 workers 4.32 ms  (1.78x)
+ *
+ * Three is worse than two and four buys nothing, because `collect` waits for
+ * every unit and affinity is fixed: a slow core always holds one share of the
+ * block, so splitting into more shares just hands it a share to be late with.
+ * Two lands both units on big cores. The native host already caps Android at
+ * three for the same topology; on this evidence the browser goes further,
+ * because it has neither realtime priority nor a say in placement.
  */
-export function automaticWorkerCount(hardwareConcurrency: number): number {
-  return Math.max(1, Math.min(4, Math.floor(hardwareConcurrency) - 2));
+export function automaticWorkerCount(
+  hardwareConcurrency: number,
+  mobile: boolean,
+): number {
+  const ceiling = mobile ? 2 : 4;
+  return Math.max(1, Math.min(ceiling, Math.floor(hardwareConcurrency) - 2));
+}
+
+/** Whether this is a phone or tablet, for the worker ceiling above.
+ *
+ * There is no API for core classes, so the device class is the closest honest
+ * proxy for "some of these cores are much slower than the others".
+ */
+export function deviceIsMobile(): boolean {
+  const data = (navigator as { userAgentData?: { mobile?: boolean } }).userAgentData;
+  if (typeof data?.mobile === "boolean") return data.mobile;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 }
 
 /** Which worker owns a unit. Stable for the life of a pool epoch. */

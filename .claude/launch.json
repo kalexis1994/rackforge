@@ -51,6 +51,19 @@
         "--strictPort"
       ],
       "port": 5199
+    },
+    {
+      "name": "rf-web-preview",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "web",
+        "preview",
+        "--port",
+        "5200",
+        "--strictPort"
+      ],
+      "port": 5200
     }
   ]
 }

@@ -27,6 +27,13 @@ export interface HostAudioRuntimeStatus {
   xruns?: number;
   callback_load_percent?: number;
   midi_dropped_events?: number;
+  /** Browser host only: whether the multicore render pool is actually up. */
+  render_pool?: {
+    isolated: boolean;
+    workers: number;
+    missed_blocks: number;
+    reason?: string;
+  };
 }
 
 export interface HostAudioPreferences {

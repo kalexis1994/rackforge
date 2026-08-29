@@ -42,6 +42,11 @@ if (-not $SkipDesktop) {
     }
     cargo +stable-x86_64-pc-windows-msvc build --release -p rackforge-desktop
     if ($LASTEXITCODE -ne 0) { throw "desktop build failed" }
+    # The desktop adopts the KeyLab .rfcontroller from the driver exe sitting
+    # next to it; without this build the installed package silently rots on
+    # old wire schemas (deny_unknown_fields breaks its LIVE menu).
+    cargo +stable-x86_64-pc-windows-msvc build --release --manifest-path hardware/keylab-bridge/Cargo.toml --bin rackforge-arturia-keylab-essential-mk3-driver
+    if ($LASTEXITCODE -ne 0) { throw "controller driver build failed" }
 }
 
 if (-not $SkipPi) {

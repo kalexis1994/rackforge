@@ -3725,6 +3725,13 @@
     0 0 6px color-mix(in srgb, var(--acid) 60%, transparent);
 }
 
+/* The take readout: what the REC loop is doing, said out loud. */
+.seq-take-info {
+  margin-left: auto;
+  color: var(--red);
+  letter-spacing: 0.08em;
+}
+
 /* REC burns red while armed: recording is the one act the player must
    never mistake for playback. */
 .seq-rec::before {

@@ -876,6 +876,10 @@ impl DesktopApp {
         let mut replacement_audio = None;
         #[cfg(windows)]
         {
+            // Same reason as the audio-settings path: the rebuilt instances
+            // restore their live state, so it has to be current first.
+            #[cfg(windows)]
+            self.flush_live_state();
             // Catalog reloads replace every DSP instance. Retire the old
             // generation through the single audio hand-off path so Web MIDI
             // cannot keep a sender whose receiver dies with that generation.
@@ -1221,6 +1225,14 @@ impl DesktopApp {
             .active_instance_id
             .as_ref()
             .map(|id| id.as_str().to_owned());
+        // Write down what is sounding before tearing it down. A restart
+        // rebuilds each instance by loading its preset and THEN its live
+        // state, so a state file older than the last program change puts
+        // the old program back — the program a player picked seconds
+        // before touching the audio settings would silently revert,
+        // because the periodic flush had not come round yet.
+        #[cfg(windows)]
+        self.flush_live_state();
         // The stream comes down BEFORE the scan: enumerating instantiates
         // every ASIO driver, and instantiating the live one kills its
         // stream anyway (measured). Validation failures restore the
@@ -1681,6 +1693,18 @@ impl DesktopApp {
             .is_some_and(|deadline| Instant::now() >= deadline)
         {
             self.controller_header_restore_at = None;
+            self.render_controller_screen();
+        } else if self.controller_header_restore_at.is_none() {
+            // The glass follows the machine's state, not the player's
+            // fingers. A program chosen on the web surface, a Rack
+            // activated from a phone, a preset loaded by a command — all of
+            // them changed the menu underneath, and until now the panel
+            // kept showing the old frame until someone pressed a button on
+            // it. The compositor discards a frame that changed nothing, so
+            // asking every cycle costs one comparison.
+            //
+            // A value message owns the header while it lasts; the repaint
+            // stands back rather than wiping it mid-flight.
             self.render_controller_screen();
         }
     }

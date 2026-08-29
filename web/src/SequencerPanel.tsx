@@ -566,6 +566,12 @@ function SequencerDeck({
           busy={busy}
           setBusy={setBusy}
           activeInstanceId={activeInstanceId}
+          fallbackView={
+            activeDraft(active)?.view === "melodic" ||
+            (libraryTabs.find((doc) => doc.lane === active.lane)?.view ?? "drum") === "melodic"
+              ? "melodic"
+              : "drum"
+          }
           onChange={(update) => updateTab(active.lane, update)}
           onClose={(revision) => closeTab(active.lane, revision)}
         />
@@ -646,6 +652,7 @@ function SequencerTabEditor({
   activeInstanceId,
   busy,
   setBusy,
+  fallbackView,
   onChange,
   onClose,
 }: {
@@ -659,6 +666,8 @@ function SequencerTabEditor({
   setBusy: (value: boolean) => void;
   onChange: (update: (tab: SequencerTab) => SequencerTab) => void;
   onClose: (revisionOverride?: string) => void;
+  /** The tab's lens when no draft exists yet — what a fresh take becomes. */
+  fallbackView: "drum" | "melodic";
 }) {
   const { lane, dirty } = tab;
   const draft = activeDraft(tab);
@@ -668,6 +677,20 @@ function SequencerTabEditor({
   const bars = draft
     ? Math.max(1, Math.round(draft.length_ticks / (beatsPerBar * TICKS_PER_BEAT)))
     : 1;
+
+  // The playhead: which step the lane is sounding right now. Launches are
+  // quantised to the bar, so the pattern's phase rides the transport's own
+  // bar grid — the highlight is the same arithmetic the engine runs.
+  const playhead =
+    draft && status && laneState?.playing
+      ? Math.floor(
+          (((status.bar - 1) * status.beats_per_bar +
+            (status.beat_in_bar - 1) +
+            status.beat_phase) *
+            TICKS_PER_BEAT) /
+            STEP_TICKS,
+        ) % stepCount(draft)
+      : null;
 
   const edit = useCallback(
     (next: PatternDefinition) => {
@@ -766,8 +789,17 @@ function SequencerTabEditor({
     const timer = window.setInterval(() => {
       requestSequencerCaptureTake(lane)
         .then((take) => {
-          const current = draftRef.current;
-          if (!current || take.notes.length === 0) return;
+          if (take.notes.length === 0) return;
+          // Recording into an empty slot creates the pattern right there:
+          // a take must never be drained into the void.
+          const current =
+            draftRef.current ??
+            emptyPattern(
+              fallbackView === "melodic" ? "Melodic take" : "Drum take",
+              1,
+              beatsPerBar,
+              fallbackView,
+            );
           const merged = mergeCapturedNotes(current, take.notes);
           onChange((tab) => ({
             ...tab,
@@ -786,7 +818,7 @@ function SequencerTabEditor({
         .catch(() => undefined);
     }, 600);
     return () => window.clearInterval(timer);
-  }, [capturing, lane, onChange]);
+  }, [capturing, lane, onChange, beatsPerBar, fallbackView]);
 
   /// LAUNCH stores the draft into its slot and jumps to it — the editor's
   /// audition and the Session grid are the same machinery.
@@ -1004,9 +1036,9 @@ function SequencerTabEditor({
         </div>
       </header>
       {draft.view === "melodic" ? (
-        <MelodicLane pattern={draft} onEdit={edit} activeInstanceId={activeInstanceId} />
+        <MelodicLane pattern={draft} onEdit={edit} activeInstanceId={activeInstanceId} playhead={playhead} />
       ) : (
-        <DrumGrid pattern={draft} onEdit={edit} />
+        <DrumGrid pattern={draft} onEdit={edit} playhead={playhead} />
       )}
       <footer className="seq-lanes" aria-label="Lane controls">
         <span className="seq-inline-label">{`LANE ${lane + 1} · CH ${lane + 1}`}</span>
@@ -1103,9 +1135,11 @@ function SequencerTabEditor({
 function DrumGrid({
   pattern,
   onEdit,
+  playhead,
 }: {
   pattern: PatternDefinition;
   onEdit: (next: PatternDefinition) => void;
+  playhead: number | null;
 }) {
   const steps = stepCount(pattern);
   const stepsPerBeat = TICKS_PER_BEAT / STEP_TICKS;
@@ -1136,7 +1170,9 @@ function DrumGrid({
                   title={on && chance < 100 ? `${chance}% — right-click cycles` : undefined}
                   className={`seq-cell${on ? " on" : ""}${
                     step % stepsPerBeat === 0 ? " beat" : ""
-                  }${on && chance < 100 ? ` chance-${chance}` : ""}`}
+                  }${on && chance < 100 ? ` chance-${chance}` : ""}${
+                    step === playhead ? " playhead" : ""
+                  }`}
                   onClick={() => onEdit(toggleStep(pattern, row.key, step))}
                   onContextMenu={(event) => {
                     event.preventDefault();
@@ -1165,10 +1201,12 @@ function MelodicLane({
   pattern,
   onEdit,
   activeInstanceId,
+  playhead,
 }: {
   pattern: PatternDefinition;
   onEdit: (next: PatternDefinition) => void;
   activeInstanceId: string | null;
+  playhead: number | null;
 }) {
   const steps = stepCount(pattern);
   const stepsPerBeat = TICKS_PER_BEAT / STEP_TICKS;
@@ -1259,6 +1297,7 @@ function MelodicLane({
                   stepNote && stepNote.velocity <= MELODIC_VELOCITIES[0] ? "soft" : "",
                   stepNote && (stepNote.probability ?? 100) < 100 ? "chance" : "",
                   stepNote && conditionLabel(stepNote.condition) !== "ALWAYS" ? "conditional" : "",
+                  step === playhead ? "playhead" : "",
                 ].join(" ").replace(/\s+/g, " ").trim()}
                 onClick={() => press(step)}
               >

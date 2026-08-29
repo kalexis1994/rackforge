@@ -459,6 +459,9 @@ struct DesktopApp {
     options: Options,
     plugin_install: Option<PluginInstallTask>,
     performance_repository: PerformanceRepository,
+    /// Mirrors the repository's revision for the web layer's sockets, so
+    /// every connected client learns about an edit made by any of them.
+    performance_revision_shared: Arc<RwLock<String>>,
     state_store: PluginStateStore,
     /// Runtime controller defaults. They are deliberately not persisted as
     /// user MIDI links; the signed controller package registers them again.
@@ -506,6 +509,7 @@ struct DesktopApp {
 impl DesktopApp {
     fn new(
         session: Arc<RwLock<SessionState>>,
+        performance_revision_shared: Arc<RwLock<String>>,
         options: &Options,
         web_servers: web::DesktopWebServers,
         web_control: Receiver<web::DesktopControlCall>,
@@ -602,6 +606,10 @@ impl DesktopApp {
             });
         let performance_repository = PerformanceRepository::load_or_empty(Some(&options.data_root))
             .context("loading Desktop performance library")?;
+        *performance_revision_shared
+            .write()
+            .expect("performance revision lock poisoned") =
+            performance_repository.revision().as_str().to_owned();
         let state_store = PluginStateStore::new(Some(&options.data_root))
             .context("loading Desktop plugin-state store")?;
         #[cfg(windows)]
@@ -789,6 +797,7 @@ impl DesktopApp {
             options: options.clone(),
             plugin_install: None,
             performance_repository,
+            performance_revision_shared,
             state_store,
             live_state_dirty: None,
             controller_semantic_profiles,
@@ -3375,6 +3384,7 @@ impl DesktopApp {
                             }
                             self.persist_session_checkpoint();
                         }
+                        self.publish_performance_revision();
                         ControlResponse::PerformanceEdited {
                             snapshot: Box::new(self.performance_snapshot()),
                         }
@@ -4234,10 +4244,22 @@ impl DesktopApp {
             }
             self.persist_session_checkpoint();
         }
+        self.publish_performance_revision();
         ControlResponse::LiveShowImported {
             preview: Box::new(preview),
             snapshot: Box::new(self.performance_snapshot()),
         }
+    }
+
+    /// Publishes the library's revision to the web layer; each session
+    /// socket compares and pushes a fresh snapshot to its own client.
+    fn publish_performance_revision(&self) {
+        let revision = self.performance_repository.revision();
+        let mut shared = self
+            .performance_revision_shared
+            .write()
+            .expect("performance revision lock poisoned");
+        *shared = revision.as_str().to_owned();
     }
 
     fn performance_snapshot(&self) -> PerformanceSnapshot {
@@ -6232,8 +6254,10 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
         SessionId::new(DEFAULT_LIVE_SESSION_ID).expect("valid live session id"),
     )));
     let (web_control_sender, web_control) = web::control_channel();
+    let performance_revision_shared = Arc::new(RwLock::new(String::new()));
     let web_servers = web::start(
         Arc::clone(&session),
+        Arc::clone(&performance_revision_shared),
         &options,
         web::WebServerPreferences {
             enabled: false,
@@ -6243,7 +6267,13 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
     )?;
     let controller_root = options.rackforge_root.join("controllers");
     let controller_address = web_servers.control_bridge_addr().to_string();
-    let mut app = DesktopApp::new(Arc::clone(&session), &options, web_servers, web_control)?;
+    let mut app = DesktopApp::new(
+        Arc::clone(&session),
+        performance_revision_shared,
+        &options,
+        web_servers,
+        web_control,
+    )?;
     #[cfg(windows)]
     if app.audio.is_some() {
         startup.advance(rackforge_core::startup::StartupPhase::AudioReady)?;

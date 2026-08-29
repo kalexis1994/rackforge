@@ -891,7 +891,7 @@ pub struct Menu {
 }
 
 const HOME_ITEMS: [&str; 3] = ["LIVE", "PLAY", "CONFIG"];
-const HOME_HEADER: &str = "RACK FORGE";
+const HOME_HEADER: &str = "RACKFORGE";
 const LIVE_ITEMS: [&str; 3] = ["RACK", "SONG", "SETLIST"];
 const LIVE_DETAILS: [&str; 3] = [
     "All configured Racks",

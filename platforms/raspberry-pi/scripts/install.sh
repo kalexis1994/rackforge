@@ -57,17 +57,25 @@ if [[ ! -f "$bundled_default_marker" ]]; then
   fi
 fi
 
-official_plugin="$source_root/bundled-plugins/RF-106.rfplugin"
-official_plugin_id=org.rackforge.rf-106
-official_known=false
-if [[ -d "$root/plugin-store/packages/$official_plugin_id" ]]; then
-  official_known=true
-fi
-if [[ -f "$official_plugin" ]]; then
-  "$root/bin/rackforge-store" install-local \
+# Every official instrument the release carries, not one name written here:
+# the bundle decides which ones travel, so a new one needs no edit. A plugin
+# the store already knows is installed but left as the player set it — only a
+# newcomer is enabled on their behalf.
+known_ids=" $(ls "$root/plugin-store/packages" 2>/dev/null | tr '\n' ' ') "
+shopt -s nullglob
+for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
+  [[ "$(basename "$official_plugin")" == "RackForge-Concert-Grand.rfplugin" ]] && continue
+  install_output="$("$root/bin/rackforge-store" install-local \
     "$official_plugin" \
-    "$root/plugin-store"
-  if [[ "$official_known" == false ]]; then
+    "$root/plugin-store")"
+  printf '%s\n' "$install_output"
+  official_plugin_id="$(printf '%s\n' "$install_output" |
+    sed -n 's/.*PLUGIN_INSTALLED id=\([^ ]*\).*/\1/p' | head -1)"
+  [[ -n "$official_plugin_id" ]] || {
+    printf 'could not read the plugin id installed from %s\n' "$official_plugin" >&2
+    exit 1
+  }
+  if [[ "$known_ids" != *" $official_plugin_id "* ]]; then
     "$root/bin/rackforge-store" enable \
       "$official_plugin_id" \
       "$root/plugin-store"
@@ -77,7 +85,8 @@ if [[ -f "$official_plugin" ]]; then
   else
     bundled_plugins="$bundled_plugins,$official_plugin_id"
   fi
-fi
+done
+shopt -u nullglob
 
 controller_package="$source_root/controller-packages/org.rackforge.arturia-keylab-essential-mk3.rfcontroller"
 if [[ -d "$controller_package" ]]; then

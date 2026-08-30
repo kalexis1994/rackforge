@@ -161,6 +161,14 @@ pub struct BrowserKeyLabController {
     output: Vec<BrowserControllerOutput>,
     gestures: GestureTracker,
     parameter_mapper: RackForgeParameterMapper,
+    /// Which plugins the menu was last given, and which of them was sounding.
+    ///
+    /// Handing the menu its list again resets the browsing cursor to whatever
+    /// is active, which is right when the catalog changes and wrong the rest
+    /// of the time. This host syncs from the audio callback, so without this
+    /// the list was re-seeded every block: the player turned the encoder and
+    /// the selection snapped back before the screen could show it.
+    plugin_list_signature: Option<String>,
 }
 
 impl BrowserKeyLabController {
@@ -171,26 +179,17 @@ impl BrowserKeyLabController {
             SurfaceMode::Play => ActiveMode::Play,
         });
         self.parameter_mapper.sync_master_pan(session.master_pan);
-        self.menu.set_play_plugins(
-            session
-                .instances
-                .iter()
-                .map(|instance| {
-                    PlayPlugin::new(
-                        instance.instance_id.as_str(),
-                        &instance.plugin_id,
-                        &instance.plugin_name,
-                    )
-                    .short_name(if instance.plugin_short_name.is_empty() {
-                        &instance.plugin_name
-                    } else {
-                        &instance.plugin_short_name
-                    })
-                    .config_available(instance.config_available)
-                })
-                .collect(),
-            session.active_instance_id.as_ref().map(|id| id.as_str()),
-        );
+        let signature = session
+            .instances
+            .iter()
+            .map(|instance| instance.instance_id.as_str())
+            .chain(session.active_instance_id.as_ref().map(|id| id.as_str()))
+            .collect::<Vec<_>>()
+            .join("\u{1f}");
+        if self.plugin_list_signature.as_deref() != Some(signature.as_str()) {
+            self.plugin_list_signature = Some(signature);
+            self.set_play_plugins(session);
+        }
         if let Some(active) = session.active_instance() {
             let sounds = active
                 .sounds
@@ -214,6 +213,29 @@ impl BrowserKeyLabController {
             );
         }
         self.queue_current_screen(false);
+    }
+
+    fn set_play_plugins(&mut self, session: &SessionState) {
+        self.menu.set_play_plugins(
+            session
+                .instances
+                .iter()
+                .map(|instance| {
+                    PlayPlugin::new(
+                        instance.instance_id.as_str(),
+                        &instance.plugin_id,
+                        &instance.plugin_name,
+                    )
+                    .short_name(if instance.plugin_short_name.is_empty() {
+                        &instance.plugin_name
+                    } else {
+                        &instance.plugin_short_name
+                    })
+                    .config_available(instance.config_available)
+                })
+                .collect(),
+            session.active_instance_id.as_ref().map(|id| id.as_str()),
+        );
     }
 
     pub fn set_plugin_presets(&mut self, presets: Vec<PlayPreset>) {
@@ -490,6 +512,73 @@ mod tests {
         assert!(!outcome.consumed);
         assert!(outcome.actions.is_empty());
         assert!(controller.has_output());
+    }
+
+    fn instance(id: &str, name: &str) -> rackforge_session_api::PluginInstanceState {
+        rackforge_session_api::PluginInstanceState {
+            instance_id: rackforge_session_api::InstanceId::new(id).unwrap(),
+            plugin_id: id.to_owned(),
+            plugin_name: name.to_owned(),
+            plugin_short_name: name.to_owned(),
+            ui_layouts: vec!["little@1".into()],
+            config_available: false,
+            banks: Vec::new(),
+            sounds: Vec::new(),
+            selected_sound_id: None,
+        }
+    }
+
+    fn session_with_two_plugins() -> SessionState {
+        let mut session =
+            SessionState::new(rackforge_session_api::SessionId::new("session.test").unwrap());
+        session.active_mode = SurfaceMode::Play;
+        session.instances = vec![
+            instance("org.rackforge.one", "One"),
+            instance("org.rackforge.two", "Two"),
+        ];
+        session.active_instance_id =
+            Some(rackforge_session_api::InstanceId::new("org.rackforge.one").unwrap());
+        session
+    }
+
+    /// This host syncs the controller from the audio callback, so `sync` runs
+    /// hundreds of times a second. Handing the menu its plugin list again
+    /// resets the browsing cursor to whatever is sounding, which turned every
+    /// attempt to browse into the selection snapping straight back. The list
+    /// is re-seeded when it changes and left alone when it does not.
+    #[test]
+    fn an_unchanged_session_does_not_reseed_the_plugin_list() {
+        let mut controller = BrowserKeyLabController::default();
+        controller.connect();
+        let session = session_with_two_plugins();
+
+        controller.sync(&session);
+        // Walk to the plugin list the way a player does: PLAY, then in.
+        controller.menu.apply_input(Input::EncoderRight);
+        controller.menu.apply_input(Input::Button1);
+        assert_eq!(controller.menu.render().line_1.trim(), "One");
+
+        // Browse to the other one, and let the audio callback sync again with
+        // a session nothing has touched.
+        controller.menu.apply_input(Input::EncoderRight);
+        assert_eq!(controller.menu.render().line_1.trim(), "Two");
+        controller.sync(&session);
+        assert_eq!(
+            controller.menu.render().line_1.trim(),
+            "Two",
+            "a sync that changed nothing pulled the selection back to what was sounding"
+        );
+
+        // What is sounding changing is exactly when the cursor should follow.
+        let seeded = controller.plugin_list_signature.clone();
+        let mut moved = session.clone();
+        moved.active_instance_id =
+            Some(rackforge_session_api::InstanceId::new("org.rackforge.two").unwrap());
+        controller.sync(&moved);
+        assert_ne!(
+            controller.plugin_list_signature, seeded,
+            "the menu was not told the sounding instrument had changed"
+        );
     }
 
     #[test]

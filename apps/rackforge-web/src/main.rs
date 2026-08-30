@@ -836,6 +836,30 @@ fn local_lan_ipv4() -> Option<Ipv4Addr> {
     }
 }
 
+/// Which of two packages carrying the same plugin id the interface serves.
+///
+/// Activation is recorded per plugin, not per version, so every version of an
+/// enabled plugin arrives here marked active. The rule that an active package
+/// outranks an inactive one therefore said nothing between two versions of the
+/// same enabled plugin — and, being checked first, it stopped the version
+/// comparison from ever running. Whichever version the directory happened to
+/// list first won.
+///
+/// On the appliance that meant RF-5 0.1.13 kept serving its panel while the
+/// engine, which does compare versions, played 0.1.14. The player saw an
+/// instrument the plugin had already replaced.
+fn replaces_current(
+    current_active: bool,
+    current_version: &str,
+    candidate_active: bool,
+    candidate_version: &str,
+) -> bool {
+    if current_active != candidate_active {
+        return candidate_active;
+    }
+    Version::parse(candidate_version).ok() > Version::parse(current_version).ok()
+}
+
 impl PluginWebRegistry {
     fn scan(plugins_root: &Path, plugin_store_root: &Path) -> Result<Self> {
         let _ = cleanup_uninstall_tombstones(plugin_store_root);
@@ -901,13 +925,12 @@ impl PluginWebRegistry {
                     let id = package.public.plugin_id.clone();
                     let replace = match packages.get(&id) {
                         None => true,
-                        Some(current) if current.public.active => false,
-                        Some(_) if package.public.active => true,
-                        Some(current) => {
-                            let current_version = Version::parse(&current.public.version).ok();
-                            let candidate_version = Version::parse(&package.public.version).ok();
-                            candidate_version > current_version
-                        }
+                        Some(current) => replaces_current(
+                            current.public.active,
+                            &current.public.version,
+                            package.public.active,
+                            &package.public.version,
+                        ),
                     };
                     if replace {
                         packages.insert(id, package);
@@ -2912,6 +2935,32 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_SERIAL: AtomicU64 = AtomicU64::new(0);
+
+    /// The appliance had both RF-5 0.1.13 and 0.1.14 installed and enabled,
+    /// and served the older panel while the engine played the newer one.
+    #[test]
+    fn the_newer_version_of_an_enabled_plugin_wins() {
+        assert!(
+            replaces_current(true, "0.1.13", true, "0.1.14"),
+            "the newer version did not take over"
+        );
+        assert!(!replaces_current(true, "0.1.14", true, "0.1.13"));
+    }
+
+    /// What the activation check was for, and still is: a package the player
+    /// turned off must not shadow one they left on, whatever its version.
+    #[test]
+    fn an_enabled_package_outranks_a_disabled_one_whatever_the_version() {
+        assert!(replaces_current(false, "9.9.9", true, "0.0.1"));
+        assert!(!replaces_current(true, "0.0.1", false, "9.9.9"));
+    }
+
+    /// A version nobody can parse must not displace one that reads.
+    #[test]
+    fn an_unreadable_version_does_not_displace_a_readable_one() {
+        assert!(!replaces_current(true, "0.1.14", true, "not-a-version"));
+        assert!(replaces_current(true, "not-a-version", true, "0.1.14"));
+    }
 
     /// A manager over a scratch file, with no PIN yet.
     fn fresh_auth() -> (AuthManager, PathBuf) {

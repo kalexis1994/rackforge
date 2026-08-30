@@ -5,7 +5,15 @@ repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 android_project="$repository/apps/rackforge-android"
 sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
 ndk_version="27.0.12077973"
+# Resolved before anything changes directory: a relative argument means the
+# same place as the default, not wherever the build happens to be standing
+# when it gets around to creating it. This script moves into the Android
+# project, which is how a relative output landed under apps/rackforge-android.
 output_directory="${1:-$repository/dist/android}"
+case "$output_directory" in
+  /*) ;;
+  *) output_directory="$repository/$output_directory" ;;
+esac
 edition="${RACKFORGE_EDITION:-standard}"
 
 case "$edition" in

@@ -2,19 +2,27 @@
 param(
     [ValidateSet("Release", "Debug")]
     [string]$Configuration = "Release",
+    [ValidateSet("Standard", "Minimal")]
+    [string]$Edition = "Standard",
+    [string]$OutputDirectory = "dist/windows-x86_64",
     [switch]$RunTests
 )
 
 $ErrorActionPreference = "Stop"
 $repository = Split-Path -Parent $PSScriptRoot
 $runtime = $repository
-$output = Join-Path $repository "dist/windows-x86_64"
+$output = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
+    $OutputDirectory
+} else {
+    Join-Path $repository $OutputDirectory
+}
 $outputExecutable = Join-Path $output "rackforge.exe"
 $cargoProfileArgument = if ($Configuration -eq "Release") { " --release" } else { "" }
 $cargoProfileDirectory = $Configuration.ToLowerInvariant()
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
 $llvmBin = Join-Path $env:ProgramFiles "LLVM/bin"
-$officialPlugins = Join-Path $repository "dist/bundled-plugins/official"
+$officialPlugins = ""
+$defaultPlugin = ""
 
 $runningRackForge = Get-Process -ErrorAction SilentlyContinue | Where-Object {
     $_.ProcessName -in @("rackforge", "rackforge-desktop")
@@ -62,19 +70,24 @@ if (-not (Test-Path -LiteralPath $clang) -or -not (Test-Path -LiteralPath $libcl
     throw "LLVM/Clang was not found at $llvmBin. Install LLVM (winget install LLVM.LLVM) to build RackForge with ASIO support."
 }
 
-& python (Join-Path $repository "tools/fetch-official-plugins.py") `
-    --output-directory $officialPlugins
-if ($LASTEXITCODE -ne 0) {
-    throw "RackForge official plugin download failed."
-}
-$env:RACKFORGE_BUNDLED_OFFICIAL_PLUGINS = $officialPlugins
-if (-not $env:RACKFORGE_BUNDLED_PLUGIN) {
-    $localDefaultPlugin = Join-Path $repository `
-        "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
-    if (Test-Path -LiteralPath $localDefaultPlugin -PathType Leaf) {
-        $env:RACKFORGE_BUNDLED_PLUGIN = $localDefaultPlugin
+if ($Edition -eq "Standard") {
+    $officialPlugins = Join-Path $repository "dist/bundled-plugins/official"
+    & python (Join-Path $repository "tools/fetch-official-plugins.py") `
+        --output-directory $officialPlugins
+    if ($LASTEXITCODE -ne 0) {
+        throw "RackForge official plugin download failed."
+    }
+    if ($env:RACKFORGE_BUNDLED_PLUGIN) {
+        $defaultPlugin = $env:RACKFORGE_BUNDLED_PLUGIN
+    } else {
+        $localDefaultPlugin = Join-Path $repository `
+            "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+        if (Test-Path -LiteralPath $localDefaultPlugin -PathType Leaf) {
+            $defaultPlugin = $localDefaultPlugin
+        }
     }
 }
+$bundledEnvironment = 'set "RACKFORGE_EDITION={0}" && set "RACKFORGE_BUNDLED_PLUGIN={1}" && set "RACKFORGE_BUNDLED_OFFICIAL_PLUGINS={2}" &&' -f $Edition.ToLowerInvariant(), $defaultPlugin, $officialPlugins
 
 Push-Location $runtime
 try {
@@ -103,14 +116,14 @@ try {
     }
 
     if ($RunTests) {
-        $tests = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && set "RACKFORGE_BUNDLED_CONTROLLER_DRIVER={4}" && cargo +stable-x86_64-pc-windows-msvc test --locked -p rackforge-desktop' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName, $controllerSource
+        $tests = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && {4} set "RACKFORGE_BUNDLED_CONTROLLER_DRIVER={5}" && cargo +stable-x86_64-pc-windows-msvc test --locked -p rackforge-desktop' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName, $bundledEnvironment, $controllerSource
         & $env:ComSpec /d /s /c $tests
         if ($LASTEXITCODE -ne 0) {
             throw "RackForge Desktop tests failed."
         }
     }
 
-    $build = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && set "RACKFORGE_BUNDLED_CONTROLLER_DRIVER={4}" && cargo +stable-x86_64-pc-windows-msvc build --locked{5} -p rackforge-desktop' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName, $controllerSource, $cargoProfileArgument
+    $build = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && {4} set "RACKFORGE_BUNDLED_CONTROLLER_DRIVER={5}" && cargo +stable-x86_64-pc-windows-msvc build --locked{6} -p rackforge-desktop' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName, $bundledEnvironment, $controllerSource, $cargoProfileArgument
     & $env:ComSpec /d /s /c $build
     if ($LASTEXITCODE -ne 0) {
         throw "RackForge Desktop build failed."
@@ -132,4 +145,18 @@ if (-not (Test-Path -LiteralPath $source)) {
 Copy-Item -LiteralPath $source -Destination $outputExecutable -Force
 Copy-Item -LiteralPath (Join-Path $repository "THIRD_PARTY_NOTICES.md") `
     -Destination (Join-Path $output "THIRD_PARTY_NOTICES.md") -Force
-Write-Host "RackForge Desktop ($Configuration): $outputExecutable"
+$bundledPluginNames = @()
+if ($defaultPlugin) {
+    $bundledPluginNames += Split-Path -Leaf $defaultPlugin
+}
+if ($officialPlugins) {
+    $bundledPluginNames += Get-ChildItem -LiteralPath $officialPlugins `
+        -Filter "*.rfplugin" -File | Sort-Object Name | Select-Object -ExpandProperty Name
+}
+[System.IO.File]::WriteAllLines(
+    (Join-Path $output "bundled-plugins.txt"),
+    [string[]]$bundledPluginNames
+)
+"edition=$($Edition.ToLowerInvariant())" | Set-Content `
+    -LiteralPath (Join-Path $output "build-info.txt") -Encoding utf8NoBOM
+Write-Host "RackForge Desktop ($Configuration, $Edition): $outputExecutable"

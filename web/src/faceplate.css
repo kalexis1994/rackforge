@@ -5674,3 +5674,106 @@
   gap: 6px;
   align-items: center;
 }
+
+/* ==========================================================================
+   LIVE on a narrow screen
+   --------------------------------------------------------------------------
+   The narrow treatment this surface still carries was written for a
+   `.live-perform-surface` that the zone redesign removed, so none of it
+   applies any more. What survived was the frame it built around that
+   structure: a clipped, full-height flex column. The zones that replaced it
+   are ordinary stacked blocks, and a clipped column does not shrink them —
+   it cuts them off, which is why the PERFORMANCE zone spilled past its own
+   border with its list unreachable.
+
+   A phone reads this surface as a column of blocks. So let it be one, and
+   let the page scroll the way every other page does.
+   ========================================================================== */
+
+@media (max-width: 760px) {
+  .app-shell.live-surface-active,
+  .live-surface-active .workspace,
+  .live-surface-active .page.live-host-page,
+  .live-surface-active .live-shell {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Blocks keep the height their content needs; nothing here is a pane to be
+     divided between. The page was `flex: 1 1 0`, and a basis of zero inside a
+     container that now sizes to its content collapses the whole column to
+     nothing — height alone does not undo that. */
+  .live-surface-active .page.live-host-page,
+  .live-surface-active .live-zone,
+  .live-surface-active .sequencer-shell {
+    flex: 0 0 auto !important;
+  }
+
+  .live-surface-active .live-zone {
+    overflow: visible !important;
+  }
+
+  /* The zone's content was written as a pane — `height: 100%` with the
+     overflow hidden — which only means something inside a column of fixed
+     height. Against a block that sizes to its content, 100% resolves to
+     whatever the zone happened to measure and the rest of the list is simply
+     cut off. That is the PERFORMANCE zone spilling past its own border. */
+  .live-surface-active .live-perform-surface .live-content,
+  .live-surface-active .live-zone .live-content {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* The menu key floats over the top-left corner. The information bar leaves
+     58px for it; the sequencer's legend did not, so the key landed on the
+     word SEQ. Fixed rather than absolute, because a menu that scrolls away
+     is not a menu on a surface a player works from standing up. */
+  .live-surface-active .performance-menu-button {
+    position: fixed !important;
+  }
+
+  /* Only the first row sits under the key, so only the first item steps
+     aside. Padding the whole strip pushed every wrapped row inward and cost
+     a line of height for nothing. */
+  .live-surface-active .sequencer-strip > .seq-legend:first-child {
+    margin-left: 46px;
+  }
+
+  /* The lane pads stacked their three lines, which on a phone spent a third
+     of the screen on eight lanes that are mostly empty. Laid on one line they
+     say the same things — which lane, what is on it, what it is doing — in
+     roughly half the height, and the row still takes a thumb. */
+  .seq-pads {
+    gap: 5px;
+    padding: 8px 12px 10px;
+  }
+
+  .seq-pad {
+    /* 44px, not less: this is a key struck mid-performance, and the height
+       saved below that comes out of the thumb rather than the layout. */
+    min-height: 44px;
+    padding: 8px 10px;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .seq-pad-name {
+    width: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* An empty lane has nothing to name, and the pad's own dimmed face already
+     says it is empty. The word was only there to fill a line that no longer
+     exists. */
+  .seq-pad.empty .seq-pad-name {
+    display: none;
+  }
+
+  .seq-pad-state {
+    min-height: 0;
+    flex: 0 0 auto;
+  }
+}

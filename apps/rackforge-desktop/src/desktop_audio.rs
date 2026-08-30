@@ -888,6 +888,7 @@ impl DesktopAudio {
             master_gain: MasterGain::new(MasterLevel::UNITY),
             master_balance: MasterBalance::new(MasterPan::CENTER),
             stopped: false,
+            conducting: false,
             retired_voice_sender,
             deferred_retire: Vec::with_capacity(voice_capacity),
             live_parameter_writer: live_parameter_writer_handle,
@@ -1189,6 +1190,12 @@ impl DesktopAudio {
         self.send_command(AudioCommand::SetRunning(running))
     }
 
+    /// Tells the audio thread whether the keyboard is conducting LIVE lanes
+    /// or simply playing the instrument.
+    pub fn set_conducting(&self, conducting: bool) -> Result<()> {
+        self.send_command(AudioCommand::SetConducting(conducting))
+    }
+
     pub fn emergency_stop(&self) -> Result<()> {
         self.send_command(AudioCommand::EmergencyStop)
     }
@@ -1381,6 +1388,7 @@ enum AudioCommand {
     SetMasterLevel(MasterLevel),
     SetMasterPan(MasterPan),
     SetRunning(bool),
+    SetConducting(bool),
     EmergencyStop,
     ReplaceVoice(AudioVoice),
 }
@@ -1675,6 +1683,9 @@ struct AudioProcessor {
     master_gain: MasterGain,
     master_balance: MasterBalance,
     stopped: bool,
+    /// True while LIVE is the surface on stage. Key-follow lanes listen only
+    /// then: off the stage the same keyboard is an instrument being played.
+    conducting: bool,
     retired_voice_sender: SyncSender<AudioVoice>,
     deferred_retire: Vec<AudioVoice>,
     live_parameter_writer: LiveParameterWriterHandle,
@@ -1725,8 +1736,8 @@ impl AudioProcessor {
                 }
             }
             if !consume {
-                let conducted =
-                    feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
+                let conducted = self.conducting
+                    && feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
                 if !conducted {
                     push_midi_event(&mut self.events, packet);
                 }
@@ -2141,8 +2152,8 @@ impl AudioProcessor {
                     let _ = reply.try_send(Ok(()));
                 }
                 AudioCommand::InjectMidi(packet) => {
-                    let conducted =
-                        feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
+                    let conducted = self.conducting
+                        && feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
                     if !conducted {
                         push_midi_event(&mut self.events, packet);
                     }
@@ -2159,6 +2170,7 @@ impl AudioProcessor {
                 AudioCommand::SetMasterLevel(level) => self.master_gain.set_level(level),
                 AudioCommand::SetMasterPan(pan) => self.master_balance.set_pan(pan),
                 AudioCommand::SetRunning(running) => self.stopped = !running,
+                AudioCommand::SetConducting(conducting) => self.conducting = conducting,
                 AudioCommand::EmergencyStop => {
                     for voice in &mut self.voices {
                         voice.mirror_control(|instance| instance.reset())?;

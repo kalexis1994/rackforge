@@ -936,6 +936,17 @@ impl BrowserHost {
                             command_ref,
                         )?);
                     }
+                    // The gate can be holding keys at the moment the mode
+                    // changes, and those note-offs are about to be filtered
+                    // out on their way in. Panic stops the transport and
+                    // flushes every lane, so nothing is left sounding by a
+                    // key that was down when the performer walked off.
+                    if let Err(reason) = self
+                        .sequencer
+                        .apply(&rackforge_control_api::SequencerCommand::TransportPanic)
+                    {
+                        eprintln!("SEQUENCER_PANIC_REJECTED reason={reason}");
+                    }
                     // Walking off stage takes the Rack off it too. Leaving the
                     // target set meant coming back to LIVE found the Rack
                     // still lit as Playing, hours after its sound had been
@@ -1803,6 +1814,13 @@ impl BrowserHost {
     /// that reaches the instrument also reaches the engine's gate. True
     /// when a FOLLOW lane claimed the note.
     fn feed_sequencer_input(&mut self, data: [u8; 3], length: u8) -> bool {
+        // Conducting is a LIVE gesture. Off the stage the same keyboard is
+        // just an instrument being played, and a FOLLOW lane that kept
+        // listening did worse than linger: claiming the note returns true
+        // here, so PLAY lost the note entirely to a lane nobody could see.
+        if self.store.state().active_mode != SurfaceMode::Live {
+            return false;
+        }
         if length < 3 {
             return false;
         }

@@ -91,6 +91,19 @@ $bundledEnvironment = 'set "RACKFORGE_EDITION={0}" && set "RACKFORGE_BUNDLED_PLU
 
 Push-Location $runtime
 try {
+    # The executable embeds web/dist, so the interface is built here rather
+    # than assumed. Trusting whatever happened to be lying in web/dist shipped
+    # an executable stamped with today's revision carrying an interface from
+    # several commits earlier — visible only because the health endpoint
+    # publishes the two revisions separately. CI never saw it, because the
+    # workflow builds the interface in a step of its own; a local build had
+    # nothing to keep it honest.
+    if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+        throw "pnpm is required to build the shared RackForge interface."
+    }
+    & pnpm --dir web build
+    if ($LASTEXITCODE -ne 0) { throw "The shared RackForge interface build failed." }
+
     & rustup run stable-x86_64-pc-windows-msvc rustc --version *> $null
     if ($LASTEXITCODE -ne 0) {
         & rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal

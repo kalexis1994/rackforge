@@ -1,0 +1,37 @@
+# RackForge pins every bundled plugin by URL, version and SHA-256, which is
+# what makes a build reproducible and a package verifiable. The cost of a pin
+# is that it cannot say when it has fallen behind: RF-5 0.1.14 shipped six
+# hours after the pin was cut at 0.1.13, and the first place that showed was a
+# player's screen.
+#
+# This job is the missing voice. It changes nothing and blocks no pull
+# request; it fails on its own schedule so a stale pin is a red mark rather
+# than a surprise. `tools/fetch-official-plugins.py --update` moves the pins,
+# verifying each package before it writes the hash down.
+name: Official plugins
+
+on:
+  schedule:
+    # Early enough that a plugin released overnight is known by morning.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pins:
+    name: Pins against upstream releases
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare every pin with the newest release
+        env:
+          # Anonymous API calls are rate limited hard enough to fail on a busy
+          # runner; the default token only reads public releases.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/fetch-official-plugins.py --check-latest

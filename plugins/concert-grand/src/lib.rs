@@ -1671,7 +1671,13 @@ const STRING_TENSION_N: f32 = 850.0;
 /// the soft blow's attack brightness drops 3.5 dB and its peak-to-sustain
 /// 2.6 dB while the fortissimo keeps its bite within 3.4 dB; the softer
 /// value is also the more physical one for a bass hammer.
-const FELT_K_A0: f32 = 1.0e12;
+/// Raised x1.5 alongside the hysteresis depth falling 0.85 -> 0.5 (0.88.0):
+/// a shallower loop softens the felt the blow actually feels, and without
+/// the compensation every attack came out darker than the calibration the
+/// bands were fitted against. Measured together in `felt_sweep`, the pair
+/// shortens the fortissimo contact toward Askenfelt's times while moving
+/// the attack centroid under 6% -- the two constants are one decision.
+const FELT_K_A0: f32 = 1.5e12;
 const FELT_K_DECADES: f32 = 4.2;
 /// Hammer speed at full velocity, m/s. Measured fortissimo hammers arrive at
 /// 5-7 m/s; pianissimo under 1.
@@ -1685,6 +1691,28 @@ const CONTACT_STRETCH: f32 = 1.0;
 const RECIPE_FLOOR: f32 = 0.0;
 #[cfg(test)]
 static CONTACT_STEPS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// Armed by the profile test: `simulate_strike` records every step of the
+/// contact -- force, both positions, hammer velocity -- so the shape of the
+/// pulse can be read instead of guessed at. Tests only; costs nothing else.
+#[cfg(test)]
+static CONTACT_TRACE_ARMED: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+#[cfg(test)]
+static CONTACT_TRACE: std::sync::Mutex<Vec<[f32; 5]>> = std::sync::Mutex::new(Vec::new());
+/// One-variable-at-a-time overrides for the felt sweep. Tests only: the
+/// engine's own call sites never touch this, so a normal render is exactly
+/// the shipped physics.
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct SweepOverride {
+    epsilon: f32,
+    tau: f32,
+    comb: f32,
+    width_mul: f32,
+    k_mul: f32,
+}
+#[cfg(test)]
+static SWEEP_OVERRIDE: std::sync::Mutex<Option<SweepOverride>> = std::sync::Mutex::new(None);
 
 /// Integrates the felt hammer against the string's modal system from first
 /// touch to release: nonlinear felt (F ∝ ξ^2.5), the string pushing back,
@@ -1702,33 +1730,50 @@ struct StrikeConfiguration {
     exponent: f32,
     velocity: f32,
     contact_seconds: f32,
+    /// Stulov's hereditary parameters -- how much softer the felt unloads
+    /// than it loads, and how fast the wool's memory relaxes.
+    stulov_epsilon: f32,
+    stulov_tau: f32,
+    /// The comb floor used for the SIM's mode shapes. The render's floor
+    /// stands in for bridge admittance; whether the contact physics should
+    /// see the same floored shape is a separate question, so it is a knob.
+    comb_floor: f32,
 }
 
 /// Integrates the hammer against the string modes during contact.
 ///
-/// KNOWN DEFECT, measured by `how_long_the_hammer_stays`: the hammer does not
-/// separate. Contact lasts 4.80 ms for every note at every velocity, and
-/// 4.80 ms is exactly this function's own window -- 1200 steps of 4 us. The
-/// integration ends because it runs out of steps, not because the hammer
-/// leaves.
+/// The hammer separates -- the escape is emergent, and its measured times
+/// (`how_long_the_hammer_stays`) shorten with velocity the way a piano's do.
+/// An older KNOWN DEFECT note here claimed a fixed 4.80 ms window-limited
+/// contact; that was true of the build it measured and is not true now.
 ///
-/// So the contact time is not modelled at all. `contact_time` asks for 1.7 ms
-/// at a fortissimo C2 and gets 4.8; it asks for 5.9 ms at a soft A0 and gets
-/// 4.8 truncated. The velocity dependence -- the thing that makes a piano
-/// respond to touch -- is absent from the strike entirely, and a hammer still
-/// pressing while the string vibrates damps it.
-///
-/// It is not the stiffness. Sweeping that constant from 34 to 4000 moves a
-/// fortissimo A0 only from 4.80 ms to 2.53 ms and leaves C2 at 4.26. Whatever
-/// holds the hammer on is in the balance between the hammer's mass and the
-/// string's -- the modal masses here are unity and there are up to 144 of
-/// them, so the string is some hundreds of times heavier than the hammer,
-/// which is backwards for a bass note.
+/// What remains true, verified against an ideal-string control (600 modes,
+/// no comb floor, no width filter, same integrator): the deep-bass contact
+/// is genuinely long. A
+/// light hammer on a heavy string hands over its momentum and then rides at
+/// low force until thrown off; tension, mode count and mode shaping were
+/// each swept and none moves it by more than ~10%. The lever that was
+/// actually broken -- the hysteresis burying the fortissimo hammer in
+/// crushed felt -- is documented at the call site.
 fn simulate_strike(
     frequencies: &[f32],
     modes: usize,
     configuration: StrikeConfiguration,
 ) -> ([f32; SIM_MODES], [f32; SIM_MODES]) {
+    #[cfg(test)]
+    let configuration = {
+        let mut configuration = configuration;
+        if let Ok(guard) = SWEEP_OVERRIDE.lock()
+            && let Some(sweep) = guard.as_ref()
+        {
+            configuration.stulov_epsilon = sweep.epsilon;
+            configuration.stulov_tau = sweep.tau;
+            configuration.comb_floor = sweep.comb;
+            configuration.contact_width *= sweep.width_mul;
+            configuration.stiffness *= sweep.k_mul;
+        }
+        configuration
+    };
     let StrikeConfiguration {
         x0,
         contact_width,
@@ -1738,6 +1783,9 @@ fn simulate_strike(
         exponent,
         velocity: velocity0,
         contact_seconds,
+        stulov_epsilon,
+        stulov_tau,
+        comb_floor,
     } = configuration;
     let dt = 4.0e-6_f32;
     // The contact ends when the string throws the hammer off, and not
@@ -1793,7 +1841,7 @@ fn simulate_strike(
         // pitch.
         let ideal = sincosf(core::f32::consts::PI * nf * x0).0;
         let comb =
-            if ideal < 0.0 { -1.0 } else { 1.0 } * sqrtf(ideal * ideal + COMB_FLOOR * COMB_FLOOR);
+            if ideal < 0.0 { -1.0 } else { 1.0 } * sqrtf(ideal * ideal + comb_floor * comb_floor);
         shape[n] = comb * expf(-1.2 * spread * spread);
     }
     let mut q = [0.0f32; SIM_MODES];
@@ -1808,7 +1856,6 @@ fn simulate_strike(
     // history kernel — loading is stiffer than unloading, the loop
     // dissipates, the pulse comes out shorter and asymmetric (JASA 97,
     // 1995). e and t0 are his hereditary parameters.
-    const STULOV_EPSILON: f32 = 0.85;
     // The relaxation time must be commensurate with the contact, or the
     // hereditary term does nothing but scale K. At the 6 microseconds that
     // stood here, the history caught up with the compression within any
@@ -1819,10 +1866,10 @@ fn simulate_strike(
     // pianissimo one sinks into the relaxed felt: rate-hardening, which is
     // the second half of how touch reaches timbre (the first is the power
     // law).
-    const STULOV_TAU_S: f32 = 2.0e-4;
-    let history_keep = expf(-dt / STULOV_TAU_S);
+    let history_keep = expf(-dt / stulov_tau);
     let mut history = 0.0f32;
-    for _ in 0..steps {
+    #[cfg_attr(not(test), allow(unused_variables))]
+    for step in 0..steps {
         let mut string_y = 0.0;
         for n in 0..modes {
             string_y += q[n] * shape[n];
@@ -1838,7 +1885,7 @@ fn simulate_strike(
             // ~1.5 in the bass to ~3.5 in the treble, not one fixed power.
             let compressed = powf(felt, exponent);
             history = history * history_keep + compressed * (1.0 - history_keep);
-            (stiffness * (compressed - STULOV_EPSILON * history)).max(0.0)
+            (stiffness * (compressed - stulov_epsilon * history)).max(0.0)
         } else {
             if touched {
                 break;
@@ -1846,6 +1893,12 @@ fn simulate_strike(
             history = 0.0;
             0.0
         };
+        #[cfg(test)]
+        if CONTACT_TRACE_ARMED.load(core::sync::atomic::Ordering::Relaxed)
+            && let Ok(mut trace) = CONTACT_TRACE.lock()
+        {
+            trace.push([step as f32, force, hammer_y, string_y, hammer_v]);
+        }
         hammer_v -= force / mass * dt;
         hammer_y += hammer_v * dt;
         for n in 0..modes {
@@ -2698,6 +2751,35 @@ impl ConcertGrand {
                         // A cap only: the hammer leaves when the string throws
                         // it off. 20 ms is several times any physical contact.
                         contact_seconds: 0.020 * CONTACT_STRETCH,
+                        // The hysteresis depth came down from 0.85 on 0.88.0,
+                        // and the story is worth keeping. At 0.85 with the
+                        // half-millisecond relaxation, the unloading force is
+                        // clamped to zero against the remembered deeper
+                        // compression -- the fortissimo hammer buries ~1 mm
+                        // into crushed felt and HOVERS there at zero force
+                        // (traced by `strike_profile`: 4 ms of F=0 with the
+                        // hammer nearly stationary) until the agraffe
+                        // reflection digs it out. Measured, A0 ff stayed
+                        // 3.55x the asked contact and the pp/ff contact
+                        // ratio ran 1.23 where the instrument runs ~2.6:
+                        // the one mechanism that carries touch into timbre,
+                        // compressed exactly where it matters most.
+                        //
+                        // At 0.5 the felt still dissipates (the loop loses
+                        // half its unloading force) but keeps enough spring
+                        // to eject the hammer: A0 ff 7.10 -> 4.06 ms, C2 ff
+                        // 3.57 -> 3.17, C4 ff 2.43 -> 2.11, C4 pp lands on
+                        // its ask (0.90x), and the pp/ff ratio recovers to
+                        // 1.89. Sweeping deeper (0.3, 0.0) buys almost no
+                        // further contact -- the residue is the genuine
+                        // physics of a light hammer on a heavy string --
+                        // while the brightness keeps climbing, so 0.5 is
+                        // where the trade stops paying. The felt sweep that
+                        // measured all of this is `felt_sweep`; the K
+                        // compensation lives in FELT_K_A0.
+                        stulov_epsilon: 0.5,
+                        stulov_tau: 2.0e-4,
+                        comb_floor: COMB_FLOOR,
                     },
                 );
                 // Scale the simulated strike to the recipe's level.
@@ -4746,6 +4828,212 @@ mod tests {
                 println!(
                     "{note:>5} {velocity:>4} {simulated:>9.2} ms {asked:>9.2} ms {:>8.2}",
                     simulated / asked
+                );
+            }
+        }
+    }
+
+    /// The shape of the contact, read instead of guessed at: force profile,
+    /// bounces, and where the time goes. The escape being late is a measured
+    /// fact (`how_long_the_hammer_stays`); this says WHY -- whether the felt
+    /// holds a long soft tail, the hammer bounces and re-lands, or the string
+    /// never throws it off at all.
+    #[test]
+    #[ignore]
+    fn strike_profile() {
+        println!(
+            "{:>5} {:>4} {:>9} {:>9} {:>9} {:>8} {:>8} {:>9}",
+            "note", "vel", "contacto", "t(pico)", "F(pico)", "rebotes", "F fin/2", "v fin/v0"
+        );
+        for (note, velocity) in [(21u8, 60u8), (21, 127), (36, 127), (48, 127), (60, 127)] {
+            CONTACT_TRACE.lock().unwrap().clear();
+            CONTACT_TRACE_ARMED.store(true, core::sync::atomic::Ordering::Relaxed);
+            let mut piano = prepared();
+            render(&mut piano, 128, &[note_on(note, velocity)]);
+            CONTACT_TRACE_ARMED.store(false, core::sync::atomic::Ordering::Relaxed);
+            let trace = CONTACT_TRACE.lock().unwrap().clone();
+            // Only the steps in contact (force > 0), which is the pulse.
+            let contact: Vec<&[f32; 5]> = trace.iter().filter(|row| row[1] > 0.0).collect();
+            if contact.is_empty() {
+                continue;
+            }
+            let dt_ms = 4.0e-6 * 1000.0;
+            let duration = contact.len() as f32 * dt_ms;
+            let (peak_at, peak) =
+                contact
+                    .iter()
+                    .enumerate()
+                    .fold((0usize, 0.0f32), |(bi, bf), (i, row)| {
+                        if row[1] > bf { (i, row[1]) } else { (bi, bf) }
+                    });
+            // A bounce is the force falling below a tenth of the peak and
+            // rising back above half of it.
+            let mut bounces = 0u32;
+            let mut low = false;
+            for row in &contact {
+                if row[1] < 0.1 * peak {
+                    low = true;
+                } else if low && row[1] > 0.5 * peak {
+                    bounces += 1;
+                    low = false;
+                }
+            }
+            // How much of the contact is spent under half the peak force
+            // AFTER the peak: the soft tail where the hammer rides the
+            // string, damping what it just excited.
+            let tail = contact[peak_at..]
+                .iter()
+                .filter(|row| row[1] < 0.5 * peak)
+                .count() as f32
+                * dt_ms;
+            let v0 = contact.first().unwrap()[4];
+            let v_end = contact.last().unwrap()[4];
+            // The bass fortissimo tail, decimated: what shape holds the
+            // hammer on. Positions in the hammer's own units.
+            if note == 21 && velocity == 127 {
+                println!("    t(ms)    F/Fpico   martillo    cuerda     v/v0");
+                for row in trace.iter().step_by(50) {
+                    println!(
+                        "  {:>7.2} {:>9.3} {:>10.5} {:>10.5} {:>8.2}",
+                        row[0] * dt_ms,
+                        row[1] / peak,
+                        row[2],
+                        row[3],
+                        row[4] / v0
+                    );
+                }
+            }
+            println!(
+                "{note:>5} {velocity:>4} {:>6.2} ms {:>6.2} ms {:>9.1} {:>8} {:>5.2} ms {:>9.2}",
+                duration,
+                peak_at as f32 * dt_ms,
+                peak,
+                bounces,
+                tail,
+                v_end / v0
+            );
+        }
+    }
+
+    /// One variable at a time against the REAL note path: contact time and
+    /// the spectral centroid of the partial state the strike actually left
+    /// in the voice. The render is the judge, not the formula.
+    #[test]
+    #[ignore]
+    fn felt_sweep() {
+        let variants: [(&str, SweepOverride); 7] = [
+            (
+                "base",
+                SweepOverride {
+                    epsilon: 0.85,
+                    tau: 2.0e-4,
+                    comb: COMB_FLOOR,
+                    width_mul: 1.0,
+                    k_mul: 1.0,
+                },
+            ),
+            (
+                "e.5 k1.5",
+                SweepOverride {
+                    epsilon: 0.5,
+                    tau: 2.0e-4,
+                    comb: COMB_FLOOR,
+                    width_mul: 1.0,
+                    k_mul: 1.5,
+                },
+            ),
+            (
+                "e.3 k1.5",
+                SweepOverride {
+                    epsilon: 0.3,
+                    tau: 2.0e-4,
+                    comb: COMB_FLOOR,
+                    width_mul: 1.0,
+                    k_mul: 1.5,
+                },
+            ),
+            (
+                "e.3 k2",
+                SweepOverride {
+                    epsilon: 0.3,
+                    tau: 2.0e-4,
+                    comb: COMB_FLOOR,
+                    width_mul: 1.0,
+                    k_mul: 2.0,
+                },
+            ),
+            (
+                "e0 k2",
+                SweepOverride {
+                    epsilon: 0.0,
+                    tau: 2.0e-4,
+                    comb: COMB_FLOOR,
+                    width_mul: 1.0,
+                    k_mul: 2.0,
+                },
+            ),
+            (
+                "e0 k3",
+                SweepOverride {
+                    epsilon: 0.0,
+                    tau: 2.0e-4,
+                    comb: COMB_FLOOR,
+                    width_mul: 1.0,
+                    k_mul: 3.0,
+                },
+            ),
+            (
+                "e0 k4",
+                SweepOverride {
+                    epsilon: 0.0,
+                    tau: 2.0e-4,
+                    comb: COMB_FLOOR,
+                    width_mul: 1.0,
+                    k_mul: 4.0,
+                },
+            ),
+        ];
+        println!(
+            "{:>10} {:>5} {:>4} {:>9} {:>7} {:>10} {:>9}",
+            "variante", "nota", "vel", "contacto", "razon", "centroide", "energia"
+        );
+        for (label, sweep) in variants {
+            for (note, velocity) in [(21u8, 60u8), (21, 127), (36, 127), (60, 60), (60, 127)] {
+                *SWEEP_OVERRIDE.lock().unwrap() = Some(sweep);
+                CONTACT_STEPS.store(0, core::sync::atomic::Ordering::Relaxed);
+                let mut piano = prepared();
+                render(&mut piano, 64, &[note_on(note, velocity)]);
+                *SWEEP_OVERRIDE.lock().unwrap() = None;
+                let steps = CONTACT_STEPS.load(core::sync::atomic::Ordering::Relaxed);
+                let contact_ms = steps as f32 * 4.0e-6 * 1000.0;
+                let asked_ms = piano.contact_time(note, velocity as f32 / 127.0) * 1000.0;
+                let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+                    continue;
+                };
+                // The partial state the strike left: magnitude and frequency
+                // per partial, straight from the oscillators.
+                let rate = 44_100.0f32;
+                let (mut weighted, mut total) = (0.0f32, 0.0f32);
+                for partial in &voice.partials[..voice.partial_count] {
+                    let mut magnitude = 0.0f32;
+                    for lane in 0..3 {
+                        magnitude +=
+                            partial.s[lane] * partial.s[lane] + partial.c[lane] * partial.c[lane];
+                    }
+                    let magnitude = sqrtf(magnitude);
+                    let frequency =
+                        partial.rs[0].atan2(partial.rc[0]).abs() * rate / core::f32::consts::TAU;
+                    weighted += magnitude * frequency;
+                    total += magnitude;
+                }
+                let centroid = if total > 0.0 { weighted / total } else { 0.0 };
+                let energy_db = 20.0 * (total.max(1e-12)).log10();
+                println!(
+                    "{label:>10} {note:>5} {velocity:>4} {:>6.2} ms {:>7.2} {:>7.0} Hz {:>6.1} dB",
+                    contact_ms,
+                    contact_ms / asked_ms,
+                    centroid,
+                    energy_db
                 );
             }
         }

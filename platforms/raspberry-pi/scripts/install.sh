@@ -17,9 +17,16 @@ test -x "$source_root/target/release/rackforge-controller-host"
 test -f "$source_root/platforms/raspberry-pi/config/rackforge.toml"
 test -f "$web_source_root/dist/index.html"
 
+# Every directory the systemd units name in their mount namespace has to
+# exist before they start. A unit naming a missing path does not warn: it
+# fails at step NAMESPACE and takes the service down with it, which is how
+# a clean install of the appliance came up with no web interface while
+# every upgrade over an older root worked. plugins/ is empty on a fresh
+# install and was the one nothing else happened to create.
 install -d \
   "$root/bin" \
   "$root/config" \
+  "$root/plugins" \
   "$root/plugin-store" \
   "$root/state" \
   "$root/logs"

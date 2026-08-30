@@ -98,7 +98,11 @@ case "$root" in
 esac
 
 printf 'Checking administrator access for system services...\n'
-sudo -v || fail "administrator access is required to install RackForge services"
+# sudo -v revalidates the user and asks for a password even under a
+# NOPASSWD policy, which made the documented curl | bash one-liner
+# impossible to run without a terminal. Asking whether a privileged
+# command can run is the question that actually matters here.
+sudo -n true 2>/dev/null || sudo -v || fail "administrator access is required to install RackForge services"
 
 install -d "$root"
 exec 9>"$root/.install.lock"
@@ -124,7 +128,11 @@ printf 'Downloading RackForge %s for Raspberry Pi ARM64...\n' "$version"
 download "$release_base/$asset" "$temporary/$asset"
 download "$release_base/$checksums" "$temporary/$checksums"
 
-expected="$({ awk -v asset="$asset" '$2 == asset { print $1 }' "$temporary/$checksums"; } | head -n 1)"
+# sha256sum writes "<digest> *<name>" in binary mode and "<digest>  <name>"
+# in text mode. Matching the name exactly saw the asterisk as part of it and
+# found no digest at all, so every release published from a binary-mode run
+# failed verification before a single byte was installed.
+expected="$({ awk -v asset="$asset" 'substr($2, 1, 1) == "*" ? substr($2, 2) == asset : $2 == asset { print $1 }' "$temporary/$checksums"; } | head -n 1)"
 [[ "$expected" =~ ^[0-9A-Fa-f]{64}$ ]] \
   || fail "$checksums does not contain a valid digest for $asset"
 actual="$(sha256sum "$temporary/$asset" | awk '{ print $1 }')"

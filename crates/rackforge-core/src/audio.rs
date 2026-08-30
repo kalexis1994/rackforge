@@ -60,7 +60,8 @@ pub fn discover_audio_devices() -> Result<Vec<AudioDeviceDescriptor>> {
                 probe_stream(&address, Direction::Playback)
                     .map_err(|error| {
                         eprintln!(
-                            "AUDIO_STREAM_IGNORED backend={address} direction=playback reason={error:#}"
+                            "AUDIO_STREAM_IGNORED backend={address} direction=playback reason={}",
+                            explain_probe_failure(&error)
                         );
                     })
                     .ok()
@@ -69,7 +70,8 @@ pub fn discover_audio_devices() -> Result<Vec<AudioDeviceDescriptor>> {
                 probe_stream(&address, Direction::Capture)
                     .map_err(|error| {
                         eprintln!(
-                            "AUDIO_STREAM_IGNORED backend={address} direction=capture reason={error:#}"
+                            "AUDIO_STREAM_IGNORED backend={address} direction=capture reason={}",
+                            explain_probe_failure(&error)
                         );
                     })
                     .ok()
@@ -373,6 +375,28 @@ fn resolve_input_device<'a>(
     bail!("configured audio input was not found; available capture devices: {available}")
 }
 
+/// Names what ALSA could not.
+///
+/// A device that exists but refuses to open answers with kernel-internal
+/// errno 524, which has no entry in the userspace table — so ALSA prints
+/// "Unknown errno (524)" and the log reads like a fault in the host. It is
+/// the ordinary state of an output with nothing on the other end of it; on a
+/// Raspberry Pi with no display, both HDMI outputs report it on every boot.
+/// The device is dropped from the catalogue either way, so the only thing at
+/// stake is whether the next person to read this loses an afternoon to it.
+fn explain_probe_failure(error: &anyhow::Error) -> String {
+    const ENOTSUPP: &str = "Unknown errno (524)";
+    let text = format!("{error:#}");
+    if text.contains(ENOTSUPP) {
+        return text.replace(
+            ENOTSUPP,
+            "ENOTSUPP — the device exists but cannot be opened, \
+             which is what an HDMI output with no display attached reports",
+        );
+    }
+    text
+}
+
 fn probe_stream(address: &str, direction: Direction) -> Result<AudioStreamCapabilities> {
     let pcm = PCM::new(address, direction, true)?;
     let parameters = HwParams::any(&pcm)?;
@@ -610,5 +634,36 @@ mod tests {
     fn slug_is_bounded_and_safe_for_persistence() {
         assert_eq!(slug("Scarlett Solo USB / Main"), "scarlett-solo-usb-main");
         assert_eq!(slug("---"), "unknown");
+    }
+
+    /// The line a headless Raspberry Pi prints twice on every boot.
+    #[test]
+    fn a_device_that_refuses_to_open_is_named_rather_than_numbered() {
+        let alsa =
+            anyhow::anyhow!("ALSA function 'snd_pcm_open' failed with error 'Unknown errno (524)'");
+        let explained = explain_probe_failure(&alsa);
+        assert!(
+            explained.contains("ENOTSUPP"),
+            "the errno was left as a number: {explained}"
+        );
+        assert!(
+            explained.contains("HDMI output with no display"),
+            "the usual cause was left unsaid: {explained}"
+        );
+        assert!(
+            !explained.contains("Unknown errno"),
+            "the unhelpful text survived: {explained}"
+        );
+    }
+
+    /// Anything else is passed through untouched: guessing at an error we do
+    /// not recognise would be worse than the number.
+    #[test]
+    fn an_unrecognised_failure_is_reported_as_it_came() {
+        let other = anyhow::anyhow!("ALSA function 'snd_pcm_open' failed with error 'EBUSY'");
+        assert_eq!(
+            explain_probe_failure(&other),
+            "ALSA function 'snd_pcm_open' failed with error 'EBUSY'"
+        );
     }
 }

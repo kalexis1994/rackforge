@@ -75,7 +75,6 @@ import { PerformanceInfoBar } from "./components/PerformanceInfoBar";
 import { ModalDialog } from "./components/ModalDialog";
 import { ParameterLinkHost } from "./components/ParameterLinkHost";
 import { ToggleSwitch } from "./components/ToggleSwitch";
-import { ExperienceDiagnosticsCard } from "./components/ExperienceDiagnosticsCard";
 import { AsyncNotice, AsyncStateBoundary } from "./components/AsyncStateBoundary";
 import { RfButton } from "./ui/RfButton";
 import { useSurfaceTransition } from "./ui/useSurfaceTransition";
@@ -84,6 +83,7 @@ import {
   hostHaptic,
   hostJson,
   HostRequestError,
+  IS_BROWSER_HOST,
   isDesktopHost,
   isNativeHost,
   isRemoteWebClient,
@@ -775,10 +775,6 @@ function RackForgeApp() {
                 <RfLoader label="Settings" detail="Reading host capabilities…" size="medium" />
               )}
             />
-            <Route
-              path="/diagnostics"
-              element={<Navigate to={vstHost ? "/play" : "/settings?tab=diagnostics"} replace />}
-            />
             <Route path="/about" element={<AboutPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
@@ -1464,14 +1460,18 @@ function MobileNavigation({
   );
 }
 
-// Drift made visible: the revision this interface was built from, beside
-// the revision the host binary reports. When they disagree, someone shipped
-// half a deploy, and the mismatch says so before a behavior difference does.
-function RevisionFooter() {
-  const [host, setHost] = useState<{ revision?: string; ui_revision?: string } | null>(null);
+interface HostHealth {
+  revision?: string;
+  ui_revision?: string;
+  host?: string;
+}
+
+/** What the host binary says about itself. Absent until it answers. */
+function useHostHealth() {
+  const [host, setHost] = useState<HostHealth | null>(null);
   useEffect(() => {
     let cancelled = false;
-    hostJson<{ revision?: string; ui_revision?: string }>("/api/v1/health")
+    hostJson<HostHealth>("/api/v1/health")
       .then((health) => {
         if (!cancelled) setHost(health);
       })
@@ -1480,6 +1480,14 @@ function RevisionFooter() {
       cancelled = true;
     };
   }, []);
+  return host;
+}
+
+// Drift made visible: the revision this interface was built from, beside
+// the revision the host binary reports. When they disagree, someone shipped
+// half a deploy, and the mismatch says so before a behavior difference does.
+function RevisionFooter() {
+  const host = useHostHealth();
   const mismatch =
     host?.ui_revision !== undefined &&
     host.ui_revision !== "unknown" &&
@@ -5488,7 +5496,6 @@ const SETTINGS_TABS = [
   ["screen", "Screen"],
   ["network", "Network"],
   ["security", "Security"],
-  ["diagnostics", "Diagnostics"],
 ] as const;
 
 type SettingsTab = (typeof SETTINGS_TABS)[number][0];
@@ -5517,9 +5524,8 @@ function SettingsPage({
   const [audioOperation, setAudioOperation] = useState<"refresh" | "test" | "save" | null>(null);
   const audioBusy = audioOperation !== null;
   const [audioMessage, setAudioMessage] = useState<string | null>(null);
-  // The tab lives in the URL so a section stays linkable now that Diagnostics
-  // is one of them: /diagnostics used to be its own route and still redirects
-  // here. `replace` keeps tab-hopping out of the back button.
+  // The tab lives in the URL so a section stays linkable. `replace` keeps
+  // tab-hopping out of the back button.
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const settingsTab: SettingsTab = isSettingsTab(requestedTab) ? requestedTab : "audio";
@@ -5981,128 +5987,29 @@ function SettingsPage({
         ) : null}
         {settingsTab === "security" ? <ChangePinCard /> : null}
       </section>
-      {settingsTab === "diagnostics" ? <DiagnosticsPanel /> : null}
     </>
   );
 }
 
-interface HostDiagnostics {
-  platform: string;
-  version: string;
-  audio_running: boolean;
-  selected_audio_output: string;
-  audio_status: Record<string, number>;
-  audio_outputs: Array<{ id: number; name: string; detail: string }>;
-  midi_devices: Array<{ name: string; detail: string }>;
-  usb_devices: Array<{ name: string; detail: string }>;
+/** Which RackForge the player is looking at, in their words rather than the
+ *  wire's. Only ever what this build can actually know about itself. */
+function hostShellName(health: HostHealth | null): string {
+  if (IS_BROWSER_HOST) return "This browser";
+  if (isVstHost()) return "VST3 plug-in";
+  if (isDesktopHost()) return "Desktop app";
+  if (health?.host === "desktop") return "Desktop app";
+  if (health?.host === "vst3") return "VST3 plug-in";
+  return "Web interface";
 }
 
-/* Diagnostics is a section of Settings rather than a rail destination: it is
-   something you consult while configuring a host, not a place you work in. The
-   panel keeps its own fetch and refresh so the surrounding page stays unaware
-   of it, and /diagnostics still resolves here. */
-function DiagnosticsPanel() {
-  const [diagnostics, setDiagnostics] = useState<HostDiagnostics | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      setDiagnostics(await hostJson<HostDiagnostics>("/api/v1/diagnostics"));
-      setError(null);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Diagnostics are unavailable.");
-    } finally {
-      setRefreshing(false);
-    }
-  }, []);
-  useEffect(() => {
-    let cancelled = false;
-    hostJson<HostDiagnostics>("/api/v1/diagnostics")
-      .then((result) => {
-        if (!cancelled) {
-          setDiagnostics(result);
-          setError(null);
-        }
-      })
-      .catch((reason) => {
-        if (!cancelled) {
-          setError(reason instanceof Error ? reason.message : "Diagnostics are unavailable.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setRefreshing(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const status = diagnostics?.audio_status ?? {};
-  return (
-    <>
-      <div className="diagnostics-actions">
-        <button className="primary-button" disabled={refreshing} onClick={() => void refresh()}>
-          <AsyncActionLabel active={refreshing} activeLabel="Refreshing…">
-            Refresh devices
-          </AsyncActionLabel>
-        </button>
-      </div>
-      {error ? <p className="form-error">{error}</p> : null}
-      <section className="settings-grid diagnostics-grid">
-        {diagnostics ? (
-          <>
-            <article className="settings-card">
-              <div className="settings-icon">◉</div>
-              <div className="settings-copy">
-                <span className="card-kicker">Native runtime</span>
-                <h2>{diagnostics.platform}</h2>
-                <p>RackForge {diagnostics.version} · {diagnostics.audio_running ? "Audio running" : "Audio stopped"}</p>
-              </div>
-              <dl className="settings-values">
-                <div><dt>Output</dt><dd>{diagnostics.selected_audio_output}</dd></div>
-                <div><dt>Sample rate</dt><dd>{status.sample_rate ?? 0} Hz</dd></div>
-                <div><dt>Buffer</dt><dd>{status.buffer_size_frames ?? 0} frames</dd></div>
-                <div><dt>Xruns</dt><dd>{status.xruns ?? 0}</dd></div>
-              </dl>
-            </article>
-            <DiagnosticDeviceCard title="Audio outputs" items={diagnostics.audio_outputs} />
-            <DiagnosticDeviceCard title="MIDI devices" items={diagnostics.midi_devices} />
-            <DiagnosticDeviceCard title="USB devices" items={diagnostics.usb_devices} />
-          </>
-        ) : null}
-        <ExperienceDiagnosticsCard />
-      </section>
-    </>
-  );
-}
-
-function DiagnosticDeviceCard({
-  title,
-  items,
-}: {
-  title: string;
-  items: Array<{ name: string; detail: string }>;
-}) {
-  return (
-    <article className="settings-card diagnostic-device-card">
-      <div className="settings-copy">
-        <span className="card-kicker">Connected · {items.length}</span>
-        <h2>{title}</h2>
-      </div>
-      <div className="diagnostic-device-list">
-        {items.map((item, index) => (
-          <div key={`${item.name}-${index}`}>
-            <strong>{item.name}</strong>
-            <small>{item.detail}</small>
-          </div>
-        ))}
-        {items.length === 0 ? <p>No devices detected.</p> : null}
-      </div>
-    </article>
-  );
-}
-
+/* About says what this build is, where it is running and what it speaks.
+   Everything on it is read from the host or stamped in at build time — a
+   version panel that guesses is worse than none. */
 function AboutPage() {
+  const health = useHostHealth();
+  const hostRevision = health?.revision;
+  const drift = hostRevision !== undefined && hostRevision !== __UI_REVISION__;
+  const shell = hostShellName(health);
   return (
     <>
       <PageHeading
@@ -6117,6 +6024,47 @@ function AboutPage() {
             <span className="card-kicker">Runtime protocol</span>
             <h2>rackforge.host@1</h2>
             <p>Portable .rfplugin runtime · Rust core · native audio and MIDI.</p>
+          </div>
+        </article>
+
+        <article className="settings-card">
+          <div className="settings-copy">
+            <span className="card-kicker">This build</span>
+            <h2>{shell}</h2>
+            <p>
+              The interface and the host binary are stamped separately, so a
+              half-finished deploy shows here instead of as a behaviour you
+              cannot explain.
+            </p>
+          </div>
+          <dl className="about-facts">
+            <div>
+              <dt>Interface</dt>
+              <dd>{__UI_REVISION__}</dd>
+            </div>
+            <div>
+              <dt>Host</dt>
+              <dd>{hostRevision ?? "—"}</dd>
+            </div>
+          </dl>
+          {drift ? (
+            <p className="about-drift">
+              These disagree. The interface and the host came from different
+              builds; reinstall the one that is behind.
+            </p>
+          ) : null}
+        </article>
+
+        <article className="settings-card">
+          <div className="settings-copy">
+            <span className="card-kicker">Typefaces</span>
+            <h2>Set in three</h2>
+            <p>
+              Chakra Petch for headings, Barlow Semi Condensed for the panel
+              legends, JetBrains Mono for anything that must line up in a
+              column. All three under the SIL Open Font License, whose text
+              ships beside the fonts.
+            </p>
           </div>
         </article>
       </section>

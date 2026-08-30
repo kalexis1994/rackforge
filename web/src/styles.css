@@ -534,8 +534,12 @@ textarea {
 }
 
 .preset-modal-backdrop {
-  position: absolute;
-  inset: 58px 0 0;
+  /* Fixed, not absolute. Absolute anchors the backdrop to whichever ancestor
+     happens to be positioned, so on any page that scrolls — the Plugin
+     Manager, for one — the dialog and its grey ground slid away with the
+     content behind them. */
+  position: fixed;
+  inset: 0;
   padding: clamp(12px, 3vw, 36px);
   display: grid;
   place-items: center;
@@ -543,6 +547,14 @@ textarea {
   backdrop-filter: blur(10px);
   z-index: var(--rf-layer-dialog);
   animation: rf-backdrop-in var(--rf-motion-fast) var(--rf-ease-standard) both;
+}
+
+/* The one surface that keeps a strip uncovered: a plugin's own play surface
+   carries a 58px toolbar, and the dialog is a layer over the instrument
+   rather than over the whole app. Everywhere else the ground covers the
+   screen, or it leaves a lit band across the top with nothing behind it. */
+.plugin-surface-active .preset-modal-backdrop {
+  top: 58px;
 }
 
 .preset-modal {

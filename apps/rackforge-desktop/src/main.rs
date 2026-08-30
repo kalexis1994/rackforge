@@ -4584,6 +4584,21 @@ impl DesktopApp {
             audio
                 .set_running(mode != SurfaceMode::Idle)
                 .map_err(|error| format!("Could not change Desktop audio mode: {error:#}"))?;
+            // Conducting is a LIVE gesture. A key-follow lane that kept
+            // listening in PLAY did worse than linger: claiming a note keeps
+            // it from the instrument, so notes vanished into a lane the
+            // player could not see from where they were standing.
+            audio
+                .set_conducting(mode == SurfaceMode::Live)
+                .map_err(|error| format!("Could not change Desktop conducting: {error:#}"))?;
+            if mode != SurfaceMode::Live {
+                // Keys held as the mode changes have their note-offs filtered
+                // out on the way in. Panic stops the transport and flushes
+                // every lane, so nothing is left sounding by a key that was
+                // down when the player walked off.
+                let _ = audio
+                    .sequencer_command(rackforge_control_api::SequencerCommand::TransportPanic);
+            }
         }
 
         let events = {

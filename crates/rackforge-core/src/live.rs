@@ -1254,7 +1254,10 @@ pub fn run(config: LiveConfig) -> Result<()> {
         MidiSourceDescriptor {
             id: virtual_midi_source_id.clone(),
             name: "RackForge Touch Controller".into(),
-            primary: false,
+            // The default play route resolves the *primary* source, so with no
+            // keyboard attached something has to be it or nothing can sound.
+            // The touch controller is the instrument the player still has.
+            primary: midi_port_names.is_empty(),
         },
     )?;
     connected_midi_sources
@@ -1268,6 +1271,12 @@ pub fn run(config: LiveConfig) -> Result<()> {
         &rack_voices,
     )?;
     println!("MIDI_READY ports={midi_port_names:?}");
+    if midi_port_names.is_empty() {
+        println!(
+            "MIDI_NO_PERFORMANCE_INPUT primary=touch-controller \
+             reason=the engine runs on the touch controller and the sequencer"
+        );
+    }
     let play_route = compile_default_play_route(
         &midi_sources,
         primary_plugin
@@ -1458,9 +1467,9 @@ fn performance_midi_names(midi: &MidiInput) -> Result<Vec<String>> {
             matches.insert(name.clone(), name);
         }
     }
-    if matches.is_empty() {
-        bail!("no performance MIDI input was found");
-    }
+    // An empty list is a machine with no keyboard attached, not a failure.
+    // The engine has a touch controller and a sequencer, and both are worth
+    // more than a service that refuses to run.
     Ok(matches.into_values().collect())
 }
 

@@ -2,6 +2,9 @@
 param(
     [ValidateSet("Release", "Debug")]
     [string]$Configuration = "Release",
+    [ValidateSet("Standard", "Minimal")]
+    [string]$Edition = "Standard",
+    [string]$OutputDirectory = "dist/windows-x86_64",
     [switch]$RunTests
 )
 
@@ -9,7 +12,11 @@ $ErrorActionPreference = "Stop"
 $repository = Split-Path -Parent $PSScriptRoot
 $profileArgument = if ($Configuration -eq "Release") { " --release" } else { "" }
 $profileDirectory = $Configuration.ToLowerInvariant()
-$output = Join-Path $repository "dist/windows-x86_64"
+$output = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
+    $OutputDirectory
+} else {
+    Join-Path $repository $OutputDirectory
+}
 $rawDll = Join-Path $output "rackforge-vst3.dll"
 $bundleBinary = Join-Path $output "RackForge.vst3/Contents/x86_64-win/RackForge.vst3"
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
@@ -41,7 +48,9 @@ if (-not (Test-Path -LiteralPath $libclang)) {
     throw "LLVM was not found at $llvmBin."
 }
 
-if (-not $env:RACKFORGE_BUNDLED_PLUGIN) {
+$defaultPlugin = ""
+$rf106 = ""
+if ($Edition -eq "Standard" -and -not $env:RACKFORGE_BUNDLED_PLUGIN) {
     $bundled = Join-Path $repository "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
     if (-not (Test-Path -LiteralPath $bundled -PathType Leaf)) {
         Push-Location $repository
@@ -60,21 +69,34 @@ if (-not $env:RACKFORGE_BUNDLED_PLUGIN) {
             Pop-Location
         }
     }
-    $env:RACKFORGE_BUNDLED_PLUGIN = $bundled
+    $defaultPlugin = $bundled
+} elseif ($Edition -eq "Standard") {
+    $defaultPlugin = $env:RACKFORGE_BUNDLED_PLUGIN
 }
 
-$officialPlugins = Join-Path $repository "dist/bundled-plugins/official"
-& python (Join-Path $repository "tools/fetch-official-plugins.py") `
-    --output-directory $officialPlugins
-if ($LASTEXITCODE -ne 0) {
-    throw "RackForge official plugin download failed."
+if ($Edition -eq "Standard") {
+    $officialPlugins = Join-Path $repository "dist/bundled-plugins/official"
+    & python (Join-Path $repository "tools/fetch-official-plugins.py") `
+        --output-directory $officialPlugins
+    if ($LASTEXITCODE -ne 0) {
+        throw "RackForge official plugin download failed."
+    }
+    $carried = @(Get-ChildItem -LiteralPath $officialPlugins -Filter *.rfplugin -File -ErrorAction SilentlyContinue)
+    if ($carried.Count -eq 0) {
+        throw "No pinned official plugins were produced in $officialPlugins"
+    }
+    Write-Host ("   embedding official instruments: " + (($carried | ForEach-Object { $_.BaseName }) -join ", "))
 }
-$carried = @(Get-ChildItem -LiteralPath $officialPlugins -Filter *.rfplugin -File -ErrorAction SilentlyContinue)
-if ($carried.Count -eq 0) {
-    throw "No pinned official plugins were produced in $officialPlugins"
+
+# The plug-in reads the directory rather than one named package, so a new
+# official instrument needs no change here. Minimal is not handed the
+# directory at all: what it does not receive it cannot carry.
+$bundledEnvironment = if ($Edition -eq "Standard") {
+    'set "RACKFORGE_EDITION={0}" && set "RACKFORGE_BUNDLED_PLUGIN={1}" && set "RACKFORGE_BUNDLED_OFFICIAL_PLUGINS={2}" &&' -f `
+        $Edition.ToLowerInvariant(), $defaultPlugin, $officialPlugins
+} else {
+    'set "RACKFORGE_EDITION={0}" &&' -f $Edition.ToLowerInvariant()
 }
-Write-Host ("   embedding official instruments: " + (($carried | ForEach-Object { $_.BaseName }) -join ", "))
-$env:RACKFORGE_BUNDLED_OFFICIAL_PLUGINS = $officialPlugins
 
 Push-Location $repository
 try {
@@ -90,11 +112,11 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Could not install the Windows MSVC Rust toolchain." }
     }
     if ($RunTests) {
-        $tests = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && cargo +stable-x86_64-pc-windows-msvc test --locked -p rackforge-vst3' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName
+        $tests = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && {4} cargo +stable-x86_64-pc-windows-msvc test --locked -p rackforge-vst3' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName, $bundledEnvironment
         & $env:ComSpec /d /s /c $tests
         if ($LASTEXITCODE -ne 0) { throw "RackForge VST3 tests failed." }
     }
-    $build = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && cargo +stable-x86_64-pc-windows-msvc build --locked{4} -p rackforge-vst3' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName, $profileArgument
+    $build = 'call "{0}" && set "PATH={1};{2};%PATH%" && set "LIBCLANG_PATH={2}" && set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={3}" && set "RUSTFLAGS=-C target-feature=+crt-static" && {4} cargo +stable-x86_64-pc-windows-msvc build --locked{5} -p rackforge-vst3' -f $vcvars, $msvcBin, $llvmBin, $msvcLinker.FullName, $bundledEnvironment, $profileArgument
     & $env:ComSpec /d /s /c $build
     if ($LASTEXITCODE -ne 0) { throw "RackForge VST3 build failed." }
 } finally {
@@ -118,6 +140,19 @@ try {
 }
 Copy-Item -LiteralPath (Join-Path $repository "THIRD_PARTY_NOTICES.md") `
     -Destination (Join-Path $output "THIRD_PARTY_NOTICES.md") -Force
+$bundledPluginNames = @()
+if ($defaultPlugin) {
+    $bundledPluginNames += Split-Path -Leaf $defaultPlugin
+}
+if ($rf106) {
+    $bundledPluginNames += Split-Path -Leaf $rf106
+}
+[System.IO.File]::WriteAllLines(
+    (Join-Path $output "bundled-plugins.txt"),
+    [string[]]$bundledPluginNames
+)
+"edition=$($Edition.ToLowerInvariant())" | Set-Content `
+    -LiteralPath (Join-Path $output "build-info.txt") -Encoding utf8NoBOM
 
-Write-Host "RackForge VST3 bundle: $bundleBinary"
-Write-Host "RackForge VST3 DLL:    $rawDll"
+Write-Host "RackForge VST3 ($Edition) bundle: $bundleBinary"
+Write-Host "RackForge VST3 ($Edition) DLL:    $rawDll"

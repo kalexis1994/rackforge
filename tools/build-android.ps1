@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-    [string]$OutputDirectory = "dist/android"
+    [string]$OutputDirectory = "dist/android",
+    [ValidateSet("Standard", "Minimal")]
+    [string]$Edition = "Standard"
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,11 +38,14 @@ if (-not (Test-Path -LiteralPath $ndkRoot)) {
     throw "Android NDK 27.0.12077973 not found below $sdkRoot."
 }
 
-$officialPlugins = Join-Path $repository "dist/bundled-plugins/official"
-& python (Join-Path $repository "tools/fetch-official-plugins.py") `
-    --output-directory $officialPlugins
-if ($LASTEXITCODE -ne 0) {
-    throw "RackForge official plugin download failed."
+$officialPlugins = ""
+if ($Edition -eq "Standard") {
+    $officialPlugins = Join-Path $repository "dist/bundled-plugins/official"
+    & python (Join-Path $repository "tools/fetch-official-plugins.py") `
+        --output-directory $officialPlugins
+    if ($LASTEXITCODE -ne 0) {
+        throw "RackForge official plugin download failed."
+    }
 }
 
 $env:JAVA_HOME = $jdkRoot
@@ -56,6 +61,20 @@ $env:CARGO_TARGET_AARCH64_LINUX_ANDROID_AR = $androidAr
 $env:CC_aarch64_linux_android = $androidClang
 $env:CXX_aarch64_linux_android = $androidClangCpp
 $env:AR_aarch64_linux_android = $androidAr
+
+# Each edition must start from a clean Android package graph. Gradle's
+# incremental APK writer can otherwise leave removed plugin bytes behind after
+# switching from Standard to Minimal, even when those files no longer appear
+# in the ZIP directory.
+Push-Location $androidProject
+try {
+    & $gradle clean --no-daemon
+    if ($LASTEXITCODE -ne 0) {
+        throw "Android clean failed."
+    }
+} finally {
+    Pop-Location
+}
 
 Push-Location $repository
 try {
@@ -110,20 +129,25 @@ if (Test-Path -LiteralPath $bundledOutput) {
 }
 $bundledDirectory = Join-Path $bundledOutput "bundled-plugins"
 New-Item -ItemType Directory -Path $bundledDirectory -Force | Out-Null
-$defaultPlugin = $env:RACKFORGE_BUNDLED_PLUGIN
-if (-not $defaultPlugin) {
-    $candidate = Join-Path $repository "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
-    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $defaultPlugin = $candidate }
-}
-if ($defaultPlugin) {
-    if (-not (Test-Path -LiteralPath $defaultPlugin -PathType Leaf)) {
-        throw "RACKFORGE_BUNDLED_PLUGIN is not a file: $defaultPlugin"
+$defaultPlugin = ""
+if ($Edition -eq "Standard") {
+    $defaultPlugin = $env:RACKFORGE_BUNDLED_PLUGIN
+    if (-not $defaultPlugin) {
+        $candidate = Join-Path $repository "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { $defaultPlugin = $candidate }
     }
-    Copy-Item -LiteralPath $defaultPlugin `
-        -Destination (Join-Path $bundledDirectory (Split-Path -Leaf $defaultPlugin)) -Force
+    if ($defaultPlugin) {
+        if (-not (Test-Path -LiteralPath $defaultPlugin -PathType Leaf)) {
+            throw "RACKFORGE_BUNDLED_PLUGIN is not a file: $defaultPlugin"
+        }
+        Copy-Item -LiteralPath $defaultPlugin `
+            -Destination (Join-Path $bundledDirectory (Split-Path -Leaf $defaultPlugin)) -Force
+    }
 }
-Copy-Item -Path (Join-Path $officialPlugins "*.rfplugin") `
-    -Destination $bundledDirectory -Force
+if ($Edition -eq "Standard") {
+    Copy-Item -Path (Join-Path $officialPlugins "*.rfplugin") `
+        -Destination $bundledDirectory -Force
+}
 
 Push-Location $androidProject
 try {
@@ -139,8 +163,14 @@ $source = Join-Path $androidProject "app/build/outputs/apk/debug/app-debug.apk"
 if (-not (Test-Path -LiteralPath $source)) {
     throw "Gradle completed without producing $source."
 }
-$output = Join-Path $repository $OutputDirectory
+$output = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
+    $OutputDirectory
+} else {
+    Join-Path $repository $OutputDirectory
+}
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 $destination = Join-Path $output "RackForge-debug.apk"
 Copy-Item -LiteralPath $source -Destination $destination -Force
-Write-Host "RackForge Android: $destination"
+"edition=$($Edition.ToLowerInvariant())" | Set-Content `
+    -LiteralPath (Join-Path $output "build-info.txt") -Encoding utf8NoBOM
+Write-Host "RackForge Android ($Edition): $destination"

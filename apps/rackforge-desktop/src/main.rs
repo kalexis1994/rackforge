@@ -4509,9 +4509,7 @@ impl DesktopApp {
                 if let Some(audio) = &self.audio {
                     audio
                         .restore_state(instance_id.as_str(), bytes)
-                        .map_err(|error| {
-                            format!("Could not load the Slot's sound: {error:#}")
-                        })?;
+                        .map_err(|error| format!("Could not load the Slot's sound: {error:#}"))?;
                 }
             }
             if unsounded_slots > 0 {
@@ -4520,9 +4518,8 @@ impl DesktopApp {
                     "LIVE_RACK_PARTIAL sounding={} silent_slots={unsounded_slots} reason=desktop-renders-one-voice",
                     instance_id.as_str()
                 );
-                self.status = format!(
-                    "LIVE: {unsounded_slots} more Slot(s) in this Rack stay silent here"
-                );
+                self.status =
+                    format!("LIVE: {unsounded_slots} more Slot(s) in this Rack stay silent here");
             }
         }
         events.extend(self.apply_program_events(

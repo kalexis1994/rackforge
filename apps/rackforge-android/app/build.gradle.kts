@@ -22,8 +22,8 @@ android {
         applicationId = "org.rackforge.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "0.1.9-preview"
+        versionCode = 12
+        versionName = "0.1.10-preview"
         buildConfigField("String", "RACKFORGE_REVISION", "\"$rackforgeRevision\"")
     }
 

@@ -5494,14 +5494,26 @@ const SETTINGS_TABS = [
   ["midi", "MIDI"],
   ["input", "Input"],
   ["screen", "Screen"],
+  // Network is the local HTTP server, and the PIN guards exactly that: it is
+  // one subject, so it is one section. Security used to sit beside it, which
+  // asked the player to know that the passcode belonged to the server.
   ["network", "Network"],
-  ["security", "Security"],
 ] as const;
 
 type SettingsTab = (typeof SETTINGS_TABS)[number][0];
 
-function isSettingsTab(value: string | null): value is SettingsTab {
-  return SETTINGS_TABS.some(([id]) => id === value);
+/** The sections this host actually has.
+ *
+ * The browser demo is its own host: the page is the instrument, and there is
+ * no HTTP server to publish, no port to choose and no PIN to guard it with.
+ * Offering the section would be offering settings that answer to nothing.
+ */
+function settingsTabsFor(browserHost: boolean): ReadonlyArray<readonly [SettingsTab, string]> {
+  return browserHost ? SETTINGS_TABS.filter(([id]) => id !== "network") : SETTINGS_TABS;
+}
+
+function isSettingsTab(value: string | null, browserHost: boolean): value is SettingsTab {
+  return settingsTabsFor(browserHost).some(([id]) => id === value);
 }
 
 function SettingsPage({
@@ -5527,8 +5539,15 @@ function SettingsPage({
   // The tab lives in the URL so a section stays linkable. `replace` keeps
   // tab-hopping out of the back button.
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedTab = searchParams.get("tab");
-  const settingsTab: SettingsTab = isSettingsTab(requestedTab) ? requestedTab : "audio";
+  const tabs = settingsTabsFor(IS_BROWSER_HOST);
+  // `security` was its own section until the PIN moved in beside the server it
+  // protects. A link someone kept still lands where the passcode now lives.
+  const requestedTab = searchParams.get("tab") === "security"
+    ? "network"
+    : searchParams.get("tab");
+  const settingsTab: SettingsTab = isSettingsTab(requestedTab, IS_BROWSER_HOST)
+    ? requestedTab
+    : "audio";
   const setSettingsTab = (tab: SettingsTab) => {
     setSearchParams(tab === "audio" ? {} : { tab }, { replace: true });
   };
@@ -5665,7 +5684,7 @@ function SettingsPage({
         detail="Host-wide configuration. Plugin-specific controls live inside each plugin."
       />
       <nav className="settings-tabs" role="tablist" aria-label="Settings sections">
-        {SETTINGS_TABS.map(([id, label]) => (
+        {tabs.map(([id, label]) => (
           <button
             key={id}
             role="tab"
@@ -5985,7 +6004,8 @@ function SettingsPage({
           ) : null}
         </article>
         ) : null}
-        {settingsTab === "security" ? <ChangePinCard /> : null}
+        {settingsTab === "network" ? <ChangePinCard /> : null}
+
       </section>
     </>
   );

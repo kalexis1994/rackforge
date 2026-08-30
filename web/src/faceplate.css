@@ -2093,6 +2093,113 @@
   box-shadow: var(--fp-lip), var(--fp-drop), inset 3px 0 0 var(--red) !important;
 }
 
+/* The confirm key in a removal dialog, and the Remove key on a plugin's own
+   config page. Both were still filled blocks of red — the one thing this
+   design spends on LIVE — while the Cancel beside them had already become a
+   key. Destructive is an ink on the edge, not a balloon. */
+.danger-button,
+.plugin-detail-remove-button {
+  color: var(--ink) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop), inset 3px 0 0 var(--red) !important;
+  font-family: var(--display-font) !important;
+  font-weight: 700;
+  letter-spacing: var(--fp-track) !important;
+  text-transform: uppercase;
+}
+
+@media (hover: hover) {
+  .danger-button:hover:not(:disabled),
+  .plugin-detail-remove-button:hover:not(:disabled) {
+    background: linear-gradient(180deg, var(--glass), var(--glass)) !important;
+  }
+}
+
+.danger-button:active:not(:disabled),
+.plugin-detail-remove-button:active:not(:disabled) {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--red) !important;
+}
+
+.danger-button:disabled,
+.plugin-detail-remove-button:disabled {
+  opacity: 0.42 !important;
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+/* The removal dialog's option rows were still lit in the old backlit cyan and
+   turned pink once ticked. Rows are inset plates here, and a ticked one is
+   marked the way every other engaged control is — a painted edge, not a
+   change of ground. The tick itself is an ordinary control: red is spent on
+   the key that does the deleting, not on each box that asks about it. */
+.plugin-remove-options label {
+  background: var(--panel-inset) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
+.plugin-remove-options label:has(input:checked) {
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--red) !important;
+}
+
+.plugin-remove-options input {
+  accent-color: var(--acid) !important;
+}
+
+/* About's fact rows: the same inset wells the runtime readout uses, so a
+   version reads as something stamped on the chassis rather than body copy. */
+.about-facts {
+  margin: 14px 0 0;
+  display: grid;
+  gap: 8px;
+}
+
+.about-facts > div {
+  padding: 9px 11px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well);
+}
+
+.about-facts dt {
+  color: var(--muted);
+  font-family: var(--display-font);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--fp-track);
+  text-transform: uppercase;
+}
+
+.about-facts dd {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--mono-font);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A disagreement is worth an edge, not a shout. */
+.about-drift {
+  margin: 12px 0 0;
+  padding: 9px 11px;
+  background: var(--panel-inset);
+  border: var(--fp-seam);
+  border-radius: var(--fp-radius-key);
+  box-shadow: var(--fp-well), inset 3px 0 0 var(--red);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .rf-button--ghost {
   background: transparent !important;
   border-color: transparent !important;

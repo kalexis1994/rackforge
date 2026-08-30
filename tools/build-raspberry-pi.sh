@@ -2,7 +2,14 @@
 set -euo pipefail
 
 repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolved before anything changes directory, so a relative argument always
+# means the same place as the default rather than wherever the build happens
+# to be standing when it creates it.
 output_directory="${1:-$repository/dist/raspberry-pi}"
+case "$output_directory" in
+  /*) ;;
+  *) output_directory="$repository/$output_directory" ;;
+esac
 architecture="$(uname -m)"
 edition="${RACKFORGE_EDITION:-standard}"
 

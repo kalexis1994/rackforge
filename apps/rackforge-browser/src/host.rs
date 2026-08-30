@@ -33,9 +33,9 @@ use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session::SessionStore;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{
-    CompiledParameterLink, LiveParameterStateStore, LoadedPlugin, PluginInstance, PluginPackage,
-    PluginStateStore, PluginStorage, SemanticParameterLinkContext,
-    compile_semantic_parameter_links,
+    CompiledParameterLink, IsolatedPluginStateEditor, LiveParameterStateStore, LoadedPlugin,
+    PluginInstance, PluginPackage, PluginStateStore, PluginStorage, SemanticParameterLinkContext,
+    compile_semantic_parameter_links, validate_state_reference,
 };
 use rackforge_midi_api::{
     IngressMidiEvent, MidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
@@ -46,7 +46,8 @@ use rackforge_performance_api::{
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{
-    Capability, HostPresetSummary, PluginKind, PluginManifest, PresetCatalog, ResourceKind,
+    Capability, HostPresetSummary, PluginKind, PluginManifest, PluginStateReference, PresetCatalog,
+    ResourceKind,
 };
 use rackforge_repository::{
     LocalPackageInspection, PluginUserDataRemovalOptions, inspect_local_archive,
@@ -601,6 +602,16 @@ impl BrowserHost {
                 })
             }
             ControlRequest::Dispatch { envelope } => self.dispatch_command(envelope),
+            ControlRequest::MaterializePluginState {
+                plugin_id,
+                sound_id,
+            } => self.materialize_plugin_state(&plugin_id, sound_id),
+            ControlRequest::PluginStateParameters { state } => self.plugin_state_parameters(&state),
+            ControlRequest::SetPluginStateParameter {
+                state,
+                parameter_index,
+                value,
+            } => self.set_plugin_state_parameter(&state, parameter_index, value),
             other => Err(Failure::new(
                 ControlErrorCode::Unavailable,
                 format!(
@@ -1045,6 +1056,188 @@ impl BrowserHost {
         }
         self.save_checkpoint();
         Ok(recorded)
+    }
+
+    /// Finds a loaded plugin by identity rather than by running instance.
+    ///
+    /// Rack Slot state is addressed by plugin id: a slot names the instrument
+    /// it carries, not the instance PLAY happens to be holding.
+    fn hosted_plugin(&self, plugin_id: &str) -> Result<&HostedPlugin, Failure> {
+        self.plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == plugin_id)
+            .ok_or_else(|| {
+                Failure::new(
+                    ControlErrorCode::Unavailable,
+                    format!("plugin {plugin_id} is not loaded in this page"),
+                )
+            })
+    }
+
+    /// The plugin a state reference addresses, once the reference has been
+    /// checked against the version actually installed here.
+    fn state_editor_runtime(
+        &self,
+        state: &PluginStateReference,
+    ) -> Result<&'static LoadedPlugin, Failure> {
+        let runtime = self.hosted_plugin(&state.plugin_id)?.runtime;
+        validate_state_reference(runtime, state).map_err(|error| {
+            Failure::new(
+                ControlErrorCode::Rejected,
+                format!("incompatible Rack Slot state: {error:#}"),
+            )
+        })?;
+        Ok(runtime)
+    }
+
+    /// Captures a plugin's initial state so a Rack Slot can carry it.
+    ///
+    /// Desktop and Android reach the plugin over the audio thread and wait on
+    /// a reply channel; here the loaded plugins are fields of this struct, so
+    /// the same work is a direct call. The instance opened here never joins
+    /// the audio graph, so filling a slot cannot disturb what PLAY is
+    /// sounding.
+    fn materialize_plugin_state(
+        &mut self,
+        plugin_id: &str,
+        requested_sound_id: Option<String>,
+    ) -> Result<ControlResponse, Failure> {
+        let plugin = self.hosted_plugin(plugin_id)?;
+        let runtime = plugin.runtime;
+        if let Some(sound_id) = requested_sound_id.as_deref()
+            && !plugin
+                .presets
+                .presets
+                .iter()
+                .any(|preset| preset.id == sound_id)
+        {
+            return Err(Failure::new(
+                ControlErrorCode::NotFound,
+                format!("plugin {plugin_id} does not provide sound {sound_id:?}"),
+            ));
+        }
+        let manifest = runtime.manifest();
+        if !manifest.capabilities.contains(&Capability::State) {
+            return Err(Failure::new(
+                ControlErrorCode::Unavailable,
+                format!("plugin {plugin_id} does not support complete state snapshots"),
+            ));
+        }
+        // A slot without an explicit program still needs a complete, portable
+        // identity: prefer what the instance is on, then its first program.
+        let sound_id = requested_sound_id
+            .or_else(|| plugin.selected_sound_id.clone())
+            .or_else(|| {
+                plugin
+                    .presets
+                    .presets
+                    .first()
+                    .map(|preset| preset.id.clone())
+            });
+        let version = manifest.version.clone();
+        let state_version = manifest.state_version;
+        let bytes = (|| -> Result<Vec<u8>> {
+            let mut isolated = runtime.create_instance()?;
+            if let Some(sound_id) = sound_id.as_deref() {
+                isolated.load_preset(sound_id)?;
+            }
+            isolated.save_state()
+        })()
+        .map_err(|error| {
+            Failure::new(
+                ControlErrorCode::Rejected,
+                format!("could not materialize Rack Slot state: {error:#}"),
+            )
+        })?;
+        let state = self
+            .state_store
+            .put(plugin_id, &version, state_version, sound_id, &bytes)
+            .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
+        Ok(ControlResponse::PluginStateMaterialized {
+            state: Box::new(state),
+        })
+    }
+
+    /// Reads the parameter surface of stored Rack Slot state.
+    fn plugin_state_parameters(
+        &mut self,
+        state: &PluginStateReference,
+    ) -> Result<ControlResponse, Failure> {
+        let runtime = self.state_editor_runtime(state)?;
+        let bytes = self.state_store.read(state).map_err(|error| {
+            Failure::new(
+                ControlErrorCode::NotFound,
+                format!("Rack Slot state is unavailable: {error:#}"),
+            )
+        })?;
+        let (schema, values) = (|| -> Result<_> {
+            let mut editor = IsolatedPluginStateEditor::open(runtime, &BTreeMap::new(), &bytes)?;
+            editor.parameters()
+        })()
+        .map_err(|error| {
+            Failure::new(
+                ControlErrorCode::Rejected,
+                format!("could not read Rack Slot parameters: {error:#}"),
+            )
+        })?;
+        Ok(ControlResponse::PluginStateParameters {
+            state: Box::new(state.clone()),
+            schema: Box::new(schema),
+            values,
+        })
+    }
+
+    /// Edits one parameter of stored Rack Slot state.
+    ///
+    /// State is immutable, so the edit produces a new reference rather than
+    /// changing the old one: the caller swaps its slot over to what comes
+    /// back.
+    fn set_plugin_state_parameter(
+        &mut self,
+        state: &PluginStateReference,
+        parameter_index: u32,
+        value: f64,
+    ) -> Result<ControlResponse, Failure> {
+        if !value.is_finite() {
+            return Err(Failure::new(
+                ControlErrorCode::InvalidRequest,
+                "plugin parameter value must be finite",
+            ));
+        }
+        let runtime = self.state_editor_runtime(state)?;
+        let bytes = self.state_store.read(state).map_err(|error| {
+            Failure::new(
+                ControlErrorCode::NotFound,
+                format!("Rack Slot state is unavailable: {error:#}"),
+            )
+        })?;
+        let (canonical, edited) = (|| -> Result<(f64, Vec<u8>)> {
+            let mut editor = IsolatedPluginStateEditor::open(runtime, &BTreeMap::new(), &bytes)?;
+            let canonical = editor.set_parameter(parameter_index, value)?;
+            Ok((canonical, editor.save_state()?))
+        })()
+        .map_err(|error| {
+            Failure::new(
+                ControlErrorCode::Rejected,
+                format!("could not edit Rack Slot parameter: {error:#}"),
+            )
+        })?;
+        let manifest = runtime.manifest();
+        let next = self
+            .state_store
+            .put(
+                &manifest.id,
+                &manifest.version,
+                manifest.state_version,
+                state.selected_sound_id.clone(),
+                &edited,
+            )
+            .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
+        Ok(ControlResponse::PluginStateParameterSet {
+            state: Box::new(next),
+            parameter_index,
+            value: canonical,
+        })
     }
 
     fn plugin_mut(&mut self, instance_id: &InstanceId) -> Result<&mut HostedPlugin, Failure> {
@@ -1872,9 +2065,6 @@ fn command_name(command: &SessionCommand) -> String {
 
 fn request_name(request: &ControlRequest) -> &'static str {
     match request {
-        ControlRequest::MaterializePluginState { .. } => "materializing plugin state",
-        ControlRequest::PluginStateParameters { .. } => "isolated plugin parameters",
-        ControlRequest::SetPluginStateParameter { .. } => "isolated parameter edits",
         ControlRequest::LoadPluginResource { .. } => "loading plugin resources",
         _ => "this request",
     }

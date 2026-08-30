@@ -4,7 +4,7 @@ use rackforge_plugin_api::{
     ParameterSchema, PluginBranding, PluginKind, ResourceRequirement, WebSurfaceKind,
     abi::{MidiEventV1, ParameterEventV1},
 };
-use rackforge_repository::install_local_archive;
+use rackforge_repository::install_local_archive_replacing;
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
@@ -304,8 +304,13 @@ fn install_bundled_packages_at(root: &Path) -> Result<Vec<PathBuf>> {
     );
     for (name, bytes) in carried {
         if let Some(bytes) = bytes {
+            // The release is the authority on what a bundled version holds, the
+            // same rule the desktop and the platform installers follow. Without
+            // it a store left holding an older build of the same version made
+            // every install fail, and a plug-in with no instruments has no
+            // model, no view and nothing to draw: the editor opened black.
             installed.push(
-                install_local_archive(&store, bytes)
+                install_local_archive_replacing(&store, bytes)
                     .with_context(|| format!("installing bundled VST3 plugin {name}"))?
                     .path,
             );
@@ -491,6 +496,59 @@ mod tests {
             ids.len(),
             BUNDLED_OFFICIAL_PLUGINS.len() + 1,
             "an instrument was carried but never installed: {ids:?}"
+        );
+    }
+
+    /// A store left holding an older build of a version the release also
+    /// carries used to fail the install, and a plug-in with no instruments has
+    /// no model, no view and nothing to draw — the editor opened black. This
+    /// is that store.
+    #[test]
+    fn a_drifted_bundled_version_is_replaced_rather_than_refused() {
+        if BUNDLED_PLUGIN.is_none() {
+            return;
+        }
+        let root = TestRoot::create();
+        let installed = install_bundled_packages_at(root.path()).expect("first install");
+        let version_root = installed
+            .first()
+            .expect("the install placed a package")
+            .clone();
+        let version = version_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("a version directory")
+            .to_owned();
+        let plugin_id = version_root
+            .parent()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            .expect("a plugin directory")
+            .to_owned();
+
+        // The record is what the conflict is decided against, so this is where
+        // an older build of the same version shows: same identity, different
+        // bytes. Planting a file inside the package would not reproduce it,
+        // because nothing reads the directory back.
+        let record = root
+            .path()
+            .join("plugin-store/records")
+            .join(&plugin_id)
+            .join(format!("{version}.json"));
+        let text = fs::read_to_string(&record).expect("reading the installation record");
+        let key = "\"artifact_sha256\": \"";
+        let start = text.find(key).expect("the record carries a digest") + key.len();
+        let end = start + 64;
+        let drifted = format!("{}{}{}", &text[..start], "0".repeat(64), &text[end..]);
+        fs::write(&record, drifted).expect("planting the drift");
+
+        install_bundled_packages_at(root.path())
+            .expect("a release must be able to correct a version that drifted");
+        assert!(
+            !load_bundled_plugin_models_at(root.path())
+                .expect("models after replacement")
+                .is_empty(),
+            "the plug-in was left with no instrument to show"
         );
     }
 

@@ -315,6 +315,11 @@ mod supervisor {
             "MIDI_SUPERVISOR_READY panic_scope={scope:?} interval_ms={}",
             interval.as_millis()
         );
+        // A machine that started with no keyboard compiled its routes without
+        // one, and a route cannot grow a source it was not built against. So
+        // the arrival of a keyboard is the one event this thread cannot
+        // absorb: it asks for the engine to be started again instead.
+        let started_without_keyboard = supervised.is_empty();
         let mut supervised =
             SupervisedMidiSources::new(supervised).context("validating supervised MIDI sources")?;
         thread::Builder::new()
@@ -324,6 +329,18 @@ mod supervisor {
                 loop {
                     match present_source_ids() {
                         Ok(present) => {
+                            if started_without_keyboard && !present.is_empty() {
+                                // Supervised by systemd, which brings the
+                                // engine straight back with the keyboard in
+                                // its registry. This is the same recovery the
+                                // old refuse-to-start loop performed, except
+                                // the engine was playing in the meantime.
+                                println!(
+                                    "MIDI_PERFORMANCE_INPUT_ARRIVED sources={present:?} \
+                                     action=restart-to-adopt"
+                                );
+                                std::process::exit(0);
+                            }
                             for action in supervised.reconcile(&present) {
                                 apply(
                                     action,

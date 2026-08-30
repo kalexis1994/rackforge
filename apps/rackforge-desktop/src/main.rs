@@ -464,6 +464,13 @@ struct DesktopApp {
     /// every connected client learns about an edit made by any of them.
     performance_revision_shared: Arc<RwLock<String>>,
     state_store: PluginStateStore,
+    /// What PLAY was sounding before LIVE borrowed the voice.
+    ///
+    /// The Desktop renders one voice, so putting a Rack on stage overwrites
+    /// the instrument and the sound the player had set up in PLAY. Leaving
+    /// LIVE has to give it back: PLAY and LIVE are two modes, and a mode that
+    /// forgets what you left in it is not a mode.
+    play_voice: Option<(InstanceId, Vec<u8>)>,
     /// Runtime controller defaults. They are deliberately not persisted as
     /// user MIDI links; the signed controller package registers them again.
     controller_semantic_profiles: BTreeMap<String, RegisteredSemanticProfile>,
@@ -800,6 +807,7 @@ impl DesktopApp {
             performance_repository,
             performance_revision_shared,
             state_store,
+            play_voice: None,
             live_state_dirty: None,
             controller_semantic_profiles,
             virtual_midi: BTreeMap::new(),
@@ -4389,7 +4397,7 @@ impl DesktopApp {
         if active_mode != SurfaceMode::Live {
             return Err("LIVE targets can only be activated while LIVE is active".into());
         }
-        let (rack_id, part_commands) = {
+        let (rack_id, part_commands, sounding, unsounded_slots) = {
             let library = self.performance_repository.library();
             let rack = library
                 .resolve_playable(&location)
@@ -4403,7 +4411,16 @@ impl DesktopApp {
                     rackforge_core::sequencer::part_launch_commands(part, &library.patterns)
                 })
                 .unwrap_or_default();
-            (rack.id.clone(), commands)
+            // The Desktop renders one voice at a time, so a Rack sounds
+            // through its first enabled Slot. Mixing several Slots is the
+            // appliance's, and the Slot order is the Rack's own.
+            let enabled = rack.slots.iter().filter(|slot| slot.enabled);
+            let mut enabled = enabled.peekable();
+            let first = enabled
+                .next()
+                .map(|slot| (slot.plugin_id.clone(), slot.state.clone()));
+            let remaining = enabled.count();
+            (rack.id.clone(), commands, first, remaining)
         };
         // A binding that fails must never fail the activation: the show
         // goes on with the lanes that resolve.
@@ -4424,11 +4441,131 @@ impl DesktopApp {
                 None => break,
             }
         }
-        let events = self.apply_program_events(
+        // Until here the activation only moved LIVE's state, which is how a
+        // Rack could be shown on stage while PLAY's instrument kept sounding:
+        // the Desktop engine has no notion of a Rack, so nobody ever pointed
+        // the voice at the one the player chose.
+        let mut events = Vec::new();
+        if let Some((plugin_id, state)) = sounding {
+            let instance_id = self
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == plugin_id)
+                .map(|plugin| plugin.instance_id.clone())
+                .ok_or_else(|| {
+                    format!("The Rack needs {plugin_id}, which is not installed here")
+                })?;
+            let instance_id = InstanceId::new(instance_id)
+                .map_err(|error| format!("The Rack's instrument is unusable: {error}"))?;
+            let previous = self
+                .session
+                .read()
+                .expect("session lock poisoned")
+                .active_instance_id
+                .clone();
+            let already_sounding = previous.as_ref() == Some(&instance_id);
+            // Take the snapshot before anything is overwritten, and only the
+            // first time: a second Rack must not record the first Rack's
+            // sound as the one PLAY was holding.
+            if self.play_voice.is_none()
+                && let Some(previous) = previous.clone()
+            {
+                {
+                    let saved = {
+                        #[cfg(windows)]
+                        {
+                            self.audio
+                                .as_ref()
+                                .and_then(|audio| audio.save_active_state().ok())
+                        }
+                        #[cfg(not(windows))]
+                        {
+                            None::<Vec<u8>>
+                        }
+                    };
+                    // A voice whose state cannot be read is still worth
+                    // remembering by name; the player gets their instrument
+                    // back even if its knobs do not survive.
+                    println!(
+                        "PLAY_VOICE_BORROWED instrument={} state_bytes={}",
+                        previous.as_str(),
+                        saved.as_ref().map_or(0, Vec::len)
+                    );
+                    self.play_voice = Some((previous, saved.unwrap_or_default()));
+                }
+            }
+            if !already_sounding {
+                events.extend(self.select_plugin(&instance_id, command.clone())?);
+            }
+            // The Slot carries its sound with it. Loading the instrument
+            // without its state would hand the player the right box making
+            // the wrong noise.
+            if let Some(reference) = state {
+                let bytes = self
+                    .state_store
+                    .read(&reference)
+                    .map_err(|error| format!("Could not read the Slot's sound: {error:#}"))?;
+                #[cfg(windows)]
+                if let Some(audio) = &self.audio {
+                    audio
+                        .restore_state(instance_id.as_str(), bytes)
+                        .map_err(|error| {
+                            format!("Could not load the Slot's sound: {error:#}")
+                        })?;
+                }
+            }
+            if unsounded_slots > 0 {
+                // Said out loud rather than mixed silently into nothing.
+                println!(
+                    "LIVE_RACK_PARTIAL sounding={} silent_slots={unsounded_slots} reason=desktop-renders-one-voice",
+                    instance_id.as_str()
+                );
+                self.status = format!(
+                    "LIVE: {unsounded_slots} more Slot(s) in this Rack stay silent here"
+                );
+            }
+        }
+        events.extend(self.apply_program_events(
             vec![SessionEvent::LiveTargetActivated { location, rack_id }],
             command,
-        )?;
+        )?);
         self.persist_session_checkpoint();
+        Ok(events)
+    }
+
+    /// Puts PLAY's own instrument and sound back under the player's hands.
+    ///
+    /// Separate from [`Self::set_active_mode`] so that its failure is a
+    /// failure to restore, not a failure to change mode.
+    fn restore_play_voice(
+        &mut self,
+        instance_id: &InstanceId,
+        state: Vec<u8>,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        let (known, sounding) = {
+            let session = self.session.read().expect("session lock poisoned");
+            (
+                session.instance(instance_id).is_some(),
+                session.active_instance_id.as_ref() == Some(instance_id),
+            )
+        };
+        if !known {
+            return Err(format!("{} is no longer loaded", instance_id.as_str()));
+        }
+        let events = if sounding {
+            Vec::new()
+        } else {
+            self.select_plugin(instance_id, command)?
+        };
+        if !state.is_empty() {
+            #[cfg(windows)]
+            if let Some(audio) = &self.audio {
+                audio
+                    .restore_state(instance_id.as_str(), state)
+                    .map_err(|error| format!("could not load its sound: {error:#}"))?;
+            }
+        }
         Ok(events)
     }
 
@@ -4463,12 +4600,41 @@ impl DesktopApp {
             events
         };
 
+        let mut events = events;
+
         let active_mode = active_mode_from_surface(mode);
         self.menu.sync_active_mode(active_mode);
         if mode == SurfaceMode::Play {
             let snapshot = self.performance_snapshot();
             self.menu.sync_performance_snapshot(snapshot);
         }
+        // Returning to PLAY restores the instrument and the sound LIVE
+        // borrowed the voice from. A restore that cannot happen must not take
+        // the mode change down with it, and must not throw the memory away
+        // either: the player asked to be in PLAY, and the next attempt still
+        // has something to give them back.
+        if mode == SurfaceMode::Play
+            && let Some((instance_id, state)) = self.play_voice.clone()
+        {
+            match self.restore_play_voice(&instance_id, state, command.clone()) {
+                Ok(restored) => {
+                    println!(
+                        "PLAY_VOICE_RESTORED instrument={} events={}",
+                        instance_id.as_str(),
+                        restored.len()
+                    );
+                    events.extend(restored);
+                    self.play_voice = None;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "PLAY_VOICE_RESTORE_FAILED instrument={} error={error}",
+                        instance_id.as_str()
+                    );
+                }
+            }
+        }
+
         self.status = format!("Active mode: {active_mode:?}");
         self.persist_session_checkpoint();
         Ok(events)

@@ -2512,8 +2512,23 @@ function PlayPage({
         // Rack preview cleanup is dispatched while this route mounts. Awaiting
         // the PLAY transition here makes it the final owner of the audio path,
         // then re-applies the already selected standalone instrument state.
-        await dispatchCommandAwait({ type: "set_active_mode", mode: "play" });
-        if (!instanceId) return;
+        const applied = await dispatchCommandAwait({
+          type: "set_active_mode",
+          mode: "play",
+        });
+        // Leaving LIVE hands the voice back: the host puts the instrument
+        // PLAY was holding before a Rack borrowed it. This route read
+        // `instanceId` while LIVE still owned the voice, so re-asserting it
+        // here is how the Rack's instrument followed the player home. If the
+        // host already chose, that choice is the newer truth.
+        const hostChose = applied.events.some(
+          (event) =>
+            typeof event === "object"
+            && event !== null
+            && (event as { event?: { type?: string } }).event?.type
+              === "active_instance_changed",
+        );
+        if (hostChose || !instanceId) return;
         await dispatchCommandAwait({ type: "select_plugin", instance_id: instanceId });
         // Deliberately not re-selecting the program. `soundId` was read from
         // the session, so re-applying it can only ever restate what the host

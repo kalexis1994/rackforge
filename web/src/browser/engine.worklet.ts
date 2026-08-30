@@ -145,6 +145,38 @@ function collectFiles(contents: Map<string, Inode>, prefix: string, files: SeedF
   }
 }
 
+/**
+ * A monotonic clock the host can actually read.
+ *
+ * The WASI shim answers `clock_time_get` for the monotonic clock out of
+ * `performance.now()`, wrapped in a try/catch that reports zero when it
+ * throws. An AudioWorkletGlobalScope has no `performance` at all, so it threw
+ * on every call and the host's clock stood at zero forever: `Instant::now()`
+ * never advanced, no elapsed time was ever measured, and a held button could
+ * not age into a gesture. That is why holding BACK did nothing here while it
+ * worked on every native host.
+ *
+ * `currentTime` is the worklet's own clock — seconds since the audio context
+ * started, moving one render quantum at a time. Coarser than a stopwatch and
+ * far finer than any gesture threshold.
+ */
+function workletClock(clock: { memory: WebAssembly.Memory | null }) {
+  const MONOTONIC = 1;
+  return {
+    clock_time_get(id: number, _precision: bigint, timePointer: number): number {
+      const memory = clock.memory;
+      if (!memory) return 28; // EINVAL, before the module is attached.
+      const view = new DataView(memory.buffer);
+      const nanoseconds =
+        id === MONOTONIC
+          ? BigInt(Math.round(currentTime * 1e9))
+          : BigInt(Date.now()) * 1_000_000n;
+      view.setBigUint64(timePointer, nanoseconds, true);
+      return 0;
+    },
+  };
+}
+
 class RackForgeEngine extends AudioWorkletProcessor {
   #host: HostExports | null = null;
   /** The root the host reads and writes through WASI. */
@@ -296,13 +328,16 @@ class RackForgeEngine extends AudioWorkletProcessor {
       (request) => this.#post(request),
       (module) => this.#pluginHost.componentBytes(module),
     );
+    // The clock is replaced before the module can read it; see workletClock.
+    const clock = { memory: null as WebAssembly.Memory | null };
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.slice().buffer), {
-      wasi_snapshot_preview1: wasi.wasiImport,
+      wasi_snapshot_preview1: { ...wasi.wasiImport, ...workletClock(clock) },
       rackforge_plugin_host: {
         ...this.#pluginHost.imports,
         ...this.#parallel.imports,
       },
     });
+    clock.memory = (instance.exports as unknown as HostExports).memory;
     const exports = instance.exports as unknown as HostExports;
     // A cdylib is a reactor: it initialises rather than running a main.
     wasi.initialize(instance as { exports: { memory: WebAssembly.Memory } });

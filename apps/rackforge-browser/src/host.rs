@@ -135,6 +135,10 @@ pub struct BrowserHost {
     live_parameter_store: LiveParameterStateStore,
     live_parameter_dirty_at: Option<Instant>,
     storage_revision: u32,
+    /// What PLAY was sounding before a Rack borrowed the voice, kept so
+    /// leaving LIVE hands the performer back their own instrument rather than
+    /// whichever Slot happened to play last.
+    play_voice: Option<(InstanceId, Vec<u8>)>,
     warnings: Vec<String>,
 }
 
@@ -282,6 +286,7 @@ impl BrowserHost {
             live_parameter_store,
             live_parameter_dirty_at: None,
             storage_revision: 0,
+            play_voice: None,
             warnings,
         };
         host.rebuild_parameter_links()?;
@@ -912,6 +917,7 @@ impl BrowserHost {
         command: SessionCommand,
         command_ref: &CommandRef,
     ) -> Result<Vec<EventEnvelope>, Failure> {
+        let mut preceding: Vec<EventEnvelope> = Vec::new();
         let event = match command {
             SessionCommand::SetMasterLevel { level } => {
                 self.audio.set_master_level(level);
@@ -921,23 +927,48 @@ impl BrowserHost {
                 self.audio.set_master_pan(pan);
                 SessionEvent::MasterPanChanged { pan }
             }
-            SessionCommand::SetActiveMode { mode } => SessionEvent::ActiveModeChanged { mode },
+            SessionCommand::SetActiveMode { mode } => {
+                if mode != SurfaceMode::Live {
+                    if let Some((instance_id, state)) = self.play_voice.take() {
+                        preceding.extend(self.restore_play_voice(
+                            &instance_id,
+                            state,
+                            command_ref,
+                        )?);
+                    }
+                    // Walking off stage takes the Rack off it too. Leaving the
+                    // target set meant coming back to LIVE found the Rack
+                    // still lit as Playing, hours after its sound had been
+                    // handed back to PLAY.
+                    let live = self.store.state().live.clone();
+                    if live.active.is_some() {
+                        let mut released = live;
+                        released.deactivate();
+                        preceding.push(
+                            self.store
+                                .record(
+                                    Some(command_ref.clone()),
+                                    SessionEvent::LiveStateReconciled { live: released },
+                                )
+                                .map_err(|error| {
+                                    Failure::new(ControlErrorCode::Internal, format!("{error:#}"))
+                                })?,
+                        );
+                    }
+                }
+                SessionEvent::ActiveModeChanged { mode }
+            }
             SessionCommand::SetLiveBrowseMode { mode } => {
                 SessionEvent::LiveBrowseModeChanged { mode }
             }
             SessionCommand::ActivateLiveTarget { location } => {
-                // The browser host activates the LIVE *state* and the Part's
-                // sequencer freight. Multi-Slot Rack audio remains the
-                // appliance's: here the groove sounds through whichever
-                // instrument is active, which is everything a single-voice
-                // host can honestly offer.
                 if self.store.state().active_mode != SurfaceMode::Live {
                     return Err(Failure::new(
                         ControlErrorCode::Rejected,
                         "LIVE targets can only be activated while LIVE is active",
                     ));
                 }
-                let (rack_id, part_commands) = {
+                let (rack_id, part_commands, sounding, unsounded_slots) = {
                     let library = self.performance.library();
                     let rack = library.resolve_playable(&location).map_err(|error| {
                         Failure::new(ControlErrorCode::NotFound, error.to_string())
@@ -954,7 +985,15 @@ impl BrowserHost {
                             rackforge_core::sequencer::part_launch_commands(part, &library.patterns)
                         })
                         .unwrap_or_default();
-                    (rack.id.clone(), commands)
+                    // The page renders one voice at a time, so a Rack sounds
+                    // through its first enabled Slot. Mixing several Slots is
+                    // the appliance's, and the Slot order is the Rack's own.
+                    let mut enabled = rack.slots.iter().filter(|slot| slot.enabled).peekable();
+                    let first = enabled
+                        .next()
+                        .map(|slot| (slot.plugin_id.clone(), slot.state.clone()));
+                    let remaining = enabled.count();
+                    (rack.id.clone(), commands, first, remaining)
                 };
                 // A binding that fails must never fail the activation.
                 for command in &part_commands {
@@ -962,7 +1001,43 @@ impl BrowserHost {
                         eprintln!("SEQUENCER_PART_QUEUE_REJECTED reason={reason}");
                     }
                 }
+                // Until here the activation only moved LIVE's state, which is
+                // how a Rack could stand on stage while PLAY's instrument kept
+                // sounding: nobody ever pointed the voice at the Rack the
+                // performer chose.
+                if let Some((plugin_id, state)) = sounding {
+                    preceding.extend(self.sound_rack_slot(
+                        &plugin_id,
+                        state,
+                        unsounded_slots,
+                        command_ref,
+                    )?);
+                }
                 SessionEvent::LiveTargetActivated { location, rack_id }
+            }
+            SessionCommand::PreviewRack { rack } => {
+                // An unsaved draft is auditioned exactly the way an activated
+                // Rack sounds, so what a performer hears while building one is
+                // what they will hear on stage. The persisted LIVE target is
+                // deliberately untouched.
+                let mut enabled = rack.slots.iter().filter(|slot| slot.enabled).peekable();
+                let Some(slot) = enabled.next() else {
+                    return Err(Failure::new(
+                        ControlErrorCode::Rejected,
+                        "the Rack has no enabled instrument to audition",
+                    ));
+                };
+                let plugin_id = slot.plugin_id.clone();
+                let state = slot.state.clone();
+                let unsounded_slots = enabled.count();
+                preceding.extend(self.sound_rack_slot(
+                    &plugin_id,
+                    state,
+                    unsounded_slots,
+                    command_ref,
+                )?);
+                self.save_checkpoint();
+                return Ok(preceding);
             }
             SessionCommand::SelectPlugin { instance_id } => {
                 self.plugin_mut(&instance_id)?;
@@ -1039,7 +1114,11 @@ impl BrowserHost {
         let recorded = self
             .store
             .record(Some(command_ref.clone()), event)
-            .map(|envelope| vec![envelope])
+            .map(|envelope| {
+                let mut events = preceding;
+                events.push(envelope);
+                events
+            })
             .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
         if recorded.iter().any(|envelope| {
             matches!(
@@ -1239,6 +1318,139 @@ impl BrowserHost {
             parameter_index,
             value: canonical,
         })
+    }
+
+    /// Points the voice at a Rack Slot's instrument and gives it the Slot's
+    /// sound, remembering what PLAY was holding on the way through.
+    fn sound_rack_slot(
+        &mut self,
+        plugin_id: &str,
+        state: Option<PluginStateReference>,
+        unsounded_slots: usize,
+        command_ref: &CommandRef,
+    ) -> Result<Vec<EventEnvelope>, Failure> {
+        let instance_id = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == plugin_id)
+            .map(|plugin| plugin.instance_id.clone())
+            .ok_or_else(|| {
+                Failure::new(
+                    ControlErrorCode::Unavailable,
+                    format!("the Rack needs {plugin_id}, which is not installed here"),
+                )
+            })?;
+        let previous = self.store.state().active_instance_id.clone();
+        let already_sounding = previous.as_ref() == Some(&instance_id);
+        // Take the snapshot before anything is overwritten, and only the first
+        // time: a second Rack must not record the first Rack's sound as the
+        // one PLAY was holding.
+        if self.play_voice.is_none()
+            && let Some(previous) = previous
+        {
+            let saved = self
+                .plugins
+                .iter_mut()
+                .find(|plugin| plugin.instance_id == previous)
+                .and_then(|plugin| plugin.instance.save_state().ok());
+            // A voice whose state cannot be read is still worth remembering by
+            // name; the performer gets their instrument back even if its knobs
+            // do not survive.
+            eprintln!(
+                "PLAY_VOICE_BORROWED instrument={} state_bytes={}",
+                previous.as_str(),
+                saved.as_ref().map_or(0, Vec::len)
+            );
+            self.play_voice = Some((previous, saved.unwrap_or_default()));
+        }
+        let mut events = Vec::new();
+        if !already_sounding {
+            events.push(self.change_active_instance(&instance_id, command_ref)?);
+        }
+        // The Slot carries its sound with it. Loading the instrument without
+        // its state would hand the performer the right box making the wrong
+        // noise.
+        if let Some(reference) = state {
+            let bytes = self.state_store.read(&reference).map_err(|error| {
+                Failure::new(
+                    ControlErrorCode::NotFound,
+                    format!("could not read the Slot's sound: {error:#}"),
+                )
+            })?;
+            self.load_instance_state(&instance_id, &bytes)?;
+        }
+        if unsounded_slots > 0 {
+            // Said out loud rather than mixed silently into nothing.
+            eprintln!(
+                "LIVE_RACK_PARTIAL sounding={} silent_slots={unsounded_slots} reason=browser-renders-one-voice",
+                instance_id.as_str()
+            );
+        }
+        Ok(events)
+    }
+
+    /// Hands PLAY back the instrument a Rack borrowed.
+    fn restore_play_voice(
+        &mut self,
+        instance_id: &InstanceId,
+        state: Vec<u8>,
+        command_ref: &CommandRef,
+    ) -> Result<Vec<EventEnvelope>, Failure> {
+        // An instrument uninstalled while LIVE was on stage is not an error
+        // worth refusing a mode change over.
+        if !self
+            .plugins
+            .iter()
+            .any(|plugin| plugin.instance_id == *instance_id)
+        {
+            eprintln!(
+                "PLAY_VOICE_LOST instrument={} reason=no-longer-loaded",
+                instance_id.as_str()
+            );
+            return Ok(Vec::new());
+        }
+        let sounding = self.store.state().active_instance_id.as_ref() == Some(instance_id);
+        let mut events = Vec::new();
+        if !sounding {
+            events.push(self.change_active_instance(instance_id, command_ref)?);
+        }
+        if !state.is_empty() {
+            self.load_instance_state(instance_id, &state)?;
+        }
+        Ok(events)
+    }
+
+    fn change_active_instance(
+        &mut self,
+        instance_id: &InstanceId,
+        command_ref: &CommandRef,
+    ) -> Result<EventEnvelope, Failure> {
+        self.plugin_mut(instance_id)?;
+        self.audio.silence();
+        self.store
+            .record(
+                Some(command_ref.clone()),
+                SessionEvent::ActiveInstanceChanged {
+                    instance_id: instance_id.clone(),
+                },
+            )
+            .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))
+    }
+
+    fn load_instance_state(
+        &mut self,
+        instance_id: &InstanceId,
+        bytes: &[u8],
+    ) -> Result<(), Failure> {
+        self.plugin_mut(instance_id)?
+            .instance
+            .load_state(bytes)
+            .map_err(|error| {
+                Failure::new(
+                    ControlErrorCode::Rejected,
+                    format!("could not load the Slot's sound: {error:#}"),
+                )
+            })
     }
 
     fn plugin_mut(&mut self, instance_id: &InstanceId) -> Result<&mut HostedPlugin, Failure> {

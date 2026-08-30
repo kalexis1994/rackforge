@@ -583,7 +583,11 @@ impl DesktopApp {
         let active_instance_id = restored_active_instance
             .as_deref()
             .and_then(|restored| plugins.iter().find(|plugin| plugin.instance_id == restored))
-            .or_else(|| plugins.first())
+            .or_else(|| {
+                rackforge_core::choose_opening_instrument(&plugins, |plugin| {
+                    plugin.plugin_id.as_str()
+                })
+            })
             .map(|plugin| plugin.instance_id.as_str());
         if let Some(restored) = restored_active_instance.as_deref()
             && active_instance_id != Some(restored)
@@ -879,7 +883,11 @@ impl DesktopApp {
         let active_instance_id = previous_active
             .as_deref()
             .and_then(|previous| plugins.iter().find(|plugin| plugin.instance_id == previous))
-            .or_else(|| plugins.first())
+            .or_else(|| {
+                rackforge_core::choose_opening_instrument(&plugins, |plugin| {
+                    plugin.plugin_id.as_str()
+                })
+            })
             .map(|plugin| plugin.instance_id.as_str());
         #[cfg(windows)]
         let mut replacement_audio = None;

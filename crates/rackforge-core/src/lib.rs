@@ -3,6 +3,7 @@ pub mod audio;
 pub mod audio_reliability;
 #[cfg(target_os = "linux")]
 pub mod control;
+pub mod default_instrument;
 pub mod hosted;
 pub mod isolated_state;
 #[cfg(target_os = "linux")]
@@ -40,6 +41,7 @@ pub mod storage;
 /// the same arithmetic the Linux LIVE host does.
 pub mod transport;
 
+pub use default_instrument::{DEFAULT_INSTRUMENT_ID, choose_opening_instrument};
 pub use hosted::{LoadedPlugin, PluginInstance};
 pub use isolated_state::{
     IsolatedPluginStateEditor, plugin_parameters, set_plugin_parameter, validate_parameter_write,

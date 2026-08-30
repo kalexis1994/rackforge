@@ -220,9 +220,10 @@ impl BrowserHost {
             .and_then(|id| InstanceId::new(id).ok())
             .filter(|id| instances.iter().any(|instance| instance.instance_id == *id));
         let active_instance_id = restored_instance.or_else(|| {
-            instances
-                .first()
-                .map(|instance| instance.instance_id.clone())
+            rackforge_core::choose_opening_instrument(&instances, |instance| {
+                instance.plugin_id.as_str()
+            })
+            .map(|instance| instance.instance_id.clone())
         });
         let session = SessionState {
             schema_version: SESSION_SCHEMA_VERSION,
@@ -1541,9 +1542,10 @@ impl BrowserHost {
             .clone()
             .filter(|id| instances.iter().any(|instance| instance.instance_id == *id))
             .or_else(|| {
-                instances
-                    .first()
-                    .map(|instance| instance.instance_id.clone())
+                rackforge_core::choose_opening_instrument(&instances, |instance| {
+                    instance.plugin_id.as_str()
+                })
+                .map(|instance| instance.instance_id.clone())
             });
         let active_mode = if previous_active_instance_id != active_instance_id
             && previous_active_instance_id.is_some()

@@ -19,20 +19,17 @@
         --panel: #0d0f11;
         --rule: #2a2118;
         --gold: #f3bc7c;
+        /* Cut into brass rather than printed on it. */
+        --engraved: #35210a;
         --gold-bright: #ffd9a0;
         --gold-dim: #8a6a44;
         --ink: #f2e7d8;
         --muted: #8c8073;
-        /* Walnut, drawn rather than photographed: grain as thin repeating
-           bands with a lacquer sheen over them. */
-        --wood: repeating-linear-gradient(
-            92deg,
-            #2e1b0e 0px,
-            #3a2412 5px,
-            #271507 9px,
-            #35200f 14px,
-            #2b1a0c 21px
-          );
+        /* Walnut, photographed. It replaces a repeating-linear-gradient that
+           stood in for grain with five hard bands; a real board has pores and
+           figure that no gradient reaches. Used with `cover` rather than
+           `repeat`, so the tile never has to close on itself. */
+        --wood: url("img/wood.webp") center / cover;
         /* The grain itself: one SVG feTurbulence, anisotropic (slow along
            the plank, fast across it), rasterised ONCE by the browser and
            tiled -- the cheapest wood noise there is: zero runtime cost. */
@@ -75,17 +72,25 @@
         );
         pointer-events: none;
       }
+      /* The instrument's nameplate: the oval is a photograph and the text is
+         real text over it, so it stays translatable and stays sharp at any
+         zoom. */
       .masthead {
         position: relative;
         z-index: 1;
         max-width: 680px;
         margin: 0 auto;
-        padding: 26px 22px 10px;
+        padding: 18px 22px 6px;
+        display: block;
+        text-align: center;
+      }
+      .plaque {
         display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        flex-wrap: wrap;
-        gap: 4px 16px;
+        align-items: center;
+        justify-content: center;
+        min-height: 104px;
+        background: url("img/nameplate.webp") center / contain no-repeat;
+        filter: drop-shadow(0 3px 7px rgba(0, 0, 0, 0.6));
       }
       .masthead h1 {
         margin: 0;
@@ -93,8 +98,8 @@
         font-weight: 600;
         letter-spacing: 0.24em;
         text-transform: uppercase;
-        color: var(--gold);
-        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+        color: var(--engraved);
+        text-shadow: 0 1px 0 rgba(255, 238, 205, 0.45);
       }
       .masthead p {
         margin: 0;
@@ -293,14 +298,14 @@
         border: 1px solid rgba(243, 188, 124, 0.22);
         border-top: none;
         border-radius: 0 0 4px 4px;
-        background: linear-gradient(
-          180deg,
-          rgba(13, 15, 17, 0.78),
-          rgba(11, 13, 15, 0.85) 80%
-        );
-        backdrop-filter: blur(7px);
-        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
-        padding: 20px 18px 8px;
+        /* The board the plates are screwed to. The vignette on top keeps the
+           middle of the photograph from competing with the brass. */
+        background:
+          radial-gradient(120% 90% at 50% 0%, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.62)),
+          var(--wood);
+        box-shadow: inset 0 1px 0 rgba(255, 220, 170, 0.12),
+          0 10px 26px rgba(0, 0, 0, 0.5);
+        padding: 22px 20px 10px;
         margin-bottom: 20px;
       }
       .grid {
@@ -308,7 +313,22 @@
         grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
         column-gap: 26px;
       }
-      .labgroup { margin-bottom: 8px; }
+      /* Each group of controls sits on its own screwed-down plate, which is
+         what lets a page of five and a page of nine both look deliberate: the
+         plate follows the group rather than the page. The image carries the
+         four screws and the bevel, so the border-image below stretches its
+         middle and leaves the corners alone. */
+      .labgroup {
+        margin-bottom: 18px;
+        padding: 14px 20px 6px;
+        /* The slice has to clear the screw heads completely. Cut at 74 the
+           screws straddled the corner and the edge, and the edge is the part
+           border-image stretches -- so each screw grew a tail. At 100 the head
+           lands wholly inside the corner, which is never stretched. */
+        border: 34px solid transparent;
+        border-image: url("img/plate.webp") 100 fill stretch;
+        filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.55));
+      }
       .labgroup > h3 {
         display: flex;
         align-items: center;
@@ -318,17 +338,25 @@
         font-weight: 600;
         letter-spacing: 0.3em;
         text-transform: uppercase;
-        color: var(--gold-dim);
+        color: var(--engraved);
+        text-shadow: 0 1px 0 rgba(255, 238, 205, 0.4);
       }
       .labgroup > h3::after {
         content: "";
         flex: 1;
-        height: 3px;
-        border-radius: 2px;
-        background: var(--wood);
-        box-shadow: inset 0 1px 0 rgba(255, 220, 170, 0.15);
-        opacity: 0.8;
+        height: 2px;
+        border-radius: 1px;
+        background: rgba(60, 38, 12, 0.55);
+        box-shadow: 0 1px 0 rgba(255, 238, 205, 0.35);
       }
+      /* Lettering on the plate is cut into it: dark, with a lit lower lip.
+         Gold on gold would be a label you cannot read. */
+      .labgroup .name,
+      .labgroup .value {
+        color: var(--engraved);
+        text-shadow: 0 1px 0 rgba(255, 238, 205, 0.42);
+      }
+      .labgroup .value { font-weight: 600; }
 
       .control { display: grid; gap: 5px; margin-bottom: 16px; }
       .row { display: flex; justify-content: space-between; align-items: baseline; }
@@ -338,43 +366,62 @@
         font-size: 12px;
         color: var(--gold);
       }
-      /* The fader: a hairline track that fills with gold, under a brass pin. */
+      /* The fader: a channel milled into the brass, a gold thread showing how
+         far it is up, and a knurled cap riding in it. The cap's engraved line
+         stays vertical -- it is an index against the channel, not a pointer
+         that turns, which is why a rotary knob's artwork can serve a slider
+         without a frame of animation anywhere. */
       input[type="range"] {
         -webkit-appearance: none;
         appearance: none;
         width: 100%;
-        height: 18px;
+        height: 30px;
         background: transparent;
         cursor: pointer;
       }
       input[type="range"]::-webkit-slider-runnable-track {
-        height: 3px;
-        border-radius: 2px;
-        background: linear-gradient(
-          90deg,
-          var(--gold) 0 var(--fill, 50%),
-          #1a1512 var(--fill, 50%) 100%
-        );
+        height: 16px;
+        border-radius: 3px;
+        background:
+          /* The gold thread lives inside the channel, not across the raised
+             ends of it, and it is inset by half a cap at each end -- so the
+             thread stops exactly where the cap's centre is, at every value
+             rather than only at the middle. */
+          linear-gradient(90deg, var(--gold) 0 var(--fill, 50%), transparent var(--fill, 50%))
+            left 12px center / calc(100% - 24px) 6px no-repeat,
+          linear-gradient(180deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.66))
+            center / 96% 64% no-repeat,
+          url("img/slot.webp") center / 100% 100% no-repeat;
       }
-      input[type="range"]::-moz-range-track { height: 3px; border-radius: 2px; background: #1a1512; }
-      input[type="range"]::-moz-range-progress { height: 3px; border-radius: 2px; background: var(--gold); }
+      input[type="range"]::-moz-range-track {
+        height: 16px;
+        border-radius: 3px;
+        background:
+          linear-gradient(180deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.66))
+            center / 96% 64% no-repeat,
+          url("img/slot.webp") center / 100% 100% no-repeat;
+      }
+      input[type="range"]::-moz-range-progress {
+        height: 6px;
+        margin-top: 5px;
+        border-radius: 2px;
+        background: var(--gold);
+      }
       input[type="range"]::-webkit-slider-thumb {
         -webkit-appearance: none;
-        width: 13px;
-        height: 13px;
+        width: 25px;
+        height: 25px;
         margin-top: -5px;
-        border-radius: 50%;
-        background: radial-gradient(circle at 35% 30%, var(--gold-bright), var(--gold) 55%, #b1834e);
-        border: 2px solid var(--lacquer);
-        box-shadow: 0 0 0 1px var(--gold-dim), 0 1px 3px rgba(0, 0, 0, 0.7);
+        border: 0;
+        background: url("img/knob.webp") center / contain no-repeat;
+        filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.75));
       }
       input[type="range"]::-moz-range-thumb {
-        width: 13px;
-        height: 13px;
-        border-radius: 50%;
-        background: radial-gradient(circle at 35% 30%, var(--gold-bright), var(--gold) 55%, #b1834e);
-        border: 2px solid var(--lacquer);
-        box-shadow: 0 0 0 1px var(--gold-dim), 0 1px 3px rgba(0, 0, 0, 0.7);
+        width: 25px;
+        height: 25px;
+        border: 0;
+        background: url("img/knob.webp") center / contain no-repeat;
+        filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.75));
       }
 
       .tools { display: flex; gap: 10px; align-items: center; margin: 6px 0 14px; }
@@ -455,7 +502,7 @@
   </head>
   <body>
     <header class="masthead">
-      <h1>Concert Grand</h1>
+      <div class="plaque"><h1>Concert Grand</h1></div>
       <p>A physical model</p>
     </header>
     <main>

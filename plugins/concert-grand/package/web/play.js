@@ -152,7 +152,12 @@
             labGroups.push({ page, mine });
           } else {
             const body = document.createElement("div");
-            body.append(faderGrid(mine, current));
+            // Every page gets the same screwed-down plate the lab groups get;
+            // otherwise the brass would look like a workbench decoration.
+            const plate = document.createElement("div");
+            plate.className = "labgroup";
+            plate.append(faderGrid(mine, current));
+            body.append(plate);
             tabs.push({ id: page.id ?? "voice", name: page.name, body });
           }
         }

@@ -686,6 +686,24 @@ const GAUGE_CONSTANT: f32 = 0.185_653_5;
 /// what makes it read as one fixed wooden pitch rather than a knock. See the
 /// note on `lab` in `Controls::default`.
 const CLACK_SCATTER: f32 = 0.14;
+/// How long the keybed thud rings.
+///
+/// It used to be 0.30 s, and it is five tuned partials at 46, 71, 103, 149 and
+/// 214 Hz: three hundred milliseconds of fixed low pitches on every key. At
+/// 46 Hz that is fourteen cycles, which the ear takes as a note rather than a
+/// knock, and in a fast passage -- a note every hundred or two hundred
+/// milliseconds -- each key adds another that has not finished. They stack.
+/// The user found it exactly there, on short quick notes, and the only remedy
+/// the panel offered was to turn the whole thing down, which they did, to 0.24
+/// and then to 0.10.
+///
+/// Level was the wrong lever. Measured against the reference's own attack
+/// floor with `tools/measure-attack-floor.py`, this model sits 26 dB UNDER the
+/// instrument at 160-320 Hz, where the thud lives; quietening it walks away
+/// from the piano. What is wrong is the duration. A key meeting its bed is a
+/// wooden knock and wooden knocks are short, so this is now sixty
+/// milliseconds and the level stays where the reference wants it.
+const THUMP_T60_S: f32 = 0.06;
 const FELT_EXPONENT_MIN: f32 = 1.2;
 const FELT_EXPONENT_MAX: f32 = 5.0;
 
@@ -3891,7 +3909,14 @@ impl ConcertGrand {
         {
             let thump_level = powf(velocity, 1.9)
                 * 0.095
+                // Shortening the thud from 300 ms to 60 ms takes its energy
+                // with it, and that energy is wanted: the model already sits
+                // 26 dB under the reference's attack floor in the band the
+                // thud occupies. Amplitude goes as the square root of the
+                // ratio of the two ring times, so the knock keeps the weight
+                // it had while losing the tail that made it stack.
                 * 0.32
+                * sqrtf(0.30 / THUMP_T60_S)
                 * (1.0 - 0.35 * position)
                 * Controls::noise_gain(self.controls.action_noise)
                 * self.controls.lab(2)
@@ -3909,7 +3934,7 @@ impl ConcertGrand {
                 }
                 let jitter = 1.0 + 0.10 * (hash01((note as u32) << 7 | seed) - 0.5);
                 let amplitude = thump_level * level;
-                let decay = self.decay_per_sample(0.30);
+                let decay = self.decay_per_sample(THUMP_T60_S);
                 let mut built = Partial::default();
                 built.set_lane(
                     0,

@@ -2315,6 +2315,34 @@ impl ConcertGrand {
     /// This was written for the string partials and applied only to them. The
     /// board's OWN modes went out at full strength -- including the lowest,
     /// which sits at 50 Hz and is struck by every note in the compass.
+    /// How much of the impact burst a note's strings can carry.
+    ///
+    /// The burst is the hammer stretching the string under its head: a tension
+    /// pulse that rings the compressional bank. It is a WOUND-string
+    /// phenomenon -- a heavy overspun wire stretches enough to matter, a short
+    /// plain treble wire does not -- and the bass bridge ends around F#2.
+    ///
+    /// The taper it used to have alone, `(1 - position)^1.2`, only reaches
+    /// zero at the top of the compass: it still delivered HALF the burst at
+    /// B3, an octave and a half above the last wound string. Measured on B3
+    /// with the fader at the house 0.5, that half-burst put +3.3 dB into
+    /// 4-8 kHz of the attack -- a bright edge over a plain-wire note, which is
+    /// the metallic strike the user placed on A3 and B3 by ear, and why
+    /// turning the noise faders down never touched it. It was never noise; it
+    /// was the strike left uncovered.
+    ///
+    /// An earlier ablation of mine cleared the burst WRONGLY: it normalised by
+    /// peak and referenced the fundamental, and under that convention the same
+    /// change reads as +0.9 dB instead of +3.3. Fourth time this file has paid
+    /// for a normalisation that hid what it was measuring.
+    ///
+    /// This gate leaves the wound register untouched -- at A0 and C2 it is
+    /// exactly 1, so the burst's bass calibration stands -- and is gone by C3.
+    /// Measured after: A3 and B3 render bit-for-bit as if the burst were off.
+    fn clang_register(position: f32) -> f32 {
+        ((0.32 - position) / 0.12).clamp(0.0, 1.0)
+    }
+
     fn board_radiation(frequency: f32) -> f32 {
         let ratio = frequency / RADIATION_CORNER_HZ;
         let u = {
@@ -2728,14 +2756,44 @@ impl ConcertGrand {
                 // The felt: K in N/m^p, hardening steeply toward the treble.
                 // Brightness and the Hammer Hard control are voicing -- the
                 // needle and the lacquer act on exactly this property.
+                // THE FELT'S EXPONENT BELONGS TO THE REGISTER, NOT TO THE
+                // VOICING -- and letting Brightness move it inverted the
+                // control.
+                //
+                // F = K*x^p, so K carries units of N/m^p: its meaning DEPENDS
+                // on p. Brightness used to raise both, K by 2.65x and p from
+                // 2.9 to 5.0, and at the half-millimetre a real hammer
+                // compresses, x^p collapses. Measured on A3 fortissimo, the
+                // force at 0.5 mm ran 10968 N at the bottom of the travel and
+                // essentially zero at the top -- five orders of magnitude
+                // SOFTER for "brighter" -- and the contact went 0.05 ms to
+                // 2.80 ms. The rendered tone followed: 4-8 kHz fell from
+                // -18.5 to -44.5 dB as the fader rose. The user found it by
+                // ear before any metric did: "lo que yo interpreto como
+                // brillo es lo que ocurre al bajar el fader".
+                //
+                // Chabassier et al. measure the exponent varying by REGISTER
+                // (~1.5 bass to ~3.5 treble), not by regulation. Voicing --
+                // needling the felt, lacquering it -- is stiffness. So the
+                // exponent is the note's alone, and Brightness moves K over
+                // two decades, which is a voicer's range. The constants are
+                // arranged so the house voicing at 0.44 lands exactly where it
+                // did: the chromatic fit cost is identical to four figures,
+                // so only the fader's behaviour changed, not the instrument.
+                //
+                // After: contact shortens with the fader everywhere, and C4's
+                // attack centroid runs 3243 -> 3866 -> 4955 Hz across the
+                // travel where it used to FALL.
+                const HOUSE_BRIGHTNESS: f32 = 0.44;
+                const EXPONENT_AT_HOUSE: f32 = 0.62 + 0.76 * HOUSE_BRIGHTNESS;
+                const STIFFNESS_AT_HOUSE: f32 = 0.5 + 1.5 * HOUSE_BRIGHTNESS;
+                let exponent = ((3.2 + 1.8 * position) * EXPONENT_AT_HOUSE * self.controls.lab(0))
+                    .clamp(1.2, 5.0);
                 let stiffness = FELT_K_A0
                     * powf(10.0, FELT_K_DECADES * position)
                     * self.controls.lab(7)
-                    * (0.5 + 1.5 * self.controls.brightness);
-                let exponent = ((3.2 + 1.8 * position)
-                    * (0.62 + 0.76 * self.controls.brightness)
-                    * self.controls.lab(0))
-                .clamp(1.2, 5.0);
+                    * STIFFNESS_AT_HOUSE
+                    * powf(10.0, 2.0 * (self.controls.brightness - HOUSE_BRIGHTNESS));
                 let (q, over_omega) = simulate_strike(
                     &frequencies,
                     sim_modes,
@@ -3389,6 +3447,7 @@ impl ConcertGrand {
                 * velocity
                 * velocity
                 * powf(1.0 - position, 1.2)
+                * Self::clang_register(position)
                 * impact_gain;
             self.voices[slot].clang_feed += clang_kick;
             self.voices[slot].clang_feed_decay = expf(-1.0 / (IMPACT_PULSE_TAU_S * sample_rate));
@@ -3450,6 +3509,7 @@ impl ConcertGrand {
             * velocity
             * velocity
             * powf(1.0 - position, 1.2)
+            * Self::clang_register(position)
             * impact_gain;
         for (k, mode) in voice.longitudinal.iter_mut().enumerate() {
             let hz = longitudinal_first * (k + 1) as f32;

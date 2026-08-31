@@ -53,81 +53,81 @@
       "description": "Close, narrow and short: a small room"
     },
     {
-      "id": "fazioli-f308",
-      "name": "Fazioli F308",
+      "id": "concert-308",
+      "name": "Concert 308 · Clear",
       "bank": "factory",
       "category": "Piano",
       "order": 4,
       "tags": [
         "instrument"
       ],
-      "description": "308 cm — the longest piano built; its clarity is its string length"
+      "description": "A 3.08 m concert grand — the longest scale, its clarity from string length"
     },
     {
-      "id": "bosendorfer-280",
-      "name": "Bosendorfer 280VC",
+      "id": "concert-280",
+      "name": "Concert 280 · Warm",
       "bank": "factory",
       "category": "Piano",
       "order": 5,
       "tags": [
         "instrument"
       ],
-      "description": "280 cm — warm and singing, a drier attack, the bass its signature"
+      "description": "A 2.80 m concert grand voiced warm, its bass the signature"
     },
     {
-      "id": "yamaha-cfx",
-      "name": "Yamaha CFX",
+      "id": "concert-275",
+      "name": "Concert 275 · Bright",
       "bank": "factory",
       "category": "Piano",
       "order": 6,
       "tags": [
         "instrument"
       ],
-      "description": "275 cm — bright, even and powerful; closest to the calibrated reference"
+      "description": "A 2.75 m concert grand voiced bright and even"
     },
     {
-      "id": "steinway-d",
-      "name": "Steinway D-274",
+      "id": "concert-274",
+      "name": "Concert 274 · Rich",
       "bank": "factory",
       "category": "Piano",
       "order": 7,
       "tags": [
         "instrument"
       ],
-      "description": "274 cm — rich rather than bright, most itself when played softly"
+      "description": "A 2.74 m concert grand voiced rich rather than bright"
     },
     {
-      "id": "steinway-b",
-      "name": "Steinway B",
+      "id": "salon-211",
+      "name": "Salon 211",
       "bank": "factory",
       "category": "Piano",
       "order": 8,
       "tags": [
         "instrument"
       ],
-      "description": "211 cm — the same voice in a shorter case; the bass gives ground"
+      "description": "A 2.11 m salon grand — the same voice, the bass gives ground"
     },
     {
-      "id": "parlour-grand",
-      "name": "Parlour Grand",
+      "id": "parlour-185",
+      "name": "Parlour 185",
       "bank": "factory",
       "category": "Piano",
       "order": 9,
       "tags": [
         "instrument"
       ],
-      "description": "185 cm — the common six-foot instrument"
+      "description": "A 1.85 m parlour grand, the common six-foot instrument"
     },
     {
-      "id": "baby-grand",
-      "name": "Baby Grand",
+      "id": "baby-150",
+      "name": "Baby 150",
       "bank": "factory",
       "category": "Piano",
       "order": 10,
       "tags": [
         "instrument"
       ],
-      "description": "150 cm — a foreshortened bass under an ordinary treble"
+      "description": "A 1.50 m baby grand — a foreshortened bass under an ordinary treble"
     },
     {
       "id": "upright-52",

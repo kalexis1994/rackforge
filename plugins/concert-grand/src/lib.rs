@@ -4246,6 +4246,16 @@ impl Processor for ConcertGrand {
 
             // ---- Instruments, from published dimensions --------------------
             //
+            // NAMED BY WHAT THEY ARE, not by whose they resemble. The
+            // dimensions below are taken from specific real instruments and
+            // those instruments are cited here, because a measurement should
+            // say where it came from -- but a preset carrying a maker's name
+            // in the product would claim two things this cannot support. It
+            // would imply an association with the maker, and it would assert
+            // that this IS their instrument when the scale is sourced and the
+            // voicing is not. "Concert 308" is exactly the honest claim: a
+            // concert grand with that scale, voiced clear.
+            //
             // Every profile below sets its SIZE from a real instrument's
             // A0 speaking length, which is the one number that reliably
             // separates pianos: 1.90 m on the concert grand this model is
@@ -4275,7 +4285,7 @@ impl Processor for ConcertGrand {
             // is the whole point -- the bass and middle strings are longer
             // than anyone else's, which is where its clarity comes from.
             // A0 ~2.10 m.
-            "fazioli-f308" => Controls {
+            "concert-308" => Controls {
                 size: 0.86,
                 brightness: 0.62,
                 tension: 0.55,
@@ -4287,7 +4297,7 @@ impl Processor for ConcertGrand {
             },
             // Bösendorfer 280VC, 280 cm: warm and singing, a drier attack,
             // the bass its signature. A0 ~2.02 m.
-            "bosendorfer-280" => Controls {
+            "concert-280" => Controls {
                 size: 0.72,
                 brightness: 0.36,
                 tension: 0.34,
@@ -4300,7 +4310,7 @@ impl Processor for ConcertGrand {
             // Yamaha CFX, 275 cm: bright, even and powerful. The reference
             // this model is calibrated against is a Yamaha, so this profile
             // sits closest to the factory instrument. A0 ~2.00 m.
-            "yamaha-cfx" => Controls {
+            "concert-275" => Controls {
                 size: 0.68,
                 brightness: 0.60,
                 tension: 0.58,
@@ -4310,7 +4320,7 @@ impl Processor for ConcertGrand {
             },
             // Steinway D-274: rich and complex rather than bright, and most
             // itself at low velocities. A0 ~1.98 m.
-            "steinway-d" => Controls {
+            "concert-274" => Controls {
                 size: 0.65,
                 brightness: 0.47,
                 tension: 0.5,
@@ -4323,7 +4333,7 @@ impl Processor for ConcertGrand {
             // Steinway B, 211 cm: the same voice in a shorter case. The bass
             // is where it gives ground, which is exactly what Size expresses.
             // A0 ~1.65 m.
-            "steinway-b" => Controls {
+            "salon-211" => Controls {
                 size: 0.38,
                 brightness: 0.47,
                 tension: 0.5,
@@ -4335,7 +4345,7 @@ impl Processor for ConcertGrand {
             },
             // A parlour grand around 1.85 m: the common six-foot instrument.
             // A0 ~1.45 m.
-            "parlour-grand" => Controls {
+            "parlour-185" => Controls {
                 size: 0.27,
                 brightness: 0.5,
                 tension: 0.5,
@@ -4345,7 +4355,7 @@ impl Processor for ConcertGrand {
             },
             // A five-foot baby grand: a foreshortened bass under an ordinary
             // treble, which is the whole character of the thing. A0 ~1.09 m.
-            "baby-grand" => Controls {
+            "baby-150" => Controls {
                 size: 0.04,
                 brightness: 0.55,
                 tension: 0.5,
@@ -5647,13 +5657,13 @@ mod tests {
     #[test]
     fn instrument_profiles_carry_their_own_scale() {
         let instruments = [
-            ("fazioli-f308", 2.10),
-            ("bosendorfer-280", 2.02),
-            ("yamaha-cfx", 2.00),
-            ("steinway-d", 1.98),
-            ("steinway-b", 1.65),
-            ("parlour-grand", 1.45),
-            ("baby-grand", 1.09),
+            ("concert-308", 2.10),
+            ("concert-280", 2.02),
+            ("concert-275", 2.00),
+            ("concert-274", 1.98),
+            ("salon-211", 1.65),
+            ("parlour-185", 1.45),
+            ("baby-150", 1.09),
             ("upright-52", 1.37),
             ("upright-studio", 1.22),
             ("fortepiano", 1.50),
@@ -5925,6 +5935,9 @@ mod tests {
         // intermodulation product; this can.
         if std::env::var("CG_CHORD").is_ok() {
             let mut piano = Box::new(ConcertGrand::default());
+            if let Ok(preset) = std::env::var("CG_PRESET") {
+                assert!(piano.load_preset(&preset), "unknown preset {preset}");
+            }
             for (index, value) in &overrides {
                 assert!(
                     piano.set_parameter(*index, *value),

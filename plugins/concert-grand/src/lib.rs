@@ -580,6 +580,13 @@ const BOARD_LOSS_FACTOR: f32 = 0.023;
 /// and the exponent mapping is anchored HERE so the factory voicing is
 /// unchanged by the remapping.
 const HOUSE_FELT_CORNER: f32 = 0.52;
+/// Where HF Floor ships, and the shape of what it does. The corner is the
+/// board's coincidence region -- below it the control does almost nothing,
+/// above it the losses are free to separate from the bass's -- and the span is
+/// how far the high partials' life can be pushed at the top of the band.
+const HOUSE_HF_FLOOR: f32 = 0.5;
+const HF_FLOOR_CORNER_HZ: f32 = 2400.0;
+const HF_FLOOR_SPAN: f32 = 4.0;
 const FELT_EXPONENT_MIN: f32 = 1.2;
 const FELT_EXPONENT_MAX: f32 = 5.0;
 
@@ -1502,6 +1509,12 @@ impl Controls {
     /// hard and new and shuts the string dead.
     fn damper_grip(&self) -> f32 {
         powf(3.0, self.damper - 0.5)
+    }
+
+    /// HF Floor as signed travel from the shipped value: -1 at the bottom of
+    /// the fader, 0 where it ships, +1 at the top.
+    fn hf_floor_travel(&self) -> f32 {
+        (self.lab[6] - HOUSE_HF_FLOOR) * 2.0
     }
 
     /// Felt Corner as signed travel from centre: -1 at the bottom of the
@@ -2520,7 +2533,7 @@ impl ConcertGrand {
         let rate = LN_1000 / (SLOW_STAGE_RATIO * string)
             + bending
             + INCOHERENT_RADIATION * RADIATION_RATE * Self::radiation_efficiency(radiating);
-        (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay)
+        (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency)
     }
 
     fn t60_seconds(&self, frequency: f32, f0: f32, string_scale: f32, treble_life: f32) -> f32 {
@@ -2558,7 +2571,7 @@ impl ConcertGrand {
         // above was too steep, and dividing the note flat also shortened the
         // upper partials that were already dying too fast. The curve carries
         // it now.
-        (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay)
+        (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency)
     }
 
     /// How readily the soundboard turns a partial of this frequency into
@@ -2685,6 +2698,45 @@ impl ConcertGrand {
         let amplitude = powf(10.0, normalized * 0.30 * settled);
         let decay = 1.0 / (1.0 + 0.35 * normalized * settled);
         (amplitude, decay)
+    }
+
+    /// How long a partial is allowed to live because of where it sits in the
+    /// spectrum, as a multiple of the life the rest of the model gives it.
+    ///
+    /// This is what HF Floor drives, and until now HF Floor drove nothing at
+    /// all: it set a floor under the calibrated recipe's felt curve, and
+    /// `SIM_MODES` equals `MAX_PARTIALS` while `RECIPE_FLOOR` is 0.0, so the
+    /// hammer integration replaced that recipe outright for every partial the
+    /// model places. Turning the control fully off rendered C4 bit for bit
+    /// identical at velocities 40, 70 and 100.
+    ///
+    /// The job it has now is one the model measurably lacked. Measured across
+    /// 29 notes against the reference, in bands at or above each note's own
+    /// fundamental, the model's 4-8 kHz arrives 5 to 7 dB SHORT in the first
+    /// 80 ms and sits 5 dB LONG at two seconds: about eleven decibels of
+    /// accumulated error in how fast the top of the spectrum dies. Nothing on
+    /// the panel could address it. Prompt Decay and Tail scale the two decay
+    /// stages, but both are flat in frequency and move every partial
+    /// together; Treble Life sets how readily the board takes the highs away
+    /// and measures as a level, moving the 80 ms window and the two-second
+    /// window the same way and by similar amounts (-2.3 and -1.0 dB at the
+    /// bottom of its travel). A control that darkens the tail without
+    /// darkening the attack did not exist.
+    ///
+    /// So this is a slope on the decay rate against frequency, not another
+    /// gain: it leaves the bottom of the spectrum alone and reaches its full
+    /// effect above the coincidence region, where a real board's losses do in
+    /// fact separate from the bass's. Centre is exactly one, so the shipped
+    /// instrument is untouched.
+    fn hf_life(&self, frequency: f32) -> f32 {
+        let travel = self.controls.hf_floor_travel();
+        if travel == 0.0 {
+            return 1.0;
+        }
+        let ratio = frequency / HF_FLOOR_CORNER_HZ;
+        let square = ratio * ratio;
+        let reach = square / (1.0 + square);
+        powf(HF_FLOOR_SPAN, travel * reach)
     }
 
     fn decay_per_sample(&self, t60: f32) -> f32 {

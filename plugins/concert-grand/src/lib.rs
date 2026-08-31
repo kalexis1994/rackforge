@@ -587,6 +587,11 @@ const HOUSE_FELT_CORNER: f32 = 0.52;
 const HOUSE_HF_FLOOR: f32 = 0.5;
 const HF_FLOOR_CORNER_HZ: f32 = 2400.0;
 const HF_FLOOR_SPAN: f32 = 4.0;
+/// The compression a hammer actually works at, in metres. Askenfelt and
+/// Jansson measure the felt squeezed by a few tenths of a millimetre at
+/// mezzoforte and about half a millimetre fortissimo; this is where the force
+/// law is held fixed when the exponent moves.
+const FELT_REFERENCE_COMPRESSION_M: f32 = 0.0005;
 const FELT_EXPONENT_MIN: f32 = 1.2;
 const FELT_EXPONENT_MAX: f32 = 5.0;
 
@@ -3184,11 +3189,42 @@ impl ConcertGrand {
                     house + reach * (FELT_EXPONENT_MAX - house)
                 }
                 .clamp(FELT_EXPONENT_MIN, FELT_EXPONENT_MAX);
+                // K carries units of N/m^p, so moving p without moving K
+                // changes the FORCE, not the hardness. At the half millimetre
+                // a real hammer compresses, x^p collapses as p grows: raising
+                // the exponent alone makes the felt softer, which is the trap
+                // that once inverted the Brightness control, and which showed
+                // up again the moment Felt Corner got its full travel --
+                // sweeping it up took the attack's 4-8 kHz from -7.5 to -20.8
+                // dB against the reference and the chromatic cost from 995 to
+                // 1402.
+                //
+                // So the exponent is moved at CONSTANT FORCE: K is
+                // compensated by the reference compression raised to the
+                // change in p, which leaves F(x_ref) exactly where it was and
+                // lets p do the only thing it should be doing -- setting how
+                // sharply the felt hardens as it is squeezed, and with it how
+                // the contact time shortens when the blow gets harder.
+                // Clamped the same way the live exponent is. Without that, the
+                // top of the compass -- where the house exponent already sits
+                // against the 5.0 ceiling -- got a compensation for travel it
+                // had not made, and A6 came out with K cut elevenfold at the
+                // factory setting. One note in thirty moved, which is exactly
+                // how much of a bug this kind is: invisible unless every note
+                // is compared.
+                let house_exponent = ((3.2 + 1.8 * position)
+                    * EXPONENT_AT_HOUSE
+                    * powf(256.0, HOUSE_FELT_CORNER - 0.5))
+                .clamp(FELT_EXPONENT_MIN, FELT_EXPONENT_MAX);
                 let stiffness = FELT_K_A0
                     * powf(10.0, FELT_K_DECADES * position)
                     * self.controls.lab(7)
                     * STIFFNESS_AT_HOUSE
-                    * powf(10.0, 2.0 * (self.controls.brightness - HOUSE_BRIGHTNESS));
+                    * powf(10.0, 2.0 * (self.controls.brightness - HOUSE_BRIGHTNESS))
+                    * powf(
+                        1.0 / FELT_REFERENCE_COMPRESSION_M,
+                        exponent - house_exponent,
+                    );
                 let (q, over_omega) = simulate_strike(
                     &frequencies,
                     sim_modes,

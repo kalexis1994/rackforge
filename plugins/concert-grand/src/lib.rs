@@ -728,11 +728,8 @@ const PROXIMITY_STRENGTH: f32 = 0.35;
 /// nearer microphone by S*x / (c*sqrt(x^2 + D^2)). That per-note arrival
 /// difference, not the level pan, is the air and width of real AB
 /// recordings.
-const PAIR_SPACING_MAX_M: f32 = 0.9;
-const PIANO_LATERAL_SPREAD_M: f32 = 1.3;
 /// Per-voice delay line length: covers the worst-case interchannel delay
 /// (0.9 m spacing, source on axis end, close pair) at up to 96 kHz.
-const VOICE_DELAY: usize = 256;
 /// How strongly the bridge's motion drives every OTHER free string, per
 /// sample, on top of each partial's own coupling weight.
 ///
@@ -820,13 +817,9 @@ struct Voice {
     pan_right: f32,
     /// The spaced pair's per-channel arrival: this voice's mono output is
     /// written here once and each microphone reads its own tap.
-    pair: [f32; VOICE_DELAY],
-    pair_write: usize,
     /// This voice's previous output sample, so the sympathetic feed can be
     /// everyone-but-me without a second pass.
     last_out: f32,
-    pair_left: usize,
-    pair_right: usize,
     /// Duplex-scale components: the string segments behind the bridge have
     /// no dampers, so these ring on after damp() silences the partials.
     duplex: [Component; 2],
@@ -889,11 +882,7 @@ impl Default for Voice {
             noise_seed: 1,
             pan_left: 0.0,
             pan_right: 0.0,
-            pair: [0.0; VOICE_DELAY],
-            pair_write: 0,
             last_out: 0.0,
-            pair_left: 0,
-            pair_right: 0,
             duplex: [Component::default(); 2],
             cull_in: CULL_INTERVAL,
             energy: 0.0,
@@ -2043,6 +2032,18 @@ impl ConcertGrand {
             // Nothing in the test suite could catch it: every render this
             // model is measured against is one note, and one note buries it.
             mode.drive *= Self::board_radiation(placed);
+            // And a SIGN. A mode's transfer from the bridge to the ear is
+            // the product of its shape at the drive point and its net
+            // radiating area, and both alternate as the shapes gain nodal
+            // lines -- a real plate's transfer flips sign mode to mode. A
+            // bank of all-positive modes in parallel with the through path
+            // notches every anti-resonance coherently: measured on B3, the
+            // bank alone carved its eleventh partial 8.4 dB below the naked
+            // string sum, its twelfth 10, in a fixed-in-Hz patchwork that
+            // gave every note a different ragged ladder -- the bell-like
+            // strike the ear reported. Below ~700 Hz the modes are sparse
+            // and a flipped neighbour could notch a fundamental, so the
+            // dense region alone draws signs.
             self.board[index] = mode;
             frequency += board_spacing(frequency);
             index += 1;
@@ -3318,12 +3319,6 @@ impl ConcertGrand {
         let longitudinal_upper = self.controls.lab(4) * 2.0 * powf(1.0 - position, 1.5);
         let action_gain = Controls::noise_gain(self.controls.action_noise);
         let impact_gain = Controls::noise_gain(self.controls.impact);
-        let pair_spacing = self.controls.width * PAIR_SPACING_MAX_M;
-        let pair_depth = MIC_DISTANCE_MIN_M
-            * powf(
-                MIC_DISTANCE_MAX_M / MIC_DISTANCE_MIN_M,
-                self.controls.mic_distance,
-            );
         if let Some(slot) = restrike_target {
             // The hammer lands on the wire it finds. Ladder partials merge
             // by harmonic number (each carries it in its slope weight);
@@ -3521,27 +3516,6 @@ impl ConcertGrand {
         voice.noise_seed = 0x9E37_79B9 ^ (note as u32).wrapping_mul(2_654_435_761);
         voice.pan_left = pan_left;
         voice.pan_right = pan_right;
-        // The pair's time-of-arrival difference for THIS string. Width is
-        // the spacing; the note's place on the bridge is its lateral
-        // position; the mic distance stretches the geometry. Zero spacing is
-        // exactly coincident: both taps read the present.
-        {
-            let spacing = pair_spacing;
-            let lateral = (position - 0.5) * PIANO_LATERAL_SPREAD_M;
-            let depth = pair_depth;
-            let arrival =
-                spacing * lateral / (SOUND_SPEED * sqrtf(lateral * lateral + depth * depth));
-            let samples = ((arrival.abs() * sample_rate) as usize).min(VOICE_DELAY - 1);
-            // Bass (lateral negative) reaches the LEFT microphone first, so
-            // the right one lags, and mirrored for the treble.
-            if arrival < 0.0 {
-                voice.pair_left = 0;
-                voice.pair_right = samples;
-            } else {
-                voice.pair_left = samples;
-                voice.pair_right = 0;
-            }
-        }
         // The glide is no longer scripted. It used to be a 28-step ramp of a
         // hand-set size; it now falls out of the tension law above, which
         // sharpens the string while it is displaced and lets it settle as the
@@ -4085,9 +4059,8 @@ impl Processor for ConcertGrand {
                 parameter_index += 1;
             }
 
-            let mut left = 0.0;
-            let mut right = 0.0;
             let mut strings_total = 0.0f32;
+            let mut bridge_drive = 0.0f32;
             for voice in &mut self.voices {
                 if !voice.active {
                     continue;
@@ -4106,17 +4079,21 @@ impl Processor for ConcertGrand {
                 let sample = voice.tick(sympathy);
                 voice.last_out = sample;
                 strings_total += sample;
-                // The spaced pair: one write, two reads. The nearer
-                // microphone hears this string first; the delay is geometry
-                // fixed at note-on, so there is nothing to interpolate.
-                voice.pair[voice.pair_write] = sample;
-                let left_tap =
-                    voice.pair[(voice.pair_write + VOICE_DELAY - voice.pair_left) % VOICE_DELAY];
-                let right_tap =
-                    voice.pair[(voice.pair_write + VOICE_DELAY - voice.pair_right) % VOICE_DELAY];
-                voice.pair_write = (voice.pair_write + 1) % VOICE_DELAY;
-                left += left_tap * voice.pan_left;
-                right += right_tap * voice.pan_right;
+                // What drives the BODY is the bridge. The strings used to
+                // pass through a per-voice "spaced pair" -- one write read at
+                // two delays, panned, then summed -- and that sum was this
+                // excitation. Summing two arrival times is a comb, and since
+                // NOTHING else ever read the pair's left and right (the
+                // output mix is built from the board, the lid and the room
+                // alone), the pair never made stereo: its entire audible
+                // output was that comb, deterministic per note. For B3 the
+                // first notch landed at ~2.7 kHz, on its eleventh partial --
+                // measured 5-8 dB of absolute loss across the upper ladder,
+                // and every note got its own notch pattern: the ragged,
+                // bell-like mid-register the ear reported as metallic. The
+                // machinery is gone; the pan weight stays so each string
+                // drives the board at the level the calibration expects.
+                bridge_drive += sample * (voice.pan_left + voice.pan_right);
 
                 voice.tension_in -= 1;
                 if voice.tension_in == 0 {
@@ -4133,7 +4110,7 @@ impl Processor for ConcertGrand {
 
             bridge_feed = strings_total;
             // Everything the strings produce radiates through the board.
-            let excitation = left + right;
+            let excitation = bridge_drive;
             let mut board_left = 0.0;
             let mut board_right = 0.0;
             for mode in self.board.iter_mut().take(self.board_count) {
@@ -5071,7 +5048,11 @@ mod tests {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(59);
-        let mut piano = prepared();
+        // At the RENDER's rate, not the harness's 16 kHz: the strike range,
+        // the felt corner and the partial count all depend on it, and one
+        // cross-rate comparison has already produced a wrong conclusion.
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(44_100.0, 512, 0, 2));
         render(&mut piano, 64, &[note_on(note, 110)]);
         let Some(voice) = piano.voices.iter().find(|v| v.active) else {
             return;
@@ -5104,6 +5085,106 @@ mod tests {
                 20.0 * (h / reference).max(1e-9).log10(),
                 20.0 * (bl / reference).max(1e-9).log10()
             );
+        }
+    }
+
+    /// The raw string sum, no body, no room, no pair: the voice ticked by
+    /// hand for 80 ms, Goertzel read at each partial. Run twice -- once with
+    /// the cull cadence (bridge drain, tension) and once without -- so the
+    /// drain's per-partial appetite is read directly.
+    #[test]
+    #[ignore]
+    fn ladder_rendered() {
+        let note: u8 = std::env::var("CG_NOTE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(59);
+        let rate = 44_100.0f32;
+        let frames = (rate * 0.08) as usize;
+        let f0_of = |piano: &ConcertGrand| {
+            let index = (note - LOW_NOTE) as usize;
+            (piano.fundamental[index], piano.inharmonicity[index])
+        };
+        let mut ladders: Vec<[f32; 14]> = Vec::new();
+        // Third pass: the naked sum PLUS the board bank in parallel, exactly
+        // as `staged` builds it -- the anti-resonances between board modes
+        // are the last un-ablated suspect for the per-note notch patchwork.
+        for pass in 0..3 {
+            let with_cull = pass == 1;
+            let with_board = pass == 2;
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.prepare(rate as f64, 512, 0, 2));
+            render(&mut piano, 64, &[note_on(note, 110)]);
+            let (f0, b) = f0_of(&piano);
+            let board_count = piano.board_count;
+            let mut board: Vec<BodyMode> = piano.board[..board_count].to_vec();
+            let Some(voice) = piano.voices.iter_mut().find(|v| v.active) else {
+                return;
+            };
+            // Goertzel accumulators per partial.
+            let mut coeffs = [[0.0f32; 3]; 14];
+            for (n, c) in coeffs.iter_mut().enumerate() {
+                let nf = (n + 1) as f32;
+                let w = core::f32::consts::TAU * nf * f0 * sqrtf(1.0 + b * nf * nf) / rate;
+                c[0] = 2.0 * w.cos();
+            }
+            let mut window_energy = [[0.0f32; 2]; 14];
+            let mut cull_in = CULL_INTERVAL;
+            let mut tension_in = TENSION_INTERVAL;
+            for frame in 0..frames {
+                let sample = voice.tick(0.0);
+                let mut mixed = sample;
+                if with_board {
+                    let mut board_sum = 0.0f32;
+                    for mode in board.iter_mut() {
+                        board_sum += mode.tick(sample);
+                    }
+                    mixed += board_sum * BOARD_MIX;
+                }
+                // Hann window so the read matches the wav measurements.
+                let hann =
+                    0.5 - 0.5 * (core::f32::consts::TAU * frame as f32 / frames as f32).cos();
+                let x = mixed * hann;
+                for (c, state) in coeffs.iter().zip(window_energy.iter_mut()) {
+                    let s = x + c[0] * state[0] - state[1];
+                    state[1] = state[0];
+                    state[0] = s;
+                }
+                if with_cull {
+                    tension_in -= 1;
+                    if tension_in == 0 {
+                        tension_in = TENSION_INTERVAL;
+                        voice.tension_step();
+                    }
+                    cull_in -= 1;
+                    if cull_in == 0 {
+                        cull_in = CULL_INTERVAL;
+                        let _ = voice.cull();
+                    }
+                }
+            }
+            let mut ladder = [0.0f32; 14];
+            for (n, (c, state)) in coeffs.iter().zip(window_energy.iter()).enumerate() {
+                let power = state[0] * state[0] + state[1] * state[1] - c[0] * state[0] * state[1];
+                ladder[n] = 10.0 * power.max(1e-24).log10();
+            }
+            let reference = ladder[0];
+            for value in &mut ladder {
+                *value -= reference;
+            }
+            ladders.push(ladder);
+        }
+        println!(
+            "{:>3} {:>10} {:>10} {:>10}",
+            "n", "sin drain", "con drain", "con tabla"
+        );
+        for (n, ((a, b), c)) in ladders[0]
+            .iter()
+            .zip(ladders[1].iter())
+            .zip(ladders[2].iter())
+            .enumerate()
+        {
+            println!("{:>3} {:>+10.1} {:>+10.1} {:>+10.1}", n + 1, a, b, c);
         }
     }
 
@@ -5473,52 +5554,6 @@ mod tests {
         assert!(
             fed > alone * 1.15,
             "the bridge fed nothing: alone {alone} vs under the bass {fed}"
-        );
-    }
-
-    #[test]
-    fn the_spaced_pair_hears_the_bass_on_the_left_first() {
-        // A spaced pair: the bass string is nearer the left microphone, so
-        // the right one lags; mirrored in the treble; and a coincident pair
-        // (Width at zero) hears no time difference at all.
-        let mut piano = prepared();
-        piano.set_parameter(PARAM_WIDTH, 0.8);
-        render(&mut piano, 64, &[note_on(24, 100)]);
-        let bass = piano
-            .voices
-            .iter()
-            .find(|v| v.active && !v.halo && v.note == 24)
-            .expect("bass voice");
-        assert_eq!(bass.pair_left, 0, "the bass reaches the left mic first");
-        assert!(bass.pair_right > 0, "the right mic must lag on a bass note");
-
-        render(&mut piano, 64, &[note_on(96, 100)]);
-        let treble = piano
-            .voices
-            .iter()
-            .find(|v| v.active && !v.halo && v.note == 96)
-            .expect("treble voice");
-        assert_eq!(
-            treble.pair_right, 0,
-            "the treble reaches the right mic first"
-        );
-        assert!(
-            treble.pair_left > 0,
-            "the left mic must lag on a treble note"
-        );
-
-        let mut coincident = prepared();
-        coincident.set_parameter(PARAM_WIDTH, 0.0);
-        render(&mut coincident, 64, &[note_on(24, 100)]);
-        let voice = coincident
-            .voices
-            .iter()
-            .find(|v| v.active && !v.halo && v.note == 24)
-            .expect("voice");
-        assert_eq!(
-            (voice.pair_left, voice.pair_right),
-            (0, 0),
-            "a coincident pair hears no time differences"
         );
     }
 

@@ -6070,6 +6070,91 @@ mod tests {
         // finger and the shared board, room and saturator are the only places
         // voices can interact. A single-note render cannot show an
         // intermodulation product; this can.
+        // CG_SEQUENCE plays notes one after another into a single file, so a
+        // listening test can compare one setting across the compass instead of
+        // asking someone to line up a dozen separate renders by hand.
+        if let Ok(spec) = std::env::var("CG_SEQUENCE") {
+            let mut piano = Box::new(ConcertGrand::default());
+            if let Ok(preset) = std::env::var("CG_PRESET") {
+                assert!(piano.load_preset(&preset), "unknown preset {preset}");
+            }
+            for (index, value) in &overrides {
+                assert!(
+                    piano.set_parameter(*index, *value),
+                    "param {index} rejected"
+                );
+            }
+            let rate: u32 = std::env::var("CG_RATE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(44_100);
+            assert!(piano.prepare(rate as f64, 512, 0, 2));
+            let velocity: u8 = std::env::var("CG_VEL")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(110);
+            // How long each note is held, and how long it is left to ring
+            // after the key comes up.
+            let hold = rate as usize * 5 / 2;
+            let release = rate as usize / 2;
+            let pedal = std::env::var("CG_PEDAL").is_ok();
+            let mut mono: Vec<i16> = Vec::new();
+            for (position, part) in spec.split(';').filter(|p| !p.is_empty()).enumerate() {
+                let notes: Vec<u8> = part
+                    .split(',')
+                    .filter(|p| !p.is_empty())
+                    .map(|p| p.trim().parse().unwrap())
+                    .collect();
+                let mut events: Vec<MidiEvent> = Vec::new();
+                if pedal && position == 0 {
+                    events.push(MidiEvent {
+                        frame: 0,
+                        data: [0xb0, 64, 127],
+                        length: 3,
+                    });
+                }
+                events.extend(notes.iter().map(|n| note_on(*n, velocity)));
+                let mut render =
+                    |events: &[MidiEvent], frames: usize| {
+                        let mut output = vec![0.0f32; frames * 2];
+                        piano.process(&[], &mut output, events, &[], frames as u32, 0, 2);
+                        mono.extend(
+                            output.as_chunks::<2>().0.iter().map(|f| {
+                                (((f[0] + f[1]) * 0.5).clamp(-1.0, 1.0) * 32_767.0) as i16
+                            }),
+                        );
+                    };
+                render(&events, hold);
+                let offs: Vec<MidiEvent> = notes
+                    .iter()
+                    .map(|n| MidiEvent {
+                        frame: 0,
+                        data: [0x80, *n, 64],
+                        length: 3,
+                    })
+                    .collect();
+                render(&offs, release);
+            }
+            let mut bytes = Vec::with_capacity(44 + mono.len() * 2);
+            let data_len = (mono.len() * 2) as u32;
+            bytes.extend(b"RIFF");
+            bytes.extend((36 + data_len).to_le_bytes());
+            bytes.extend(b"WAVEfmt ");
+            bytes.extend(16u32.to_le_bytes());
+            bytes.extend(1u16.to_le_bytes());
+            bytes.extend(1u16.to_le_bytes());
+            bytes.extend(rate.to_le_bytes());
+            bytes.extend((rate * 2).to_le_bytes());
+            bytes.extend(2u16.to_le_bytes());
+            bytes.extend(16u16.to_le_bytes());
+            bytes.extend(b"data");
+            bytes.extend(data_len.to_le_bytes());
+            for sample in &mono {
+                bytes.extend(sample.to_le_bytes());
+            }
+            std::fs::write(format!("{out}/sequence.wav"), bytes).unwrap();
+            return;
+        }
         if std::env::var("CG_CHORD").is_ok() {
             let mut piano = Box::new(ConcertGrand::default());
             if let Ok(preset) = std::env::var("CG_PRESET") {

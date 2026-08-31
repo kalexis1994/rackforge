@@ -592,6 +592,22 @@ const HF_FLOOR_SPAN: f32 = 4.0;
 /// mezzoforte and about half a millimetre fortissimo; this is where the force
 /// law is held fixed when the exponent moves.
 const FELT_REFERENCE_COMPRESSION_M: f32 = 0.0005;
+/// The scale's two joints and the equivalent gauges at them. See
+/// `string_length`: below F#3 the speaking length is derived from the gauge a
+/// solid steel wire would need, because the curve that used to run there
+/// implied wire up to 2.3 mm, which is not wire at all but a wrap.
+///
+/// F#3 and G2 as fractions of the compass; 3.55 mm is what the case's 1.9 m
+/// at A0 already implies, 1.40 mm is where piano wire ends and winding
+/// begins, and 1.29 mm is the old curve's own gauge at the join, so the two
+/// meet exactly. `GAUGE_CONSTANT` is sqrt(4T/(rho*pi))/2 at the nominal
+/// tension: L = GAUGE_CONSTANT/(f0*d).
+const SCALE_JOIN: f32 = 33.0 / 87.0;
+const SCALE_BREAK: f32 = 22.0 / 87.0;
+const GAUGE_A0_M: f32 = 3.553e-3;
+const GAUGE_BREAK_M: f32 = 1.40e-3;
+const GAUGE_JOIN_M: f32 = 1.2947e-3;
+const GAUGE_CONSTANT: f32 = 0.185_653_5;
 const FELT_EXPONENT_MIN: f32 = 1.2;
 const FELT_EXPONENT_MAX: f32 = 5.0;
 
@@ -2760,12 +2776,59 @@ impl ConcertGrand {
     /// case seven metres long. A pure geometric law from 2 m to 5 cm put C4
     /// at 0.38 m -- a real C4 speaks over 0.62 m -- which threw off both the
     /// derived linear density and the agraffe-reflection time that floors
-    /// the hammer contact. Quadratic in log-length through measured anchors:
-    /// A0 1.9 m, C2 ~1.3, C4 0.62, C6 0.19, C8 5.2 cm.
-    /// A speaking length in metres: 1.9 m at A0 down to 5 cm at the top of a
-    /// concert grand's scale, scaled by the instrument's size.
+    /// A speaking length in metres, scaled by the instrument's size.
+    ///
+    /// From F#3 up this is the quadratic in log-length the scale has always
+    /// used, through its measured anchors -- A0 1.9 m, C4 0.62, C6 0.19, C8
+    /// 5.2 cm -- and those lengths are right. Below F#3 it is derived instead,
+    /// because that stretch was not.
+    ///
+    /// The test that catches it needs no maker's scale table, only the wire.
+    /// Holding pitch at length L under tension T forces the linear density,
+    /// mu = T/(2 L f0)^2, and so the diameter of the solid steel wire that
+    /// would weigh that much. Run over the old curve, that diameter comes out
+    /// 1.15 mm at C4 and 0.82 at C7 -- real gauges -- and then 1.49 mm at C3,
+    /// 1.61 at A2, 1.85 at E2, 2.30 at A1. Piano wire stops at about 1.4 mm;
+    /// past that a string is wound instead. So the old curve had its wound
+    /// section reaching up to about D#3, where a concert grand's plain wire
+    /// starts around G2, and every string between carried the mass of a wrap
+    /// it should not have had.
+    ///
+    /// The reference recording says the same thing from a second direction.
+    /// For a plain string the same substitution turns B = pi^3 E d^4/(64 T
+    /// L^2) into B = pi E T/(4 rho^2 (2 L f0)^4 L^2), which inverts for L, and
+    /// the estimator recovers this model's own inharmonicity to within 1% when
+    /// pointed at its own renders. Pointed at the YDP, C3 and A3 -- the notes
+    /// with enough clean partials to fit -- give 1.26 m and 0.87 m against the
+    /// old curve's 0.95 and 0.69. The model's inharmonicity CURVE already
+    /// agreed with the reference at those notes; only its geometry did not,
+    /// and the two never had to meet because B is drawn rather than derived.
+    ///
+    /// So below the join the equivalent gauge carries the scale instead: 3.55
+    /// mm at A0, where the case fixes the length, geometric down to 1.40 mm at
+    /// G2 where the wrap gives out, then geometric again to meet the old curve
+    /// exactly at F#3. The result is monotonic, anchors A0 unmoved, leaves
+    /// everything from F#3 up bit for bit as it was, and lengthens the tenor
+    /// by 10 to 22 percent.
+    ///
+    /// The tension used here is the scale's nominal one, not the fader's: this
+    /// is the instrument's geometry, and String Tension moves what is strung
+    /// on it, not how long it is.
     fn string_length(&self, position: f32) -> f32 {
-        expf(0.642 - (1.61 + 1.99 * position) * position) * self.controls.scale_at(position)
+        let base = if position >= SCALE_JOIN {
+            expf(0.642 - (1.61 + 1.99 * position) * position)
+        } else {
+            let f0 = 440.0 * powf(2.0, (87.0 * position - 48.0) / 12.0);
+            let gauge = if position >= SCALE_BREAK {
+                let t = (position - SCALE_BREAK) / (SCALE_JOIN - SCALE_BREAK);
+                GAUGE_BREAK_M * powf(GAUGE_JOIN_M / GAUGE_BREAK_M, t)
+            } else {
+                let t = position / SCALE_BREAK;
+                GAUGE_A0_M * powf(GAUGE_BREAK_M / GAUGE_A0_M, t)
+            };
+            GAUGE_CONSTANT / (f0 * gauge)
+        };
+        base * self.controls.scale_at(position)
     }
 
     fn strike_point(&self, note: u8) -> f32 {

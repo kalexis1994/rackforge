@@ -66,6 +66,34 @@ struct ProcessorInner {
     pending_state: Vec<u8>,
 }
 
+impl ProcessorInner {
+    /// Drop the engines, keeping what they hold.
+    ///
+    /// Reactivation restores `pending_state`, and `pending_state` was only ever
+    /// written by `setState` -- which a host calls when it loads a project, not
+    /// when a fader moves. Everything the player touched after that lived
+    /// solely inside the engine, so clearing the engines threw it away and the
+    /// next activation brought back the values the project was opened with.
+    ///
+    /// Both places that tear the engines down are on the path a host walks to
+    /// render offline: it deactivates, calls `setupProcessing` for the export's
+    /// rate and block size, and activates again. The bounce itself still came
+    /// out right, because the host knows the parameter values -- `performEdit`
+    /// told it -- and replays them into `process`; what did not survive was the
+    /// instrument's own state, so afterwards the panel drew the positions the
+    /// player had left while the engine underneath held the project's old ones.
+    /// Reported from FL Studio as faders whose value had reset without moving.
+    fn stash_and_clear(&mut self) {
+        let active = self.active_engine;
+        if let Some(engine) = self.engines.get_mut(active)
+            && let Ok(state) = engine.save_state()
+        {
+            self.pending_state = state;
+        }
+        self.engines.clear();
+    }
+}
+
 struct RackForgeProcessor {
     inner: Mutex<ProcessorInner>,
     level: AtomicU64,
@@ -195,7 +223,7 @@ impl IComponentTrait for RackForgeProcessor {
             return kInternalError;
         };
         if active == 0 {
-            inner.engines.clear();
+            inner.stash_and_clear();
             return kResultOk;
         }
         if inner.engines.is_empty() {
@@ -346,7 +374,10 @@ impl IAudioProcessorTrait for RackForgeProcessor {
         };
         inner.sample_rate = setup.sampleRate;
         inner.maximum_frames = setup.maxSamplesPerBlock as usize;
-        inner.engines.clear();
+        // The rate and block size change for an offline render, and the
+        // engines have to be rebuilt for them -- but not emptied of what the
+        // player put in.
+        inner.stash_and_clear();
         kResultOk
     }
 

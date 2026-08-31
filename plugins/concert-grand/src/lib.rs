@@ -3107,14 +3107,21 @@ impl ConcertGrand {
                 // move.
                 //
                 // Measured after: the fader is live from about 0.35 to 1.00,
-                // against 0.28 to 0.545 before. It is NOT live below 0.35,
-                // and that wall is a different mechanism: soften the felt far
-                // enough and the integration falls under `RECIPE_FLOOR`, so
-                // the calibrated recipe holds the level up and no amount of
-                // further softening darkens the note. That floor is
-                // deliberate and has been measured worth keeping, so the
-                // bottom of this fader stays honest about the model's limit
-                // rather than being rescaled to hide it.
+                // against 0.28 to 0.545 before. It is NOT live below 0.35 --
+                // C4 renders bit for bit the same at 0.00 and at 0.20, where
+                // the exponent is 1.20 and 2.37 -- and that wall is NOT this
+                // mapping. It is downstream of the exponent and it is not yet
+                // identified.
+                //
+                // It is specifically NOT the calibrated recipe holding the
+                // level up, which is what a first pass here claimed:
+                // `RECIPE_FLOOR` is 0.0 and `SIM_MODES` equals `MAX_PARTIALS`,
+                // so wherever the integration runs it replaces the recipe
+                // outright and the recipe floors nothing. The likeliest
+                // remaining suspect is the contact itself -- soften the felt
+                // enough and the hammer never separates, which this model is
+                // already known not to do -- but that is a guess and is
+                // written here as one.
                 let house = (3.2 + 1.8 * position)
                     * EXPONENT_AT_HOUSE
                     * powf(256.0, HOUSE_FELT_CORNER - 0.5);
@@ -6031,12 +6038,26 @@ mod tests {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(110);
-            let chord: Vec<_> = std::env::var("CG_CHORD")
-                .unwrap()
-                .split(',')
-                .filter(|p| !p.is_empty())
-                .map(|p| note_on(p.trim().parse().unwrap(), chord_velocity))
-                .collect();
+            // CG_PEDAL puts the sustain pedal down before the chord. Anything
+            // sympathetic -- the undamped bank, the open top octave, the halo
+            // shadows -- is designed to do nothing without it, so measuring
+            // those with the pedal up measures the one condition where they
+            // are meant to be silent.
+            let mut chord: Vec<MidiEvent> = Vec::new();
+            if std::env::var("CG_PEDAL").is_ok() {
+                chord.push(MidiEvent {
+                    frame: 0,
+                    data: [0xb0, 64, 127],
+                    length: 3,
+                });
+            }
+            chord.extend(
+                std::env::var("CG_CHORD")
+                    .unwrap()
+                    .split(',')
+                    .filter(|p| !p.is_empty())
+                    .map(|p| note_on(p.trim().parse().unwrap(), chord_velocity)),
+            );
             let frames = rate as usize * 5;
             let mut output = vec![0.0f32; frames * 2];
             piano.process(&[], &mut output, &chord, &[], frames as u32, 0, 2);

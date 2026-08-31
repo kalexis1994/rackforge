@@ -600,6 +600,29 @@ impl BodyMode {
 /// products, the board's own modes rung by the strike, and unisons beating.
 /// This model has versions of several of those and they contribute under a
 /// decibel each.
+///
+/// One mechanism was built and rejected, and it is written down so it is not
+/// built again the same way. What the bridge feels is the string's transverse
+/// force at its termination, and that force does not fade in: the wave the
+/// hammer launched arrives as a step, and a step is broadband, and it rings
+/// the board's modes FREELY -- at the board's frequencies rather than the
+/// note's. Injecting that pulse into the bridge, shaped as two exponentials
+/// with a rise set by the wire's dispersion rather than by the contact time,
+/// filled the floor evenly across every band and improved BOTH independent
+/// criteria at once: the floor's error against the reference fell from 21.7 to
+/// 6.4 dB rms, and the chromatic cost from 1025 to 904 -- a hundred and twenty
+/// points, where the rest of this branch fought for two or three at a time.
+///
+/// It was still wrong. The user heard a click at the start of every note and
+/// it was cut back to nothing. A broadband transient delivered in one impulse
+/// IS a click; a real piano's bed arrives spread across the first
+/// milliseconds, smeared by dispersion and by the board's own response, not
+/// concentrated at the onset. The deficit is real and the mechanism is the
+/// right one -- what is missing is that the energy has to arrive over time.
+///
+/// Which is the third time in one sitting that a measurable improvement was
+/// overruled by listening, after the Impact Burst and the shank knock's fixed
+/// pitch. Two agreeing metrics are not a verdict.
 const KNOCK_LEVEL: f32 = 0.028;
 
 /// The soundboard's modal loss factor.

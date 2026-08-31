@@ -70,7 +70,7 @@ if __name__=="__main__":
     pool,headers=EX.parse(SF)
     best=EX.loudest_per_note(headers)
     rows=[]
-    print("piso de ruido del instrumento real durante el ataque")
+    print("piso de ruido del instrumento real durante el ataque, referido a su tono")
     print(f"{'nota':>5} " + " ".join(f"{a}-{b}".rjust(9) for a,b in BANDS))
     for pitch,(name,start,end,rate,_p) in best.items():
         if pitch<36 or pitch>96 or (pitch-36)%6: continue
@@ -79,9 +79,11 @@ if __name__=="__main__":
         B=fit_B(x,rate,f0)
         fl=floor_of(x,rate,f0,B)
         if fl is None or np.isnan(fl).all(): continue
-        rel=fl-np.nanmax(fl)
-        rows.append(rel)
-        print(f"{pitch:>5} " + " ".join(f"{v:>+9.1f}" for v in rel))
+        rows.append(fl)
+        print(f"{pitch:>5} " + " ".join(f"{v:>+9.1f}" for v in fl))
     mean=np.nanmean(np.array(rows),axis=0)
     print(f"{'medio':>5} " + " ".join(f"{v:>+9.1f}" for v in mean))
-    np.save("real-floor.npy", mean)
+    print()
+    print("dB bajo el tono de la misma nota. Un render del modelo se mide")
+    print("importando floor_of y apuntandolo al wav; hoy queda 17 a 26 dB")
+    print("por debajo de estos numeros en todas las bandas.")

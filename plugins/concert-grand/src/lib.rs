@@ -5062,6 +5062,51 @@ mod tests {
         }
     }
 
+    /// The initial per-partial state of one note's voice: what the strike
+    /// assigned, before a single sample renders. CG_NOTE picks the note.
+    #[test]
+    #[ignore]
+    fn voice_ladder() {
+        let note: u8 = std::env::var("CG_NOTE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(59);
+        let mut piano = prepared();
+        render(&mut piano, 64, &[note_on(note, 110)]);
+        let Some(voice) = piano.voices.iter().find(|v| v.active) else {
+            return;
+        };
+        let rate = 44_100.0f32;
+        println!(
+            "{:>3} {:>8} {:>9} {:>9} {:>9}",
+            "i", "f(Hz)", "verts", "horiz", "bloom"
+        );
+        let mut rows: Vec<(f32, f32, f32, f32)> = Vec::new();
+        for partial in &voice.partials[..voice.partial_count] {
+            let frequency =
+                partial.rs[0].atan2(partial.rc[0]).abs() * rate / core::f32::consts::TAU;
+            let mut verts = 0.0f32;
+            for lane in 0..3 {
+                verts += partial.s[lane] * partial.s[lane] + partial.c[lane] * partial.c[lane];
+            }
+            let horiz = partial.s[3] * partial.s[3] + partial.c[3] * partial.c[3];
+            let bloom = partial.s[4] * partial.s[4] + partial.c[4] * partial.c[4];
+            rows.push((frequency, sqrtf(verts), sqrtf(horiz), sqrtf(bloom)));
+        }
+        rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let reference = rows.iter().map(|r| r.1).fold(0.0f32, f32::max).max(1e-12);
+        for (i, (f, v, h, bl)) in rows.iter().enumerate().take(24) {
+            println!(
+                "{:>3} {:>8.0} {:>+9.1} {:>+9.1} {:>+9.1}",
+                i + 1,
+                f,
+                20.0 * (v / reference).max(1e-9).log10(),
+                20.0 * (h / reference).max(1e-9).log10(),
+                20.0 * (bl / reference).max(1e-9).log10()
+            );
+        }
+    }
+
     /// Does the strike leave the string with VELOCITY or with DISPLACEMENT?
     ///
     /// A finger releases a string from a static shape: position, no velocity.
@@ -5221,11 +5266,20 @@ mod tests {
             let frames = rate as usize * 5;
             let mut output = vec![0.0f32; frames * 2];
             piano.process(&[], &mut output, &chord, &[], frames as u32, 0, 2);
+            // CG_LEFT writes the left channel alone. The mono sum folds the
+            // spaced pair into a comb -- measured on B3, specific partials
+            // read up to 16 dB off through it -- so any per-partial
+            // measurement wants one channel, not the sum. The fit's band
+            // measures are wide enough to survive the comb; ladders are not.
+            let left_only = std::env::var("CG_LEFT").is_ok();
             let mono: Vec<i16> = output
                 .as_chunks::<2>()
                 .0
                 .iter()
-                .map(|f| (((f[0] + f[1]) * 0.5).clamp(-1.0, 1.0) * 32_767.0) as i16)
+                .map(|f| {
+                    let v = if left_only { f[0] } else { (f[0] + f[1]) * 0.5 };
+                    (v.clamp(-1.0, 1.0) * 32_767.0) as i16
+                })
                 .collect();
             let mut bytes = Vec::with_capacity(44 + mono.len() * 2);
             let data_len = (mono.len() * 2) as u32;

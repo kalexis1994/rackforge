@@ -574,6 +574,32 @@ impl BodyMode {
 /// comparable. Normalised against one of its own bands instead, an ablation
 /// that empties that band lifts every other one by contrast -- which is how
 /// three separate readings in this model's history came out backwards.
+///
+/// The reference's floor is the PIANO, not the recording: measured absolutely
+/// in 640 Hz to 5 kHz it falls 52 to 62 dB between the attack and six seconds
+/// in, so what the attack window sees is fifty decibels clear of the room and
+/// the microphones.
+///
+/// And ablation says where the model's is missing. Removing each source in
+/// turn and reading the same floor:
+///
+/// ```text
+///                160-320  320-640  640-1250  1250-2500  2500-5000
+///   action noise   -12.9     -1.0     -1.2      -0.6       -1.1
+///   thud            -10.6    -0.0     -0.0      +0.0       +0.0
+///   impact           0.0     -0.0     +0.0      -0.0       +0.0
+///   phantoms        -0.0     -0.0     -0.2      -0.5       -0.5
+///   clang           -0.0     -0.0     +0.0      +0.1       -0.3
+/// ```
+///
+/// Above 320 Hz nothing in this instrument puts anything between the partials.
+/// Turning every noise source off moves the floor by about a decibel, so what
+/// sits there is the skirts of the tonal lines and not broadband content at
+/// all. A sum of exactly harmonic partials cannot have energy between them by
+/// construction; a real piano's comes from inharmonic spread, longitudinal
+/// products, the board's own modes rung by the strike, and unisons beating.
+/// This model has versions of several of those and they contribute under a
+/// decibel each.
 const KNOCK_LEVEL: f32 = 0.028;
 
 /// The soundboard's modal loss factor.

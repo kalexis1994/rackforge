@@ -2125,6 +2125,7 @@ fn simulate_strike(
     // law).
     let history_keep = expf(-dt / stulov_tau);
     let mut history = 0.0f32;
+
     #[cfg_attr(not(test), allow(unused_variables))]
     for step in 0..steps {
         let mut string_y = 0.0;
@@ -5537,6 +5538,112 @@ mod tests {
     /// the contact time the model asks for. A hammer that leaves in a
     /// fraction of the intended time is a small hard one, whatever its
     /// nominal mass says.
+    /// How much the contact SHORTENS when the blow gets harder, which is the
+    /// half of touch the absolute contact time does not capture.
+    ///
+    /// For a power-law felt the contact goes as v^((1-p)/(1+p)), so this ratio
+    /// is the felt's signature. Measured on the reference the instrument is
+    /// calibrated against, it wants about 0.38 from velocity 60 to 127 at
+    /// every pitch; the model gives 0.53 in the bass and 0.70 in the middle,
+    /// far too flat, even though its own exponent implies 0.42.
+    ///
+    /// CG_TAU and CG_EPS drive Stulov's hereditary parameters, CG_KMUL the
+    /// felt stiffness and CG_PARAMS the panel, so the sweep can find what
+    /// flattens it. WHAT IT FOUND, so nobody re-runs these:
+    ///
+    /// - Stulov's relaxation time does nothing. From 0.2 ms to 4 ms, twenty
+    ///   times, the ratio sits at 0.78 / 0.70 / 0.61 and does not budge. The
+    ///   comment on `history_keep` reasons that a fortissimo pulse should ride
+    ///   the unrelaxed felt while a pianissimo one sinks into the relaxed
+    ///   felt; measured, no value of tau produces that.
+    /// - The felt EXPONENT barely does either. Driven at constant force from
+    ///   4.3 to 5.0, C3 moves 0.776 to 0.760, where the power law says 0.42 to
+    ///   0.39. The model does not obey its own force law.
+    /// - Nor does the felt's STIFFNESS. Multiplied by a THOUSAND the absolute
+    ///   times fall, as they must, and the ratio still sits at 0.71 to 0.88.
+    /// - And the long tail is not the missing brightness. Ending the contact
+    ///   at 30% of peak force -- five of A0's six and a half milliseconds sit
+    ///   under half the peak -- buys 1.1 dB in the attack's 4-8 kHz and costs
+    ///   2 dB of midrange surplus and six of bass.
+    ///
+    /// What that leaves: across the whole space the felt can reach, the
+    /// contact duration is set by the STRING and the hammer's mass, not by the
+    /// felt, so it cannot shorten with velocity the way a real one's does. The
+    /// note on `HAMMER_MASS_SCALE` reached the same place from the other
+    /// direction -- lightening the hammer fifty-fold makes the times land and
+    /// starves the tone -- and momentum forbids the obvious escape, since a
+    /// fiftyfold lighter hammer would need to arrive at 300 m/s to deliver the
+    /// same blow.
+    ///
+    /// One measurable discrepancy does sit underneath, unexplored: the tenor's
+    /// speaking lengths. A0 and C4 and C5 land on a real concert grand's scale
+    /// (1.90 m, 0.62, 0.37), but C3 comes out at 0.95 m where a real one is
+    /// about 1.15, and mu goes as 1/L^2, so that string carries close to twice
+    /// the mass it should -- straight into the ratio that decides this.
+    #[test]
+    #[ignore]
+    fn how_hard_the_blow_matters() {
+        let taus: Vec<f32> = std::env::var("CG_TAU")
+            .map(|v| v.split(',').map(|p| p.trim().parse().unwrap()).collect())
+            .unwrap_or_else(|_| vec![2.0e-4]);
+        let epsilon: f32 = std::env::var("CG_EPS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.5);
+        println!(
+            "{:>9} {:>5} {:>10} {:>10} {:>9} {:>9} {:>7}",
+            "tau ms", "nota", "pp sim", "ff sim", "razon", "pedida", "error"
+        );
+        for tau in taus {
+            for note in [21u8, 36, 48, 60, 72] {
+                let mut times = [0.0f32; 2];
+                let mut asked = [0.0f32; 2];
+                for (slot, velocity) in [60u8, 127].into_iter().enumerate() {
+                    *SWEEP_OVERRIDE.lock().unwrap() = Some(SweepOverride {
+                        epsilon,
+                        tau,
+                        comb: COMB_FLOOR,
+                        width_mul: 1.0,
+                        k_mul: std::env::var("CG_KMUL")
+                            .ok()
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(1.0),
+                    });
+                    CONTACT_STEPS.store(0, core::sync::atomic::Ordering::Relaxed);
+                    let mut piano = prepared();
+                    for part in std::env::var("CG_PARAMS")
+                        .unwrap_or_default()
+                        .split(',')
+                        .filter(|p| !p.is_empty())
+                    {
+                        let (index, value) = part.split_once('=').expect("index=value");
+                        assert!(piano.set_parameter(
+                            index.trim().parse().unwrap(),
+                            value.trim().parse().unwrap()
+                        ));
+                    }
+                    render(&mut piano, 128, &[note_on(note, velocity)]);
+                    let steps = CONTACT_STEPS.load(core::sync::atomic::Ordering::Relaxed);
+                    times[slot] = steps as f32 * 4.0e-6 * 1000.0;
+                    asked[slot] = piano.contact_time(note, velocity as f32 / 127.0) * 1000.0;
+                    *SWEEP_OVERRIDE.lock().unwrap() = None;
+                }
+                if times[0] <= 0.0 {
+                    continue;
+                }
+                let got = times[1] / times[0];
+                let want = asked[1] / asked[0];
+                println!(
+                    "{:>9.2} {note:>5} {:>7.2} ms {:>7.2} ms {got:>9.3} {want:>9.3} {:>+7.1}%",
+                    tau * 1000.0,
+                    times[0],
+                    times[1],
+                    (got / want - 1.0) * 100.0
+                );
+            }
+        }
+    }
+
     #[test]
     #[ignore]
     fn how_long_the_hammer_stays() {

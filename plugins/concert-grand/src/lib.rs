@@ -281,7 +281,20 @@ const PARAM_BOARD_DENSITY: u32 = 32;
 /// stretch. A grand at 2.7 m and an upright at 1.2 m differ by about thirty
 /// times in bass inharmonicity, and that ratio is what this reproduces.
 const PARAM_SIZE: u32 = 33;
-const PARAM_COUNT: usize = 6 + LAB_COUNT + 11;
+/// Where the hammer meets the string, as a fraction of the speaking length.
+///
+/// The comb it produces is one of the loudest facts about a piano's timbre:
+/// the partial with a node at the strike point is suppressed, and its
+/// neighbours with it. Real actions land between about 1/7 and 1/10, and a
+/// voicer moving the action is moving THIS.
+const PARAM_STRIKE_POINT: u32 = 34;
+/// The scale's tension, the other half of its design.
+///
+/// Length and tension together fix every string's linear density, so this
+/// moves the wire's thickness at constant pitch -- and with it the stiffness,
+/// which is why inharmonicity rises with tension.
+const PARAM_TENSION: u32 = 35;
+const PARAM_COUNT: usize = 6 + LAB_COUNT + 13;
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
 /// entries are pre-scaled by the per-sample decay factor `g`, so magnitude
@@ -1280,6 +1293,10 @@ struct Controls {
     board_density: f32,
     /// The scale's overall length. Centre is the calibrated concert grand.
     size: f32,
+    /// The action's strike point and the scale's tension: the rest of the
+    /// instrument's design, centred on the calibrated one.
+    strike_point: f32,
+    tension: f32,
 }
 
 impl Default for Controls {
@@ -1315,6 +1332,8 @@ impl Default for Controls {
             board_damping: 0.5,
             board_density: 0.5,
             size: 0.5,
+            strike_point: 0.5,
+            tension: 0.5,
         }
     }
 }
@@ -1358,6 +1377,19 @@ impl Controls {
         powf(2.4, self.size - 0.5)
     }
 
+    /// The strike point as a multiple of the calibrated action's. The travel
+    /// spans roughly 1/11 to 1/6 of the speaking length, which brackets what
+    /// real actions are regulated to.
+    fn strike_ratio(&self) -> f32 {
+        powf(1.9, self.strike_point - 0.5)
+    }
+
+    /// The scale's tension in newtons. Piano scales hold 600 to 900 N per
+    /// string; the travel covers that and a little either side.
+    fn tension_newtons(&self) -> f32 {
+        STRING_TENSION_N * powf(2.0, self.tension - 0.5)
+    }
+
     fn lab(&self, i: usize) -> f32 {
         // The bottom of the travel is off, not a quarter. Mapping the whole
         // range to x0.25..x4 meant a control could never remove what it
@@ -1399,6 +1431,8 @@ impl Controls {
             PARAM_BOARD_DAMPING => self.board_damping,
             PARAM_BOARD_DENSITY => self.board_density,
             PARAM_SIZE => self.size,
+            PARAM_STRIKE_POINT => self.strike_point,
+            PARAM_TENSION => self.tension,
             _ => return None,
         };
         Some(value as f64)
@@ -1428,6 +1462,8 @@ impl Controls {
             PARAM_BOARD_DAMPING => self.board_damping = value,
             PARAM_BOARD_DENSITY => self.board_density = value,
             PARAM_SIZE => self.size = value,
+            PARAM_STRIKE_POINT => self.strike_point = value,
+            PARAM_TENSION => self.tension = value,
             // (the engine watches the room and the board through their
             // dirty flags -- both are rebuilds, not per-sample reads)
             _ => return false,
@@ -2022,9 +2058,13 @@ impl ConcertGrand {
     fn inharmonicity_for(&self, note: u8) -> f32 {
         let n = note as f32;
         let exponent = -3.95 + 4.9e-4 * (n - 45.0) * (n - 45.0);
+        // B goes as T/L^6: the length exponent above, and tension linearly,
+        // because a tighter scale needs a thicker wire (d ~ sqrt(T)) and
+        // stiffness follows d^4 while the restoring tension follows T.
         let scale = self.controls.scale_length();
         let square = scale * scale;
-        powf(10.0, exponent) / (square * square * square)
+        let tension = self.controls.tension_newtons() / STRING_TENSION_N;
+        powf(10.0, exponent) * tension / (square * square * square)
     }
 
     /// Tunes the instrument the way a tuner does: A4 = 440, octave anchors
@@ -2531,7 +2571,7 @@ impl ConcertGrand {
         expf(0.642 - (1.61 + 1.99 * position) * position) * self.controls.scale_length()
     }
 
-    fn strike_point(note: u8) -> f32 {
+    fn strike_point(&self, note: u8) -> f32 {
         let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
         // Flat at one eighth through the bass, where a real action strikes,
         // and moving toward the bridge only in the upper half.
@@ -2543,7 +2583,7 @@ impl ConcertGrand {
         // 30.8 and the ninth at 48.3: the hole in the middle of the harmonics
         // that makes the note sound like a thinner string.
         let upper = (position - 0.35).max(0.0) / 0.65;
-        let base = 1.0 / (8.0 + 8.0 * upper * upper);
+        let base = 1.0 / (8.0 + 8.0 * upper * upper) * self.controls.strike_ratio();
         #[cfg(test)]
         if let Ok(scale) = std::env::var("CG_X0_SCALE")
             && let Ok(scale) = scale.parse::<f32>()
@@ -2628,7 +2668,7 @@ impl ConcertGrand {
 
         let f0 = self.fundamental[index];
         let b = self.inharmonicity[index];
-        let x0 = Self::strike_point(note);
+        let x0 = self.strike_point(note);
         let width = Self::hammer_width(note);
         let nyquist = 0.47 * self.sample_rate;
         // A piano's ladder is spent long before nyquist: past ~11 kHz the
@@ -2837,7 +2877,8 @@ impl ConcertGrand {
                 // left alone. The contact time is an OUTCOME.
                 let length = self.string_length(position);
                 let wave_speed = 2.0 * length * f0;
-                let string_mass = STRING_TENSION_N / (wave_speed * wave_speed) * length;
+                let string_mass =
+                    self.controls.tension_newtons() / (wave_speed * wave_speed) * length;
                 // A0 to ~E1 single-strung, doubled through the wound bass,
                 // three from ~C2 -- the same stringing the unison uses.
                 let strings_struck = 1.0
@@ -4032,7 +4073,7 @@ impl Processor for ConcertGrand {
             // while the slider moves.
             self.room_dirty = true;
         }
-        if accepted && index == PARAM_SIZE {
+        if accepted && (index == PARAM_SIZE || index == PARAM_TENSION) {
             // Size moves every speaking length, so the whole scale is
             // re-derived: densities, inharmonicity and the stretch that
             // follows from it. A retune, not a multiplier.
@@ -4120,6 +4161,8 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 8] = self.controls.board_damping;
         values[6 + LAB_COUNT + 9] = self.controls.board_density;
         values[6 + LAB_COUNT + 10] = self.controls.size;
+        values[6 + LAB_COUNT + 11] = self.controls.strike_point;
+        values[6 + LAB_COUNT + 12] = self.controls.tension;
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -4165,6 +4208,8 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 8] = defaults.board_damping;
         values[6 + LAB_COUNT + 9] = defaults.board_density;
         values[6 + LAB_COUNT + 10] = defaults.size;
+        values[6 + LAB_COUNT + 11] = defaults.strike_point;
+        values[6 + LAB_COUNT + 12] = defaults.tension;
         // A 37-float state is from the era of the "in bass" tilt twins: its
         // tail is tilt values, not room values, and reading it into the room
         // controls would set the hall from leftovers. Take its head only.
@@ -4205,6 +4250,8 @@ impl Processor for ConcertGrand {
             board_damping: values[6 + LAB_COUNT + 8],
             board_density: values[6 + LAB_COUNT + 9],
             size: values[6 + LAB_COUNT + 10],
+            strike_point: values[6 + LAB_COUNT + 11],
+            tension: values[6 + LAB_COUNT + 12],
         };
         self.room_dirty = true;
         self.board_dirty = true;
@@ -4626,7 +4673,8 @@ mod tests {
     fn the_strike_point_comb_suppresses_its_partial() {
         // The hammer strikes near 1/8 in the bass, so partials with a node
         // there — around n=8 — must come out well below their neighbours.
-        let x0 = ConcertGrand::strike_point(21);
+        let piano = prepared();
+        let x0 = piano.strike_point(21);
         let comb = |n: f32| sincosf(core::f32::consts::PI * n * x0).0.abs();
         let null = (1.0 / x0).round();
         assert!(comb(null) < 0.25 * comb(null - 2.0));
@@ -4643,7 +4691,7 @@ mod tests {
             let index = (note - LOW_NOTE) as usize;
             let f0 = piano.fundamental[index];
             let b = piano.inharmonicity[index];
-            let x0 = ConcertGrand::strike_point(note);
+            let x0 = piano.strike_point(note);
             // The same felt low-pass the model applies at note-on.
             let cutoff = ((2.4 / piano.contact_time(note, velocity)) * 1.25).max(1.5 * f0);
             let mut weighted = 0.0;

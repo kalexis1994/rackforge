@@ -550,6 +550,30 @@ impl BodyMode {
 /// the taper with `chiff` pinned to its 4.0 ceiling at the top three anchors
 /// and still could not reach. Flat here, with the level set by measurement;
 /// the per-note column carries the shape from there.
+///
+/// STILL TOO CLEAN, and now measured band by band. `tools/measure-attack-floor.py`
+/// masks the bins that belong to a partial -- their frequencies follow from f0
+/// and a B fitted off the recording itself -- takes the median of what is left,
+/// and refers it to the tonal energy of the same note, so model and reference
+/// stand on one scale. Averaged over ten notes from F#2 to C7:
+///
+/// ```text
+///            160-320  320-640  640-1250  1250-2500  2500-5000  5000-10k
+///   real      -26.0    -25.8    -29.8      -33.0      -41.4      -51.4
+///   model     -52.2    -51.9    -50.0      -50.4      -60.1      -71.3
+/// ```
+///
+/// Seventeen to twenty-six decibels short in every band. Normalised to its own
+/// 160-320 the model's floor is also 3 to 7 dB too BRIGHT above 640 Hz, and
+/// that part improved when the user cut Click Colour by ear: the shape's error
+/// against the reference fell from 6.9 to 4.3 dB rms between 0.32 and 0.07.
+/// The note on `Controls::default` claiming no measurement could see that
+/// control is wrong, and this is the measurement that can.
+///
+/// Referring the floor to the note's own tone is what makes any of it
+/// comparable. Normalised against one of its own bands instead, an ablation
+/// that empties that band lifts every other one by contrast -- which is how
+/// three separate readings in this model's history came out backwards.
 const KNOCK_LEVEL: f32 = 0.028;
 
 /// The soundboard's modal loss factor.

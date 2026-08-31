@@ -570,6 +570,19 @@ const KNOCK_LEVEL: f32 = 0.028;
 /// a struck string with no resonating plate behind it.
 const BOARD_LOSS_FACTOR: f32 = 0.023;
 
+/// The felt exponent's physical range. Outside it the hammer integration
+/// stops describing felt: below, the force law is too soft to separate the
+/// hammer at all; above, x^p collapses at the half-millimetre a real hammer
+/// compresses and the contact vanishes. Chabassier et al. measure 1.5 in the
+/// bass to 3.5 in the treble, and the model's own house curve runs a little
+/// above that; these are the bounds the integration was calibrated inside.
+/// Where Felt Corner ships. Not 0.5: the panel's declared default is 0.52,
+/// and the exponent mapping is anchored HERE so the factory voicing is
+/// unchanged by the remapping.
+const HOUSE_FELT_CORNER: f32 = 0.52;
+const FELT_EXPONENT_MIN: f32 = 1.2;
+const FELT_EXPONENT_MAX: f32 = 5.0;
+
 /// Amplitude T60 of a board mode: `ln(10^3) / (π·f·η)`.
 fn board_t60(frequency: f32, loss: f32) -> f32 {
     6.907_755 / (core::f32::consts::PI * frequency * loss)
@@ -1489,6 +1502,26 @@ impl Controls {
     /// hard and new and shuts the string dead.
     fn damper_grip(&self) -> f32 {
         powf(3.0, self.damper - 0.5)
+    }
+
+    /// Felt Corner as signed travel from centre: -1 at the bottom of the
+    /// fader, 0 at the house voicing, +1 at the top. See the exponent it
+    /// drives -- the fader's own lab curve cannot be used there because it
+    /// spans sixteen times the range the exponent has room for.
+    fn felt_corner_travel(&self) -> f32 {
+        let offset = self.lab[0] - HOUSE_FELT_CORNER;
+        // The two sides are not the same length, because the house voicing
+        // does not sit at the middle of the fader. Anchoring this at 0.5
+        // instead moved the factory instrument -- caught by the chromatic
+        // cost, which went from 995.42 to 1015.31 on a change that was
+        // supposed to leave the default untouched. That is the third time
+        // this project has anchored a rewritten control at the middle of its
+        // travel rather than at the value the instrument actually ships with.
+        if offset < 0.0 {
+            offset / HOUSE_FELT_CORNER
+        } else {
+            offset / (1.0 - HOUSE_FELT_CORNER)
+        }
     }
 
     fn lab(&self, i: usize) -> f32 {
@@ -3045,8 +3078,53 @@ impl ConcertGrand {
                 const HOUSE_BRIGHTNESS: f32 = 0.44;
                 const EXPONENT_AT_HOUSE: f32 = 0.62 + 0.76 * HOUSE_BRIGHTNESS;
                 const STIFFNESS_AT_HOUSE: f32 = 0.5 + 1.5 * HOUSE_BRIGHTNESS;
-                let exponent = ((3.2 + 1.8 * position) * EXPONENT_AT_HOUSE * self.controls.lab(0))
-                    .clamp(1.2, 5.0);
+                // Felt Corner spans the exponent's PHYSICAL range instead of
+                // multiplying into a wall.
+                //
+                // The exponent is clamped to 1.2..5.0 because the integration
+                // stops meaning anything outside it, and the lab curve --
+                // 256^(v-0.5), a factor of sixteen either way -- overshoots
+                // that clamp almost at once. The house value sits at 3.9 in
+                // the middle of the compass and 4.8 at the top, four fifths
+                // of the way up the range, so the fader ran out of room
+                // upward after a few percent of travel.
+                //
+                // Measured on C4, moving the fader from centre to 0.56
+                // changed the rendered note by 3.3 dB rms and moving it from
+                // 0.56 to 1.00 changed it by nothing at all: the top 44% of
+                // the control was dead, and dead by MORE than that in the
+                // treble, where the house exponent starts closer to the
+                // ceiling. (The renders differ bit for bit up there, which is
+                // why this went unnoticed -- the differences are numerical
+                // dust tens of dB below anything audible. A hash is not a
+                // measurement.)
+                //
+                // So the travel is mapped onto the headroom that actually
+                // exists on each side, which is different above and below and
+                // different in every register. Centre is unchanged by
+                // construction -- bit for bit, verified against a render made
+                // before the change -- so the instrument's voicing does not
+                // move.
+                //
+                // Measured after: the fader is live from about 0.35 to 1.00,
+                // against 0.28 to 0.545 before. It is NOT live below 0.35,
+                // and that wall is a different mechanism: soften the felt far
+                // enough and the integration falls under `RECIPE_FLOOR`, so
+                // the calibrated recipe holds the level up and no amount of
+                // further softening darkens the note. That floor is
+                // deliberate and has been measured worth keeping, so the
+                // bottom of this fader stays honest about the model's limit
+                // rather than being rescaled to hide it.
+                let house = (3.2 + 1.8 * position)
+                    * EXPONENT_AT_HOUSE
+                    * powf(256.0, HOUSE_FELT_CORNER - 0.5);
+                let reach = self.controls.felt_corner_travel();
+                let exponent = if reach < 0.0 {
+                    house + reach * (house - FELT_EXPONENT_MIN)
+                } else {
+                    house + reach * (FELT_EXPONENT_MAX - house)
+                }
+                .clamp(FELT_EXPONENT_MIN, FELT_EXPONENT_MAX);
                 let stiffness = FELT_K_A0
                     * powf(10.0, FELT_K_DECADES * position)
                     * self.controls.lab(7)
@@ -6663,6 +6741,634 @@ mod tests {
                 "{label}: -34 dB after {:?} ms, {voices} voices still live",
                 ms_to_silence.map(|v| v as u32)
             );
+        }
+    }
+
+    /// The sympathetic halo, and what the open-string bank is doing to get it.
+    ///
+    /// The calibrated quantity is the sustained 3-8 kHz band: on the YDP it
+    /// falls only ~3 dB between 80 ms and 600 ms.
+    ///
+    /// The second number is the open-string bank's own internal state, and
+    /// the pair of them together is the point. Under continuous playing that
+    /// state charges to thirty times the state of the strings actually being
+    /// struck -- alarming to read, and it led to a whole afternoon spent
+    /// chasing it as the source of a crack the user reported. It is not.
+    /// Rendering the same passage with the bank's resonant gain at 45 and at
+    /// 1 changes the audio by -55 dB rms and -36 dB peak: the bank is
+    /// essentially inaudible either way, on one note and on a dense passage
+    /// alike. Read the state if it helps, but never conclude from it -- the
+    /// only thing that settles an audibility question is the rendered
+    /// difference.
+    #[test]
+    #[ignore]
+    fn halo_profile() {
+        let note: u8 = std::env::var("CG_NOTE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60);
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, 512, 0, 2));
+        let mut output = vec![0.0f32; 512 * 2];
+        let mut mono: Vec<f32> = Vec::new();
+        let mut worst_open = 0.0f32;
+        for buffer in 0..80 {
+            let onset = [MidiEvent {
+                frame: 0,
+                data: [0x90, note, 96],
+                length: 3,
+            }];
+            let events: &[MidiEvent] = if buffer == 0 { &onset } else { &[] };
+            piano.process(&[], &mut output, events, &[], 512, 0, 2);
+            mono.extend(
+                output
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|f| (f[0] + f[1]) * 0.5),
+            );
+            worst_open = piano
+                .open_strings
+                .iter()
+                .fold(worst_open, |a, m| a.max(m.y1.abs()).max(m.y2.abs()));
+        }
+        // Band energy at two moments, by a crude one-pole high pass and a
+        // window: enough to compare two builds of the same model.
+        let band = |from: usize| -> f32 {
+            let window = &mono[from..(from + 4800).min(mono.len())];
+            let mut hp = 0.0f32;
+            let mut sum = 0.0f32;
+            for sample in window {
+                hp += 0.35 * (sample - hp);
+                let high = sample - hp;
+                sum += high * high;
+            }
+            20.0 * (sum / window.len() as f32).sqrt().max(1e-12).log10()
+        };
+        let early = band(48 * 80);
+        let late = band(48 * 600);
+        println!(
+            "nota {note}: banda alta a 80 ms {early:.1} dB, a 600 ms {late:.1} dB, caida {:.1} dB",
+            early - late
+        );
+        println!("  estado maximo del banco de cuerdas libres: {worst_open:.3}");
+    }
+
+    /// How much the SAME note changes depending on what else is sounding.
+    ///
+    /// The saturator is shared and instantaneous, so a note struck into a
+    /// thick texture is shaped down while the identical note struck into a
+    /// gap is not. The player changes nothing and the key answers differently
+    /// -- which is what "sometimes a note explodes" sounds like from the
+    /// bench. This runs the same passage twice, once with the note and once
+    /// without, and reports what the note actually added.
+    #[test]
+    #[ignore]
+    fn the_same_note_in_different_company() {
+        let target: u8 = std::env::var("CG_NOTE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(64);
+        let velocity: u8 = std::env::var("CG_VEL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(96);
+        println!("nota {target} a velocidad {velocity}, con el pedal abajo");
+        println!(
+            "{:>7} {:>12} {:>12} {:>10}",
+            "fondo", "pico solo", "pico anadido", "perdida"
+        );
+        let mut reference = 0.0f32;
+        for background in [0usize, 1, 2, 3, 4, 6, 8] {
+            let render = |with_target: bool| -> Vec<f32> {
+                let mut piano = Box::new(ConcertGrand::default());
+                assert!(piano.prepare(48_000.0, 512, 0, 2));
+                let mut output = vec![0.0f32; 512 * 2];
+                let mut captured = Vec::new();
+                let mut events = vec![MidiEvent {
+                    frame: 0,
+                    data: [0xb0, 64, 127],
+                    length: 3,
+                }];
+                // A chord under it, spread over two octaves, none of them the
+                // note under test.
+                for i in 0..background {
+                    let note = 40 + (i as u8) * 5;
+                    events.push(MidiEvent {
+                        frame: 0,
+                        data: [0x90, note, velocity],
+                        length: 3,
+                    });
+                }
+                piano.process(&[], &mut output, &events, &[], 512, 0, 2);
+                // Let the chord establish itself, then strike.
+                for _ in 0..4 {
+                    piano.process(&[], &mut output, &[], &[], 512, 0, 2);
+                }
+                for buffer in 0..8 {
+                    let onset = [MidiEvent {
+                        frame: 0,
+                        data: [0x90, target, velocity],
+                        length: 3,
+                    }];
+                    let events: &[MidiEvent] = if buffer == 0 && with_target {
+                        &onset
+                    } else {
+                        &[]
+                    };
+                    piano.process(&[], &mut output, events, &[], 512, 0, 2);
+                    captured.extend_from_slice(&output);
+                }
+                captured
+            };
+            let with = render(true);
+            let without = render(false);
+            let added = with
+                .iter()
+                .zip(without.iter())
+                .fold(0.0f32, |a, (x, y)| a.max((x - y).abs()));
+            let alone = with.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+            if background == 0 {
+                reference = added;
+            }
+            println!(
+                "{background:>7} {alone:>12.4} {added:>12.4} {:>9.1} dB",
+                20.0 * (added / reference.max(1e-9)).log10()
+            );
+        }
+    }
+
+    /// A long stretch of dense random playing, watching for a buffer whose
+    /// peak jumps far above everything around it -- a note that "explodes"
+    /// without anything having been changed.
+    #[test]
+    #[ignore]
+    fn peak_excursions() {
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, 512, 0, 2));
+        for part in std::env::var("CG_PARAMS")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|part| !part.is_empty())
+        {
+            let (index, value) = part.split_once('=').expect("index=value");
+            assert!(
+                piano.set_parameter(index.trim().parse().unwrap(), value.trim().parse().unwrap())
+            );
+        }
+        let mut seed = std::env::var("CG_SEED")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0x1234_5678u32);
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 16) as usize
+        };
+        let mut output = vec![0.0f32; 512 * 2];
+        let capture = std::env::var("CG_CAPTURE").is_ok();
+        let mut captured: Vec<f32> = Vec::new();
+        let mut peaks: Vec<f32> = Vec::new();
+        let mut steps: Vec<f32> = Vec::new();
+        let mut states: Vec<(f32, f32, f32, f32)> = Vec::new();
+        let mut worst: Vec<(usize, f32, f32)> = Vec::new();
+        for round in 0..8000 {
+            let mut events = Vec::new();
+            if round % 37 == 0 {
+                events.push(MidiEvent {
+                    frame: 0,
+                    data: [0xb0, 64, 127],
+                    length: 3,
+                });
+            }
+            if round % 53 == 0 {
+                events.push(MidiEvent {
+                    frame: 0,
+                    data: [0xb0, 64, 0],
+                    length: 3,
+                });
+            }
+            // One event every `sparsity` buffers on average: at 512 frames
+            // and 48 kHz that is a note roughly every 120 ms, which is fast
+            // playing by a person rather than a stress test.
+            let sparsity: usize = std::env::var("CG_SPARSITY")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1);
+            let fire = if sparsity <= 1 {
+                next() % 6
+            } else if next() % sparsity == 0 {
+                1
+            } else {
+                0
+            };
+            for _ in 0..fire {
+                let note = (21 + next() % 88) as u8;
+                let velocity = (30 + next() % 90) as u8;
+                let on = next() % 3 != 0;
+                events.push(MidiEvent {
+                    frame: (next() % 512) as u32,
+                    data: [if on { 0x90 } else { 0x80 }, note, velocity],
+                    length: 3,
+                });
+            }
+            events.sort_by_key(|e| e.frame);
+            piano.process(&[], &mut output, &events, &[], 512, 0, 2);
+            if capture {
+                captured.extend(
+                    output
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|f| (f[0] + f[1]) * 0.5),
+                );
+            }
+            let peak = output.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+            // A click is a STEP, not a level: the biggest jump between one
+            // sample and the next, which an attack cannot produce because an
+            // attack is band limited.
+            let step = output
+                .as_chunks::<2>()
+                .0
+                .windows(2)
+                .fold(0.0f32, |a, w| a.max((w[1][0] - w[0][0]).abs()));
+            steps.push(step);
+            // The largest oscillator state anywhere in the bank: if this
+            // grows, something has a pole outside the unit circle.
+            let state = piano
+                .voices
+                .iter()
+                .filter(|v| v.active)
+                .flat_map(|v| v.partials[..v.partial_count].iter())
+                .flat_map(|p| p.s.iter().chain(p.c.iter()))
+                .fold(0.0f32, |a, x| a.max(x.abs()));
+            let peak_of = |bank: &[BodyMode]| {
+                bank.iter()
+                    .fold(0.0f32, |a, m| a.max(m.y1.abs()).max(m.y2.abs()))
+            };
+            states.push((
+                state,
+                peak_of(&piano.board[..piano.board_count]),
+                peak_of(&piano.undamped),
+                peak_of(&piano.open_strings),
+            ));
+            // The local floor: what the last 20 buffers have been doing.
+            let recent = peaks.len().saturating_sub(20);
+            let local = peaks[recent..].iter().copied().fold(0.0f32, f32::max);
+            if peaks.len() > 20 && peak > local * 2.0 {
+                worst.push((round, peak, local));
+            }
+            peaks.push(peak);
+        }
+        let mut sorted = peaks.clone();
+        sorted.sort_by(|a, b| a.total_cmp(b));
+        println!(
+            "8000 buffers: mediana {:.4}, p99 {:.4}, maximo {:.4}",
+            sorted[sorted.len() / 2],
+            sorted[sorted.len() * 99 / 100],
+            sorted[sorted.len() - 1]
+        );
+        println!(
+            "saltos de mas de 6 dB sobre los 20 buffers previos: {}",
+            worst.len()
+        );
+        if let Ok(path) = std::env::var("CG_CAPTURE") {
+            let bytes: Vec<u8> = captured
+                .iter()
+                .flat_map(|s| (((s).clamp(-1.0, 1.0) * 32_767.0) as i16).to_le_bytes())
+                .collect();
+            std::fs::write(path, bytes).unwrap();
+        }
+        let mut open_states: Vec<f32> = states.iter().map(|s| s.3).collect();
+        open_states.sort_by(|a, b| a.total_cmp(b));
+        println!(
+            "cuerdas libres: mediana {:.3}, p99 {:.3}, maximo {:.3}",
+            open_states[open_states.len() / 2],
+            open_states[open_states.len() * 99 / 100],
+            open_states[open_states.len() - 1]
+        );
+        let mut by_step: Vec<(usize, f32)> = steps.iter().copied().enumerate().collect();
+        by_step.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let mut sorted_steps = steps.clone();
+        sorted_steps.sort_by(|a, b| a.total_cmp(b));
+        let median_step = sorted_steps[sorted_steps.len() / 2];
+        println!(
+            "salto entre muestras: mediana {median_step:.5}, p99 {:.5}, maximo {:.5} ({:+.1} dB sobre la mediana)",
+            sorted_steps[sorted_steps.len() * 99 / 100],
+            sorted_steps[sorted_steps.len() - 1],
+            20.0 * (sorted_steps[sorted_steps.len() - 1] / median_step.max(1e-9)).log10()
+        );
+        if std::env::var("CG_TRACE").is_ok() {
+            let centre = by_step[0].0;
+            println!("evolucion alrededor del buffer {centre}:");
+            let from = centre.saturating_sub(60);
+            for round in (from..(centre + 20).min(states.len())).step_by(4) {
+                println!(
+                    "  {round:>5}  cuerdas libres {:>7.3}  tabla {:>6.3}  salto {:.4}",
+                    states[round].3, states[round].1, steps[round]
+                );
+            }
+        }
+        for (round, step) in by_step.iter().take(6) {
+            println!(
+                "  buffer {round}: salto {step:.5} ({:+.1} dB sobre la mediana), pico {:.4}",
+                20.0 * (step / median_step.max(1e-9)).log10(),
+                peaks[*round]
+            );
+            let (string, board, undamped, open) = states[*round];
+            println!(
+                "      cuerda {string:.3}  tabla {board:.3}  sin apagador {undamped:.3}  cuerdas libres {open:.3}"
+            );
+        }
+        for (round, peak, local) in worst.iter().take(10) {
+            println!(
+                "  buffer {round}: {peak:.4} contra {local:.4} local ({:+.1} dB)",
+                20.0 * (peak / local.max(1e-9)).log10()
+            );
+        }
+    }
+
+    /// What happens when the same note is struck again while it still rings.
+    ///
+    /// A repeated note is ordinary playing. The model re-strikes by ADDING
+    /// the fresh strike's modal state to the state already there, so if the
+    /// two land in phase the partial doubles -- and nothing bounds it. A real
+    /// hammer meeting a string that is moving toward it gives energy back;
+    /// it cannot pump a string louder and louder at the same key speed.
+    #[test]
+    #[ignore]
+    fn restrike_accumulates() {
+        let gap_ms: usize = std::env::var("CG_GAP")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(120);
+        let note: u8 = std::env::var("CG_NOTE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60);
+        let pedal = std::env::var("CG_PEDAL").is_ok();
+        let velocity: u8 = std::env::var("CG_VEL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(96);
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, 512, 0, 2));
+        let mut output = vec![0.0f32; 512 * 2];
+        if pedal {
+            piano.process(
+                &[],
+                &mut output,
+                &[MidiEvent {
+                    frame: 0,
+                    data: [0xb0, 64, 127],
+                    length: 3,
+                }],
+                &[],
+                512,
+                0,
+                2,
+            );
+        }
+        let buffers = (gap_ms * 48).div_ceil(512).max(1);
+        let mut peaks = Vec::new();
+        for strike in 0..12 {
+            let mut peak = 0.0f32;
+            for buffer in 0..buffers {
+                let events: Vec<MidiEvent> = if buffer == 0 {
+                    let mut v = vec![MidiEvent {
+                        frame: 0,
+                        data: [0x90, note, velocity],
+                        length: 3,
+                    }];
+                    if !pedal && strike > 0 {
+                        v.insert(
+                            0,
+                            MidiEvent {
+                                frame: 0,
+                                data: [0x80, note, 64],
+                                length: 3,
+                            },
+                        );
+                    }
+                    v
+                } else {
+                    Vec::new()
+                };
+                piano.process(&[], &mut output, &events, &[], 512, 0, 2);
+                peak = output.iter().fold(peak, |a, s| a.max(s.abs()));
+            }
+            peaks.push(peak);
+        }
+        let first = peaks[0];
+        println!(
+            "nota {note}, golpe cada {gap_ms} ms, pedal {}",
+            if pedal { "abajo" } else { "arriba" }
+        );
+        for (i, peak) in peaks.iter().enumerate() {
+            println!(
+                "  golpe {:>2}: pico {peak:.4}  ({:+.1} dB sobre el primero)",
+                i + 1,
+                20.0 * (peak / first.max(1e-9)).log10()
+            );
+        }
+    }
+
+    /// What a stolen voice was still doing when the model deleted it.
+    ///
+    /// There are 13 voices and, with the pedal down, a note takes TWO of them
+    /// -- its own and a halo shadow. So the polyphony a pedalled passage
+    /// actually gets is closer to six notes, and past that every new note
+    /// overwrites a ringing one in a single sample, with no fade. This
+    /// reports how loud the victims were.
+    #[test]
+    #[ignore]
+    fn voice_theft() {
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, 512, 0, 2));
+        let mut output = vec![0.0f32; 512 * 2];
+        // Pedal down and a passage that accumulates, the way a pianist plays.
+        piano.process(
+            &[],
+            &mut output,
+            &[MidiEvent {
+                frame: 0,
+                data: [0xb0, 64, 127],
+                length: 3,
+            }],
+            &[],
+            512,
+            0,
+            2,
+        );
+        let mut victims: Vec<(usize, u8, f32, f32)> = Vec::new();
+        for step in 0..24 {
+            let note = 48 + step as u8;
+            // What the bank looks like the instant before the strike.
+            let active = piano.voices.iter().filter(|v| v.active).count();
+            let quietest = piano
+                .voices
+                .iter()
+                .filter(|v| v.active)
+                .map(|v| v.energy)
+                .fold(f32::INFINITY, f32::min);
+            let loudest = piano
+                .voices
+                .iter()
+                .filter(|v| v.active)
+                .map(|v| v.energy)
+                .fold(0.0f32, f32::max);
+            if active == MAX_VOICES {
+                victims.push((step, note, quietest, loudest));
+            }
+            piano.process(
+                &[],
+                &mut output,
+                &[MidiEvent {
+                    frame: 0,
+                    data: [0x90, note, 96],
+                    length: 3,
+                }],
+                &[],
+                512,
+                0,
+                2,
+            );
+            // ~150 ms between notes: ordinary playing, not a flourish.
+            for _ in 0..13 {
+                piano.process(&[], &mut output, &[], &[], 512, 0, 2);
+            }
+        }
+        println!("voces: {MAX_VOICES}");
+        println!(
+            "notas de la pasada que tuvieron que robar: {} de 24",
+            victims.len()
+        );
+        for (step, note, quietest, loudest) in victims.iter().take(16) {
+            println!(
+                "  nota {} (paso {step}): borra una voz a {:.1} dB (la mas fuerte del banco esta a {:.1} dB)",
+                note,
+                20.0 * quietest.max(1e-9).log10(),
+                20.0 * loudest.max(1e-9).log10()
+            );
+        }
+    }
+
+    /// Hunts a note that "explodes" mid-performance without anything being
+    /// changed.
+    ///
+    /// Every onset here is identical -- same note, same velocity, same frame
+    /// in the buffer -- so any spread in what comes out is the instrument's
+    /// STATE, not the playing. The background around it varies the way real
+    /// playing does: notes held down, the pedal coming and going, voices
+    /// still ringing from before.
+    #[test]
+    #[ignore]
+    fn attack_outliers() {
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(piano.prepare(48_000.0, 512, 0, 2));
+        let mut seed = 0x9E37_79B9u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 16) as usize
+        };
+        let target: u8 = std::env::var("CG_NOTE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60);
+        let velocity: u8 = std::env::var("CG_VEL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100);
+        let mut output = vec![0.0f32; 512 * 2];
+        let mut peaks: Vec<(usize, f32, f32, usize)> = Vec::new();
+        let mut held: Vec<u8> = Vec::new();
+        for trial in 0..400 {
+            // Random background: a few notes down, the pedal sometimes.
+            let mut events = Vec::new();
+            if trial % 7 == 0 {
+                let pedal = if next() % 2 == 0 { 127 } else { 0 };
+                events.push(MidiEvent {
+                    frame: 0,
+                    data: [0xb0, 64, pedal],
+                    length: 3,
+                });
+            }
+            let density: usize = std::env::var("CG_BG")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(4);
+            for _ in 0..(if density == 0 { 0 } else { next() % density }) {
+                let note = (21 + next() % 88) as u8;
+                if next() % 3 == 0 && !held.is_empty() {
+                    let victim = held.remove(next() % held.len());
+                    events.push(MidiEvent {
+                        frame: (next() % 512) as u32,
+                        data: [0x80, victim, 64],
+                        length: 3,
+                    });
+                } else {
+                    held.push(note);
+                    events.push(MidiEvent {
+                        frame: (next() % 512) as u32,
+                        data: [0x90, note, (40 + next() % 80) as u8],
+                        length: 3,
+                    });
+                }
+            }
+            events.sort_by_key(|e| e.frame);
+            piano.process(&[], &mut output, &events, &[], 512, 0, 2);
+            // Let the background settle for a few buffers, then measure what
+            // is already there.
+            for _ in 0..3 {
+                piano.process(&[], &mut output, &[], &[], 512, 0, 2);
+            }
+            let background = output.iter().fold(0.0f32, |a, s| a.max(s.abs()));
+            let voices = piano.voices.iter().filter(|v| v.active).count();
+            // The onset under test, alone at frame 0.
+            let onset = [MidiEvent {
+                frame: 0,
+                data: [0x90, target, velocity],
+                length: 3,
+            }];
+            let mut peak = 0.0f32;
+            for buffer in 0..6 {
+                let events: &[MidiEvent] = if buffer == 0 { &onset } else { &[] };
+                piano.process(&[], &mut output, events, &[], 512, 0, 2);
+                peak = output.iter().fold(peak, |a, s| a.max(s.abs()));
+            }
+            peaks.push((trial, peak, background, voices));
+            piano.process(
+                &[],
+                &mut output,
+                &[MidiEvent {
+                    frame: 0,
+                    data: [0x80, target, 64],
+                    length: 3,
+                }],
+                &[],
+                512,
+                0,
+                2,
+            );
+        }
+        let mut sorted: Vec<f32> = peaks.iter().map(|p| p.1).collect();
+        sorted.sort_by(|a, b| a.total_cmp(b));
+        let median = sorted[sorted.len() / 2];
+        println!("nota {target} vel {velocity}: mediana del pico {median:.4}");
+        println!(
+            "  minimo {:.4}  maximo {:.4}  rango {:.1} dB",
+            sorted[0],
+            sorted[sorted.len() - 1],
+            20.0 * (sorted[sorted.len() - 1] / sorted[0].max(1e-9)).log10()
+        );
+        let mut shown = 0;
+        for (trial, peak, background, voices) in &peaks {
+            if *peak > median * 1.12 && shown < 12 {
+                println!(
+                    "  atipico ensayo {trial}: pico {peak:.4} ({:+.1} dB sobre la mediana), fondo {background:.4}, {voices} voces",
+                    20.0 * (peak / median).log10()
+                );
+                shown += 1;
+            }
         }
     }
 

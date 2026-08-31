@@ -398,7 +398,10 @@
 
       .control { display: grid; gap: 5px; margin-bottom: 16px; }
       .row { display: flex; justify-content: space-between; align-items: baseline; }
-      .name { font-size: 13px; letter-spacing: 0.02em; }
+      /* The control's name is the plate's engraving, so it carries the weight
+         a stencilled label would: larger and heavier than the reading beside
+         it, which is the part that changes. */
+      .name { font-size: 14.5px; font-weight: 600; letter-spacing: 0.03em; }
       .value {
         font-variant-numeric: tabular-nums;
         font-size: 12px;
@@ -439,9 +442,9 @@
              not land where it reads. */
           linear-gradient(
               90deg,
-              transparent 0 1.2%,
-              var(--gold) 1.2% min(var(--fill, 50%), 97.6%),
-              transparent min(var(--fill, 50%), 97.6%)
+              transparent 0 2.3%,
+              var(--gold) 2.3% min(var(--fill, 50%), 97.7%),
+              transparent min(var(--fill, 50%), 97.7%)
             )
             center / 100% 6px no-repeat,
           linear-gradient(180deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.66))

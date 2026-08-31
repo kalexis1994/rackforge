@@ -294,7 +294,22 @@ const PARAM_STRIKE_POINT: u32 = 34;
 /// moves the wire's thickness at constant pitch -- and with it the stiffness,
 /// which is why inharmonicity rises with tension.
 const PARAM_TENSION: u32 = 35;
-const PARAM_COUNT: usize = 6 + LAB_COUNT + 13;
+/// How far the lid stands open.
+///
+/// The lid is a mirror over the strings: on the long stick it throws the
+/// board's near field out toward the room, and shut it seals the instrument
+/// into its own case. The model had it as four fixed taps -- one lid angle,
+/// forever -- when it is the single most common thing a pianist changes about
+/// how a grand sounds in a room.
+const PARAM_LID: u32 = 36;
+/// The dampers' grip: how hard the felt stops a string when the key returns.
+///
+/// A regulated damper stops a treble string almost at once and a wound bass
+/// string much more slowly, which the model already knows. What it did not
+/// have is the mechanism's CONDITION -- worn felt that lets a note bleed,
+/// against a hard new set that shuts the note dead.
+const PARAM_DAMPER: u32 = 37;
+const PARAM_COUNT: usize = 6 + LAB_COUNT + 15;
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
 /// entries are pre-scaled by the per-sample decay factor `g`, so magnitude
@@ -1297,6 +1312,10 @@ struct Controls {
     /// instrument's design, centred on the calibrated one.
     strike_point: f32,
     tension: f32,
+    /// The lid's angle and the dampers' grip: the two things about a grand
+    /// that change without touching the instrument's design.
+    lid: f32,
+    damper: f32,
 }
 
 impl Default for Controls {
@@ -1334,6 +1353,8 @@ impl Default for Controls {
             size: 0.5,
             strike_point: 0.5,
             tension: 0.5,
+            lid: 0.5,
+            damper: 0.5,
         }
     }
 }
@@ -1390,6 +1411,27 @@ impl Controls {
         STRING_TENSION_N * powf(2.0, self.tension - 0.5)
     }
 
+    /// How much of the near field the lid throws back, centred on the lid
+    /// angle the instrument was calibrated at: a third of it shut, three
+    /// times it on the long stick.
+    ///
+    /// Stated plainly, this is reflection STRENGTH and not lid geometry. A
+    /// real closed lid does not merely reflect less -- it reflects sooner,
+    /// darker, and back into the case rather than out at the room. Modelling
+    /// that wants the taps themselves to move, which is a bigger change than
+    /// this; what is here is the part that carries most of the audible
+    /// difference.
+    fn lid_reflection(&self) -> f32 {
+        powf(3.0, 2.0 * (self.lid - 0.5))
+    }
+
+    /// How much of the damper's grip the felt actually delivers. Below centre
+    /// the felt is worn and the note bleeds past the key; above it the set is
+    /// hard and new and shuts the string dead.
+    fn damper_grip(&self) -> f32 {
+        powf(3.0, self.damper - 0.5)
+    }
+
     fn lab(&self, i: usize) -> f32 {
         // The bottom of the travel is off, not a quarter. Mapping the whole
         // range to x0.25..x4 meant a control could never remove what it
@@ -1433,6 +1475,8 @@ impl Controls {
             PARAM_SIZE => self.size,
             PARAM_STRIKE_POINT => self.strike_point,
             PARAM_TENSION => self.tension,
+            PARAM_LID => self.lid,
+            PARAM_DAMPER => self.damper,
             _ => return None,
         };
         Some(value as f64)
@@ -1464,6 +1508,8 @@ impl Controls {
             PARAM_SIZE => self.size = value,
             PARAM_STRIKE_POINT => self.strike_point = value,
             PARAM_TENSION => self.tension = value,
+            PARAM_LID => self.lid = value,
+            PARAM_DAMPER => self.damper = value,
             // (the engine watches the room and the board through their
             // dirty flags -- both are rebuilds, not per-sample reads)
             _ => return false,
@@ -3803,7 +3849,7 @@ impl ConcertGrand {
     /// Per-sample decay multiplier a falling damper applies: the note dies in
     /// tens of milliseconds instead of seconds.
     fn damper_factor(&self, note: u8) -> f32 {
-        Self::damper_for(note, self.sample_rate)
+        Self::damper_for(note, self.sample_rate, self.controls.damper_grip())
     }
 
     /// Dampers are not equally effective across the compass: a treble damper
@@ -3811,10 +3857,13 @@ impl ConcertGrand {
     /// carries far too much energy to be stopped that fast. A single 60 ms
     /// constant for the whole keyboard left every release ringing ~230 ms
     /// down to −34 dB, which smears into a wash as soon as playing gets fast.
-    fn damper_for(note: u8, sample_rate: f32) -> f32 {
+    fn damper_for(note: u8, sample_rate: f32, grip: f32) -> f32 {
         let position = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as f32
             / (NOTE_COUNT - 1) as f32;
-        let seconds = 0.075 - 0.055 * position;
+        // Grip divides the stopping time: a hard new set shuts the string in
+        // a third of it, worn felt takes three times as long and the note
+        // bleeds past the key.
+        let seconds = (0.075 - 0.055 * position) / grip.max(0.05);
         expf(-1.0 / (seconds * sample_rate))
     }
 
@@ -3873,6 +3922,7 @@ impl ConcertGrand {
         let (thud_coefficient, thud_decay) = self.damper_thud();
         let release_gain = Controls::noise_gain(self.controls.release_noise);
         let rate = self.sample_rate;
+        let grip = self.controls.damper_grip();
         for voice in &mut self.voices {
             if !(voice.active && voice.sustained) {
                 continue;
@@ -3882,12 +3932,12 @@ impl ConcertGrand {
             }
             if pressure >= 0.98 {
                 // Seated: the legacy full damp, note over.
-                let damper = Self::damper_for(voice.note, rate);
+                let damper = Self::damper_for(voice.note, rate, grip);
                 voice.damp(damper, thud_coefficient, thud_decay, release_gain);
                 voice.damper_applied = 0.0;
             } else {
                 let delta = pressure - voice.damper_applied;
-                let damper = Self::damper_for(voice.note, rate);
+                let damper = Self::damper_for(voice.note, rate, grip);
                 voice.press_damper(damper, delta);
                 voice.damper_applied = pressure;
             }
@@ -3917,6 +3967,7 @@ impl ConcertGrand {
         let (thud_coefficient, thud_decay) = self.damper_thud();
         let release_gain = Controls::noise_gain(self.controls.release_noise);
         let rate = self.sample_rate;
+        let grip = self.controls.damper_grip();
         let pressure = self.pedal_pressure;
         for voice in &mut self.voices {
             if !(voice.active && voice.sostenuto) {
@@ -3927,11 +3978,11 @@ impl ConcertGrand {
                 continue;
             }
             if self.pedal && pressure < 0.98 {
-                let damper = Self::damper_for(voice.note, rate);
+                let damper = Self::damper_for(voice.note, rate, grip);
                 voice.press_damper(damper, pressure - voice.damper_applied);
                 voice.damper_applied = pressure;
             } else {
-                let damper = Self::damper_for(voice.note, rate);
+                let damper = Self::damper_for(voice.note, rate, grip);
                 voice.damp(damper, thud_coefficient, thud_decay, release_gain);
                 voice.damper_applied = 0.0;
             }
@@ -3942,9 +3993,10 @@ impl ConcertGrand {
         let (thud_coefficient, thud_decay) = self.damper_thud();
         let release_gain = Controls::noise_gain(self.controls.release_noise);
         let rate = self.sample_rate;
+        let grip = self.controls.damper_grip();
         for voice in &mut self.voices {
             if voice.active {
-                let damper = Self::damper_for(voice.note, rate);
+                let damper = Self::damper_for(voice.note, rate, grip);
                 voice.damp(damper, thud_coefficient, thud_decay, release_gain);
             }
         }
@@ -4163,6 +4215,8 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 10] = self.controls.size;
         values[6 + LAB_COUNT + 11] = self.controls.strike_point;
         values[6 + LAB_COUNT + 12] = self.controls.tension;
+        values[6 + LAB_COUNT + 13] = self.controls.lid;
+        values[6 + LAB_COUNT + 14] = self.controls.damper;
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -4183,7 +4237,16 @@ impl Processor for ConcertGrand {
         // values is deliberately ignored rather than the whole state -- the
         // controls the user dialled in are all in the head.
         const LEGACY_PARAM_COUNT: usize = 37;
-        if !state.len().is_multiple_of(4) || state.len() > LEGACY_PARAM_COUNT * 4 {
+        // The ceiling is whichever layout is longer. It used to be the legacy
+        // one alone, which quietly became a cap on the CURRENT state the day
+        // the instrument's own controls outgrew 37 -- every save would have
+        // been rejected on load.
+        let longest = if PARAM_COUNT > LEGACY_PARAM_COUNT {
+            PARAM_COUNT
+        } else {
+            LEGACY_PARAM_COUNT
+        };
+        if !state.len().is_multiple_of(4) || state.len() > longest * 4 {
             return false;
         }
         // Every parameter's own default, so a shorter (older) state leaves
@@ -4210,10 +4273,13 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 10] = defaults.size;
         values[6 + LAB_COUNT + 11] = defaults.strike_point;
         values[6 + LAB_COUNT + 12] = defaults.tension;
+        values[6 + LAB_COUNT + 13] = defaults.lid;
+        values[6 + LAB_COUNT + 14] = defaults.damper;
         // A 37-float state is from the era of the "in bass" tilt twins: its
         // tail is tilt values, not room values, and reading it into the room
         // controls would set the hall from leftovers. Take its head only.
-        let readable = if state.len() == LEGACY_PARAM_COUNT * 4 {
+        let readable = if state.len() == LEGACY_PARAM_COUNT * 4 && PARAM_COUNT != LEGACY_PARAM_COUNT
+        {
             23.min(PARAM_COUNT)
         } else {
             state.len() / 4
@@ -4252,6 +4318,8 @@ impl Processor for ConcertGrand {
             size: values[6 + LAB_COUNT + 10],
             strike_point: values[6 + LAB_COUNT + 11],
             tension: values[6 + LAB_COUNT + 12],
+            lid: values[6 + LAB_COUNT + 13],
+            damper: values[6 + LAB_COUNT + 14],
         };
         self.room_dirty = true;
         self.board_dirty = true;
@@ -4466,14 +4534,17 @@ impl Processor for ConcertGrand {
                 }
             }
             self.early_write = (self.early_write + 1) % ROOM_BUFFER;
+            let lid_open = self.controls.lid_reflection();
             let mut lid_left = 0.0;
             for (offset, gain) in self.lid_left {
                 lid_left += self.lid[(self.lid_write + LID_BUFFER - offset) % LID_BUFFER] * gain;
             }
+            lid_left *= lid_open;
             let mut lid_right = 0.0;
             for (offset, gain) in self.lid_right {
                 lid_right += self.lid[(self.lid_write + LID_BUFFER - offset) % LID_BUFFER] * gain;
             }
+            lid_right *= lid_open;
             self.lid_write = (self.lid_write + 1) % LID_BUFFER;
 
             // The chamber: read every line, mix through the Householder
@@ -4819,22 +4890,29 @@ mod tests {
         assert_eq!(older.get_parameter(PARAM_BRIGHTNESS), Some(0.9_f32 as f64));
 
         // A state from the era of the fourteen "in bass" tilt twins is
-        // LONGER than today's layout; the head still holds every control the
-        // user dialled in, and the tail of tilt values is ignored.
+        // exactly 37 floats, and its tail is tilt values rather than room
+        // ones: only its head is read. Built here on its own terms -- today's
+        // layout has outgrown it, so it can no longer be made by padding a
+        // current state, which is what this test used to do.
         let mut legacy = [0u8; 37 * 4];
-        legacy[..PARAM_COUNT * 4].copy_from_slice(&state);
-        for chunk in legacy[PARAM_COUNT * 4..].as_chunks_mut::<4>().0 {
+        for chunk in legacy.as_chunks_mut::<4>().0 {
             chunk.copy_from_slice(&0.5f32.to_le_bytes());
         }
+        legacy[..4].copy_from_slice(&0.9f32.to_le_bytes());
         let mut migrated = Box::new(ConcertGrand::default());
         assert!(migrated.load_state(&legacy));
         assert_eq!(
             migrated.get_parameter(PARAM_BRIGHTNESS),
             Some(0.9_f32 as f64)
         );
+        // Its tail was NOT read into the room: the hall keeps its default.
+        assert_eq!(
+            migrated.get_parameter(PARAM_ROOM_SIZE),
+            Some(Controls::default().room_size as f64)
+        );
 
-        // Longer than even the legacy layout is not a state of ours.
-        assert!(!older.load_state(&[0u8; 38 * 4]));
+        // Longer than any layout of ours is not a state of ours.
+        assert!(!older.load_state(&[0u8; (PARAM_COUNT + 1) * 4]));
     }
 
     /// Which parameters actually change the sound, and by how much. Not a

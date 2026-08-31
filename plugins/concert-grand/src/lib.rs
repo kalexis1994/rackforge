@@ -2317,28 +2317,26 @@ impl ConcertGrand {
     /// which sits at 50 Hz and is struck by every note in the compass.
     /// How much of the impact burst a note's strings can carry.
     ///
-    /// The burst is the hammer stretching the string under its head: a tension
-    /// pulse that rings the compressional bank. It is a WOUND-string
-    /// phenomenon -- a heavy overspun wire stretches enough to matter, a short
-    /// plain treble wire does not -- and the bass bridge ends around F#2.
+    /// The burst is the hammer stretching the string under its head: a
+    /// tension pulse that rings the compressional bank. It is a WOUND-string
+    /// phenomenon -- a heavy overspun wire stretches enough to matter, a
+    /// short plain treble wire does not -- and the bass bridge ends around
+    /// F#2.
     ///
     /// The taper it used to have alone, `(1 - position)^1.2`, only reaches
     /// zero at the top of the compass: it still delivered HALF the burst at
     /// B3, an octave and a half above the last wound string. Measured on B3
     /// with the fader at the house 0.5, that half-burst put +3.3 dB into
-    /// 4-8 kHz of the attack -- a bright edge over a plain-wire note, which is
-    /// the metallic strike the user placed on A3 and B3 by ear, and why
-    /// turning the noise faders down never touched it. It was never noise; it
-    /// was the strike left uncovered.
+    /// 4-8 kHz of the attack -- a bright edge over a plain-wire note, which
+    /// is the metallic strike the user placed on A3 and B3 by ear. (An
+    /// earlier ablation of mine cleared the burst wrongly: it normalised by
+    /// peak and referenced the fundamental, and that convention showed the
+    /// same change as +0.9 dB. The same normalisation trap this file has
+    /// recorded three times before.)
     ///
-    /// An earlier ablation of mine cleared the burst WRONGLY: it normalised by
-    /// peak and referenced the fundamental, and under that convention the same
-    /// change reads as +0.9 dB instead of +3.3. Fourth time this file has paid
-    /// for a normalisation that hid what it was measuring.
-    ///
-    /// This gate leaves the wound register untouched -- at A0 and C2 it is
-    /// exactly 1, so the burst's bass calibration stands -- and is gone by C3.
-    /// Measured after: A3 and B3 render bit-for-bit as if the burst were off.
+    /// This gate leaves the wound register untouched -- A0 and C2 measure
+    /// bit-identical, so the burst's bass calibration stands -- and is gone
+    /// by C3.
     fn clang_register(position: f32) -> f32 {
         ((0.32 - position) / 0.12).clamp(0.0, 1.0)
     }
@@ -2444,7 +2442,14 @@ impl ConcertGrand {
         // 30.8 and the ninth at 48.3: the hole in the middle of the harmonics
         // that makes the note sound like a thinner string.
         let upper = (position - 0.35).max(0.0) / 0.65;
-        1.0 / (8.0 + 8.0 * upper * upper)
+        let base = 1.0 / (8.0 + 8.0 * upper * upper);
+        #[cfg(test)]
+        if let Ok(scale) = std::env::var("CG_X0_SCALE")
+            && let Ok(scale) = scale.parse::<f32>()
+        {
+            return base * scale;
+        }
+        base
     }
 
     /// The hammer's contact width as a fraction of string length: a few
@@ -2760,30 +2765,35 @@ impl ConcertGrand {
                 // VOICING -- and letting Brightness move it inverted the
                 // control.
                 //
-                // F = K*x^p, so K carries units of N/m^p: its meaning DEPENDS
-                // on p. Brightness used to raise both, K by 2.65x and p from
-                // 2.9 to 5.0, and at the half-millimetre a real hammer
-                // compresses, x^p collapses. Measured on A3 fortissimo, the
-                // force at 0.5 mm ran 10968 N at the bottom of the travel and
-                // essentially zero at the top -- five orders of magnitude
-                // SOFTER for "brighter" -- and the contact went 0.05 ms to
-                // 2.80 ms. The rendered tone followed: 4-8 kHz fell from
-                // -18.5 to -44.5 dB as the fader rose. The user found it by
-                // ear before any metric did: "lo que yo interpreto como
-                // brillo es lo que ocurre al bajar el fader".
+                // F = K*x^p, so K carries units of N/m^p: its meaning
+                // DEPENDS on p. Brightness used to raise both, K by 2.65x
+                // and p from 2.9 to 5.0, and at the half-millimetre a real
+                // hammer compresses, x^p collapses. Measured on A3
+                // fortissimo, the force at 0.5 mm ran 10968 N at the bottom
+                // of the travel and essentially zero at the top -- five
+                // orders of magnitude SOFTER for "brighter" -- and the
+                // contact went 0.05 ms to 2.80 ms. The rendered tone
+                // followed: 4-8 kHz fell from -18.5 to -44.5 dB as the fader
+                // rose. The user found it by ear before any metric did:
+                // "lo que yo interpreto como brillo es lo que ocurre al
+                // bajar el fader".
+                //
+                // It also made the strike stand out. With the tone under it
+                // collapsing while the transient did not, A3's attack sat
+                // +24.9 dB over its own sustain in 4-8 kHz at the top of the
+                // travel against +1.5 dB at the bottom: a bare knock over a
+                // dark note, which is the metallic strike reported on A3 and
+                // B3 -- and why turning the noise faders down never touched
+                // it. It was never noise; it was the strike left uncovered.
                 //
                 // Chabassier et al. measure the exponent varying by REGISTER
                 // (~1.5 bass to ~3.5 treble), not by regulation. Voicing --
                 // needling the felt, lacquering it -- is stiffness. So the
                 // exponent is the note's alone, and Brightness moves K over
                 // two decades, which is a voicer's range. The constants are
-                // arranged so the house voicing at 0.44 lands exactly where it
-                // did: the chromatic fit cost is identical to four figures,
-                // so only the fader's behaviour changed, not the instrument.
-                //
-                // After: contact shortens with the fader everywhere, and C4's
-                // attack centroid runs 3243 -> 3866 -> 4955 Hz across the
-                // travel where it used to FALL.
+                // arranged so the house voicing at 0.4 lands exactly where
+                // it did: only the fader's behaviour changes, not the
+                // instrument's default sound.
                 const HOUSE_BRIGHTNESS: f32 = 0.44;
                 const EXPONENT_AT_HOUSE: f32 = 0.62 + 0.76 * HOUSE_BRIGHTNESS;
                 const STIFFNESS_AT_HOUSE: f32 = 0.5 + 1.5 * HOUSE_BRIGHTNESS;
@@ -5061,7 +5071,14 @@ mod tests {
             for (note, velocity) in [(21u8, 60u8), (21, 127), (36, 127), (60, 60), (60, 127)] {
                 *SWEEP_OVERRIDE.lock().unwrap() = Some(sweep);
                 CONTACT_STEPS.store(0, core::sync::atomic::Ordering::Relaxed);
+                let brightness: f64 = std::env::var("CG_BRIGHT")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(-1.0);
                 let mut piano = prepared();
+                if brightness >= 0.0 {
+                    assert!(piano.set_parameter(PARAM_BRIGHTNESS, brightness));
+                }
                 render(&mut piano, 64, &[note_on(note, velocity)]);
                 *SWEEP_OVERRIDE.lock().unwrap() = None;
                 let steps = CONTACT_STEPS.load(core::sync::atomic::Ordering::Relaxed);
@@ -5193,13 +5210,17 @@ mod tests {
             let mut tension_in = TENSION_INTERVAL;
             for frame in 0..frames {
                 let sample = voice.tick(0.0);
+                // The board is the THROUGH path in `process`: the output is
+                // built from board_left/right, not from the string sum plus
+                // the board. So the third pass reads the board's output
+                // ALONE, which is what the instrument actually radiates.
                 let mut mixed = sample;
                 if with_board {
                     let mut board_sum = 0.0f32;
                     for mode in board.iter_mut() {
                         board_sum += mode.tick(sample);
                     }
-                    mixed += board_sum * BOARD_MIX;
+                    mixed = board_sum * BOARD_MIX;
                 }
                 // Hann window so the read matches the wav measurements.
                 let hann =

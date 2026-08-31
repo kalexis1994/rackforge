@@ -608,6 +608,11 @@ const GAUGE_A0_M: f32 = 3.553e-3;
 const GAUGE_BREAK_M: f32 = 1.40e-3;
 const GAUGE_JOIN_M: f32 = 1.2947e-3;
 const GAUGE_CONSTANT: f32 = 0.185_653_5;
+/// How far the shank knock's pitch wanders from note to note. At this value
+/// it barely wanders at all -- 12% across the compass, measured -- which is
+/// what makes it read as one fixed wooden pitch rather than a knock. See the
+/// note on `lab` in `Controls::default`.
+const CLACK_SCATTER: f32 = 0.14;
 const FELT_EXPONENT_MIN: f32 = 1.2;
 const FELT_EXPONENT_MAX: f32 = 5.0;
 
@@ -1387,12 +1392,37 @@ impl Default for Controls {
             decay: 0.35,
             width: 0.35,
             level: 0.72,
-            // The user's lab refinements, by ear on 0.79.0: felt corner a
-            // touch up, the click colour well down, the hammer a shade
-            // softer and heavier, bloom up, both decay stages a little
-            // longer, the board eased.
+            // The user's lab refinements, by ear: felt corner a touch up, the
+            // hammer a shade softer and heavier, bloom up, both decay stages
+            // a little longer, the board eased.
+            //
+            // Click Colour is at 0.09, and it is down there for a reason the
+            // measurements could not state. The shank knock is three tuned
+            // partials -- 720, 1560 and 2740 Hz -- and `shank` moves them only
+            // 30% from A0 to C8, so every note in the compass carries the same
+            // three pitches on its attack. Measured, the low one sits at 750
+            // Hz under F2, 833 under G3, 850 under E4 and 783 under E5, while
+            // the fundamental underneath travels from 82 Hz to 659. A pitch
+            // that does not follow the note is a formant, and the ear names
+            // formants: the user heard a xylophone.
+            //
+            // No metric here saw it. The 29-note tilt against the reference
+            // does not move 0.1 dB across the whole travel of this control,
+            // and the chromatic cost actively PREFERS the old 0.32, rising to
+            // 1023.60 at 0.09 -- it scores band energy inside windows and has
+            // no way to represent "the same pitch on every note". This is the
+            // second time an attack component has been found by ear after the
+            // measurements cleared it; the first was the Impact Burst.
+            //
+            // Shortening the knock's ring was tried and does nothing: cutting
+            // its T60 by five changes the render by -45 dB rms, because the
+            // energy is in the first few milliseconds and not in the tail.
+            // Scattering the pitch per note DOES break the formant -- at +-55%
+            // the low mode ranges 633 to 1000 Hz across the compass instead of
+            // 750 to 850 -- and is the better fix if it ever survives a
+            // listening test. It has not been chosen; the level has.
             lab: [
-                0.52, 0.5, 0.5, 0.32, 0.5, 0.5, 0.5, 0.49, 0.55, 0.56, 0.5, 0.57, 0.58, 0.5, 0.45,
+                0.52, 0.5, 0.5, 0.09, 0.5, 0.5, 0.5, 0.49, 0.55, 0.56, 0.5, 0.57, 0.58, 0.5, 0.45,
                 0.5, 0.5,
             ],
             room_size: 0.28,
@@ -3756,7 +3786,7 @@ impl ConcertGrand {
                 // the ear flags it long before it can name it. A real action
                 // never lands twice the same way.
                 let jitter = 1.0
-                    + 0.14 * (hash01((note as u32) << 8 | seed) - 0.5)
+                    + CLACK_SCATTER * (hash01((note as u32) << 8 | seed) - 0.5)
                     + 0.06 * (hash01(strike_salt ^ seed) - 0.5);
                 let amplitude = clack_level * level;
                 let decay = self.decay_per_sample(t60);
@@ -6314,6 +6344,107 @@ mod tests {
         // finger and the shared board, room and saturator are the only places
         // voices can interact. A single-note render cannot show an
         // intermodulation product; this can.
+        // CG_SCORE renders a piece: a text file of timed events, one per line,
+        // "onset_ms duration_ms note velocity", plus "onset_ms pedal 0|1".
+        // Single notes and one-note-at-a-time sequences tell you about the
+        // instrument; only music tells you whether it is playable, because
+        // only music has a pedal held down over changing harmony, voices
+        // struck at different strengths at the same instant, and notes
+        // arriving while their neighbours still ring.
+        if let Ok(path) = std::env::var("CG_SCORE") {
+            let mut piano = Box::new(ConcertGrand::default());
+            if let Ok(preset) = std::env::var("CG_PRESET") {
+                assert!(piano.load_preset(&preset), "unknown preset {preset}");
+            }
+            for (index, value) in &overrides {
+                assert!(
+                    piano.set_parameter(*index, *value),
+                    "param {index} rejected"
+                );
+            }
+            let rate: u32 = std::env::var("CG_RATE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(44_100);
+            assert!(piano.prepare(rate as f64, 512, 0, 2));
+            let text = std::fs::read_to_string(&path).expect("score file");
+            let mut events: Vec<(u64, [u8; 3])> = Vec::new();
+            let mut last_ms = 0u64;
+            for line in text.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                let f: Vec<&str> = line.split_whitespace().collect();
+                let at: u64 = f[0].parse().expect("onset");
+                if f[1] == "pedal" {
+                    // A pedal POSITION, 0 to 127, not a switch. A Disklavier
+                    // capture records the sensor continuously -- the Chopin
+                    // nocturne in this set carries 2901 pedal events over three
+                    // and a half minutes -- and the engine takes CC64 as a
+                    // level, so half pedalling survives the trip.
+                    let level: u8 = f[2].parse().expect("pedal 0..127");
+                    events.push((at, [0xb0, 64, level.min(127)]));
+                    last_ms = last_ms.max(at);
+                    continue;
+                }
+                let hold: u64 = f[1].parse().expect("duration");
+                let note: u8 = f[2].parse().expect("note");
+                let velocity: u8 = f[3].parse().expect("velocity");
+                events.push((at, [0x90, note, velocity]));
+                events.push((at + hold, [0x80, note, 64]));
+                last_ms = last_ms.max(at + hold);
+            }
+            events.sort_by_key(|(at, _)| *at);
+            // Three seconds of tail, so the last chord is not guillotined.
+            let total = ((last_ms + 3_000) * rate as u64 / 1000) as usize;
+            let block = 512usize;
+            let mut output = vec![0.0f32; block * 2];
+            let mut mono: Vec<i16> = Vec::with_capacity(total);
+            let mut next = 0usize;
+            let mut frame = 0usize;
+            while frame < total {
+                let frames = block.min(total - frame);
+                let until = ((frame + frames) as u64) * 1000 / rate as u64;
+                let mut due: Vec<MidiEvent> = Vec::new();
+                while next < events.len() && events[next].0 <= until {
+                    let at = (events[next].0 * rate as u64 / 1000) as usize;
+                    due.push(MidiEvent {
+                        frame: at.saturating_sub(frame).min(frames - 1) as u32,
+                        data: events[next].1,
+                        length: 3,
+                    });
+                    next += 1;
+                }
+                due.sort_by_key(|e| e.frame);
+                piano.process(&[], &mut output, &due, &[], frames as u32, 0, 2);
+                mono.extend(
+                    output.as_chunks::<2>().0[..frames]
+                        .iter()
+                        .map(|f| (((f[0] + f[1]) * 0.5).clamp(-1.0, 1.0) * 32_767.0) as i16),
+                );
+                frame += frames;
+            }
+            let mut bytes = Vec::with_capacity(44 + mono.len() * 2);
+            let data_len = (mono.len() * 2) as u32;
+            bytes.extend(b"RIFF");
+            bytes.extend((36 + data_len).to_le_bytes());
+            bytes.extend(b"WAVEfmt ");
+            bytes.extend(16u32.to_le_bytes());
+            bytes.extend(1u16.to_le_bytes());
+            bytes.extend(1u16.to_le_bytes());
+            bytes.extend(rate.to_le_bytes());
+            bytes.extend((rate * 2).to_le_bytes());
+            bytes.extend(2u16.to_le_bytes());
+            bytes.extend(16u16.to_le_bytes());
+            bytes.extend(b"data");
+            bytes.extend(data_len.to_le_bytes());
+            for sample in &mono {
+                bytes.extend(sample.to_le_bytes());
+            }
+            std::fs::write(format!("{out}/score.wav"), bytes).unwrap();
+            return;
+        }
         // CG_SEQUENCE plays notes one after another into a single file, so a
         // listening test can compare one setting across the compass instead of
         // asking someone to line up a dozen separate renders by hand.

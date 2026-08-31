@@ -609,7 +609,23 @@ const BOARD_BOTTOM_HZ: f32 = 62.0;
 /// 150 Hz, 70% at 550 Hz, 100% at 1 kHz and back to 60% at 3 kHz, and 60%
 /// overlap at a 2.3% loss factor means spacing ≈ 0.038·f.
 ///
-/// Both measurements are honoured directly: 16.7 Hz flat to 1.1 kHz, then a
+/// The knee sat at 1.1 kHz until Ege & Boutillon's own comparison of five
+/// instruments was read for it. They report the limit between the two
+/// regimes -- the frequency where the vibration stops seeing a homogeneous
+/// plate and starts being confined between the ribs -- as 1184 Hz on an
+/// Atlas upright, 1394 on a Schimmel, 1589 on a Hohner, 1477 on a Steinway B
+/// and 1355 on a Steinway D. Our 1.1 kHz was below the entire measured
+/// range: the bank thinned its modes several hundred hertz too early, right
+/// where the mid-register ladder measures short.
+///
+/// 1477 Hz is the Steinway B's measured value and this is calibrated against
+/// a grand. Swept against the render, the chromatic cost falls 1003.6 at
+/// 1100 to 995.4 here, keeps falling to 986.6 at 1589 and then RISES again
+/// past the measured range -- the optimum lands inside the published data
+/// rather than beyond it, which is what makes this physics and not curve
+/// fitting. The optimum itself is not taken: 1589 is an upright's number.
+///
+/// Both measurements are honoured directly: 16.7 Hz flat to the knee, then a
 /// power law steep enough to reach the ~115 Hz spacing that 60% overlap
 /// implies at 3 kHz. Past 3 kHz the exponent is beyond the data, so the
 /// spacing is capped at constant 60% overlap rather than extrapolated — an
@@ -621,7 +637,7 @@ const BOARD_BOTTOM_HZ: f32 = 62.0;
 /// out with 11 dB of ripple through 500-1000 Hz where the over-damped bank it
 /// replaced had 1.3 dB.
 fn board_spacing(frequency: f32, density: f32) -> f32 {
-    const KNEE_HZ: f32 = 1100.0;
+    const KNEE_HZ: f32 = 1477.0;
     const FLAT: f32 = 1.0 / 0.06;
     let spacing = if frequency < KNEE_HZ {
         FLAT
@@ -1391,11 +1407,30 @@ impl Controls {
         powf(2.5, 0.5 - self.board_density)
     }
 
-    /// The speaking lengths, as a multiple of the calibrated scale. A little
-    /// over half at the bottom of the travel -- an upright's bass -- to a
-    /// third longer than a concert grand at the top.
+    /// The speaking lengths, as a multiple of the calibrated scale AT A0.
+    /// A little over half at the bottom of the travel -- an upright's bass --
+    /// to a third longer than a concert grand at the top.
     fn scale_length(&self) -> f32 {
         powf(2.4, self.size - 0.5)
+    }
+
+    /// How much of that scaling a given note actually receives.
+    ///
+    /// Pianos differ in the BASS, not in the treble. Measured across the
+    /// catalogue, A0 runs about 109 cm on a five-foot baby grand and 200 cm
+    /// on a nine-foot concert grand -- nearly a factor of two -- while the top
+    /// note's speaking length is around two inches on every piano ever built,
+    /// because that length is set by the pitch and the wire, not by the case.
+    /// A small piano is a piano with a foreshortened bass and an ordinary
+    /// treble, which is exactly why its bass is the part that sounds wrong.
+    ///
+    /// Scaling every length uniformly, which is what this did first, moved
+    /// the treble along with the bass and shrank an instrument that no maker
+    /// builds. The taper is gone by the middle of the keyboard, where real
+    /// scales converge.
+    fn scale_at(&self, position: f32) -> f32 {
+        let taper = powf(1.0 - position.clamp(0.0, 1.0), 2.5);
+        1.0 + (self.scale_length() - 1.0) * taper
     }
 
     /// The strike point as a multiple of the calibrated action's. The travel
@@ -1405,10 +1440,24 @@ impl Controls {
         powf(1.9, self.strike_point - 0.5)
     }
 
-    /// The scale's tension in newtons. Piano scales hold 600 to 900 N per
-    /// string; the travel covers that and a little either side.
+    /// The scale's tension in newtons, centred on the calibrated 850 N.
+    ///
+    /// The travel is ASYMMETRIC on purpose: down to about 300 N and up to
+    /// about 1200. Modern grands hold 700-900 N per string, so there is
+    /// almost nothing above the centre worth reaching -- 1200 is already past
+    /// any real instrument -- while below it lie the lighter scales that
+    /// historical pianos were strung at, and that is the direction a player
+    /// actually travels. A symmetric log travel spent half its length in a
+    /// region no piano occupies.
+    ///
+    /// Measured down to 347 N before opening it up: the model stays sound
+    /// there. C2's fundamental gains 4.6 dB while its partials 8-15 fall 7,
+    /// which is the trade -- a lighter scale is fatter and less jangly, with
+    /// a third of the inharmonicity and correspondingly less stretch.
     fn tension_newtons(&self) -> f32 {
-        STRING_TENSION_N * powf(2.0, self.tension - 0.5)
+        let offset = self.tension - 0.5;
+        let span = if offset < 0.0 { 2.83 } else { 1.41 };
+        STRING_TENSION_N * powf(span, 2.0 * offset)
     }
 
     /// How much of the near field the lid throws back, centred on the lid
@@ -2107,7 +2156,8 @@ impl ConcertGrand {
         // B goes as T/L^6: the length exponent above, and tension linearly,
         // because a tighter scale needs a thicker wire (d ~ sqrt(T)) and
         // stiffness follows d^4 while the restoring tension follows T.
-        let scale = self.controls.scale_length();
+        let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
+        let scale = self.controls.scale_at(position);
         let square = scale * scale;
         let tension = self.controls.tension_newtons() / STRING_TENSION_N;
         powf(10.0, exponent) * tension / (square * square * square)
@@ -2614,7 +2664,7 @@ impl ConcertGrand {
     /// A speaking length in metres: 1.9 m at A0 down to 5 cm at the top of a
     /// concert grand's scale, scaled by the instrument's size.
     fn string_length(&self, position: f32) -> f32 {
-        expf(0.642 - (1.61 + 1.99 * position) * position) * self.controls.scale_length()
+        expf(0.642 - (1.61 + 1.99 * position) * position) * self.controls.scale_at(position)
     }
 
     fn strike_point(&self, note: u8) -> f32 {

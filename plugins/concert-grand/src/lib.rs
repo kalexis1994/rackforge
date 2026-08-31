@@ -4006,8 +4006,46 @@ impl ConcertGrand {
                 if target != usize::MAX {
                     let existing = &mut voice.partials[target];
                     for lane in 0..LANES {
-                        existing.s[lane] += fresh.s[lane];
-                        existing.c[lane] += fresh.c[lane];
+                        // A hammer meeting a string that is already moving
+                        // gives it MOMENTUM. It does not teleport the string:
+                        // the displacement is continuous across the blow and
+                        // only the velocity jumps.
+                        //
+                        // Adding the fresh state into both quadratures put a
+                        // step into `s`, which IS the output -- the comment on
+                        // `Component::start` says exactly that about note-on,
+                        // where the state deliberately begins at (0, amp) so
+                        // the output rises from zero "with no click". The
+                        // restrike path did not honour it, so every repeated
+                        // note carried a step, and a step is broadband.
+                        //
+                        // Measured on the Chopin nocturne by the height of the
+                        // 9-20 kHz needle over its surroundings at each onset,
+                        // against how long since that same note last sounded:
+                        //
+                        // ```text
+                        //   never before   2.6 dB      2-10 s     3.8 dB
+                        //   over 10 s      2.5 dB      0.5-2 s    6.1 dB
+                        //                              under 0.5 s 10.3 dB
+                        // ```
+                        //
+                        // Monotonic in exactly the way the mechanism predicts:
+                        // the sooner the note is struck again, the more old
+                        // state is still there to be stepped over. The user
+                        // saw them as vertical needles in a spectrogram and
+                        // described them as a micro saturation on the attack.
+                        // An earlier pass in the same session cleared the
+                        // restrike path by measuring PEAK level, which cannot
+                        // see this: the step is small in amplitude and wide in
+                        // spectrum.
+                        //
+                        // The blow's whole contribution therefore arrives as
+                        // velocity, keeping its size and losing its
+                        // discontinuity.
+                        let energy =
+                            sqrtf(fresh.s[lane] * fresh.s[lane] + fresh.c[lane] * fresh.c[lane]);
+                        let push = if fresh.c[lane] < 0.0 { -energy } else { energy };
+                        existing.c[lane] += push;
                     }
                     existing.coupling = fresh.coupling;
                 } else if voice.partial_count < MAX_PARTIALS {

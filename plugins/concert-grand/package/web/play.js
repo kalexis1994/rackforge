@@ -269,12 +269,116 @@
         });
       }
 
-      function chooseCard(card) {
-        chosenCard = card;
-        for (const other of voicing.querySelectorAll(".card")) {
-          other.setAttribute("aria-pressed", String(other === card));
+      // The nameplate slides the way the arrow points: the name leaving goes
+      // out the far side, the one arriving comes in from the near one. The
+      // outgoing animation holds its end state, so it has to be cancelled once
+      // the incoming one has taken over -- otherwise the plate keeps the fade
+      // and the name never comes back.
+      const programLabel = document.getElementById("program");
+      let programToken = 0;
+
+      // A voicing's name is the plate's whole content, and what tells two of
+      // them apart tends to sit at the end -- "Concert 275 · Bright" against
+      // "Concert 275 · Warm". An ellipsis would cut off exactly the part that
+      // identifies it, so the lettering shrinks to fit instead; the ellipsis in
+      // the stylesheet stays as the floor's safety net, for a name so long that
+      // even the smallest engraving would not hold it. Letter-spacing is in em,
+      // so it follows the size down on its own.
+      const PROGRAM_TYPE_MAX = 13;
+      const PROGRAM_TYPE_MIN = 8;
+      function fitProgram() {
+        let size = PROGRAM_TYPE_MAX;
+        programLabel.style.fontSize = `${size}px`;
+        while (
+          size > PROGRAM_TYPE_MIN &&
+          programLabel.scrollWidth > programLabel.clientWidth
+        ) {
+          size -= 0.5;
+          programLabel.style.fontSize = `${size}px`;
         }
       }
+      // The plate is sized against the viewport, so a resize changes the field.
+      let refit = 0;
+      window.addEventListener("resize", () => {
+        clearTimeout(refit);
+        refit = setTimeout(fitProgram, 120);
+      });
+      function showProgram(name, direction) {
+        if (!name || programLabel.textContent === name) return;
+        if (!direction || !programLabel.animate) {
+          programLabel.textContent = name;
+          fitProgram();
+          return;
+        }
+        const token = ++programToken;
+        const travel = 34 * direction;
+        const out = programLabel.animate(
+          [
+            { transform: "translateX(0)", opacity: 1 },
+            { transform: `translateX(${-travel}px)`, opacity: 0 },
+          ],
+          { duration: 120, easing: "ease-in", fill: "forwards" },
+        );
+        // The name must land even if the animation never finishes. A panel
+        // whose window is offscreen gets a frozen timeline: the animations
+        // queue up reporting currentTime 0 and `finished` never settles, so
+        // hanging the text change off it alone left the plate naming the
+        // voicing before last. Whichever arrives first does the work.
+        // hanging the text change off it alone left the plate naming the
+        // voicing before last, and animating the arrival on a frozen timeline
+        // left it stuck at zero opacity -- worse than stale. So the timer
+        // winning the race is itself the evidence that nothing is animating:
+        // it sets the name and skips the arrival.
+        let settled = false;
+        const settle = (animated) => {
+          if (settled || token !== programToken) return;
+          settled = true;
+          programLabel.textContent = name;
+          fitProgram();
+          out.cancel();
+          if (!animated) return;
+          programLabel.animate(
+            [
+              { transform: `translateX(${travel}px)`, opacity: 0 },
+              { transform: "translateX(0)", opacity: 1 },
+            ],
+            { duration: 160, easing: "ease-out" },
+          );
+        };
+        out.finished.then(
+          () => settle(true),
+          () => settle(false),
+        );
+        setTimeout(() => settle(false), 220);
+      }
+
+      function chooseCard(card) {
+        // Which way the plate travels is read off the shelf rather than passed
+        // in, so an arrow and a click on a distant card animate alike.
+        const cards = [...voicing.querySelectorAll(".card")];
+        const from = cards.indexOf(chosenCard);
+        const to = cards.indexOf(card);
+        const direction = from < 0 || to < 0 || from === to ? 0 : Math.sign(to - from);
+        chosenCard = card;
+        for (const other of cards) {
+          other.setAttribute("aria-pressed", String(other === card));
+        }
+        showProgram(card?.querySelector(".title")?.textContent?.trim(), direction);
+      }
+
+      function stepProgram(delta) {
+        const cards = [...voicing.querySelectorAll(".card")];
+        if (!cards.length) return;
+        const at = cards.indexOf(chosenCard);
+        const next = (((at < 0 ? 0 : at + delta) % cards.length) + cards.length) % cards.length;
+        cards[next].click();
+      }
+      document
+        .getElementById("programprev")
+        .addEventListener("click", () => stepProgram(-1));
+      document
+        .getElementById("programnext")
+        .addEventListener("click", () => stepProgram(1));
 
       function presetCard(name, onPick, extras) {
         const card = document.createElement("div");
@@ -331,7 +435,7 @@
           (selectedSoundId &&
             voicing.querySelector(`.card[data-sound-id="${selectedSoundId}"]`)) ||
           voicing.querySelector(".card");
-        if (chosen) chosen.setAttribute("aria-pressed", "true");
+        if (chosen) chooseCard(chosen);
         for (const preset of userPresets()) {
           const tools = document.createElement("span");
           tools.className = "tools-inline";

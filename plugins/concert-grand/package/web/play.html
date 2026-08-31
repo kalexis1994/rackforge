@@ -84,19 +84,57 @@
         display: block;
         text-align: center;
       }
-      .plaque {
+      /* The plate carries the name of the program, and the arrows either
+         side of it change program -- so the instrument's identity and its
+         voicing are the same object, the way a nameplate on a real console
+         names whatever is patched. */
+      .selector {
         display: flex;
         align-items: center;
         justify-content: center;
-        min-height: 104px;
-        background: url("img/nameplate.webp") center / contain no-repeat;
+        gap: 4px;
+      }
+      .step {
+        appearance: none;
+        border: 0;
+        background: none;
+        padding: 0 6px;
+        color: var(--gold);
+        font: 32px/1 "Unna", Georgia, "Times New Roman", serif;
+        cursor: pointer;
+        opacity: 0.7;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+        transition: opacity 120ms ease, transform 120ms ease;
+      }
+      .step:hover { opacity: 1; transform: scale(1.16); }
+      .step:active { transform: scale(0.94); }
+      /* The box is given the plate's own proportion, so the image can fill it
+         exactly rather than being fitted inside it. That is what makes the
+         percentage below mean something: `contain` left the oval floating in a
+         wider box, and a max-width in percent then measured the box rather
+         than the plate -- a long voicing name ran out over the beaded rim and
+         across the screws. The clear field between the two screws is about
+         three fifths of the plate. */
+      .plaque {
+        flex: 0 0 auto;
+        width: min(300px, 62vw);
+        aspect-ratio: 640 / 287;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: url("img/nameplate.webp") center / 100% 100% no-repeat;
         filter: drop-shadow(0 3px 7px rgba(0, 0, 0, 0.6));
       }
       .masthead h1 {
         margin: 0;
-        font-size: 15px;
+        max-width: 60%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 13px;
         font-weight: 600;
-        letter-spacing: 0.24em;
+        letter-spacing: 0.12em;
         text-transform: uppercase;
         color: var(--engraved);
         text-shadow: 0 1px 0 rgba(255, 238, 205, 0.45);
@@ -374,6 +412,12 @@
       input[type="range"] {
         -webkit-appearance: none;
         appearance: none;
+        /* The browser's own stylesheet puts a 2px margin on a range input.
+           Added to width:100% it pushed every fader two pixels right of its
+           label and two pixels past the far side of the plate -- which read as
+           padding on the left and none on the right. */
+        margin: 0;
+        box-sizing: border-box;
         width: 100%;
         height: 30px;
         background: transparent;
@@ -384,13 +428,24 @@
         border-radius: 3px;
         background:
           /* The gold thread lives inside the channel, not across the raised
-             ends of it, and it is inset by half a cap at each end -- so the
-             thread stops exactly where the cap's centre is, at every value
-             rather than only at the middle. */
-          linear-gradient(90deg, var(--gold) 0 var(--fill, 50%), transparent var(--fill, 50%))
-            left 12px center / calc(100% - 24px) 6px no-repeat,
+             ends of it. Both insets come from measuring slot.webp rather than
+             from taste: the milled recess runs from 24% to 78% of the image's
+             height and its raised ends take about 2.4% of the width, which is
+             about 6px on a narrow fader and 11px on a wide one. So the inset
+             has to be the percentage, not a pixel count: a fixed 9px left a
+             black step showing at the low end of every narrow fader. The stops
+             live in the gradient rather than in the layer's position, because
+             a background-position percentage measures (box - image) and would
+             not land where it reads. */
+          linear-gradient(
+              90deg,
+              transparent 0 1.2%,
+              var(--gold) 1.2% min(var(--fill, 50%), 97.6%),
+              transparent min(var(--fill, 50%), 97.6%)
+            )
+            center / 100% 6px no-repeat,
           linear-gradient(180deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.66))
-            center / 96% 64% no-repeat,
+            center / 96% 54% no-repeat,
           url("img/slot.webp") center / 100% 100% no-repeat;
       }
       input[type="range"]::-moz-range-track {
@@ -398,7 +453,7 @@
         border-radius: 3px;
         background:
           linear-gradient(180deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.66))
-            center / 96% 64% no-repeat,
+            center / 96% 54% no-repeat,
           url("img/slot.webp") center / 100% 100% no-repeat;
       }
       input[type="range"]::-moz-range-progress {
@@ -502,8 +557,16 @@
   </head>
   <body>
     <header class="masthead">
-      <div class="plaque"><h1>Concert Grand</h1></div>
-      <p>A physical model</p>
+      <div class="selector">
+        <button type="button" class="step" id="programprev" aria-label="Programa anterior">
+          &#8249;
+        </button>
+        <div class="plaque"><h1 id="program">Concert Grand</h1></div>
+        <button type="button" class="step" id="programnext" aria-label="Programa siguiente">
+          &#8250;
+        </button>
+      </div>
+      <p>Concert Grand &middot; a physical model</p>
     </header>
     <main>
       <div class="console">

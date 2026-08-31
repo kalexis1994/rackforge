@@ -1411,7 +1411,17 @@ impl Controls {
     /// A little over half at the bottom of the travel -- an upright's bass --
     /// to a third longer than a concert grand at the top.
     fn scale_length(&self) -> f32 {
-        powf(2.4, self.size - 0.5)
+        // Asymmetric, for the same reason the tension travel is: the real
+        // instruments are not spread evenly around the calibrated one. A
+        // concert grand's A0 speaking length is about 1.90 m and the longest
+        // piano ever built reaches perhaps 2.15 -- there is almost nothing
+        // above -- while below lie the five-foot grands at 1.09 m and the
+        // studio uprights at 1.22. A symmetric travel put a third of its
+        // length past any piano that exists and could not reach a baby grand
+        // at all.
+        let offset = self.size - 0.5;
+        let span = if offset < 0.0 { 1.82 } else { 1.15 };
+        powf(span, 2.0 * offset)
     }
 
     /// How much of that scaling a given note actually receives.
@@ -4233,6 +4243,163 @@ impl Processor for ConcertGrand {
             // Intimate: the default IS the intimate voicing now; this keeps
             // its own name for the day the default moves elsewhere.
             "intimate" => Controls::default(),
+
+            // ---- Instruments, from published dimensions --------------------
+            //
+            // Every profile below sets its SIZE from a real instrument's
+            // A0 speaking length, which is the one number that reliably
+            // separates pianos: 1.90 m on the concert grand this model is
+            // calibrated against, 2.10 on the longest piano built, 1.09 on a
+            // five-foot baby grand. The case lengths are the makers' own
+            // published figures; the A0 lengths follow from them and from the
+            // scale data in the sources, and the fader position follows from
+            // the A0 length by the travel's own law.
+            //
+            // The voicing on top of that is NOT measured. A maker's tone is
+            // hammers, board taper and rib design, none of which any
+            // specification sheet gives, so the brightness, tension and
+            // strike point here are read from how these instruments are
+            // consistently described and from the physics that would produce
+            // that description. They are a starting point for the ear, not a
+            // claim about the instrument.
+            //
+            // Two things the measurements DO constrain, and both are obeyed:
+            // the soundboard barely differs between pianos -- Ege &
+            // Boutillon find a millimetre of panel thickness moves modal
+            // density as much as the difference between instruments -- so no
+            // profile moves the board far; and grands carry slightly higher
+            // modal density than uprights, so the uprights sit a little
+            // below centre and the grands a little above.
+
+            // Fazioli F308, 308 cm: the longest piano made, and its length
+            // is the whole point -- the bass and middle strings are longer
+            // than anyone else's, which is where its clarity comes from.
+            // A0 ~2.10 m.
+            "fazioli-f308" => Controls {
+                size: 0.86,
+                brightness: 0.62,
+                tension: 0.55,
+                strike_point: 0.5,
+                board_density: 0.56,
+                unison: 0.42,
+                decay: 0.55,
+                ..Controls::default()
+            },
+            // Bösendorfer 280VC, 280 cm: warm and singing, a drier attack,
+            // the bass its signature. A0 ~2.02 m.
+            "bosendorfer-280" => Controls {
+                size: 0.72,
+                brightness: 0.36,
+                tension: 0.34,
+                strike_point: 0.42,
+                board_density: 0.54,
+                unison: 0.55,
+                decay: 0.58,
+                ..Controls::default()
+            },
+            // Yamaha CFX, 275 cm: bright, even and powerful. The reference
+            // this model is calibrated against is a Yamaha, so this profile
+            // sits closest to the factory instrument. A0 ~2.00 m.
+            "yamaha-cfx" => Controls {
+                size: 0.68,
+                brightness: 0.60,
+                tension: 0.58,
+                strike_point: 0.52,
+                board_density: 0.53,
+                ..Controls::default()
+            },
+            // Steinway D-274: rich and complex rather than bright, and most
+            // itself at low velocities. A0 ~1.98 m.
+            "steinway-d" => Controls {
+                size: 0.65,
+                brightness: 0.47,
+                tension: 0.5,
+                strike_point: 0.47,
+                board_density: 0.53,
+                unison: 0.58,
+                dynamics: 0.62,
+                ..Controls::default()
+            },
+            // Steinway B, 211 cm: the same voice in a shorter case. The bass
+            // is where it gives ground, which is exactly what Size expresses.
+            // A0 ~1.65 m.
+            "steinway-b" => Controls {
+                size: 0.38,
+                brightness: 0.47,
+                tension: 0.5,
+                strike_point: 0.47,
+                board_density: 0.52,
+                unison: 0.58,
+                dynamics: 0.62,
+                ..Controls::default()
+            },
+            // A parlour grand around 1.85 m: the common six-foot instrument.
+            // A0 ~1.45 m.
+            "parlour-grand" => Controls {
+                size: 0.27,
+                brightness: 0.5,
+                tension: 0.5,
+                strike_point: 0.5,
+                board_density: 0.5,
+                ..Controls::default()
+            },
+            // A five-foot baby grand: a foreshortened bass under an ordinary
+            // treble, which is the whole character of the thing. A0 ~1.09 m.
+            "baby-grand" => Controls {
+                size: 0.04,
+                brightness: 0.55,
+                tension: 0.5,
+                strike_point: 0.55,
+                board_density: 0.47,
+                decay: 0.4,
+                ..Controls::default()
+            },
+            // A 52-inch professional upright. Its bass string is LONGER than
+            // a five-foot grand's -- 1.37 m against 1.09 -- which is why tall
+            // uprights beat small grands where it matters.
+            "upright-52" => Controls {
+                size: 0.23,
+                brightness: 0.52,
+                tension: 0.5,
+                strike_point: 0.55,
+                board_density: 0.45,
+                room_size: 0.2,
+                mic_distance: 0.25,
+                width: 0.45,
+                decay: 0.42,
+                ..Controls::default()
+            },
+            // A 45-inch studio upright. A0 ~1.22 m.
+            "upright-studio" => Controls {
+                size: 0.13,
+                brightness: 0.55,
+                tension: 0.52,
+                strike_point: 0.58,
+                board_density: 0.43,
+                room_size: 0.15,
+                mic_distance: 0.2,
+                width: 0.4,
+                decay: 0.38,
+                ..Controls::default()
+            },
+            // A Viennese fortepiano. Not a small modern piano: a different
+            // instrument, strung at a fraction of the tension on far lighter
+            // wire, with leather-covered hammers. This is the profile the
+            // widened tension travel exists for.
+            "fortepiano" => Controls {
+                size: 0.30,
+                brightness: 0.45,
+                tension: 0.06,
+                strike_point: 0.35,
+                board_density: 0.4,
+                board_damping: 0.6,
+                unison: 0.35,
+                decay: 0.3,
+                dynamics: 0.35,
+                room_size: 0.25,
+                mic_distance: 0.25,
+                ..Controls::default()
+            },
             _ => return false,
         };
         self.room_dirty = true;
@@ -5471,6 +5638,50 @@ mod tests {
                 20.0 * (v / reference).max(1e-9).log10(),
                 20.0 * (h / reference).max(1e-9).log10(),
                 20.0 * (bl / reference).max(1e-9).log10()
+            );
+        }
+    }
+
+    /// Every instrument profile is reachable, distinct, and lands its scale
+    /// where its real counterpart's does.
+    #[test]
+    fn instrument_profiles_carry_their_own_scale() {
+        let instruments = [
+            ("fazioli-f308", 2.10),
+            ("bosendorfer-280", 2.02),
+            ("yamaha-cfx", 2.00),
+            ("steinway-d", 1.98),
+            ("steinway-b", 1.65),
+            ("parlour-grand", 1.45),
+            ("baby-grand", 1.09),
+            ("upright-52", 1.37),
+            ("upright-studio", 1.22),
+            ("fortepiano", 1.50),
+        ];
+        let mut sizes = Vec::new();
+        for (id, expected_a0) in instruments {
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.load_preset(id), "{id} is not a preset");
+            let a0 = piano.string_length(0.0);
+            assert!(
+                (a0 - expected_a0).abs() < 0.06,
+                "{id}: A0 speaking length {a0:.2} m, expected about {expected_a0:.2}"
+            );
+            // The treble is the same piano on every instrument: makers
+            // differ in the bass, and the top note is set by pitch and wire.
+            let top = piano.string_length(1.0);
+            assert!(
+                (top - 0.052).abs() < 0.002,
+                "{id}: the top note moved to {top:.3} m"
+            );
+            sizes.push(piano.controls.size);
+        }
+        // And they are actually different instruments, not one with labels.
+        sizes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        for pair in sizes.windows(2) {
+            assert!(
+                pair[1] - pair[0] > 0.005 || (pair[1] - pair[0]).abs() < 1e-6,
+                "two profiles share a scale: {pair:?}"
             );
         }
     }

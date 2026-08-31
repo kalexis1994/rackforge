@@ -51,6 +51,116 @@
         "close"
       ],
       "description": "Close, narrow and short: a small room"
+    },
+    {
+      "id": "fazioli-f308",
+      "name": "Fazioli F308",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 4,
+      "tags": [
+        "instrument"
+      ],
+      "description": "308 cm — the longest piano built; its clarity is its string length"
+    },
+    {
+      "id": "bosendorfer-280",
+      "name": "Bosendorfer 280VC",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 5,
+      "tags": [
+        "instrument"
+      ],
+      "description": "280 cm — warm and singing, a drier attack, the bass its signature"
+    },
+    {
+      "id": "yamaha-cfx",
+      "name": "Yamaha CFX",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 6,
+      "tags": [
+        "instrument"
+      ],
+      "description": "275 cm — bright, even and powerful; closest to the calibrated reference"
+    },
+    {
+      "id": "steinway-d",
+      "name": "Steinway D-274",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 7,
+      "tags": [
+        "instrument"
+      ],
+      "description": "274 cm — rich rather than bright, most itself when played softly"
+    },
+    {
+      "id": "steinway-b",
+      "name": "Steinway B",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 8,
+      "tags": [
+        "instrument"
+      ],
+      "description": "211 cm — the same voice in a shorter case; the bass gives ground"
+    },
+    {
+      "id": "parlour-grand",
+      "name": "Parlour Grand",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 9,
+      "tags": [
+        "instrument"
+      ],
+      "description": "185 cm — the common six-foot instrument"
+    },
+    {
+      "id": "baby-grand",
+      "name": "Baby Grand",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 10,
+      "tags": [
+        "instrument"
+      ],
+      "description": "150 cm — a foreshortened bass under an ordinary treble"
+    },
+    {
+      "id": "upright-52",
+      "name": "Upright 52\"",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 11,
+      "tags": [
+        "instrument"
+      ],
+      "description": "A tall upright; its bass string outreaches a five-foot grand's"
+    },
+    {
+      "id": "upright-studio",
+      "name": "Studio Upright",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 12,
+      "tags": [
+        "instrument"
+      ],
+      "description": "45 inches, close and dry"
+    },
+    {
+      "id": "fortepiano",
+      "name": "Fortepiano",
+      "bank": "factory",
+      "category": "Piano",
+      "order": 13,
+      "tags": [
+        "instrument"
+      ],
+      "description": "Viennese: light wire at a fraction of the tension"
     }
   ]
 }

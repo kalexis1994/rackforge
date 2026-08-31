@@ -5812,6 +5812,15 @@ mod tests {
     ///   against stiffness -- mass over 2.5x, stiffness over 300x, nine
     ///   corners -- C3's ratio stays between 0.67 and 0.87 and never approaches
     ///   0.38. There is no pair of values in this model that produces it.
+    /// - Nor the string's RESOLUTION. The contact used to inherit the audible
+    ///   ladder's 11 kHz ceiling, so the hammer met 27 modes at C4 and 14 at
+    ///   C5 where the literature uses hundreds. Given its own ceiling at
+    ///   Nyquist -- 63 and 34 modes, and 105 at C3 against 68 -- the ratios
+    ///   move from 0.769/0.700/0.610 to 0.769/0.700/0.611. The extra modes are
+    ///   there and they do nothing.
+    /// - Nor the contact width's MAGNITUDE, which is what gates how much those
+    ///   high modes are coupled at all: over a twentyfold range C3 moves 0.769
+    ///   to 0.774.
     /// - Nor the contact WIDTH's dependence on the blow. Swept from narrowing
     ///   with velocity, as it does now, through flat, to widening steeply --
     ///   which is the physical direction, since a harder blow flattens more of
@@ -5857,14 +5866,23 @@ mod tests {
                         epsilon,
                         tau,
                         comb: COMB_FLOOR,
-                        width_mul: 1.0,
+                        width_mul: std::env::var("CG_WIDTH")
+                            .ok()
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(1.0),
                         k_mul: std::env::var("CG_KMUL")
                             .ok()
                             .and_then(|v| v.parse().ok())
                             .unwrap_or(1.0),
                     });
                     CONTACT_STEPS.store(0, core::sync::atomic::Ordering::Relaxed);
-                    let mut piano = prepared();
+                    // At the host's rate, not the tests' 16 kHz. The rate caps
+                    // how far the partial ladder reaches and so how many modes
+                    // the contact is integrated against: at 16 kHz the hammer
+                    // meets a string resolved only to 8 kHz, which is 27 modes
+                    // at C4 and 14 at C5 rather than 63 and 34.
+                    let mut piano = Box::new(ConcertGrand::default());
+                    assert!(piano.prepare(44_100.0, 512, 0, 2));
                     for part in std::env::var("CG_PARAMS")
                         .unwrap_or_default()
                         .split(',')

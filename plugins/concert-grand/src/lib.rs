@@ -5808,9 +5808,21 @@ mod tests {
     ///   under half the peak -- buys 1.1 dB in the attack's 4-8 kHz and costs
     ///   2 dB of midrange surplus and six of bass.
     ///
+    /// - Nor the hammer's MASS, and not in combination either. Swept as a grid
+    ///   against stiffness -- mass over 2.5x, stiffness over 300x, nine
+    ///   corners -- C3's ratio stays between 0.67 and 0.87 and never approaches
+    ///   0.38. There is no pair of values in this model that produces it.
+    /// - Nor the contact WIDTH's dependence on the blow. Swept from narrowing
+    ///   with velocity, as it does now, through flat, to widening steeply --
+    ///   which is the physical direction, since a harder blow flattens more of
+    ///   the crown against the string -- the ratio moves 0.769 to 0.744.
+    ///
     /// What that leaves: across the whole space the felt can reach, the
     /// contact duration is set by the STRING and the hammer's mass, not by the
-    /// felt, so it cannot shorten with velocity the way a real one's does. The
+    /// felt, so it cannot shorten with velocity the way a real one's does.
+    /// Counted in wave round trips to the agraffe and back, this hammer stays
+    /// for three to four where a real one stays for one and a half to two, and
+    /// no parameter reachable from here changes that. The
     /// note on `HAMMER_MASS_SCALE` reached the same place from the other
     /// direction -- lightening the hammer fifty-fold makes the times land and
     /// starves the tone -- and momentum forbids the obvious escape, since a

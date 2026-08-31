@@ -1396,7 +1396,7 @@ impl Default for Controls {
             // hammer a shade softer and heavier, bloom up, both decay stages
             // a little longer, the board eased.
             //
-            // Click Colour is at 0.09, and it is down there for a reason the
+            // Click Colour is at 0.07, and it is down there for a reason the
             // measurements could not state. The shank knock is three tuned
             // partials -- 720, 1560 and 2740 Hz -- and `shank` moves them only
             // 30% from A0 to C8, so every note in the compass carries the same
@@ -1409,7 +1409,7 @@ impl Default for Controls {
             // No metric here saw it. The 29-note tilt against the reference
             // does not move 0.1 dB across the whole travel of this control,
             // and the chromatic cost actively PREFERS the old 0.32, rising to
-            // 1023.60 at 0.09 -- it scores band energy inside windows and has
+            // 1025.09 at 0.07 -- it scores band energy inside windows and has
             // no way to represent "the same pitch on every note". This is the
             // second time an attack component has been found by ear after the
             // measurements cleared it; the first was the Impact Burst.
@@ -1422,7 +1422,7 @@ impl Default for Controls {
             // 750 to 850 -- and is the better fix if it ever survives a
             // listening test. It has not been chosen; the level has.
             lab: [
-                0.52, 0.5, 0.5, 0.09, 0.5, 0.5, 0.5, 0.49, 0.55, 0.56, 0.5, 0.57, 0.58, 0.5, 0.45,
+                0.52, 0.5, 0.5, 0.07, 0.5, 0.5, 0.5, 0.49, 0.55, 0.56, 0.5, 0.57, 0.58, 0.5, 0.45,
                 0.5, 0.5,
             ],
             room_size: 0.28,

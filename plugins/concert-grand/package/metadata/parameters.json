@@ -536,6 +536,20 @@
         "step": 0.01,
         "default": 0.5
       }
+    },
+    {
+      "index": 33,
+      "id": "size",
+      "name": "Size",
+      "page": "sound",
+      "order": 5,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
     }
   ]
 }

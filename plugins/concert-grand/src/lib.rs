@@ -271,7 +271,17 @@ const PARAM_IMPACT: u32 = 30;
 /// never touches these is the instrument that was calibrated.
 const PARAM_BOARD_DAMPING: u32 = 31;
 const PARAM_BOARD_DENSITY: u32 = 32;
-const PARAM_COUNT: usize = 6 + LAB_COUNT + 10;
+/// The instrument's SIZE, as a scale on the speaking lengths.
+///
+/// Centre is the concert grand the model was calibrated on. This is not a
+/// voicing multiplier: it moves the one dimension every other string quantity
+/// is derived from, so the whole character follows by physics -- the wire
+/// thickens to hold pitch at the shorter length, its stiffness rises as the
+/// fourth power of that, and the inharmonicity that results widens the tuner's
+/// stretch. A grand at 2.7 m and an upright at 1.2 m differ by about thirty
+/// times in bass inharmonicity, and that ratio is what this reproduces.
+const PARAM_SIZE: u32 = 33;
+const PARAM_COUNT: usize = 6 + LAB_COUNT + 11;
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
 /// entries are pre-scaled by the per-sample decay factor `g`, so magnitude
@@ -1268,6 +1278,8 @@ struct Controls {
     /// the modes closer or further apart, which costs or saves CPU.
     board_damping: f32,
     board_density: f32,
+    /// The scale's overall length. Centre is the calibrated concert grand.
+    size: f32,
 }
 
 impl Default for Controls {
@@ -1302,6 +1314,7 @@ impl Default for Controls {
             impact: 0.5,
             board_damping: 0.5,
             board_density: 0.5,
+            size: 0.5,
         }
     }
 }
@@ -1336,6 +1349,13 @@ impl Controls {
     /// than better. 256 slots cover the tightest setting here to 8.5 kHz.
     fn board_density(&self) -> f32 {
         powf(2.5, 0.5 - self.board_density)
+    }
+
+    /// The speaking lengths, as a multiple of the calibrated scale. A little
+    /// over half at the bottom of the travel -- an upright's bass -- to a
+    /// third longer than a concert grand at the top.
+    fn scale_length(&self) -> f32 {
+        powf(2.4, self.size - 0.5)
     }
 
     fn lab(&self, i: usize) -> f32 {
@@ -1378,6 +1398,7 @@ impl Controls {
             PARAM_IMPACT => self.impact,
             PARAM_BOARD_DAMPING => self.board_damping,
             PARAM_BOARD_DENSITY => self.board_density,
+            PARAM_SIZE => self.size,
             _ => return None,
         };
         Some(value as f64)
@@ -1406,6 +1427,7 @@ impl Controls {
             PARAM_IMPACT => self.impact = value,
             PARAM_BOARD_DAMPING => self.board_damping = value,
             PARAM_BOARD_DENSITY => self.board_density = value,
+            PARAM_SIZE => self.size = value,
             // (the engine watches the room and the board through their
             // dirty flags -- both are rebuilds, not per-sample reads)
             _ => return false,
@@ -1521,6 +1543,7 @@ pub struct ConcertGrand {
     /// The board is a rebuild, not a per-sample read: its two controls set
     /// this and `process` retunes the bank at the next block boundary.
     board_dirty: bool,
+    scale_dirty: bool,
     room_index: [usize; ROOM_LINES],
 }
 
@@ -1635,6 +1658,7 @@ impl Default for ConcertGrand {
             proximity: [0.0; 2],
             room_dirty: false,
             board_dirty: false,
+            scale_dirty: false,
             room_index: [0; ROOM_LINES],
         };
         piano.tune();
@@ -1977,10 +2001,30 @@ impl ConcertGrand {
 
     /// Fits published inharmonicity measurements: a quadratic in log-space,
     /// minimum near A2, ~1e-4 in the middle of the compass to ~1e-2 at C8.
-    fn inharmonicity_for(note: u8) -> f32 {
+    /// Inharmonicity: the calibrated instrument's measured curve, carried to
+    /// other scale lengths by the exact law that relates them.
+    ///
+    /// B = pi^3 E d^4 / (64 T L^2) for a stiff string. Hold the pitch and the
+    /// tension and shorten the scale, and the wire must thicken as 1/L to keep
+    /// its linear density -- so the stiffness rises as the fourth power of
+    /// that and B goes as 1/L^6. That exponent is exact, and it is most of why
+    /// a small piano sounds small: a 1.2 m upright carries about thirty times
+    /// the bass inharmonicity of a 2.7 m grand, and the tuner's stretch, which
+    /// `tune` derives FROM B, widens with it.
+    ///
+    /// The curve in note number stays as the anchor. Deriving B from the
+    /// geometry outright was tried and measured: with a two-constant wound-core
+    /// profile it reproduces this curve within 1.1 dB across eight octaves --
+    /// the physics is sound -- but that residue cost six points of chromatic
+    /// fit for nothing, because the size dependence is a power law that rides
+    /// on top of a measurement perfectly well. Measured where there is a
+    /// measurement, derived where there is not.
+    fn inharmonicity_for(&self, note: u8) -> f32 {
         let n = note as f32;
         let exponent = -3.95 + 4.9e-4 * (n - 45.0) * (n - 45.0);
-        powf(10.0, exponent)
+        let scale = self.controls.scale_length();
+        let square = scale * scale;
+        powf(10.0, exponent) / (square * square * square)
     }
 
     /// Tunes the instrument the way a tuner does: A4 = 440, octave anchors
@@ -1989,7 +2033,7 @@ impl ConcertGrand {
     /// the output of this procedure, not an input to it.
     fn tune(&mut self) {
         for index in 0..NOTE_COUNT {
-            self.inharmonicity[index] = Self::inharmonicity_for(LOW_NOTE + index as u8);
+            self.inharmonicity[index] = self.inharmonicity_for(LOW_NOTE + index as u8);
         }
 
         // Stretch in cents at the octave anchors around A4 (index 48).
@@ -2481,8 +2525,10 @@ impl ConcertGrand {
     /// derived linear density and the agraffe-reflection time that floors
     /// the hammer contact. Quadratic in log-length through measured anchors:
     /// A0 1.9 m, C2 ~1.3, C4 0.62, C6 0.19, C8 5.2 cm.
-    fn string_length(position: f32) -> f32 {
-        expf(0.642 - (1.61 + 1.99 * position) * position)
+    /// A speaking length in metres: 1.9 m at A0 down to 5 cm at the top of a
+    /// concert grand's scale, scaled by the instrument's size.
+    fn string_length(&self, position: f32) -> f32 {
+        expf(0.642 - (1.61 + 1.99 * position) * position) * self.controls.scale_length()
     }
 
     fn strike_point(note: u8) -> f32 {
@@ -2789,7 +2835,7 @@ impl ConcertGrand {
                 // and the felt's K is a material property in N/m^p,
                 // calibrated once against measured contact times and then
                 // left alone. The contact time is an OUTCOME.
-                let length = Self::string_length(position);
+                let length = self.string_length(position);
                 let wave_speed = 2.0 * length * f0;
                 let string_mass = STRING_TENSION_N / (wave_speed * wave_speed) * length;
                 // A0 to ~E1 single-strung, doubled through the wound bass,
@@ -3986,6 +4032,12 @@ impl Processor for ConcertGrand {
             // while the slider moves.
             self.room_dirty = true;
         }
+        if accepted && index == PARAM_SIZE {
+            // Size moves every speaking length, so the whole scale is
+            // re-derived: densities, inharmonicity and the stretch that
+            // follows from it. A retune, not a multiplier.
+            self.scale_dirty = true;
+        }
         if accepted && (PARAM_BOARD_DAMPING..=PARAM_BOARD_DENSITY).contains(&index) {
             // The board is a bank rebuild -- a hundred and some resonators
             // retuned -- so it happens at the block boundary too, never
@@ -4042,6 +4094,7 @@ impl Processor for ConcertGrand {
         };
         self.room_dirty = true;
         self.board_dirty = true;
+        self.scale_dirty = true;
         true
     }
 
@@ -4066,6 +4119,7 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 7] = self.controls.impact;
         values[6 + LAB_COUNT + 8] = self.controls.board_damping;
         values[6 + LAB_COUNT + 9] = self.controls.board_density;
+        values[6 + LAB_COUNT + 10] = self.controls.size;
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -4110,6 +4164,7 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 7] = defaults.impact;
         values[6 + LAB_COUNT + 8] = defaults.board_damping;
         values[6 + LAB_COUNT + 9] = defaults.board_density;
+        values[6 + LAB_COUNT + 10] = defaults.size;
         // A 37-float state is from the era of the "in bass" tilt twins: its
         // tail is tilt values, not room values, and reading it into the room
         // controls would set the hall from leftovers. Take its head only.
@@ -4149,6 +4204,7 @@ impl Processor for ConcertGrand {
             impact: values[6 + LAB_COUNT + 7],
             board_damping: values[6 + LAB_COUNT + 8],
             board_density: values[6 + LAB_COUNT + 9],
+            size: values[6 + LAB_COUNT + 10],
         };
         self.room_dirty = true;
         self.board_dirty = true;
@@ -4174,6 +4230,10 @@ impl Processor for ConcertGrand {
         }
         if self.board_dirty {
             self.tune_board();
+        }
+        if self.scale_dirty {
+            self.scale_dirty = false;
+            self.tune();
         }
         let level = self.controls.level * self.controls.level;
         // The sympathetic feed: the bridge's total string signal from the
@@ -4551,10 +4611,12 @@ mod tests {
     #[test]
     fn inharmonicity_fits_the_published_shape() {
         // Smallest in the tenor, largest at the top: the ranges reported in
-        // Fletcher & Rossing ch. 12.
-        let tenor = ConcertGrand::inharmonicity_for(45);
-        let bass = ConcertGrand::inharmonicity_for(21);
-        let top = ConcertGrand::inharmonicity_for(108);
+        // Fletcher & Rossing ch. 12. Derived from the scale's geometry now,
+        // so this also guards the derivation against the published ranges.
+        let piano = prepared();
+        let tenor = piano.inharmonicity_for(45);
+        let bass = piano.inharmonicity_for(21);
+        let top = piano.inharmonicity_for(108);
         assert!(tenor < bass && bass < top);
         assert!((5e-5..5e-4).contains(&tenor), "tenor B {tenor}");
         assert!((1e-3..5e-2).contains(&top), "treble B {top}");

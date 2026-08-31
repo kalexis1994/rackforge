@@ -1,9 +1,9 @@
 schema_version = 3
 id = "org.rackforge.concert-grand"
-name = "RackForge Concert Grand"
+name = "RF - Concert Grand"
 short_name = "RF-GRAND"
 vendor = "RackForge"
-version = "0.102.0"
+version = "0.103.0"
 description = "Physically modelled grand piano: stiff strings, derived stretch tuning, hammer felt and two-stage decay, with no samples"
 kind = "instrument"
 state_version = 1

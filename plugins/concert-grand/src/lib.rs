@@ -2950,7 +2950,16 @@ impl ConcertGrand {
                 * board_decay
                 * self.cal(note, 4)
                 * string_life;
-            let jitter = 0.55 + 0.9 * hash01((note as u32) << 10 | (n as u32) << 2 | 1);
+            // Geometric, and WIDE. The linear x0.55-1.45 spread kept every
+            // cluster's beat rate within a factor 2.6, so with rate
+            // proportional to frequency the FIRST nulls of every 2-4 kHz
+            // cluster landed together inside 0.1-0.3 s -- measured on C2 as
+            // a 5 dB band dip at 0.08-0.25 s that swings back by 0.5 s, a
+            // breath the real note does not take (its clusters are dense and
+            // their nulls shallow). A factor-6 geometric spread scatters the
+            // null times; the geometric mean keeps the average width the
+            // ear already approved.
+            let jitter = 0.95 * powf(6.0, hash01((note as u32) << 10 | (n as u32) << 2 | 1) - 0.5);
             let cents = detune_cents * jitter;
             // The strings of the unison, struck together and equal: their
             // subsequent life -- fast coherent decay, dephasing, the long
@@ -2966,6 +2975,20 @@ impl ConcertGrand {
             // Equal strings, equal shares. The old split gave the "second
             // string" 0.44 and the third 0.22 of the note, which is not how
             // a unison is strung.
+            // No unison is balanced: the tuner's mutes, the felt's wear and
+            // the strike line's tilt give each string of the trio a different
+            // share of every partial, varying along the ladder. Equal shares
+            // made each partial's cluster a symmetric two-or-three phasor sum
+            // whose FIRST collective null is deep -- and with C2's 2-4 kHz
+            // detunes all nulling inside 0.08-0.25 s, the band's energy
+            // measurably dipped 4-5 dB there and swung back by 0.5 s (a V
+            // the real note does not have: its clusters are uneven and dense,
+            // so their nulls are shallow and scattered). Hashed per partial,
+            // fixed per note: character, not randomness.
+            let unbalance_a = 0.65 + 0.7 * hash01((note as u32) << 12 | (n as u32) << 3 | 0x15);
+            let unbalance_b = 0.65 + 0.7 * hash01((note as u32) << 12 | (n as u32) << 3 | 0x2B);
+            let second = second * unbalance_a;
+            let third_string = third_string * unbalance_b;
             let split = 1.0 / (1.0 + second + third_string);
             let shares = [split, split * second, split * third_string];
             let ratios = [

@@ -18,17 +18,17 @@
     },
     {
       "id": "lab_strike",
-      "name": "Lab \u00b7 Strike",
+      "name": "Lab · Strike",
       "order": 3
     },
     {
       "id": "lab_strings",
-      "name": "Lab \u00b7 Strings",
+      "name": "Lab · Strings",
       "order": 4
     },
     {
       "id": "lab_board",
-      "name": "Lab \u00b7 Board & Air",
+      "name": "Lab · Board & Air",
       "order": 5
     }
   ],
@@ -501,6 +501,34 @@
       "name": "Impact Burst",
       "page": "lab_strike",
       "order": 5,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 31,
+      "id": "board_damping",
+      "name": "Board Damping",
+      "page": "lab_board",
+      "order": 3,
+      "kind": {
+        "type": "float",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "step": 0.01,
+        "default": 0.5
+      }
+    },
+    {
+      "index": 32,
+      "id": "board_density",
+      "name": "Board Density",
+      "page": "lab_board",
+      "order": 4,
       "kind": {
         "type": "float",
         "minimum": 0.0,

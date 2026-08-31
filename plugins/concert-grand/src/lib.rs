@@ -260,7 +260,18 @@ const PARAM_ACTION_NOISE: u32 = 27;
 const PARAM_RELEASE_NOISE: u32 = 28;
 const PARAM_PEDAL_NOISE: u32 = 29;
 const PARAM_IMPACT: u32 = 30;
-const PARAM_COUNT: usize = 6 + LAB_COUNT + 8;
+/// The soundboard as an object rather than a constant.
+///
+/// `BOARD_LOSS_FACTOR` and the modal density law are the plate's material and
+/// its size, and both were fixed numbers no one could reach -- so the one
+/// mechanism that decides how much of a string's upper ladder actually gets
+/// radiated had no control at all. Measured on A3, the bank's transfer carves
+/// 9-13 dB holes at the partials that render short, and the holes are where
+/// its modes fail to overlap. Centre is the measured plate, so a preset that
+/// never touches these is the instrument that was calibrated.
+const PARAM_BOARD_DAMPING: u32 = 31;
+const PARAM_BOARD_DENSITY: u32 = 32;
+const PARAM_COUNT: usize = 6 + LAB_COUNT + 10;
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
 /// entries are pre-scaled by the per-sample decay factor `g`, so magnitude
@@ -522,8 +533,8 @@ const KNOCK_LEVEL: f32 = 0.028;
 const BOARD_LOSS_FACTOR: f32 = 0.023;
 
 /// Amplitude T60 of a board mode: `ln(10^3) / (π·f·η)`.
-fn board_t60(frequency: f32) -> f32 {
-    6.907_755 / (core::f32::consts::PI * frequency * BOARD_LOSS_FACTOR)
+fn board_t60(frequency: f32, loss: f32) -> f32 {
+    6.907_755 / (core::f32::consts::PI * frequency * loss)
 }
 
 /// How many resonators the board bank can hold. The density law below needs
@@ -531,7 +542,7 @@ fn board_t60(frequency: f32) -> f32 {
 /// the measurement calls for — and the rest is headroom, so the loop never
 /// runs out mid-compass. It did once, at 128: the bank stopped at 5 kHz and
 /// the 4-8 kHz octave came out 11 dB down.
-const BOARD_MODES: usize = 152;
+const BOARD_MODES: usize = 256;
 
 /// Level of the board against the string sum that drives it. There is one
 /// board, so there is one gain; it is set by measurement against the YDP
@@ -571,19 +582,21 @@ const BOARD_BOTTOM_HZ: f32 = 62.0;
 /// bandwidth — overlap 0.6 where the measurement says 1.0 — and the bank came
 /// out with 11 dB of ripple through 500-1000 Hz where the over-damped bank it
 /// replaced had 1.3 dB.
-fn board_spacing(frequency: f32) -> f32 {
+fn board_spacing(frequency: f32, density: f32) -> f32 {
     const KNEE_HZ: f32 = 1100.0;
     const FLAT: f32 = 1.0 / 0.06;
-    if frequency < KNEE_HZ {
-        return FLAT;
-    }
-    let taper = FLAT * powf(frequency / KNEE_HZ, 1.92);
-    let floor_overlap = 0.038 * frequency;
-    if taper < floor_overlap {
-        taper
+    let spacing = if frequency < KNEE_HZ {
+        FLAT
     } else {
-        floor_overlap
-    }
+        let taper = FLAT * powf(frequency / KNEE_HZ, 1.92);
+        let floor_overlap = 0.038 * frequency;
+        if taper < floor_overlap {
+            taper
+        } else {
+            floor_overlap
+        }
+    };
+    spacing * density
 }
 
 /// The open top octave: from ~F6 to C8 a piano's strings have no dampers.
@@ -1248,6 +1261,13 @@ struct Controls {
     /// The strike's longitudinal burst -- the metallic bark of a hard bass
     /// attack. Same curve: bottom off, centre the calibrated level.
     impact: f32,
+    /// The soundboard's own two numbers. Centre is the measured plate:
+    /// Ege & Boutillon's 2.3% loss factor and their modal density law.
+    /// Damping widens or narrows every mode, which trades the board's
+    /// sustain against how much it fills between its modes; density moves
+    /// the modes closer or further apart, which costs or saves CPU.
+    board_damping: f32,
+    board_density: f32,
 }
 
 impl Default for Controls {
@@ -1280,6 +1300,8 @@ impl Default for Controls {
             // Centre of the recalibrated travel: the subtle level the
             // user's ear chose now IS mid-fader, with room below it.
             impact: 0.5,
+            board_damping: 0.5,
+            board_density: 0.5,
         }
     }
 }
@@ -1293,6 +1315,27 @@ impl Controls {
             return 0.0;
         }
         powf(256.0, value - 0.5)
+    }
+
+    /// The board's loss factor. Centre is Ege & Boutillon's measured 2.3%;
+    /// the travel spans a quarter of that to four times it, which covers a
+    /// dry ribbed plate through to a loose old one.
+    fn board_loss(&self) -> f32 {
+        BOARD_LOSS_FACTOR * powf(16.0, self.board_damping - 0.5)
+    }
+
+    /// How far apart the plate's modes sit, as a multiplier on the measured
+    /// density law. Below one the modes crowd -- more of them, more overlap,
+    /// more CPU; above one they thin out.
+    ///
+    /// The travel is bounded so the bank always REACHES its ceiling. A
+    /// crowded bank needs more slots to cover the same span, and running out
+    /// of them does not thin the board -- it truncates it: at x0.71 spacing
+    /// the old 152 slots stopped at 3.1 kHz, deleting the radiator for every
+    /// partial above it, and the upper ladder measured 3 dB WORSE rather
+    /// than better. 256 slots cover the tightest setting here to 8.5 kHz.
+    fn board_density(&self) -> f32 {
+        powf(2.5, 0.5 - self.board_density)
     }
 
     fn lab(&self, i: usize) -> f32 {
@@ -1333,6 +1376,8 @@ impl Controls {
             PARAM_RELEASE_NOISE => self.release_noise,
             PARAM_PEDAL_NOISE => self.pedal_noise,
             PARAM_IMPACT => self.impact,
+            PARAM_BOARD_DAMPING => self.board_damping,
+            PARAM_BOARD_DENSITY => self.board_density,
             _ => return None,
         };
         Some(value as f64)
@@ -1359,7 +1404,10 @@ impl Controls {
             PARAM_RELEASE_NOISE => self.release_noise = value,
             PARAM_PEDAL_NOISE => self.pedal_noise = value,
             PARAM_IMPACT => self.impact = value,
-            // (the engine watches the room block through `room_dirty`)
+            PARAM_BOARD_DAMPING => self.board_damping = value,
+            PARAM_BOARD_DENSITY => self.board_density = value,
+            // (the engine watches the room and the board through their
+            // dirty flags -- both are rebuilds, not per-sample reads)
             _ => return false,
         }
         true
@@ -1470,6 +1518,9 @@ pub struct ConcertGrand {
     proximity_coeff: f32,
     proximity: [f32; 2],
     room_dirty: bool,
+    /// The board is a rebuild, not a per-sample read: its two controls set
+    /// this and `process` retunes the bank at the next block boundary.
+    board_dirty: bool,
     room_index: [usize; ROOM_LINES],
 }
 
@@ -1583,6 +1634,7 @@ impl Default for ConcertGrand {
             proximity_coeff: 0.0,
             proximity: [0.0; 2],
             room_dirty: false,
+            board_dirty: false,
             room_index: [0; ROOM_LINES],
         };
         piano.tune();
@@ -1998,6 +2050,9 @@ impl ConcertGrand {
     /// jitter frequency, strength and pan so the bank is ragged rather than
     /// regular.
     fn tune_board(&mut self) {
+        self.board_dirty = false;
+        let loss = self.controls.board_loss();
+        let density = self.controls.board_density();
         let ceiling = if BOARD_TOP_HZ < 0.45 * self.sample_rate {
             BOARD_TOP_HZ
         } else {
@@ -2012,7 +2067,7 @@ impl ConcertGrand {
             let jitter = 1.0 + 0.06 * (hash01(0xB0A2D ^ seed << 3) - 0.5);
             let placed = frequency * jitter;
             let pan = 0.35 + 0.30 * hash01(0x5EA1 ^ seed << 5);
-            let mut mode = BodyMode::tune(placed, board_t60(placed), pan, self.sample_rate);
+            let mut mode = BodyMode::tune(placed, board_t60(placed, loss), pan, self.sample_rate);
             // A real plate's mobility is ragged: per-mode strength swings
             // ~±8 dB — a bank of equal modes is only a volume knob.
             mode.drive *= 0.65 + 0.8 * hash01(0xF00D ^ seed << 7);
@@ -2045,7 +2100,7 @@ impl ConcertGrand {
             // and a flipped neighbour could notch a fundamental, so the
             // dense region alone draws signs.
             self.board[index] = mode;
-            frequency += board_spacing(frequency);
+            frequency += board_spacing(frequency, density);
             index += 1;
         }
         self.board_count = index;
@@ -3931,6 +3986,12 @@ impl Processor for ConcertGrand {
             // while the slider moves.
             self.room_dirty = true;
         }
+        if accepted && (PARAM_BOARD_DAMPING..=PARAM_BOARD_DENSITY).contains(&index) {
+            // The board is a bank rebuild -- a hundred and some resonators
+            // retuned -- so it happens at the block boundary too, never
+            // inside the sample loop.
+            self.board_dirty = true;
+        }
         accepted
     }
 
@@ -3980,6 +4041,7 @@ impl Processor for ConcertGrand {
             _ => return false,
         };
         self.room_dirty = true;
+        self.board_dirty = true;
         true
     }
 
@@ -4002,6 +4064,8 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 5] = self.controls.release_noise;
         values[6 + LAB_COUNT + 6] = self.controls.pedal_noise;
         values[6 + LAB_COUNT + 7] = self.controls.impact;
+        values[6 + LAB_COUNT + 8] = self.controls.board_damping;
+        values[6 + LAB_COUNT + 9] = self.controls.board_density;
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -4044,6 +4108,8 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 5] = defaults.release_noise;
         values[6 + LAB_COUNT + 6] = defaults.pedal_noise;
         values[6 + LAB_COUNT + 7] = defaults.impact;
+        values[6 + LAB_COUNT + 8] = defaults.board_damping;
+        values[6 + LAB_COUNT + 9] = defaults.board_density;
         // A 37-float state is from the era of the "in bass" tilt twins: its
         // tail is tilt values, not room values, and reading it into the room
         // controls would set the hall from leftovers. Take its head only.
@@ -4081,8 +4147,11 @@ impl Processor for ConcertGrand {
             release_noise: values[6 + LAB_COUNT + 5],
             pedal_noise: values[6 + LAB_COUNT + 6],
             impact: values[6 + LAB_COUNT + 7],
+            board_damping: values[6 + LAB_COUNT + 8],
+            board_density: values[6 + LAB_COUNT + 9],
         };
         self.room_dirty = true;
+        self.board_dirty = true;
         true
     }
 
@@ -4102,6 +4171,9 @@ impl Processor for ConcertGrand {
         self.strike_budget = 3;
         if self.room_dirty {
             self.tune_room();
+        }
+        if self.board_dirty {
+            self.tune_board();
         }
         let level = self.controls.level * self.controls.level;
         // The sympathetic feed: the bridge's total string signal from the
@@ -6305,7 +6377,12 @@ mod tests {
         // one — an accidental bass boost, not a soundboard.
         let sample_rate = FS as f32;
         for frequency in [BOARD_BOTTOM_HZ, 1000.0, BOARD_TOP_HZ] {
-            let mut mode = BodyMode::tune(frequency, board_t60(frequency), 0.5, sample_rate);
+            let mut mode = BodyMode::tune(
+                frequency,
+                board_t60(frequency, BOARD_LOSS_FACTOR),
+                0.5,
+                sample_rate,
+            );
             let omega = core::f32::consts::TAU * frequency / sample_rate;
             let mut peak = 0.0_f32;
             for n in 0..(sample_rate as usize) {

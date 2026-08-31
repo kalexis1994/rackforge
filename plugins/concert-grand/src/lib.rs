@@ -4442,6 +4442,24 @@ impl Processor for ConcertGrand {
     }
 
     fn load_preset(&mut self, id: &str) -> bool {
+        /// The house lab bank with a few entries moved.
+        ///
+        /// A preset builds ON the factory voicing and only says what makes it
+        /// itself, so this exists to let one move a single control without
+        /// restating seventeen. `LAB_FELT` and `LAB_HF` are the two that
+        /// separate one instrument from another in the register people
+        /// actually play; until they were repaired, no preset could use them,
+        /// which is why they all sounded alike through the middle.
+        fn voiced(changes: &[(usize, f32)]) -> [f32; LAB_COUNT] {
+            let mut lab = Controls::default().lab;
+            for (index, value) in changes {
+                lab[*index] = *value;
+            }
+            lab
+        }
+        const LAB_FELT: usize = 0;
+        const LAB_HF: usize = 6;
+
         // Every voicing BUILDS ON the factory default -- the lab
         // refinements, the noise levels and the calibration the user's ear
         // chose are the house sound, and a preset only moves what makes it
@@ -4453,6 +4471,7 @@ impl Processor for ConcertGrand {
             // Mellow: darker hammer, longer room, the pair a step back,
             // ribbon-ward pattern.
             "mellow" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.46), (LAB_HF, 0.56)]),
                 brightness: 0.28,
                 dynamics: 0.5,
                 unison: 0.55,
@@ -4466,6 +4485,7 @@ impl Processor for ConcertGrand {
             },
             // Bright: harder felt, a livelier hall, closer cardioids.
             "bright" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.64), (LAB_HF, 0.54)]),
                 brightness: 0.8,
                 dynamics: 0.75,
                 unison: 0.45,
@@ -4477,9 +4497,17 @@ impl Processor for ConcertGrand {
                 mic_pattern: 0.5,
                 ..Controls::default()
             },
-            // Intimate: the default IS the intimate voicing now; this keeps
-            // its own name for the day the default moves elsewhere.
-            "intimate" => Controls::default(),
+            // Intimate: the room closes in, the hammer eases and the high
+            // halo is let go early -- a piano heard from the bench rather
+            // than from the hall. It used to BE the default, note for note,
+            // so picking it did nothing at all.
+            "intimate" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.48), (LAB_HF, 0.44)]),
+                room_size: 0.18,
+                mic_distance: 0.04,
+                width: 0.30,
+                ..Controls::default()
+            },
 
             // ---- Instruments, from published dimensions --------------------
             //
@@ -4523,6 +4551,7 @@ impl Processor for ConcertGrand {
             // than anyone else's, which is where its clarity comes from.
             // A0 ~2.10 m.
             "concert-308" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.60), (LAB_HF, 0.58)]),
                 size: 0.86,
                 brightness: 0.62,
                 tension: 0.55,
@@ -4535,6 +4564,7 @@ impl Processor for ConcertGrand {
             // Bösendorfer 280VC, 280 cm: warm and singing, a drier attack,
             // the bass its signature. A0 ~2.02 m.
             "concert-280" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.45), (LAB_HF, 0.60)]),
                 size: 0.72,
                 brightness: 0.36,
                 tension: 0.34,
@@ -4548,6 +4578,7 @@ impl Processor for ConcertGrand {
             // this model is calibrated against is a Yamaha, so this profile
             // sits closest to the factory instrument. A0 ~2.00 m.
             "concert-275" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.62), (LAB_HF, 0.52)]),
                 size: 0.68,
                 brightness: 0.60,
                 tension: 0.58,
@@ -4558,6 +4589,7 @@ impl Processor for ConcertGrand {
             // Steinway D-274: rich and complex rather than bright, and most
             // itself at low velocities. A0 ~1.98 m.
             "concert-274" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.50), (LAB_HF, 0.56)]),
                 size: 0.65,
                 brightness: 0.47,
                 tension: 0.5,
@@ -4571,6 +4603,7 @@ impl Processor for ConcertGrand {
             // is where it gives ground, which is exactly what Size expresses.
             // A0 ~1.65 m.
             "salon-211" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.51), (LAB_HF, 0.52)]),
                 size: 0.38,
                 brightness: 0.47,
                 tension: 0.5,
@@ -4583,6 +4616,7 @@ impl Processor for ConcertGrand {
             // A parlour grand around 1.85 m: the common six-foot instrument.
             // A0 ~1.45 m.
             "parlour-185" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.52), (LAB_HF, 0.48)]),
                 size: 0.27,
                 brightness: 0.5,
                 tension: 0.5,
@@ -4593,6 +4627,7 @@ impl Processor for ConcertGrand {
             // A five-foot baby grand: a foreshortened bass under an ordinary
             // treble, which is the whole character of the thing. A0 ~1.09 m.
             "baby-150" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.55), (LAB_HF, 0.42)]),
                 size: 0.04,
                 brightness: 0.55,
                 tension: 0.5,
@@ -4605,6 +4640,7 @@ impl Processor for ConcertGrand {
             // a five-foot grand's -- 1.37 m against 1.09 -- which is why tall
             // uprights beat small grands where it matters.
             "upright-52" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.58), (LAB_HF, 0.40)]),
                 size: 0.23,
                 brightness: 0.52,
                 tension: 0.5,
@@ -4618,6 +4654,7 @@ impl Processor for ConcertGrand {
             },
             // A 45-inch studio upright. A0 ~1.22 m.
             "upright-studio" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.60), (LAB_HF, 0.36)]),
                 size: 0.13,
                 brightness: 0.55,
                 tension: 0.52,
@@ -4634,6 +4671,7 @@ impl Processor for ConcertGrand {
             // wire, with leather-covered hammers. This is the profile the
             // widened tension travel exists for.
             "fortepiano" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.44), (LAB_HF, 0.34)]),
                 size: 0.30,
                 brightness: 0.45,
                 tension: 0.06,

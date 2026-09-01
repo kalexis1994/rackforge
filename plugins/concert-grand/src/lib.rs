@@ -701,6 +701,13 @@ const GAUGE_CONSTANT: f32 = 0.185_653_5;
 /// it barely wanders at all -- 12% across the compass, measured -- which is
 /// what makes it read as one fixed wooden pitch rather than a knock. See the
 /// note on `lab` in `Controls::default`.
+/// How steeply the longitudinal drive follows the string's length. The
+/// tension pulse goes as the square of the transverse slope, so two.
+const CLANG_LENGTH_POWER: f32 = 2.0;
+/// What a plain string keeps of a wound one's longitudinal drive. Not zero:
+/// plain wire has longitudinal modes too, they are simply far weaker and sit
+/// much lower above the pitch.
+const CLANG_PLAIN_SHARE: f32 = 0.25;
 const CLACK_SCATTER: f32 = 0.14;
 /// How long the keybed thud rings.
 ///
@@ -2828,8 +2835,35 @@ impl ConcertGrand {
     /// This gate leaves the wound register untouched -- A0 and C2 measure
     /// bit-identical, so the burst's bass calibration stands -- and is gone
     /// by C3.
-    fn clang_register(position: f32) -> f32 {
-        ((0.32 - position) / 0.12).clamp(0.0, 1.0)
+    fn clang_register(&self, position: f32) -> f32 {
+        // How much longitudinal drive a string can carry, taken from the
+        // string rather than from where it sits on the keyboard.
+        //
+        // This was `(0.32 - position) / 0.12`: a straight line in key number,
+        // zero from C3 up. Nothing switches off at C3. The model's own scale
+        // puts the winding's end at F#3 (SCALE_JOIN), so the gate was silencing
+        // the last five WOUND notes, whose first longitudinal mode sits at a
+        // plainly audible 2.4 kHz -- and it left the Impact Burst fader inert
+        // over two thirds of the keyboard, which is how the player found it.
+        //
+        // The drive is the tension pulse and goes as the square of the
+        // transverse slope, so it follows the amplitude-to-length ratio. Length
+        // is already derived here from the gauge: 1.90 m at A0 against 0.62 at
+        // C4, whose square alone takes the burst down 20 dB across that span
+        // with no gate at all.
+        //
+        // The winding is a real discontinuity on top of that rather than a
+        // taper: a wound string's core carries the longitudinal wave while the
+        // wrap adds only mass, which is why its longitudinal mode sits 17-20x
+        // above its pitch. Plain wire keeps a share, not a zero.
+        //
+        // The top end needs no law: the first longitudinal mode is at 17.5x the
+        // pitch, so it leaves the audible band near C6 by itself, and the bank
+        // already declines to place a mode above Nyquist.
+        let longest = self.string_length(0.0).max(1e-3);
+        let reach = (self.string_length(position) / longest).clamp(0.0, 1.0);
+        let wound = if position < SCALE_JOIN { 1.0 } else { CLANG_PLAIN_SHARE };
+        powf(reach, CLANG_LENGTH_POWER) * wound
     }
 
     fn board_radiation(frequency: f32) -> f32 {
@@ -4185,7 +4219,7 @@ impl ConcertGrand {
                 * velocity
                 * velocity
                 * powf(1.0 - position, 1.2)
-                * Self::clang_register(position)
+                * self.clang_register(position)
                 * impact_gain;
             self.voices[slot].clang_feed += clang_kick;
             self.voices[slot].clang_feed_decay = expf(-1.0 / (IMPACT_PULSE_TAU_S * sample_rate));
@@ -4194,6 +4228,9 @@ impl ConcertGrand {
             self.voices[slot].upper_env = 1.0;
             return;
         }
+        // Read before the voice is borrowed: this consults the scale, and the
+        // borrow checker is right that the two cannot overlap.
+        let clang_register = self.clang_register(position);
         let Some(voice) = self.allocate_voice() else {
             return;
         };
@@ -4247,7 +4284,7 @@ impl ConcertGrand {
             * velocity
             * velocity
             * powf(1.0 - position, 1.2)
-            * Self::clang_register(position)
+            * clang_register
             * impact_gain;
         for (k, mode) in voice.longitudinal.iter_mut().enumerate() {
             let hz = longitudinal_first * (k + 1) as f32;

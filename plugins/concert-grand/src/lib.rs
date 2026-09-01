@@ -5414,6 +5414,39 @@ mod tests {
         output
     }
 
+    /// Writes a mono WAV of the rendered samples, at 24 bits.
+    ///
+    /// It was 16, in four copies of the same header. Sixteen bits is not
+    /// enough to measure a piano quietly: played softly, a note's 2-4 kHz
+    /// band sits around 65 dB below its own fundamentals, which lands at the
+    /// quantisation floor. Measured on these very files, a single note at
+    /// velocity 40 had 2.8 dB of margin over it -- so a comparison between a
+    /// chord and the same notes struck alone was reading the file's own noise
+    /// for the quiet half and real signal for the loud half, and reported the
+    /// model creating energy out of nothing. Calibrating anything below
+    /// fortissimo needs the headroom this gives.
+    fn write_mono_wav(path: &str, rate: u32, samples: &[f32]) {
+        let data_len = (samples.len() * 3) as u32;
+        let mut bytes = Vec::with_capacity(44 + samples.len() * 3);
+        bytes.extend(b"RIFF");
+        bytes.extend((36 + data_len).to_le_bytes());
+        bytes.extend(b"WAVEfmt ");
+        bytes.extend(16u32.to_le_bytes());
+        bytes.extend(1u16.to_le_bytes());
+        bytes.extend(1u16.to_le_bytes());
+        bytes.extend(rate.to_le_bytes());
+        bytes.extend((rate * 3).to_le_bytes());
+        bytes.extend(3u16.to_le_bytes());
+        bytes.extend(24u16.to_le_bytes());
+        bytes.extend(b"data");
+        bytes.extend(data_len.to_le_bytes());
+        for sample in samples {
+            let value = (sample.clamp(-1.0, 1.0) * 8_388_607.0) as i32;
+            bytes.extend(&value.to_le_bytes()[..3]);
+        }
+        std::fs::write(path, bytes).unwrap();
+    }
+
     fn energy(samples: &[f32]) -> f32 {
         samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len() as f32
     }
@@ -6734,7 +6767,7 @@ mod tests {
             let total = ((last_ms + 3_000) * rate as u64 / 1000) as usize;
             let block = 512usize;
             let mut output = vec![0.0f32; block * 2];
-            let mut mono: Vec<i16> = Vec::with_capacity(total);
+            let mut mono: Vec<f32> = Vec::with_capacity(total);
             let mut next = 0usize;
             let mut frame = 0usize;
             while frame < total {
@@ -6755,28 +6788,11 @@ mod tests {
                 mono.extend(
                     output.as_chunks::<2>().0[..frames]
                         .iter()
-                        .map(|f| (((f[0] + f[1]) * 0.5).clamp(-1.0, 1.0) * 32_767.0) as i16),
+                        .map(|f| (f[0] + f[1]) * 0.5),
                 );
                 frame += frames;
             }
-            let mut bytes = Vec::with_capacity(44 + mono.len() * 2);
-            let data_len = (mono.len() * 2) as u32;
-            bytes.extend(b"RIFF");
-            bytes.extend((36 + data_len).to_le_bytes());
-            bytes.extend(b"WAVEfmt ");
-            bytes.extend(16u32.to_le_bytes());
-            bytes.extend(1u16.to_le_bytes());
-            bytes.extend(1u16.to_le_bytes());
-            bytes.extend(rate.to_le_bytes());
-            bytes.extend((rate * 2).to_le_bytes());
-            bytes.extend(2u16.to_le_bytes());
-            bytes.extend(16u16.to_le_bytes());
-            bytes.extend(b"data");
-            bytes.extend(data_len.to_le_bytes());
-            for sample in &mono {
-                bytes.extend(sample.to_le_bytes());
-            }
-            std::fs::write(format!("{out}/score.wav"), bytes).unwrap();
+            write_mono_wav(&format!("{out}/score.wav"), rate, &mono);
             return;
         }
         // CG_SEQUENCE plays notes one after another into a single file, so a
@@ -6807,7 +6823,7 @@ mod tests {
             let hold = rate as usize * 5 / 2;
             let release = rate as usize / 2;
             let pedal = std::env::var("CG_PEDAL").is_ok();
-            let mut mono: Vec<i16> = Vec::new();
+            let mut mono: Vec<f32> = Vec::new();
             for (position, part) in spec.split(';').filter(|p| !p.is_empty()).enumerate() {
                 let notes: Vec<u8> = part
                     .split(',')
@@ -6829,7 +6845,7 @@ mod tests {
                         piano.process(&[], &mut output, events, &[], frames as u32, 0, 2);
                         mono.extend(
                             output.as_chunks::<2>().0.iter().map(|f| {
-                                (((f[0] + f[1]) * 0.5).clamp(-1.0, 1.0) * 32_767.0) as i16
+                                (f[0] + f[1]) * 0.5
                             }),
                         );
                     };
@@ -6844,24 +6860,7 @@ mod tests {
                     .collect();
                 render(&offs, release);
             }
-            let mut bytes = Vec::with_capacity(44 + mono.len() * 2);
-            let data_len = (mono.len() * 2) as u32;
-            bytes.extend(b"RIFF");
-            bytes.extend((36 + data_len).to_le_bytes());
-            bytes.extend(b"WAVEfmt ");
-            bytes.extend(16u32.to_le_bytes());
-            bytes.extend(1u16.to_le_bytes());
-            bytes.extend(1u16.to_le_bytes());
-            bytes.extend(rate.to_le_bytes());
-            bytes.extend((rate * 2).to_le_bytes());
-            bytes.extend(2u16.to_le_bytes());
-            bytes.extend(16u16.to_le_bytes());
-            bytes.extend(b"data");
-            bytes.extend(data_len.to_le_bytes());
-            for sample in &mono {
-                bytes.extend(sample.to_le_bytes());
-            }
-            std::fs::write(format!("{out}/sequence.wav"), bytes).unwrap();
+            write_mono_wav(&format!("{out}/sequence.wav"), rate, &mono);
             return;
         }
         if std::env::var("CG_CHORD").is_ok() {
@@ -6913,33 +6912,16 @@ mod tests {
             // measurement wants one channel, not the sum. The fit's band
             // measures are wide enough to survive the comb; ladders are not.
             let left_only = std::env::var("CG_LEFT").is_ok();
-            let mono: Vec<i16> = output
+            let mono: Vec<f32> = output
                 .as_chunks::<2>()
                 .0
                 .iter()
                 .map(|f| {
                     let v = if left_only { f[0] } else { (f[0] + f[1]) * 0.5 };
-                    (v.clamp(-1.0, 1.0) * 32_767.0) as i16
+                    v
                 })
                 .collect();
-            let mut bytes = Vec::with_capacity(44 + mono.len() * 2);
-            let data_len = (mono.len() * 2) as u32;
-            bytes.extend(b"RIFF");
-            bytes.extend((36 + data_len).to_le_bytes());
-            bytes.extend(b"WAVEfmt ");
-            bytes.extend(16u32.to_le_bytes());
-            bytes.extend(1u16.to_le_bytes());
-            bytes.extend(1u16.to_le_bytes());
-            bytes.extend(rate.to_le_bytes());
-            bytes.extend((rate * 2).to_le_bytes());
-            bytes.extend(2u16.to_le_bytes());
-            bytes.extend(16u16.to_le_bytes());
-            bytes.extend(b"data");
-            bytes.extend(data_len.to_le_bytes());
-            for sample in &mono {
-                bytes.extend(sample.to_le_bytes());
-            }
-            std::fs::write(format!("{out}/chord.wav"), bytes).unwrap();
+            write_mono_wav(&format!("{out}/chord.wav"), rate, &mono);
             return;
         }
         let notes: Vec<(u8, u8)> = if chromatic {
@@ -6990,30 +6972,13 @@ mod tests {
                 2,
             );
             // Mono mix, 16-bit PCM WAV.
-            let mono: Vec<i16> = output
+            let mono: Vec<f32> = output
                 .as_chunks::<2>()
                 .0
                 .iter()
-                .map(|f| (((f[0] + f[1]) * 0.5).clamp(-1.0, 1.0) * 32_767.0) as i16)
+                .map(|f| (f[0] + f[1]) * 0.5)
                 .collect();
-            let mut bytes = Vec::with_capacity(44 + mono.len() * 2);
-            let data_len = (mono.len() * 2) as u32;
-            bytes.extend(b"RIFF");
-            bytes.extend((36 + data_len).to_le_bytes());
-            bytes.extend(b"WAVEfmt ");
-            bytes.extend(16u32.to_le_bytes());
-            bytes.extend(1u16.to_le_bytes());
-            bytes.extend(1u16.to_le_bytes());
-            bytes.extend(rate.to_le_bytes());
-            bytes.extend((rate * 2).to_le_bytes());
-            bytes.extend(2u16.to_le_bytes());
-            bytes.extend(16u16.to_le_bytes());
-            bytes.extend(b"data");
-            bytes.extend(data_len.to_le_bytes());
-            for sample in mono {
-                bytes.extend(sample.to_le_bytes());
-            }
-            std::fs::write(format!("{out}/model{note:03}v{velocity}.wav"), bytes).unwrap();
+            write_mono_wav(&format!("{out}/model{note:03}v{velocity}.wav"), rate, &mono);
         }
     }
 

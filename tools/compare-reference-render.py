@@ -79,11 +79,24 @@ def render(executable, note, velocity, out_path, preset=None):
 
 
 def read_wav(path):
+    """Reads a mono WAV at either 16 or 24 bits.
+
+    The model's renders moved to 24 bits so that soft dynamics can be measured
+    at all -- at 16, a quietly played note's 2-4 kHz band sits on the
+    quantisation floor. Reference samples are still 16-bit and read the same.
+    """
     data = open(path, "rb").read()
+    fmt = data.index(b"fmt ")
+    bits = struct.unpack("<H", data[fmt + 22:fmt + 24])[0]
     i = data.index(b"data")
     n = struct.unpack("<I", data[i + 4:i + 8])[0]
-    raw = np.frombuffer(data[i + 8:i + 8 + n], dtype="<i2").astype(np.float64)
-    return raw / 32768.0
+    raw = data[i + 8:i + 8 + n]
+    if bits == 24:
+        byte = np.frombuffer(raw, np.uint8).reshape(-1, 3).astype(np.int32)
+        value = byte[:, 0] | (byte[:, 1] << 8) | (
+            byte[:, 2].astype(np.uint8).view(np.int8).astype(np.int32) << 16)
+        return value.astype(np.float64) / 8388608.0
+    return np.frombuffer(raw, dtype="<i2").astype(np.float64) / 32768.0
 
 
 def clusters(x, rate, lo=2000.0, hi=4000.0, seconds=1.5):

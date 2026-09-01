@@ -641,7 +641,23 @@ const KNOCK_LEVEL: f32 = 0.028;
 /// factors of 15.7% and 25.3%. That is not wood; it is roughly the loss factor
 /// of rubber, and an instrument whose board is made of rubber is a clavinet:
 /// a struck string with no resonating plate behind it.
-const BOARD_LOSS_FACTOR: f32 = 0.023;
+/// The plate's loss factor, which fixes how long a board mode rings:
+/// `T60 = ln(1000) / (pi * f * loss)`.
+///
+/// It was 0.023, giving 1.20 s at 80 Hz -- a fall of 50 dB in one second.
+/// Measured on the reference, the 60-120 Hz energy under a softly struck
+/// treble note falls 22.7 dB in that second, which asks for about 2.6 s and so
+/// for a loss near 0.0106. Published loss factors for a spruce soundboard at
+/// low frequency run about 0.01 to 0.02, so the old value sat above the
+/// measured range and this one sits inside it.
+///
+/// It is NOT the value that minimises the fit. The chromatic cost keeps
+/// falling to 884.93 at 0.005 before turning back up, and 0.005 is 5.5 s at
+/// 80 Hz -- not a soundboard, and below anything published. The cost rewards
+/// low-frequency sustain because the model is still missing the blow the key
+/// and action deal to the board, and stretching this ring is a cheap way to
+/// counterfeit it. Fitting to that minimum would be fitting the symptom.
+const BOARD_LOSS_FACTOR: f32 = 0.011;
 
 /// The felt exponent's physical range. Outside it the hammer integration
 /// stops describing felt: below, the force law is too soft to separate the

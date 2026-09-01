@@ -732,6 +732,8 @@ impl PluginInstance<'_> {
         midi_events: &[MidiEventV1],
         parameter_events: &[ParameterEventV1],
     ) -> Result<()> {
+        // Every event a plug-in receives passes the host's one vocabulary.
+        crate::midi2::assert_expressible(midi_events);
         match &mut self.backend {
             PluginInstanceBackend::Native(instance) => instance.process_interleaved(
                 input,
@@ -946,6 +948,7 @@ impl PortablePluginInstance {
         if midi_events.len() > MAX_REALTIME_EVENTS || parameter_events.len() > MAX_REALTIME_EVENTS {
             bail!("process block exceeds RackForge's real-time event limit");
         }
+        crate::midi2::assert_expressible(midi_events);
         self.midi_scratch.clear();
         for event in midi_events {
             let length = event.length as usize;

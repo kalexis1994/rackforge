@@ -106,19 +106,24 @@ impl ReservedMidiControls {
         if event.length < 2 {
             return false;
         }
-        let channel = (event.data[0] & 0x0f) as usize;
+        // Read once, through the host's vocabulary: what a note-on and a
+        // note-off ARE is decided in `midi2`, not re-derived from bytes here.
+        let semantic = crate::midi2::Midi2Event::from_midi1(&event);
+        let channel = usize::from(semantic.channel);
         let note = event.data[1] as usize;
-        let status = event.data[0] & 0xf0;
-        if status == 0x90 && event.length == 3 && event.data[2] > 0 && state.keyboard_parts_held {
+        if semantic.note_on().is_some() && state.keyboard_parts_held {
             state.suppressed_notes[channel][note] = true;
             return true;
         }
-        let release = status == 0x80 || (status == 0x90 && event.length == 3 && event.data[2] == 0);
-        if release && state.suppressed_notes[channel][note] {
+        if semantic.note_off().is_some() && state.suppressed_notes[channel][note] {
             state.suppressed_notes[channel][note] = false;
             return true;
         }
-        if status == 0xa0 && state.suppressed_notes[channel][note] {
+        if matches!(
+            semantic.message,
+            crate::midi2::Midi2Message::PolyPressure { .. }
+        ) && state.suppressed_notes[channel][note]
+        {
             return true;
         }
         false

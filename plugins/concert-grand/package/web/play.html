@@ -499,6 +499,17 @@
             center / 100% 6px no-repeat,
           linear-gradient(180deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.66))
             center / 96% 54% no-repeat,
+          /* The channel's two ends are pieces of their own, laid at their true
+             proportion, and only the middle stretches -- the same trick the
+             plates use, done with layers because a border-image would cover
+             the gold thread above it. Stretching the whole image put the
+             raised end caps under a 4x horizontal squash on a wide fader; they
+             are 42px of the source's 1000, so at a 16px track they belong at
+             8px and no wider. The stretched image stays underneath to fill
+             whatever is between them, and its own distorted ends are hidden
+             beneath the two real ones. */
+          url("img/slot-end-left.webp") left center / auto 100% no-repeat,
+          url("img/slot-end-right.webp") right center / auto 100% no-repeat,
           url("img/slot.webp") center / 100% 100% no-repeat;
       }
       input[type="range"]::-moz-range-track {
@@ -507,6 +518,8 @@
         background:
           linear-gradient(180deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.66))
             center / 96% 54% no-repeat,
+          url("img/slot-end-left.webp") left center / auto 100% no-repeat,
+          url("img/slot-end-right.webp") right center / auto 100% no-repeat,
           url("img/slot.webp") center / 100% 100% no-repeat;
       }
       input[type="range"]::-moz-range-progress {

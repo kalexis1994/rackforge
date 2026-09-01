@@ -42,6 +42,20 @@
         );
       }
       * { box-sizing: border-box; }
+      /* Nothing here is a document, so nothing here highlights. Dragging a
+         fader used to sweep a blue selection across its label and the value
+         beside it, which is what a text editor does and an instrument does
+         not. The one exception is the workbench textarea: its whole purpose is
+         to have its contents selected and copied out. */
+      * {
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      textarea,
+      input[type="text"] {
+        -webkit-user-select: text;
+        user-select: text;
+      }
       body {
         margin: 0;
         padding: 0 0 32px;
@@ -394,7 +408,7 @@
         color: var(--engraved);
         text-shadow: 0 1px 0 rgba(255, 238, 205, 0.42);
       }
-      .labgroup .value { font-weight: 600; }
+      .labgroup .value { font-weight: 700; }
 
       .control { display: grid; gap: 5px; margin-bottom: 16px; }
       .row { display: flex; justify-content: space-between; align-items: baseline; }
@@ -404,7 +418,8 @@
       .name { font-size: 14.5px; font-weight: 600; letter-spacing: 0.03em; }
       .value {
         font-variant-numeric: tabular-nums;
-        font-size: 12px;
+        font-size: 14px;
+        font-weight: 700;
         color: var(--gold);
       }
       /* The fader: a channel milled into the brass, a gold thread showing how

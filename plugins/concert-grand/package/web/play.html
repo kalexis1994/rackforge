@@ -462,7 +462,17 @@
          stays vertical -- it is an index against the channel, not a pointer
          that turns, which is why a rotary knob's artwork can serve a slider
          without a frame of animation anywhere. */
+      /* Where the channel's raised end finishes, in pixels rather than in a
+         percentage of the fader. It was 2.3%, which was the end cap's share
+         back when the whole image stretched -- correct at one width and wrong
+         at every other.
+         The number is the RAISED structure, not the piece it was cut from:
+         the bevel finishes 42px into a source 113 rows tall, so at a 16px
+         track it finishes at 5.9px, and the rest of the 58px crop is already
+         channel. Anchoring the thread to the crop instead left a hairline of
+         dark groove showing before the gold began. */
       input[type="range"] {
+        --slot-end: 5.9px;
         -webkit-appearance: none;
         appearance: none;
         /* The browser's own stylesheet puts a 2px margin on a range input.
@@ -492,13 +502,14 @@
              not land where it reads. */
           linear-gradient(
               90deg,
-              transparent 0 2.3%,
-              var(--gold) 2.3% min(var(--fill, 50%), 97.7%),
-              transparent min(var(--fill, 50%), 97.7%)
+              transparent 0 var(--slot-end),
+              var(--gold) var(--slot-end)
+                min(var(--fill, 50%), calc(100% - var(--slot-end))),
+              transparent min(var(--fill, 50%), calc(100% - var(--slot-end)))
             )
             center / 100% 6px no-repeat,
           linear-gradient(180deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.66))
-            center / 96% 54% no-repeat,
+            center / calc(100% - 2 * var(--slot-end)) 54% no-repeat,
           /* The channel's two ends are pieces of their own, laid at their true
              proportion, and only the middle stretches -- the same trick the
              plates use, done with layers because a border-image would cover
@@ -517,7 +528,7 @@
         border-radius: 3px;
         background:
           linear-gradient(180deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.66))
-            center / 96% 54% no-repeat,
+            center / calc(100% - 2 * var(--slot-end)) 54% no-repeat,
           url("img/slot-end-left.webp") left center / auto 100% no-repeat,
           url("img/slot-end-right.webp") right center / auto 100% no-repeat,
           url("img/slot.webp") center / 100% 100% no-repeat;

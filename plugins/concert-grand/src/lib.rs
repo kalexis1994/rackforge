@@ -309,7 +309,21 @@ const PARAM_LID: u32 = 36;
 /// have is the mechanism's CONDITION -- worn felt that lets a note bleed,
 /// against a hard new set that shuts the note dead.
 const PARAM_DAMPER: u32 = 37;
-const PARAM_COUNT: usize = 6 + LAB_COUNT + 15;
+/// How steeply the longitudinal drive falls as the string gets shorter.
+///
+/// The tension pulse goes as the square of the transverse slope, so the
+/// physical value is two, and the fader ships there. A voicer who wants the
+/// clang to reach further up the compass lowers it; raising it confines the
+/// growl to the longest wound strings.
+const PARAM_CLANG_FALLOFF: u32 = 38;
+/// What a plain string keeps of a wound one's longitudinal drive.
+///
+/// Not a taper but a step, because the winding is: the steel core carries the
+/// longitudinal wave and the wrap adds only mass. A quarter is where it ships.
+/// At zero the plain register is silent above the winding, which is what the
+/// old hard gate did and is here as a position rather than as a law.
+const PARAM_CLANG_PLAIN: u32 = 39;
+const PARAM_COUNT: usize = 6 + LAB_COUNT + 17;
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
 /// entries are pre-scaled by the per-sample decay factor `g`, so magnitude
@@ -1516,6 +1530,8 @@ struct Controls {
     /// The strike's longitudinal burst -- the metallic bark of a hard bass
     /// attack. Same curve: bottom off, centre the calibrated level.
     impact: f32,
+    clang_falloff: f32,
+    clang_plain: f32,
     /// The soundboard's own two numbers. Centre is the measured plate:
     /// Ege & Boutillon's 2.3% loss factor and their modal density law.
     /// Damping widens or narrows every mode, which trades the board's
@@ -1597,6 +1613,8 @@ impl Default for Controls {
             tension: 0.5,
             lid: 0.5,
             damper: 0.5,
+            clang_falloff: 0.5,
+            clang_plain: 0.25,
         }
     }
 }
@@ -1788,6 +1806,8 @@ impl Controls {
             PARAM_TENSION => self.tension,
             PARAM_LID => self.lid,
             PARAM_DAMPER => self.damper,
+            PARAM_CLANG_FALLOFF => self.clang_falloff,
+            PARAM_CLANG_PLAIN => self.clang_plain,
             _ => return None,
         };
         Some(value as f64)
@@ -1821,6 +1841,8 @@ impl Controls {
             PARAM_TENSION => self.tension = value,
             PARAM_LID => self.lid = value,
             PARAM_DAMPER => self.damper = value,
+            PARAM_CLANG_FALLOFF => self.clang_falloff = value,
+            PARAM_CLANG_PLAIN => self.clang_plain = value,
             // (the engine watches the room and the board through their
             // dirty flags -- both are rebuilds, not per-sample reads)
             _ => return false,
@@ -2862,8 +2884,16 @@ impl ConcertGrand {
         // already declines to place a mode above Nyquist.
         let longest = self.string_length(0.0).max(1e-3);
         let reach = (self.string_length(position) / longest).clamp(0.0, 1.0);
-        let wound = if position < SCALE_JOIN { 1.0 } else { CLANG_PLAIN_SHARE };
-        powf(reach, CLANG_LENGTH_POWER) * wound
+        // Both shipped as constants until a voicer asked for them: the fader
+        // is centred on the physical value rather than on the middle of a
+        // range, so leaving it alone leaves the physics alone.
+        let falloff = CLANG_LENGTH_POWER * 2.0 * self.controls.clang_falloff;
+        let wound = if position < SCALE_JOIN {
+            1.0
+        } else {
+            self.controls.clang_plain
+        };
+        powf(reach, falloff) * wound
     }
 
     fn board_radiation(frequency: f32) -> f32 {
@@ -4999,6 +5029,8 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 12] = self.controls.tension;
         values[6 + LAB_COUNT + 13] = self.controls.lid;
         values[6 + LAB_COUNT + 14] = self.controls.damper;
+        values[6 + LAB_COUNT + 15] = self.controls.clang_falloff;
+        values[6 + LAB_COUNT + 16] = self.controls.clang_plain;
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -5057,6 +5089,8 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 12] = defaults.tension;
         values[6 + LAB_COUNT + 13] = defaults.lid;
         values[6 + LAB_COUNT + 14] = defaults.damper;
+        values[6 + LAB_COUNT + 15] = defaults.clang_falloff;
+        values[6 + LAB_COUNT + 16] = defaults.clang_plain;
         // A 37-float state is from the era of the "in bass" tilt twins: its
         // tail is tilt values, not room values, and reading it into the room
         // controls would set the hall from leftovers. Take its head only.
@@ -5102,6 +5136,8 @@ impl Processor for ConcertGrand {
             tension: values[6 + LAB_COUNT + 12],
             lid: values[6 + LAB_COUNT + 13],
             damper: values[6 + LAB_COUNT + 14],
+            clang_falloff: values[6 + LAB_COUNT + 15],
+            clang_plain: values[6 + LAB_COUNT + 16],
         };
         self.room_dirty = true;
         self.board_dirty = true;

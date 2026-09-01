@@ -98,8 +98,10 @@ fn report_fuel_per_block() {
     // The ceiling is per CALL and does not scale with the buffer, so a larger
     // buffer does more work against the same limit. Both sizes are measured.
     for frames in [512u32, 1024, 2048] {
-        println!("
---- {frames}-frame buffer ---");
+        println!(
+            "
+--- {frames}-frame buffer ---"
+        );
         let mut block = vec![0.0f32; frames as usize * 2];
         for notes in [1usize, 3, 5, 8, 10, 13] {
             let mut instance = module.instantiate().expect("instantiate");

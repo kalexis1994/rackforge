@@ -25,6 +25,10 @@ const MAX_IMPORT_ARCHIVE_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_IMPORT_ARCHIVE_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 
 /// One validated RackForge plugin, independent of its execution backend.
+/// Retires Wasmtime's process-wide trap handlers; see the runtime crate.
+/// Re-exported here because hosts reach the runtime only through this crate.
+pub use rackforge_plugin_runtime::unload_process_handlers;
+
 pub struct LoadedPlugin {
     backend: LoadedBackend,
 }
@@ -109,6 +113,17 @@ impl LoadedPlugin {
         match &self.backend {
             LoadedBackend::Native(_) => None,
             LoadedBackend::Portable(plugin) => plugin.parallel_layout,
+        }
+    }
+
+    /// Consumes the plugin and hands back its compiled portable module, so a
+    /// host that is about to be unloaded can retire Wasmtime's process-wide
+    /// trap handlers through `rackforge_plugin_runtime::unload_process_handlers`.
+    /// A native plugin has no such module and returns `None`.
+    pub fn into_portable_module(self) -> Option<PortableModule> {
+        match self.backend {
+            LoadedBackend::Portable(plugin) => Some(plugin.module),
+            LoadedBackend::Native(_) => None,
         }
     }
 

@@ -114,7 +114,19 @@ impl IPlugViewTrait for RackForgeView {
                 self.shared.ui_route()
             ));
             let mut context = wry::WebContext::new(Some(data_directory));
-            let builder = wry::WebViewBuilder::new_with_web_context(&mut context)
+            // The first successful view adopts its environment into
+            // `webview_env`; every later one builds on it. See that module
+            // for why a fresh environment per view failed on every reopen.
+            let shared_environment = crate::webview_env::for_this_thread();
+            let builder = wry::WebViewBuilder::new_with_web_context(&mut context);
+            let builder = match shared_environment {
+                Some(environment) => {
+                    use wry::WebViewBuilderExtWindows;
+                    builder.with_environment(environment)
+                }
+                None => builder,
+            };
+            let builder = builder
                 .with_custom_protocol(
                     "rackforge".into(),
                     move |_webview_id, request| {
@@ -213,6 +225,10 @@ impl IPlugViewTrait for RackForgeView {
                 });
             match builder.build_as_child(&parent) {
                 Ok(view) => {
+                    {
+                        use wry::WebViewExtWindows;
+                        crate::webview_env::adopt(view.environment());
+                    }
                     *slot = Some(view);
                     *context_slot = Some(context);
                     diagnostic::write("view.attached WebView2 child created");

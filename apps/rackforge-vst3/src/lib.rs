@@ -5,6 +5,8 @@ mod engine;
 mod view;
 #[cfg(windows)]
 mod web_host;
+#[cfg(windows)]
+mod webview_env;
 
 use engine::{RackForgeEngine, VstPluginModel};
 use rackforge_plugin_api::{
@@ -1778,6 +1780,20 @@ extern "system" fn InitDll() -> bool {
 #[cfg(target_os = "windows")]
 #[unsafe(no_mangle)]
 extern "system" fn ExitDll() -> bool {
+    // The host is about to unmap this DLL. Wasmtime's trap handlers are
+    // process-global and live in our code, so they must come out first or
+    // the host's next exception jumps into freed memory. See
+    // `engine::unload_runtimes` and the runtime crate's
+    // `unload_process_handlers` for the crash this closes.
+    // Order matters: the WebView2 environment is a COM object registered
+    // from this DLL and is released first, while every function it may call
+    // back into is still mapped; Wasmtime's process-wide trap handlers come
+    // out after it.
+    diagnostic::write(format!(
+        "ExitDll webview environment {}",
+        webview_env::release()
+    ));
+    diagnostic::write(format!("ExitDll {:?}", engine::unload_runtimes()));
     true
 }
 

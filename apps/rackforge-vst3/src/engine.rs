@@ -6,6 +6,7 @@ use rackforge_plugin_api::{
 };
 use rackforge_repository::install_local_archive_replacing;
 use serde::Deserialize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{
     collections::BTreeMap,
     env, fs,
@@ -29,6 +30,92 @@ static BUNDLED_PACKAGES: OnceLock<Vec<PathBuf>> = OnceLock::new();
 static BUNDLED_PACKAGES_INIT: Mutex<()> = Mutex::new(());
 static BUNDLED_MODELS: OnceLock<Vec<VstPluginModel>> = OnceLock::new();
 static BUNDLED_MODELS_INIT: Mutex<()> = Mutex::new(());
+
+/// Every plug-in runtime this module has loaded, kept so `ExitDll` can retire
+/// them, and a count of the instances still borrowing them.
+///
+/// The runtimes used to be `Box::leak`ed, on the reasoning that a VST host may
+/// keep factory objects beyond a component's lifetime and an unloaded module
+/// would leave ABI pointers dangling. That reasoning is right about the
+/// components and wrong about the DLL: Wasmtime's trap handlers are
+/// process-global and must be removed BEFORE the DLL is unmapped, and a leaked
+/// runtime can never do that. See `rackforge_plugin_runtime::unload_process_handlers`
+/// for the crash it caused.
+///
+/// Handing out `&'static LoadedPlugin` from boxes owned by this registry is
+/// sound under one invariant: a box is only dropped from `unload_runtimes`,
+/// and only when `LIVE_INSTANCES` is zero, i.e. when no `PluginInstance`
+/// borrows any of them. If a host ever calls `ExitDll` with an instance still
+/// alive, the registry leaks rather than frees -- a crash on unload is bad, a
+/// use-after-free is worse -- and says so in the diagnostic log.
+/// A registered runtime. `LoadedPlugin` is not `Send` only because its
+/// native backend carries raw host-API pointers; the VST3 loads the portable
+/// (WebAssembly) backend, and either way a runtime here is touched by exactly
+/// two parties -- the loader that registers it and `ExitDll` that retires it
+/// -- both on host threads and both under the registry's lock. That is the
+/// whole extent of the sharing this wrapper vouches for.
+struct Registered(Box<LoadedPlugin>);
+// SAFETY: see `Registered`; access is serialised by `RUNTIMES`' mutex and no
+// reference escapes except the `&'static` handed out by `register_runtime`,
+// whose lifetime is bounded by `LIVE_INSTANCES` as documented on `RUNTIMES`.
+unsafe impl Send for Registered {}
+
+static RUNTIMES: Mutex<Vec<Registered>> = Mutex::new(Vec::new());
+static LIVE_INSTANCES: AtomicUsize = AtomicUsize::new(0);
+
+/// Registers a freshly loaded runtime and returns the reference the rest of
+/// this module needs. See `RUNTIMES` for why this is not a leak.
+fn register_runtime(runtime: LoadedPlugin) -> &'static LoadedPlugin {
+    let boxed = Box::new(runtime);
+    // SAFETY: the box lives in RUNTIMES until `unload_runtimes`, which only
+    // drops it once LIVE_INSTANCES is zero, and every borrower of this
+    // reference is counted there.
+    let reference: &'static LoadedPlugin =
+        unsafe { &*(Box::as_ref(&boxed) as *const LoadedPlugin) };
+    RUNTIMES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(Registered(boxed));
+    reference
+}
+
+/// What `ExitDll` does with the runtimes: retire Wasmtime's process-wide
+/// handlers if nothing still borrows a runtime, or leave everything in place
+/// and say why. Returns what happened so the exit hook can log it and a test
+/// can see it.
+pub fn unload_runtimes() -> UnloadOutcome {
+    let live = LIVE_INSTANCES.load(Ordering::SeqCst);
+    if live != 0 {
+        return UnloadOutcome::LeftInPlace {
+            live_instances: live,
+        };
+    }
+    let runtimes: Vec<Registered> = std::mem::take(
+        &mut *RUNTIMES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    );
+    let count = runtimes.len();
+    let modules: Vec<_> = runtimes
+        .into_iter()
+        .filter_map(|Registered(runtime)| runtime.into_portable_module())
+        .collect();
+    // SAFETY: LIVE_INSTANCES is zero so no PluginInstance -- and therefore no
+    // Store -- exists; the modules just collected are the only remaining
+    // Engine clones and are consumed by the call; and ExitDll runs after the
+    // host has released every component and stopped audio.
+    match unsafe { rackforge_core::unload_process_handlers(modules) } {
+        Ok(()) => UnloadOutcome::Unloaded { runtimes: count },
+        Err(reason) => UnloadOutcome::Failed { reason },
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum UnloadOutcome {
+    Unloaded { runtimes: usize },
+    LeftInPlace { live_instances: usize },
+    Failed { reason: String },
+}
 
 pub struct RackForgeEngine {
     instance: PluginInstance<'static>,
@@ -59,8 +146,9 @@ impl RackForgeEngine {
         // factory objects beyond an individual component's lifetime, so an
         // unloaded module would leave ABI pointers dangling.
         let runtime = unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), Some(&data)) }?;
-        let runtime: &'static LoadedPlugin = Box::leak(Box::new(runtime));
+        let runtime = register_runtime(runtime);
         let mut instance = runtime.create_instance()?;
+        LIVE_INSTANCES.fetch_add(1, Ordering::SeqCst);
         let catalog = instance.preset_catalog()?;
         if let Some(preset) = catalog.presets.first() {
             instance.load_preset(&preset.id)?;
@@ -208,7 +296,7 @@ fn load_plugin_model_at(root: &Path, package_root: PathBuf) -> Result<VstPluginM
     let runtime =
         unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), Some(&root.join("data"))) }
             .context("loading the VST3 UI model")?;
-    let runtime: &'static LoadedPlugin = Box::leak(Box::new(runtime));
+    let runtime = register_runtime(runtime);
     let mut instance = runtime
         .create_instance()
         .context("creating the VST3 UI model")?;
@@ -351,6 +439,7 @@ fn package_root_for_id(plugin_id: &str) -> Result<PathBuf> {
 impl Drop for RackForgeEngine {
     fn drop(&mut self) {
         let _ = self.instance.deactivate();
+        LIVE_INSTANCES.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -574,5 +663,33 @@ mod tests {
                 .and_then(Option::as_deref)
                 .is_some_and(|bank| !bank.is_empty())
         }));
+    }
+}
+
+#[cfg(test)]
+mod unload_tests {
+    use super::*;
+
+    /// With nothing registered and nothing live there is nothing to unload,
+    /// and the hook must say so without touching Wasmtime at all.
+    #[test]
+    fn an_empty_registry_unloads_nothing_and_does_not_panic() {
+        LIVE_INSTANCES.store(0, Ordering::SeqCst);
+        RUNTIMES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+        assert_eq!(unload_runtimes(), UnloadOutcome::Unloaded { runtimes: 0 });
+    }
+
+    /// A host that unloads the module while a component is still alive is
+    /// breaking its own contract; the only safe answer is to leave every
+    /// runtime where it is and say why, never to free under a live borrower.
+    #[test]
+    fn a_live_instance_keeps_every_runtime_in_place() {
+        LIVE_INSTANCES.store(1, Ordering::SeqCst);
+        let outcome = unload_runtimes();
+        LIVE_INSTANCES.store(0, Ordering::SeqCst);
+        assert_eq!(outcome, UnloadOutcome::LeftInPlace { live_instances: 1 });
     }
 }

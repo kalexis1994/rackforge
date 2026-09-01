@@ -42,7 +42,7 @@ pub mod storage;
 pub mod transport;
 
 pub use default_instrument::{DEFAULT_INSTRUMENT_ID, choose_opening_instrument};
-pub use hosted::{LoadedPlugin, PluginInstance};
+pub use hosted::{LoadedPlugin, PluginInstance, unload_process_handlers};
 pub use isolated_state::{
     IsolatedPluginStateEditor, plugin_parameters, set_plugin_parameter, validate_parameter_write,
     validate_state_reference,

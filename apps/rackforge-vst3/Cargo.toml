@@ -24,3 +24,6 @@ include_dir = "0.7"
 mime_guess = "2.0"
 raw-window-handle = "0.6"
 wry = { version = "0.56.0", default-features = false, features = ["os-webview"] }
+# Pinned to the exact version wry 0.56 depends on: naming ICoreWebView2Environment
+# ourselves must not pull a second copy of the COM types.
+webview2-com = "=0.38.2"

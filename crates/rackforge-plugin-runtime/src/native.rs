@@ -88,6 +88,54 @@ impl PortableEngine {
     }
 }
 
+/// Takes Wasmtime's process-wide trap handlers back out of the process.
+///
+/// On Windows, Wasmtime installs a vectored exception handler and a vectored
+/// continue handler the first time an `Engine` is created. They are
+/// PROCESS-GLOBAL and point at code inside whichever DLL created them, and
+/// an ordinary `Drop` of an `Engine` never removes them -- only
+/// `Engine::unload_process_handlers` does, and it demands to hold the last
+/// `Engine` handle in the whole process. A plug-in DLL that is unloaded
+/// without doing this leaves a dangling function pointer at the head of the
+/// host's exception chain, and the next exception anywhere in the host --
+/// even a benign first-chance one it uses internally -- jumps into unmapped
+/// memory. FL Studio 2025 died exactly that way on 2026-09-01, faulting in
+/// `RackForge.vst3_unloaded` at Wasmtime's `exception_handler` symbol.
+///
+/// This consumes every module a host still holds, keeps one `Engine` handle
+/// from the first, drops the rest so that handle is the last, and unloads.
+/// Wasmtime asserts its preconditions with panics; a panic inside a DLL's
+/// exit hook would abort the host, so the call is caught and reported
+/// instead, and on failure the process is left as it was -- handlers in
+/// place, which is the pre-existing leak, never a use-after-free.
+///
+/// # Safety
+///
+/// Wasmtime's contract, which the caller inherits: no other `Engine` may
+/// exist anywhere in the process (every `Store` and `Module` is an `Engine`
+/// clone, so all of them must be gone), and no thread that has run
+/// WebAssembly through this copy of Wasmtime may run it again. A VST3
+/// module's `ExitDll` satisfies both by the host's own contract: components
+/// are released and audio is stopped before the module is unloaded.
+pub unsafe fn unload_process_handlers(modules: Vec<PortableModule>) -> Result<(), String> {
+    let Some(first) = modules.first() else {
+        return Ok(());
+    };
+    let engine = first.module.engine().clone();
+    drop(modules);
+    let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        // SAFETY: forwarded from the caller, see above.
+        unsafe { engine.unload_process_handlers() }
+    }));
+    attempt.map_err(|panic| {
+        panic
+            .downcast_ref::<&str>()
+            .map(|message| (*message).to_owned())
+            .or_else(|| panic.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "another Engine handle was still alive".to_owned())
+    })
+}
+
 pub struct PortableModule {
     module: Module,
     limits: RuntimeLimits,

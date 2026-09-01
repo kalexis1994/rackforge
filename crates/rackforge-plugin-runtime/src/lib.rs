@@ -21,6 +21,7 @@ pub use shared::{
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
+pub use native::unload_process_handlers;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{PortableEngine, PortableInstance, PortableModule};
 

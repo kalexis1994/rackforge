@@ -446,6 +446,42 @@
       .labgroup .value { font-weight: 700; }
 
       .control { display: grid; gap: 5px; margin-bottom: 16px; }
+      /* A or B: a row of plates, one lit -- the rail's own tab idiom, laid
+         flat. Lacquer ground and a hairline frame like the tabs; the chosen
+         plate goes solid gold with lacquer lettering, like the sheet's
+         solid button, so it reads as the one that is down. */
+      .segment {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        gap: 4px;
+        padding: 3px;
+        background: rgba(0, 5, 6, 0.55);
+        border: 1px solid rgba(0, 0, 0, 0.55);
+        border-radius: 3px;
+      }
+      .segment button {
+        font: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        padding: 6px 4px;
+        color: rgba(242, 231, 216, 0.66);
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 2px;
+        cursor: pointer;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+      }
+      .segment button:hover { color: var(--gold-bright); }
+      .segment button[aria-checked="true"] {
+        color: var(--lacquer);
+        background: var(--gold);
+        border-color: var(--gold);
+        text-shadow: none;
+        box-shadow: inset 0 1px 0 var(--gold-bright);
+      }
       .row { display: flex; justify-content: space-between; align-items: baseline; }
       /* The control's name is the plate's engraving, so it carries the weight
          a stencilled label would: larger and heavier than the reading beside

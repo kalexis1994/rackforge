@@ -581,6 +581,40 @@ and strikes one string fewer. The model plays the strike softer and darker
 (velocity-to-felt path) and raises the aftersound — the unstruck third
 string is all aftersound.
 
+### Release velocity: how the key was let go (tested)
+
+A real Note Off carries how fast the key came up, and until now the engine
+threw that byte away: every release stopped the string at a rate set only by
+the note. Now the damper's stopping time follows the key's return. The curve
+is asymmetric by mechanism -- the damper falls under its own weight and the
+key's return, so a fast release converges on a floor (at most 1.25x faster),
+while a slow release rides it down as far as the player wants (up to 2.5x
+slower), the legato of a finger easing off. The release knock follows in the
+same direction with a smaller travel (0.7x-1.4x): a key that comes back hard
+lands harder.
+
+The two spans are DRAWN, not measured. The asymmetry is the physical claim;
+1.25 and 2.5 are chosen to sit where the mechanism plausibly does and were
+read from no paper.
+
+What counts as a measurement matters more than the curve. `0` and `64` are
+not measurements: `0` is what most keyboards without a release sensor send,
+a running-status note-off (`0x90` at velocity 0) has no byte at all, and `64`
+is MIDI's conventional neutral -- what the sequencer writes. Reading any of
+those as a gesture would change the instrument's character with the
+controller plugged in. All three fall back to the per-landing variation the
+damper already had (see the damper's `firmness`); only a real value moves
+the mean, and when it does, the random variation shrinks to a residual -- the
+felt still seats where it seats, but the return speed is no longer a guess.
+The pedal never reads it: a rail dropping sixty dampers is the pedal's
+gesture, not the finger's.
+
+Tested: the three no-measurement encodings leave the instrument bit-identical;
+0 and 64 map to no data and 64 sits at exactly 1.0; a slow release (20)
+leaves measurably more note behind at 150 ms than a fast one (110), with
+neutral between. Not validated by the fit cost, which renders without ever
+releasing a key and is blind to this axis by construction.
+
 ### Three strings, tension glide, and the re-struck string (tested)
 
 Where the scale has three unison strings (from the tenor up), every partial

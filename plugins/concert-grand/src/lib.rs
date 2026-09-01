@@ -122,6 +122,38 @@ const HORIZONTAL_BRIDGE: f32 = 0.12;
 /// the blow's small sideways component and what the bridge's anisotropy
 /// leaks across, a modest fraction of the vertical motion.
 const HORIZONTAL_SHARE: f32 = 0.3;
+/// How far apart the three strings of a unison sit under the hammer face.
+///
+/// The strike line is never exactly perpendicular, the hammer face is flat only
+/// to a fraction of a millimetre, and the strings never sit at exactly the same
+/// height, so one hammer does not meet three strings at one instant (Askenfelt
+/// & Jansson; Yamaha's own account of why a unison's strings "do not oscillate
+/// in exactly the same way"). A quarter of a millimetre is an ordinary amount.
+///
+/// It is a DISTANCE, not a time, and that is the whole point. Divided by the
+/// hammer's speed it gives about 40 us at fortissimo and 200 at pianissimo, so
+/// a soft blow spreads the trio further apart than a hard one -- the hammer
+/// gets out of the way as the player eases off, which is what a player says a
+/// piano does and what this model was reported not to do. A fixed time cannot
+/// express that. A time offset is a phase offset 2*pi*f*dt, so it also grows
+/// with frequency: the fundamental starts coherent, the high partials start
+/// already spread.
+///
+/// The magnitude is NOT measured. The mechanism is documented and the contact
+/// durations around it are (4 ms in the bass to under 1 in the treble); the
+/// height spread of a particular piano's unison is not something published,
+/// and a quarter millimetre is read off what the geometry allows. It is a
+/// starting point for the ear, like the voicings, not a claim about an
+/// instrument.
+///
+/// Why this and not the other three things tried first: every other way found
+/// to keep the high partials alive through the first quarter second went
+/// through `bridge_rate`, and that drain is also what feeds every other
+/// string -- so each of them bought the attack by silencing sympathetic
+/// resonance, and `a_loud_bass_feeds_a_quiet_octave_through_the_bridge` caught
+/// them. This one puts energy into the dephased configuration AT the strike
+/// instead of taking it out of the coherent one, and leaves the drain alone.
+const STRIKE_SKEW_M: f32 = 2.5e-4;
 /// The horizontal polarisation is not at the vertical's exact pitch: the
 /// bridge is stiffer along the string than across it, so the two
 /// polarisations of one string differ by a fraction of a cent. That slow
@@ -323,7 +355,27 @@ const PARAM_CLANG_FALLOFF: u32 = 38;
 /// At zero the plain register is silent above the winding, which is what the
 /// old hard gate did and is here as a position rather than as a law.
 const PARAM_CLANG_PLAIN: u32 = 39;
-const PARAM_COUNT: usize = 6 + LAB_COUNT + 17;
+/// Which action the instrument has, because the left pedal is not one
+/// mechanism with a dial on it -- it is two mechanisms, and a piano has one or
+/// the other.
+///
+/// A GRAND slides the whole action sideways: each hammer leaves the third
+/// string and meets the other two on felt the grooves have not hardened. Fewer
+/// strings, softer felt, and the string it abandons goes on ringing
+/// sympathetically. That is a change of TIMBRE, and it is what a pianist
+/// reaches for.
+///
+/// An UPRIGHT moves the hammer rest rail forward instead, shortening the blow.
+/// The hammer arrives slower for the same key, but it still meets all three
+/// strings with the same worn spot on the felt. That is a change of LEVEL and
+/// almost nothing else, which is exactly why players find an upright's left
+/// pedal disappointing after a grand's.
+///
+/// Modelling one with the other is not a calibration error, it is the wrong
+/// instrument: until this existed, `Upright 132`, `Upright 114` and
+/// `Player Upright` all answered CC67 with a mechanism they do not have.
+const PARAM_ACTION: u32 = 40;
+const PARAM_COUNT: usize = 6 + LAB_COUNT + 18;
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
 /// entries are pre-scaled by the per-sample decay factor `g`, so magnitude
@@ -718,10 +770,6 @@ const GAUGE_CONSTANT: f32 = 0.185_653_5;
 /// How steeply the longitudinal drive follows the string's length. The
 /// tension pulse goes as the square of the transverse slope, so two.
 const CLANG_LENGTH_POWER: f32 = 2.0;
-/// What a plain string keeps of a wound one's longitudinal drive. Not zero:
-/// plain wire has longitudinal modes too, they are simply far weaker and sit
-/// much lower above the pitch.
-const CLANG_PLAIN_SHARE: f32 = 0.25;
 const CLACK_SCATTER: f32 = 0.14;
 /// How long the keybed thud rings.
 ///
@@ -1002,6 +1050,47 @@ const MIC_REFERENCE_M: f32 = 2.5;
 const AIR_ABSORB_4K_PER_M: f32 = 0.0022;
 /// Where the proximity rise sits: the pressure-gradient term crosses the
 /// pressure term at f = c/(2*pi*r); this scales its audible strength.
+/// The pair, as a pair: two capsules 17 cm apart, splayed 110 degrees.
+///
+/// Every microphone quantity used to be a scalar computed at ONE point, and
+/// the two channels were manufactured afterwards by handing the six early
+/// reflections out on the parity of their index -- floor hard left, ceiling
+/// hard right. Those two arrive at a real pair almost identically, because
+/// they are in the vertical plane and symmetric about it, so the split
+/// invented a difference where a room has none and threw away the reflections
+/// that hold the centre of the image together.
+///
+/// With two positions the width, the inter-channel delays and the reflection
+/// pattern all fall out of the geometry instead of being drawn, and the
+/// pattern axis finally does directional work rather than only setting how
+/// much diffuse field each capsule collects. `Stereo Width` still spreads the
+/// SOURCE across the soundboard, which is a different real thing: a piano is
+/// two metres wide whatever you record it with.
+const MIC_SPACING_M: f32 = 0.17;
+/// The pair's preamplifier, and it is applied where the loss happened.
+///
+/// The geometry costs 3.9 dB against the single point it replaced -- 0.4 m of
+/// height between soundboard and capsules, 8.5 cm across, and a cardioid
+/// turned 55 degrees off the instrument. That is a real loss, and what answers
+/// a real loss is a real preamp, not a quieter piano: it has no business
+/// arriving as sixteen presets suddenly playing softer.
+///
+/// It lifts the near path -- direct and early reflections -- and NOT the
+/// reverberant tail, and the asymmetry is deliberate. The reverberant field is
+/// the one thing a capsule hears that does not depend on where the capsule
+/// stands: `reverb_gain` carries only the pattern's random-energy efficiency,
+/// and the tail's absolute level is `ROOM_MIX`, a constant set by ear. So the
+/// geometry change did not cost the tail anything, and lifting it would not be
+/// compensating a loss -- it would be re-voicing the room's wet/dry under
+/// cover of a gain. Measured: 1.9161 x 1.57 = 3.008 against the 3.0 the single
+/// point gave, so the dry level and the wet/dry ratio both come out where they
+/// were, and only the stereo geometry has changed.
+///
+/// (Which is not to say a real engineer backing a pair off and raising the gain
+/// gets no wetter -- they do. But that is a mic-distance decision the player
+/// makes on the fader, not something a refactor should decide for them.)
+const MIC_PREAMP: f32 = 1.57;
+const MIC_HALF_ANGLE_RAD: f32 = 0.959_931; // 55 degrees, so 110 between them
 const PROXIMITY_STRENGTH: f32 = 0.35;
 /// The spaced pair's maximum spacing in metres (Width at full), and how far
 /// the piano's strings spread laterally as the pair sees them. A coincident
@@ -1532,6 +1621,8 @@ struct Controls {
     impact: f32,
     clang_falloff: f32,
     clang_plain: f32,
+    /// 0.0 a grand's shifting action, 1.0 an upright's half-blow rail.
+    action: f32,
     /// The soundboard's own two numbers. Centre is the measured plate:
     /// Ege & Boutillon's 2.3% loss factor and their modal density law.
     /// Damping widens or narrows every mode, which trades the board's
@@ -1593,7 +1684,7 @@ impl Default for Controls {
             // 750 to 850 -- and is the better fix if it ever survives a
             // listening test. It has not been chosen; the level has.
             lab: [
-                0.52, 0.5, 0.5, 0.07, 0.5, 0.5, 0.5, 0.49, 0.55, 0.15, 0.5, 0.57, 0.58, 0.5, 0.45,
+                0.52, 0.5, 0.5, 0.07, 0.5, 0.5, 0.35, 0.49, 0.55, 0.15, 0.5, 0.57, 0.58, 0.5, 0.45,
                 0.5, 0.5,
             ],
             room_size: 0.28,
@@ -1614,7 +1705,11 @@ impl Default for Controls {
             lid: 0.5,
             damper: 0.5,
             clang_falloff: 0.5,
+            // What a plain string keeps of a wound one's longitudinal
+            // drive. Not zero: plain wire has longitudinal modes too, they
+            // are simply far weaker and sit much lower above the pitch.
             clang_plain: 0.25,
+            action: 0.0,
         }
     }
 }
@@ -1808,6 +1903,7 @@ impl Controls {
             PARAM_DAMPER => self.damper,
             PARAM_CLANG_FALLOFF => self.clang_falloff,
             PARAM_CLANG_PLAIN => self.clang_plain,
+            PARAM_ACTION => self.action,
             _ => return None,
         };
         Some(value as f64)
@@ -1843,6 +1939,7 @@ impl Controls {
             PARAM_DAMPER => self.damper = value,
             PARAM_CLANG_FALLOFF => self.clang_falloff = value,
             PARAM_CLANG_PLAIN => self.clang_plain = value,
+            PARAM_ACTION => self.action = value,
             // (the engine watches the room and the board through their
             // dirty flags -- both are rebuilds, not per-sample reads)
             _ => return false,
@@ -1870,7 +1967,16 @@ pub struct ConcertGrand {
     /// Una corda (CC 67): the shifted hammer strikes two of the three
     /// strings, softer and darker, and the free third string feeds the
     /// aftersound.
-    soft: bool,
+    /// Una corda, 0..1 and not a switch.
+    ///
+    /// The left pedal slides the whole action sideways, and it slides
+    /// PROGRESSIVELY: the hammer leaves the third string gradually and meets
+    /// the other two on felt that is less worn the further it travels. Real
+    /// playing lives in the middle of that travel -- the Chopin nocturne this
+    /// was found on sends 129 CC67 events carrying 73 distinct values, and a
+    /// `>= 64` test threw every one of them away and snapped between nothing
+    /// and everything at the halfway mark.
+    soft: f32,
     /// Live count of active partials, the budget the callback answers to.
     active_partials: usize,
     /// Delay line feeding the lid/rim early reflections.
@@ -1921,6 +2027,7 @@ pub struct ConcertGrand {
     /// Counts strikes, so per-strike randomness never repeats a note's exact
     /// mechanical fingerprint twice in a row.
     strike_serial: u32,
+    damp_serial: u32,
     /// The pedal's own noise: the rail and the dampers moving. A one-shot
     /// low-passed burst, softer on the way down, heavier on release when
     /// the whole damper rail lands back on the strings.
@@ -1946,12 +2053,12 @@ pub struct ConcertGrand {
     /// surfaces, three read left and three right.
     early: [f32; ROOM_BUFFER],
     early_write: usize,
-    early_taps: [(usize, f32); 6],
+    early_taps: [[(usize, f32); 6]; 2],
     /// The microphone chain, retuned whenever a room control moves.
-    direct_gain: f32,
+    direct_gain: [f32; 2],
     reverb_gain: f32,
     early_gain: f32,
-    proximity_gain: f32,
+    proximity_gain: [f32; 2],
     proximity_coeff: f32,
     proximity: [f32; 2],
     room_dirty: bool,
@@ -1971,7 +2078,7 @@ impl Default for ConcertGrand {
             inharmonicity: [0.0; NOTE_COUNT],
             voices: [Voice::default(); MAX_VOICES],
             pedal: false,
-            soft: false,
+            soft: 0.0,
             active_partials: 0,
             // Per-note calibration fitted against the YDP samples: ten
             // anchors from A0 to C8, nine multipliers each (felt, HF floor,
@@ -2002,34 +2109,34 @@ impl Default for ConcertGrand {
             strike_budget: 0,
             cal: [
                 [
-                    0.7665, 2.3440, 0.5097, 0.3392, 2.9182, 0.9236, 1.6842, 1.0000, 0.8144,
+                    0.7665, 2.3440, 0.5097, 0.3392, 4.0000, 0.9236, 1.6842, 1.0000, 1.0587,
                 ],
                 [
-                    0.7931, 2.7660, 0.2500, 0.3392, 0.7338, 0.4180, 0.4024, 1.0000, 1.9939,
+                    1.0310, 2.7660, 0.2500, 0.3392, 0.9539, 0.4180, 0.4024, 1.0000, 2.5921,
                 ],
                 [
-                    0.3580, 2.4965, 0.3922, 0.2609, 0.9169, 0.5434, 0.8348, 1.0000, 0.5849,
+                    0.3580, 2.2532, 0.3922, 0.3079, 1.2694, 0.5434, 0.8348, 1.0000, 0.3441,
                 ],
                 [
-                    0.2923, 1.9095, 0.5429, 0.3411, 0.4729, 0.4932, 0.2500, 1.0000, 2.1236,
+                    0.2500, 1.4688, 0.3194, 0.4434, 0.8038, 0.4932, 0.2500, 1.0000, 2.3396,
                 ],
                 [
-                    1.6297, 2.4650, 0.7534, 0.2565, 0.6582, 0.3269, 1.3111, 1.0000, 3.2479,
+                    1.2536, 2.4650, 0.9850, 0.2565, 1.0097, 0.3269, 1.3111, 1.0000, 3.4590,
                 ],
                 [
-                    3.5576, 2.1321, 0.9212, 2.6568, 0.5000, 0.4731, 0.2952, 1.0000, 0.4058,
+                    2.7366, 2.1321, 1.5657, 2.6568, 0.5866, 0.4731, 0.2952, 1.0000, 0.3439,
                 ],
                 [
-                    4.0000, 0.6556, 1.1017, 1.0000, 0.5000, 0.7958, 0.2500, 1.0000, 0.9942,
+                    4.0000, 0.6556, 1.8725, 1.0000, 0.4538, 0.7958, 0.2500, 1.0000, 0.6481,
                 ],
                 [
-                    0.9443, 0.9026, 4.0000, 3.9996, 0.5000, 1.0000, 1.9942, 1.0000, 0.2500,
+                    0.9443, 0.9026, 4.0000, 3.9996, 0.2942, 1.0000, 1.9942, 1.0000, 0.2500,
                 ],
                 [
-                    0.4820, 0.2500, 4.0000, 4.0000, 0.5000, 1.1800, 0.3836, 1.0000, 0.2500,
+                    0.4820, 0.2500, 4.0000, 4.0000, 0.2942, 1.1800, 0.3836, 1.0000, 0.2500,
                 ],
                 [
-                    1.0345, 0.3835, 4.0000, 4.0000, 0.5000, 1.0000, 1.0000, 1.0000, 0.2500,
+                    1.0345, 0.4249, 4.0000, 4.0000, 0.2942, 1.0000, 1.0000, 1.0000, 0.2500,
                 ],
             ],
             board: [BodyMode::default(); BOARD_MODES],
@@ -2050,6 +2157,7 @@ impl Default for ConcertGrand {
             room_len: [1; ROOM_LINES],
             air_dc: [0.0; 2],
             strike_serial: 0,
+            damp_serial: 0,
             pedal_noise_amp: 0.0,
             pedal_pressure: 1.0,
             sostenuto: false,
@@ -2064,11 +2172,11 @@ impl Default for ConcertGrand {
             room_low_gain: 0.0,
             early: [0.0; ROOM_BUFFER],
             early_write: 0,
-            early_taps: [(1, 0.0); 6],
-            direct_gain: 1.0,
+            early_taps: [[(1, 0.0); 6]; 2],
+            direct_gain: [1.0; 2],
             reverb_gain: 1.0,
             early_gain: 0.0,
-            proximity_gain: 0.0,
+            proximity_gain: [0.0; 2],
             proximity_coeff: 0.0,
             proximity: [0.0; 2],
             room_dirty: false,
@@ -2168,6 +2276,23 @@ const HAMMER_V_FF: f32 = 6.0;
 /// 40-90 Hz within 2 dB of the real instrument where the nominal time leaves
 /// it 12 dB short.
 const CONTACT_STRETCH: f32 = 1.0;
+/// How much of the recipe's amplitude survives inside the simulated range.
+///
+/// Zero: where the strike simulation reaches, it OWNS the amplitude, and the
+/// recipe's felt shaping -- `cutoff`, `bass_top`, the contact-width window,
+/// the HF floor -- does not reach those partials at all. Above the simulated
+/// range the recipe is all there is, and it still sets the level the
+/// simulation is normalised to. So the recipe is neither dead nor in charge,
+/// and which of the two it is depends on the partial.
+///
+/// That boundary is invisible from either side and has cost real time.
+/// Turning `bass_top` up FIFTY-fold changes notes 21-51 -- their ladder above
+/// about 4 kHz is recipe-supplied -- while leaving the 1-4 kHz band of those
+/// same notes bit-identical, because `sim_modes` covers up to `SIM_MODES`
+/// partials below 8 kHz and in the bass that is the whole of 1-4 kHz. A knob
+/// that reads like it shapes the attack can be swept all afternoon without
+/// moving it. `the_strike_owns_the_bass_where_the_hammer_is_heard` puts the
+/// line under test so it cannot move in silence.
 const RECIPE_FLOOR: f32 = 0.0;
 #[cfg(test)]
 static CONTACT_STEPS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
@@ -2680,40 +2805,42 @@ impl ConcertGrand {
         self.room_low_gain = (low_ratio - 1.0).clamp(-0.6, 0.35);
         self.room_low_coeff = 1.0 - expf(-core::f32::consts::TAU * 150.0 / self.sample_rate);
 
-        // The microphones. Distance on a log axis; the direct sound falls
-        // as r_ref/r, the reverberant field holds, the early reflections
-        // arrive from their mirror images.
+        // The microphones, as two capsules rather than one point. Distance
+        // on a log axis; the direct sound falls as r_ref/r per capsule, the
+        // reverberant field holds, and the early reflections arrive from their
+        // mirror images along each capsule's own path.
         let distance = MIC_DISTANCE_MIN_M
             * powf(
                 MIC_DISTANCE_MAX_M / MIC_DISTANCE_MIN_M,
                 self.controls.mic_distance,
             );
-        self.direct_gain = (MIC_REFERENCE_M / distance).clamp(0.12, 3.0);
         // The pattern axis b: p(theta) = (1-b) + b*cos(theta). Random-energy
-        // efficiency is what the mic hears of a diffuse field.
+        // efficiency is what a capsule hears of a DIFFUSE field, which depends
+        // on the pattern and not on where the capsule stands, so it stays
+        // shared between the two.
         let b = self.controls.mic_pattern;
         let random_energy = (1.0 - b) * (1.0 - b) + b * b / 3.0;
         self.reverb_gain = sqrtf(random_energy) / 0.577;
-        // Proximity: the pressure-gradient term rises as c/(2*pi*f*r). Felt
-        // below ~ c/(2*pi*r); rendered as a 120 Hz shelf whose gain follows
-        // b/r.
-        self.proximity_gain = PROXIMITY_STRENGTH * b * (1.0 / distance) * MIC_REFERENCE_M;
-        self.proximity_coeff = 1.0 - expf(-core::f32::consts::TAU * 120.0 / self.sample_rate);
 
-        // Early reflections: the piano stands a third of the way down the
-        // hall, mid-width, soundboard at 1 m; the pair faces it from
-        // `distance` away. Six first-order images, each with its own extra
-        // path and its 1/r loss and one bounce off its own surface.
+        // The piano stands a third of the way down the hall, mid-width,
+        // soundboard at 1 m; the pair faces it from `distance` away, ears at
+        // 1.4 m.
         let piano = (0.33 * length, 0.5 * width, 1.0_f32);
-        let mic = (
+        let centre = (
             0.33 * length + distance.min(0.6 * length),
             0.5 * width,
             1.4_f32,
         );
-        let direct_path = {
-            let (dx, dy, dz) = (mic.0 - piano.0, mic.1 - piano.1, mic.2 - piano.2);
-            sqrtf(dx * dx + dy * dy + dz * dz).max(0.3)
+        // Both capsules look back at the instrument, splayed either side of
+        // that line. The splay is what makes the pattern axis do directional
+        // work: a cardioid turned 55 degrees off the source hears the near
+        // wall and the far wall quite differently, and an omni does not.
+        let aim = {
+            let (dx, dy) = (piano.0 - centre.0, piano.1 - centre.1);
+            let length = sqrtf(dx * dx + dy * dy).max(1e-3);
+            (dx / length, dy / length)
         };
+        let (sin_half, cos_half) = sincosf(MIC_HALF_ANGLE_RAD);
         let images = [
             (piano.0, piano.1, -piano.2),               // floor
             (piano.0, piano.1, 2.0 * height - piano.2), // ceiling
@@ -2723,13 +2850,47 @@ impl ConcertGrand {
             (2.0 * length - piano.0, piano.1, piano.2), // front wall
         ];
         let reflect = 1.0 - alpha_mid;
-        for (slot, image) in self.early_taps.iter_mut().zip(images) {
-            let (dx, dy, dz) = (mic.0 - image.0, mic.1 - image.1, mic.2 - image.2);
-            let path = sqrtf(dx * dx + dy * dy + dz * dz).max(direct_path + 0.1);
-            let delay_s = (path - direct_path) / SOUND_SPEED;
-            let samples = ((delay_s * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
-            let gain = reflect * (direct_path / path) * self.direct_gain;
-            *slot = (samples, gain);
+        for side in 0..2 {
+            let turn = if side == 0 { 1.0 } else { -1.0 };
+            // The capsule, offset across the pair's line and turned outward.
+            let across = (-aim.1, aim.0);
+            let half = 0.5 * MIC_SPACING_M * turn;
+            let mic = (
+                centre.0 + across.0 * half,
+                centre.1 + across.1 * half,
+                centre.2,
+            );
+            let axis = (
+                aim.0 * cos_half - aim.1 * sin_half * turn,
+                aim.1 * cos_half + aim.0 * sin_half * turn,
+            );
+            // What this capsule makes of a source at `point`: its distance and
+            // its polar response at the angle the source arrives from. The
+            // sign is kept -- a figure-of-eight really does invert what
+            // reaches it from behind, and two capsules disagreeing about that
+            // is a thing a pair does.
+            let heard = |point: (f32, f32, f32)| -> (f32, f32) {
+                let (dx, dy, dz) = (point.0 - mic.0, point.1 - mic.1, point.2 - mic.2);
+                let range = sqrtf(dx * dx + dy * dy + dz * dz).max(0.3);
+                let cosine = (dx * axis.0 + dy * axis.1) / range;
+                (range, (1.0 - b) + b * cosine)
+            };
+            let (direct_path, direct_response) = heard(piano);
+            let near = (MIC_REFERENCE_M / direct_path).clamp(0.12, 3.0) * MIC_PREAMP;
+            self.direct_gain[side] = near * direct_response;
+            // Proximity: the pressure-gradient term rises as c/(2*pi*f*r).
+            // Felt below ~ c/(2*pi*r); rendered as a 120 Hz shelf whose gain
+            // follows b/r, and each capsule has its own r.
+            self.proximity_gain[side] =
+                PROXIMITY_STRENGTH * b * (1.0 / direct_path) * MIC_REFERENCE_M;
+            for (slot, image) in self.early_taps[side].iter_mut().zip(images) {
+                let (path, response) = heard(image);
+                let path = path.max(direct_path + 0.1);
+                let delay_s = (path - direct_path) / SOUND_SPEED;
+                let samples = ((delay_s * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
+                let gain = reflect * (direct_path / path) * response * near;
+                *slot = (samples, gain);
+            }
         }
         self.early_gain = 0.55 * self.reverb_gain;
         self.room_dirty = false;
@@ -3131,9 +3292,24 @@ impl ConcertGrand {
         let mut velocity = velocity as f32 / 127.0;
         // Una corda: the shifted hammer meets the strings with softer felt
         // (the unworn side) and strikes one string fewer.
-        if self.soft {
-            velocity *= 0.78;
-        }
+        // The left pedal, through whichever mechanism this instrument has.
+        //
+        // A grand's shift takes 22% of the blow because the felt it lands on
+        // is softer, and it takes strings away as well. An upright's rail only
+        // shortens the travel: the hammer accelerates over a shorter distance,
+        // so its speed goes as the square root of it, and a rail that brings a
+        // regulated ~46 mm blow down into the mid-thirties gives about 0.85.
+        // So an upright's pedal is WEAKER than a grand's and purely a level --
+        // which is the well-known disappointment of playing one after the
+        // other, and the thing a single mechanism could not say.
+        //
+        // The blow distances are regulation practice, not something measured
+        // here: 37 mm turns up among technicians as a shortened figure and
+        // ~46 mm as the regulated one. The mechanism is certain; the fraction
+        // is judgement, like the strike skew and the damper's spread.
+        let shift = self.soft * (1.0 - self.controls.action);
+        let half_blow = self.soft * self.controls.action;
+        velocity *= 1.0 - 0.22 * shift - 0.15 * half_blow;
 
         // A RE-STRUCK STRING IS THE SAME STRING. If this note is still
         // ringing free -- held, or sustained with its damper clear -- the
@@ -3766,10 +3942,8 @@ impl ConcertGrand {
             // How many strings this note actually has: single to ~E1,
             // doubled through the wound bass, three from ~C2 upward -- the
             // same stringing the hammer divides its mass over.
-            let second =
-                ((index as f32 - 5.0) / 5.0).clamp(0.0, 1.0) * if self.soft { 0.6 } else { 1.0 };
-            let third_string =
-                ((index as f32 - 9.0) / 6.0).clamp(0.0, 1.0) * if self.soft { 0.25 } else { 1.0 };
+            let second = ((index as f32 - 5.0) / 5.0).clamp(0.0, 1.0) * (1.0 - 0.4 * shift);
+            let third_string = ((index as f32 - 9.0) / 6.0).clamp(0.0, 1.0) * (1.0 - 0.75 * shift);
             // Equal strings, equal shares. The old split gave the "second
             // string" 0.44 and the third 0.22 of the note, which is not how
             // a unison is strung.
@@ -3908,11 +4082,25 @@ impl ConcertGrand {
             };
             for (lane, (share, ratio)) in shares.iter().zip(ratios.iter()).enumerate() {
                 if *share > 0.0 {
+                    // Each string of the trio meets the hammer at its own
+                    // instant, fixed per note -- a piano's strike line does not
+                    // re-tilt between blows. Lane 0 is the reference; the other
+                    // two carry a skew of a few tens of microseconds either way.
+                    let skew = if lane == 0 {
+                        0.0
+                    } else {
+                        let speed = (velocity * HAMMER_V_FF).max(0.3);
+                        (STRIKE_SKEW_M / speed)
+                            * (2.0 * hash01((note as u32) << 5 | (lane as u32) << 2 | 0xB) - 1.0)
+                    };
+                    let angle = core::f32::consts::TAU * frequency * skew;
+                    let (sin_a, cos_a) = sincosf(angle);
+                    let (rq, ro) = (pq * cos_a - po * sin_a, pq * sin_a + po * cos_a);
                     built.set_lane(
                         lane,
                         Component::start_state(
-                            amplitude * share * pq,
-                            amplitude * share * po,
+                            amplitude * share * rq,
+                            amplitude * share * ro,
                             (frequency * ratio).min(nyquist),
                             intrinsic,
                             sample_rate,
@@ -4455,8 +4643,111 @@ impl ConcertGrand {
 
     /// Per-sample decay multiplier a falling damper applies: the note dies in
     /// tens of milliseconds instead of seconds.
-    fn damper_factor(&self, note: u8) -> f32 {
-        Self::damper_for(note, self.sample_rate, self.controls.damper_grip())
+    /// What the note-off message says about how the key was let go.
+    ///
+    /// MIDI carries it in the third byte of a real Note Off (`0x80`): the
+    /// release velocity. Two values mean "no data" and must not be read as a
+    /// slow or fast release. `0` is what most keyboards that do not sense
+    /// release put there, and a Note On with velocity 0 (running-status
+    /// note-off) has no byte to give at all. `64` is the conventional
+    /// neutral -- what our own sequencer writes, and what a keyboard without
+    /// the sensor may write too. Reading either as a gesture would change the
+    /// instrument's character with the controller plugged in, which is the
+    /// one thing this must never do. So both fall back to the per-landing
+    /// variation the damper already has; only 1..=127 other than 64 is a
+    /// measurement, and only a measurement is allowed to move the mean.
+    fn release_velocity(status: u8, data2: u8) -> Option<u8> {
+        if status & 0xF0 == 0x80 && data2 != 0 && data2 != 64 {
+            Some(data2)
+        } else {
+            None
+        }
+    }
+
+    /// Release velocity as a multiplier on the damper's stopping time.
+    ///
+    /// Asymmetric by mechanism. The damper falls under its own weight and the
+    /// key's return, so a fast release cannot drive it down faster than the
+    /// mechanism allows -- it converges on a floor, 1.25x at most. A slow
+    /// release rides it down as far as the player wants, the legato of a
+    /// finger easing off a key: up to 2.5x. Little travel above neutral,
+    /// much below it. That asymmetry is the physical claim; the two spans are
+    /// DRAWN, chosen to sit where the mechanism plausibly does, not read from
+    /// any measurement.
+    ///
+    /// 64 returns exactly 1.0 by early return, so neutral is bit-identical to
+    /// the release path before this existed as a property of the code and
+    /// not of a chain of float reasoning.
+    fn damper_span(release: u8) -> f32 {
+        const FAST_SPAN: f32 = 1.25;
+        const SLOW_SPAN: f32 = 2.5;
+        if release == 64 {
+            return 1.0;
+        }
+        let t = (release as f32 - 64.0) / 63.0;
+        if t >= 0.0 {
+            powf(FAST_SPAN, -t)
+        } else {
+            powf(SLOW_SPAN, -t)
+        }
+    }
+
+    /// Release velocity as a multiplier on the release knock: the key coming
+    /// back and the felt landing. Same direction as the damper -- a fast
+    /// return lands harder and sounds it -- with a smaller travel, 0.7x to
+    /// 1.4x, because the knock is a small sound and the ear does not want it
+    /// to double.
+    fn damper_knock(release: u8) -> f32 {
+        if release == 64 {
+            return 1.0;
+        }
+        let t = (release as f32 - 64.0) / 63.0;
+        if t >= 0.0 {
+            powf(1.4, t)
+        } else {
+            powf(1.0 / 0.7, t)
+        }
+    }
+
+    /// How much of the random per-landing variation survives once the key's
+    /// return is actually measured: the felt still seats where it seats, but
+    /// the return speed is no longer something to guess at. A third of the
+    /// spread, so +/-15% becomes +/-5%.
+    const RELEASE_RESIDUAL: f32 = 0.33;
+
+    /// How firmly ONE damper lands, this time, on this note.
+    ///
+    /// A key never returns twice at the same speed and the felt never seats on
+    /// exactly the same spot -- least of all on a wound bass string, where the
+    /// damper straddles a winding. So a release is not a constant: it is the
+    /// one part of a piano that genuinely differs blow to blow, which is why
+    /// a real instrument's releases sound like a mechanism and a model's
+    /// sound like a gate.
+    ///
+    /// The two things it moves are CORRELATED, and that is the point of doing
+    /// it with one number instead of two. A fast key return lands the felt
+    /// hard: it stops the string sooner AND knocks louder. Rolling those
+    /// independently would give firm-but-silent and soft-but-loud landings,
+    /// which no action can produce, and the ear hears the incoherence as
+    /// noise rather than as mechanism.
+    ///
+    /// The spread is judgement, not measurement: what a key return varies by
+    /// between ordinary releases is not something published. +/-15% on the
+    /// stopping time is small enough to read as an action and not as a fault.
+    fn damper_firmness(serial: u32, note: u8) -> f32 {
+        let salt = serial
+            .wrapping_mul(0x9E37_79B9)
+            .wrapping_add((note as u32).wrapping_mul(0x85EB_CA6B));
+        0.85 + 0.30 * hash01(salt ^ 0x5D)
+    }
+
+    fn damper_factor(&self, note: u8, firmness: f32, span: f32) -> f32 {
+        Self::damper_for(
+            note,
+            self.sample_rate,
+            self.controls.damper_grip() * firmness,
+            span,
+        )
     }
 
     /// Dampers are not equally effective across the compass: a treble damper
@@ -4464,13 +4755,16 @@ impl ConcertGrand {
     /// carries far too much energy to be stopped that fast. A single 60 ms
     /// constant for the whole keyboard left every release ringing ~230 ms
     /// down to −34 dB, which smears into a wash as soon as playing gets fast.
-    fn damper_for(note: u8, sample_rate: f32, grip: f32) -> f32 {
+    fn damper_for(note: u8, sample_rate: f32, grip: f32, span: f32) -> f32 {
         let position = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as f32
             / (NOTE_COUNT - 1) as f32;
         // Grip divides the stopping time: a hard new set shuts the string in
         // a third of it, worn felt takes three times as long and the note
-        // bleeds past the key.
-        let seconds = (0.075 - 0.055 * position) / grip.max(0.05);
+        // bleeds past the key. `span` is the key's own return, from release
+        // velocity (`damper_span`); the pedal passes exactly 1.0, which
+        // multiplies out bit-identically, because a rail dropping sixty
+        // dampers is the pedal's gesture and not the finger's.
+        let seconds = (0.075 - 0.055 * position) / grip.max(0.05) * span;
         expf(-1.0 / (seconds * sample_rate))
     }
 
@@ -4481,10 +4775,24 @@ impl ConcertGrand {
         (coefficient, decay)
     }
 
-    fn release(&mut self, channel: u8, note: u8) {
-        let damper = self.damper_factor(note);
+    fn release(&mut self, channel: u8, note: u8, release: Option<u8>) {
+        self.damp_serial = self.damp_serial.wrapping_add(1);
+        let firmness = Self::damper_firmness(self.damp_serial, note);
+        // With a measured return the random landing becomes a residual: the
+        // felt still seats where it seats, but how fast the key came back is
+        // no longer a guess. Without one, the variation carries the landing
+        // exactly as it did before release velocity was read at all.
+        let (span, knock, firmness) = match release {
+            Some(velocity) => (
+                Self::damper_span(velocity),
+                Self::damper_knock(velocity),
+                1.0 + (firmness - 1.0) * Self::RELEASE_RESIDUAL,
+            ),
+            None => (1.0, 1.0, firmness),
+        };
+        let damper = self.damper_factor(note, firmness, span);
         let (thud_coefficient, thud_decay) = self.damper_thud();
-        let release_gain = Controls::noise_gain(self.controls.release_noise);
+        let release_gain = Controls::noise_gain(self.controls.release_noise) * firmness * knock;
         let pressure = self.pedal_pressure;
         for voice in &mut self.voices {
             if voice.active && voice.note == note && voice.channel == channel && voice.held {
@@ -4530,6 +4838,11 @@ impl ConcertGrand {
         let release_gain = Controls::noise_gain(self.controls.release_noise);
         let rate = self.sample_rate;
         let grip = self.controls.damper_grip();
+        // One pedal motion, but sixty dampers, and each one seats on its own
+        // string. Sharing a single factor across the rail was audible as a
+        // chord ending like a gate rather than like felt.
+        self.damp_serial = self.damp_serial.wrapping_add(1);
+        let serial = self.damp_serial;
         for voice in &mut self.voices {
             if !(voice.active && voice.sustained) {
                 continue;
@@ -4537,14 +4850,20 @@ impl ConcertGrand {
             if self.sostenuto && voice.sostenuto {
                 continue;
             }
+            let firmness = Self::damper_firmness(serial, voice.note);
             if pressure >= 0.98 {
                 // Seated: the legacy full damp, note over.
-                let damper = Self::damper_for(voice.note, rate, grip);
-                voice.damp(damper, thud_coefficient, thud_decay, release_gain);
+                let damper = Self::damper_for(voice.note, rate, grip * firmness, 1.0);
+                voice.damp(
+                    damper,
+                    thud_coefficient,
+                    thud_decay,
+                    release_gain * firmness,
+                );
                 voice.damper_applied = 0.0;
             } else {
                 let delta = pressure - voice.damper_applied;
-                let damper = Self::damper_for(voice.note, rate, grip);
+                let damper = Self::damper_for(voice.note, rate, grip * firmness, 1.0);
                 voice.press_damper(damper, delta);
                 voice.damper_applied = pressure;
             }
@@ -4585,11 +4904,11 @@ impl ConcertGrand {
                 continue;
             }
             if self.pedal && pressure < 0.98 {
-                let damper = Self::damper_for(voice.note, rate, grip);
+                let damper = Self::damper_for(voice.note, rate, grip, 1.0);
                 voice.press_damper(damper, pressure - voice.damper_applied);
                 voice.damper_applied = pressure;
             } else {
-                let damper = Self::damper_for(voice.note, rate, grip);
+                let damper = Self::damper_for(voice.note, rate, grip, 1.0);
                 voice.damp(damper, thud_coefficient, thud_decay, release_gain);
                 voice.damper_applied = 0.0;
             }
@@ -4603,7 +4922,7 @@ impl ConcertGrand {
         let grip = self.controls.damper_grip();
         for voice in &mut self.voices {
             if voice.active {
-                let damper = Self::damper_for(voice.note, rate, grip);
+                let damper = Self::damper_for(voice.note, rate, grip, 1.0);
                 voice.damp(damper, thud_coefficient, thud_decay, release_gain);
             }
         }
@@ -4615,11 +4934,18 @@ impl ConcertGrand {
         let channel = data[0] & 0x0f;
         match data[0] & 0xf0 {
             0x90 if data[2] > 0 => self.start_voice(channel, data[1] & 0x7f, data[2] & 0x7f),
-            0x80 | 0x90 => self.release(channel, data[1] & 0x7f),
+            // A real Note Off may carry how the key was let go; a Note On at
+            // velocity 0 is a running-status note-off and carries nothing.
+            0x80 => self.release(
+                channel,
+                data[1] & 0x7f,
+                Self::release_velocity(0x80, data[2] & 0x7f),
+            ),
+            0x90 => self.release(channel, data[1] & 0x7f, None),
             0xb0 => match data[1] {
                 64 => self.set_pedal_level(data[2] as f32 / 127.0),
                 66 => self.set_sostenuto(data[2] >= 64),
-                67 => self.soft = data[2] >= 64,
+                67 => self.soft = data[2] as f32 / 127.0,
                 120 | 123 => self.all_notes_off(),
                 _ => {}
             },
@@ -4769,6 +5095,8 @@ impl Processor for ConcertGrand {
         }
         const LAB_FELT: usize = 0;
         const LAB_HF: usize = 6;
+        const LAB_HAMMER: usize = 7;
+        const LAB_DETUNE: usize = 13;
 
         // Every voicing BUILDS ON the factory default -- the lab
         // refinements, the noise levels and the calibration the user's ear
@@ -4781,7 +5109,7 @@ impl Processor for ConcertGrand {
             // Mellow: darker hammer, longer room, the pair a step back,
             // ribbon-ward pattern.
             "mellow" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.46), (LAB_HF, 0.56)]),
+                lab: voiced(&[(LAB_FELT, 0.46), (LAB_HF, 0.41)]),
                 brightness: 0.28,
                 dynamics: 0.5,
                 unison: 0.55,
@@ -4795,7 +5123,7 @@ impl Processor for ConcertGrand {
             },
             // Bright: harder felt, a livelier hall, closer cardioids.
             "bright" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.64), (LAB_HF, 0.54)]),
+                lab: voiced(&[(LAB_FELT, 0.64), (LAB_HF, 0.39)]),
                 brightness: 0.8,
                 dynamics: 0.75,
                 unison: 0.45,
@@ -4812,7 +5140,7 @@ impl Processor for ConcertGrand {
             // than from the hall. It used to BE the default, note for note,
             // so picking it did nothing at all.
             "intimate" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.48), (LAB_HF, 0.44)]),
+                lab: voiced(&[(LAB_FELT, 0.48), (LAB_HF, 0.29)]),
                 room_size: 0.18,
                 mic_distance: 0.04,
                 width: 0.30,
@@ -4861,7 +5189,7 @@ impl Processor for ConcertGrand {
             // than anyone else's, which is where its clarity comes from.
             // A0 ~2.10 m.
             "concert-308" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.60), (LAB_HF, 0.58)]),
+                lab: voiced(&[(LAB_FELT, 0.60), (LAB_HF, 0.43)]),
                 size: 0.86,
                 brightness: 0.62,
                 tension: 0.55,
@@ -4869,12 +5197,14 @@ impl Processor for ConcertGrand {
                 board_density: 0.56,
                 unison: 0.42,
                 decay: 0.55,
+                room_size: 0.36,
+                mic_distance: 0.15,
                 ..Controls::default()
             },
             // Bösendorfer 280VC, 280 cm: warm and singing, a drier attack,
             // the bass its signature. A0 ~2.02 m.
             "concert-280" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.45), (LAB_HF, 0.60)]),
+                lab: voiced(&[(LAB_FELT, 0.45), (LAB_HF, 0.45)]),
                 size: 0.72,
                 brightness: 0.36,
                 tension: 0.34,
@@ -4882,24 +5212,28 @@ impl Processor for ConcertGrand {
                 board_density: 0.54,
                 unison: 0.55,
                 decay: 0.58,
+                room_size: 0.34,
+                mic_distance: 0.14,
                 ..Controls::default()
             },
             // Yamaha CFX, 275 cm: bright, even and powerful. The reference
             // this model is calibrated against is a Yamaha, so this profile
             // sits closest to the factory instrument. A0 ~2.00 m.
             "concert-275" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.62), (LAB_HF, 0.52)]),
+                lab: voiced(&[(LAB_FELT, 0.62), (LAB_HF, 0.37)]),
                 size: 0.68,
                 brightness: 0.60,
                 tension: 0.58,
                 strike_point: 0.52,
                 board_density: 0.53,
+                room_size: 0.33,
+                mic_distance: 0.13,
                 ..Controls::default()
             },
             // Steinway D-274: rich and complex rather than bright, and most
             // itself at low velocities. A0 ~1.98 m.
             "concert-274" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.50), (LAB_HF, 0.56)]),
+                lab: voiced(&[(LAB_FELT, 0.50), (LAB_HF, 0.41)]),
                 size: 0.65,
                 brightness: 0.47,
                 tension: 0.5,
@@ -4907,13 +5241,33 @@ impl Processor for ConcertGrand {
                 board_density: 0.53,
                 unison: 0.58,
                 dynamics: 0.62,
+                room_size: 0.33,
+                mic_distance: 0.13,
+                ..Controls::default()
+            },
+            // A semi-concert around 227 cm -- Steinway C, Yamaha C7, Kawai
+            // SK-7. The size that actually gets recorded and taught on: a
+            // hall instrument's scale in a case that fits a studio. Voiced
+            // between the D's richness and the CFX's edge, because that is
+            // what the class is for. A0 ~1.81 m.
+            "concert-227" => Controls {
+                lab: voiced(&[(LAB_FELT, 0.55), (LAB_HF, 0.39)]),
+                size: 0.455,
+                brightness: 0.52,
+                tension: 0.52,
+                strike_point: 0.49,
+                board_density: 0.53,
+                unison: 0.56,
+                dynamics: 0.58,
+                room_size: 0.31,
+                mic_distance: 0.12,
                 ..Controls::default()
             },
             // Steinway B, 211 cm: the same voice in a shorter case. The bass
             // is where it gives ground, which is exactly what Size expresses.
             // A0 ~1.65 m.
             "salon-211" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.51), (LAB_HF, 0.52)]),
+                lab: voiced(&[(LAB_FELT, 0.51), (LAB_HF, 0.37)]),
                 size: 0.38,
                 brightness: 0.47,
                 tension: 0.5,
@@ -4921,59 +5275,126 @@ impl Processor for ConcertGrand {
                 board_density: 0.52,
                 unison: 0.58,
                 dynamics: 0.62,
+                room_size: 0.29,
+                mic_distance: 0.11,
                 ..Controls::default()
             },
             // A parlour grand around 1.85 m: the common six-foot instrument.
             // A0 ~1.45 m.
             "parlour-185" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.52), (LAB_HF, 0.48)]),
+                lab: voiced(&[(LAB_FELT, 0.53), (LAB_HF, 0.31)]),
                 size: 0.27,
-                brightness: 0.5,
+                brightness: 0.53,
                 tension: 0.5,
                 strike_point: 0.5,
-                board_density: 0.5,
+                board_density: 0.49,
+                unison: 0.52,
+                decay: 0.46,
+                room_size: 0.26,
+                mic_distance: 0.1,
                 ..Controls::default()
             },
             // A five-foot baby grand: a foreshortened bass under an ordinary
             // treble, which is the whole character of the thing. A0 ~1.09 m.
             "baby-150" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.55), (LAB_HF, 0.42)]),
+                lab: voiced(&[(LAB_FELT, 0.55), (LAB_HF, 0.27)]),
                 size: 0.04,
                 brightness: 0.55,
                 tension: 0.5,
                 strike_point: 0.55,
                 board_density: 0.47,
                 decay: 0.4,
+                room_size: 0.22,
+                mic_distance: 0.09,
                 ..Controls::default()
             },
             // A 52-inch professional upright. Its bass string is LONGER than
             // a five-foot grand's -- 1.37 m against 1.09 -- which is why tall
             // uprights beat small grands where it matters.
             "upright-52" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.58), (LAB_HF, 0.40)]),
+                lab: voiced(&[(LAB_FELT, 0.58), (LAB_HF, 0.25)]),
                 size: 0.23,
                 brightness: 0.52,
                 tension: 0.5,
                 strike_point: 0.55,
                 board_density: 0.45,
-                room_size: 0.2,
-                mic_distance: 0.25,
                 width: 0.45,
                 decay: 0.42,
+                room_size: 0.2,
+                mic_distance: 0.12,
+                action: 1.0,
                 ..Controls::default()
             },
             // A 45-inch studio upright. A0 ~1.22 m.
             "upright-studio" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.60), (LAB_HF, 0.36)]),
+                lab: voiced(&[(LAB_FELT, 0.60), (LAB_HF, 0.21)]),
                 size: 0.13,
                 brightness: 0.55,
                 tension: 0.52,
                 strike_point: 0.58,
                 board_density: 0.43,
-                room_size: 0.15,
-                mic_distance: 0.2,
                 width: 0.4,
                 decay: 0.38,
+                room_size: 0.16,
+                mic_distance: 0.1,
+                action: 1.0,
+                ..Controls::default()
+            },
+            // A player piano: acoustically an ordinary upright, because that
+            // is what one is -- the pneumatic stack works the same action.
+            // What people hear as "pianola" is the instrument these were:
+            // a hall or parlour upright played daily for decades, its
+            // unisons walked apart, its hammers worn hard and grooved, its
+            // board dried out. So none of this is a new mechanism; it is the
+            // ordinary one, old. The rigid tempo and the stepped dynamics of
+            // a roll are performance, not timbre, and belong to a sequencer.
+            //
+            // The only preset that moves Detune off its default. It is worn,
+            // not broken, and the line between the two is narrower than it
+            // looks: the first version pushed every axis at once and read as
+            // a piano in disrepair. The loudest mistake was the mechanism --
+            // `noise_gain` is 256^(v-0.5), so 0.62 against the house 0.39 was
+            // not "a bit more action", it was 3.6x, a clatter under every
+            // note.
+            //
+            // Detune and Unison multiply the same number, so what matters is
+            // their product: the house instrument is 0.65 x 0.50 = 0.325 and
+            // this is 0.70 x 0.56 = 0.392, a fifth wider. That sounds far too
+            // little on paper and is not, because it is not the only thing
+            // detuning this instrument -- see the note on Size below.
+            //
+            // A tack piano, which is what going further sounds like, is a
+            // different instrument: tacks in the hammer felt, a metallic
+            // attack. This is an ordinary upright played daily for decades.
+            // A0 ~1.33 m, a 50-inch case -- and that short scale is the
+            // OTHER half of why it sounds out of tune, which is physics and
+            // not a setting. A 1.33 m bass string is thick for its pitch, and
+            // a thick string's partials are stretched sharp: its own overtones
+            // no longer line up with the treble's fundamentals. Every small
+            // upright does this and it is most of why cheap ones sound sour.
+            // Detune is the half worth being careful with, because the scale
+            // is already spending the budget.
+            "player-upright" => Controls {
+                lab: voiced(&[
+                    (LAB_FELT, 0.62),
+                    (LAB_HF, 0.29),
+                    (LAB_HAMMER, 0.60),
+                    (LAB_DETUNE, 0.56),
+                ]),
+                size: 0.20,
+                brightness: 0.56,
+                tension: 0.5,
+                strike_point: 0.56,
+                board_density: 0.44,
+                board_damping: 0.55,
+                unison: 0.70,
+                decay: 0.4,
+                dynamics: 0.4,
+                action_noise: 0.46,
+                width: 0.42,
+                room_size: 0.19,
+                mic_distance: 0.13,
+                action: 1.0,
                 ..Controls::default()
             },
             // A Viennese fortepiano. Not a small modern piano: a different
@@ -4981,7 +5402,7 @@ impl Processor for ConcertGrand {
             // wire, with leather-covered hammers. This is the profile the
             // widened tension travel exists for.
             "fortepiano" => Controls {
-                lab: voiced(&[(LAB_FELT, 0.44), (LAB_HF, 0.34)]),
+                lab: voiced(&[(LAB_FELT, 0.44), (LAB_HF, 0.19)]),
                 size: 0.30,
                 brightness: 0.45,
                 tension: 0.06,
@@ -4991,8 +5412,8 @@ impl Processor for ConcertGrand {
                 unison: 0.35,
                 decay: 0.3,
                 dynamics: 0.35,
-                room_size: 0.25,
-                mic_distance: 0.25,
+                room_size: 0.22,
+                mic_distance: 0.13,
                 ..Controls::default()
             },
             _ => return false,
@@ -5031,6 +5452,7 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 14] = self.controls.damper;
         values[6 + LAB_COUNT + 15] = self.controls.clang_falloff;
         values[6 + LAB_COUNT + 16] = self.controls.clang_plain;
+        values[6 + LAB_COUNT + 17] = self.controls.action;
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -5091,6 +5513,7 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 14] = defaults.damper;
         values[6 + LAB_COUNT + 15] = defaults.clang_falloff;
         values[6 + LAB_COUNT + 16] = defaults.clang_plain;
+        values[6 + LAB_COUNT + 17] = defaults.action;
         // A 37-float state is from the era of the "in bass" tilt twins: its
         // tail is tilt values, not room values, and reading it into the room
         // controls would set the hall from leftovers. Take its head only.
@@ -5138,6 +5561,7 @@ impl Processor for ConcertGrand {
             damper: values[6 + LAB_COUNT + 14],
             clang_falloff: values[6 + LAB_COUNT + 15],
             clang_plain: values[6 + LAB_COUNT + 16],
+            action: values[6 + LAB_COUNT + 17],
         };
         self.room_dirty = true;
         self.board_dirty = true;
@@ -5360,17 +5784,19 @@ impl Processor for ConcertGrand {
             // The early reflections: what the board radiates, mirrored in
             // the six surfaces, three images read by each side of the pair.
             self.early[self.early_write] = staged;
-            let mut early_left = 0.0;
-            let mut early_right = 0.0;
-            for (index, (offset, gain)) in self.early_taps.iter().enumerate() {
-                let sample =
-                    self.early[(self.early_write + ROOM_BUFFER - offset) % ROOM_BUFFER] * gain;
-                if index % 2 == 0 {
-                    early_left += sample;
-                } else {
-                    early_right += sample;
+            // Every surface reaches BOTH capsules, each by its own path and
+            // at its own polar angle. The floor and the ceiling arrive almost
+            // together, which is what holds the centre; the near and far walls
+            // arrive apart, which is what opens the image. Neither is decided
+            // here any more.
+            let mut early = [0.0f32; 2];
+            for (side, taps) in self.early_taps.iter().enumerate() {
+                for (offset, gain) in taps {
+                    early[side] +=
+                        self.early[(self.early_write + ROOM_BUFFER - offset) % ROOM_BUFFER] * gain;
                 }
             }
+            let (early_left, early_right) = (early[0], early[1]);
             self.early_write = (self.early_write + 1) % ROOM_BUFFER;
             let lid_open = self.controls.lid_reflection();
             let mut lid_left = 0.0;
@@ -5443,17 +5869,18 @@ impl Processor for ConcertGrand {
             // clamp. That costs about 11 dB of output, which belongs in the
             // host's gain and not in a saturator: the desktop already runs
             // +6 dB and allows +12.
-            let board_gain = BOARD_MIX * self.controls.lab(14) * HEADROOM * self.direct_gain;
-            let mut direct_left = board_left * board_gain
-                + undamped_left * undamped_gain * HEADROOM * self.direct_gain
+            let board_mix = BOARD_MIX * self.controls.lab(14) * HEADROOM;
+            let (near_left, near_right) = (self.direct_gain[0], self.direct_gain[1]);
+            let mut direct_left = board_left * board_mix * near_left
+                + undamped_left * undamped_gain * HEADROOM * near_left
                 + open_left * OPEN_MIX * sympathy * HEADROOM
                 + halo_left * HEADROOM
-                + lid_left * air * HEADROOM * self.direct_gain;
-            let mut direct_right = board_right * board_gain
-                + undamped_right * undamped_gain * HEADROOM * self.direct_gain
+                + lid_left * air * HEADROOM * near_left;
+            let mut direct_right = board_right * board_mix * near_right
+                + undamped_right * undamped_gain * HEADROOM * near_right
                 + open_right * OPEN_MIX * sympathy * HEADROOM
                 + halo_right * HEADROOM
-                + lid_right * air * HEADROOM * self.direct_gain;
+                + lid_right * air * HEADROOM * near_right;
             if self.pedal_noise_amp > 1e-6 {
                 self.pedal_noise_seed = self
                     .pedal_noise_seed
@@ -5470,11 +5897,11 @@ impl Processor for ConcertGrand {
             // Proximity: the pressure-gradient microphone's low end rises
             // with 1/r. A 120 Hz shelf whose gain follows the pattern and
             // the distance -- an omni has none, a ribbon up close blooms.
-            if self.proximity_gain > 1e-3 {
+            if self.proximity_gain[0] > 1e-3 || self.proximity_gain[1] > 1e-3 {
                 self.proximity[0] += self.proximity_coeff * (direct_left - self.proximity[0]);
                 self.proximity[1] += self.proximity_coeff * (direct_right - self.proximity[1]);
-                direct_left += self.proximity_gain * self.proximity[0];
-                direct_right += self.proximity_gain * self.proximity[1];
+                direct_left += self.proximity_gain[0] * self.proximity[0];
+                direct_right += self.proximity_gain[1] * self.proximity[1];
             }
             // The soft clip is a safety net on the output, not part of the
             // voice, so it belongs AFTER the level control -- and it was sitting
@@ -5642,9 +6069,7 @@ mod tests {
             samples.sort_by(f64::total_cmp);
             let median = samples[samples.len() / 2];
             let marginal = if count == 0 { 0.0 } else { median - previous };
-            println!(
-                "{count:>15}   {median:16.1}   {marginal:11.1}",
-            );
+            println!("{count:>15}   {median:16.1}   {marginal:11.1}",);
             previous = median;
         }
     }
@@ -5692,35 +6117,325 @@ mod tests {
 
     #[test]
     fn harder_blows_are_brighter_not_just_louder() {
-        // Spectral centroid of the initial partial amplitudes must rise with
-        // velocity: the felt's contact time shortens, the cutoff rises.
+        // Measured on the ENGINE's output, not on a copy of one of its
+        // formulas. This test used to recompute the recipe's felt low-pass
+        // inline, drifted from it (it still says `2.4/contact*1.25` where the
+        // model says `1.9*cal/contact*bass_top*lab(0)*(0.5+1.5*brightness)`),
+        // and would have gone on passing however the model changed -- and
+        // since `RECIPE_FLOOR` went to zero that low-pass no longer shapes
+        // the partials a C4 attack is even made of.
+        //
+        // Brightness here is the RMS frequency of the attack: the energy of
+        // the first difference over the energy of the signal is the mean
+        // square frequency. It needs no transform, and there is no second
+        // copy of anything for the model to drift away from.
+        let brightness = |velocity: u8| {
+            let mut piano = prepared();
+            let samples = render(&mut piano, 2048, &[note_on(60, velocity)]);
+            let mono: Vec<f32> = samples.chunks(2).map(|f| 0.5 * (f[0] + f[1])).collect();
+            let energy: f32 = mono.iter().map(|s| s * s).sum();
+            let slope: f32 = mono.windows(2).map(|w| (w[1] - w[0]) * (w[1] - w[0])).sum();
+            sqrtf(slope / energy.max(1e-20)) * FS as f32 / (2.0 * core::f32::consts::PI)
+        };
+        // Measured: 504 Hz RMS at velocity 20 against 702 at 120, a factor
+        // 1.39. The threshold is 1.25 rather than the 1.39 it could be,
+        // because this guards against the brightening COLLAPSING -- a refit
+        // is allowed to move it a little. The 1.3 that stood here was carried
+        // over from the old test, where it applied to a different quantity
+        // and so meant nothing here.
+        let (soft, hard) = (brightness(20), brightness(120));
+        assert!(
+            hard > soft * 1.25,
+            "a fortissimo C4 should be far brighter than a pianissimo one:              ff {hard:.0} Hz RMS against pp {soft:.0} Hz"
+        );
+    }
+
+    /// The left pedal has a travel, and the middle of it is a real place.
+    ///
+    /// It was a switch on `>= 64`, which threw away everything a player does
+    /// with that pedal: the Chopin nocturne in `piano-comparacion` sends 129
+    /// CC67 events carrying 73 distinct values, and every one of them landed
+    /// on either "off" or "fully across". The action really does slide, so
+    /// half a pedal is half a pedal.
+    #[test]
+    fn the_left_pedal_is_a_travel_and_not_a_switch() {
+        let struck = |pedal: u8| -> f32 {
+            let mut piano = prepared();
+            render(
+                &mut piano,
+                64,
+                &[
+                    MidiEvent {
+                        frame: 0,
+                        data: [0xb0, 67, pedal],
+                        length: 3,
+                    },
+                    note_on(60, 90),
+                ],
+            );
+            energy(&render(&mut piano, (FS * 0.3) as usize, &[]))
+        };
+        let (open, half, across) = (struck(0), struck(64), struck(127));
+        assert!(
+            open > half && half > across,
+            "the travel is not monotonic: {open} then {half} then {across}"
+        );
+        // And the middle is its own place, not one of the ends rounded to.
+        assert!(
+            (half - open).abs() > open * 0.02 && (half - across).abs() > across * 0.02,
+            "half a pedal collapsed onto an end: {open}, {half}, {across}"
+        );
+    }
+
+    /// The left pedal is two mechanisms, and a piano has one of them.
+    ///
+    /// A grand slides the action and takes strings away; an upright moves the
+    /// hammer rail and only shortens the blow. With the pedal up they are the
+    /// same instrument. With it down, the grand must give up MORE than the
+    /// upright -- it loses strings as well as speed -- and the upright must
+    /// still give up something, or it is not a pedal.
+    #[test]
+    fn the_left_pedal_is_two_mechanisms_and_a_piano_has_one() {
+        let struck = |upright: bool, pedal: u8| -> f32 {
+            let mut piano = prepared();
+            piano.controls.action = if upright { 1.0 } else { 0.0 };
+            render(
+                &mut piano,
+                64,
+                &[
+                    MidiEvent {
+                        frame: 0,
+                        data: [0xb0, 67, pedal],
+                        length: 3,
+                    },
+                    note_on(60, 90),
+                ],
+            );
+            energy(&render(&mut piano, (FS * 0.3) as usize, &[]))
+        };
+        let (grand_up, upright_up) = (struck(false, 0), struck(true, 0));
+        assert!(
+            (grand_up - upright_up).abs() <= grand_up * 1e-6,
+            "pedal up, the action must not matter: grand {grand_up} vs upright {upright_up}"
+        );
+        let (grand, upright) = (struck(false, 127), struck(true, 127));
+        assert!(
+            upright < upright_up,
+            "an upright's pedal did nothing: {upright_up} -> {upright}"
+        );
+        assert!(
+            grand < upright,
+            "a grand's shift should cost more than an upright's rail: grand {grand}, upright {upright}"
+        );
+    }
+
+    /// The pair hears the room from two places, and it matters which.
+    ///
+    /// The six early reflections used to be handed to the channels on the
+    /// parity of their index: floor hard left, ceiling hard right. Those two
+    /// are in the VERTICAL plane and symmetric about a level pair, so they
+    /// reach both capsules within a fraction of a millisecond -- they are what
+    /// holds the middle of the image together, and splitting them threw that
+    /// away and invented a width the room does not have. The side walls are
+    /// the ones that genuinely arrive apart. Now both facts come out of the
+    /// geometry rather than an index.
+    #[test]
+    fn the_pair_hears_the_room_from_two_places() {
         let piano = prepared();
-        let centroid = |velocity: f32| {
-            let note = 60;
+        let (left, right) = (piano.early_taps[0], piano.early_taps[1]);
+        assert!(
+            left.iter().any(|(_, gain)| *gain != 0.0),
+            "the room was never built"
+        );
+        // Floor and ceiling: both capsules, together.
+        for surface in [0usize, 1] {
+            let apart = (left[surface].0 as i32 - right[surface].0 as i32).abs();
+            assert!(
+                apart <= 2,
+                "a vertical surface split the pair by {apart} samples; it should reach both"
+            );
+        }
+        // The side walls: not together, in time or in level. A capsule turned
+        // 55 degrees the other way does not hear the near wall as its partner
+        // does, and that difference IS the stereo.
+        let lateral_gain: f32 = [2usize, 3]
+            .iter()
+            .map(|&s| (left[s].1 - right[s].1).abs())
+            .sum();
+        assert!(
+            lateral_gain > 1e-4,
+            "both capsules heard the side walls identically: the pair is still one point"
+        );
+    }
+
+    /// Three ways MIDI says "the key came up, and I measured nothing":
+    /// a running-status note-off, a Note Off at 0, and a Note Off at the
+    /// conventional 64 our own sequencer writes. All three must leave the
+    /// instrument bit-identical, or its character would depend on which
+    /// keyboard was plugged in -- the one thing release velocity must never do.
+    #[test]
+    fn a_release_without_a_measurement_is_the_same_release_three_ways() {
+        let tail = |status: u8, byte: u8| -> Vec<f32> {
+            let mut piano = prepared();
+            render(&mut piano, 64, &[note_on(60, 80)]);
+            render(&mut piano, (FS * 0.4) as usize, &[]);
+            render(
+                &mut piano,
+                64,
+                &[MidiEvent {
+                    frame: 0,
+                    data: [status, 60, byte],
+                    length: 3,
+                }],
+            );
+            render(&mut piano, (FS * 0.15) as usize, &[])
+        };
+        let running_status = tail(0x90, 0);
+        assert_eq!(
+            running_status,
+            tail(0x80, 0),
+            "Note Off at 0 differs from running status"
+        );
+        assert_eq!(
+            running_status,
+            tail(0x80, 64),
+            "Note Off at 64 differs from running status"
+        );
+    }
+
+    /// The pure mapping, so the semantics are pinned in one place: 0 and 64
+    /// are not measurements; everything else is; 64 sits exactly at neutral;
+    /// the travel is short above it and long below it.
+    #[test]
+    fn release_velocity_semantics_are_pinned() {
+        assert_eq!(ConcertGrand::release_velocity(0x80, 0), None);
+        assert_eq!(ConcertGrand::release_velocity(0x80, 64), None);
+        assert_eq!(ConcertGrand::release_velocity(0x90, 0), None);
+        assert_eq!(ConcertGrand::release_velocity(0x80, 20), Some(20));
+        assert_eq!(ConcertGrand::release_velocity(0x80, 127), Some(127));
+        assert_eq!(ConcertGrand::damper_span(64), 1.0);
+        assert!(ConcertGrand::damper_span(127) < 1.0 && ConcertGrand::damper_span(127) > 0.79);
+        assert!(ConcertGrand::damper_span(1) > 2.4 && ConcertGrand::damper_span(1) < 2.6);
+        assert!(ConcertGrand::damper_span(20) > ConcertGrand::damper_span(64));
+        assert!(ConcertGrand::damper_span(110) < ConcertGrand::damper_span(64));
+        assert_eq!(ConcertGrand::damper_knock(64), 1.0);
+        assert!(ConcertGrand::damper_knock(127) > 1.0 && ConcertGrand::damper_knock(1) < 1.0);
+    }
+
+    /// The measurement has authority: a slow release leaves more of the note
+    /// behind at 150 ms than a fast one, on the same note at the same blow,
+    /// and the neutral release sits between them. Fresh instances so the
+    /// landing serial -- and the residual felt variation -- start equal.
+    #[test]
+    fn a_slow_release_leaves_more_note_behind_than_a_fast_one() {
+        let left = |release: u8| -> f32 {
+            let mut piano = prepared();
+            render(&mut piano, 64, &[note_on(60, 80)]);
+            render(&mut piano, (FS * 0.4) as usize, &[]);
+            render(
+                &mut piano,
+                64,
+                &[MidiEvent {
+                    frame: 0,
+                    data: [0x80, 60, release],
+                    length: 3,
+                }],
+            );
+            render(&mut piano, (FS * 0.10) as usize, &[]);
+            energy(&render(&mut piano, (FS * 0.05) as usize, &[]))
+        };
+        let (slow, neutral, fast) = (left(20), left(64), left(110));
+        assert!(
+            slow > neutral && neutral > fast,
+            "release velocity has no authority: slow {slow}, neutral {neutral}, fast {fast}"
+        );
+        assert!(
+            slow > fast * 1.5,
+            "the slow release should leave clearly more behind: slow {slow} vs fast {fast}"
+        );
+    }
+
+    /// No two damper landings are the same one.
+    ///
+    /// The key never returns twice at the same speed and the felt never seats
+    /// on the same spot, so a release is the one part of a piano that really
+    /// does differ blow to blow -- and a model that damps every note with one
+    /// constant ends its notes like a gate. The two things a landing moves are
+    /// deliberately driven by ONE number so they stay correlated: firm lands
+    /// stop the string sooner AND knock louder, which is what an action can
+    /// do. Independent draws would produce firm-but-silent landings, and the
+    /// ear reads that incoherence as noise instead of as mechanism.
+    #[test]
+    fn no_two_damper_landings_are_the_same_one() {
+        let firmness: Vec<f32> = (0..8)
+            .map(|s| ConcertGrand::damper_firmness(s, 60))
+            .collect();
+        for value in &firmness {
+            assert!(
+                (0.85..=1.15).contains(value),
+                "a landing at {value} is not an action, it is a fault"
+            );
+        }
+        assert!(
+            firmness.windows(2).any(|w| (w[0] - w[1]).abs() > 0.02),
+            "consecutive landings are identical: {firmness:?}"
+        );
+        // Same landing, same answer: this is variation, not noise, and a
+        // rendered note must be reproducible from its own state.
+        assert_eq!(firmness[3], ConcertGrand::damper_firmness(3, 60));
+        // One pedal motion still seats every damper on its own string.
+        assert_ne!(
+            ConcertGrand::damper_firmness(3, 60),
+            ConcertGrand::damper_firmness(3, 61)
+        );
+
+        // And it reaches the audio: the same note, released from the same
+        // state, leaves a different tail once the rail has moved on.
+        let tail = |skips: usize| -> f32 {
+            let mut piano = prepared();
+            for _ in 0..skips {
+                piano.release(0, 21, None);
+            }
+            render(&mut piano, 64, &[note_on(60, 80)]);
+            render(&mut piano, (FS * 0.4) as usize, &[]);
+            render(&mut piano, 64, &[note_off(60)]);
+            energy(&render(&mut piano, (FS * 0.05) as usize, &[]))
+        };
+        let (first, second) = (tail(0), tail(1));
+        assert!(
+            (first - second).abs() > first.max(second) * 0.01,
+            "two releases left the same tail: {first} and {second}"
+        );
+    }
+
+    /// Where the strike simulation stops and the recipe begins.
+    ///
+    /// The band a player calls "the hammer" is 1-4 kHz, and in the bass that
+    /// band belongs entirely to the simulation. Anything hoping to quieten a
+    /// bass attack has to go through `simulate_strike`; the recipe's felt
+    /// controls cannot reach it, however physical they look. See
+    /// `RECIPE_FLOOR`.
+    #[test]
+    fn the_strike_owns_the_bass_where_the_hammer_is_heard() {
+        let piano = prepared();
+        for note in [21u8, 33, 45] {
             let index = (note - LOW_NOTE) as usize;
             let f0 = piano.fundamental[index];
             let b = piano.inharmonicity[index];
-            let x0 = piano.strike_point(note);
-            // The same felt low-pass the model applies at note-on.
-            let cutoff = ((2.4 / piano.contact_time(note, velocity)) * 1.25).max(1.5 * f0);
-            let mut weighted = 0.0;
-            let mut total = 0.0;
-            for n in 1..=40 {
+            let mut top = 0.0f32;
+            for n in 1..=SIM_MODES {
                 let nf = n as f32;
                 let frequency = nf * f0 * sqrtf(1.0 + b * nf * nf);
-                let r = frequency / cutoff;
-                let amp = sincosf(core::f32::consts::PI * nf * x0).0.abs() * expf(-1.2 * r * r);
-                weighted += amp * frequency;
-                total += amp;
+                if frequency >= 8_000.0 {
+                    break;
+                }
+                top = frequency;
             }
-            weighted / total
-        };
-        assert!(
-            centroid(1.0) > centroid(0.15) * 1.3,
-            "ff centroid {} vs pp {}",
-            centroid(1.0),
-            centroid(0.15)
-        );
+            assert!(
+                top >= 4_000.0,
+                "note {note}: the simulation reaches only {top:.0} Hz, so the                  recipe now shapes part of the 1-4 kHz band and the comment                  on RECIPE_FLOOR is no longer true"
+            );
+        }
     }
 
     #[test]
@@ -5868,7 +6583,10 @@ mod tests {
             "a chord's dynamic range collapsed to {range:.2} dB between velocity 70 and 127"
         );
         // And the ceiling still holds: the clip is a safety net, not a voice.
-        assert!(loud <= 1.0, "the loudest chord left the output range at {loud}");
+        assert!(
+            loud <= 1.0,
+            "the loudest chord left the output range at {loud}"
+        );
     }
 
     #[test]
@@ -6580,6 +7298,53 @@ mod tests {
         }
     }
 
+    /// The shipped catalogue and the code that answers it cannot drift.
+    ///
+    /// A preset the manifest offers but `load_preset` does not know returns
+    /// false and leaves the instrument on whatever was loaded before, which
+    /// reads to a player as "this program does nothing". The reverse -- an arm
+    /// with no manifest entry -- is a voicing nobody can reach. Neither is
+    /// visible without comparing the two files, so they are compared here.
+    ///
+    /// The name rules are the KeyLab's: it refuses a byte outside ASCII
+    /// outright, and a loaded program wears a mark in each of the two columns
+    /// its carousel keeps clear, leaving fourteen. A longer name is not
+    /// broken, it is merely cut -- so this is the line between a name a
+    /// player reads and one they infer.
+    #[test]
+    fn every_shipped_preset_is_one_the_instrument_answers_to() {
+        const MANIFEST: &str = include_str!("../package/metadata/presets.json");
+
+        fn field<'a>(entry: &'a str, key: &str) -> &'a str {
+            let at = entry.find(key).expect("preset entry carries the key");
+            let rest = &entry[at + key.len()..];
+            let open = rest.find('"').expect("a quoted value") + 1;
+            let close = rest[open..].find('"').expect("a closing quote") + open;
+            &rest[open..close]
+        }
+
+        let mut found = 0;
+        for entry in MANIFEST.split("\"id\": \"").skip(2) {
+            let id = &entry[..entry.find('"').expect("a closing quote")];
+            let name = field(entry, "\"name\":");
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.load_preset(id), "{id} is offered but not answered");
+            assert!(name.is_ascii(), "{id}: the panel cannot spell {name:?}");
+            assert!(
+                name.chars().count() <= 14,
+                "{id}: {name:?} is {} columns, and a marked program has 14",
+                name.chars().count()
+            );
+            found += 1;
+        }
+        assert_eq!(found, 16, "the catalogue changed size");
+        let mut piano = Box::new(ConcertGrand::default());
+        assert!(
+            !piano.load_preset("no-such-instrument"),
+            "an unknown id must be refused, not silently ignored"
+        );
+    }
+
     /// Every instrument profile is reachable, distinct, and lands its scale
     /// where its real counterpart's does.
     #[test]
@@ -6589,11 +7354,13 @@ mod tests {
             ("concert-280", 2.02),
             ("concert-275", 2.00),
             ("concert-274", 1.98),
+            ("concert-227", 1.81),
             ("salon-211", 1.65),
             ("parlour-185", 1.45),
             ("baby-150", 1.09),
             ("upright-52", 1.37),
             ("upright-studio", 1.22),
+            ("player-upright", 1.33),
             ("fortepiano", 1.50),
         ];
         let mut sizes = Vec::new();
@@ -6829,6 +7596,34 @@ mod tests {
     #[ignore]
     fn render_reference_wavs() {
         let out = std::env::var("CG_RENDER_DIR").unwrap_or_else(|_| ".".into());
+        // The hammer's own parameters, for the measurement scripts.
+        //
+        // `SWEEP_OVERRIDE` reached only the two sweep tests, so the strike's
+        // physics could be swept against a single note but never against the
+        // chromatic render the calibration is judged by. That mattered more
+        // than it looked: since the strike budget was lifted the simulation
+        // owns every partial it reaches and `RECIPE_FLOOR` is zero, so these
+        // five numbers -- not the recipe's felt corner -- are what shapes an
+        // attack. Defaults here restate the shipped configuration, so an
+        // unset environment renders exactly what a player hears.
+        let sweep_var = |name: &str, fallback: f32| -> f32 {
+            std::env::var(name)
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(fallback)
+        };
+        if ["CG_TAU", "CG_EPS", "CG_COMB", "CG_WIDTH", "CG_KMUL"]
+            .iter()
+            .any(|name| std::env::var(name).is_ok())
+        {
+            *SWEEP_OVERRIDE.lock().unwrap() = Some(SweepOverride {
+                epsilon: sweep_var("CG_EPS", 0.5),
+                tau: sweep_var("CG_TAU", 2.0e-4),
+                comb: sweep_var("CG_COMB", COMB_FLOOR),
+                width_mul: sweep_var("CG_WIDTH", 1.0),
+                k_mul: sweep_var("CG_KMUL", 1.0),
+            });
+        }
         // Optional calibration table: 10 lines x 8 space-separated floats.
         let cal = std::env::var("CG_CAL").ok().map(|path| {
             let text = std::fs::read_to_string(path).unwrap();
@@ -6998,16 +7793,17 @@ mod tests {
                     });
                 }
                 events.extend(notes.iter().map(|n| note_on(*n, velocity)));
-                let mut render =
-                    |events: &[MidiEvent], frames: usize| {
-                        let mut output = vec![0.0f32; frames * 2];
-                        piano.process(&[], &mut output, events, &[], frames as u32, 0, 2);
-                        mono.extend(
-                            output.as_chunks::<2>().0.iter().map(|f| {
-                                (f[0] + f[1]) * 0.5
-                            }),
-                        );
-                    };
+                let mut render = |events: &[MidiEvent], frames: usize| {
+                    let mut output = vec![0.0f32; frames * 2];
+                    piano.process(&[], &mut output, events, &[], frames as u32, 0, 2);
+                    mono.extend(
+                        output
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .map(|f| (f[0] + f[1]) * 0.5),
+                    );
+                };
                 render(&events, hold);
                 let offs: Vec<MidiEvent> = notes
                     .iter()
@@ -7075,16 +7871,15 @@ mod tests {
                 .as_chunks::<2>()
                 .0
                 .iter()
-                .map(|f| {
-                    let v = if left_only { f[0] } else { (f[0] + f[1]) * 0.5 };
-                    v
-                })
+                .map(|f| if left_only { f[0] } else { (f[0] + f[1]) * 0.5 })
                 .collect();
             write_mono_wav(&format!("{out}/chord.wav"), rate, &mono);
             return;
         }
         let notes: Vec<(u8, u8)> = if chromatic {
-            (0..30).map(|i| (21 + 3 * i as u8, chromatic_velocity)).collect()
+            (0..30)
+                .map(|i| (21 + 3 * i as u8, chromatic_velocity))
+                .collect()
         } else if cal.is_some() {
             (0..30).map(|i| (21 + 3 * i as u8, 125u8)).collect()
         } else {
@@ -7139,6 +7934,11 @@ mod tests {
                 .collect();
             write_mono_wav(&format!("{out}/model{note:03}v{velocity}.wav"), rate, &mono);
         }
+        // Put the strike back as it ships. The override is a process-wide
+        // static, and the two sweep tests that already used it both clear it;
+        // leaving it set here would hand a swept hammer to whatever ran next
+        // in the same process.
+        *SWEEP_OVERRIDE.lock().unwrap() = None;
     }
 
     /// Every fader must start where the panel says it starts.

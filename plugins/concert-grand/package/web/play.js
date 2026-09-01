@@ -116,12 +116,74 @@
         return wrapper;
       }
 
-      /** A grid of faders for one page. */
+      /**
+       * One choice among a few, for the things about a piano that are A or B.
+       *
+       * A fader says "somewhere between"; a piano's action is a grand's or an
+       * upright's and there is no instrument in the middle. So an enum is not
+       * a dropdown and not a slider with two stops -- it is a row of plates,
+       * one of them lit, the same idiom the tabs on the rail already use for
+       * "one of several, one active".
+       */
+      function selector(parameter, value) {
+        const kind = parameter.kind;
+        const wrapper = document.createElement("div");
+        wrapper.className = "control";
+        const row = document.createElement("div");
+        row.className = "row";
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = parameter.name;
+        const reading = document.createElement("span");
+        reading.className = "value";
+        row.append(name, reading);
+
+        const segment = document.createElement("div");
+        segment.className = "segment";
+        segment.setAttribute("role", "radiogroup");
+        segment.setAttribute("aria-label", parameter.name);
+        let chosen = Number(value ?? kind.default);
+        const buttons = kind.choices.map((choice) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = choice.name;
+          button.setAttribute("role", "radio");
+          button.addEventListener("click", () => {
+            if (choice.value === chosen) return;
+            chosen = choice.value;
+            show();
+            void call("plugin.set_parameter", {
+              parameter_index: parameter.index,
+              value: choice.value,
+            }).catch((error) => {
+              state.textContent = error.message;
+            });
+          });
+          return { button, choice };
+        });
+        const show = () => {
+          for (const { button, choice } of buttons) {
+            const on = choice.value === chosen;
+            button.setAttribute("aria-checked", on ? "true" : "false");
+          }
+          const current = kind.choices.find((choice) => choice.value === chosen);
+          reading.textContent = current ? current.name : String(chosen);
+        };
+        show();
+        segment.append(...buttons.map(({ button }) => button));
+        wrapper.append(row, segment);
+        return wrapper;
+      }
+
+      /** A grid of controls for one page: faders, and plates where the thing is A or B. */
       function faderGrid(parameters, current) {
         const grid = document.createElement("div");
         grid.className = "grid";
         for (const parameter of parameters) {
-          grid.append(fader(parameter, current.get(parameter.index)));
+          const value = current.get(parameter.index);
+          grid.append(
+            parameter.kind.type === "enum" ? selector(parameter, value) : fader(parameter, value),
+          );
         }
         return grid;
       }
@@ -137,7 +199,12 @@
       function draw(schema, values) {
         const current = new Map(values.map((value) => [value.index, value.value]));
         const pages = [...(schema.pages ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-        const floats = schema.parameters.filter((p) => p.kind.type === "float");
+        // Faders for the continuous things, plates for the ones that are A or
+        // B. Everything else -- meters, triggers -- has no place on a piano's
+        // own panel and is left to the host.
+        const floats = schema.parameters.filter(
+          (p) => p.kind.type === "float" || p.kind.type === "enum",
+        );
         const forPage = (id) =>
           floats
             .filter((p) => (p.page ?? null) === id)

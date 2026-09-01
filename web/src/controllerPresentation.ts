@@ -30,6 +30,37 @@ export function isImmersiveControllerViewport({
     && width / height >= 7 / 4;
 }
 
+/**
+ * Whether the Touch Controller exists on this host at all.
+ *
+ * Inside a DAW the host already owns the keyboard: the player has their own
+ * controller plugged into it, the plug-in window is small, and an on-screen
+ * keyboard there is a dock over the only surface there is room for. So the
+ * controller is a desktop and phone thing, not a plug-in one. The rail and the
+ * route already left it out of the VST3; the dock did not, because it only
+ * ever asked how wide the window was.
+ */
+export function controllerIsAvailable(vstHost: boolean) {
+  return !vstHost;
+}
+
+/**
+ * Whether it appears as a dock rather than as a surface of its own.
+ *
+ * Two booleans rather than one object because both are read inside hook
+ * dependency lists, and a fresh object every render is memoisation the React
+ * compiler cannot see through.
+ */
+export function controllerIsDockable({
+  vstHost,
+  immersive,
+}: {
+  vstHost: boolean;
+  immersive: boolean;
+}) {
+  return controllerIsAvailable(vstHost) && !immersive;
+}
+
 export function controllerPresentationTransition({
   dockable,
   dockOpen,

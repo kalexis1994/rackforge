@@ -111,6 +111,8 @@ import { LivePage, type PerformanceGraphWorkspace } from "./LivePage";
 import { TouchControllerPage } from "./TouchControllerPage";
 import {
   controllerPresentationTransition,
+  controllerIsAvailable,
+  controllerIsDockable,
   IMMERSIVE_CONTROLLER_QUERY,
 } from "./controllerPresentation";
 import type { RootState } from "./store";
@@ -485,7 +487,16 @@ function RackForgeApp() {
   const [settingsBootstrap, setSettingsBootstrap] = useState<HostSettingsBootstrap | null>(null);
   const [controllerDockOpen, setControllerDockOpen] = useState(false);
   const immersiveController = useMediaQuery(IMMERSIVE_CONTROLLER_QUERY);
-  const dockableController = !immersiveController;
+  /* Where the Touch Controller lives is decided in `controllerPresentation`,
+     so the rule can be read and tested on its own. The two `useMemo`s look
+     like ceremony around a boolean, but the React compiler will not fold a
+     call it cannot see into, and without them it stops preserving the
+     memoisation of the play-navigation callbacks further down. */
+  const controllerAvailable = useMemo(() => controllerIsAvailable(vstHost), [vstHost]);
+  const dockableController = useMemo(
+    () => controllerIsDockable({ vstHost, immersive: immersiveController }),
+    [vstHost, immersiveController],
+  );
   const lastContentRoute = useRef(location.pathname === "/controller" ? "/play" : location.pathname);
   useEffect(() => {
     const updateOverlay = (event: Event) => {
@@ -495,7 +506,11 @@ function RackForgeApp() {
     window.addEventListener("rackforge:rack-graph-overlay", updateOverlay);
     return () => window.removeEventListener("rackforge:rack-graph-overlay", updateOverlay);
   }, []);
-  const isControllerSurface = location.pathname === "/controller" && !dockableController;
+  /* Where the controller is not available at all the route sends the player
+     to PLAY; until it does, the path still reads `/controller`, and calling
+     that a controller surface would blank the topbar for a frame. */
+  const isControllerSurface =
+    location.pathname === "/controller" && controllerAvailable && !dockableController;
   const isPluginSurface =
     location.pathname === "/play" ||
     location.pathname.startsWith("/plugins/");

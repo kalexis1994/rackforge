@@ -132,6 +132,19 @@ mod tests {
     use super::*;
     use crate::TextFallback;
 
+    /// The two lines as the surface runtime builds them.
+    ///
+    /// It passes `false` for the focus fallback -- `component_lines(&carousel,
+    /// false)` -- so the brackets that fallback would draw never reach the
+    /// panel. Measuring with `TextFallback::default()` would paint them over
+    /// the line and report a screen nothing renders.
+    fn lines(carousel: &SimpleCarousel, width: usize) -> [String; 2] {
+        let mut frame = Frame::new(width, 2);
+        carousel.render(&mut frame, Rect::new(0, 0, width, 2));
+        let text = TextFallback::new(false);
+        [text.row(&frame, 0), text.row(&frame, 1)]
+    }
+
     fn carousel() -> SimpleCarousel {
         let mut carousel = SimpleCarousel::new(
             "mode",
@@ -147,13 +160,37 @@ mod tests {
 
     #[test]
     fn renders_name_on_primary_line_and_detail_on_secondary_line() {
-        let carousel = carousel();
+        let [name, detail] = lines(&carousel(), 18);
+        assert_eq!(name, "       LIVE       ");
+        assert_eq!(detail, "    Ready set     ");
+        assert_eq!(frame_style(&carousel(), 0, 1), Style::FOCUSED);
+        assert_eq!(frame_style(&carousel(), 1, 0), Style::SECONDARY);
+    }
+
+    fn frame_style(carousel: &SimpleCarousel, y: usize, x: usize) -> Style {
         let mut frame = Frame::new(18, 2);
         carousel.render(&mut frame, Rect::new(0, 0, 18, 2));
-        assert_eq!(TextFallback::default().row(&frame, 0), "[      LIVE      ]");
-        assert_eq!(TextFallback::default().row(&frame, 1), "    Ready set     ");
-        assert_eq!(frame.cell(0, 0).unwrap().style, Style::FOCUSED);
-        assert_eq!(frame.cell(0, 1).unwrap().style, Style::SECONDARY);
+        frame.cell(x, y).unwrap().style
+    }
+
+    #[test]
+    fn a_name_too_long_for_the_panel_is_cut_with_a_mark() {
+        let mut carousel = SimpleCarousel::new(
+            "programs",
+            [CarouselItem::new(
+                "GRAND PIANO STAGE MK II",
+                "Concert Grand",
+            )],
+        );
+        carousel.set_focused(true);
+        let [name, _] = lines(&carousel, 18);
+        // Sixteen columns for the name: one on each side stays clear, which
+        // is the room a caller needs for marks of its own.
+        assert_eq!(name, " GRAND PIANO S... ");
+        assert_eq!(name.chars().count(), 18);
+        // The panel refuses anything outside ASCII, so the cut cannot be a
+        // one-character ellipsis.
+        assert!(name.is_ascii());
     }
 
     #[test]

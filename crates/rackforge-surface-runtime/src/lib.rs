@@ -24,7 +24,7 @@ use rackforge_ui::{
     Component, ComponentEvent, Frame, NavigationAction as Action, Rect, TextFallback, VisualState,
     components::{
         Button, CarouselItem, ConfirmationDialog, EditableValue, SecretEditor, SecretValue,
-        SimpleCarousel, Spinner, TextEditor, ValueCarousel, ValueItem,
+        SimpleCarousel, Spinner, TextEditor, ValueCarousel, ValueItem, text_columns, truncated,
     },
 };
 use std::collections::BTreeMap;
@@ -6137,18 +6137,7 @@ impl Menu {
         let mut carousel = SimpleCarousel::new(
             "program-editor-sound",
             sounds.iter().map(|sound| {
-                let name = if selected_id == Some(sound.id.as_str()) {
-                    format!(
-                        "[{}]",
-                        sound
-                            .name
-                            .chars()
-                            .take(DISPLAY_COLUMNS - 2)
-                            .collect::<String>()
-                    )
-                } else {
-                    sound.name.clone()
-                };
+                let name = carousel_label(&sound.name, selected_id == Some(sound.id.as_str()));
                 CarouselItem::new(name, &sound.detail)
             }),
         );
@@ -6174,16 +6163,10 @@ impl Menu {
         let mut carousel = SimpleCarousel::new(
             "plugin-sounds",
             sounds.iter().map(|sound| {
-                let name = if self.plugin_play_selected_sound_id() == Some(sound.id.as_str()) {
-                    let bounded = sound
-                        .name
-                        .chars()
-                        .take(DISPLAY_COLUMNS - 2)
-                        .collect::<String>();
-                    format!("[{bounded}]")
-                } else {
-                    sound.name.clone()
-                };
+                let name = carousel_label(
+                    &sound.name,
+                    self.plugin_play_selected_sound_id() == Some(sound.id.as_str()),
+                );
                 CarouselItem::new(name, &sound.detail)
             }),
         );
@@ -6254,17 +6237,10 @@ impl Menu {
             "plugin-presets",
             std::iter::once(CarouselItem::new("SAVE CURRENT", "CAPTURE PLUGIN STATE")).chain(
                 self.plugin_presets.iter().map(|preset| {
-                    let name =
-                        if self.plugin_active_preset_id.as_deref() == Some(preset.id.as_str()) {
-                            let bounded = preset
-                                .name
-                                .chars()
-                                .take(DISPLAY_COLUMNS - 2)
-                                .collect::<String>();
-                            format!("[{bounded}]")
-                        } else {
-                            preset.name.clone()
-                        };
+                    let name = carousel_label(
+                        &preset.name,
+                        self.plugin_active_preset_id.as_deref() == Some(preset.id.as_str()),
+                    );
                     CarouselItem::new(name, &preset.detail)
                 }),
             ),
@@ -6448,16 +6424,10 @@ impl Menu {
         let mut carousel = SimpleCarousel::new(
             "plugin-timbre",
             sounds.iter().map(|sound| {
-                let name = if selected_id.as_deref() == Some(sound.id.as_str()) {
-                    let bounded = sound
-                        .name
-                        .chars()
-                        .take(DISPLAY_COLUMNS - 2)
-                        .collect::<String>();
-                    format!("[{bounded}]")
-                } else {
-                    sound.name.clone()
-                };
+                let name = carousel_label(
+                    &sound.name,
+                    selected_id.as_deref() == Some(sound.id.as_str()),
+                );
                 CarouselItem::new(name, &sound.detail)
             }),
         );
@@ -7234,6 +7204,34 @@ fn render_home(selected: usize) -> [String; 2] {
     ]
 }
 
+/// A carousel item's label, marked when it is the one currently loaded.
+///
+/// Written with bars rather than brackets because that is what the KeyLab's
+/// panel draws either way, and a source that says `[` for something the player
+/// reads as `|` is a source that lies about its own screen.
+///
+/// The marks have to survive the cut, so what gets trimmed is the NAME, down
+/// to what the marks leave of the carousel's own columns -- not the decorated
+/// string down to what the panel leaves. Trimming the decorated string is how
+/// the closing mark fell off the right edge, taking the marking's meaning with
+/// it, and how a long name lost two characters it had room for and was marked
+/// as cut neither time.
+fn carousel_label(name: &str, loaded: bool) -> String {
+    // Plugin-supplied, so it is cleaned before it is cut. The panel refuses
+    // anything outside ASCII outright -- `two_lines` returns an error and the
+    // screen simply does not update -- and a name is only as safe as the
+    // characters that survive the cut, which is a different set depending on
+    // whether it is marked. A preset called "Concert 308 \u{b7} Clear" cleared
+    // that trap while it was the loaded one, because the cut landed on the
+    // separator, and sprang it the moment you scrolled past it unmarked.
+    let name = clean_surface_text(name, "PROGRAM");
+    if !loaded {
+        return name;
+    }
+    let inside = text_columns(DISPLAY_COLUMNS).saturating_sub(2);
+    format!("|{}|", truncated(&name, inside))
+}
+
 fn indexed_title(title: &str, index: usize, len: usize) -> String {
     let counter = format!("{}/{}", index + 1, len);
     let maximum_title = DISPLAY_COLUMNS.saturating_sub(counter.len() + 1);
@@ -7270,7 +7268,15 @@ fn component_lines(component: &impl Component, mark_focus: bool) -> [String; 2] 
     let mut frame = Frame::new(DISPLAY_COLUMNS, 2);
     component.render(&mut frame, Rect::new(0, 0, DISPLAY_COLUMNS, 2));
     let text = TextFallback::new(mark_focus);
-    [text.row(&frame, 0), text.row(&frame, 1)]
+    // Last gate before the panel. Whatever a component was handed -- a plugin's
+    // program name, a preset a player typed, a network's SSID -- the KeyLab
+    // refuses a single non-ASCII byte by returning an error from `two_lines`,
+    // and the screen then does not update at all. Cleaning here rather than at
+    // each caller means a component cannot leak one by being built directly.
+    [
+        clean_surface_text(&text.row(&frame, 0), " "),
+        clean_surface_text(&text.row(&frame, 1), " "),
+    ]
 }
 
 fn envelope_carousel(layer: Option<&serde_json::Value>) -> ValueCarousel {
@@ -7889,7 +7895,7 @@ mod tests {
         menu.apply(Action::Next);
         assert_eq!(menu.render().line_1.trim(), "PROGRAMS");
         menu.apply(Action::Select);
-        assert_eq!(menu.render().line_1.trim(), "[NEW SYNTH]");
+        assert_eq!(menu.render().line_1.trim(), "|NEW SYNTH|");
     }
 
     #[test]
@@ -9066,7 +9072,7 @@ mod tests {
         assert_eq!(menu.render().line_1.trim(), "PROGRAMS");
         menu.apply(Action::Select);
         assert_plugin_header(&menu.render(), "RF-DLS", "PROG 1/1");
-        assert!(menu.render().line_1.contains("[PIANO 1]"));
+        assert!(menu.render().line_1.contains("|PIANO 1|"));
         assert_eq!(menu.render().line_2.trim(), "B000 P000");
         menu.apply(Action::Back);
         assert_plugin_header(&menu.render(), "RF-DLS", "PLAY 2/2");
@@ -9160,7 +9166,7 @@ mod tests {
             menu.render()
                 .line_1
                 .to_ascii_uppercase()
-                .contains("[WARM KEYS]")
+                .contains("|WARM KEYS|")
         );
     }
 
@@ -9220,7 +9226,7 @@ mod tests {
             ],
             Some("sound.strings"),
         );
-        assert!(menu.render().line_1.contains("[STRINGS 1]"));
+        assert!(menu.render().line_1.contains("|STRINGS 1|"));
     }
 
     #[test]
@@ -9275,6 +9281,44 @@ mod tests {
         assert!(!screen.line_1.contains('['));
         assert!(!screen.line_1.contains(']'));
         assert_eq!(screen.line_2.trim(), "Songs and parts");
+    }
+
+    #[test]
+    fn a_long_loaded_program_keeps_both_marks_and_says_it_was_cut() {
+        let name = "A VERY LONG PROGRAM NAME";
+        let label = carousel_label(name, true);
+        // Fourteen columns for the name: eighteen on the panel, less the one
+        // `render_centered` keeps clear on each side, less one for each mark.
+        assert_eq!(label, "|A VERY LONG...|");
+
+        let mut carousel =
+            SimpleCarousel::new("programs", [CarouselItem::new(label, "CONCERT GRAND")]);
+        carousel.set_focused(true);
+        let [line_1, _] = component_lines(&carousel, false);
+        // Nothing is lost off either edge, and the cut says it is a cut.
+        assert_eq!(line_1, " |A VERY LONG...| ");
+        assert_eq!(line_1.chars().count(), DISPLAY_COLUMNS);
+        assert!(line_1.is_ascii());
+    }
+
+    #[test]
+    fn a_program_that_is_not_loaded_is_left_unmarked() {
+        assert_eq!(carousel_label("CONCERT GRAND", false), "CONCERT GRAND");
+    }
+
+    #[test]
+    fn a_program_name_the_panel_cannot_spell_never_reaches_it() {
+        // Marked, the cut used to hide the problem; unmarked, two more
+        // columns survive and the separator came through.
+        for loaded in [true, false] {
+            let label = carousel_label("Concert 308 \u{b7} Clear", loaded);
+            assert!(label.is_ascii(), "{label:?} would be refused by the panel");
+        }
+        let mut carousel =
+            SimpleCarousel::new("p", [CarouselItem::new("Salon 211 \u{b7} Rich", "X")]);
+        carousel.set_focused(true);
+        let [line_1, line_2] = component_lines(&carousel, false);
+        assert!(line_1.is_ascii() && line_2.is_ascii());
     }
 
     #[test]
@@ -9695,7 +9739,7 @@ mod tests {
         ));
         menu.complete_return_to_active_mode(ActiveMode::Play, Some("custom.user.warm-piano"));
         assert_plugin_header(&menu.render(), "RF-DLS", "PROG 1/1");
-        assert!(menu.render().line_1.contains("[WARM PIANO]"));
+        assert!(menu.render().line_1.contains("|WARM PIANO|"));
     }
 
     #[test]

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  controllerIsAvailable,
+  controllerIsDockable,
   controllerPresentationTransition,
   isImmersiveControllerViewport,
 } from "./controllerPresentation";
@@ -59,5 +61,20 @@ describe("responsive Touch Controller presentation", () => {
       pathname: "/controller",
       lastContentRoute: "/live",
     })).toBeNull();
+  });
+});
+
+describe("Touch Controller availability", () => {
+  it("is gone from a VST3 plug-in, dock and all", () => {
+    expect(controllerIsAvailable(true)).toBe(false);
+    for (const immersive of [false, true]) {
+      expect(controllerIsDockable({ vstHost: true, immersive })).toBe(false);
+    }
+  });
+
+  it("is a dock on desktop and a surface of its own on a phone", () => {
+    expect(controllerIsAvailable(false)).toBe(true);
+    expect(controllerIsDockable({ vstHost: false, immersive: false })).toBe(true);
+    expect(controllerIsDockable({ vstHost: false, immersive: true })).toBe(false);
   });
 });

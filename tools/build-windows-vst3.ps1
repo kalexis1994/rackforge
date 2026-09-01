@@ -51,7 +51,7 @@ if (-not (Test-Path -LiteralPath $libclang)) {
 $defaultPlugin = ""
 $rf106 = ""
 if ($Edition -eq "Standard" -and -not $env:RACKFORGE_BUNDLED_PLUGIN) {
-    $bundled = Join-Path $repository "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+    $bundled = Join-Path $repository "dist/bundled-plugins/RF-Concert-Grand.rfplugin"
     if (-not (Test-Path -LiteralPath $bundled -PathType Leaf)) {
         Push-Location $repository
         try {

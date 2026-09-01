@@ -81,7 +81,7 @@ if ($Edition -eq "Standard") {
         $defaultPlugin = $env:RACKFORGE_BUNDLED_PLUGIN
     } else {
         $localDefaultPlugin = Join-Path $repository `
-            "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+            "dist/bundled-plugins/RF-Concert-Grand.rfplugin"
         if (Test-Path -LiteralPath $localDefaultPlugin -PathType Leaf) {
             $defaultPlugin = $localDefaultPlugin
         }

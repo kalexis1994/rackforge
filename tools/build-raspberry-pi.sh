@@ -123,8 +123,8 @@ cp -a "$repository/config/." "$release/config/"
 default_plugin_archive="${RACKFORGE_BUNDLED_PLUGIN:-}"
 install -d "$release/bundled-plugins"
 if [[ "$edition" == standard ]]; then
-  if [[ -z "$default_plugin_archive" && -f "$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
-    default_plugin_archive="$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+  if [[ -z "$default_plugin_archive" && -f "$repository/dist/bundled-plugins/RF-Concert-Grand.rfplugin" ]]; then
+    default_plugin_archive="$repository/dist/bundled-plugins/RF-Concert-Grand.rfplugin"
   fi
   if [[ -n "$default_plugin_archive" ]]; then
     [[ -f "$default_plugin_archive" ]] || {
@@ -133,7 +133,7 @@ if [[ "$edition" == standard ]]; then
       exit 2
     }
     install -m 0644 "$default_plugin_archive" \
-      "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+      "$release/bundled-plugins/RF-Concert-Grand.rfplugin"
   fi
   shopt -s nullglob
   for archive in "$official_plugins"/*.rfplugin; do
@@ -153,7 +153,7 @@ cp "$repository/THIRD_PARTY_NOTICES.md" "$release/THIRD_PARTY_NOTICES.md"
 
 revision="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || printf 'unknown')}"
 default_plugin=none
-if [[ -f "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
+if [[ -f "$release/bundled-plugins/RF-Concert-Grand.rfplugin" ]]; then
   default_plugin=org.rackforge.concert-grand
 fi
 official_plugin="$(python3 - "$release/bundled-plugins" <<'PY'
@@ -165,7 +165,7 @@ import zipfile
 directory = pathlib.Path(sys.argv[1])
 carried = []
 for archive_path in sorted(directory.glob("*.rfplugin")):
-    if archive_path.name == "RackForge-Concert-Grand.rfplugin":
+    if archive_path.name == "RF-Concert-Grand.rfplugin":
         continue
     with zipfile.ZipFile(archive_path) as archive:
         manifest = archive.read("rackforge-plugin.toml").decode("utf-8")

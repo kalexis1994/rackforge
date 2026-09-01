@@ -133,7 +133,7 @@ $defaultPlugin = ""
 if ($Edition -eq "Standard") {
     $defaultPlugin = $env:RACKFORGE_BUNDLED_PLUGIN
     if (-not $defaultPlugin) {
-        $candidate = Join-Path $repository "dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+        $candidate = Join-Path $repository "dist/bundled-plugins/RF-Concert-Grand.rfplugin"
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { $defaultPlugin = $candidate }
     }
     if ($defaultPlugin) {

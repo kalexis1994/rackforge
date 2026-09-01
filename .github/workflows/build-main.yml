@@ -200,8 +200,8 @@ jobs:
           cargo run --release -p rackforge-store -- pack-wasm `
             plugins/concert-grand/package `
             target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
-            dist/bundled-plugins/RackForge-Concert-Grand.rfplugin
-          $plugin = Join-Path $PWD 'dist/bundled-plugins/RackForge-Concert-Grand.rfplugin'
+            dist/bundled-plugins/RF-Concert-Grand.rfplugin
+          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Concert-Grand.rfplugin'
           "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
 
       - name: Build RackForge Desktop Standard
@@ -239,13 +239,13 @@ jobs:
         run: |
           python tools/verify-release-edition.py --edition standard `
             --manifest dist/windows-x86_64/standard/bundled-plugins.txt `
-            --expect-plugin RackForge-Concert-Grand.rfplugin `
+            --expect-plugin RF-Concert-Grand.rfplugin `
             --expect-official
           python tools/verify-release-edition.py --edition minimal `
             --manifest dist/windows-x86_64/minimal/bundled-plugins.txt
           python tools/verify-release-edition.py --edition standard `
             --manifest dist/windows-x86_64/vst3-standard/bundled-plugins.txt `
-            --expect-plugin RackForge-Concert-Grand.rfplugin `
+            --expect-plugin RF-Concert-Grand.rfplugin `
             --expect-official
           python tools/verify-release-edition.py --edition minimal `
             --manifest dist/windows-x86_64/vst3-minimal/bundled-plugins.txt
@@ -358,8 +358,8 @@ jobs:
           cargo run --release -p rackforge-store -- pack-wasm \
             plugins/concert-grand/package \
             target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm \
-            dist/bundled-plugins/RackForge-Concert-Grand.rfplugin
-          printf 'RACKFORGE_BUNDLED_PLUGIN=%s/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin\n' \
+            dist/bundled-plugins/RF-Concert-Grand.rfplugin
+          printf 'RACKFORGE_BUNDLED_PLUGIN=%s/dist/bundled-plugins/RF-Concert-Grand.rfplugin\n' \
             "$GITHUB_WORKSPACE" >>"$GITHUB_ENV"
 
       - name: Build Linux x86-64 Standard bundle
@@ -380,7 +380,7 @@ jobs:
           python3 tools/verify-release-edition.py \
             --edition standard \
             --archive dist/linux-x86_64/standard/RackForge-Linux-x86_64.tar.gz \
-            --expect-plugin RackForge-Concert-Grand.rfplugin \
+            --expect-plugin RF-Concert-Grand.rfplugin \
             --expect-official
           python3 tools/verify-release-edition.py \
             --edition minimal \
@@ -485,8 +485,8 @@ jobs:
           cargo run --release -p rackforge-store -- pack-wasm `
             plugins/concert-grand/package `
             target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
-            dist/bundled-plugins/RackForge-Concert-Grand.rfplugin
-          $plugin = Join-Path $PWD 'dist/bundled-plugins/RackForge-Concert-Grand.rfplugin'
+            dist/bundled-plugins/RF-Concert-Grand.rfplugin
+          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Concert-Grand.rfplugin'
           "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
 
       - name: Build Android Standard APK
@@ -507,7 +507,7 @@ jobs:
           python3 tools/verify-release-edition.py \
             --edition standard \
             --archive dist/android/standard/RackForge-debug.apk \
-            --expect-plugin RackForge-Concert-Grand.rfplugin \
+            --expect-plugin RF-Concert-Grand.rfplugin \
             --expect-official
           python3 tools/verify-release-edition.py \
             --edition minimal \
@@ -601,8 +601,8 @@ jobs:
           cargo run --release -p rackforge-store -- pack-wasm `
             plugins/concert-grand/package `
             target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
-            dist/bundled-plugins/RackForge-Concert-Grand.rfplugin
-          $plugin = Join-Path $PWD 'dist/bundled-plugins/RackForge-Concert-Grand.rfplugin'
+            dist/bundled-plugins/RF-Concert-Grand.rfplugin
+          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Concert-Grand.rfplugin'
           "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
 
       - name: Build Raspberry Pi Standard bundle
@@ -623,7 +623,7 @@ jobs:
           python3 tools/verify-release-edition.py \
             --edition standard \
             --archive dist/raspberry-pi/standard/RackForge-RaspberryPi-arm64.tar.gz \
-            --expect-plugin RackForge-Concert-Grand.rfplugin \
+            --expect-plugin RF-Concert-Grand.rfplugin \
             --expect-official
           python3 tools/verify-release-edition.py \
             --edition minimal \

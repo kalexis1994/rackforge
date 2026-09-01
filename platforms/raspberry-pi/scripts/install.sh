@@ -43,7 +43,7 @@ do
   mv "$root/bin/$binary.new" "$root/bin/$binary"
 done
 
-bundled_plugin="$source_root/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+bundled_plugin="$source_root/bundled-plugins/RF-Concert-Grand.rfplugin"
 bundled_default_marker="$root/state/bundled-default-initialized"
 shopt -s nullglob
 installed_plugins=("$root/plugin-store/packages"/*)
@@ -71,7 +71,7 @@ fi
 known_ids=" $(ls "$root/plugin-store/packages" 2>/dev/null | tr '\n' ' ') "
 shopt -s nullglob
 for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
-  [[ "$(basename "$official_plugin")" == "RackForge-Concert-Grand.rfplugin" ]] && continue
+  [[ "$(basename "$official_plugin")" == "RF-Concert-Grand.rfplugin" ]] && continue
   install_output="$("$root/bin/rackforge-store" install-local \
     "$official_plugin" \
     "$root/plugin-store" --replace)"

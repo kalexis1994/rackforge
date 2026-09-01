@@ -87,13 +87,13 @@ cp "$repository/THIRD_PARTY_NOTICES.md" "$release/THIRD_PARTY_NOTICES.md"
 
 default_plugin_archive="${RACKFORGE_BUNDLED_PLUGIN:-}"
 if [[ "$edition" == standard ]]; then
-  if [[ -z "$default_plugin_archive" && -f "$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
-    default_plugin_archive="$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+  if [[ -z "$default_plugin_archive" && -f "$repository/dist/bundled-plugins/RF-Concert-Grand.rfplugin" ]]; then
+    default_plugin_archive="$repository/dist/bundled-plugins/RF-Concert-Grand.rfplugin"
   fi
   if [[ -n "$default_plugin_archive" ]]; then
     test -f "$default_plugin_archive"
     install -m 0644 "$default_plugin_archive" \
-      "$release/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+      "$release/bundled-plugins/RF-Concert-Grand.rfplugin"
   fi
   shopt -s nullglob
   for archive in "$official_plugins"/*.rfplugin; do

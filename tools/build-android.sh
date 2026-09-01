@@ -96,8 +96,8 @@ rm -rf -- "$bundled_output"
 install -d "$bundled_output/bundled-plugins"
 default_plugin="${RACKFORGE_BUNDLED_PLUGIN:-}"
 if [[ "$edition" == standard ]]; then
-  if [[ -z "$default_plugin" && -f "$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin" ]]; then
-    default_plugin="$repository/dist/bundled-plugins/RackForge-Concert-Grand.rfplugin"
+  if [[ -z "$default_plugin" && -f "$repository/dist/bundled-plugins/RF-Concert-Grand.rfplugin" ]]; then
+    default_plugin="$repository/dist/bundled-plugins/RF-Concert-Grand.rfplugin"
   fi
   if [[ -n "$default_plugin" ]]; then
     [[ -f "$default_plugin" ]] || {

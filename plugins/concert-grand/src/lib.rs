@@ -6707,6 +6707,15 @@ mod tests {
             .unwrap_or_default();
         // A chromatic sweep, for measurements that average across the compass.
         let chromatic = std::env::var("CG_CHROMATIC").is_ok();
+        // What the chromatic sweep strikes with. It was fixed at 110, which is
+        // fine while the only reference is fortissimo -- but the dynamics
+        // targets carry sixteen velocity layers per note, and comparing the
+        // model's brightening against a real piano's means rendering the same
+        // compass at the same blows.
+        let chromatic_velocity: u8 = std::env::var("CG_VELOCITY")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(110);
         // A chord, because the instrument is played with more than one
         // finger and the shared board, room and saturator are the only places
         // voices can interact. A single-note render cannot show an
@@ -6925,7 +6934,7 @@ mod tests {
             return;
         }
         let notes: Vec<(u8, u8)> = if chromatic {
-            (0..30).map(|i| (21 + 3 * i as u8, 110u8)).collect()
+            (0..30).map(|i| (21 + 3 * i as u8, chromatic_velocity)).collect()
         } else if cal.is_some() {
             (0..30).map(|i| (21 + 3 * i as u8, 125u8)).collect()
         } else {

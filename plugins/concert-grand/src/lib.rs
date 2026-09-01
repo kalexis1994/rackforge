@@ -1570,7 +1570,7 @@ impl Default for Controls {
             // 750 to 850 -- and is the better fix if it ever survives a
             // listening test. It has not been chosen; the level has.
             lab: [
-                0.52, 0.5, 0.5, 0.07, 0.5, 0.5, 0.5, 0.49, 0.55, 0.56, 0.5, 0.57, 0.58, 0.5, 0.45,
+                0.52, 0.5, 0.5, 0.07, 0.5, 0.5, 0.5, 0.49, 0.55, 0.15, 0.5, 0.57, 0.58, 0.5, 0.45,
                 0.5, 0.5,
             ],
             room_size: 0.28,
@@ -3779,8 +3779,26 @@ impl ConcertGrand {
                 + third_string * third_string
                 + HORIZONTAL_BRIDGE * HORIZONTAL_BRIDGE;
             let coupling = drained / weights;
-            // The partial swells in over many of its own periods, and slowly
-            // enough to matter: a bass note does not arrive, it gathers.
+            // How fast a partial reaches its amplitude. It is NOT a swell.
+            //
+            // This used to read "a bass note does not arrive, it gathers",
+            // with Bloom shipping at 0.56, and that was taste rather than
+            // measurement. A C3's fundamental took 53 ms to build, and since
+            // the law goes as 5/f the lowest partials took longest of all --
+            // so the model played the blow and then let the thick string walk
+            // in behind it. The player heard it as two events, "GOLPE ->
+            // CUERDA GRUESA", and said it had always been there.
+            //
+            // Measured on the reference: a real C3's 100-300 Hz band is at its
+            // maximum 30 ms after the strike and already falling by 200 ms. It
+            // rises 0.1 dB. Ours rose 5.1. At 0.15 the build is under one
+            // period, which is what a hammer setting mode amplitudes during a
+            // two-millisecond contact actually does, and the swell measures
+            // 0.3 dB. The chromatic cost falls 41 points with it.
+            //
+            // What legitimately gathers -- the horizontal polarisation, the
+            // aftersound as the unison dephases -- gathers through the
+            // two-stage decay and the halo, not through here.
             let rise_seconds = ((5.0 / frequency) * self.controls.lab(9)).clamp(0.0008, 0.15);
             let rise = expf(-1.0 / (rise_seconds * sample_rate));
             // The horizontal picks up more of the blow in the bass: a wound

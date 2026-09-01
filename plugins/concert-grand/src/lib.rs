@@ -5005,9 +5005,29 @@ impl Processor for ConcertGrand {
         output_channels: u32,
     ) {
         let channels = output_channels as usize;
-        // Three full strikes per buffer: measured at ~0.5 ms each natively,
-        // which leaves the rest of the callback to the voices already ringing.
-        self.strike_budget = 3;
+        // Every note-on in the buffer gets the full hammer-string integration.
+        //
+        // This was three, to keep the callback affordable, and the fourth key
+        // in a chord fell back to the calibrated recipe instead. That is
+        // audibly a different instrument: measured note by note against the
+        // simulated strike, the recipe comes out about 4 dB light from 60 to
+        // 500 Hz and 17.9 dB heavy from 4 to 8 kHz, at the same peak level. A
+        // chord lost body and grew an edge from its fourth note on, and which
+        // notes those were depended on where the buffer boundary fell, so the
+        // same chord did not sound the same twice.
+        //
+        // The budget turns out to have been costing fuel as well as tone.
+        // Measured in the host's own currency (tests/concert_grand_fuel.rs),
+        // thirteen notes struck in one 1024-frame block spend 167.3M fuel with
+        // the budget at three and 149.7M with every strike simulated -- 84% of
+        // the ceiling against 75%. The cheap path is only cheap at the strike:
+        // it leaves a brighter, denser set of partials running, and that is
+        // billed on every sample afterwards.
+        //
+        // MAX_VOICES is the bound because no more than that can sound at once;
+        // it only limits a buffer carrying more note-ons than the instrument
+        // has voices, where the surplus would be stolen away regardless.
+        self.strike_budget = MAX_VOICES as u32;
         if self.room_dirty {
             self.tune_room();
         }
@@ -5398,6 +5418,54 @@ mod tests {
         samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len() as f32
     }
 
+    /// What a simulated strike actually costs, on the audio thread.
+    ///
+    /// `strike_budget` gives the first three note-ons in a buffer the full
+    /// hammer-string integration and drops the rest onto the calibrated
+    /// recipe, which is measurably a different instrument: the recipe comes
+    /// out about 4 dB light from 60 to 500 Hz and 18 dB heavy from 4 to 8 kHz.
+    /// Whether the budget can be raised is a question about time, and the
+    /// number in the comment beside it -- half a millisecond a strike -- had
+    /// never been re-measured. This reports the marginal cost of each
+    /// successive note-on in one buffer, so the third (simulated) and the
+    /// fourth (recipe) can be read off and compared directly.
+    ///
+    /// It is a measurement, not an assertion: timings are machine's-mood
+    /// numbers and would make a flaky gate. Run it with
+    /// `cargo test -p rackforge-concert-grand what_a_strike_costs -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn what_a_simulated_strike_costs() {
+        const BLOCK: usize = 512;
+        const ROUNDS: usize = 400;
+        let notes = [48u8, 52, 55, 60, 64, 67, 71, 74];
+        println!("notes in buffer   median us/buffer   marginal us");
+        let mut previous = 0.0_f64;
+        for count in 0..=notes.len() {
+            let mut samples = Vec::with_capacity(ROUNDS);
+            for _ in 0..ROUNDS {
+                // A fresh instrument each round: the strike is what is being
+                // timed, so the voices must not already be ringing.
+                let mut piano = prepared();
+                let events: Vec<MidiEvent> = notes[..count]
+                    .iter()
+                    .map(|note| note_on(*note, 110))
+                    .collect();
+                let mut output = vec![0.0; BLOCK * 2];
+                let started = std::time::Instant::now();
+                piano.process(&[], &mut output, &events, &[], BLOCK as u32, 0, 2);
+                samples.push(started.elapsed().as_secs_f64() * 1e6);
+            }
+            samples.sort_by(f64::total_cmp);
+            let median = samples[samples.len() / 2];
+            let marginal = if count == 0 { 0.0 } else { median - previous };
+            println!(
+                "{count:>15}   {median:16.1}   {marginal:11.1}",
+            );
+            previous = median;
+        }
+    }
+
     #[test]
     fn a4_is_the_tuning_anchor_and_octaves_stretch_outward() {
         let piano = Box::new(ConcertGrand::default());
@@ -5539,7 +5607,59 @@ mod tests {
         assert!(rendered.iter().all(|sample| sample.abs() <= 1.0));
     }
 
+    /// A chord has to be the sum of its notes.
+    ///
+    /// A soundboard is linear to a very good approximation, so seven keys
+    /// pressed together are seven keys added up. They were not: `strike_budget`
+    /// gave the first three note-ons in a buffer the full hammer-string
+    /// integration and dropped the rest onto the calibrated recipe, which
+    /// measures about 4 dB light from 60 to 500 Hz and 17.9 dB heavy from 4 to
+    /// 8 kHz. A seven-note chord came out 3.25 dB down in its fundamentals and
+    /// 10.34 dB up at 4-8 kHz against the same notes struck alone -- it lost
+    /// body and grew an edge from its fourth note on, and which notes those
+    /// were depended on where the buffer boundary fell.
+    ///
+    /// The excess is measured as the difference between neighbouring samples,
+    /// a crude high pass, because what the fallback added was edge rather than
+    /// level. It read +4.68 dB with the budget at three and +0.51 dB with every
+    /// strike simulated.
     #[test]
+    fn a_chord_is_the_sum_of_its_notes() {
+        const NOTES: [u8; 7] = [48, 52, 55, 60, 64, 67, 72];
+        let frames = (FS * 0.5) as usize;
+        let left = |interleaved: Vec<f32>| -> Vec<f32> {
+            interleaved.chunks(2).map(|frame| frame[0]).collect()
+        };
+        let mut piano = prepared();
+        let events: Vec<MidiEvent> = NOTES.iter().map(|note| note_on(*note, 110)).collect();
+        let chord = left(render(&mut piano, frames, &events));
+
+        let mut sum = vec![0.0_f32; chord.len()];
+        for note in NOTES {
+            let mut piano = prepared();
+            let alone = left(render(&mut piano, frames, &[note_on(note, 110)]));
+            for (slot, sample) in sum.iter_mut().zip(alone) {
+                *slot += sample;
+            }
+        }
+
+        let edge = |samples: &[f32]| -> f64 {
+            samples
+                .windows(2)
+                .map(|pair| {
+                    let step = f64::from(pair[1] - pair[0]);
+                    step * step
+                })
+                .sum::<f64>()
+                / samples.len() as f64
+        };
+        let excess = 10.0 * (edge(&chord) / edge(&sum).max(1e-30)).log10();
+        assert!(
+            excess.abs() < 2.0,
+            "a seven-note chord carries {excess:+.2} dB of edge the same notes              struck alone do not"
+        );
+    }
+
     /// A chord struck harder has to come out louder. It did not: the output
     /// soft clip sat BEFORE the level control, so it defended against a peak
     /// that the very next multiply -- 0.518 by default -- was about to halve.

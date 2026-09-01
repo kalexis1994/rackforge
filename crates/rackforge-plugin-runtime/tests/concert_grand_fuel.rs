@@ -86,4 +86,39 @@ fn report_fuel_per_block() {
             peak as f64 / budget as f64 * 100.0
         );
     }
+
+    // The block that carries the strikes, which is the one the strike budget
+    // is about. Everything above measures the steady state AFTER the notes are
+    // already ringing; a chord's cost lands in a single call, and that is the
+    // call that either fits in the budget or takes the audio stream down with
+    // it. `strike_budget` currently gives the first three note-ons in a buffer
+    // the full hammer-string integration and drops the rest onto the recipe,
+    // which measures about 4 dB light from 60 to 500 Hz and 18 dB heavy from
+    // 4 to 8 kHz -- a different instrument for the fourth key down.
+    // The ceiling is per CALL and does not scale with the buffer, so a larger
+    // buffer does more work against the same limit. Both sizes are measured.
+    for frames in [512u32, 1024, 2048] {
+        println!("
+--- {frames}-frame buffer ---");
+        let mut block = vec![0.0f32; frames as usize * 2];
+        for notes in [1usize, 3, 5, 8, 10, 13] {
+            let mut instance = module.instantiate().expect("instantiate");
+            instance.prepare(48_000.0, frames, 0, 2).expect("prepare");
+            let events: Vec<MidiEvent> = (0..notes)
+                .map(|i| MidiEvent {
+                    frame: 0,
+                    data: [0x90, 33 + 3 * i as u8, 115],
+                    length: 3,
+                })
+                .collect();
+            instance
+                .process_interleaved_with_midi(&[], &mut block, frames, &events)
+                .expect("strike");
+            let spent = instance.last_realtime_fuel_consumed();
+            println!(
+                "{notes:>2} notes struck in ONE block: {spent} fuel ({:.0}% of budget)",
+                spent as f64 / budget as f64 * 100.0
+            );
+        }
+    }
 }

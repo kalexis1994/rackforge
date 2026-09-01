@@ -160,13 +160,39 @@
         color: var(--muted);
         text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
       }
-      main { position: relative; z-index: 1; max-width: 680px; margin: 0 auto; padding: 8px 22px 0; }
+      /* 680px was a phone's column, and the desktop kept it: the Lab's six
+         plates stacked into a chimney with the whole right half of the screen
+         empty beside them. The console grows to the room it is given and the
+         plates flow into however many columns fit, which is one on a phone. */
+      main {
+        position: relative;
+        z-index: 1;
+        max-width: min(1180px, 100%);
+        margin: 0 auto;
+        padding: 8px 22px 0;
+      }
+      /* The body of whichever tab is showing. One plate spans it; several
+         share it. `align-items: start` so a short plate beside a tall one
+         keeps its own height instead of stretching to match. */
+      .panelbox > div {
+        display: grid;
+        /* `min(300px, 100%)` and not a bare 300px: a grid track cannot shrink
+           below its own minimum, and with the plate's 100px of border and
+           padding that forced 400px of content into a phone's 361px column and
+           pushed the whole console off the side. */
+        grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+        gap: 0 20px;
+        align-items: start;
+      }
 
       /* The console: voicings on the left, the instrument on the right;
          stacked on a narrow screen. */
       .console { display: flex; gap: 18px; align-items: flex-start; }
       .shelf { flex: 0 0 200px; display: flex; flex-direction: column; gap: 8px; }
-      .work { flex: 1 1 auto; min-width: 0; }
+      /* `min-width: 0` frees a flex item to shrink; `max-width: 100%` stops
+         it growing past its column when its own content is wider, which the
+         tab rail's labels are on a phone. */
+      .work { flex: 1 1 auto; min-width: 0; max-width: 100%; }
       @media (max-width: 720px) {
         .console { flex-direction: column; }
         .shelf { flex: none; width: 100%; flex-direction: row; flex-wrap: wrap; }
@@ -313,11 +339,17 @@
       .tabs {
         position: relative;
         display: flex;
+        /* On a narrow screen the rail wraps to a second row rather than
+           pushing the console off the side: a flex item's min-width is `auto`,
+           so "ROOM & MICROPHONES" refused to shrink and dragged everything
+           right of the viewport with it. */
+        flex-wrap: wrap;
         gap: 2px;
         padding: 8px 8px 0;
       }
       .tabs button {
         flex: 1 1 auto;
+        min-width: 0;
         padding: 9px 6px 8px;
         font: inherit;
         font-size: 11px;

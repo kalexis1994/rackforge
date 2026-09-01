@@ -704,29 +704,6 @@ const CLACK_SCATTER: f32 = 0.14;
 /// wooden knock and wooden knocks are short, so this is now sixty
 /// milliseconds and the level stays where the reference wants it.
 const THUMP_T60_S: f32 = 0.06;
-/// The board's own low ring under a note, which the keybed knock above is not.
-///
-/// Measured on the reference's treble, where it matters most: a C8 played at
-/// velocity 35 has its STRONGEST band at 60-120 Hz -- louder than its own
-/// pitch -- and that energy swells to a peak near 0.1 s and takes about a
-/// second to fall 16 dB. It is a struck plate ringing up, not a knock. Ours
-/// was 14 dB under it at the onset and gone in a fifth of the time: 37 dB
-/// down by one second against the reference's 16.5.
-///
-/// It is a separate component on purpose. The knock is sixty milliseconds
-/// because the player found it stacking on short quick notes and turned Thud
-/// Colour down to 0.10 to escape it; lengthening THAT would walk straight back
-/// into what they rejected. This rings low and long underneath instead, and it
-/// does not answer to Thud Colour for the same reason -- that control is the
-/// knock's, and it carries a judgement about the knock.
-const BOARD_RING_T60_S: f32 = 2.4;
-/// How fast it swells. With the decay above this puts the peak near 0.09 s.
-const BOARD_RING_RISE_S: f32 = 0.05;
-const BOARD_RING_LEVEL: f32 = 0.008;
-/// The reference's ring grows as velocity^1.06 -- very nearly straight --
-/// while the note grows as velocity^2.2. That difference IS why a soft treble
-/// note is mostly board and a hard one is mostly string.
-const BOARD_RING_VELOCITY: f32 = 1.06;
 /// The felt's hardening exponent across the compass, before any voicing.
 ///
 /// In `F = K*x^p`, p is how sharply the felt stiffens as it is squashed, so it
@@ -4001,44 +3978,6 @@ impl ConcertGrand {
                 let jitter = 1.0 + 0.10 * (hash01((note as u32) << 7 | seed) - 0.5);
                 let amplitude = thump_level * level;
                 let decay = self.decay_per_sample(THUMP_T60_S);
-                let mut built = Partial::default();
-                built.set_lane(
-                    0,
-                    Component::start(amplitude, freq * jitter, decay, sample_rate),
-                );
-                built.set_lane(
-                    LANE_BLOOM,
-                    Component::start(-amplitude, freq * jitter, rise, sample_rate),
-                );
-                partials[placed] = built;
-                placed += 1;
-            }
-        }
-
-        // The board's low ring: the plate answering the blow, under everything.
-        // Its level leans toward the treble, which is the opposite of the
-        // knock's taper, because that is where the reference shows the deficit
-        // -- a bass note's own fundamentals already fill this region.
-        {
-            let ring_level = powf(velocity, BOARD_RING_VELOCITY)
-                * BOARD_RING_LEVEL
-                * (0.35 + 1.30 * position)
-                * Controls::noise_gain(self.controls.action_noise)
-                * self.cal(note, 2);
-            let rise = expf(-1.0 / (BOARD_RING_RISE_S * sample_rate));
-            let decay = self.decay_per_sample(BOARD_RING_T60_S);
-            for (freq, level, seed) in [
-                (58.0_f32, 1.0_f32, 53u32),
-                (82.0, 0.70, 59),
-                (117.0, 0.45, 61),
-            ] {
-                if placed >= MAX_PARTIALS {
-                    break;
-                }
-                // Jittered per note so that repeated strikes, and neighbouring
-                // keys, do not pile identical resonances on the same hertz.
-                let jitter = 1.0 + 0.16 * (hash01((note as u32) << 9 | seed) - 0.5);
-                let amplitude = ring_level * level;
                 let mut built = Partial::default();
                 built.set_lane(
                     0,

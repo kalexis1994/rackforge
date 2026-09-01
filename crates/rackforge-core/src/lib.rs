@@ -31,6 +31,7 @@ pub mod rack_graph;
 pub mod realtime;
 pub mod session;
 pub mod session_checkpoint;
+pub mod ump;
 pub use rackforge_startup as startup;
 /// The sequencer engine rides the same rule: patterns into sample-accurate
 /// MIDI on every platform, gated by nothing.

@@ -1439,6 +1439,7 @@ impl MidiPacket {
                 frame: 0,
                 length: self.length,
                 data: self.data,
+                wide: None,
             },
         }
     }

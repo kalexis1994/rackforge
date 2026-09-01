@@ -1798,6 +1798,7 @@ impl AndroidEngine {
                     frame: ingress.event.frame,
                     length: ingress.event.length,
                     data: ingress.event.data,
+                    wide: None,
                 };
                 let ingress_event = IngressMidiEvent {
                     source: ingress.source,

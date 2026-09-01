@@ -26,6 +26,7 @@
 //! with the transport and the V2 plug-in extension. This is the floor they
 //! stand on, and its only job today is to be exactly right about 1.0.
 
+use rackforge_midi_api::MidiPacket;
 use rackforge_plugin_api::abi::{
     MIDI_FAMILY_BEND, MIDI_FAMILY_CONTROL, MIDI_FAMILY_NOTE, MIDI_FAMILY_PRESSURE,
     MIDI_FAMILY_PROGRAM, MIDI2_FLAG_ORIGIN_7BIT, MIDI2_FLAG_RELEASE_MEASURED,
@@ -251,6 +252,32 @@ impl Midi2Event {
 
     /// Back to the three bytes the V1 plug-in ABI carries. Exact for every
     /// event `from_midi1` produced -- see `round_trip_is_the_identity`.
+    /// The host's packet, at whatever width it carries: its bytes lifted,
+    /// then the wide value put back where the packet had one. A packet from
+    /// a byte source is exactly `from_midi1` of its bytes.
+    pub fn from_packet(packet: &MidiPacket) -> Self {
+        let mut event = Self::from_midi1(&MidiEventV1 {
+            frame: packet.frame,
+            length: packet.length,
+            data: packet.data,
+        });
+        if let Some(value) = packet.wide {
+            event.origin_7bit = false;
+            match &mut event.message {
+                Midi2Message::NoteOff { velocity, .. } => *velocity = Some(value as u16),
+                Midi2Message::NoteOn { velocity, .. } => *velocity = value as u16,
+                Midi2Message::PolyPressure { pressure, .. }
+                | Midi2Message::ChannelPressure { pressure } => *pressure = value,
+                Midi2Message::ControlChange { value: wide, .. }
+                | Midi2Message::PitchBend { value: wide } => *wide = value,
+                Midi2Message::ProgramChange { .. } | Midi2Message::Raw { .. } => {
+                    event.origin_7bit = true;
+                }
+            }
+        }
+        event
+    }
+
     pub fn to_midi1(&self) -> MidiEventV1 {
         let ch = self.channel & 0x0f;
         let (length, data): (u8, [u8; 3]) = match self.message {
@@ -267,7 +294,11 @@ impl Midi2Event {
                 [
                     0x90 | ch,
                     note,
-                    scale_down(u32::from(velocity), 7, 16) as u8,
+                    // The specification's translation rule: a note-on whose
+                    // velocity would become the byte 0 becomes 1, since 0
+                    // would make it a note-off. Unreachable from `from_midi1`,
+                    // which never lifts a byte below 1; reachable from UMP.
+                    (scale_down(u32::from(velocity), 7, 16) as u8).max(1),
                 ],
             ),
             Midi2Message::PolyPressure { note, pressure } => {
@@ -458,6 +489,44 @@ mod tests {
     /// vocabulary's own downscale gives the original bytes, the origin flag
     /// is set, and the release flag says exactly what
     /// `release_velocity_measured` says.
+    /// A packet from bytes is its bytes; a wide packet keeps its value and
+    /// projects to exactly the bytes the packet already carried.
+    #[test]
+    fn a_packet_enters_at_its_width() {
+        let bytes = MidiPacket::new(4, &[0x91, 60, 100]).unwrap();
+        assert_eq!(
+            Midi2Event::from_packet(&bytes),
+            Midi2Event::from_midi1(&MidiEventV1 {
+                frame: 4,
+                length: 3,
+                data: [0x91, 60, 100]
+            })
+        );
+        let wide = MidiPacket::wide(4, 0x91, 60, 0x1234).unwrap();
+        let event = Midi2Event::from_packet(&wide);
+        assert_eq!(
+            event.message,
+            Midi2Message::NoteOn {
+                note: 60,
+                velocity: 0x1234
+            }
+        );
+        assert!(!event.origin_7bit);
+        assert_eq!(event.to_midi1().data, wide.data);
+        let pedal = MidiPacket::wide(0, 0xb0, 64, 0xdead_beef).unwrap();
+        let event = Midi2Event::from_packet(&pedal);
+        assert_eq!(
+            event.message,
+            Midi2Message::ControlChange {
+                controller: 64,
+                value: 0xdead_beef
+            }
+        );
+        assert_eq!(event.to_midi1().data, pedal.data);
+        let whisper = Midi2Event::from_packet(&MidiPacket::wide(0, 0x90, 60, 7).unwrap());
+        assert_eq!(whisper.to_midi1().data, [0x90, 60, 1]);
+    }
+
     #[test]
     fn the_wide_event_is_the_same_message() {
         for status in [0x80u8, 0x90, 0xa0, 0xb0, 0xc0, 0xd0, 0xe0] {

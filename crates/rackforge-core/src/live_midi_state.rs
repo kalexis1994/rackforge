@@ -2,6 +2,8 @@
 
 use rackforge_midi_api::{CompiledMidiRoute, IngressMidiEvent, MidiPacket, MidiSourceKey};
 use rackforge_plugin_api::abi::MidiEventV1;
+
+use crate::midi2::{Midi2Event, Midi2Message, scale_down};
 use rackforge_session_api::{
     ButtonPhase, HostActionBinding, HostActionTarget, HostControlBinding, MidiButtonBinding,
 };
@@ -159,7 +161,7 @@ impl MidiControllerStates {
         &self,
         route: &CompiledMidiRoute,
         input_channel: Option<u8>,
-        events: &mut Vec<MidiEventV1>,
+        events: &mut Vec<Midi2Event>,
         maximum_events: usize,
     ) -> usize {
         let mut omitted = 0;
@@ -171,6 +173,7 @@ impl MidiControllerStates {
                         frame: event.frame,
                         length: event.length,
                         data: event.data,
+                        wide: None,
                     },
                 };
                 if !matches_midi_input_channel(ingress.packet, input_channel) {
@@ -180,7 +183,7 @@ impl MidiControllerStates {
                     push_replay_event(
                         events,
                         maximum_events,
-                        plugin_midi_event(routed.packet),
+                        Midi2Event::from_packet(&routed.packet),
                         &mut omitted,
                     );
                 }
@@ -193,7 +196,7 @@ impl MidiControllerStates {
     pub(super) fn replay_source_into(
         &self,
         source: MidiSourceKey,
-        events: &mut Vec<MidiEventV1>,
+        events: &mut Vec<Midi2Event>,
         maximum_events: usize,
     ) -> Option<usize> {
         self.sources
@@ -213,28 +216,34 @@ impl Default for MidiControllerState {
 }
 
 impl MidiControllerState {
+    /// Remembers what a controller last said, so a plug-in that arrives
+    /// later can be told. It asks the vocabulary what the bytes meant
+    /// instead of parsing status nibbles itself; the state is kept at byte
+    /// width, which `scale_down` recovers exactly from a lifted byte.
     pub(super) fn observe(&mut self, event: MidiEventV1) {
         if event.length == 0 {
             return;
         }
-        let status = event.data[0] & 0xf0;
-        let channel = usize::from(event.data[0] & 0x0f);
-        match status {
-            0xb0 if event.length >= 3 => {
-                let controller = usize::from(event.data[1] & 0x7f);
+        let semantic = Midi2Event::from_midi1(&event);
+        let channel = usize::from(semantic.channel & 0x0f);
+        match semantic.message {
+            Midi2Message::ControlChange { controller, value } => {
+                let controller = usize::from(controller & 0x7f);
                 if controller < CONTINUOUS_CONTROLLERS {
-                    self.continuous_controllers[channel][controller] = Some(event.data[2] & 0x7f);
+                    self.continuous_controllers[channel][controller] =
+                        Some(scale_down(value, 7, 32) as u8);
                 } else if controller == 121 {
                     self.continuous_controllers[channel].fill(None);
                     self.pitch_bend[channel] = None;
                     self.channel_pressure[channel] = None;
                 }
             }
-            0xd0 if event.length >= 2 => {
-                self.channel_pressure[channel] = Some(event.data[1] & 0x7f);
+            Midi2Message::ChannelPressure { pressure } => {
+                self.channel_pressure[channel] = Some(scale_down(pressure, 7, 32) as u8);
             }
-            0xe0 if event.length >= 3 => {
-                self.pitch_bend[channel] = Some((event.data[1] & 0x7f, event.data[2] & 0x7f));
+            Midi2Message::PitchBend { value } => {
+                let bend = scale_down(value, 14, 32);
+                self.pitch_bend[channel] = Some(((bend & 0x7f) as u8, (bend >> 7) as u8));
             }
             _ => {}
         }
@@ -269,23 +278,24 @@ impl MidiControllerState {
     }
 
     #[cfg(test)]
-    pub(super) fn replay_into(
-        &self,
-        events: &mut Vec<MidiEventV1>,
-        maximum_events: usize,
-    ) -> usize {
+    pub(super) fn replay_into(&self, events: &mut Vec<Midi2Event>, maximum_events: usize) -> usize {
         let mut omitted = 0;
         self.visit_replay(|event| {
-            push_replay_event(events, maximum_events, event, &mut omitted);
+            push_replay_event(
+                events,
+                maximum_events,
+                Midi2Event::from_midi1(&event),
+                &mut omitted,
+            );
         });
         omitted
     }
 }
 
 fn push_replay_event(
-    events: &mut Vec<MidiEventV1>,
+    events: &mut Vec<Midi2Event>,
     maximum_events: usize,
-    event: MidiEventV1,
+    event: Midi2Event,
     omitted: &mut usize,
 ) {
     if events.len() < maximum_events {

@@ -628,7 +628,17 @@ impl MidiSourceRegistry {
 pub struct MidiPacket {
     pub frame: u32,
     pub length: u8,
+    /// The message as MIDI 1.0 bytes. Always present: for a wide message
+    /// these are its exact projection -- the top bits of `wide`, by the
+    /// specification's translation rule -- and they are what every filter,
+    /// range and curve in this crate reads. Filters do not widen.
     pub data: [u8; 3],
+    /// The message's value at MIDI 2.0 width, when its source had one: the
+    /// 16-bit velocity of a note, the 32 bits of a controller, a pressure or
+    /// a bend. `None` means the bytes ARE the message. Nothing in this crate
+    /// reads it; the host's vocabulary does, so a plug-in that asked for the
+    /// width receives it and one that did not is none the wiser.
+    pub wide: Option<u32>,
 }
 
 impl MidiPacket {
@@ -659,6 +669,33 @@ impl MidiPacket {
             frame,
             length: message.len() as u8,
             data,
+            wide: None,
+        })
+    }
+
+    /// A channel-voice message at MIDI 2.0 width, with its byte projection
+    /// derived by the specification's rule: the top bits. A note-on whose
+    /// velocity would project to 0 projects to 1, since 0 would turn it into
+    /// a note-off; a program change has no width and carries none.
+    pub fn wide(frame: u32, status: u8, index: u8, value: u32) -> Result<Self, MidiRoutingError> {
+        let index = index & 0x7f;
+        let (length, data) = match status & 0xf0 {
+            0x80 => (3, [status, index, ((value & 0xffff) >> 9) as u8]),
+            0x90 => (3, [status, index, (((value & 0xffff) >> 9) as u8).max(1)]),
+            0xa0 | 0xb0 => (3, [status, index, (value >> 25) as u8]),
+            0xc0 => (2, [status, index, 0]),
+            0xd0 => (2, [status, (value >> 25) as u8, 0]),
+            0xe0 => {
+                let bend = value >> 18;
+                (3, [status, (bend & 0x7f) as u8, (bend >> 7) as u8])
+            }
+            _ => return Err(MidiRoutingError::UnsupportedStatus(status)),
+        };
+        Ok(Self {
+            frame,
+            length,
+            data,
+            wide: (status & 0xf0 != 0xc0).then_some(value),
         })
     }
 
@@ -869,6 +906,38 @@ fn validate_midi_range(kind: &'static str, low: u8, high: u8) -> Result<(), Midi
 
 #[cfg(test)]
 mod tests {
+    /// The bytes of a wide packet are its top bits, and a note-on never
+    /// projects to the byte that would make it a note-off.
+    #[test]
+    fn a_wide_packet_projects_its_top_bits() {
+        let full = super::MidiPacket::wide(3, 0x92, 60, 0xffff).unwrap();
+        assert_eq!(
+            (full.length, full.data, full.wide),
+            (3, [0x92, 60, 127], Some(0xffff))
+        );
+        assert_eq!(full.note_on_velocity(), Some(127));
+        let whisper = super::MidiPacket::wide(0, 0x90, 60, 1).unwrap();
+        assert_eq!(whisper.data, [0x90, 60, 1]);
+        assert_eq!(
+            super::MidiPacket::wide(0, 0x90, 60, 0x1ff).unwrap().data[2],
+            1
+        );
+        let pedal = super::MidiPacket::wide(0, 0xb0, 64, 0x8000_0000).unwrap();
+        assert_eq!(pedal.data, [0xb0, 64, 64]);
+        let centre = super::MidiPacket::wide(0, 0xe1, 0, 0x8000_0000).unwrap();
+        assert_eq!(centre.data, [0xe1, 0x00, 0x40]);
+        let program = super::MidiPacket::wide(0, 0xc0, 5, 7).unwrap();
+        assert_eq!(
+            (program.length, program.data, program.wide),
+            (2, [0xc0, 5, 0], None)
+        );
+        assert_eq!(
+            super::MidiPacket::new(0, &[0x90, 60, 100]).unwrap().wide,
+            None
+        );
+        assert!(super::MidiPacket::wide(0, 0xf8, 0, 0).is_err());
+    }
+
     use super::*;
 
     fn channel(number: u8) -> MidiChannel {

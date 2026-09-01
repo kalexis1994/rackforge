@@ -165,7 +165,7 @@ struct RackSlotVoice<'plugin> {
     pan: f32,
     input: Vec<f32>,
     output: Vec<f32>,
-    events: Vec<MidiEventV1>,
+    events: Vec<crate::midi2::Midi2Event>,
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
 }
@@ -405,7 +405,7 @@ fn process_rack_voice(voice: &mut RackSlotVoice<'_>, period_frames: u32, channel
     if voice.process_faulted {
         return;
     }
-    let process_result = voice.instance.process_interleaved(
+    let process_result = voice.instance.process_wide(
         &voice.input,
         &mut voice.output,
         period_frames,
@@ -486,7 +486,7 @@ struct StandaloneVoice<'plugin> {
     live_parameter_target: usize,
     input: Vec<f32>,
     output: Vec<f32>,
-    events: Vec<MidiEventV1>,
+    events: Vec<crate::midi2::Midi2Event>,
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
 }
@@ -523,7 +523,7 @@ unsafe impl<'plugin> ScheduledSlot for StandaloneVoice<'plugin> {
             return true;
         }
         self.instance
-            .process_interleaved(
+            .process_wide(
                 &self.input,
                 &mut self.output,
                 frames,
@@ -2586,7 +2586,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                         }
                         if !consume && let Some(routed) = play_route.route(event) {
                             if events.len() < MAX_EVENTS_PER_BLOCK {
-                                events.push(plugin_midi_event(routed.packet));
+                                events.push(crate::midi2::Midi2Event::from_packet(&routed.packet));
                             } else {
                                 dropped_events += 1;
                             }
@@ -2623,7 +2623,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 AudioRenderMode::Plugin => {
                     if let Some(routed) = virtual_play_route.route(event) {
                         if events.len() < MAX_EVENTS_PER_BLOCK {
-                            events.push(plugin_midi_event(routed.packet));
+                            events.push(crate::midi2::Midi2Event::from_packet(&routed.packet));
                         } else {
                             dropped_events += 1;
                         }
@@ -2687,7 +2687,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     }
                     if !consume && let Some(routed) = play_route.route(event) {
                         if events.len() < MAX_EVENTS_PER_BLOCK {
-                            events.push(plugin_midi_event(routed.packet));
+                            events.push(crate::midi2::Midi2Event::from_packet(&routed.packet));
                         } else {
                             dropped_events += 1;
                         }
@@ -2769,7 +2769,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
             AudioRenderMode::Plugin => {
                 for event in &sequencer_events {
                     if events.len() < MAX_EVENTS_PER_BLOCK {
-                        events.push(*event);
+                        events.push(crate::midi2::Midi2Event::from_midi1(event));
                     } else {
                         dropped_events += 1;
                     }
@@ -2783,6 +2783,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             frame: event.frame,
                             length: event.length,
                             data: event.data,
+                            wide: None,
                         },
                     };
                     for voice in &mut rack_voices {
@@ -3338,6 +3339,7 @@ fn route_rack_event_transformed(
         keyboard_parts,
     };
     route_rack_event_through_stages(event, std::slice::from_ref(&stage), play_route)
+        .map(|event| event.to_midi1())
 }
 
 /// Applies graph MIDI cables in their actual nesting order. The first stage
@@ -3389,11 +3391,11 @@ fn route_rack_event_through_stages(
     event: IngressMidiEvent,
     stages: &[RackMidiStageRuntimeSpec],
     play_route: &CompiledMidiRoute,
-) -> Option<MidiEventV1> {
+) -> Option<crate::midi2::Midi2Event> {
     if stages.is_empty() {
         return play_route
             .route(event)
-            .map(|routed| plugin_midi_event(routed.packet));
+            .map(|routed| crate::midi2::Midi2Event::from_packet(&routed.packet));
     }
 
     let mut packet = event.packet;
@@ -3459,6 +3461,21 @@ fn route_rack_event_through_stages(
                 transform.velocity_output_low,
                 transform.velocity_output_high,
             );
+            // A velocity with more than seven bits rides the same curve at
+            // its own width -- the byte endpoints scaled up by the
+            // specification's rule, so an endpoint means the same loudness
+            // on both scales -- and its byte projection follows it.
+            if let Some(value) = packet.wide {
+                let mapped = map_wide_velocity(
+                    value & 0xffff,
+                    transform.velocity_input_low,
+                    transform.velocity_input_high,
+                    transform.velocity_output_low,
+                    transform.velocity_output_high,
+                );
+                packet.wide = Some(mapped);
+                packet.data[2] = ((mapped >> 9) as u8).max(1);
+            }
         }
         if let Some(channel) = transform.target_channel
             && matches!(status, 0x80..=0xe0)
@@ -3466,7 +3483,7 @@ fn route_rack_event_through_stages(
             packet.data[0] = (packet.data[0] & 0xf0) | (channel - 1);
         }
     }
-    Some(plugin_midi_event(packet))
+    Some(crate::midi2::Midi2Event::from_packet(&packet))
 }
 
 fn replay_rack_controller_state(
@@ -3584,6 +3601,32 @@ fn map_midi_velocity(
     let output_span = u16::from(output_high - output_low);
     let offset = u16::from(value - input_low);
     output_low + ((offset * output_span + input_span / 2) / input_span) as u8
+}
+
+/// `map_midi_velocity` at sixteen bits: the same curve, its endpoints
+/// lifted by the specification's scaling so that `0..=127` is the identity
+/// on the whole 16-bit range and a byte-valued endpoint means the same
+/// loudness it means on the byte scale.
+fn map_wide_velocity(
+    value: u32,
+    input_low: u8,
+    input_high: u8,
+    output_low: u8,
+    output_high: u8,
+) -> u32 {
+    let lift = |byte: u8| crate::midi2::scale_up(u32::from(byte), 7, 16);
+    let (input_low, input_high) = (lift(input_low), lift(input_high));
+    let (output_low, output_high) = (lift(output_low), lift(output_high));
+    if value <= input_low {
+        return output_low;
+    }
+    if value >= input_high {
+        return output_high;
+    }
+    let input_span = u64::from(input_high - input_low);
+    let output_span = u64::from(output_high - output_low);
+    let offset = u64::from(value - input_low);
+    output_low + ((offset * output_span + input_span / 2) / input_span) as u32
 }
 
 fn restore_after_audition(voice: &mut StandaloneVoice<'_>, lease: &AuditionLease) -> Result<()> {
@@ -3812,12 +3855,20 @@ mod tests {
         let mut replay = Vec::new();
         assert_eq!(state.replay_into(&mut replay, MAX_EVENTS_PER_BLOCK), 0);
         assert_eq!(replay.len(), 3);
-        assert!(replay.iter().any(|event| event.data == [0xb2, 1, 87]));
-        assert!(replay.iter().any(|event| event.data == [0xe2, 12, 100]));
         assert!(
             replay
                 .iter()
-                .any(|event| event.length == 2 && event.data == [0xd2, 44, 0])
+                .any(|event| event.to_midi1().data == [0xb2, 1, 87])
+        );
+        assert!(
+            replay
+                .iter()
+                .any(|event| event.to_midi1().data == [0xe2, 12, 100])
+        );
+        assert!(
+            replay
+                .iter()
+                .any(|event| event.to_midi1().length == 2 && event.to_midi1().data == [0xd2, 44, 0])
         );
     }
 
@@ -3860,14 +3911,14 @@ mod tests {
             states.replay_source_into(MidiSourceKey::new(0), &mut first, MAX_EVENTS_PER_BLOCK,),
             Some(0)
         );
-        assert_eq!(first[0].data, [0xb0, 1, 20]);
+        assert_eq!(first[0].to_midi1().data, [0xb0, 1, 20]);
 
         let mut second = Vec::new();
         assert_eq!(
             states.replay_source_into(MidiSourceKey::new(1), &mut second, MAX_EVENTS_PER_BLOCK,),
             Some(0)
         );
-        assert_eq!(second[0].data, [0xb0, 1, 100]);
+        assert_eq!(second[0].to_midi1().data, [0xb0, 1, 100]);
     }
 
     #[test]
@@ -4280,5 +4331,28 @@ mod tests {
         };
         assert!(parameter_value_is_valid(&integer, 6.0));
         assert!(!parameter_value_is_valid(&integer, 5.0));
+    }
+}
+
+#[cfg(test)]
+mod wide_velocity_tests {
+    use super::map_wide_velocity;
+
+    /// The byte identity is the 16-bit identity, and a byte endpoint clamps
+    /// at the byte's lifted value.
+    #[test]
+    fn the_wide_curve_agrees_with_the_byte_curve() {
+        for value in [0u32, 1, 511, 512, 0x7fff, 0x8000, 0xfffe, 0xffff] {
+            assert_eq!(map_wide_velocity(value, 0, 127, 0, 127), value);
+        }
+        // Output 64..=127 on a byte curve: full scale stays full scale and
+        // the floor is the lifted byte 64.
+        assert_eq!(map_wide_velocity(0xffff, 0, 127, 64, 127), 0xffff);
+        assert_eq!(map_wide_velocity(0, 0, 127, 64, 127), 64 << 9);
+        // Monotonic between adjacent 16-bit steps a byte would merge.
+        assert!(
+            map_wide_velocity(100 << 9, 0, 127, 0, 100)
+                < map_wide_velocity((100 << 9) + 400, 0, 127, 0, 100)
+        );
     }
 }

@@ -116,6 +116,35 @@ impl Default for RuntimeLimits {
     }
 }
 
+/// One channel-voice message at MIDI 2.0 widths, in the shape the host ABI
+/// hands over (`MidiEventV2`): the runtime keeps its own copy of the type, as
+/// it does for [`MidiEvent`], so it stays independent of the ABI crate. The
+/// two are layout- and bit-identical; `packed` is the wire form a component
+/// reads back with its SDK's `MidiEvent2::from_packed`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MidiEvent2 {
+    pub frame: u32,
+    pub kind: u8,
+    pub channel: u8,
+    pub index: u8,
+    pub flags: u8,
+    pub value: u32,
+    pub extra: u32,
+}
+
+impl MidiEvent2 {
+    pub const fn packed(self) -> (u64, u64) {
+        (
+            self.frame as u64
+                | (self.kind as u64) << 32
+                | (self.channel as u64) << 40
+                | (self.index as u64) << 48
+                | (self.flags as u64) << 56,
+            self.value as u64 | (self.extra as u64) << 32,
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MidiEvent {
     pub frame: u32,
@@ -206,6 +235,15 @@ pub(crate) fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool 
 pub(crate) fn write_midi(memory: &mut [u8], range: Range<usize>, events: &[MidiEvent]) {
     for (chunk, event) in memory[range].as_chunks_mut::<8>().0.iter_mut().zip(events) {
         chunk.copy_from_slice(&event.packed().to_le_bytes());
+    }
+}
+
+/// Two little-endian words per wide event, mirroring `MidiEventV2::packed`.
+pub(crate) fn write_midi2(memory: &mut [u8], range: Range<usize>, events: &[MidiEvent2]) {
+    for (chunk, event) in memory[range].as_chunks_mut::<16>().0.iter_mut().zip(events) {
+        let (head, tail) = event.packed();
+        chunk[0..8].copy_from_slice(&head.to_le_bytes());
+        chunk[8..16].copy_from_slice(&tail.to_le_bytes());
     }
 }
 

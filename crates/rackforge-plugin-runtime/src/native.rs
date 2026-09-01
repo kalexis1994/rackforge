@@ -8,11 +8,12 @@ use crate::shared::{
     PARALLEL_PLAN_ENTRY_BYTES, PARALLEL_PLAN_HEADER_BYTES, PROGRAM_EDIT_BASIC,
     PROGRAM_EDIT_DECLARATIVE, PROGRAM_EDIT_KNOWN_CAPABILITIES, PROGRAM_EDIT_PREVIEW, byte_range,
     check_status, checked_samples, memory_range, ranges_overlap, read_f32, validate_parallel_plan,
-    validate_realtime_events, write_f32, write_midi, write_parameters,
+    validate_realtime_events, write_f32, write_midi, write_midi2, write_parameters,
 };
 use crate::{
-    ABI_VERSION_V1, ABI_VERSION_V1_1, MAX_PARALLEL_UNITS, MidiEvent, PARALLEL_ABI_VERSION_V1,
-    ParallelBlockPlan, ParallelLayout, ParallelPlanEntry, ParameterEvent, RuntimeLimits,
+    ABI_VERSION_V1, ABI_VERSION_V1_1, MAX_PARALLEL_UNITS, MidiEvent, MidiEvent2,
+    PARALLEL_ABI_VERSION_V1, ParallelBlockPlan, ParallelLayout, ParallelPlanEntry, ParameterEvent,
+    RuntimeLimits,
 };
 use anyhow::{Context, Result, bail};
 use std::fs::File;
@@ -202,6 +203,34 @@ impl PortableModule {
         let input_offset = input_ptr.call(&mut store, ())?;
         let output_offset = output_ptr.call(&mut store, ())?;
         let midi_offset = midi_ptr.call(&mut store, ())?;
+        // Optional, like the program API: a component that wants MIDI at 2.0
+        // widths exports a second region, its capacity, the families it
+        // wants there, and a process entry that takes the extra count.
+        let midi2 = match (
+            optional_typed::<(), i32>(&instance, &mut store, "rackforge_midi2_ptr")?,
+            optional_typed::<(), i32>(&instance, &mut store, "rackforge_capacity_midi2_events")?,
+            optional_typed::<(), i32>(&instance, &mut store, "rackforge_midi2_families")?,
+            optional_typed::<(i32, i32, i32, i32, i32, i32), i32>(
+                &instance,
+                &mut store,
+                "rackforge_process_v2",
+            )?,
+        ) {
+            (Some(ptr), Some(capacity), Some(families), Some(process_v2)) => {
+                let capacity = capacity.call(&mut store, ())?;
+                if capacity <= 0 {
+                    bail!("component reported a non-positive wide-MIDI capacity");
+                }
+                Some((
+                    ptr.call(&mut store, ())?,
+                    capacity as usize,
+                    families.call(&mut store, ())? as u32,
+                    process_v2,
+                ))
+            }
+            (None, None, None, None) => None,
+            _ => bail!("component exports only part of the wide-MIDI contract"),
+        };
         let parameter_offset = parameter_ptr.call(&mut store, ())?;
         let transfer_offset = transfer_ptr.call(&mut store, ())?;
         let initialize = typed::<(), i32>(&instance, &mut store, "rackforge_initialize")?;
@@ -400,6 +429,10 @@ impl PortableModule {
             transfer_offset,
             capacity_input_samples: input_capacity as usize,
             capacity_output_samples: output_capacity as usize,
+            midi2_offset: midi2.as_ref().map(|(offset, ..)| *offset),
+            capacity_midi2_events: midi2.as_ref().map_or(0, |(_, capacity, ..)| *capacity),
+            midi2_families: midi2.as_ref().map_or(0, |(_, _, families, _)| *families),
+            process_v2: midi2.map(|(_, _, _, process_v2)| process_v2),
             capacity_midi_events: midi_capacity as usize,
             capacity_parameter_events: parameter_capacity as usize,
             capacity_transfer_bytes: transfer_capacity as usize,
@@ -449,12 +482,21 @@ struct PortableProgramApi {
     apply_edit: Option<TypedFunc<i32, i32>>,
 }
 
+/// The wide-MIDI block entry: `rackforge_process` plus the wide event count.
+type ProcessV2Fn = TypedFunc<(i32, i32, i32, i32, i32, i32), i32>;
+
 pub struct PortableInstance {
     store: Store<HostState>,
     memory: Memory,
     input_offset: i32,
     output_offset: i32,
     midi_offset: i32,
+    /// The wide-MIDI region and entry, present only for a component that
+    /// exported them. See `MidiExtensionApiV1` for the contract.
+    midi2_offset: Option<i32>,
+    capacity_midi2_events: usize,
+    midi2_families: u32,
+    process_v2: Option<ProcessV2Fn>,
     parameter_offset: i32,
     transfer_offset: i32,
     capacity_input_samples: usize,
@@ -819,6 +861,29 @@ impl PortableInstance {
         midi: &[MidiEvent],
         parameters: &[ParameterEvent],
     ) -> Result<()> {
+        self.process_interleaved_with_midi2(input, output, frames, midi, parameters, &[])
+    }
+
+    /// The `MIDI_FAMILY_*` bits the component asked to receive wide; zero
+    /// when it does not export the wide-MIDI contract.
+    pub fn midi2_families(&self) -> u32 {
+        self.midi2_families
+    }
+
+    /// Runs one block with `midi2` delivered at MIDI 2.0 widths. A component
+    /// that exports the wide-MIDI contract is entered through
+    /// `rackforge_process_v2` on every block, wide events or not; one that
+    /// does not is entered through `rackforge_process` and may only ever be
+    /// handed an empty `midi2`.
+    pub fn process_interleaved_with_midi2(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        frames: u32,
+        midi: &[MidiEvent],
+        parameters: &[ParameterEvent],
+        midi2: &[MidiEvent2],
+    ) -> Result<()> {
         if frames == 0 || frames > self.maximum_frames {
             bail!("portable plugin is not prepared for this audio block");
         }
@@ -834,6 +899,12 @@ impl PortableInstance {
             self.capacity_midi_events,
             self.capacity_parameter_events,
         )?;
+        if midi2.len() > self.capacity_midi2_events {
+            bail!("wide MIDI event count exceeds plugin capacity");
+        }
+        if midi2.iter().any(|event| event.frame >= frames) {
+            bail!("wide MIDI event is outside the audio block");
+        }
         let input_range = memory_range(
             self.input_offset,
             input_samples,
@@ -858,24 +929,50 @@ impl PortableInstance {
             align_of::<u64>(),
             self.memory.data_size(&self.store),
         )?;
+        let midi2_range = match self.midi2_offset {
+            Some(offset) if !midi2.is_empty() => Some(byte_range(
+                offset,
+                midi2.len(),
+                16,
+                align_of::<u64>(),
+                self.memory.data_size(&self.store),
+            )?),
+            _ => None,
+        };
         write_f32(self.memory.data_mut(&mut self.store), input_range, input);
         write_midi(self.memory.data_mut(&mut self.store), midi_range, midi);
+        if let Some(range) = midi2_range {
+            write_midi2(self.memory.data_mut(&mut self.store), range, midi2);
+        }
         write_parameters(
             self.memory.data_mut(&mut self.store),
             parameter_range,
             parameters,
         );
         self.reset_realtime_fuel()?;
-        let result = self.process.call(
-            &mut self.store,
-            (
-                frames as i32,
-                self.prepared_input_channels as i32,
-                self.prepared_output_channels as i32,
-                midi.len() as i32,
-                parameters.len() as i32,
+        let result = match &self.process_v2 {
+            Some(process_v2) => process_v2.call(
+                &mut self.store,
+                (
+                    frames as i32,
+                    self.prepared_input_channels as i32,
+                    self.prepared_output_channels as i32,
+                    midi.len() as i32,
+                    parameters.len() as i32,
+                    midi2.len() as i32,
+                ),
             ),
-        );
+            None => self.process.call(
+                &mut self.store,
+                (
+                    frames as i32,
+                    self.prepared_input_channels as i32,
+                    self.prepared_output_channels as i32,
+                    midi.len() as i32,
+                    parameters.len() as i32,
+                ),
+            ),
+        };
         self.last_realtime_fuel_consumed = self
             .fuel_per_call
             .saturating_sub(self.store.get_fuel().unwrap_or(0));

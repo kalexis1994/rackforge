@@ -1,14 +1,16 @@
 use crate::{PluginPackage, PluginStorage, loader::NativeLoadedPlugin};
 use anyhow::{Context, Result, bail};
-use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
+use rackforge_plugin_api::abi::{MidiEventV1, MidiEventV2, ParameterEventV1};
+
+use crate::midi2::Midi2Event;
 use rackforge_plugin_api::{
     Capability, ParameterSchema, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
     ProgramEditRequest, ProgramEditorView, ProgramFieldEditRequest, ResourceKind,
     RuntimeDescriptor, SurfaceActivationRequest, SurfaceActivationResponse,
 };
 use rackforge_plugin_runtime::{
-    MidiEvent, ParallelLayout, ParameterEvent, PortableEngine, PortableInstance as WasmInstance,
-    PortableModule, RuntimeLimits,
+    MidiEvent, MidiEvent2, ParallelLayout, ParameterEvent, PortableEngine,
+    PortableInstance as WasmInstance, PortableModule, RuntimeLimits,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use rackforge_plugin_runtime::{ParallelBlockPlan, ParallelPlanEntry};
@@ -136,7 +138,12 @@ impl LoadedPlugin {
                 PluginInstanceBackend::Portable(Box::new(plugin.create_instance()?))
             }
         };
-        Ok(PluginInstance { backend })
+        Ok(PluginInstance {
+            backend,
+            midi1_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
+            midi2_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
+            wide_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
+        })
     }
 
     /// Creates a portable instance after replacing any startup resource paths
@@ -153,6 +160,9 @@ impl LoadedPlugin {
             backend: PluginInstanceBackend::Portable(Box::new(
                 plugin.create_instance_with_resource_overrides(overrides)?,
             )),
+            midi1_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
+            midi2_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
+            wide_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
         })
     }
 
@@ -463,6 +473,7 @@ impl PortableLoadedPlugin {
             allows_presets: self.manifest.capabilities.contains(&Capability::Presets),
             active: false,
             midi_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
+            midi2_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
             parameter_scratch: Vec::with_capacity(MAX_REALTIME_EVENTS),
         })
     }
@@ -470,6 +481,12 @@ impl PortableLoadedPlugin {
 
 pub struct PluginInstance<'plugin> {
     backend: PluginInstanceBackend<'plugin>,
+    /// Scratch for one block, sized once: the events a plug-in takes narrow.
+    midi1_scratch: Vec<MidiEventV1>,
+    /// ... the events it declared it takes wide ...
+    midi2_scratch: Vec<MidiEventV2>,
+    /// ... and the block's events in the host's vocabulary, before the cut.
+    wide_scratch: Vec<Midi2Event>,
 }
 
 enum PluginInstanceBackend<'plugin> {
@@ -732,8 +749,64 @@ impl PluginInstance<'_> {
         midi_events: &[MidiEventV1],
         parameter_events: &[ParameterEventV1],
     ) -> Result<()> {
-        // Every event a plug-in receives passes the host's one vocabulary.
+        // Every event a plug-in receives passes the host's one vocabulary:
+        // MIDI 1.0 bytes are lifted into it here and cut again below, so a
+        // plug-in that declared no wide family sees exactly what it always
+        // saw, and one that did sees the same events at their full width.
         crate::midi2::assert_expressible(midi_events);
+        if midi_events.len() > MAX_REALTIME_EVENTS {
+            bail!("process block exceeds RackForge's real-time event limit");
+        }
+        let mut wide = std::mem::take(&mut self.wide_scratch);
+        wide.clear();
+        wide.extend(midi_events.iter().map(Midi2Event::from_midi1));
+        let result = self.process_wide(
+            input,
+            output,
+            frames,
+            input_channels,
+            output_channels,
+            &wide,
+            parameter_events,
+        );
+        self.wide_scratch = wide;
+        result
+    }
+
+    /// Delivers one block with MIDI in the host's 2.0-shaped vocabulary.
+    ///
+    /// Each event reaches the plug-in exactly once: an event whose family the
+    /// plug-in declared wide arrives as a [`MidiEventV2`], every other event
+    /// as its MIDI 1.0 bytes, both in block order. A plug-in that declared no
+    /// family receives precisely the stream it received before the vocabulary
+    /// existed, which is what keeps every render bit-identical.
+    #[allow(clippy::too_many_arguments)]
+    pub fn process_wide(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        frames: u32,
+        input_channels: u32,
+        output_channels: u32,
+        midi: &[Midi2Event],
+        parameter_events: &[ParameterEventV1],
+    ) -> Result<()> {
+        if midi.len() > MAX_REALTIME_EVENTS {
+            bail!("process block exceeds RackForge's real-time event limit");
+        }
+        let families = self.midi2_families();
+        self.midi1_scratch.clear();
+        self.midi2_scratch.clear();
+        for event in midi {
+            match event
+                .family()
+                .filter(|family| families & family != 0)
+                .and_then(|_| event.to_v2())
+            {
+                Some(wide) => self.midi2_scratch.push(wide),
+                None => self.midi1_scratch.push(event.to_midi1()),
+            }
+        }
         match &mut self.backend {
             PluginInstanceBackend::Native(instance) => instance.process_interleaved(
                 input,
@@ -741,8 +814,9 @@ impl PluginInstance<'_> {
                 frames,
                 input_channels,
                 output_channels,
-                midi_events,
+                &self.midi1_scratch,
                 parameter_events,
+                &self.midi2_scratch,
             ),
             PluginInstanceBackend::Portable(instance) => instance.process_interleaved(
                 input,
@@ -750,9 +824,19 @@ impl PluginInstance<'_> {
                 frames,
                 input_channels,
                 output_channels,
-                midi_events,
+                &self.midi1_scratch,
                 parameter_events,
+                &self.midi2_scratch,
             ),
+        }
+    }
+
+    /// The `MIDI_FAMILY_*` bits this plug-in asked to receive wide; zero for
+    /// every plug-in that has not adopted the MIDI extension.
+    pub fn midi2_families(&self) -> u32 {
+        match &self.backend {
+            PluginInstanceBackend::Native(instance) => instance.midi2_families(),
+            PluginInstanceBackend::Portable(instance) => instance.instance.midi2_families(),
         }
     }
 
@@ -790,7 +874,7 @@ impl PluginInstance<'_> {
                 if !instance.active {
                     bail!("plugin instance is not active");
                 }
-                instance.stage_realtime_events(midi_events, parameter_events)?;
+                instance.stage_realtime_events(midi_events, parameter_events, &[])?;
                 let midi = std::mem::take(&mut instance.midi_scratch);
                 let parameters = std::mem::take(&mut instance.parameter_scratch);
                 let result =
@@ -934,6 +1018,7 @@ pub struct PortablePluginInstance {
     allows_presets: bool,
     active: bool,
     midi_scratch: Vec<MidiEvent>,
+    midi2_scratch: Vec<MidiEvent2>,
     parameter_scratch: Vec<ParameterEvent>,
 }
 
@@ -944,10 +1029,25 @@ impl PortablePluginInstance {
         &mut self,
         midi_events: &[MidiEventV1],
         parameter_events: &[ParameterEventV1],
+        midi2_events: &[MidiEventV2],
     ) -> Result<()> {
-        if midi_events.len() > MAX_REALTIME_EVENTS || parameter_events.len() > MAX_REALTIME_EVENTS {
+        if midi_events.len() > MAX_REALTIME_EVENTS
+            || parameter_events.len() > MAX_REALTIME_EVENTS
+            || midi2_events.len() > MAX_REALTIME_EVENTS
+        {
             bail!("process block exceeds RackForge's real-time event limit");
         }
+        self.midi2_scratch.clear();
+        self.midi2_scratch
+            .extend(midi2_events.iter().map(|event| MidiEvent2 {
+                frame: event.frame,
+                kind: event.kind,
+                channel: event.channel,
+                index: event.index,
+                flags: event.flags,
+                value: event.value,
+                extra: event.extra,
+            }));
         crate::midi2::assert_expressible(midi_events);
         self.midi_scratch.clear();
         for event in midi_events {
@@ -994,22 +1094,24 @@ impl PortablePluginInstance {
         output_channels: u32,
         midi_events: &[MidiEventV1],
         parameter_events: &[ParameterEventV1],
+        midi2_events: &[MidiEventV2],
     ) -> Result<()> {
         if !self.active {
             bail!("plugin instance is not active");
         }
-        self.stage_realtime_events(midi_events, parameter_events)?;
+        self.stage_realtime_events(midi_events, parameter_events, midi2_events)?;
         if input.len() != frames as usize * input_channels as usize
             || output.len() != frames as usize * output_channels as usize
         {
             bail!("audio buffers do not match the declared process block");
         }
-        self.instance.process_interleaved_with_events(
+        self.instance.process_interleaved_with_midi2(
             input,
             output,
             frames,
             &self.midi_scratch,
             &self.parameter_scratch,
+            &self.midi2_scratch,
         )
     }
 }

@@ -26,7 +26,13 @@
 //! with the transport and the V2 plug-in extension. This is the floor they
 //! stand on, and its only job today is to be exactly right about 1.0.
 
-use rackforge_plugin_api::abi::MidiEventV1;
+use rackforge_plugin_api::abi::{
+    MIDI_FAMILY_BEND, MIDI_FAMILY_CONTROL, MIDI_FAMILY_NOTE, MIDI_FAMILY_PRESSURE,
+    MIDI_FAMILY_PROGRAM, MIDI2_FLAG_ORIGIN_7BIT, MIDI2_FLAG_RELEASE_MEASURED,
+    MIDI2_KIND_CHANNEL_PRESSURE, MIDI2_KIND_CONTROL_CHANGE, MIDI2_KIND_NOTE_OFF,
+    MIDI2_KIND_NOTE_ON, MIDI2_KIND_PITCH_BEND, MIDI2_KIND_POLY_PRESSURE, MIDI2_KIND_PROGRAM_CHANGE,
+    MidiEventV1, MidiEventV2,
+};
 
 /// One channel-voice message, with MIDI 2.0's widths.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +84,11 @@ pub struct Midi2Event {
     /// 0..=15. Meaningless for `Raw`, and kept at 0 there.
     pub channel: u8,
     pub message: Midi2Message,
+    /// Whether the wide values were scaled up from a seven-bit source. Set by
+    /// `from_midi1`, cleared by a producer that measured at full width. It
+    /// rides through to `MidiEventV2::flags` so a plug-in can stay
+    /// bit-identical for 1.0 input while using every bit a 2.0 source gives.
+    pub origin_7bit: bool,
 }
 
 /// Scales a value up between bit widths the way the MIDI 2.0 specification's
@@ -129,6 +140,7 @@ impl Midi2Event {
                 frame: event.frame,
                 channel: 0,
                 message: raw(),
+                origin_7bit: true,
             };
         }
         let status = event.data[0] & 0xf0;
@@ -168,6 +180,7 @@ impl Midi2Event {
                     frame: event.frame,
                     channel: 0,
                     message: raw(),
+                    origin_7bit: true,
                 };
             }
         };
@@ -175,7 +188,65 @@ impl Midi2Event {
             frame: event.frame,
             channel,
             message,
+            origin_7bit: true,
         }
+    }
+
+    /// Which `MIDI_FAMILY_*` this message belongs to; `None` for `Raw`,
+    /// which no plug-in can ask for wide.
+    pub fn family(&self) -> Option<u32> {
+        Some(match self.message {
+            Midi2Message::NoteOff { .. } | Midi2Message::NoteOn { .. } => MIDI_FAMILY_NOTE,
+            Midi2Message::PolyPressure { .. } | Midi2Message::ChannelPressure { .. } => {
+                MIDI_FAMILY_PRESSURE
+            }
+            Midi2Message::ControlChange { .. } => MIDI_FAMILY_CONTROL,
+            Midi2Message::ProgramChange { .. } => MIDI_FAMILY_PROGRAM,
+            Midi2Message::PitchBend { .. } => MIDI_FAMILY_BEND,
+            Midi2Message::Raw { .. } => return None,
+        })
+    }
+
+    /// The wide ABI event, for a plug-in that asked for this family. `Raw`
+    /// has no wide form and returns `None`.
+    pub fn to_v2(&self) -> Option<MidiEventV2> {
+        let mut flags = if self.origin_7bit {
+            MIDI2_FLAG_ORIGIN_7BIT
+        } else {
+            0
+        };
+        let (kind, index, value) = match self.message {
+            Midi2Message::NoteOff { note, velocity } => {
+                if self.release_velocity_measured().is_some() {
+                    flags |= MIDI2_FLAG_RELEASE_MEASURED;
+                }
+                (MIDI2_KIND_NOTE_OFF, note, u32::from(velocity.unwrap_or(0)))
+            }
+            Midi2Message::NoteOn { note, velocity } => {
+                (MIDI2_KIND_NOTE_ON, note, u32::from(velocity))
+            }
+            Midi2Message::PolyPressure { note, pressure } => {
+                (MIDI2_KIND_POLY_PRESSURE, note, pressure)
+            }
+            Midi2Message::ControlChange { controller, value } => {
+                (MIDI2_KIND_CONTROL_CHANGE, controller, value)
+            }
+            Midi2Message::ProgramChange { program } => (MIDI2_KIND_PROGRAM_CHANGE, program, 0),
+            Midi2Message::ChannelPressure { pressure } => {
+                (MIDI2_KIND_CHANNEL_PRESSURE, 0, pressure)
+            }
+            Midi2Message::PitchBend { value } => (MIDI2_KIND_PITCH_BEND, 0, value),
+            Midi2Message::Raw { .. } => return None,
+        };
+        Some(MidiEventV2 {
+            frame: self.frame,
+            kind,
+            channel: self.channel,
+            index,
+            flags,
+            value,
+            extra: 0,
+        })
     }
 
     /// Back to the three bytes the V1 plug-in ABI carries. Exact for every
@@ -380,6 +451,56 @@ mod tests {
         assert_eq!(none.to_midi1().data, [0x90, 60, 0]);
         assert_eq!(zero.to_midi1().data, [0x80, 60, 0]);
         assert_eq!(sixty_four.to_midi1().data, [0x80, 60, 64]);
+    }
+
+    /// The wide event carries the same message: for every 1.0 channel-voice
+    /// message, going wide and reading the wide event back through the
+    /// vocabulary's own downscale gives the original bytes, the origin flag
+    /// is set, and the release flag says exactly what
+    /// `release_velocity_measured` says.
+    #[test]
+    fn the_wide_event_is_the_same_message() {
+        for status in [0x80u8, 0x90, 0xa0, 0xb0, 0xc0, 0xd0, 0xe0] {
+            let length = if matches!(status, 0xc0 | 0xd0) { 2 } else { 3 };
+            for d1 in [0u8, 1, 60, 64, 127] {
+                for d2 in [0u8, 1, 20, 64, 100, 127] {
+                    let original = event([status | 0x3, d1, d2], length);
+                    let semantic = Midi2Event::from_midi1(&original);
+                    let Some(wide) = semantic.to_v2() else {
+                        panic!("channel voice has a wide form: {original:?}");
+                    };
+                    assert_eq!(wide.frame, 7);
+                    assert_eq!(wide.channel, 3);
+                    assert_ne!(wide.flags & MIDI2_FLAG_ORIGIN_7BIT, 0);
+                    let measured = wide.flags & MIDI2_FLAG_RELEASE_MEASURED != 0;
+                    assert_eq!(measured, semantic.release_velocity_measured().is_some());
+                    // Two u64 words round-trip the ABI struct exactly.
+                    let (head, tail) = wide.packed();
+                    assert_eq!(MidiEventV2::from_packed(head, tail), wide);
+                    // Wide value back to the byte: the origin flag promises this.
+                    let back = match wide.kind {
+                        MIDI2_KIND_NOTE_ON | MIDI2_KIND_NOTE_OFF => {
+                            scale_down(wide.value, 7, 16) as u8
+                        }
+                        MIDI2_KIND_PITCH_BEND => (scale_down(wide.value, 14, 32) & 0x7f) as u8,
+                        MIDI2_KIND_PROGRAM_CHANGE => wide.index,
+                        MIDI2_KIND_CHANNEL_PRESSURE => scale_down(wide.value, 7, 32) as u8,
+                        _ => scale_down(wide.value, 7, 32) as u8,
+                    };
+                    let expected = match status {
+                        0xc0 => d1,
+                        0xd0 => d1,
+                        0xe0 => d1 & 0x7f,
+                        0x90 if d2 == 0 => 0,
+                        _ => d2,
+                    };
+                    assert_eq!(
+                        back, expected,
+                        "wide value lost the byte: {original:?} -> {wide:?}"
+                    );
+                }
+            }
+        }
     }
 
     /// What is not channel voice is carried, not dropped, and not reshaped.

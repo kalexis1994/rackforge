@@ -8,6 +8,9 @@
 
 pub const ABI_VERSION_V1_1: u32 = 0x0001_0001;
 pub const ABI_VERSION_V1: u32 = 0x0001_0002;
+#[cfg(test)]
+mod wide_midi_probe_test;
+
 pub const STATUS_OK: i32 = 0;
 pub const STATUS_INVALID_ARGUMENT: i32 = -1;
 pub const STATUS_UNKNOWN_PARAMETER: i32 = -2;
@@ -21,6 +24,63 @@ pub const PROGRAM_EDIT_PREVIEW: u32 = 1 << 1;
 pub const PROGRAM_EDIT_DECLARATIVE: u32 = 1 << 2;
 pub const PROGRAM_EDIT_KNOWN_CAPABILITIES: u32 =
     PROGRAM_EDIT_BASIC | PROGRAM_EDIT_PREVIEW | PROGRAM_EDIT_DECLARATIVE;
+
+/// One channel-voice message at MIDI 2.0 widths: 16-bit velocities, 32-bit
+/// controllers, pressure and bend. Delivered only for the families the
+/// component declared in the `midi2` clause of [`export_processor!`];
+/// everything else keeps arriving as a [`MidiEvent`]. Mirrors the host ABI's
+/// `MidiEventV2` field for field and bit for bit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MidiEvent2 {
+    pub frame: u32,
+    /// One of the `MIDI2_KIND_*` constants.
+    pub kind: u8,
+    pub channel: u8,
+    /// Note number, controller number or program; zero for the rest.
+    pub index: u8,
+    /// `MIDI2_FLAG_*` bits.
+    pub flags: u8,
+    /// Velocity in the low 16 bits for notes; the full 32-bit value for
+    /// controllers, pressure and bend (bend is unsigned, centre `1 << 31`).
+    pub value: u32,
+    pub extra: u32,
+}
+
+pub const MIDI2_KIND_NOTE_OFF: u8 = 1;
+pub const MIDI2_KIND_NOTE_ON: u8 = 2;
+pub const MIDI2_KIND_POLY_PRESSURE: u8 = 3;
+pub const MIDI2_KIND_CONTROL_CHANGE: u8 = 4;
+pub const MIDI2_KIND_PROGRAM_CHANGE: u8 = 5;
+pub const MIDI2_KIND_CHANNEL_PRESSURE: u8 = 6;
+pub const MIDI2_KIND_PITCH_BEND: u8 = 7;
+
+/// The value was upscaled from a 7-bit source; a component may recover the
+/// original byte exactly (the top 7 bits) and keep older behaviour bit for bit.
+pub const MIDI2_FLAG_ORIGIN_7BIT: u8 = 1 << 0;
+/// A note-off's velocity was measured by the instrument, not defaulted.
+pub const MIDI2_FLAG_RELEASE_MEASURED: u8 = 1 << 1;
+
+pub const MIDI_FAMILY_NOTE: u32 = 1 << 0;
+pub const MIDI_FAMILY_PRESSURE: u32 = 1 << 1;
+pub const MIDI_FAMILY_CONTROL: u32 = 1 << 2;
+pub const MIDI_FAMILY_PROGRAM: u32 = 1 << 3;
+pub const MIDI_FAMILY_BEND: u32 = 1 << 4;
+
+impl MidiEvent2 {
+    /// Decodes the two little-endian words the host writes per event; the
+    /// inverse of the host ABI's `MidiEventV2::packed`.
+    pub const fn from_packed(head: u64, tail: u64) -> Self {
+        Self {
+            frame: head as u32,
+            kind: (head >> 32) as u8,
+            channel: (head >> 40) as u8,
+            index: (head >> 48) as u8,
+            flags: (head >> 56) as u8,
+            value: tail as u32,
+            extra: (tail >> 32) as u32,
+        }
+    }
+}
 
 /// One MIDI 1.0 channel/system-common message delivered at an exact sample
 /// offset inside the current audio block. SysEx uses the control plane and is
@@ -175,6 +235,34 @@ pub trait Processor: Default {
         input_channels: u32,
         output_channels: u32,
     );
+
+    /// [`Processor::process`] with the families the component declared wide
+    /// delivered in `midi2` at their MIDI 2.0 widths. No event is in both
+    /// slices. The default ignores `midi2`, which is correct only for a
+    /// component that declares no family; one that does overrides this.
+    #[allow(clippy::too_many_arguments)]
+    fn process_wide(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        midi: &[MidiEvent],
+        midi2: &[MidiEvent2],
+        parameters: &[ParameterEvent],
+        frames: u32,
+        input_channels: u32,
+        output_channels: u32,
+    ) {
+        let _ = midi2;
+        self.process(
+            input,
+            output,
+            midi,
+            parameters,
+            frames,
+            input_channels,
+            output_channels,
+        );
+    }
 }
 
 /// Version this SDK writes into `rackforge_parallel_abi_version`.
@@ -932,6 +1020,148 @@ macro_rules! export_processor {
                     input,
                     output,
                     &events[..midi_event_count as usize],
+                    parameter_events,
+                    frames as u32,
+                    input_channels as u32,
+                    output_channels as u32,
+                );
+                $crate::STATUS_OK
+            }
+        }
+    };
+    ($processor:ty, max_frames = $max_frames:expr, max_input_channels = $max_input_channels:expr, max_output_channels = $max_output_channels:expr, max_midi_events = $max_midi_events:expr, max_parameter_events = $max_parameter_events:expr, max_transfer_bytes = $max_transfer_bytes:expr, midi2 = { max_events = $max_midi2_events:expr, families = $midi2_families:expr }) => {
+        $crate::export_processor!(
+            $processor,
+            max_frames = $max_frames,
+            max_input_channels = $max_input_channels,
+            max_output_channels = $max_output_channels,
+            max_midi_events = $max_midi_events,
+            max_parameter_events = $max_parameter_events,
+            max_transfer_bytes = $max_transfer_bytes
+        );
+
+        // The wide-MIDI contract: a second event region, its capacity, the
+        // families the component takes wide, and an entry the host uses for
+        // every block once it sees all four. Exporting only some of them is
+        // refused at load; the host implements the whole vocabulary and this
+        // declaration is the component's cut of it.
+        const RF_MAX_MIDI2_EVENTS: usize = $max_midi2_events;
+        const RF_MIDI2_FAMILIES: u32 = $midi2_families;
+        static mut RF_MIDI2: [u64; 2 * RF_MAX_MIDI2_EVENTS] = [0; 2 * RF_MAX_MIDI2_EVENTS];
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_midi2_ptr() -> i32 {
+            core::ptr::addr_of!(RF_MIDI2) as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_capacity_midi2_events() -> i32 {
+            RF_MAX_MIDI2_EVENTS as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_midi2_families() -> i32 {
+            RF_MIDI2_FAMILIES as i32
+        }
+
+        #[unsafe(no_mangle)]
+        pub extern "C" fn rackforge_process_v2(
+            frames: i32,
+            input_channels: i32,
+            output_channels: i32,
+            midi_event_count: i32,
+            parameter_event_count: i32,
+            midi2_event_count: i32,
+        ) -> i32 {
+            if frames <= 0
+                || input_channels < 0
+                || output_channels < 0
+                || midi_event_count < 0
+                || parameter_event_count < 0
+            {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            let Some(input_samples) = (frames as usize).checked_mul(input_channels as usize) else {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            };
+            let Some(output_samples) = (frames as usize).checked_mul(output_channels as usize)
+            else {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            };
+            if input_samples > RF_MAX_INPUT_SAMPLES
+                || output_samples > RF_MAX_OUTPUT_SAMPLES
+                || midi_event_count as usize > RF_MAX_MIDI_EVENTS
+                || parameter_event_count as usize > RF_MAX_PARAMETER_EVENTS
+                || midi2_event_count < 0
+                || midi2_event_count as usize > RF_MAX_MIDI2_EVENTS
+            {
+                return $crate::STATUS_INVALID_ARGUMENT;
+            }
+            unsafe {
+                if !RF_PREPARED {
+                    return $crate::STATUS_INVALID_STATE;
+                }
+                let processor = &mut *core::ptr::addr_of_mut!(RF_PROCESSOR).cast::<$processor>();
+                let input = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_INPUT).cast::<f32>(),
+                    input_samples,
+                );
+                let output = core::slice::from_raw_parts_mut(
+                    core::ptr::addr_of_mut!(RF_OUTPUT).cast::<f32>(),
+                    output_samples,
+                );
+                let packed_midi = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_MIDI).cast::<u64>(),
+                    midi_event_count as usize,
+                );
+                let parameter_events = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_PARAMETERS).cast::<$crate::ParameterEvent>(),
+                    parameter_event_count as usize,
+                );
+                let mut events = [$crate::MidiEvent {
+                    frame: 0,
+                    data: [0; 3],
+                    length: 1,
+                }; RF_MAX_MIDI_EVENTS];
+                for (destination, packed) in events.iter_mut().zip(packed_midi) {
+                    *destination = $crate::MidiEvent::from_packed(*packed);
+                    if destination.frame >= frames as u32
+                        || destination.length == 0
+                        || destination.length > 3
+                    {
+                        return $crate::STATUS_INVALID_ARGUMENT;
+                    }
+                }
+                if parameter_events
+                    .iter()
+                    .any(|event| event.frame >= frames as u32 || !event.value.is_finite())
+                {
+                    return $crate::STATUS_INVALID_ARGUMENT;
+                }
+                let packed_midi2 = core::slice::from_raw_parts(
+                    core::ptr::addr_of!(RF_MIDI2).cast::<u64>(),
+                    2 * midi2_event_count as usize,
+                );
+                let mut events2 = [$crate::MidiEvent2 {
+                    frame: 0,
+                    kind: 0,
+                    channel: 0,
+                    index: 0,
+                    flags: 0,
+                    value: 0,
+                    extra: 0,
+                }; RF_MAX_MIDI2_EVENTS];
+                for (destination, packed) in events2.iter_mut().zip(packed_midi2.chunks_exact(2)) {
+                    *destination = $crate::MidiEvent2::from_packed(packed[0], packed[1]);
+                    if destination.frame >= frames as u32 {
+                        return $crate::STATUS_INVALID_ARGUMENT;
+                    }
+                }
+                processor.process_wide(
+                    input,
+                    output,
+                    &events[..midi_event_count as usize],
+                    &events2[..midi2_event_count as usize],
                     parameter_events,
                     frames as u32,
                     input_channels as u32,

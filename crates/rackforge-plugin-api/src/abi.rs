@@ -25,6 +25,11 @@ pub const SURFACE_EXTENSION_VERSION: u32 = pack_version(
     SURFACE_EXTENSION_VERSION_MINOR,
 );
 pub const SURFACE_EXTENSION_ENTRY_SYMBOL_V1: &[u8] = b"rackforge_surface_extension_entry_v1\0";
+pub const MIDI_EXTENSION_VERSION_MAJOR: u16 = 1;
+pub const MIDI_EXTENSION_VERSION_MINOR: u16 = 0;
+pub const MIDI_EXTENSION_VERSION: u32 =
+    pack_version(MIDI_EXTENSION_VERSION_MAJOR, MIDI_EXTENSION_VERSION_MINOR);
+pub const MIDI_EXTENSION_ENTRY_SYMBOL_V1: &[u8] = b"rackforge_midi_extension_entry_v1\0";
 
 pub const STATUS_OK: i32 = 0;
 pub const STATUS_INVALID_ARGUMENT: i32 = -1;
@@ -104,6 +109,77 @@ pub struct MidiEventV1 {
     pub data: [u8; 3],
 }
 
+/// A MIDI event at MIDI 2.0's widths, for plug-ins that ask for it.
+///
+/// Sixteen bytes, two little-endian `u64` words on the portable side.
+/// `kind` is one of the `MIDI2_KIND_*` constants; `index` is the note or the
+/// controller; `value` carries the wide value (velocity in the low sixteen
+/// bits, pressure, control and bend in all thirty-two); `extra` is spare for
+/// a note's attribute. `flags` carries PROVENANCE, which is what makes this
+/// honest: `MIDI2_FLAG_ORIGIN_7BIT` says the value was scaled up from a
+/// seven-bit source, so a plug-in that wants to stay bit-identical for 1.0
+/// input can scale it back down and divide by 127 exactly as it always did,
+/// and `MIDI2_FLAG_RELEASE_MEASURED` says a note-off's velocity was a
+/// measurement and not MIDI's "no data" (0, 64, or a running-status
+/// note-off) -- the rule that lives in one place in the host's vocabulary.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MidiEventV2 {
+    pub frame: u32,
+    pub kind: u8,
+    pub channel: u8,
+    pub index: u8,
+    pub flags: u8,
+    pub value: u32,
+    pub extra: u32,
+}
+
+pub const MIDI2_KIND_NOTE_OFF: u8 = 1;
+pub const MIDI2_KIND_NOTE_ON: u8 = 2;
+pub const MIDI2_KIND_POLY_PRESSURE: u8 = 3;
+pub const MIDI2_KIND_CONTROL_CHANGE: u8 = 4;
+pub const MIDI2_KIND_PROGRAM_CHANGE: u8 = 5;
+pub const MIDI2_KIND_CHANNEL_PRESSURE: u8 = 6;
+pub const MIDI2_KIND_PITCH_BEND: u8 = 7;
+
+pub const MIDI2_FLAG_ORIGIN_7BIT: u8 = 1 << 0;
+pub const MIDI2_FLAG_RELEASE_MEASURED: u8 = 1 << 1;
+
+/// Message families a plug-in may ask to receive wide. For a family it
+/// declares, the host delivers those events ONLY in `midi2_events`; every
+/// other family still arrives in `midi_events` as three bytes. Each event is
+/// delivered exactly once.
+pub const MIDI_FAMILY_NOTE: u32 = 1 << 0;
+pub const MIDI_FAMILY_PRESSURE: u32 = 1 << 1;
+pub const MIDI_FAMILY_CONTROL: u32 = 1 << 2;
+pub const MIDI_FAMILY_PROGRAM: u32 = 1 << 3;
+pub const MIDI_FAMILY_BEND: u32 = 1 << 4;
+
+impl MidiEventV2 {
+    pub const fn packed(self) -> (u64, u64) {
+        (
+            self.frame as u64
+                | (self.kind as u64) << 32
+                | (self.channel as u64) << 40
+                | (self.index as u64) << 48
+                | (self.flags as u64) << 56,
+            self.value as u64 | (self.extra as u64) << 32,
+        )
+    }
+
+    pub const fn from_packed(head: u64, tail: u64) -> Self {
+        Self {
+            frame: head as u32,
+            kind: (head >> 32) as u8,
+            channel: (head >> 40) as u8,
+            index: (head >> 48) as u8,
+            flags: (head >> 56) as u8,
+            value: tail as u32,
+            extra: (tail >> 32) as u32,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ParameterEventV1 {
@@ -125,7 +201,16 @@ pub struct ProcessBlockV1 {
     pub midi_event_count: u32,
     pub parameter_events: *const ParameterEventV1,
     pub parameter_event_count: u32,
+    /// Appended in 1.1 and gated by `struct_size`, like the program
+    /// extension's later fields: a plug-in built against 1.0 never reads
+    /// past the fields it knows. Only present for a plug-in that exported the
+    /// MIDI extension; null and zero otherwise.
+    pub midi2_events: *const MidiEventV2,
+    pub midi2_event_count: u32,
 }
+
+pub const PROCESS_BLOCK_V1_0_SIZE: u32 = std::mem::offset_of!(ProcessBlockV1, midi2_events) as u32;
+pub const PROCESS_BLOCK_V1_1_SIZE: u32 = size_of::<ProcessBlockV1>() as u32;
 
 impl ProcessBlockV1 {
     pub const fn empty() -> Self {
@@ -140,6 +225,8 @@ impl ProcessBlockV1 {
             midi_event_count: 0,
             parameter_events: ptr::null(),
             parameter_event_count: 0,
+            midi2_events: ptr::null(),
+            midi2_event_count: 0,
         }
     }
 }
@@ -229,6 +316,25 @@ pub struct SurfaceExtensionApiV1 {
 
 pub type SurfaceExtensionEntryFnV1 = unsafe extern "C" fn() -> *const SurfaceExtensionApiV1;
 
+/// What a plug-in exports to receive MIDI at MIDI 2.0's widths.
+///
+/// A plug-in that does not export it is on the three-byte path forever and
+/// is never touched; that is every plug-in that exists today. One that does
+/// names the families it wants wide, and the host delivers exactly those in
+/// `ProcessBlockV1::midi2_events` and everything else as before. The host
+/// implements the whole vocabulary; the cut is the plug-in's declaration.
+#[repr(C)]
+pub struct MidiExtensionApiV1 {
+    pub struct_size: u32,
+    pub api_version: u32,
+    /// `MIDI_FAMILY_*` bits.
+    pub families: u32,
+}
+
+pub const MIDI_EXTENSION_V1_0_SIZE: u32 = size_of::<MidiExtensionApiV1>() as u32;
+
+pub type MidiExtensionEntryFnV1 = unsafe extern "C" fn() -> *const MidiExtensionApiV1;
+
 /// Copies plugin-owned bytes into a host-owned buffer and returns the required
 /// size. Passing a null destination or zero capacity performs a size query.
 ///
@@ -255,6 +361,10 @@ pub fn is_compatible(plugin_version: u32) -> bool {
 pub fn is_program_extension_compatible(version: u32) -> bool {
     version_major(version) == PROGRAM_EXTENSION_VERSION_MAJOR
         && version <= PROGRAM_EXTENSION_VERSION
+}
+
+pub fn is_midi_extension_compatible(version: u32) -> bool {
+    version_major(version) == MIDI_EXTENSION_VERSION_MAJOR && version <= MIDI_EXTENSION_VERSION
 }
 
 pub fn is_surface_extension_compatible(version: u32) -> bool {

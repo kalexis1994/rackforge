@@ -3,13 +3,14 @@ use anyhow::{Context, Result, anyhow, bail};
 use libloading::{Library, Symbol};
 use rackforge_plugin_api::abi::{
     ABI_VERSION, ENTRY_SYMBOL_V1, HostApiV1, LOG_LEVEL_DEBUG, LOG_LEVEL_ERROR, LOG_LEVEL_INFO,
-    LOG_LEVEL_TRACE, LOG_LEVEL_WARN, MidiEventV1, PROGRAM_EXTENSION_ENTRY_SYMBOL_V1,
-    PROGRAM_EXTENSION_V1_0_SIZE, PROGRAM_EXTENSION_V1_1_SIZE, PROGRAM_EXTENSION_V1_2_SIZE,
-    ParameterEventV1, PluginApiV1, PluginEntryFnV1, ProcessBlockV1, ProgramExchangeJsonFnV1,
-    ProgramExtensionApiV1, ProgramExtensionEntryFnV1, STATUS_INTERNAL_ERROR,
-    STATUS_INVALID_ARGUMENT, STATUS_OK, SURFACE_EXTENSION_ENTRY_SYMBOL_V1, SurfaceExtensionApiV1,
-    SurfaceExtensionEntryFnV1, copy_to_host_buffer, is_compatible, is_program_extension_compatible,
-    is_surface_extension_compatible,
+    LOG_LEVEL_TRACE, LOG_LEVEL_WARN, MIDI_EXTENSION_ENTRY_SYMBOL_V1, MIDI_EXTENSION_V1_0_SIZE,
+    MidiEventV1, MidiEventV2, MidiExtensionApiV1, MidiExtensionEntryFnV1,
+    PROGRAM_EXTENSION_ENTRY_SYMBOL_V1, PROGRAM_EXTENSION_V1_0_SIZE, PROGRAM_EXTENSION_V1_1_SIZE,
+    PROGRAM_EXTENSION_V1_2_SIZE, ParameterEventV1, PluginApiV1, PluginEntryFnV1, ProcessBlockV1,
+    ProgramExchangeJsonFnV1, ProgramExtensionApiV1, ProgramExtensionEntryFnV1,
+    STATUS_INTERNAL_ERROR, STATUS_INVALID_ARGUMENT, STATUS_OK, SURFACE_EXTENSION_ENTRY_SYMBOL_V1,
+    SurfaceExtensionApiV1, SurfaceExtensionEntryFnV1, copy_to_host_buffer, is_compatible,
+    is_midi_extension_compatible, is_program_extension_compatible, is_surface_extension_compatible,
 };
 use rackforge_plugin_api::{
     Capability, ParameterSchema, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
@@ -33,6 +34,7 @@ pub(crate) struct NativeLoadedPlugin {
     api: &'static PluginApiV1,
     program_extension: Option<&'static ProgramExtensionApiV1>,
     surface_extension: Option<&'static SurfaceExtensionApiV1>,
+    midi_extension: Option<&'static MidiExtensionApiV1>,
     _host_context: Box<HostContext>,
     host_api: Box<HostApiV1>,
     _library: Library,
@@ -123,6 +125,28 @@ impl NativeLoadedPlugin {
             }
             Err(_) => None,
         };
+        let midi_extension = match unsafe {
+            library.get::<MidiExtensionEntryFnV1>(MIDI_EXTENSION_ENTRY_SYMBOL_V1)
+        } {
+            Ok(entry) => {
+                // SAFETY: the optional symbol follows the same static-table
+                // lifetime contract as the primary plugin entry.
+                let pointer = unsafe { entry() };
+                let extension = unsafe { pointer.as_ref() }
+                    .context("MIDI extension entry returned a null API table")?;
+                if extension.struct_size < MIDI_EXTENSION_V1_0_SIZE {
+                    bail!("MIDI extension API table is truncated");
+                }
+                if !is_midi_extension_compatible(extension.api_version) {
+                    bail!(
+                        "MIDI extension ABI {:#010x} is incompatible",
+                        extension.api_version
+                    );
+                }
+                Some(extension)
+            }
+            Err(_) => None,
+        };
         let surface_extension = match unsafe {
             library.get::<SurfaceExtensionEntryFnV1>(SURFACE_EXTENSION_ENTRY_SYMBOL_V1)
         } {
@@ -197,6 +221,7 @@ impl NativeLoadedPlugin {
             api,
             program_extension,
             surface_extension,
+            midi_extension,
             _host_context: host_context,
             host_api,
             _library: library,
@@ -249,6 +274,13 @@ pub(crate) struct NativePluginInstance<'plugin> {
 impl NativePluginInstance<'_> {
     pub fn supports_program_editing(&self) -> bool {
         self.plugin.program_extension.is_some()
+    }
+
+    /// The `MIDI_FAMILY_*` bits this plug-in asked to receive wide, or zero.
+    pub fn midi2_families(&self) -> u32 {
+        self.plugin
+            .midi_extension
+            .map_or(0, |extension| extension.families)
     }
 
     pub fn activate_surface(
@@ -509,6 +541,7 @@ impl NativePluginInstance<'_> {
         output_channels: u32,
         midi_events: &[MidiEventV1],
         parameter_events: &[ParameterEventV1],
+        midi2_events: &[MidiEventV2],
     ) -> Result<()> {
         if !self.active {
             bail!("plugin instance is not active");
@@ -571,6 +604,12 @@ impl NativePluginInstance<'_> {
                 parameter_events.as_ptr()
             },
             parameter_event_count,
+            midi2_events: if midi2_events.is_empty() {
+                ptr::null()
+            } else {
+                midi2_events.as_ptr()
+            },
+            midi2_event_count: midi2_events.len() as u32,
         };
         let status = unsafe { (self.plugin.api.process)(self.handle, &block) };
         check_status(status, "process")

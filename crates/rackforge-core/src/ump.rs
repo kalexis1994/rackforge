@@ -242,6 +242,37 @@ pub fn read_packet(
     }
 }
 
+/// Reads a whole buffer of packets, the way a transport receives them:
+/// channel-voice messages become host packets with their width and go to
+/// `packets` with their group; system messages (clock, start, stop, song
+/// position) go to `system` as their bytes; whatever produced no event is
+/// reported to `unread`. Every event lands at `frame`. Stops at the first
+/// truncated packet, which a transport should treat as a framing fault.
+pub fn read_stream(
+    words: &[u32],
+    frame: u32,
+    packets: &mut impl FnMut(u8, rackforge_midi_api::MidiPacket),
+    system: &mut impl FnMut(u8, MidiEventV1),
+    unread: &mut impl FnMut(Unread),
+) -> Result<(), UmpError> {
+    let mut at = 0;
+    while at < words.len() {
+        let read = read_packet(
+            &words[at..],
+            frame,
+            &mut |group, event| match event.to_packet() {
+                Some(packet) => packets(group, packet),
+                None => system(group, event.to_midi1()),
+            },
+        )?;
+        if let Some(why) = read.unread {
+            unread(why);
+        }
+        at += read.consumed;
+    }
+    Ok(())
+}
+
 /// Writes one event as a packet into `out`, returning how many words it
 /// took: two for a channel-voice message (type 4), one for a system message
 /// (type 1). A note-off without a measured velocity is written with
@@ -451,6 +482,57 @@ mod tests {
         };
         assert_eq!(write_packet(1, &position, &mut words), 1);
         assert_eq!(read_one(&words[..1]).1, [(1, position)]);
+    }
+
+    /// A transport's buffer -- a timestamp, a byte note, a wide note, a
+    /// clock tick, a per-note controller -- becomes two packets (one wide),
+    /// one system message and one named leftover, in order.
+    #[test]
+    fn a_stream_becomes_packets_system_messages_and_leftovers() {
+        let words = [
+            0x0020_1234,
+            0x2390_3c64,
+            0x4491_3d00,
+            0xabcd_0000,
+            0x15f8_0000,
+            0x4600_3c01,
+            0x1234_5678,
+        ];
+        let mut packets = Vec::new();
+        let mut system = Vec::new();
+        let mut leftovers = Vec::new();
+        read_stream(
+            &words,
+            11,
+            &mut |group, packet| packets.push((group, packet)),
+            &mut |group, event| system.push((group, event.data[0], event.length)),
+            &mut |why| leftovers.push(why),
+        )
+        .unwrap();
+        assert_eq!(packets.len(), 2);
+        assert_eq!(packets[0].0, 3);
+        assert_eq!(
+            (packets[0].1.frame, packets[0].1.data, packets[0].1.wide),
+            (11, [0x90, 60, 100], None)
+        );
+        assert_eq!(packets[1].0, 4);
+        assert_eq!(
+            (packets[1].1.data, packets[1].1.wide),
+            ([0x91, 61, 0x55], Some(0xabcd))
+        );
+        assert_eq!(system, [(5, 0xf8, 1)]);
+        assert_eq!(leftovers, [Unread::Utility, Unread::NoByteForm(0)]);
+        assert_eq!(
+            read_stream(&words[..2], 0, &mut |_, _| {}, &mut |_, _| {}, &mut |_| {}),
+            Ok(())
+        );
+        assert_eq!(
+            read_stream(&words[..3], 0, &mut |_, _| {}, &mut |_, _| {}, &mut |_| {}),
+            Err(UmpError::Truncated {
+                needed: 2,
+                available: 1
+            })
+        );
     }
 
     /// A note-on the byte scale cannot whisper is still a note-on, and its

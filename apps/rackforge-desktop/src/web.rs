@@ -560,6 +560,7 @@ fn release_injected_midi(state: &WebState) {
                 source: crate::desktop_audio::VIRTUAL_MIDI_SOURCE_KEY,
                 length: 3,
                 data: [0xb0 | channel, controller, value],
+                wide: None,
             });
         }
     }
@@ -2277,6 +2278,7 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
                     source: crate::desktop_audio::VIRTUAL_MIDI_SOURCE_KEY,
                     length: 3,
                     data: message.bytes(),
+                    wide: None,
                 };
                 match try_injected_midi(state, packet) {
                     Ok(true) => {
@@ -2571,6 +2573,7 @@ mod tests {
             source: crate::desktop_audio::VIRTUAL_MIDI_SOURCE_KEY,
             length: 3,
             data: [0x90, 60, 100],
+            wide: None,
         };
 
         let (retired_sender, retired_receiver) = mpsc::sync_channel(1);

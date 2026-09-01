@@ -1247,6 +1247,7 @@ impl DesktopAudio {
             source: VIRTUAL_MIDI_SOURCE_KEY,
             length: 3,
             data: [0x90, 60, 100],
+            wide: None,
         }))?;
         let sender = self.command_sender.clone();
         thread::Builder::new()
@@ -1257,6 +1258,7 @@ impl DesktopAudio {
                     source: VIRTUAL_MIDI_SOURCE_KEY,
                     length: 3,
                     data: [0x80, 60, 0],
+                    wide: None,
                 }));
             })?;
         Ok(())
@@ -1287,6 +1289,7 @@ impl DesktopAudio {
                     source,
                     length: 3,
                     data,
+                    wide: None,
                 })
                 .map_err(|error| {
                     anyhow::anyhow!("MIDI queue rejected an injected note: {error}")
@@ -1429,6 +1432,8 @@ pub(crate) struct MidiPacket {
     pub(crate) source: MidiSourceKey,
     pub(crate) length: u8,
     pub(crate) data: [u8; 3],
+    /// The value at MIDI 2.0 width, from a transport that has one.
+    pub(crate) wide: Option<u32>,
 }
 
 impl MidiPacket {
@@ -1439,7 +1444,7 @@ impl MidiPacket {
                 frame: 0,
                 length: self.length,
                 data: self.data,
-                wide: None,
+                wide: self.wide,
             },
         }
     }
@@ -2906,6 +2911,7 @@ fn connect_midi_input(
                     source,
                     length: message.len() as u8,
                     data,
+                    wide: None,
                 })
                 .is_err()
             {
@@ -3093,6 +3099,7 @@ fn release_held_notes(sender: &SyncSender<MidiPacket>, telemetry: &AudioTelemetr
                 source: VIRTUAL_MIDI_SOURCE_KEY,
                 length: packet.length,
                 data: packet.data,
+                wide: None,
             })
             .is_err()
         {

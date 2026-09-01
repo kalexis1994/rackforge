@@ -278,6 +278,41 @@ impl Midi2Event {
         event
     }
 
+    /// The host's packet for this event, its width kept: a byte-origin
+    /// event is `MidiPacket::new` of its bytes, a wide one carries its value
+    /// beside the projection. `None` for a system message, which the packet
+    /// layer does not carry; a transport hands those to the clock instead.
+    /// `from_packet` of the result is this event again.
+    pub fn to_packet(&self) -> Option<MidiPacket> {
+        let bytes = self.to_midi1();
+        if bytes.data[0] >= 0xf0 {
+            return None;
+        }
+        if self.origin_7bit {
+            return MidiPacket::new(self.frame, &bytes.data[..bytes.length as usize]).ok();
+        }
+        let (index, value) = match self.message {
+            Midi2Message::NoteOff {
+                note,
+                velocity: Some(velocity),
+            } => (note, u32::from(velocity)),
+            Midi2Message::NoteOff {
+                note: _,
+                velocity: None,
+            }
+            | Midi2Message::ProgramChange { .. }
+            | Midi2Message::Raw { .. } => {
+                return MidiPacket::new(self.frame, &bytes.data[..bytes.length as usize]).ok();
+            }
+            Midi2Message::NoteOn { note, velocity } => (note, u32::from(velocity)),
+            Midi2Message::PolyPressure { note, pressure } => (note, pressure),
+            Midi2Message::ControlChange { controller, value } => (controller, value),
+            Midi2Message::ChannelPressure { pressure } => (0, pressure),
+            Midi2Message::PitchBend { value } => (0, value),
+        };
+        MidiPacket::wide(self.frame, bytes.data[0], index, value).ok()
+    }
+
     pub fn to_midi1(&self) -> MidiEventV1 {
         let ch = self.channel & 0x0f;
         let (length, data): (u8, [u8; 3]) = match self.message {
@@ -525,6 +560,80 @@ mod tests {
         assert_eq!(event.to_midi1().data, pedal.data);
         let whisper = Midi2Event::from_packet(&MidiPacket::wide(0, 0x90, 60, 7).unwrap());
         assert_eq!(whisper.to_midi1().data, [0x90, 60, 1]);
+    }
+
+    /// Into a packet and back is the identity on every message the packet
+    /// layer carries, at either width; a system message has no packet.
+    #[test]
+    fn a_packet_is_the_event_again() {
+        let mut cases = 0;
+        for origin_7bit in [true, false] {
+            for value in [
+                0u32,
+                1,
+                0x1ff,
+                0x200,
+                0x7fff,
+                0x8000,
+                0xffff,
+                0x8000_0000,
+                u32::MAX,
+            ] {
+                let velocity = value as u16;
+                let messages = [
+                    Midi2Message::NoteOff {
+                        note: 60,
+                        velocity: Some(velocity),
+                    },
+                    Midi2Message::NoteOn { note: 61, velocity },
+                    Midi2Message::PolyPressure {
+                        note: 1,
+                        pressure: value,
+                    },
+                    Midi2Message::ControlChange {
+                        controller: 64,
+                        value,
+                    },
+                    Midi2Message::ChannelPressure { pressure: value },
+                    Midi2Message::PitchBend { value },
+                ];
+                for message in messages {
+                    let event = Midi2Event {
+                        frame: 3,
+                        channel: 5,
+                        message,
+                        origin_7bit,
+                    };
+                    // A byte-origin event must be one a byte can express.
+                    let event = if origin_7bit {
+                        Midi2Event::from_midi1(&event.to_midi1())
+                    } else {
+                        event
+                    };
+                    let packet = event.to_packet().unwrap();
+                    assert_eq!(packet.wide.is_none(), event.origin_7bit);
+                    assert_eq!(packet.data, event.to_midi1().data);
+                    assert_eq!(Midi2Event::from_packet(&packet), event);
+                    cases += 1;
+                }
+            }
+        }
+        assert_eq!(cases, 2 * 9 * 6);
+        let program = Midi2Event::from_midi1(&MidiEventV1 {
+            frame: 0,
+            length: 2,
+            data: [0xc3, 9, 0],
+        });
+        assert_eq!(
+            Midi2Event::from_packet(&program.to_packet().unwrap()),
+            program
+        );
+        let clock = Midi2Event::from_midi1(&MidiEventV1 {
+            frame: 0,
+            length: 1,
+            data: [0xf8, 0, 0],
+        });
+        assert_eq!(clock.to_packet(), None);
     }
 
     #[test]

@@ -581,6 +581,29 @@ and strikes one string fewer. The model plays the strike softer and darker
 (velocity-to-felt path) and raises the aftersound — the unstruck third
 string is all aftersound.
 
+### Velocity at MIDI 2.0 width (tested)
+
+The instrument declares two message families wide to the host -- notes and
+controllers -- and receives them at MIDI 2.0 widths: a 16-bit velocity, a
+release velocity that says whether it was measured, 32-bit pedals. A
+seven-bit source is flagged as such by the host (`ORIGIN_7BIT`: the top
+seven bits are the byte it came from) and is routed through exactly the
+byte path the engine always had, so nothing a MIDI 1.0 keyboard plays has
+changed, sample for sample; the chromatic render set is md5-identical
+through the packaged wasm. Only a velocity no byte can express takes the
+wide path, landing between the 127 steps the byte scale offered: two
+velocities that round to the same byte are two different strikes, and the
+harder one is louder. MIDI 2.0 keeps velocity 0 a note-on; the engine plays
+it as its softest calibrated strike, one seven-bit step. The damper still
+reads a measured release in seven-bit steps today.
+
+The VST3 wrapper used to round the host's float velocity to a byte before any
+instrument saw it. It now asks whether the value sits on the `k / 127` grid
+every MIDI 1.0 source produces (within a millionth) and, if so, sends that
+byte, lifted and flagged; anything between grid points -- a controller with
+more than 128 levels, a note the host generated itself, a half-pedal drawn
+as an automation curve -- is sent whole.
+
 ### Release velocity: how the key was let go (tested)
 
 A real Note Off carries how fast the key came up, and until now the engine

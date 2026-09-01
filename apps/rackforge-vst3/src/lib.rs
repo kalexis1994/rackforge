@@ -9,6 +9,7 @@ mod web_host;
 mod webview_env;
 
 use engine::{RackForgeEngine, VstPluginModel};
+use rackforge_core::midi2::{Midi2Event, Midi2Message};
 use rackforge_plugin_api::{
     ParameterDescriptor, ParameterKind,
     abi::{MidiEventV1, ParameterEventV1},
@@ -491,7 +492,7 @@ impl VstMidiEvents {
 }
 
 impl Iterator for VstMidiEvents {
-    type Item = MidiEventV1;
+    type Item = Midi2Event;
 
     fn next(&mut self) -> Option<Self::Item> {
         let list = unsafe { ComRef::from_raw(self.list) }?;
@@ -545,16 +546,78 @@ impl Iterator for VstMidiEvents {
     }
 }
 
-fn midi_event(frame: u32, status: u8, channel: i16, note: i16, value: f32) -> MidiEventV1 {
-    MidiEventV1 {
-        frame,
-        length: 3,
-        data: [
-            status | (channel.clamp(0, 15) as u8),
-            note.clamp(0, 127) as u8,
-            (value.clamp(0.0, 1.0) * 127.0).round() as u8,
-        ],
+/// The byte a host's normalized value came from, if it came from one.
+///
+/// Every MIDI 1.0 source reaches a VST3 processor as `k / 127`, and a value
+/// within a millionth of that grid is treated as that byte -- float error in
+/// the host's division is a hundred times smaller. A value between grid
+/// points can only have come from a source with more resolution than a
+/// byte, and is kept whole.
+fn seven_bit_origin(value: f64) -> Option<u8> {
+    let value = value.clamp(0.0, 1.0);
+    let byte = (value * 127.0).round();
+    ((byte / 127.0 - value).abs() <= 1e-6).then_some(byte as u8)
+}
+
+/// A note event in the host's vocabulary.
+///
+/// This used to round the velocity to a byte, so a controller with more
+/// than 128 levels, or a host that produced the note itself, was cut to MIDI
+/// 1.0 before any instrument saw it. A seven-bit source now takes exactly
+/// the path it took then -- the same three bytes, lifted, and flagged as
+/// bytes so the instrument keeps its calibrated response for them -- and a
+/// value off that grid carries its full width.
+fn midi_event(frame: u32, status: u8, channel: i16, note: i16, value: f32) -> Midi2Event {
+    let channel = channel.clamp(0, 15) as u8;
+    let note = note.clamp(0, 127) as u8;
+    let value = f64::from(value).clamp(0.0, 1.0);
+    if let Some(byte) = seven_bit_origin(value) {
+        return Midi2Event::from_midi1(&MidiEventV1 {
+            frame,
+            length: 3,
+            data: [status | channel, note, byte],
+        });
     }
+    let message = match status {
+        0x90 => Midi2Message::NoteOn {
+            note,
+            velocity: (value * 65535.0).round() as u16,
+        },
+        0x80 => Midi2Message::NoteOff {
+            note,
+            velocity: Some((value * 65535.0).round() as u16),
+        },
+        _ => Midi2Message::PolyPressure {
+            note,
+            pressure: (value * f64::from(u32::MAX)).round() as u32,
+        },
+    };
+    Midi2Event {
+        frame,
+        channel,
+        message,
+        origin_7bit: false,
+    }
+}
+
+/// A controller from the host's parameter queues, in the vocabulary.
+///
+/// A plain controller gets the same seven-bit test as a note: a byte stays
+/// a byte, and a finer value -- a half-pedal drawn as an automation curve --
+/// keeps its 32 bits. Aftertouch and pitch bend keep their byte forms.
+fn controller_event(frame: u32, channel: u16, controller: u16, value: f64) -> Midi2Event {
+    if controller < 128 && seven_bit_origin(value).is_none() {
+        return Midi2Event {
+            frame,
+            channel: channel.min(15) as u8,
+            message: Midi2Message::ControlChange {
+                controller: controller as u8,
+                value: (value.clamp(0.0, 1.0) * f64::from(u32::MAX)).round() as u32,
+            },
+            origin_7bit: false,
+        };
+    }
+    Midi2Event::from_midi1(&controller_midi_event(frame, channel, controller, value))
 }
 
 #[derive(Clone)]
@@ -1156,7 +1219,7 @@ impl VstControllerEvents {
 }
 
 impl Iterator for VstControllerEvents {
-    type Item = MidiEventV1;
+    type Item = Midi2Event;
 
     fn next(&mut self) -> Option<Self::Item> {
         let changes = unsafe { ComRef::from_raw(self.changes) }?;
@@ -1173,7 +1236,7 @@ impl Iterator for VstControllerEvents {
                     continue;
                 }
                 let (channel, controller) = self.mapping?;
-                return Some(controller_midi_event(
+                return Some(controller_event(
                     (frame.max(0) as u32).min(self.frames.saturating_sub(1)),
                     channel,
                     controller,
@@ -1867,7 +1930,52 @@ mod tests {
 
     #[test]
     fn midi_conversion_clamps_channel_note_and_velocity() {
-        assert_eq!(midi_event(7, 0x90, 20, 200, 2.0).data, [0x9f, 127, 127]);
+        let event = midi_event(7, 0x90, 20, 200, 2.0);
+        assert!(event.origin_7bit);
+        assert_eq!(event.to_midi1().data, [0x9f, 127, 127]);
+    }
+
+    /// A value on the `k / 127` grid is the byte it came from, lifted and
+    /// flagged; a value between grid points keeps its width unflagged.
+    #[test]
+    fn a_seven_bit_source_stays_bytes_and_a_finer_one_keeps_its_width() {
+        let byte = midi_event(0, 0x90, 0, 60, 100.0 / 127.0);
+        assert!(byte.origin_7bit);
+        assert_eq!(byte.to_midi1().data, [0x90, 60, 100]);
+
+        let fine = midi_event(0, 0x90, 0, 60, 0.5);
+        assert!(!fine.origin_7bit);
+        assert_eq!(
+            fine.message,
+            Midi2Message::NoteOn {
+                note: 60,
+                velocity: 32768
+            }
+        );
+
+        let lifted = midi_event(0, 0x80, 0, 60, 0.3);
+        assert_eq!(
+            lifted.message,
+            Midi2Message::NoteOff {
+                note: 60,
+                velocity: Some(19661)
+            }
+        );
+
+        let pedal = controller_event(1, 0, 64, 0.5);
+        assert!(!pedal.origin_7bit);
+        assert_eq!(
+            pedal.message,
+            Midi2Message::ControlChange {
+                controller: 64,
+                value: 2_147_483_648
+            }
+        );
+        let pedal_byte = controller_event(1, 0, 64, 1.0);
+        assert!(pedal_byte.origin_7bit);
+        assert_eq!(pedal_byte.to_midi1().data, [0xB0, 64, 127]);
+        // Pitch bend keeps its 14-bit byte form whatever the value.
+        assert!(controller_event(1, 0, 129, 0.3).origin_7bit);
     }
 
     #[test]

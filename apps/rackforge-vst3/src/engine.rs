@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, bail};
-use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage};
+use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage, midi2::Midi2Event};
 use rackforge_plugin_api::{
     ParameterSchema, PluginBranding, PluginKind, ResourceRequirement, WebSurfaceKind,
-    abi::{MidiEventV1, ParameterEventV1},
+    abi::ParameterEventV1,
 };
 use rackforge_repository::install_local_archive_replacing;
 use serde::Deserialize;
@@ -120,7 +120,7 @@ pub enum UnloadOutcome {
 pub struct RackForgeEngine {
     instance: PluginInstance<'static>,
     interleaved: Vec<f32>,
-    events: Vec<MidiEventV1>,
+    events: Vec<Midi2Event>,
     parameter_events: Vec<ParameterEventV1>,
     maximum_frames: usize,
 }
@@ -171,7 +171,7 @@ impl RackForgeEngine {
     pub fn process(
         &mut self,
         frames: usize,
-        incoming: impl IntoIterator<Item = MidiEventV1>,
+        incoming: impl IntoIterator<Item = Midi2Event>,
         parameters: impl IntoIterator<Item = ParameterEventV1>,
         left: &mut [f32],
         right: &mut [f32],
@@ -184,7 +184,8 @@ impl RackForgeEngine {
         for event in incoming.into_iter().take(MAX_REALTIME_EVENTS) {
             self.events.push(event);
         }
-        self.events.sort_unstable_by_key(|event| event.frame);
+        // Stable: two events the host placed on one frame keep its order.
+        self.events.sort_by_key(|event| event.frame);
         self.parameter_events.clear();
         for event in parameters.into_iter().take(MAX_REALTIME_EVENTS) {
             self.parameter_events.push(event);
@@ -193,7 +194,7 @@ impl RackForgeEngine {
             .sort_unstable_by_key(|event| event.frame);
         let output = &mut self.interleaved[..frames * 2];
         output.fill(0.0);
-        self.instance.process_interleaved(
+        self.instance.process_wide(
             &[],
             output,
             frames as u32,

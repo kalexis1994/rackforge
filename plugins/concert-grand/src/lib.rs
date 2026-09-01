@@ -26,7 +26,11 @@
 mod math;
 
 use math::{expf, log2f, powf, roundf, sincosf, sqrtf};
-use rackforge_plugin_sdk::{MidiEvent, ParameterEvent, Processor, export_processor};
+use rackforge_plugin_sdk::{
+    MIDI_FAMILY_CONTROL, MIDI_FAMILY_NOTE, MIDI2_FLAG_ORIGIN_7BIT, MIDI2_FLAG_RELEASE_MEASURED,
+    MIDI2_KIND_CONTROL_CHANGE, MIDI2_KIND_NOTE_OFF, MIDI2_KIND_NOTE_ON, MidiEvent, MidiEvent2,
+    ParameterEvent, Processor, export_processor,
+};
 
 /// The piano compass, A0..=C8.
 const LOW_NOTE: u8 = 21;
@@ -3288,8 +3292,15 @@ impl ConcertGrand {
     }
 
     fn start_voice(&mut self, channel: u8, note: u8, velocity: u8) {
+        self.start_voice_unit(channel, note, velocity as f32 / 127.0);
+    }
+
+    /// The strike with its velocity already on the unit scale. Seven-bit
+    /// sources come through `start_voice` and land here at exactly the value
+    /// they always produced; a 16-bit velocity lands between those steps.
+    fn start_voice_unit(&mut self, channel: u8, note: u8, velocity: f32) {
         let index = (note.clamp(LOW_NOTE, LOW_NOTE + NOTE_COUNT as u8 - 1) - LOW_NOTE) as usize;
-        let mut velocity = velocity as f32 / 127.0;
+        let mut velocity = velocity;
         // Una corda: the shifted hammer meets the strings with softer felt
         // (the unworn side) and strikes one string fewer.
         // The left pedal, through whichever mechanism this instrument has.
@@ -4953,6 +4964,60 @@ impl ConcertGrand {
         }
     }
 
+    /// The same instrument reached at MIDI 2.0 widths. Kinds outside the two
+    /// families this component declared never arrive here; the host keeps
+    /// them narrow.
+    ///
+    /// `ORIGIN_7BIT` means the host scaled a byte up: its top seven bits ARE
+    /// that byte, so the event is routed through the byte path and the
+    /// instrument behaves, sample for sample, as it did before it could hear
+    /// the width. Only a value no byte can express takes the wide path.
+    fn handle_wide(&mut self, event: &MidiEvent2) {
+        let channel = event.channel & 0x0f;
+        let note = event.index & 0x7f;
+        let seven_bit = event.flags & MIDI2_FLAG_ORIGIN_7BIT != 0;
+        match event.kind {
+            MIDI2_KIND_NOTE_ON => {
+                let velocity = event.value & 0xffff;
+                if seven_bit {
+                    self.start_voice(channel, note, (velocity >> 9) as u8);
+                } else {
+                    // MIDI 2.0 keeps velocity 0 a note-on. The instrument's
+                    // softest calibrated strike is one seven-bit step, and a
+                    // hammer thrown slower than that is that strike.
+                    let unit = (velocity as f32 / 65535.0).max(1.0 / 127.0);
+                    self.start_voice_unit(channel, note, unit);
+                }
+            }
+            MIDI2_KIND_NOTE_OFF => {
+                // The host raises `RELEASE_MEASURED` under exactly the rule
+                // `release_velocity` applies to bytes; the damper model reads
+                // the return in seven-bit steps today.
+                let release = if event.flags & MIDI2_FLAG_RELEASE_MEASURED != 0 {
+                    Self::release_velocity(0x80, ((event.value & 0xffff) >> 9) as u8)
+                } else {
+                    None
+                };
+                self.release(channel, note, release);
+            }
+            MIDI2_KIND_CONTROL_CHANGE => {
+                let unit = if seven_bit {
+                    (event.value >> 25) as f32 / 127.0
+                } else {
+                    event.value as f32 / u32::MAX as f32
+                };
+                match event.index {
+                    64 => self.set_pedal_level(unit),
+                    66 => self.set_sostenuto(event.value >= 1 << 31),
+                    67 => self.soft = unit,
+                    120 | 123 => self.all_notes_off(),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Cubic soft clip with unity gain at small levels; only a pedalled
     /// fortissimo cluster ever reaches it.
     /// The output ceiling, and it is LINEAR until the signal is nearly at it.
@@ -5570,9 +5635,32 @@ impl Processor for ConcertGrand {
 
     fn process(
         &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        midi: &[MidiEvent],
+        parameters: &[ParameterEvent],
+        frames: u32,
+        input_channels: u32,
+        output_channels: u32,
+    ) {
+        self.process_wide(
+            input,
+            output,
+            midi,
+            &[],
+            parameters,
+            frames,
+            input_channels,
+            output_channels,
+        );
+    }
+
+    fn process_wide(
+        &mut self,
         _input: &[f32],
         output: &mut [f32],
         midi: &[MidiEvent],
+        midi2: &[MidiEvent2],
         parameters: &[ParameterEvent],
         frames: u32,
         _input_channels: u32,
@@ -5620,6 +5708,7 @@ impl Processor for ConcertGrand {
         let sympathy_rate = SYMPATHY_RATE * self.controls.lab(15).min(4.0);
         let mut bridge_feed = self.bridge_feed;
         let mut midi_index = 0;
+        let mut midi2_index = 0;
         let mut parameter_index = 0;
 
         for frame in 0..frames as usize {
@@ -5629,6 +5718,13 @@ impl Processor for ConcertGrand {
                 }
                 self.handle_midi(event);
                 midi_index += 1;
+            }
+            while let Some(event) = midi2.get(midi2_index) {
+                if event.frame as usize != frame {
+                    break;
+                }
+                self.handle_wide(event);
+                midi2_index += 1;
             }
             while let Some(event) = parameters.get(parameter_index) {
                 if event.frame as usize != frame {
@@ -5947,7 +6043,12 @@ export_processor!(
     max_output_channels = 2,
     max_midi_events = 256,
     max_parameter_events = 256,
-    max_transfer_bytes = 4096
+    max_transfer_bytes = 4096,
+    // Notes and controllers arrive at MIDI 2.0 widths: 16-bit velocity for
+    // the hammer, a measured release for the damper, 32-bit pedals. A
+    // seven-bit source is flagged as such and takes the byte path it always
+    // took, bit for bit; see `handle_wide`.
+    midi2 = { max_events = 256, families = MIDI_FAMILY_NOTE | MIDI_FAMILY_CONTROL }
 );
 
 #[cfg(all(target_arch = "wasm32", not(test)))]
@@ -6306,6 +6407,121 @@ mod tests {
     /// The pure mapping, so the semantics are pinned in one place: 0 and 64
     /// are not measurements; everything else is; 64 sits exactly at neutral;
     /// the travel is short above it and long below it.
+    fn wide(frame: u32, kind: u8, index: u8, flags: u8, value: u32) -> MidiEvent2 {
+        MidiEvent2 {
+            frame,
+            kind,
+            channel: 0,
+            index,
+            flags,
+            value,
+            extra: 0,
+        }
+    }
+
+    fn render_wide(narrow: &[MidiEvent], wide: &[MidiEvent2], blocks: usize) -> Vec<f32> {
+        let mut piano = ConcertGrand::default();
+        assert!(piano.prepare(48_000.0, 256, 0, 2));
+        let mut out = Vec::new();
+        let mut block = vec![0.0f32; 512];
+        for i in 0..blocks {
+            let (n, w): (&[MidiEvent], &[MidiEvent2]) =
+                if i == 0 { (narrow, wide) } else { (&[], &[]) };
+            piano.process_wide(&[], &mut block, n, w, &[], 256, 0, 2);
+            out.extend_from_slice(&block);
+        }
+        out
+    }
+
+    /// A seven-bit source, delivered wide with its origin flagged, produces
+    /// the same samples as the bytes did: the width changes nothing it did
+    /// not have.
+    #[test]
+    fn a_seven_bit_origin_takes_the_byte_path_exactly() {
+        let bytes = render_wide(&[note_on(60, 100)], &[], 40);
+        let flagged = render_wide(
+            &[],
+            &[wide(
+                0,
+                MIDI2_KIND_NOTE_ON,
+                60,
+                MIDI2_FLAG_ORIGIN_7BIT,
+                (100u32 << 9) | 0x1ff,
+            )],
+            40,
+        );
+        assert!(bytes.iter().any(|s| *s != 0.0));
+        assert_eq!(bytes, flagged);
+
+        // Pedal down as a byte and as its upscaled 32-bit self: identical.
+        let pedal_bytes = render_wide(
+            &[
+                MidiEvent::new(0, [0xb0, 64, 100], 3).unwrap(),
+                note_on(60, 90),
+            ],
+            &[],
+            40,
+        );
+        let pedal_wide = render_wide(
+            &[],
+            &[
+                wide(
+                    0,
+                    MIDI2_KIND_CONTROL_CHANGE,
+                    64,
+                    MIDI2_FLAG_ORIGIN_7BIT,
+                    100u32 << 25,
+                ),
+                wide(
+                    0,
+                    MIDI2_KIND_NOTE_ON,
+                    60,
+                    MIDI2_FLAG_ORIGIN_7BIT,
+                    90u32 << 9,
+                ),
+            ],
+            40,
+        );
+        assert_eq!(pedal_bytes, pedal_wide);
+    }
+
+    /// Two velocities that round to the same byte are two different strikes
+    /// once the width is real, and the harder one is louder.
+    #[test]
+    fn a_true_sixteen_bit_velocity_is_audible() {
+        let peak = |samples: &[f32]| samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        let lower = render_wide(&[], &[wide(0, MIDI2_KIND_NOTE_ON, 60, 0, 100 << 9)], 40);
+        let upper = render_wide(
+            &[],
+            &[wide(0, MIDI2_KIND_NOTE_ON, 60, 0, (100 << 9) + 400)],
+            40,
+        );
+        assert_ne!(lower, upper);
+        assert!(peak(&upper) > peak(&lower));
+        // And the byte path sits where the wide scale says it should: a
+        // wide velocity at exactly 100/127 of full scale is the byte 100.
+        let exact = render_wide(
+            &[],
+            &[wide(
+                0,
+                MIDI2_KIND_NOTE_ON,
+                60,
+                0,
+                (100.0f32 / 127.0 * 65535.0).round() as u32,
+            )],
+            40,
+        );
+        let bytes = render_wide(&[note_on(60, 100)], &[], 40);
+        let difference = exact
+            .iter()
+            .zip(&bytes)
+            .fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+        assert!(
+            difference < 1e-3,
+            "wide and byte scales disagree by {difference}"
+        );
+    }
+
     #[test]
     fn release_velocity_semantics_are_pinned() {
         assert_eq!(ConcertGrand::release_velocity(0x80, 0), None);

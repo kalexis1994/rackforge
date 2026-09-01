@@ -610,25 +610,33 @@
          pieces of the same brass rather than as a caption. The screws sit in
          the outer 4% at each end, which is what the padding leaves clear. */
       .masthead p {
-        width: min(430px, 84vw);
+        width: min(300px, 78vw);
         /* The plate came 11.76:1, which read as a rule with writing on it. Its
            middle is brushed brass with nothing in it, so a third of that was
            taken out and the two ends spliced back together over a crossfade --
            both screws and both notched ends survive, and at 8:1 the brass has
            enough height for the engraving to be worth reading. */
         aspect-ratio: 8 / 1;
-        margin: 7px auto 0;
+        margin: 14px auto 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 0 7%;
+        padding: 0 6%;
         box-sizing: border-box;
         background: url("img/nameplate-long.webp") center / 100% 100% no-repeat;
         filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.55));
         color: var(--engraved);
         text-shadow: 0 1px 0 rgba(255, 238, 205, 0.4);
         font-style: italic;
-        font-size: 13px;
+        /* Sized so the engraving fills the plate rather than floating in it:
+           at 13px on the 430px plate the text spanned 212px of a 370px clear
+           field -- 57%, which reads as a caption floating in brass. The plate
+           is now 300px, the same width as the oval above it so the two stack
+           as one piece rather than the subtitle outgrowing the title, and the
+           engraving fills what is left between the screws instead of floating
+           in the middle of it. The 6% padding is measured, not chosen: the
+           screws run to 5.5% of the plate's width at each end. */
+        font-size: 13.5px;
         letter-spacing: 0.05em;
         white-space: nowrap;
         overflow: hidden;

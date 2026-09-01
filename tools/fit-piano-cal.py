@@ -182,39 +182,52 @@ def cost():
 
 ANCHOR_NOTES = {a: [n for n in NOTES if abs(n - a) <= 13] for a in ANCHORS}
 
-table = seed_table()
-write_cal(table)
-best, best_notes = cost()
-print(f"start cost {best:.1f}", flush=True)
+# Everything below runs only when this file is executed, never when it is
+# imported. It used to run at module level, so `import fit_piano_cal` -- to
+# borrow `measure` or `note_cost`, which is exactly what a second measuring
+# tool wants -- silently launched a twenty-minute recalibration and overwrote
+# tools/piano-cal.txt with its result. That happened twice in one afternoon
+# before anyone noticed the table had changed underneath them.
 
-# True per-anchor descent. Anchors 27+ semitones apart do not share any
-# interpolation region, so a whole group can be perturbed in one render and
-# each anchor judged on its OWN neighbourhood cost. The previous fitter moved
-# anchors in parity groups and could only ever produce two global constants.
-GROUPS = [[0, 4, 8], [1, 5, 9], [2, 6], [3, 7]]
-STEP = 0.3
-for sweep in range(int(sys.argv[1]) if len(sys.argv) > 1 else 3):
-    for param in [p for p in range(PARAMS) if p != LEVEL]:
-        for group in GROUPS:
-            for direction in (1 + STEP, 1 / (1 + STEP)):
-                trial = [row[:] for row in table]
-                for a in group:
-                    trial[a][param] = min(4.0, max(0.25, trial[a][param] * direction))
-                write_cal(trial)
-                _, notes = cost()
-                keep = [a for a in group
-                        if sum(notes.get(n, 0) for n in ANCHOR_NOTES[ANCHORS[a]])
-                        < sum(best_notes.get(n, 0) for n in ANCHOR_NOTES[ANCHORS[a]]) - 0.02]
-                if keep:
-                    for a in keep:
-                        table[a][param] = trial[a][param]
-                    write_cal(table)
-                    best, best_notes = cost()
-                else:
-                    write_cal(table)
-        print(f"sweep {sweep} param {param}: cost {best:.1f}", flush=True)
-    STEP *= 0.6
-write_cal(table)
-print("FINAL", best, flush=True)
-for row in table:
-    print(" ".join(f"{v:.3f}" for v in row), flush=True)
+def fit():
+    """The descent itself. It writes tools/piano-cal.txt as it goes."""
+    table = seed_table()
+    write_cal(table)
+    best, best_notes = cost()
+    print(f"start cost {best:.1f}", flush=True)
+
+    # True per-anchor descent. Anchors 27+ semitones apart do not share any
+    # interpolation region, so a whole group can be perturbed in one render and
+    # each anchor judged on its OWN neighbourhood cost. The previous fitter moved
+    # anchors in parity groups and could only ever produce two global constants.
+    GROUPS = [[0, 4, 8], [1, 5, 9], [2, 6], [3, 7]]
+    STEP = 0.3
+    for sweep in range(int(sys.argv[1]) if len(sys.argv) > 1 else 3):
+        for param in [p for p in range(PARAMS) if p != LEVEL]:
+            for group in GROUPS:
+                for direction in (1 + STEP, 1 / (1 + STEP)):
+                    trial = [row[:] for row in table]
+                    for a in group:
+                        trial[a][param] = min(4.0, max(0.25, trial[a][param] * direction))
+                    write_cal(trial)
+                    _, notes = cost()
+                    keep = [a for a in group
+                            if sum(notes.get(n, 0) for n in ANCHOR_NOTES[ANCHORS[a]])
+                            < sum(best_notes.get(n, 0) for n in ANCHOR_NOTES[ANCHORS[a]]) - 0.02]
+                    if keep:
+                        for a in keep:
+                            table[a][param] = trial[a][param]
+                        write_cal(table)
+                        best, best_notes = cost()
+                    else:
+                        write_cal(table)
+            print(f"sweep {sweep} param {param}: cost {best:.1f}", flush=True)
+        STEP *= 0.6
+    write_cal(table)
+    print("FINAL", best, flush=True)
+    for row in table:
+        print(" ".join(f"{v:.3f}" for v in row), flush=True)
+
+
+if __name__ == "__main__":
+    fit()

@@ -704,6 +704,47 @@ const CLACK_SCATTER: f32 = 0.14;
 /// wooden knock and wooden knocks are short, so this is now sixty
 /// milliseconds and the level stays where the reference wants it.
 const THUMP_T60_S: f32 = 0.06;
+/// The felt's hardening exponent across the compass, before any voicing.
+///
+/// In `F = K*x^p`, p is how sharply the felt stiffens as it is squashed, so it
+/// is p more than anything else that decides how much brighter a note gets when
+/// it is struck harder. Measured hammers sit around 1.5 to 3.5 (Chaigne and
+/// Askenfelt); before these were named the law read `3.2 + 1.8 * position` as
+/// two loose numbers in the middle of the strike, which lands the house voicing
+/// at 3.4 in the bass and 5.3 at the top -- above the measured range from one
+/// end of the keyboard to the other, and hard against the 5.0 clamp for the top
+/// third of it.
+///
+/// `tools/measure-dynamic-slope.py` says what that costs: between velocity 35
+/// and 116 the model's 2-4 kHz band gains 17.5 dB more than a real piano's in
+/// the bass and 19.4 dB more in the tenor. That is the harshness a player hears
+/// at forte, in the register they play in most.
+const FELT_EXPONENT_AT_BASS: f32 = 3.2;
+/// How much the exponent rises from the lowest note to the highest.
+const FELT_EXPONENT_RISE: f32 = 1.8;
+/// How much longer the hammer stays on the string for a soft blow than a hard
+/// one: `contact_time` multiplies its base by `1 + swing - 2*swing*(v - 0.5)`.
+///
+/// This no longer reaches the output. It shapes the analytic recipe's spectral
+/// cutoff, which goes as one over the contact -- but the simulated strike owns
+/// every partial it reaches, and since the strike budget was lifted every
+/// note-on gets that strike. Swept from 1.0 down to 0.25, the dynamic cost in
+/// `tools/measure-dynamic-slope.py` did not move by a hundredth of a decibel,
+/// four times running.
+///
+/// So the comment at `contact_time` describing this as how `dynamics` drives
+/// the felt describes the instrument as it was. Dynamics acts through
+/// `ACTION_SPAN_*` now. The constants stay because the recipe is still what
+/// runs above the simulated modes and for any note whose ladder outruns them.
+/// The action's dynamic span: how much faster the hammer arrives at full
+/// velocity than at none, as `velocity0 = V_ff * span^(v - 1)`. At the house
+/// Dynamics of 0.45 these give 14.1, a 5.41x range of hammer speed between
+/// velocity 35 and 116 -- and since the felt hardens with speed, this is what
+/// finally decides how much brighter a hard blow is.
+const ACTION_SPAN_BASE: f32 = 2.1;
+const ACTION_SPAN_PER_DYNAMICS: f32 = 6.3;
+const CONTACT_SWING_BASE: f32 = 1.0;
+const CONTACT_SWING_PER_DYNAMICS: f32 = 1.2;
 const FELT_EXPONENT_MIN: f32 = 1.2;
 const FELT_EXPONENT_MAX: f32 = 5.0;
 
@@ -2996,10 +3037,12 @@ impl ConcertGrand {
         // With the fourth-order felt this lands the measured cliffs: C4 ff
         // ~2.5 kHz, A4 ff ~3.5 kHz.
         let base = 0.002 - 0.0016 * position;
-        // `dynamics` sets how strongly velocity drives the felt; the felt's
-        // hardening (force exponent ~2.5) is rendered as this contact-time
-        // swing rather than simulated.
-        let swing = 1.0 + 1.2 * self.controls.dynamics;
+        // `dynamics` reaches the felt through ACTION_SPAN_* now, not through
+        // here: the simulated strike owns the partials it reaches, and it
+        // reaches all of them since the strike budget was lifted. Measured,
+        // moving CONTACT_SWING_BASE over four values changed the render by
+        // nothing at all. What survives here is the recipe's own cutoff.
+        let swing = CONTACT_SWING_BASE + CONTACT_SWING_PER_DYNAMICS * self.controls.dynamics;
         base * (1.0 + swing - swing * 2.0 * (velocity - 0.5))
     }
 
@@ -3279,7 +3322,7 @@ impl ConcertGrand {
                 // arrives at full velocity than at none. `dynamics` is the
                 // regulation -- a shallow action compresses the span, a deep
                 // one spreads it.
-                let span = 6.0 + 18.0 * self.controls.dynamics;
+                let span = ACTION_SPAN_BASE + ACTION_SPAN_PER_DYNAMICS * self.controls.dynamics;
                 let velocity0 = HAMMER_V_FF * powf(span, velocity - 1.0);
                 // The felt: K in N/m^p, hardening steeply toward the treble.
                 // Brightness and the Hammer Hard control are voicing -- the
@@ -3364,7 +3407,7 @@ impl ConcertGrand {
                 // enough and the hammer never separates, which this model is
                 // already known not to do -- but that is a guess and is
                 // written here as one.
-                let house = (3.2 + 1.8 * position)
+                let house = (FELT_EXPONENT_AT_BASS + FELT_EXPONENT_RISE * position)
                     * EXPONENT_AT_HOUSE
                     * powf(256.0, HOUSE_FELT_CORNER - 0.5);
                 let reach = self.controls.felt_corner_travel();

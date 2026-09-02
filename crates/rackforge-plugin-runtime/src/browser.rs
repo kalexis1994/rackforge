@@ -25,7 +25,9 @@ use crate::shared::{
     check_status, checked_samples, memory_range, ranges_overlap, read_f32, validate_parallel_plan,
     validate_realtime_events, write_f32, write_midi, write_parameters,
 };
-use crate::{ABI_VERSION_V1, ABI_VERSION_V1_1, MidiEvent, ParameterEvent, RuntimeLimits};
+use crate::{
+    ABI_VERSION_V1, ABI_VERSION_V1_1, MidiEvent, MidiEvent2, ParameterEvent, RuntimeLimits,
+};
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::rc::Rc;
@@ -899,6 +901,31 @@ impl PortableInstance {
         midi: &[MidiEvent],
     ) -> Result<()> {
         self.process_interleaved_with_events(input, output, frames, midi, &[])
+    }
+
+    /// The browser backend does not enter a component through the wide-MIDI
+    /// contract yet, so it asks for no family: the host narrows everything to
+    /// MIDI 1.0 before it gets here, exactly as for a component that never
+    /// adopted the extension.
+    pub fn midi2_families(&self) -> u32 {
+        0
+    }
+
+    /// The same block entry the native backend offers; with no family asked
+    /// for, `midi2` is always empty here.
+    pub fn process_interleaved_with_midi2(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        frames: u32,
+        midi: &[MidiEvent],
+        parameters: &[ParameterEvent],
+        midi2: &[MidiEvent2],
+    ) -> Result<()> {
+        if !midi2.is_empty() {
+            bail!("the browser backend does not carry wide MIDI events");
+        }
+        self.process_interleaved_with_events(input, output, frames, midi, parameters)
     }
 
     pub fn process_interleaved_with_events(

@@ -10,7 +10,7 @@
 
 use crate::PluginPackage;
 use anyhow::{Result, bail};
-use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
+use rackforge_plugin_api::abi::{MidiEventV1, MidiEventV2, ParameterEventV1};
 use rackforge_plugin_api::{
     ParameterSchema, PluginManifest, PreparedProgram, PresetCatalog, ProgramDocument,
     ProgramEditRequest, ProgramEditorView, ProgramFieldEditRequest, RuntimeDescriptor,
@@ -158,6 +158,11 @@ impl NativePluginInstance<'_> {
         self.absent()
     }
 
+    /// No plug-in loads here, so none asked for wide MIDI.
+    pub fn midi2_families(&self) -> u32 {
+        0
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn process_interleaved(
         &mut self,
@@ -168,6 +173,7 @@ impl NativePluginInstance<'_> {
         _output_channels: u32,
         _midi_events: &[MidiEventV1],
         _parameter_events: &[ParameterEventV1],
+        _midi2_events: &[MidiEventV2],
     ) -> Result<()> {
         self.absent()
     }

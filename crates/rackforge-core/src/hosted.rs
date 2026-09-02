@@ -29,6 +29,7 @@ const MAX_IMPORT_ARCHIVE_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 /// One validated RackForge plugin, independent of its execution backend.
 /// Retires Wasmtime's process-wide trap handlers; see the runtime crate.
 /// Re-exported here because hosts reach the runtime only through this crate.
+#[cfg(not(target_arch = "wasm32"))]
 pub use rackforge_plugin_runtime::unload_process_handlers;
 
 pub struct LoadedPlugin {

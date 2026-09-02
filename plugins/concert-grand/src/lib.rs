@@ -95,7 +95,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 117;
+pub const KNOB_COUNT: usize = 115;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -342,16 +342,6 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "BOARD_TOP_HZ",
         &BOARD_TOP_HZ,
         "Where the board's modes stop. Above this a real board still radiates, but",
-    ),
-    (
-        "BOARD_TOP_OVERLAP",
-        &BOARD_TOP_OVERLAP,
-        "Modes per bandwidth the bank holds above the ribbed-plate knee: the evenness of the top two octaves, note to note.",
-    ),
-    (
-        "BOARD_SIGN_TOP_HZ",
-        &BOARD_SIGN_TOP_HZ,
-        "Modes below this draw a random sign at the bridge; above it they sum with one sign, as a driving point does.",
     ),
     (
         "BOARD_BOTTOM_HZ",
@@ -1473,7 +1463,7 @@ fn board_t60(frequency: f32, loss: f32) -> f32 {
 /// the measurement calls for — and the rest is headroom, so the loop never
 /// runs out mid-compass. It did once, at 128: the bank stopped at 5 kHz and
 /// the 4-8 kHz octave came out 11 dB down.
-const BOARD_MODES: usize = 512;
+const BOARD_MODES: usize = 256;
 /// Where the board starts radiating efficiently; below it the drive of each
 /// mode falls toward zero at BOARD_RADIATION_ORDER times 6 dB per octave.
 /// Scale on the Skudrzyk normalisation of the board's mean mobility.
@@ -1498,12 +1488,6 @@ pub static BOARD_MIX: Knob = Knob::new(8.0);
 /// Where the board's modes stop. Above this a real board still radiates, but
 /// weakly and without resolvable structure.
 pub static BOARD_TOP_HZ: Knob = Knob::new(8500.0);
-/// Modes per bandwidth the bank holds above the ribbed-plate knee: the
-/// evenness of the top two octaves, note to note.
-pub static BOARD_TOP_OVERLAP: Knob = Knob::new(4.0);
-/// Modes below this draw a random sign at the bridge; above it they sum with
-/// one sign, as a driving point does, so the dense region has no fades.
-pub static BOARD_SIGN_TOP_HZ: Knob = Knob::new(1477.0);
 /// The lowest board mode. A grand's first soundboard mode sits near 60-70 Hz;
 /// the bank starts just below so the region around it is covered rather than
 /// bounded.
@@ -1554,12 +1538,7 @@ fn board_spacing(frequency: f32, density: f32) -> f32 {
         FLAT
     } else {
         let taper = FLAT * powf(frequency / KNEE_HZ, 1.92);
-        // Measured (2026-09-02) note to note against Pianoteq in the sixth
-        // and seventh octaves: at 0.6 modes per bandwidth the fundamental's
-        // level swung 8 dB rms between semitones, with 15-18 dB holes at C7
-        // and E7; the reference swings 3. Two modes per bandwidth is what
-        // the bank has room for and what the reference's evenness wants.
-        let floor_overlap = BOARD_LOSS_FACTOR.get() / BOARD_TOP_OVERLAP.get() * frequency;
+        let floor_overlap = 0.038 * frequency;
         if taper < floor_overlap {
             taper
         } else {
@@ -3397,14 +3376,7 @@ impl ConcertGrand {
             // ~±8 dB — a bank of equal modes is only a volume knob.
             mode.drive *= 0.65 + 0.8 * hash01(0xF00D ^ seed << 7);
             // The mode shape at the bridge is as often negative as positive.
-            // ... where the modes are sparse. Above the ribbed-plate knee, with
-            // four modes to a bandwidth, drawn signs made the transfer a
-            // Rayleigh sum -- fades of 15-20 dB wherever two neighbours
-            // cancelled, and the top two octaves' fundamentals fell into
-            // them note by note (measured: 8 dB rms between semitones against
-            // Pianoteq's 3). The overlapping region sums like a driving
-            // point instead, one sign, and the anti-resonances fill in.
-            if placed < BOARD_SIGN_TOP_HZ.get() && hash01(0x51C4 ^ seed << 9) < 0.5 {
+            if hash01(0x51C4 ^ seed << 9) < 0.5 {
                 mode.drive = -mode.drive;
             }
             // And the board does not radiate its own lowest modes any more
@@ -4495,21 +4467,12 @@ impl ConcertGrand {
             // Above ~8 kHz a mode contributes almost nothing to the contact
             // shape, and the strike runs on the audio thread: modes past it
             // keep the calibrated recipe's amplitude instead.
-            // At the top of the compass fewer than four partials sit under
-            // that ceiling and the simulation used to stand down from A6 up,
-            // leaving the top two octaves to the calibrated recipe -- and its
-            // per-note lottery: measured, the fundamental swung 8 dB rms
-            // between semitones where Pianoteq swings 3. The ceiling follows
-            // the note up so the first four partials are always simulated.
-            let sim_top = SIM_TOP_HZ.get().max(4.3 * f0).min(0.9 * nyquist);
-            while sim_modes < SIM_MODES.min(count) && frequencies[sim_modes] < sim_top {
+            while sim_modes < SIM_MODES.min(count)
+                && frequencies[sim_modes] < SIM_TOP_HZ.get().min(0.9 * nyquist)
+            {
                 sim_modes += 1;
             }
-            // Whatever partials the note has under the ceiling: at the top of
-            // the compass that is three, and the recipe they fell back to had
-            // a per-note lottery in it (measured, 8 dB rms between semitones
-            // against Pianoteq's 3).
-            if sim_modes >= 4.min(count) && sim_modes >= 2 && self.strike_budget > 0 {
+            if sim_modes >= 4 && self.strike_budget > 0 {
                 self.strike_budget -= 1;
                 // Everything the contact needs, in physical units.
                 //
@@ -4902,11 +4865,6 @@ impl ConcertGrand {
             // same stringing the hammer divides its mass over.
             let second = ((index as f32 - 5.0) / 5.0).clamp(0.0, 1.0) * (1.0 - 0.4 * shift);
             let third_string = ((index as f32 - 9.0) / 6.0).clamp(0.0, 1.0) * (1.0 - 0.75 * shift);
-            // How many strings push the bridge: the drain below is normalised
-            // by that, not by how hard each was struck.
-            let string_lanes = 1.0
-                + if second > 0.0 { 1.0 } else { 0.0 }
-                + if third_string > 0.0 { 1.0 } else { 0.0 };
             // Equal strings, equal shares. The old split gave the "second
             // string" 0.44 and the third 0.22 of the note, which is not how
             // a unison is strung.
@@ -4974,16 +4932,11 @@ impl ConcertGrand {
             // the coherent mode loses k*(w.w) per step, so dividing makes it
             // lose exactly `drained`, and the fast stage means what the
             // curve says.
-            //
-            // Normalised by the strings that push the bridge, with the same
-            // weight each -- which is how `cull` sums them. It used to be
-            // normalised by the strike's share per string (a per-note hash),
-            // while the cull summed them equally: the mismatch made a note
-            // whose first string took the blow drain the coherent stage twice
-            // as fast as its neighbour (measured on E7 against F7: k 0.051
-            // against 0.027, the fundamental 12 dB weaker at 100 ms), and the
-            // top two octaves came out uneven note to note.
-            let weights = string_lanes + HORIZONTAL_BRIDGE.get() * HORIZONTAL_BRIDGE.get();
+            let weights = shares[0] * 0.0
+                + 1.0
+                + second * second
+                + third_string * third_string
+                + HORIZONTAL_BRIDGE.get() * HORIZONTAL_BRIDGE.get();
             let coupling = drained / weights;
             // How fast a partial reaches its amplitude. It is NOT a swell.
             //
@@ -10629,99 +10582,6 @@ mod tests {
         piano.set_parameter(PARAM_LID, 0.5);
     }
 
-    /// Per note across the top: the board bank's response at the fundamental
-    /// and the second partial, the strike comb, and the hashed per-note
-    /// factors -- to attribute a note that speaks weaker than its neighbours.
-    #[test]
-    #[ignore]
-    fn note_to_note() {
-        let piano = prepared();
-        let rate = piano.sample_rate;
-        let bank = |hz: f32| -> f32 {
-            // H(z) = drive / (1 - a1 z^-1 - a2 z^-2) * (1 - z^-1) * velocity, summed.
-            let w = core::f32::consts::TAU * hz / rate;
-            let (sw, cw) = sincosf(w);
-            let (s2, c2) = sincosf(2.0 * w);
-            let (mut re, mut im) = (0.0f32, 0.0f32);
-            for mode in piano.board.iter().take(piano.board_count) {
-                let (dr, di) = (
-                    1.0 - mode.a1 * cw - mode.a2 * c2,
-                    mode.a1 * sw + mode.a2 * s2,
-                );
-                let d = dr * dr + di * di;
-                let (hr, hi) = (mode.drive * dr / d, -mode.drive * di / d);
-                let (nr, ni) = (1.0 - cw, sw);
-                let (pr, pi) = (
-                    (hr * nr - hi * ni) * mode.velocity,
-                    (hr * ni + hi * nr) * mode.velocity,
-                );
-                re += pr * 0.5 * (mode.pan_left + mode.pan_right);
-                im += pi * 0.5 * (mode.pan_left + mode.pan_right);
-            }
-            20.0 * log2f(sqrtf(re * re + im * im).max(1e-9)) * core::f32::consts::LOG10_2
-        };
-        for note in 86u8..=102 {
-            let f0 = piano.fundamental[(note - LOW_NOTE) as usize];
-            let x = piano.strike_point(note);
-            let comb1 = (core::f32::consts::PI * x).sin().abs();
-            let comb2 = (2.0 * core::f32::consts::PI * x).sin().abs();
-            let b = piano.inharmonicity_for(note);
-            let precision = 0.5 + 1.0 * hash01((note as u32).wrapping_mul(2_654_435_761) ^ 0x51);
-            let life = 0.88 + 0.24 * hash01((note as u32).wrapping_mul(2_246_822_519) ^ 0xA7);
-            println!(
-                "note {note:3} f0 {f0:7.1} B {b:.4}: bank n1 {:6.1} dB n2 {:6.1} dB | strike x {x:.4} comb n1 {comb1:.2} n2 {comb2:.2} | unison precision {precision:.2} string life {life:.2}",
-                bank(f0),
-                bank(2.0 * f0)
-            );
-        }
-    }
-
-    /// The hammer's force pulse per note across the top, and what it puts
-    /// into the fundamental and the second partial: a pulse whose length
-    /// crosses one and a half periods has a null there.
-    #[test]
-    #[ignore]
-    fn strike_spectrum_top() {
-        for note in 86u8..=102 {
-            CONTACT_TRACE.lock().unwrap().clear();
-            CONTACT_TRACE_ARMED.store(true, core::sync::atomic::Ordering::Relaxed);
-            let mut piano = prepared();
-            render(&mut piano, 128, &[note_on(note, 100)]);
-            CONTACT_TRACE_ARMED.store(false, core::sync::atomic::Ordering::Relaxed);
-            let trace = CONTACT_TRACE.lock().unwrap().clone();
-            let contact: Vec<f32> = trace
-                .iter()
-                .filter(|row| row[1] > 0.0)
-                .map(|row| row[1])
-                .collect();
-            if contact.is_empty() {
-                println!("note {note}: no contact");
-                continue;
-            }
-            let dt = 4.0e-6f32;
-            let f0 = 440.0 * powf(2.0, (note as f32 - 69.0) / 12.0);
-            let spectrum = |hz: f32| -> f32 {
-                let (mut re, mut im) = (0.0f32, 0.0f32);
-                for (i, force) in contact.iter().enumerate() {
-                    let (s, c) = sincosf(core::f32::consts::TAU * hz * i as f32 * dt);
-                    re += force * c;
-                    im -= force * s;
-                }
-                sqrtf(re * re + im * im)
-            };
-            let dc = spectrum(0.0).max(1e-9);
-            let db = |v: f32| 20.0 * log2f((v / dc).max(1e-9)) * core::f32::consts::LOG10_2;
-            println!(
-                "note {note:3} f0 {f0:7.1}: contact {:5.2} ms = {:4.2} periods | F(f0) {:6.1} dB F(2f0) {:6.1} dB F(3f0) {:6.1} dB rel DC",
-                contact.len() as f32 * dt * 1000.0,
-                contact.len() as f32 * dt * f0,
-                db(spectrum(f0)),
-                db(spectrum(2.0 * f0)),
-                db(spectrum(3.0 * f0))
-            );
-        }
-    }
-
     #[test]
     #[ignore]
     fn board_curve() {
@@ -10765,24 +10625,6 @@ mod tests {
             line.push_str(&format!("{centre:.0}:{db:.1} "));
         }
         println!("board_curve modes={} {line}", piano.board_count);
-        // And at the fundamentals of the top notes, exactly: the transfer a
-        // note's first partial actually meets.
-        let mut tops = String::new();
-        for note in 86u8..=102 {
-            let f = piano.fundamental[(note - LOW_NOTE) as usize];
-            let w = core::f64::consts::TAU * f as f64 / FS;
-            let (mut re, mut im) = (0.0f64, 0.0f64);
-            for (i, x) in out.iter().enumerate() {
-                let a = w * i as f64;
-                re += *x as f64 * a.cos();
-                im -= *x as f64 * a.sin();
-            }
-            tops.push_str(&format!(
-                "{note}:{:.1} ",
-                10.0 * (re * re + im * im).max(1e-30).log10()
-            ));
-        }
-        println!("board_at_fundamentals {tops}");
     }
 
     #[test]

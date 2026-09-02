@@ -1910,8 +1910,8 @@
   },
   {
    "index": 102,
-   "id": "knob_board_bottom_hz",
-   "name": "BOARD_BOTTOM_HZ",
+   "id": "knob_board_top_overlap",
+   "name": "BOARD_TOP_OVERLAP",
    "page": "model_board",
    "order": 12,
    "kind": {
@@ -1930,6 +1930,46 @@
   },
   {
    "index": 103,
+   "id": "knob_board_sign_top_hz",
+   "name": "BOARD_SIGN_TOP_HZ",
+   "page": "model_board",
+   "order": 13,
+   "kind": {
+    "type": "float",
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "step": 0.001,
+    "default": 0.5
+   },
+   "flags": {
+    "automatable": true,
+    "modulatable": false,
+    "read_only": false,
+    "advanced": true
+   }
+  },
+  {
+   "index": 104,
+   "id": "knob_board_bottom_hz",
+   "name": "BOARD_BOTTOM_HZ",
+   "page": "model_board",
+   "order": 14,
+   "kind": {
+    "type": "float",
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "step": 0.001,
+    "default": 0.5
+   },
+   "flags": {
+    "automatable": true,
+    "modulatable": false,
+    "read_only": false,
+    "advanced": true
+   }
+  },
+  {
+   "index": 105,
    "id": "knob_open_mix",
    "name": "OPEN_MIX",
    "page": "model_air",
@@ -1949,7 +1989,7 @@
    }
   },
   {
-   "index": 104,
+   "index": 106,
    "id": "knob_undamped_low_hz",
    "name": "UNDAMPED_LOW_HZ",
    "page": "model_air",
@@ -1969,7 +2009,7 @@
    }
   },
   {
-   "index": 105,
+   "index": 107,
    "id": "knob_undamped_high_hz",
    "name": "UNDAMPED_HIGH_HZ",
    "page": "model_air",
@@ -1989,7 +2029,7 @@
    }
   },
   {
-   "index": 106,
+   "index": 108,
    "id": "knob_undamped_t60_low_s",
    "name": "UNDAMPED_T60_LOW_S",
    "page": "model_air",
@@ -2009,7 +2049,7 @@
    }
   },
   {
-   "index": 107,
+   "index": 109,
    "id": "knob_undamped_t60_high_s",
    "name": "UNDAMPED_T60_HIGH_S",
    "page": "model_air",
@@ -2029,7 +2069,7 @@
    }
   },
   {
-   "index": 108,
+   "index": 110,
    "id": "knob_undamped_mix",
    "name": "UNDAMPED_MIX",
    "page": "model_air",
@@ -2049,7 +2089,7 @@
    }
   },
   {
-   "index": 109,
+   "index": 111,
    "id": "knob_halo_rt60_s",
    "name": "HALO_RT60_S",
    "page": "model_air",
@@ -2069,7 +2109,7 @@
    }
   },
   {
-   "index": 110,
+   "index": 112,
    "id": "knob_halo_hp_hz",
    "name": "HALO_HP_HZ",
    "page": "model_air",
@@ -2089,7 +2129,7 @@
    }
   },
   {
-   "index": 111,
+   "index": 113,
    "id": "knob_halo_mix",
    "name": "HALO_MIX",
    "page": "model_air",
@@ -2109,7 +2149,7 @@
    }
   },
   {
-   "index": 112,
+   "index": 114,
    "id": "knob_lid_half_width_m",
    "name": "LID_HALF_WIDTH_M",
    "page": "model_air",
@@ -2129,7 +2169,7 @@
    }
   },
   {
-   "index": 113,
+   "index": 115,
    "id": "knob_lid_half_length_m",
    "name": "LID_HALF_LENGTH_M",
    "page": "model_air",
@@ -2149,7 +2189,7 @@
    }
   },
   {
-   "index": 114,
+   "index": 116,
    "id": "knob_mic_azimuth_rad",
    "name": "MIC_AZIMUTH_RAD",
    "page": "model_air",
@@ -2169,7 +2209,7 @@
    }
   },
   {
-   "index": 115,
+   "index": 117,
    "id": "knob_lid_closed_rad",
    "name": "LID_CLOSED_RAD",
    "page": "model_air",
@@ -2189,7 +2229,7 @@
    }
   },
   {
-   "index": 116,
+   "index": 118,
    "id": "knob_lid_open_rad",
    "name": "LID_OPEN_RAD",
    "page": "model_air",
@@ -2209,7 +2249,7 @@
    }
   },
   {
-   "index": 117,
+   "index": 119,
    "id": "knob_lid_reflect",
    "name": "LID_REFLECT",
    "page": "model_air",
@@ -2229,7 +2269,7 @@
    }
   },
   {
-   "index": 118,
+   "index": 120,
    "id": "knob_lid_closed_leak",
    "name": "LID_CLOSED_LEAK",
    "page": "model_air",
@@ -2249,7 +2289,7 @@
    }
   },
   {
-   "index": 119,
+   "index": 121,
    "id": "knob_lid_closed_hz",
    "name": "LID_CLOSED_HZ",
    "page": "model_air",
@@ -2269,7 +2309,7 @@
    }
   },
   {
-   "index": 120,
+   "index": 122,
    "id": "knob_lid_open_hz",
    "name": "LID_OPEN_HZ",
    "page": "model_air",
@@ -2289,7 +2329,7 @@
    }
   },
   {
-   "index": 121,
+   "index": 123,
    "id": "knob_sound_speed",
    "name": "SOUND_SPEED",
    "page": "model_air",
@@ -2309,7 +2349,7 @@
    }
   },
   {
-   "index": 122,
+   "index": 124,
    "id": "knob_room_volume_min_m3",
    "name": "ROOM_VOLUME_MIN_M3",
    "page": "model_air",
@@ -2329,7 +2369,7 @@
    }
   },
   {
-   "index": 123,
+   "index": 125,
    "id": "knob_room_volume_max_m3",
    "name": "ROOM_VOLUME_MAX_M3",
    "page": "model_air",
@@ -2349,7 +2389,7 @@
    }
   },
   {
-   "index": 124,
+   "index": 126,
    "id": "knob_mic_distance_min_m",
    "name": "MIC_DISTANCE_MIN_M",
    "page": "model_air",
@@ -2369,7 +2409,7 @@
    }
   },
   {
-   "index": 125,
+   "index": 127,
    "id": "knob_mic_distance_max_m",
    "name": "MIC_DISTANCE_MAX_M",
    "page": "model_air",
@@ -2389,7 +2429,7 @@
    }
   },
   {
-   "index": 126,
+   "index": 128,
    "id": "knob_mic_reference_m",
    "name": "MIC_REFERENCE_M",
    "page": "model_air",
@@ -2409,7 +2449,7 @@
    }
   },
   {
-   "index": 127,
+   "index": 129,
    "id": "knob_air_absorb_4k_per_m",
    "name": "AIR_ABSORB_4K_PER_M",
    "page": "model_air",
@@ -2429,7 +2469,7 @@
    }
   },
   {
-   "index": 128,
+   "index": 130,
    "id": "knob_mic_spacing_m",
    "name": "MIC_SPACING_M",
    "page": "model_air",
@@ -2449,7 +2489,7 @@
    }
   },
   {
-   "index": 129,
+   "index": 131,
    "id": "knob_mic_preamp",
    "name": "MIC_PREAMP",
    "page": "model_air",
@@ -2469,7 +2509,7 @@
    }
   },
   {
-   "index": 130,
+   "index": 132,
    "id": "knob_proximity_strength",
    "name": "PROXIMITY_STRENGTH",
    "page": "model_air",
@@ -2489,7 +2529,7 @@
    }
   },
   {
-   "index": 131,
+   "index": 133,
    "id": "knob_sympathy_rate",
    "name": "SYMPATHY_RATE",
    "page": "model_strings",
@@ -2509,7 +2549,7 @@
    }
   },
   {
-   "index": 132,
+   "index": 134,
    "id": "knob_impact_clang",
    "name": "IMPACT_CLANG",
    "page": "model_hammer",
@@ -2529,7 +2569,7 @@
    }
   },
   {
-   "index": 133,
+   "index": 135,
    "id": "knob_impact_pulse_tau_s",
    "name": "IMPACT_PULSE_TAU_S",
    "page": "model_hammer",
@@ -2549,7 +2589,7 @@
    }
   },
   {
-   "index": 134,
+   "index": 136,
    "id": "knob_air_highpass",
    "name": "AIR_HIGHPASS",
    "page": "model_air",
@@ -2569,7 +2609,7 @@
    }
   },
   {
-   "index": 135,
+   "index": 137,
    "id": "knob_room_mix",
    "name": "ROOM_MIX",
    "page": "model_air",
@@ -2589,7 +2629,7 @@
    }
   },
   {
-   "index": 136,
+   "index": 138,
    "id": "knob_hammer_mass_scale",
    "name": "HAMMER_MASS_SCALE",
    "page": "model_hammer",
@@ -2609,7 +2649,7 @@
    }
   },
   {
-   "index": 137,
+   "index": 139,
    "id": "knob_string_tension_n",
    "name": "STRING_TENSION_N",
    "page": "model_strings",
@@ -2629,7 +2669,7 @@
    }
   },
   {
-   "index": 138,
+   "index": 140,
    "id": "knob_felt_k_a0",
    "name": "FELT_K_A0",
    "page": "model_hammer",
@@ -2649,7 +2689,7 @@
    }
   },
   {
-   "index": 139,
+   "index": 141,
    "id": "knob_felt_k_decades",
    "name": "FELT_K_DECADES",
    "page": "model_hammer",
@@ -2669,7 +2709,7 @@
    }
   },
   {
-   "index": 140,
+   "index": 142,
    "id": "knob_felt_table_floor",
    "name": "FELT_TABLE_FLOOR",
    "page": "model_hammer",
@@ -2689,7 +2729,7 @@
    }
   },
   {
-   "index": 141,
+   "index": 143,
    "id": "knob_felt_bass_gain",
    "name": "FELT_BASS_GAIN",
    "page": "model_hammer",
@@ -2709,7 +2749,7 @@
    }
   },
   {
-   "index": 142,
+   "index": 144,
    "id": "knob_felt_treble_gain",
    "name": "FELT_TREBLE_GAIN",
    "page": "model_hammer",
@@ -2729,7 +2769,7 @@
    }
   },
   {
-   "index": 143,
+   "index": 145,
    "id": "knob_duplex_level",
    "name": "DUPLEX_LEVEL",
    "page": "model_strings",
@@ -2749,7 +2789,7 @@
    }
   },
   {
-   "index": 144,
+   "index": 146,
    "id": "knob_unison_beat_cap_hz",
    "name": "UNISON_BEAT_CAP_HZ",
    "page": "model_strings",
@@ -2769,7 +2809,7 @@
    }
   },
   {
-   "index": 145,
+   "index": 147,
    "id": "knob_unison_width",
    "name": "UNISON_WIDTH",
    "page": "model_strings",
@@ -2789,7 +2829,7 @@
    }
   },
   {
-   "index": 146,
+   "index": 148,
    "id": "knob_unison_jitter_spread",
    "name": "UNISON_JITTER_SPREAD",
    "page": "model_strings",
@@ -2809,7 +2849,7 @@
    }
   },
   {
-   "index": 147,
+   "index": 149,
    "id": "knob_stulov_epsilon",
    "name": "STULOV_EPSILON",
    "page": "model_hammer",
@@ -2829,7 +2869,7 @@
    }
   },
   {
-   "index": 148,
+   "index": 150,
    "id": "knob_stulov_tau_s",
    "name": "STULOV_TAU_S",
    "page": "model_hammer",
@@ -2849,7 +2889,7 @@
    }
   },
   {
-   "index": 149,
+   "index": 151,
    "id": "knob_string_hf_loss",
    "name": "STRING_HF_LOSS",
    "page": "model_strings",
@@ -2869,11 +2909,11 @@
    }
   },
   {
-   "index": 150,
+   "index": 152,
    "id": "knob_board_low_loss",
    "name": "BOARD_LOW_LOSS",
    "page": "model_board",
-   "order": 13,
+   "order": 15,
    "kind": {
     "type": "float",
     "minimum": 0.0,
@@ -2889,11 +2929,11 @@
    }
   },
   {
-   "index": 151,
+   "index": 153,
    "id": "knob_board_mean_cap",
    "name": "BOARD_MEAN_CAP",
    "page": "model_board",
-   "order": 14,
+   "order": 16,
    "kind": {
     "type": "float",
     "minimum": 0.0,
@@ -2909,7 +2949,7 @@
    }
   },
   {
-   "index": 152,
+   "index": 154,
    "id": "knob_sim_top_hz",
    "name": "SIM_TOP_HZ",
    "page": "model_hammer",
@@ -2929,7 +2969,7 @@
    }
   },
   {
-   "index": 153,
+   "index": 155,
    "id": "knob_hammer_v_ff",
    "name": "HAMMER_V_FF",
    "page": "model_hammer",
@@ -2949,7 +2989,7 @@
    }
   },
   {
-   "index": 154,
+   "index": 156,
    "id": "knob_contact_stretch",
    "name": "CONTACT_STRETCH",
    "page": "model_hammer",
@@ -2969,7 +3009,7 @@
    }
   },
   {
-   "index": 155,
+   "index": 157,
    "id": "knob_recipe_floor",
    "name": "RECIPE_FLOOR",
    "page": "model_misc",

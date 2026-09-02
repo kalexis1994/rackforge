@@ -59,6 +59,14 @@ impl Knob {
 /// knob compiled at zero has nothing to scale and takes the fader as it is.
 const KNOB_PARAM_BASE: u32 = (6 + LAB_COUNT + 18) as u32;
 
+/// `clamp` with the bounds in whichever order the knobs left them: a fader
+/// can drive a minimum above its maximum, and Rust's `clamp` panics on that,
+/// which in the wasm build is a trap and a piano that stops sounding.
+fn clamp_between(value: f32, a: f32, b: f32) -> f32 {
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    value.clamp(lo, hi)
+}
+
 fn knob_slot(index: u32) -> Option<usize> {
     let slot = index.checked_sub(KNOB_PARAM_BASE)? as usize;
     (slot < KNOB_COUNT).then_some(slot)
@@ -3367,7 +3375,11 @@ impl ConcertGrand {
                     * (hash01((i as u32).wrapping_mul(2_654_435_761)) - 0.5)
                     * (step - 1.0)
                     * 2.0;
-            let hz = (frequency * scatter).clamp(UNDAMPED_LOW_HZ.get(), UNDAMPED_HIGH_HZ.get());
+            let hz = clamp_between(
+                frequency * scatter,
+                UNDAMPED_LOW_HZ.get(),
+                UNDAMPED_HIGH_HZ.get(),
+            );
             // Shorter lengths ring less: the T60 falls across the bank.
             let t = i as f32 / (UNDAMPED_COUNT - 1) as f32;
             let t60 = UNDAMPED_T60_LOW_S.get()
@@ -4352,7 +4364,10 @@ impl ConcertGrand {
                 } else {
                     house + reach * (FELT_EXPONENT_MAX.get() - house)
                 }
-                .clamp(FELT_EXPONENT_MIN.get(), FELT_EXPONENT_MAX.get());
+                .clamp(
+                    FELT_EXPONENT_MIN.get().min(FELT_EXPONENT_MAX.get()),
+                    FELT_EXPONENT_MIN.get().max(FELT_EXPONENT_MAX.get()),
+                );
                 // K carries units of N/m^p, so moving p without moving K
                 // changes the FORCE, not the hardness. At the half millimetre
                 // a real hammer compresses, x^p collapses as p grows: raising
@@ -4376,7 +4391,8 @@ impl ConcertGrand {
                 // factory setting. One note in thirty moved, which is exactly
                 // how much of a bug this kind is: invisible unless every note
                 // is compared.
-                let house_exponent = house.clamp(FELT_EXPONENT_MIN.get(), FELT_EXPONENT_MAX.get());
+                let house_exponent =
+                    clamp_between(house, FELT_EXPONENT_MIN.get(), FELT_EXPONENT_MAX.get());
                 let stiffness = FELT_K_A0.get()
                     * powf(10.0, FELT_K_DECADES.get() * felt_position)
                     * bass_gain
@@ -10235,6 +10251,44 @@ mod tests {
             piano
                 .get_parameter(KNOB_PARAM_BASE + KNOB_COUNT as u32)
                 .is_none()
+        );
+    }
+
+    /// Every knob at both ends of its fader, with a note struck and rendered
+    /// at each: nothing may panic (a trap in wasm, a mute piano) and the
+    /// output must stay finite (a NaN in a delay line is a mute piano too).
+    /// Ignored because it moves global knobs; run it alone:
+    /// `cargo test every_knob_at_its_extremes -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn every_knob_at_its_extremes_still_plays() {
+        let mut offenders = Vec::new();
+        for (slot, (name, knob, _, default)) in TUNABLES.iter().enumerate() {
+            let index = KNOB_PARAM_BASE + slot as u32;
+            for fader in [0.0f64, 1.0] {
+                let outcome = std::panic::catch_unwind(|| {
+                    let mut piano = prepared();
+                    assert!(piano.set_parameter(index, fader));
+                    let out = render(&mut piano, 4096, &[note_on(60, 100)]);
+                    let out2 = render(&mut piano, 4096, &[note_on(24, 120), note_on(96, 60)]);
+                    out.iter().chain(out2.iter()).all(|s| s.is_finite())
+                });
+                match outcome {
+                    Ok(true) => {}
+                    Ok(false) => offenders.push(format!("{name} at {fader}: non-finite output")),
+                    Err(_) => offenders.push(format!("{name} at {fader}: PANIC")),
+                }
+                knob.set(*default);
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "knobs that break the instrument:
+{}",
+            offenders.join(
+                "
+"
+            )
         );
     }
 

@@ -95,7 +95,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 94;
+pub const KNOB_COUNT: usize = 95;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -429,6 +429,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "Stulov hysteresis memory time constant, seconds.",
     ),
     (
+        "STRING_HF_LOSS",
+        &STRING_HF_LOSS,
+        "The wire's viscoelastic loss rate at 4.4 kHz (1/s); grows with f^2.",
+    ),
+    (
         "SIM_TOP_HZ",
         &SIM_TOP_HZ,
         "How far up the strike simulation owns the partials (Hz).",
@@ -707,7 +712,7 @@ pub static TENSION_MAX_SHIFT: Knob = Knob::new(0.01);
 pub static TENSION_SMOOTHING: Knob = Knob::new(0.02861);
 /// A component whose squared magnitude falls below this is inaudible even
 /// summed eighty times: kill it and spend the arithmetic elsewhere.
-pub static DEAD_MAGNITUDE_SQUARED: Knob = Knob::new(3e-8);
+pub static DEAD_MAGNITUDE_SQUARED: Knob = Knob::new(3e-10);
 
 /// Parameter indices, matching the packaged schema.
 const PARAM_BRIGHTNESS: u32 = 0;
@@ -759,7 +764,7 @@ const LN_1000: f32 = 6.907_755;
 pub static RADIATION_COINCIDENCE: Knob = Knob::new(200.0);
 /// Above this the bridge stops taking the string's energy as readily: the
 /// board's mobility falls once its waves are confined between the ribs.
-pub static RADIATION_ROLLOFF_HZ: Knob = Knob::new(5000.0);
+pub static RADIATION_ROLLOFF_HZ: Knob = Knob::new(12000.0);
 /// The wave speed the bridge loss is calibrated at: a tenor string. A bass
 /// string is heavier, so its impedance is higher and the same bridge takes
 /// its energy more slowly; a treble string is lighter and gives it up faster.
@@ -2838,6 +2843,8 @@ pub static UNISON_JITTER_SPREAD: Knob = Knob::new(6.0);
 /// seconds (his: 2 microseconds). Shipped at 0.5 and 0.2 ms since 0.88.0.
 pub static STULOV_EPSILON: Knob = Knob::new(0.5);
 pub static STULOV_TAU_S: Knob = Knob::new(2.0e-4);
+/// The wire's viscoelastic loss rate at 4.4 kHz, in 1/s; grows with f^2.
+pub static STRING_HF_LOSS: Knob = Knob::new(5.0);
 /// How far up the strike simulation owns the partials, in Hz. It was 8 kHz,
 /// which left a C7 with three simulated partials and everything above them
 /// to the analytic recipe, whose felt cutoff is floored at 1.5 f0 and so
@@ -3544,7 +3551,8 @@ impl ConcertGrand {
             + INCOHERENT_RADIATION.get()
                 * RADIATION_RATE.get()
                 * Self::radiation_efficiency(radiating)
-                * self.bridge_speed_factor(f0);
+                * self.bridge_speed_factor(f0)
+            + 0.5 * Self::viscoelastic_loss(radiating);
         (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency)
     }
 
@@ -3581,7 +3589,8 @@ impl ConcertGrand {
                 * Self::radiation_efficiency(radiating)
                 * self.bridge_speed_factor(f0)
                 + bending)
-                / treble_life.max(0.05);
+                / treble_life.max(0.05)
+            + Self::viscoelastic_loss(radiating);
         // There is no register correction here any more, and that is the
         // point. One used to divide the whole note by up to 2.6 because the
         // bass rang too long; but the bass rang too long because the curve
@@ -3705,6 +3714,17 @@ impl ConcertGrand {
         let position = (12.0 * log2f(f0.max(1.0) / 27.5) / 87.0).clamp(0.0, 1.0);
         let speed = 2.0 * self.string_length(position) * f0;
         (speed / BRIDGE_REFERENCE_SPEED.get()).clamp(0.3, 1.5)
+    }
+
+    /// The wire's own high-frequency loss, growing with the square of the
+    /// frequency as a viscoelastic loss does. Measured on both references,
+    /// an A5's fifth partial (4.4 kHz) falls from -26 to -42 dB between 50
+    /// and 200 ms -- a T60 near half a second -- where the bridge channel
+    /// alone let it ring three times longer, and a C7's fundamental at
+    /// 2.1 kHz keeps its 1.7 s. STRING_HF_LOSS is the rate at 4.4 kHz, 1/s.
+    fn viscoelastic_loss(frequency: f32) -> f32 {
+        let r = frequency / 4400.0;
+        STRING_HF_LOSS.get() * r * r
     }
 
     fn radiation_efficiency(frequency: f32) -> f32 {

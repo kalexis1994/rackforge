@@ -489,6 +489,51 @@ a density law, not from any particular instrument. A measured soundboard
 response (commuted synthesis: J. O. Smith & S. A. Van Duyne, ICMC 1995) would
 be a sample by another name.
 
+### One path to the air: the board radiates, and radiates with its velocity (tested by measurement)
+
+The string reaches the air only through the bridge and the soundboard bank.
+Until 2026-09-02 there were two paths: the bank, and the string's own sum
+fed raw into the lid taps and the room's early reflections; and the string's
+partial amplitudes were coloured beforehand by a synthetic board response
+(three sines of scatter, a hash, a 66 Hz high-pass), so the board's effect
+was applied twice and the reflections were of a sound that never existed.
+Now the string amplitudes are what the strike left on the wire, the bank is
+the only radiator, and the lid and the room reflect what the bank radiates.
+
+Three things in the bank itself were found by driving it with an impulse and
+reading its third-octave response (`board_curve`, an ignored test):
+
+- **A displacement resonator passes everything below its own frequency with
+  a gain of the loss factor.** Summed over 256 modes of one sign that was a
+  +15 dB shelf under the whole bass -- the old bank measured flat to within
+  a decibel from 40 Hz to 1.6 kHz, a wire, not a board -- and it is what made
+  the bass sound thick and even. A board radiates with its velocity: every
+  mode now outputs its displacement difference scaled to unit gain at
+  resonance, and the mode shape at the bridge takes a random sign, as it
+  does on a real plate. Below the first mode the bank now falls away
+  (-55 dB at 40 Hz), and C1's fundamental sits 28 dB under its third
+  partial, where Salamander puts it.
+- **A bank of unit-gain peaks has a mean that rises with modal overlap.**
+  Skudrzyk's result is that a plate's mean mobility is flat with frequency
+  whatever its density and damping; each peak is now scaled by the square
+  root of its spacing over its bandwidth (`BOARD_MEAN_MOBILITY`), and the
+  measured mean is level to within a few decibels from 100 Hz to 6 kHz.
+- **The loss factor shipped at half of Ege and Boutillon's 2.3 %.** It is
+  2.3 % now; the modes above 1.5 kHz overlap instead of standing three
+  bandwidths apart, which is the raggedness the mid register used to have.
+
+Two corners remain as knobs: the 6th-order high-pass on each mode's drive
+(`RADIATION_CORNER_HZ`, 45 Hz) and a first-order fall-off of the drive
+below `BOARD_COINCIDENCE_HZ` (60 Hz). Measured on the chromatic grid against
+both references at fortissimo, the tenor's partial ladder, its 2-4 and
+4-8 kHz bands, its centroid and its envelope all sit inside the two
+references, and the compass is level within two decibels where it used to
+droop 10 dB into the treble. `BOARD_MIX` is 8.0 to put the peaks where the
+references' are. Left for the next steps: the treble's fourth and sixth
+partials are 15 dB too strong (the strike, not the board -- the side banks
+were ablated and did nothing), and pianissimo is bright in the bass and the
+treble (the hammer).
+
 ### Blooming (tested)
 
 A struck tone does not switch on: each partial swells in over a few of its

@@ -167,6 +167,21 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "How loud the action's broadband knock is, before the per-note calibration.",
     ),
     (
+        "BOARD_MEAN_MOBILITY",
+        &BOARD_MEAN_MOBILITY,
+        "Scale on the Skudrzyk normalisation of the board's mean mobility.",
+    ),
+    (
+        "BOARD_COINCIDENCE_HZ",
+        &BOARD_COINCIDENCE_HZ,
+        "Where the board starts radiating efficiently (Hz); below it each mode's drive falls off.",
+    ),
+    (
+        "BOARD_RADIATION_ORDER",
+        &BOARD_RADIATION_ORDER,
+        "Slope of that fall-off: 1 = 6 dB per octave, 2 = 12.",
+    ),
+    (
         "BOARD_LOSS_FACTOR",
         &BOARD_LOSS_FACTOR,
         "The soundboard's modal loss factor.",
@@ -437,7 +452,7 @@ const PARTIAL_BUDGET: usize = 900;
 /// Calibrated against the YDP Grand samples: A0's fundamental measures
 /// ~-40 dB against its strongest partial, 46 Hz ~-25 dB, 78 Hz ~0 dB — a
 /// steep transition this sixth-order corner reproduces.
-pub static RADIATION_CORNER_HZ: Knob = Knob::new(66.0);
+pub static RADIATION_CORNER_HZ: Knob = Knob::new(45.0);
 /// How deep the strike-point comb can cut. A finite bridge admittance keeps a
 /// real one to 10-20 dB dips, never a null. Measured on the YDP C2, whose
 /// ninth partial sits right on the ideal comb's zero: the real instrument has
@@ -958,6 +973,12 @@ struct BodyMode {
     a1: f32,
     a2: f32,
     drive: f32,
+    /// Turns the mode's displacement difference into its velocity, scaled
+    /// so the gain at resonance is one: a board radiates with its velocity,
+    /// and a displacement resonator would pass every frequency below its own
+    /// with a gain of the loss factor -- summed over hundreds of modes of one
+    /// sign, that was a +15 dB shelf under the whole bass.
+    velocity: f32,
     pan_left: f32,
     pan_right: f32,
 }
@@ -973,6 +994,7 @@ impl BodyMode {
             a1: 2.0 * r * cos,
             a2: -r * r,
             drive: (1.0 - r) * 2.0 * sin,
+            velocity: 1.0 / (2.0 * sincosf(0.5 * omega).0).max(1e-6_f32),
             pan_left: 1.0 - pan,
             pan_right: pan,
         }
@@ -981,9 +1003,10 @@ impl BodyMode {
     #[inline(always)]
     fn tick(&mut self, input: f32) -> f32 {
         let y = self.a1 * self.y1 + self.a2 * self.y2 + self.drive * input;
+        let out = (y - self.y1) * self.velocity;
         self.y2 = self.y1;
         self.y1 = y;
-        y
+        out
     }
 }
 
@@ -1108,7 +1131,7 @@ pub static KNOCK_LEVEL: Knob = Knob::new(0.028);
 /// low-frequency sustain because the model is still missing the blow the key
 /// and action deal to the board, and stretching this ring is a cheap way to
 /// counterfeit it. Fitting to that minimum would be fitting the symptom.
-pub static BOARD_LOSS_FACTOR: Knob = Knob::new(0.011);
+pub static BOARD_LOSS_FACTOR: Knob = Knob::new(0.023);
 
 /// The felt exponent's physical range. Outside it the hammer integration
 /// stops describing felt: below, the force law is too soft to separate the
@@ -1229,6 +1252,12 @@ fn board_t60(frequency: f32, loss: f32) -> f32 {
 /// runs out mid-compass. It did once, at 128: the bank stopped at 5 kHz and
 /// the 4-8 kHz octave came out 11 dB down.
 const BOARD_MODES: usize = 256;
+/// Where the board starts radiating efficiently; below it the drive of each
+/// mode falls toward zero at BOARD_RADIATION_ORDER times 6 dB per octave.
+/// Scale on the Skudrzyk normalisation of the board's mean mobility.
+pub static BOARD_MEAN_MOBILITY: Knob = Knob::new(0.5);
+pub static BOARD_COINCIDENCE_HZ: Knob = Knob::new(60.0);
+pub static BOARD_RADIATION_ORDER: Knob = Knob::new(1.0);
 
 /// Level of the board against the string sum that drives it. There is one
 /// board, so there is one gain; it is set by measurement against the YDP
@@ -1236,7 +1265,7 @@ const BOARD_MODES: usize = 256;
 /// Divides everything on its way to the output saturator, so that the
 /// loudest chord the instrument can play still has shape.
 pub static HEADROOM: Knob = Knob::new(0.182);
-pub static BOARD_MIX: Knob = Knob::new(1.0);
+pub static BOARD_MIX: Knob = Knob::new(8.0);
 
 /// Where the board's modes stop. Above this a real board still radiates, but
 /// weakly and without resolvable structure.
@@ -3069,9 +3098,21 @@ impl ConcertGrand {
             let placed = frequency * jitter;
             let pan = 0.35 + 0.30 * hash01(0x5EA1 ^ seed << 5);
             let mut mode = BodyMode::tune(placed, board_t60(placed, loss), pan, self.sample_rate);
+            // Skudrzyk: a plate's MEAN mobility is flat with frequency,
+            // whatever its modal density and damping. A bank of unit-gain
+            // peaks is not -- where the modes overlap more the mean rises --
+            // so each peak is scaled by the square root of its spacing over
+            // its bandwidth, and the mean comes out level.
+            let spacing_here = board_spacing(frequency, density);
+            let bandwidth = (loss * placed).max(1e-3);
+            mode.drive *= sqrtf(spacing_here / bandwidth) * BOARD_MEAN_MOBILITY.get();
             // A real plate's mobility is ragged: per-mode strength swings
             // ~±8 dB — a bank of equal modes is only a volume knob.
             mode.drive *= 0.65 + 0.8 * hash01(0xF00D ^ seed << 7);
+            // The mode shape at the bridge is as often negative as positive.
+            if hash01(0x51C4 ^ seed << 9) < 0.5 {
+                mode.drive = -mode.drive;
+            }
             // And the board does not radiate its own lowest modes any more
             // than it radiates a string's lowest partials.
             //
@@ -3088,6 +3129,15 @@ impl ConcertGrand {
             // Nothing in the test suite could catch it: every render this
             // model is measured against is one note, and one note buries it.
             mode.drive *= Self::board_radiation(placed);
+            // Below coincidence a plate radiates poorly: the near-field of
+            // neighbouring antinodes cancels. A first-order rise toward the
+            // corner keeps the bass fundamental where the references put it,
+            // well under its own second and third partials.
+            let ratio = powf(
+                placed / BOARD_COINCIDENCE_HZ.get(),
+                BOARD_RADIATION_ORDER.get(),
+            );
+            mode.drive *= ratio / (1.0 + ratio);
             // And a SIGN. A mode's transfer from the bridge to the ear is
             // the product of its shape at the drive point and its net
             // radiating area, and both alternate as the shapes gain nodal
@@ -3951,9 +4001,10 @@ impl ConcertGrand {
             // ladder. Radiating them at full strength is a synthesizer's
             // sub bass, not a piano's. Sixth-order: the YDP measurements show
             // -40 dB at 27.5 Hz against ~0 dB by 78 Hz.
-            let radiation = Self::board_radiation(frequency);
-            let (board, _) = Self::board_response(frequency);
-            let rough = (0.71 + 0.58 * hash01((note as u32) << 8 | n as u32)) * board * radiation;
+            // The string's own amplitudes carry no board colour: what the
+            // board does to them happens once, in the bank that radiates
+            // them, not twice.
+            let rough = 1.0;
             colour[count] = rough;
             // Bridge force, not string displacement: the ear hears the force
             // the string exerts on the bridge, proportional to the string's
@@ -5514,6 +5565,24 @@ impl ConcertGrand {
     }
 }
 
+impl ConcertGrand {
+    /// Re-derives everything `prepare` derives from the knobs -- the board
+    /// bank, the room and microphones, the halo, the undamped strings, the
+    /// lid -- so a tuning file changed while the instrument runs reaches the
+    /// parts that are only built once.
+    pub fn retune(&mut self) {
+        if self.sample_rate <= 0.0 {
+            return;
+        }
+        self.tune();
+        self.tune_board();
+        self.tune_undamped();
+        self.tune_halo();
+        self.tune_room();
+        self.tune_lid();
+    }
+}
+
 impl Processor for ConcertGrand {
     fn prepare(
         &mut self,
@@ -6291,8 +6360,10 @@ impl Processor for ConcertGrand {
 
             // The lid and rim reflect the near field back a few dozen
             // milliseconds late, differently per side.
-            let staged = excitation
-                + (board_left + board_right) * knob_board_mix
+            // What the lid and the room reflect is what the board radiates,
+            // not the string's own motion: the string reaches the air only
+            // through the bridge and the board.
+            let staged = (board_left + board_right) * knob_board_mix
                 + (undamped_left + undamped_right) * undamped_gain
                 + (open_left + open_right) * knob_open_mix * sympathy
                 + halo_left
@@ -6521,6 +6592,10 @@ mod tests {
     const FS: f64 = 16_000.0;
 
     fn prepared() -> Box<ConcertGrand> {
+        if let Ok(path) = std::env::var("CG_TUNING") {
+            let text = std::fs::read_to_string(&path).expect("CG_TUNING file");
+            let _ = apply_tuning(&text);
+        }
         let mut piano = Box::new(ConcertGrand::default());
         assert!(piano.prepare(FS, 512, 0, 2));
         piano
@@ -8267,6 +8342,13 @@ mod tests {
     #[test]
     #[ignore]
     fn render_reference_wavs() {
+        // CG_TUNING=<file>: every knob from a lab tuning file, applied before
+        // anything is prepared, so a voicing found by ear renders here too.
+        if let Ok(path) = std::env::var("CG_TUNING") {
+            let text = std::fs::read_to_string(&path).expect("CG_TUNING file");
+            let (set, _faders, complaints) = apply_tuning(&text);
+            eprintln!("tuning: {set} knobs from {path}; complaints: {complaints:?}");
+        }
         let out = std::env::var("CG_RENDER_DIR").unwrap_or_else(|_| ".".into());
         // The hammer's own parameters, for the measurement scripts.
         //
@@ -9907,31 +9989,81 @@ mod tests {
             "the partial did not swell in: {at_strike} -> {developed}"
         );
     }
+    /// The board bank's own frequency response, impulse in at the bridge,
+    /// summed left output out, in third-octave bands: what the radiator does
+    /// to whatever the strings hand it. `cargo test board_curve -- --ignored
+    /// --nocapture`.
+    #[test]
+    #[ignore]
+    fn board_curve() {
+        let mut piano = prepared();
+        let n = 1 << 17;
+        let mut out = vec![0.0f32; n];
+        for (i, slot) in out.iter_mut().enumerate() {
+            let input = if i == 0 { 1.0 } else { 0.0 };
+            let mut left = 0.0;
+            for mode in piano.board.iter_mut().take(piano.board_count) {
+                left += mode.tick(input) * mode.pan_left;
+            }
+            *slot = left;
+        }
+        // magnitude by naive DFT at band centres (cheap enough for a test)
+        let centres = [
+            40.0f32, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0, 400.0, 500.0,
+            630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0,
+            8000.0,
+        ];
+        let mut line = String::new();
+        for centre in centres {
+            let lo = centre / 1.122;
+            let hi = centre * 1.122;
+            let mut power = 0.0f64;
+            let mut count = 0;
+            let mut f = lo;
+            while f < hi {
+                let w = core::f64::consts::TAU * f as f64 / FS;
+                let (mut re, mut im) = (0.0f64, 0.0f64);
+                for (i, x) in out.iter().enumerate() {
+                    let a = w * i as f64;
+                    re += *x as f64 * a.cos();
+                    im -= *x as f64 * a.sin();
+                }
+                power += re * re + im * im;
+                count += 1;
+                f *= 1.02;
+            }
+            let db = 10.0 * (power / count as f64).max(1e-30).log10();
+            line.push_str(&format!("{centre:.0}:{db:.1} "));
+        }
+        println!("board_curve modes={} {line}", piano.board_count);
+    }
+
     #[test]
     fn the_lowest_notes_speak_through_upper_partials_not_the_fundamental() {
-        // Measured C1 spectra put the strongest partial around n=4–6 and the
+        // Measured C1 spectra put the strongest partial around n=3-6 and the
         // fundamental tens of dB down: the board cannot radiate below its
-        // first mode. The model's initial amplitudes must show the same shape.
+        // first mode. That is the RADIATOR's doing, so it is read off the
+        // render, not off the string's own amplitudes, which are honest.
         let mut piano = prepared();
-        render(&mut piano, 1, &[note_on(24, 100)]);
-        let voice = piano.voices.iter().find(|v| v.active).unwrap();
-        let amp = |i: usize| voice.partials[i].lane_magnitude_squared(0);
-        // Scan the transverse ladder only: nonlinear extras and the
-        // mechanism thump are appended after it.
-        let ladder = voice.partial_count.min(40);
-        let strongest = (0..ladder)
-            .max_by(|a, b| amp(*a).total_cmp(&amp(*b)))
-            .unwrap();
+        let frames = (FS * 0.6) as usize;
+        let out = render(&mut piano, frames, &[note_on(24, 100)]);
+        let left: Vec<f32> = out.chunks(2).map(|c| c[0]).collect();
+        let level = |hz: f64| -> f64 {
+            let w = core::f64::consts::TAU * hz / FS;
+            let (mut re, mut im) = (0.0f64, 0.0f64);
+            for (i, x) in left.iter().enumerate() {
+                let a = w * i as f64;
+                re += *x as f64 * a.cos();
+                im -= *x as f64 * a.sin();
+            }
+            (re * re + im * im).sqrt()
+        };
+        let f0 = 32.7032f64;
+        let fundamental = level(f0);
+        let strongest = (2..=8).map(|n| level(n as f64 * f0)).fold(0.0f64, f64::max);
         assert!(
-            (1..=26).contains(&strongest),
-            "strongest partial is n={}",
-            strongest + 1
-        );
-        assert!(
-            amp(0) < amp(strongest) * 0.25,
-            "fundamental {} vs strongest {}",
-            amp(0),
-            amp(strongest)
+            fundamental < strongest * 0.1,
+            "fundamental {fundamental} vs strongest {strongest}"
         );
     }
 

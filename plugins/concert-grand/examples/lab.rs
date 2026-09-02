@@ -237,9 +237,9 @@ fn render(score: &Path, wav: &Path, tuning: &Path) {
         last_ms = last_ms.max(onset + duration);
     }
     events.sort_by_key(|(at, _)| *at);
+    let faders = load_tuning(tuning, true);
     let mut piano = Box::new(ConcertGrand::default());
     assert!(piano.prepare(rate as f64, BLOCK as u32, 0, 2));
-    let faders = load_tuning(tuning, true);
     apply_faders(&mut piano, &faders);
     let total = ((last_ms + 3_000) * rate as u64 / 1000) as usize;
     let mut output = Vec::with_capacity(total * 2);
@@ -469,9 +469,10 @@ fn main() {
         }
     };
 
+    let first_faders = load_tuning(&options.tuning, true);
     let mut piano = Box::new(ConcertGrand::default());
     assert!(piano.prepare(rate as f64, BLOCK as u32, 0, 2));
-    for fader in load_tuning(&options.tuning, true) {
+    for fader in first_faders {
         let _ = fader_tx.send(fader);
     }
 
@@ -489,7 +490,9 @@ fn main() {
                     });
                 }
                 while let Ok((index, value)) = fader_rx.try_recv() {
-                    if !piano.set_parameter(index as u32, value as f64) {
+                    if index == usize::MAX {
+                        piano.retune();
+                    } else if !piano.set_parameter(index as u32, value as f64) {
                         eprintln!("fader.{index}: refused {value}");
                     }
                 }
@@ -541,6 +544,7 @@ fn main() {
             for fader in load_tuning(&options.tuning, true) {
                 let _ = fader_tx.send(fader);
             }
+            let _ = fader_tx.send((usize::MAX, 0.0));
         }
     }
 }

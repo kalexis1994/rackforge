@@ -343,6 +343,31 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         &FELT_K_A0,
         "The felt's stiffness at A0, in N/m^p, and how many decades it climbs to",
     ),
+    (
+        "SIM_TOP_HZ",
+        &SIM_TOP_HZ,
+        "How far up the strike simulation owns the partials (Hz).",
+    ),
+    (
+        "DUPLEX_LEVEL",
+        &DUPLEX_LEVEL,
+        "Level of the duplex segments' ring at 2.015 and 4.03 times the pitch.",
+    ),
+    (
+        "FELT_TREBLE_GAIN",
+        &FELT_TREBLE_GAIN,
+        "Multiplier on the felt stiffness at C8, fading to one at C4.",
+    ),
+    (
+        "FELT_BASS_GAIN",
+        &FELT_BASS_GAIN,
+        "Multiplier on the felt stiffness at A0, fading to one at C2.",
+    ),
+    (
+        "FELT_TABLE_FLOOR",
+        &FELT_TABLE_FLOOR,
+        "Position (0 = A0, 1 = C8) below which the felt tables are held at C2's values.",
+    ),
     ("FELT_K_DECADES", &FELT_K_DECADES, ""),
     (
         "HAMMER_V_FF",
@@ -1212,9 +1237,9 @@ pub static THUMP_T60_S: Knob = Knob::new(0.06);
 /// and 116 the model's 2-4 kHz band gains 17.5 dB more than a real piano's in
 /// the bass and 19.4 dB more in the tenor. That is the harshness a player hears
 /// at forte, in the register they play in most.
-pub static FELT_EXPONENT_AT_BASS: Knob = Knob::new(3.2);
+pub static FELT_EXPONENT_AT_BASS: Knob = Knob::new(2.3);
 /// How much the exponent rises from the lowest note to the highest.
-pub static FELT_EXPONENT_RISE: Knob = Knob::new(1.8);
+pub static FELT_EXPONENT_RISE: Knob = Knob::new(0.7);
 /// How much longer the hammer stays on the string for a soft blow than a hard
 /// one: `contact_time` multiplies its base by `1 + swing - 2*swing*(v - 0.5)`.
 ///
@@ -1239,7 +1264,7 @@ pub static ACTION_SPAN_PER_DYNAMICS: Knob = Knob::new(6.3);
 pub static CONTACT_SWING_BASE: Knob = Knob::new(1.0);
 pub static CONTACT_SWING_PER_DYNAMICS: Knob = Knob::new(1.2);
 pub static FELT_EXPONENT_MIN: Knob = Knob::new(1.2);
-pub static FELT_EXPONENT_MAX: Knob = Knob::new(5.0);
+pub static FELT_EXPONENT_MAX: Knob = Knob::new(3.5);
 
 /// Amplitude T60 of a board mode: `ln(10^3) / (π·f·η)`.
 fn board_t60(frequency: f32, loss: f32) -> f32 {
@@ -2705,8 +2730,23 @@ pub static STRING_TENSION_N: Knob = Knob::new(850.0);
 /// bands were fitted against. Measured together in `felt_sweep`, the pair
 /// shortens the fortissimo contact toward Askenfelt's times while moving
 /// the attack centroid under 6% -- the two constants are one decision.
-pub static FELT_K_A0: Knob = Knob::new(1.5e12);
-pub static FELT_K_DECADES: Knob = Knob::new(4.2);
+pub static FELT_K_A0: Knob = Knob::new(5.6e7);
+pub static FELT_K_DECADES: Knob = Knob::new(4.93);
+/// Position (0 = A0, 1 = C8) below which the felt tables are held at C2's values.
+pub static FELT_TABLE_FLOOR: Knob = Knob::new(0.172);
+/// Multiplier on the felt stiffness at A0, fading to one at C2.
+pub static FELT_BASS_GAIN: Knob = Knob::new(4.0);
+/// Multiplier on the felt stiffness at C8, fading to one at C4.
+pub static FELT_TREBLE_GAIN: Knob = Knob::new(1.0);
+/// Level of the duplex segments' ring at 2.015 and 4.03 times the pitch (notes above the middle).
+pub static DUPLEX_LEVEL: Knob = Knob::new(0.018);
+/// How far up the strike simulation owns the partials, in Hz. It was 8 kHz,
+/// which left a C7 with three simulated partials and everything above them
+/// to the analytic recipe, whose felt cutoff is floored at 1.5 f0 and so
+/// does not move with velocity: the treble was velocity-blind by
+/// construction. The simulated string is capped at SIM_MODES partials
+/// regardless, so the bass is unaffected.
+pub static SIM_TOP_HZ: Knob = Knob::new(20_000.0);
 /// Hammer speed at full velocity, m/s. Measured fortissimo hammers arrive at
 /// 5-7 m/s; pianissimo under 1.
 pub static HAMMER_V_FF: Knob = Knob::new(6.0);
@@ -4034,7 +4074,7 @@ impl ConcertGrand {
             // shape, and the strike runs on the audio thread: modes past it
             // keep the calibrated recipe's amplitude instead.
             while sim_modes < SIM_MODES.min(count)
-                && frequencies[sim_modes] < 8_000.0_f32.min(nyquist)
+                && frequencies[sim_modes] < SIM_TOP_HZ.get().min(0.9 * nyquist)
             {
                 sim_modes += 1;
             }
@@ -4122,55 +4162,31 @@ impl ConcertGrand {
                 // it did: only the fader's behaviour changes, not the
                 // instrument's default sound.
                 const HOUSE_BRIGHTNESS: f32 = 0.44;
-                const EXPONENT_AT_HOUSE: f32 = 0.62 + 0.76 * HOUSE_BRIGHTNESS;
-                const STIFFNESS_AT_HOUSE: f32 = 0.5 + 1.5 * HOUSE_BRIGHTNESS;
-                // Felt Corner spans the exponent's PHYSICAL range instead of
-                // multiplying into a wall.
-                //
-                // The exponent is clamped to 1.2..5.0 because the integration
-                // stops meaning anything outside it, and the lab curve --
-                // 256^(v-0.5), a factor of sixteen either way -- overshoots
-                // that clamp almost at once. The house value sits at 3.9 in
-                // the middle of the compass and 4.8 at the top, four fifths
-                // of the way up the range, so the fader ran out of room
-                // upward after a few percent of travel.
-                //
-                // Measured on C4, moving the fader from centre to 0.56
-                // changed the rendered note by 3.3 dB rms and moving it from
-                // 0.56 to 1.00 changed it by nothing at all: the top 44% of
-                // the control was dead, and dead by MORE than that in the
-                // treble, where the house exponent starts closer to the
-                // ceiling. (The renders differ bit for bit up there, which is
-                // why this went unnoticed -- the differences are numerical
-                // dust tens of dB below anything audible. A hash is not a
-                // measurement.)
-                //
-                // So the travel is mapped onto the headroom that actually
-                // exists on each side, which is different above and below and
-                // different in every register. Centre is unchanged by
-                // construction -- bit for bit, verified against a render made
-                // before the change -- so the instrument's voicing does not
-                // move.
-                //
-                // Measured after: the fader is live from about 0.35 to 1.00,
-                // against 0.28 to 0.545 before. It is NOT live below 0.35 --
-                // C4 renders bit for bit the same at 0.00 and at 0.20, where
-                // the exponent is 1.20 and 2.37 -- and that wall is NOT this
-                // mapping. It is downstream of the exponent and it is not yet
-                // identified.
-                //
-                // It is specifically NOT the calibrated recipe holding the
-                // level up, which is what a first pass here claimed:
-                // `RECIPE_FLOOR` is 0.0 and `SIM_MODES` equals `MAX_PARTIALS`,
-                // so wherever the integration runs it replaces the recipe
-                // outright and the recipe floors nothing. The likeliest
-                // remaining suspect is the contact itself -- soften the felt
-                // enough and the hammer never separates, which this model is
-                // already known not to do -- but that is a guess and is
-                // written here as one.
-                let house = (FELT_EXPONENT_AT_BASS.get() + FELT_EXPONENT_RISE.get() * position)
-                    * EXPONENT_AT_HOUSE
-                    * powf(256.0, HOUSE_FELT_CORNER.get() - 0.5);
+                // The felt as measured (Hall and Askenfelt; Chaigne and
+                // Askenfelt 1994): stiffness K and exponent p per note, C2
+                // 4e8 N/m^p and 2.3, C4 4.5e9 and 2.5, C7 1e12 and 3.0, both
+                // log-linear in position between them. The faders act on
+                // these as multipliers that are exactly one at the house
+                // voicing -- there is no second set of house factors.
+                // The tables stop at C2: below it the felt is C2's, not an
+                // extrapolation into a cushion that kept the A0 hammer on the
+                // string for eight milliseconds.
+                let felt_position = position.max(FELT_TABLE_FLOOR.get());
+                // Below C2 the hammers grow heavier faster than their felt
+                // softens: the bass felt is C2's times a gain that reaches
+                // FELT_BASS_GAIN at A0.
+                let bass_gain = 1.0
+                    + (FELT_BASS_GAIN.get() - 1.0)
+                        * (1.0 - position / FELT_TABLE_FLOOR.get().max(1e-3)).clamp(0.0, 1.0);
+                // And above C4 the measured C7 value leaves the second partial
+                // of the top octave as loud as its fundamental where both
+                // references have it 20 dB down: the top felt is voiced
+                // softer than the table by FELT_TREBLE_GAIN at C8, fading to
+                // one at C4.
+                let treble_gain = 1.0
+                    + (FELT_TREBLE_GAIN.get() - 1.0)
+                        * ((position - 0.448) / (1.0 - 0.448)).clamp(0.0, 1.0);
+                let house = FELT_EXPONENT_AT_BASS.get() + FELT_EXPONENT_RISE.get() * felt_position;
                 let reach = self.controls.felt_corner_travel();
                 let exponent = if reach < 0.0 {
                     house + reach * (house - FELT_EXPONENT_MIN.get())
@@ -4201,14 +4217,12 @@ impl ConcertGrand {
                 // factory setting. One note in thirty moved, which is exactly
                 // how much of a bug this kind is: invisible unless every note
                 // is compared.
-                let house_exponent = ((3.2 + 1.8 * position)
-                    * EXPONENT_AT_HOUSE
-                    * powf(256.0, HOUSE_FELT_CORNER.get() - 0.5))
-                .clamp(FELT_EXPONENT_MIN.get(), FELT_EXPONENT_MAX.get());
+                let house_exponent = house.clamp(FELT_EXPONENT_MIN.get(), FELT_EXPONENT_MAX.get());
                 let stiffness = FELT_K_A0.get()
-                    * powf(10.0, FELT_K_DECADES.get() * position)
+                    * powf(10.0, FELT_K_DECADES.get() * felt_position)
+                    * bass_gain
+                    * treble_gain
                     * self.controls.lab(7)
-                    * STIFFNESS_AT_HOUSE
                     * powf(10.0, 2.0 * (self.controls.brightness - HOUSE_BRIGHTNESS))
                     * powf(
                         1.0 / FELT_REFERENCE_COMPRESSION_M.get(),
@@ -4796,7 +4810,7 @@ impl ConcertGrand {
             // tone grows with v^1.7 and masks it while held, but after the
             // damper falls the ring stands alone, so a hard strike must not
             // leave proportionally more of it.
-            let level = 0.018 * powf(velocity, 1.7) * (1.0 - 0.45 * velocity) * 0.32;
+            let level = DUPLEX_LEVEL.get() * powf(velocity, 1.7) * (1.0 - 0.45 * velocity) * 0.32;
             for (slot, (ratio, seed)) in duplex.iter_mut().zip([(2.015_f32, 11), (4.03, 29)]) {
                 let jitter = powf(
                     2.0,
@@ -7760,6 +7774,9 @@ mod tests {
     #[test]
     #[ignore]
     fn how_long_the_hammer_stays() {
+        if let Ok(path) = std::env::var("CG_TUNING") {
+            let _ = apply_tuning(&std::fs::read_to_string(&path).expect("CG_TUNING file"));
+        }
         println!(
             "{:>5} {:>4} {:>12} {:>12} {:>8}",
             "note", "vel", "simulado", "pedido", "razon"

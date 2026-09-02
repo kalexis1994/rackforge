@@ -95,7 +95,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 97;
+pub const KNOB_COUNT: usize = 100;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -196,6 +196,16 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "The wave speed the bridge loss is calibrated at: a tenor string. A bass",
     ),
     (
+        "BRIDGE_IMPEDANCE_POWER",
+        &BRIDGE_IMPEDANCE_POWER,
+        "Power on the string's wave impedance in the bridge and wire losses: 1 = admittance over impedance.",
+    ),
+    (
+        "BRIDGE_REFERENCE_GAUGE_M",
+        &BRIDGE_REFERENCE_GAUGE_M,
+        "The gauge of the tenor wire the bridge loss is calibrated at, in metres.",
+    ),
+    (
         "RADIATION_RATE",
         &RADIATION_RATE,
         "The loss rate a fully radiating partial carries, in nepers per second.",
@@ -241,6 +251,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     ("GAUGE_A0_M", &GAUGE_A0_M, ""),
     ("GAUGE_BREAK_M", &GAUGE_BREAK_M, ""),
     ("GAUGE_JOIN_M", &GAUGE_JOIN_M, ""),
+    (
+        "GAUGE_TOP_M",
+        &GAUGE_TOP_M,
+        "Plain wire at the top of the scale, in metres (a no. 13 wire).",
+    ),
     ("GAUGE_CONSTANT", &GAUGE_CONSTANT, ""),
     (
         "CLANG_LENGTH_POWER",
@@ -779,6 +794,14 @@ pub static RADIATION_ROLLOFF_HZ: Knob = Knob::new(12000.0);
 /// string is heavier, so its impedance is higher and the same bridge takes
 /// its energy more slowly; a treble string is lighter and gives it up faster.
 pub static BRIDGE_REFERENCE_SPEED: Knob = Knob::new(320.0);
+/// Power on the string's wave impedance in the bridge and wire losses. One is
+/// admittance over impedance; three is what the references measure (2026-09-02):
+/// with the tenor at one, a bass string keeps its 2-3 kHz aftersound 9 s.
+pub static BRIDGE_IMPEDANCE_POWER: Knob = Knob::new(3.0);
+/// The gauge of the tenor wire the bridge loss is calibrated at, in metres.
+pub static BRIDGE_REFERENCE_GAUGE_M: Knob = Knob::new(1.23e-3);
+/// Plain wire at the top of the scale, in metres (a no. 13 wire).
+pub static GAUGE_TOP_M: Knob = Knob::new(0.8e-3);
 /// The loss rate a fully radiating partial carries, in nepers per second.
 /// Fitted to the same measurement, less what the string's own losses already
 /// account for.
@@ -3575,7 +3598,7 @@ impl ConcertGrand {
                 * RADIATION_RATE.get()
                 * Self::radiation_efficiency(radiating)
                 * self.bridge_speed_factor(f0)
-            + 0.5 * Self::viscoelastic_loss(radiating);
+            + 0.5 * Self::viscoelastic_loss(radiating) * self.bridge_speed_factor(f0);
         (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency)
     }
 
@@ -3613,7 +3636,7 @@ impl ConcertGrand {
                 * self.bridge_speed_factor(f0)
                 + bending)
                 / treble_life.max(0.05)
-            + Self::viscoelastic_loss(radiating);
+            + Self::viscoelastic_loss(radiating) * self.bridge_speed_factor(f0);
         // There is no register correction here any more, and that is the
         // point. One used to divide the whole note by up to 2.6 because the
         // bass rang too long; but the bass rang too long because the curve
@@ -3736,7 +3759,17 @@ impl ConcertGrand {
     fn bridge_speed_factor(&self, f0: f32) -> f32 {
         let position = (12.0 * log2f(f0.max(1.0) / 27.5) / 87.0).clamp(0.0, 1.0);
         let speed = 2.0 * self.string_length(position) * f0;
-        (speed / BRIDGE_REFERENCE_SPEED.get()).clamp(0.3, 1.5)
+        // What the bridge takes from a string goes as the bridge's admittance
+        // over the string's wave impedance, Z = mu * c: a wound A0 string
+        // carries twelve times the mass per metre of a tenor's plain wire, so
+        // the bridge takes a tenth as much from it per second. Measured on
+        // both references (2026-09-02): a bass string's partials at 400-800
+        // Hz ring 10 s early where a tenor's ring 4, and the aftersound of
+        // its 2-3 kHz partials 8-9 s. The wave speed alone (bottom octave
+        // foreshortened, the rest near 320 m/s) gives a fifth of that spread.
+        let gauge = self.string_gauge(position) / BRIDGE_REFERENCE_GAUGE_M.get();
+        let impedance = gauge * gauge * speed / BRIDGE_REFERENCE_SPEED.get();
+        powf(1.0 / impedance.max(1e-3), BRIDGE_IMPEDANCE_POWER.get()).clamp(0.08, 1.5)
     }
 
     /// The wire's own high-frequency loss, growing with the square of the
@@ -3910,6 +3943,21 @@ impl ConcertGrand {
     /// The tension used here is the scale's nominal one, not the fader's: this
     /// is the instrument's geometry, and String Tension moves what is strung
     /// on it, not how long it is.
+    /// The equivalent wire gauge along the scale: the wound bass law below the
+    /// join, and plain wire thinning geometrically to the top above it.
+    fn string_gauge(&self, position: f32) -> f32 {
+        if position >= SCALE_JOIN.get() {
+            let t = ((position - SCALE_JOIN.get()) / (1.0 - SCALE_JOIN.get())).clamp(0.0, 1.0);
+            GAUGE_JOIN_M.get() * powf(GAUGE_TOP_M.get() / GAUGE_JOIN_M.get(), t)
+        } else if position >= SCALE_BREAK.get() {
+            let t = (position - SCALE_BREAK.get()) / (SCALE_JOIN.get() - SCALE_BREAK.get());
+            GAUGE_BREAK_M.get() * powf(GAUGE_JOIN_M.get() / GAUGE_BREAK_M.get(), t)
+        } else {
+            let t = position / SCALE_BREAK.get();
+            GAUGE_A0_M.get() * powf(GAUGE_BREAK_M.get() / GAUGE_A0_M.get(), t)
+        }
+    }
+
     fn string_length(&self, position: f32) -> f32 {
         let base = if position >= SCALE_JOIN.get() {
             expf(0.642 - (1.61 + 1.99 * position) * position)

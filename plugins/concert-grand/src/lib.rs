@@ -2386,7 +2386,7 @@ impl Default for Controls {
             decay: 0.35,
             width: 0.35,
             level: 0.72,
-            preamp: 0.2,
+            preamp: 0.15,
             // The user's lab refinements, by ear: felt corner a touch up, the
             // hammer a shade softer and heavier, bloom up, both decay stages
             // a little longer, the board eased.

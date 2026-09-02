@@ -699,7 +699,7 @@
     "minimum": 0.0,
     "maximum": 1.0,
     "step": 0.01,
-    "default": 0.2
+    "default": 0.15
    }
   },
   {

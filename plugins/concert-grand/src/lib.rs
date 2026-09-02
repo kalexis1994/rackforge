@@ -96,17 +96,17 @@ const COMB_FLOOR: f32 = 0.26;
 /// 180 Hz, nearly three octaves too low, which is why the curve was so steep
 /// that no single note could sit on it and both corrections were needed to
 /// drag the ends back.
-const STRING_T60_S: f32 = 6.0;
+const STRING_T60_S: f32 = 40.0;
 /// How much longer the string rings alone than the audible (bridge-drained)
 /// curve at its flattest. One number, calibrated against the measured late
 /// decay; the knee, depth and register dependence of the two-stage decay
 /// come from the DIFFERENCE between the slow and fast curves, not from a
 /// drawn shape.
-const SLOW_STAGE_RATIO: f32 = 3.5;
+const SLOW_STAGE_RATIO: f32 = 1.5;
 /// The share of the radiation channel that survives dephasing.
-const INCOHERENT_RADIATION: f32 = 0.55;
+const INCOHERENT_RADIATION: f32 = 0.25;
 const STRING_KNEE_HZ: f32 = 20.0;
-const STRING_TILT: f32 = 0.14;
+const STRING_TILT: f32 = 0.05;
 /// Below this the soundboard has too few modes to be ragged, so the synthetic
 /// scatter is faded out rather than gambling on where its notches land.
 const SCATTER_KNEE_HZ: f32 = 320.0;
@@ -282,11 +282,18 @@ const LN_1000: f32 = 6.907_755;
 /// instrument (300-700 Hz 1.04x -> 0.95, 700-1600 1.15 -> 1.04, top 1.37 ->
 /// 1.21) with the fit cost and the whole-note durations unchanged -- the
 /// physical number was simply right, no rate refit needed.
-const RADIATION_COINCIDENCE: f32 = 1200.0;
+const RADIATION_COINCIDENCE: f32 = 200.0;
+/// Above this the bridge stops taking the string's energy as readily: the
+/// board's mobility falls once its waves are confined between the ribs.
+const RADIATION_ROLLOFF_HZ: f32 = 5000.0;
+/// The wave speed the bridge loss is calibrated at: a tenor string. A bass
+/// string is heavier, so its impedance is higher and the same bridge takes
+/// its energy more slowly; a treble string is lighter and gives it up faster.
+const BRIDGE_REFERENCE_SPEED: f32 = 320.0;
 /// The loss rate a fully radiating partial carries, in nepers per second.
 /// Fitted to the same measurement, less what the string's own losses already
 /// account for.
-const RADIATION_RATE: f32 = 0.9;
+const RADIATION_RATE: f32 = 3.4;
 /// The wire's own bending loss, per partial squared. Bensa et al.'s
 /// b2*kappa^2 term, which is what makes a bass string's two-hundredth
 /// partial die while its fundamental rings for half a minute.
@@ -2137,34 +2144,34 @@ impl Default for ConcertGrand {
             strike_budget: 0,
             cal: [
                 [
-                    0.7665, 2.3440, 0.5097, 0.3392, 4.0000, 0.9236, 1.6842, 1.0000, 1.0587,
+                    0.7665, 2.3440, 0.5097, 0.3392, 1.0000, 0.9236, 1.6842, 1.0000, 1.0000,
                 ],
                 [
-                    1.0310, 2.7660, 0.2500, 0.3392, 0.9539, 0.4180, 0.4024, 1.0000, 2.5921,
+                    1.0310, 2.7660, 0.2500, 0.3392, 1.0000, 0.4180, 0.4024, 1.0000, 1.0000,
                 ],
                 [
-                    0.3580, 2.2532, 0.3922, 0.3079, 1.2694, 0.5434, 0.8348, 1.0000, 0.3441,
+                    0.3580, 2.2532, 0.3922, 0.3079, 1.0000, 0.5434, 0.8348, 1.0000, 1.0000,
                 ],
                 [
-                    0.2500, 1.4688, 0.3194, 0.4434, 0.8038, 0.4932, 0.2500, 1.0000, 2.3396,
+                    0.2500, 1.4688, 0.3194, 0.4434, 1.0000, 0.4932, 0.2500, 1.0000, 1.0000,
                 ],
                 [
-                    1.2536, 2.4650, 0.9850, 0.2565, 1.0097, 0.3269, 1.3111, 1.0000, 3.4590,
+                    1.2536, 2.4650, 0.9850, 0.2565, 1.0000, 0.3269, 1.3111, 1.0000, 1.0000,
                 ],
                 [
-                    2.7366, 2.1321, 1.5657, 2.6568, 0.5866, 0.4731, 0.2952, 1.0000, 0.3439,
+                    2.7366, 2.1321, 1.5657, 2.6568, 1.0000, 0.4731, 0.2952, 1.0000, 1.0000,
                 ],
                 [
-                    4.0000, 0.6556, 1.8725, 1.0000, 0.4538, 0.7958, 0.2500, 1.0000, 0.6481,
+                    4.0000, 0.6556, 1.8725, 1.0000, 1.0000, 0.7958, 0.2500, 1.0000, 1.0000,
                 ],
                 [
-                    0.9443, 0.9026, 4.0000, 3.9996, 0.2942, 1.0000, 1.9942, 1.0000, 0.2500,
+                    0.9443, 0.9026, 4.0000, 3.9996, 1.0000, 1.0000, 1.9942, 1.0000, 1.0000,
                 ],
                 [
-                    0.4820, 0.2500, 4.0000, 4.0000, 0.2942, 1.1800, 0.3836, 1.0000, 0.2500,
+                    0.4820, 0.2500, 4.0000, 4.0000, 1.0000, 1.1800, 0.3836, 1.0000, 1.0000,
                 ],
                 [
-                    1.0345, 0.4249, 4.0000, 4.0000, 0.2942, 1.0000, 1.0000, 1.0000, 0.2500,
+                    1.0345, 0.4249, 4.0000, 4.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000,
                 ],
             ],
             board: [BodyMode::default(); BOARD_MODES],
@@ -2950,7 +2957,10 @@ impl ConcertGrand {
         // top of the compass rang 2.3x too long once it dephased.
         let rate = LN_1000 / (SLOW_STAGE_RATIO * string)
             + bending
-            + INCOHERENT_RADIATION * RADIATION_RATE * Self::radiation_efficiency(radiating);
+            + INCOHERENT_RADIATION
+                * RADIATION_RATE
+                * Self::radiation_efficiency(radiating)
+                * self.bridge_speed_factor(f0);
         (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency)
     }
 
@@ -2981,7 +2991,8 @@ impl ConcertGrand {
         // channel in parallel with it, so the rates add.
         let bending = KAPPA_LOSS * partial_number * partial_number;
         let rate = LN_1000 / string
-            + (RADIATION_RATE * Self::radiation_efficiency(radiating) + bending)
+            + (RADIATION_RATE * Self::radiation_efficiency(radiating) * self.bridge_speed_factor(f0)
+                + bending)
                 / treble_life.max(0.05);
         // There is no register correction here any more, and that is the
         // point. One used to divide the whole note by up to 2.6 because the
@@ -3094,9 +3105,32 @@ impl ConcertGrand {
         u / (1.0 + u)
     }
 
+    /// How readily this string gives its energy to the bridge, against the
+    /// tenor string the bridge loss is calibrated on. The rate at which a
+    /// string loses energy through its termination goes as the bridge's
+    /// admittance over the string's characteristic impedance, and with the
+    /// scale's tension nearly constant that impedance is T/c: a heavy bass
+    /// string with its slow wave loses slowly, a light treble string fast.
+    /// Measured on two references, a bass string's partial at 220 Hz rings
+    /// three times longer than a tenor fundamental at the same frequency.
+    fn bridge_speed_factor(&self, f0: f32) -> f32 {
+        let position = (12.0 * log2f(f0.max(1.0) / 27.5) / 87.0).clamp(0.0, 1.0);
+        let speed = 2.0 * self.string_length(position) * f0;
+        (speed / BRIDGE_REFERENCE_SPEED).clamp(0.3, 1.5)
+    }
+
     fn radiation_efficiency(frequency: f32) -> f32 {
-        let r = powf(frequency / RADIATION_COINCIDENCE, 2.6);
-        r / (1.0 + r)
+        // The bridge channel, as the real instrument's prompt decay shows
+        // it: measured partial by partial on two references, the early T60
+        // is 20-30 s below 100 Hz, ~12 s at 200, ~6 at 500, ~3 at 1 kHz,
+        // ~2.2 from 2 to 5 kHz and ~3 at 8 kHz -- a bell, with the loss
+        // peaking where the board is most mobile and radiates best, and
+        // small at both ends. A square-law rise to a corner and a roll-off
+        // where the ribs confine the board reproduce that shape within the
+        // spread of the two references.
+        let r = powf(frequency / RADIATION_COINCIDENCE, 2.5);
+        let confined = powf(frequency / RADIATION_ROLLOFF_HZ, 2.0);
+        r / (1.0 + r) / (1.0 + confined)
     }
 
     /// The soundboard as the filter it is. Measured bridge mobility is ragged

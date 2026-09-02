@@ -2157,11 +2157,11 @@ impl Default for Controls {
             mic_distance: 0.08,
             mic_pattern: 0.6,
             action_noise: 0.39,
-            release_noise: 0.6,
+            release_noise: 0.3,
             pedal_noise: 0.5,
             // Centre of the recalibrated travel: the subtle level the
             // user's ear chose now IS mid-fader, with room below it.
-            impact: 0.5,
+            impact: 0.26,
             board_damping: 0.5,
             board_density: 0.5,
             size: 0.5,

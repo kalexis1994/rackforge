@@ -543,13 +543,19 @@ values below C2 with a gain reaching x4 at A0 (`FELT_BASS_GAIN`: the plain
 extrapolation kept the A0 hammer on the string for eight milliseconds where
 Askenfelt's bass hammers leave in about four; x4 lands 3.9). The three house
 factors that multiplied into the exponent and the stiffness are gone; the
-faders are multipliers that are exactly one at the house voicing. The strike
-simulation owns the partials up to 20 kHz (`SIM_TOP_HZ`), not 8: a C7 used
-to have three simulated partials and the rest from the analytic recipe, whose
-cutoff is floored at 1.5 f0 and cannot move with velocity.
+faders are multipliers that are exactly one at the house voicing. The felt's slope toward the treble is a decade
+softer than the table's line (`FELT_K_DECADES` 4.0, C7 1.6e11 N/m^p): at the
+table's 4.93 a C5's tenth partial sat at -27 dB at fortissimo where both
+references have -53, an ideal-string control with the same parameters
+agreed with the simulation, and the user heard it as broken and detuned; at
+4.0 it is -41 with the tenor's bands still on the references. The strike
+simulation's reach (`SIM_TOP_HZ`) was tried at 20 kHz and stays at 8 kHz:
+the recipe above it carries a felt cutoff that follows velocity, while the
+simulated partials above 8 kHz, with this felt, do not roll off as the
+recordings do.
 
-Measured on the chromatic grid at fortissimo, contact times are A0 3.7 ms,
-C2 2.9, C3 2.3, C4 1.5, and the tenor's centroid and 2-8 kHz bands sit on the
+Measured on the chromatic grid at fortissimo, contact times are A0 4.1 ms,
+C2 3.5, C3 2.8, C4 2.0, and the tenor's centroid and 2-8 kHz bands sit on the
 references. Two defects are recorded rather than hidden: a C4's brightness
 rises only 18% from velocity 20 to 120 where the references rise 50-100% and
 an ideal-string control with the same felt rises 49% (the test

@@ -95,7 +95,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 100;
+pub const KNOB_COUNT: usize = 101;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -427,6 +427,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "UNISON_BEAT_CAP_HZ",
         &UNISON_BEAT_CAP_HZ,
         "The fastest beat a unison may leave at its fundamental (Hz); caps the treble detune.",
+    ),
+    (
+        "UNISON_WIDTH",
+        &UNISON_WIDTH,
+        "Scales the unison's width in cents: the knee between the coherent, draining decay and the dephased aftersound.",
     ),
     (
         "UNISON_JITTER_SPREAD",
@@ -2869,6 +2874,9 @@ pub static DUPLEX_LEVEL: Knob = Knob::new(0.018);
 /// The fastest beat a unison may leave at its fundamental, in hertz; caps the
 /// detune in the treble the way a tuner does.
 pub static UNISON_BEAT_CAP_HZ: Knob = Knob::new(2.0);
+/// Scales the unison's width in cents: the knee between the coherent, draining
+/// decay and the dephased aftersound. Half the old width, measured.
+pub static UNISON_WIDTH: Knob = Knob::new(0.5);
 /// Geometric spread of the per-partial detune jitter (6 = x0.4..x2.4; 1 = one detune per string).
 pub static UNISON_JITTER_SPREAD: Knob = Knob::new(6.0);
 /// Stulov's hereditary felt: the share of the compression history the force
@@ -4166,7 +4174,15 @@ impl ConcertGrand {
         // and a modest spread in the string's own losses.
         let unison_precision = 0.5 + 1.0 * hash01((note as u32).wrapping_mul(2_654_435_761) ^ 0x51);
         let string_life = 0.88 + 0.24 * hash01((note as u32).wrapping_mul(2_246_822_519) ^ 0xA7);
-        let detune_cents = (0.9 + 0.9 * position)
+        // Measured (2026-09-02) against both references: at the old width
+        // the unisons dephased inside the first third of a second and the
+        // tenor's and treble's early decays ran two to three times slower
+        // than the references' (the energy escaped the bridge's drain before
+        // the drain had done its work); at half the width the early decays
+        // land on them, and the late ones hold. Kirk's tuners preferred one
+        // to two cents; this is a cent and a bit through the middle.
+        let detune_cents = UNISON_WIDTH.get()
+            * (0.9 + 0.9 * position)
             * (self.controls.unison * 2.86)
             * self.controls.lab(13)
             * unison_precision;
@@ -10339,6 +10355,33 @@ mod tests {
 "
             )
         );
+    }
+
+    /// Prints the designed fast and slow T60 of the first partials of a few
+    /// notes, to hold against what a render measures.
+    #[test]
+    #[ignore]
+    fn decay_design() {
+        let piano = prepared();
+        for note in [24u8, 36, 48, 60, 72, 79, 84, 96, 108] {
+            let f0 = 440.0 * powf(2.0, (note as f32 - 69.0) / 12.0);
+            let position = (note - LOW_NOTE) as f32 / (NOTE_COUNT - 1) as f32;
+            let mut line = format!(
+                "note {note:3} f0 {f0:7.1} L {:.2} factor {:.2}:",
+                piano.string_length(position),
+                piano.bridge_speed_factor(f0)
+            );
+            for n in [1, 2, 3, 4, 6, 8, 12, 16] {
+                let f = n as f32 * f0;
+                if f > 8000.0 {
+                    break;
+                }
+                let fast = piano.t60_seconds(f, f0, 1.0, 1.0);
+                let slow = piano.slow_t60_seconds(f, f0, 1.0);
+                line.push_str(&format!("  n{n}:{fast:.1}/{slow:.1}"));
+            }
+            println!("{line}");
+        }
     }
 
     #[test]

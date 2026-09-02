@@ -2490,8 +2490,8 @@
   },
   {
    "index": 131,
-   "id": "knob_unison_jitter_spread",
-   "name": "UNISON_JITTER_SPREAD",
+   "id": "knob_unison_width",
+   "name": "UNISON_WIDTH",
    "page": "model_strings",
    "order": 26,
    "kind": {
@@ -2510,6 +2510,26 @@
   },
   {
    "index": 132,
+   "id": "knob_unison_jitter_spread",
+   "name": "UNISON_JITTER_SPREAD",
+   "page": "model_strings",
+   "order": 27,
+   "kind": {
+    "type": "float",
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "step": 0.001,
+    "default": 0.5
+   },
+   "flags": {
+    "automatable": true,
+    "modulatable": false,
+    "read_only": false,
+    "advanced": true
+   }
+  },
+  {
+   "index": 133,
    "id": "knob_stulov_epsilon",
    "name": "STULOV_EPSILON",
    "page": "model_hammer",
@@ -2529,7 +2549,7 @@
    }
   },
   {
-   "index": 133,
+   "index": 134,
    "id": "knob_stulov_tau_s",
    "name": "STULOV_TAU_S",
    "page": "model_hammer",
@@ -2549,11 +2569,11 @@
    }
   },
   {
-   "index": 134,
+   "index": 135,
    "id": "knob_string_hf_loss",
    "name": "STRING_HF_LOSS",
    "page": "model_strings",
-   "order": 27,
+   "order": 28,
    "kind": {
     "type": "float",
     "minimum": 0.0,
@@ -2569,7 +2589,7 @@
    }
   },
   {
-   "index": 135,
+   "index": 136,
    "id": "knob_board_low_loss",
    "name": "BOARD_LOW_LOSS",
    "page": "model_board",
@@ -2589,7 +2609,7 @@
    }
   },
   {
-   "index": 136,
+   "index": 137,
    "id": "knob_board_mean_cap",
    "name": "BOARD_MEAN_CAP",
    "page": "model_board",
@@ -2609,7 +2629,7 @@
    }
   },
   {
-   "index": 137,
+   "index": 138,
    "id": "knob_sim_top_hz",
    "name": "SIM_TOP_HZ",
    "page": "model_hammer",
@@ -2629,7 +2649,7 @@
    }
   },
   {
-   "index": 138,
+   "index": 139,
    "id": "knob_hammer_v_ff",
    "name": "HAMMER_V_FF",
    "page": "model_hammer",
@@ -2649,7 +2669,7 @@
    }
   },
   {
-   "index": 139,
+   "index": 140,
    "id": "knob_contact_stretch",
    "name": "CONTACT_STRETCH",
    "page": "model_hammer",
@@ -2669,7 +2689,7 @@
    }
   },
   {
-   "index": 140,
+   "index": 141,
    "id": "knob_recipe_floor",
    "name": "RECIPE_FLOOR",
    "page": "model_misc",

@@ -95,7 +95,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 118;
+pub const KNOB_COUNT: usize = 120;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -434,6 +434,16 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "MIC_REFERENCE_M",
         &MIC_REFERENCE_M,
         "The distance the dry calibration was made at: the direct gain is 1 here.",
+    ),
+    (
+        "MIC_NEAR_CAP",
+        &MIC_NEAR_CAP,
+        "The most the direct sound may rise over its reference as the pair comes close.",
+    ),
+    (
+        "MIC_HEIGHT_M",
+        &MIC_HEIGHT_M,
+        "How far above the soundboard the pair stands at the reference distance and beyond; closer, it is lowered toward the strings.",
     ),
     (
         "AIR_ABSORB_4K_PER_M",
@@ -1729,7 +1739,13 @@ pub static ROOM_VOLUME_MAX_M3: Knob = Knob::new(45_000.0);
 pub static MIC_DISTANCE_MIN_M: Knob = Knob::new(0.5);
 pub static MIC_DISTANCE_MAX_M: Knob = Knob::new(16.0);
 /// The distance the dry calibration was made at: the direct gain is 1 here.
-pub static MIC_REFERENCE_M: Knob = Knob::new(2.5);
+pub static MIC_REFERENCE_M: Knob = Knob::new(2.0);
+/// The most the direct sound may rise over its reference as the pair comes
+/// close: past the closest the fader reaches, so the fader is never clamped.
+pub static MIC_NEAR_CAP: Knob = Knob::new(6.0);
+/// How far above the soundboard the pair stands at the reference distance
+/// and beyond (ear height); closer, it is lowered toward the strings.
+pub static MIC_HEIGHT_M: Knob = Knob::new(0.4);
 /// Air absorption per metre at 4 kHz, ISO 9613 order of magnitude at
 /// concert-hall humidity.
 pub static AIR_ABSORB_4K_PER_M: Knob = Knob::new(0.0022);
@@ -3613,10 +3629,15 @@ impl ConcertGrand {
         let piano = (0.33 * length, 0.5 * width, 1.0_f32);
         let (az_sin, az_cos) = sincosf(MIC_AZIMUTH_RAD.get());
         let reach = distance.min(0.6 * length);
+        // Close, the pair is lowered toward the strings, as an engineer does;
+        // at the reference distance and beyond it stands at ear height. With
+        // the height fixed at 1.4 m the bottom fifth of the fader changed the
+        // path by centimetres, and Mic Distance did nothing there.
+        let height = piano.2 + MIC_HEIGHT_M.get() * (reach / MIC_REFERENCE_M.get()).clamp(0.0, 1.0);
         let centre = (
             0.33 * length + reach * az_cos,
             (0.5 * width - reach * az_sin).max(0.3),
-            1.4_f32,
+            height,
         );
         // Both capsules look back at the instrument, splayed either side of
         // that line. The splay is what makes the pattern axis do directional
@@ -3665,7 +3686,12 @@ impl ConcertGrand {
                 (range, (1.0 - b) + b * cosine)
             };
             let (direct_path, direct_response) = heard(piano);
-            let near = (MIC_REFERENCE_M.get() / direct_path).clamp(0.12, 3.0) * MIC_PREAMP.get();
+            // The direct sound falls as r_ref / r, and the cap sits well past
+            // the closest the fader reaches. It used to sit at 3.0, which the
+            // fader's whole bottom fifth (0.5 to 0.83 m, the default among it)
+            // was clamped to -- measured, Mic Distance did nothing there.
+            let near = (MIC_REFERENCE_M.get() / direct_path).clamp(0.12, MIC_NEAR_CAP.get())
+                * MIC_PREAMP.get();
             self.direct_gain[side] = near * direct_response;
             // Proximity: the pressure-gradient term rises as c/(2*pi*f*r).
             // Felt below ~ c/(2*pi*r); rendered as a 120 Hz shelf whose gain

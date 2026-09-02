@@ -634,6 +634,18 @@ state now ends with an FNV-1a fingerprint of the registry's names in order;
 a state whose fingerprint is not this build's keeps its voicing and drops
 its knobs to their compiled values.
 
+### Mic Distance reaches the pair (0.153)
+
+Measured on a C4 at v100, the direct sound's level across the fader: the
+bottom fifth (0.5–0.83 m, the default among it) used to change nothing,
+because the near gain r_ref/r was clamped at 3.0 and the pair stood 0.4 m
+above the soundboard whatever its distance, so "0.5 m" heard 0.64. The cap
+is now `MIC_NEAR_CAP` (6, past the closest the fader reaches), the
+reference `MIC_REFERENCE_M` 2.0 so the default keeps its level, and the
+pair is lowered toward the strings as it comes close (`MIC_HEIGHT_M` 0.4 at
+the reference and beyond). Direct level now: +1.3 dB at 0.5 m, −2 at 1 m,
+−6 at 1.4 m, −17 at 4 m; the far end is capped by the room's length.
+
 ### The recording chain, derived rather than drawn (tested)
 
 Four panel controls describe a physical situation — **Room Size**, **Wall

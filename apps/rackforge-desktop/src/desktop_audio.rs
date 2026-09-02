@@ -407,7 +407,7 @@ impl AudioInventory {
                 .then_with(|| right.is_default.cmp(&left.is_default))
                 .then_with(|| left.name.cmp(&right.name))
         });
-        let midi_inputs = discover_midi_inputs()?;
+        let midi_inputs = discover_all_midi_inputs()?;
         Ok(Self {
             drivers,
             outputs,
@@ -2605,6 +2605,14 @@ fn silence_output(data: &mut cpal::Data, format: SampleFormat) {
     }
 }
 
+/// Every input a user can select: the byte ports `midir` sees, then the
+/// packet endpoints Windows MIDI Services exposes, under their own names.
+fn discover_all_midi_inputs() -> Result<Vec<String>> {
+    let mut names = discover_midi_inputs()?;
+    names.extend(crate::ump_input::discover());
+    Ok(names)
+}
+
 fn discover_midi_inputs() -> Result<Vec<String>> {
     let discovery =
         MidiInput::new("rackforge-desktop-discovery").context("starting Windows MIDI discovery")?;
@@ -2671,10 +2679,12 @@ impl MidiSupervisor {
             .name("rackforge-desktop-midi-supervisor".into())
             .spawn(move || {
                 let mut connections = BTreeMap::new();
+                let mut ump = UmpInputs::new();
                 let mut display = None;
                 match reconcile_midi_inputs(
                     &selected,
                     &mut connections,
+                    &mut ump,
                     &sender,
                     &telemetry,
                     &controller_sender,
@@ -2686,6 +2696,7 @@ impl MidiSupervisor {
                             reconnect_keylab_inputs(
                                 &selected,
                                 &mut connections,
+                                &mut ump,
                                 &sender,
                                 &telemetry,
                                 &controller_sender,
@@ -2722,6 +2733,7 @@ impl MidiSupervisor {
                         if let Err(error) = reconcile_midi_inputs(
                             &selected,
                             &mut connections,
+                            &mut ump,
                             &sender,
                             &telemetry,
                             &controller_sender,
@@ -2734,6 +2746,7 @@ impl MidiSupervisor {
                             reconnect_keylab_inputs(
                                 &selected,
                                 &mut connections,
+                                &mut ump,
                                 &sender,
                                 &telemetry,
                                 &controller_sender,
@@ -2776,9 +2789,157 @@ impl Drop for MidiSupervisor {
     }
 }
 
+/// The packet transport's side of the supervisor: the session, what the
+/// service currently exposes, and the endpoints opened. Absent when the
+/// runtime is not installed, in which case the byte ports are all there is.
+struct UmpInputs {
+    transport: Option<crate::ump_input::Transport>,
+    endpoints: Vec<crate::ump_input::Endpoint>,
+    connections: BTreeMap<String, crate::ump_input::Connection>,
+}
+
+impl UmpInputs {
+    fn new() -> Self {
+        let transport = match crate::ump_input::Transport::open() {
+            Ok(transport) => {
+                println!(
+                    "DESKTOP_UMP_READY sdk={}",
+                    crate::ump_input::version().unwrap_or_default()
+                );
+                Some(transport)
+            }
+            Err(error) => {
+                eprintln!("DESKTOP_UMP_UNAVAILABLE reason={error:#}");
+                None
+            }
+        };
+        Self {
+            transport,
+            endpoints: Vec::new(),
+            connections: BTreeMap::new(),
+        }
+    }
+
+    /// The source names present right now.
+    fn refresh(&mut self) -> BTreeSet<String> {
+        if self.transport.is_none() {
+            return BTreeSet::new();
+        }
+        match crate::ump_input::endpoints() {
+            Ok(endpoints) => self.endpoints = endpoints,
+            Err(error) => eprintln!("DESKTOP_UMP_SCAN_FAILED error={error:#}"),
+        }
+        self.endpoints
+            .iter()
+            .map(|endpoint| crate::ump_input::source_name(&endpoint.name))
+            .collect()
+    }
+}
+
+fn reconcile_ump_inputs(
+    selected: &BTreeSet<String>,
+    ump: &mut UmpInputs,
+    sender: &SyncSender<MidiPacket>,
+    telemetry: &Arc<AudioTelemetry>,
+    controller_sender: &SyncSender<DesktopControllerEvent>,
+) {
+    let present = ump.refresh();
+    let lost = ump
+        .connections
+        .keys()
+        .filter(|name| !present.contains(*name))
+        .cloned()
+        .collect::<Vec<_>>();
+    for name in lost {
+        ump.connections.remove(&name);
+        eprintln!("DESKTOP_MIDI_SOURCE_LOST name={name:?}");
+        release_held_notes(sender, telemetry);
+    }
+    for name in selected {
+        let Some(device) = crate::ump_input::endpoint_name(name) else {
+            continue;
+        };
+        if !present.contains(name) || ump.connections.contains_key(name) {
+            continue;
+        }
+        // The KeyLab's surface speaks SysEx, which the packet path does not
+        // reassemble yet, and its display is driven back over the byte port;
+        // the byte port keeps the whole instrument so nothing is heard twice.
+        if keylab_controller::is_keylab_endpoint(device) {
+            eprintln!("DESKTOP_UMP_SKIPPED name={name:?} reason=\"KeyLab stays on its byte port\"");
+            continue;
+        }
+        match connect_ump_input(name, ump, sender, telemetry, controller_sender) {
+            Ok(connection) => {
+                ump.connections.insert(name.clone(), connection);
+                println!("DESKTOP_MIDI_SOURCE_CONNECTED name={name:?}");
+            }
+            Err(error) => {
+                eprintln!("DESKTOP_MIDI_CONNECT_FAILED name={name:?} error={error:#}");
+            }
+        }
+    }
+}
+
+/// Opens one UMP endpoint and turns each packet it receives into the same
+/// wrapper the byte ports send the audio thread, width included; system
+/// bytes (clock and friends) ride the same channel as they always have.
+fn connect_ump_input(
+    name: &str,
+    ump: &UmpInputs,
+    sender: &SyncSender<MidiPacket>,
+    telemetry: &Arc<AudioTelemetry>,
+    controller_sender: &SyncSender<DesktopControllerEvent>,
+) -> Result<crate::ump_input::Connection> {
+    let transport = ump
+        .transport
+        .as_ref()
+        .context("Windows MIDI Services is not available")?;
+    let endpoint = ump
+        .endpoints
+        .iter()
+        .find(|endpoint| crate::ump_input::source_name(&endpoint.name) == name)
+        .with_context(|| format!("UMP endpoint {name:?} disappeared before connection"))?;
+    let source = stable_midi_source_key(name);
+    let sender = sender.clone();
+    let telemetry = Arc::clone(telemetry);
+    let controller_sender = controller_sender.clone();
+    transport.connect(endpoint, move |words| {
+        let deliver = |length: u8, data: [u8; 3], wide: Option<u32>| {
+            let _ = controller_sender.try_send(DesktopControllerEvent::MidiObserved {
+                source,
+                length,
+                data,
+                observed_at: Instant::now(),
+            });
+            if sender
+                .try_send(MidiPacket {
+                    source,
+                    length,
+                    data,
+                    wide,
+                })
+                .is_err()
+            {
+                telemetry
+                    .midi_dropped_events
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        };
+        let _ = rackforge_core::ump::read_stream(
+            words,
+            0,
+            &mut |_group, packet| deliver(packet.length, packet.data, packet.wide),
+            &mut |_group, event| deliver(event.length, event.data, None),
+            &mut |_unread| {},
+        );
+    })
+}
+
 fn reconcile_midi_inputs(
     selected: &BTreeSet<String>,
     connections: &mut BTreeMap<String, MidiInputConnection<()>>,
+    ump: &mut UmpInputs,
     sender: &SyncSender<MidiPacket>,
     telemetry: &Arc<AudioTelemetry>,
     controller_sender: &SyncSender<DesktopControllerEvent>,
@@ -2821,7 +2982,12 @@ fn reconcile_midi_inputs(
             }
         }
     }
-    Ok(connections.keys().cloned().collect())
+    reconcile_ump_inputs(selected, ump, sender, telemetry, controller_sender);
+    Ok(connections
+        .keys()
+        .chain(ump.connections.keys())
+        .cloned()
+        .collect())
 }
 
 fn desired_midi_inputs(
@@ -3050,6 +3216,7 @@ fn reconcile_keylab_display(
 fn reconnect_keylab_inputs(
     selected: &BTreeSet<String>,
     connections: &mut BTreeMap<String, MidiInputConnection<()>>,
+    ump: &mut UmpInputs,
     sender: &SyncSender<MidiPacket>,
     telemetry: &Arc<AudioTelemetry>,
     controller_sender: &SyncSender<DesktopControllerEvent>,
@@ -3066,6 +3233,7 @@ fn reconnect_keylab_inputs(
     if let Err(error) = reconcile_midi_inputs(
         selected,
         connections,
+        ump,
         sender,
         telemetry,
         controller_sender,

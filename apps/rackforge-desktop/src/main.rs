@@ -4,12 +4,17 @@
 mod desktop_audio;
 #[cfg(windows)]
 mod desktop_webview;
+#[cfg(windows)]
+#[rustfmt::skip]
+mod midi2_sdk;
 mod paths;
 mod setup;
 mod shutdown;
 #[cfg(windows)]
 mod single_instance;
 mod startup;
+#[cfg(windows)]
+mod ump_input;
 mod web;
 
 use anyhow::{Context, Result, bail};

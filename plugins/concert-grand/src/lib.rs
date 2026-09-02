@@ -89,7 +89,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 92;
+pub const KNOB_COUNT: usize = 94;
 /// Every knob by name, with the first line of its documentation and the
 /// value it was compiled with.
 pub static TUNABLES: &[(&str, &Knob, &str, f32)] = &[
@@ -485,6 +485,18 @@ pub static TUNABLES: &[(&str, &Knob, &str, f32)] = &[
         &UNISON_JITTER_SPREAD,
         "Geometric spread of the per-partial detune jitter (6 = x0.4..x2.4; 1 = one detune per string).",
         6.0,
+    ),
+    (
+        "STULOV_EPSILON",
+        &STULOV_EPSILON,
+        "Stulov hysteresis: share of the compression history the felt force forgets.",
+        0.5,
+    ),
+    (
+        "STULOV_TAU_S",
+        &STULOV_TAU_S,
+        "Stulov hysteresis memory time constant, seconds.",
+        2.0e-4,
     ),
     (
         "SIM_TOP_HZ",
@@ -1385,8 +1397,8 @@ pub static FELT_EXPONENT_RISE: Knob = Knob::new(0.7);
 /// Dynamics of 0.45 these give 14.1, a 5.41x range of hammer speed between
 /// velocity 35 and 116 -- and since the felt hardens with speed, this is what
 /// finally decides how much brighter a hard blow is.
-pub static ACTION_SPAN_BASE: Knob = Knob::new(2.1);
-pub static ACTION_SPAN_PER_DYNAMICS: Knob = Knob::new(6.3);
+pub static ACTION_SPAN_BASE: Knob = Knob::new(15.0);
+pub static ACTION_SPAN_PER_DYNAMICS: Knob = Knob::new(66.0);
 pub static CONTACT_SWING_BASE: Knob = Knob::new(1.0);
 pub static CONTACT_SWING_PER_DYNAMICS: Knob = Knob::new(1.2);
 pub static FELT_EXPONENT_MIN: Knob = Knob::new(1.2);
@@ -2889,6 +2901,11 @@ pub static DUPLEX_LEVEL: Knob = Knob::new(0.018);
 pub static UNISON_BEAT_CAP_HZ: Knob = Knob::new(2.0);
 /// Geometric spread of the per-partial detune jitter (6 = x0.4..x2.4; 1 = one detune per string).
 pub static UNISON_JITTER_SPREAD: Knob = Knob::new(6.0);
+/// Stulov's hereditary felt: the share of the compression history the force
+/// forgets (his measured hammers: 0.992) and the memory's time constant in
+/// seconds (his: 2 microseconds). Shipped at 0.5 and 0.2 ms since 0.88.0.
+pub static STULOV_EPSILON: Knob = Knob::new(0.5);
+pub static STULOV_TAU_S: Knob = Knob::new(2.0e-4);
 /// How far up the strike simulation owns the partials, in Hz. It was 8 kHz,
 /// which left a C7 with three simulated partials and everything above them
 /// to the analytic recipe, whose felt cutoff is floored at 1.5 f0 and so
@@ -2905,9 +2922,13 @@ pub static UNISON_JITTER_SPREAD: Knob = Knob::new(6.0);
 /// velocity, is the closer description. The user heard the 20 kHz version
 /// as broken and detuned; the tenth partial of C5 is why.
 pub static SIM_TOP_HZ: Knob = Knob::new(8_000.0);
-/// Hammer speed at full velocity, m/s. Measured fortissimo hammers arrive at
-/// 5-7 m/s; pianissimo under 1.
-pub static HAMMER_V_FF: Knob = Knob::new(6.0);
+/// Hammer speed at full velocity, m/s. Boutillon's measured hammers run from
+/// 0.11 m/s at pianissimo to 6.83 at fortissimo -- a range of sixty --
+/// where the old span of fourteen (2.1 + 6.3 x 0.45) left pianissimo at
+/// 0.9 m/s and too bright: with the published range the pianissimo bass
+/// centroid lands at 197 Hz against the references' 166-172 and the tenor's
+/// at 385 against 393-394 (2026-09-02), fortissimo untouched.
+pub static HAMMER_V_FF: Knob = Knob::new(6.8);
 /// How much longer the integration runs than the nominal contact time. The
 /// hammer is still in contact when it stops, so this sets how heavily it
 /// pushes the low modes: measured on C2's first 30 ms, stretching it puts
@@ -4445,8 +4466,8 @@ impl ConcertGrand {
                         // where the trade stops paying. The felt sweep that
                         // measured all of this is `felt_sweep`; the K
                         // compensation lives in FELT_K_A0.
-                        stulov_epsilon: 0.5,
-                        stulov_tau: 2.0e-4,
+                        stulov_epsilon: STULOV_EPSILON.get(),
+                        stulov_tau: STULOV_TAU_S.get(),
                         comb_floor: COMB_FLOOR.get(),
                     },
                 );

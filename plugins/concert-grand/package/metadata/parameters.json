@@ -2527,6 +2527,46 @@
     "read_only": false,
     "advanced": true
    }
+  },
+  {
+   "index": 133,
+   "id": "knob_stulov_epsilon",
+   "name": "STULOV_EPSILON",
+   "page": "model_hammer",
+   "order": 32,
+   "kind": {
+    "type": "float",
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "step": 0.001,
+    "default": 0.5
+   },
+   "flags": {
+    "automatable": true,
+    "modulatable": false,
+    "read_only": false,
+    "advanced": true
+   }
+  },
+  {
+   "index": 134,
+   "id": "knob_stulov_tau_s",
+   "name": "STULOV_TAU_S",
+   "page": "model_hammer",
+   "order": 33,
+   "kind": {
+    "type": "float",
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "step": 0.001,
+    "default": 0.5
+   },
+   "flags": {
+    "automatable": true,
+    "modulatable": false,
+    "read_only": false,
+    "advanced": true
+   }
   }
  ]
 }

@@ -111,6 +111,7 @@ fn stop_running_lab() -> bool {
 
 /// Relaunches this executable detached from the terminal, with the same
 /// arguments plus `--foreground`, its output in the log file.
+#[allow(clippy::zombie_processes)]
 fn detach() {
     use std::os::windows::process::CommandExt;
     let exe = std::env::current_exe().expect("own path");
@@ -137,6 +138,7 @@ fn detach() {
     );
 }
 
+#[allow(clippy::zombie_processes)]
 fn open_in_editor(path: &Path) {
     let _ = std::process::Command::new("cmd")
         .args(["/C", "start", "", &path.to_string_lossy()])

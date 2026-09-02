@@ -268,7 +268,35 @@
             sector.button = button;
             strip.append(button);
           }
-          body.append(strip, holder);
+          // The voicings carry the forty-one voicing parameters and leave
+          // the model's constants where the player left them, so the way
+          // back to the compiled instrument is a button, not a preset.
+          const reset = document.createElement("div");
+          reset.className = "resetrow";
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "Reset model to compiled values";
+          button.addEventListener("click", async () => {
+            button.disabled = true;
+            try {
+              for (const { mine } of modelGroups) {
+                for (const parameter of mine) {
+                  await call("plugin.set_parameter", {
+                    parameter_index: parameter.index,
+                    value: parameter.kind.default ?? 0.5,
+                  });
+                }
+              }
+              state.textContent = "Model · compiled values";
+              await load(false);
+            } catch (error) {
+              state.textContent = error.message;
+            } finally {
+              button.disabled = false;
+            }
+          });
+          reset.append(button);
+          body.append(strip, holder, reset);
           choose(activeModelTab);
           tabs.push({ id: "model", name: "Model", body });
         }

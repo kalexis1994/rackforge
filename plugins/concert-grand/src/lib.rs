@@ -53,341 +53,454 @@ impl Knob {
 }
 
 /// Every knob by name, with the first line of its documentation.
-pub static TUNABLES: &[(&str, &Knob, &str)] = &[
+/// The knobs as the instrument's own parameters, after the forty-one that
+/// voice it: fader 0.5 is the compiled value, and each eighth of travel
+/// doubles or halves it (a sixteenth to sixteen times over the range). A
+/// knob compiled at zero has nothing to scale and takes the fader as it is.
+const KNOB_PARAM_BASE: u32 = (6 + LAB_COUNT + 18) as u32;
+
+fn knob_slot(index: u32) -> Option<usize> {
+    let slot = index.checked_sub(KNOB_PARAM_BASE)? as usize;
+    (slot < KNOB_COUNT).then_some(slot)
+}
+
+fn knob_from_fader(default: f32, fader: f32) -> f32 {
+    if default == 0.0 {
+        fader
+    } else {
+        default * powf(16.0, 2.0 * (fader - 0.5))
+    }
+}
+
+fn fader_from_knob(default: f32, value: f32) -> f32 {
+    if default == 0.0 {
+        value.clamp(0.0, 1.0)
+    } else if value <= 0.0 {
+        0.0
+    } else {
+        (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
+    }
+}
+pub const KNOB_COUNT: usize = 92;
+/// Every knob by name, with the first line of its documentation and the
+/// value it was compiled with.
+pub static TUNABLES: &[(&str, &Knob, &str, f32)] = &[
     (
         "RADIATION_CORNER_HZ",
         &RADIATION_CORNER_HZ,
         "Below the soundboard's first mode the board radiates almost nothing.",
+        45.0,
     ),
     (
         "COMB_FLOOR",
         &COMB_FLOOR,
         "How deep the strike-point comb can cut. A finite bridge admittance keeps a",
+        0.26,
     ),
     (
         "STRING_T60_S",
         &STRING_T60_S,
         "How long the string's own losses let a partial ring, at the bottom of the",
+        40.0,
     ),
     (
         "SLOW_STAGE_RATIO",
         &SLOW_STAGE_RATIO,
         "How much longer the string rings alone than the audible (bridge-drained)",
+        1.5,
     ),
     (
         "INCOHERENT_RADIATION",
         &INCOHERENT_RADIATION,
         "The share of the radiation channel that survives dephasing.",
+        0.25,
     ),
-    ("STRING_KNEE_HZ", &STRING_KNEE_HZ, ""),
-    ("STRING_TILT", &STRING_TILT, ""),
+    ("STRING_KNEE_HZ", &STRING_KNEE_HZ, "", 20.0),
+    ("STRING_TILT", &STRING_TILT, "", 0.05),
     (
         "SCATTER_KNEE_HZ",
         &SCATTER_KNEE_HZ,
         "Below this the soundboard has too few modes to be ragged, so the synthetic",
+        320.0,
     ),
     (
         "HORIZONTAL_BRIDGE",
         &HORIZONTAL_BRIDGE,
         "How strongly the horizontal polarisation couples to the bridge, against",
+        0.12,
     ),
     (
         "HORIZONTAL_SHARE",
         &HORIZONTAL_SHARE,
         "How much of a partial's amplitude the hammer puts into the horizontal",
+        0.3,
     ),
     (
         "STRIKE_SKEW_M",
         &STRIKE_SKEW_M,
         "How far apart the three strings of a unison sit under the hammer face.",
+        2.5e-4,
     ),
     (
         "POLARISATION_CENTS",
         &POLARISATION_CENTS,
         "The horizontal polarisation is not at the vertical's exact pitch: the",
+        0.5,
     ),
     (
         "LONGITUDINAL_RATIO",
         &LONGITUDINAL_RATIO,
         "How many longitudinal modes each voice carries.",
+        17.5,
     ),
     (
         "LONGITUDINAL_MIX",
         &LONGITUDINAL_MIX,
         "How many transverse partials feed the longitudinal excitation. They hold",
+        4.0,
     ),
     (
         "TENSION_GAIN",
         &TENSION_GAIN,
         "How hard the string's own stretch pulls it sharp. Sized so a fortissimo",
+        0.052,
     ),
     (
         "TENSION_MAX_SHIFT",
         &TENSION_MAX_SHIFT,
         "The largest relative frequency shift the tension modulation may apply.",
+        0.01,
     ),
     (
         "TENSION_SMOOTHING",
         &TENSION_SMOOTHING,
         "One-pole smoothing of the tension offset per tension step: ~25 ms.",
+        0.02861,
     ),
     (
         "DEAD_MAGNITUDE_SQUARED",
         &DEAD_MAGNITUDE_SQUARED,
         "A component whose squared magnitude falls below this is inaudible even",
+        3e-8,
     ),
     (
         "RADIATION_COINCIDENCE",
         &RADIATION_COINCIDENCE,
         "Where the soundboard's bending wavelength overtakes the wavelength in air",
+        200.0,
     ),
     (
         "RADIATION_ROLLOFF_HZ",
         &RADIATION_ROLLOFF_HZ,
         "Above this the bridge stops taking the string's energy as readily: the",
+        5000.0,
     ),
     (
         "BRIDGE_REFERENCE_SPEED",
         &BRIDGE_REFERENCE_SPEED,
         "The wave speed the bridge loss is calibrated at: a tenor string. A bass",
+        320.0,
     ),
     (
         "RADIATION_RATE",
         &RADIATION_RATE,
         "The loss rate a fully radiating partial carries, in nepers per second.",
+        3.4,
     ),
     (
         "KAPPA_LOSS",
         &KAPPA_LOSS,
         "The wire's own bending loss, per partial squared. Bensa et al.'s",
+        2.0e-5,
     ),
     (
         "KNOCK_LEVEL",
         &KNOCK_LEVEL,
         "How loud the action's broadband knock is, before the per-note calibration.",
-    ),
-    (
-        "BOARD_MEAN_MOBILITY",
-        &BOARD_MEAN_MOBILITY,
-        "Scale on the Skudrzyk normalisation of the board's mean mobility.",
-    ),
-    (
-        "BOARD_COINCIDENCE_HZ",
-        &BOARD_COINCIDENCE_HZ,
-        "Where the board starts radiating efficiently (Hz); below it each mode's drive falls off.",
-    ),
-    (
-        "BOARD_RADIATION_ORDER",
-        &BOARD_RADIATION_ORDER,
-        "Slope of that fall-off: 1 = 6 dB per octave, 2 = 12.",
+        0.028,
     ),
     (
         "BOARD_LOSS_FACTOR",
         &BOARD_LOSS_FACTOR,
         "The soundboard's modal loss factor.",
+        0.023,
     ),
     (
         "HOUSE_FELT_CORNER",
         &HOUSE_FELT_CORNER,
         "The felt exponent's physical range. Outside it the hammer integration",
+        0.52,
     ),
     (
         "HOUSE_HF_FLOOR",
         &HOUSE_HF_FLOOR,
         "Where HF Floor ships, and the shape of what it does. The corner is the",
+        0.5,
     ),
-    ("HF_FLOOR_CORNER_HZ", &HF_FLOOR_CORNER_HZ, ""),
-    ("HF_FLOOR_SPAN", &HF_FLOOR_SPAN, ""),
+    ("HF_FLOOR_CORNER_HZ", &HF_FLOOR_CORNER_HZ, "", 2400.0),
+    ("HF_FLOOR_SPAN", &HF_FLOOR_SPAN, "", 4.0),
     (
         "FELT_REFERENCE_COMPRESSION_M",
         &FELT_REFERENCE_COMPRESSION_M,
         "The compression a hammer actually works at, in metres. Askenfelt and",
+        0.0005,
     ),
     (
         "SCALE_JOIN",
         &SCALE_JOIN,
         "The scale's two joints and the equivalent gauges at them. See",
+        33.0 / 87.0,
     ),
-    ("SCALE_BREAK", &SCALE_BREAK, ""),
-    ("GAUGE_A0_M", &GAUGE_A0_M, ""),
-    ("GAUGE_BREAK_M", &GAUGE_BREAK_M, ""),
-    ("GAUGE_JOIN_M", &GAUGE_JOIN_M, ""),
-    ("GAUGE_CONSTANT", &GAUGE_CONSTANT, ""),
+    ("SCALE_BREAK", &SCALE_BREAK, "", 22.0 / 87.0),
+    ("GAUGE_A0_M", &GAUGE_A0_M, "", 3.553e-3),
+    ("GAUGE_BREAK_M", &GAUGE_BREAK_M, "", 1.40e-3),
+    ("GAUGE_JOIN_M", &GAUGE_JOIN_M, "", 1.2947e-3),
+    ("GAUGE_CONSTANT", &GAUGE_CONSTANT, "", 0.185_653_5),
     (
         "CLANG_LENGTH_POWER",
         &CLANG_LENGTH_POWER,
         "How far the shank knock's pitch wanders from note to note. At this value",
+        2.0,
     ),
-    ("CLACK_SCATTER", &CLACK_SCATTER, ""),
+    ("CLACK_SCATTER", &CLACK_SCATTER, "", 0.14),
     (
         "THUMP_T60_S",
         &THUMP_T60_S,
         "How long the keybed thud rings.",
+        0.06,
     ),
     (
         "FELT_EXPONENT_AT_BASS",
         &FELT_EXPONENT_AT_BASS,
         "The felt's hardening exponent across the compass, before any voicing.",
+        2.3,
     ),
     (
         "FELT_EXPONENT_RISE",
         &FELT_EXPONENT_RISE,
         "How much the exponent rises from the lowest note to the highest.",
+        0.7,
     ),
     (
         "ACTION_SPAN_BASE",
         &ACTION_SPAN_BASE,
         "How much longer the hammer stays on the string for a soft blow than a hard",
+        2.1,
     ),
-    ("ACTION_SPAN_PER_DYNAMICS", &ACTION_SPAN_PER_DYNAMICS, ""),
-    ("CONTACT_SWING_BASE", &CONTACT_SWING_BASE, ""),
+    (
+        "ACTION_SPAN_PER_DYNAMICS",
+        &ACTION_SPAN_PER_DYNAMICS,
+        "",
+        6.3,
+    ),
+    ("CONTACT_SWING_BASE", &CONTACT_SWING_BASE, "", 1.0),
     (
         "CONTACT_SWING_PER_DYNAMICS",
         &CONTACT_SWING_PER_DYNAMICS,
         "",
+        1.2,
     ),
-    ("FELT_EXPONENT_MIN", &FELT_EXPONENT_MIN, ""),
-    ("FELT_EXPONENT_MAX", &FELT_EXPONENT_MAX, ""),
+    ("FELT_EXPONENT_MIN", &FELT_EXPONENT_MIN, "", 1.2),
+    ("FELT_EXPONENT_MAX", &FELT_EXPONENT_MAX, "", 3.5),
+    (
+        "BOARD_MEAN_MOBILITY",
+        &BOARD_MEAN_MOBILITY,
+        "Scale on the Skudrzyk normalisation of the board's mean mobility.",
+        0.5,
+    ),
+    (
+        "BOARD_COINCIDENCE_HZ",
+        &BOARD_COINCIDENCE_HZ,
+        "Where the board starts radiating efficiently (Hz); below it each mode's drive falls off.",
+        60.0,
+    ),
+    (
+        "BOARD_RADIATION_ORDER",
+        &BOARD_RADIATION_ORDER,
+        "Slope of that fall-off: 1 = 6 dB per octave, 2 = 12.",
+        1.0,
+    ),
     (
         "HEADROOM",
         &HEADROOM,
         "Level of the board against the string sum that drives it. There is one",
+        0.182,
     ),
-    ("BOARD_MIX", &BOARD_MIX, ""),
+    ("BOARD_MIX", &BOARD_MIX, "", 8.0),
     (
         "BOARD_TOP_HZ",
         &BOARD_TOP_HZ,
         "Where the board's modes stop. Above this a real board still radiates, but",
+        8500.0,
     ),
     (
         "BOARD_BOTTOM_HZ",
         &BOARD_BOTTOM_HZ,
         "The lowest board mode. A grand's first soundboard mode sits near 60-70 Hz;",
+        62.0,
     ),
-    ("OPEN_MIX", &OPEN_MIX, "Wet level of the open-string halo."),
-    ("UNDAMPED_LOW_HZ", &UNDAMPED_LOW_HZ, ""),
-    ("UNDAMPED_HIGH_HZ", &UNDAMPED_HIGH_HZ, ""),
+    (
+        "OPEN_MIX",
+        &OPEN_MIX,
+        "Wet level of the open-string halo.",
+        0.012,
+    ),
+    ("UNDAMPED_LOW_HZ", &UNDAMPED_LOW_HZ, "", 1900.0),
+    ("UNDAMPED_HIGH_HZ", &UNDAMPED_HIGH_HZ, "", 7000.0),
     (
         "UNDAMPED_T60_LOW_S",
         &UNDAMPED_T60_LOW_S,
         "Undamped, but not endless: these are short, light, well-terminated lengths.",
+        2.6,
     ),
-    ("UNDAMPED_T60_HIGH_S", &UNDAMPED_T60_HIGH_S, ""),
-    ("UNDAMPED_MIX", &UNDAMPED_MIX, ""),
-    ("HALO_RT60_S", &HALO_RT60_S, ""),
-    ("HALO_HP_HZ", &HALO_HP_HZ, ""),
-    ("HALO_MIX", &HALO_MIX, ""),
-    ("SOUND_SPEED", &SOUND_SPEED, "The speed of sound, m/s."),
+    ("UNDAMPED_T60_HIGH_S", &UNDAMPED_T60_HIGH_S, "", 0.9),
+    ("UNDAMPED_MIX", &UNDAMPED_MIX, "", 0.12),
+    ("HALO_RT60_S", &HALO_RT60_S, "", 2.2),
+    ("HALO_HP_HZ", &HALO_HP_HZ, "", 1800.0),
+    ("HALO_MIX", &HALO_MIX, "", 0.05),
+    (
+        "SOUND_SPEED",
+        &SOUND_SPEED,
+        "The speed of sound, m/s.",
+        343.0,
+    ),
     (
         "ROOM_VOLUME_MIN_M3",
         &ROOM_VOLUME_MIN_M3,
         "THE RECORDING CHAIN, DERIVED RATHER THAN DRAWN.",
+        45.0,
     ),
-    ("ROOM_VOLUME_MAX_M3", &ROOM_VOLUME_MAX_M3, ""),
-    ("MIC_DISTANCE_MIN_M", &MIC_DISTANCE_MIN_M, ""),
-    ("MIC_DISTANCE_MAX_M", &MIC_DISTANCE_MAX_M, ""),
+    ("ROOM_VOLUME_MAX_M3", &ROOM_VOLUME_MAX_M3, "", 45_000.0),
+    ("MIC_DISTANCE_MIN_M", &MIC_DISTANCE_MIN_M, "", 0.5),
+    ("MIC_DISTANCE_MAX_M", &MIC_DISTANCE_MAX_M, "", 16.0),
     (
         "MIC_REFERENCE_M",
         &MIC_REFERENCE_M,
         "The distance the dry calibration was made at: the direct gain is 1 here.",
+        2.5,
     ),
     (
         "AIR_ABSORB_4K_PER_M",
         &AIR_ABSORB_4K_PER_M,
         "Air absorption per metre at 4 kHz, ISO 9613 order of magnitude at",
+        0.0022,
     ),
     (
         "MIC_SPACING_M",
         &MIC_SPACING_M,
         "Where the proximity rise sits: the pressure-gradient term crosses the",
+        0.17,
     ),
     (
         "MIC_PREAMP",
         &MIC_PREAMP,
         "The pair's preamplifier, and it is applied where the loss happened.",
+        1.57,
     ),
-    ("PROXIMITY_STRENGTH", &PROXIMITY_STRENGTH, ""),
+    ("PROXIMITY_STRENGTH", &PROXIMITY_STRENGTH, "", 0.35),
     (
         "SYMPATHY_RATE",
         &SYMPATHY_RATE,
         "The spaced pair's maximum spacing in metres (Width at full), and how far",
+        0.004,
     ),
     (
         "IMPACT_CLANG",
         &IMPACT_CLANG,
         "The impact's own longitudinal excitation: the tension pulse of the",
+        3.5,
     ),
-    ("IMPACT_PULSE_TAU_S", &IMPACT_PULSE_TAU_S, ""),
+    ("IMPACT_PULSE_TAU_S", &IMPACT_PULSE_TAU_S, "", 0.0015),
     (
         "AIR_HIGHPASS",
         &AIR_HIGHPASS,
         "One-pole coefficient for the high-pass on everything entering the lid and",
+        0.0094,
     ),
     (
         "ROOM_MIX",
         &ROOM_MIX,
         "Wet level of the chamber against the direct sound.",
+        0.09,
     ),
     (
         "HAMMER_MASS_SCALE",
         &HAMMER_MASS_SCALE,
         "What is left of the old analytic recipe under the simulated strike.",
+        1.0,
     ),
     (
         "STRING_TENSION_N",
         &STRING_TENSION_N,
         "The scale's tension, in newtons. Piano scales hold string tension nearly",
+        850.0,
     ),
     (
         "FELT_K_A0",
         &FELT_K_A0,
         "The felt's stiffness at A0, in N/m^p, and how many decades it climbs to",
+        5.6e7,
     ),
+    ("FELT_K_DECADES", &FELT_K_DECADES, "", 4.0),
     (
-        "SIM_TOP_HZ",
-        &SIM_TOP_HZ,
-        "How far up the strike simulation owns the partials (Hz).",
-    ),
-    (
-        "UNISON_BEAT_CAP_HZ",
-        &UNISON_BEAT_CAP_HZ,
-        "The fastest beat a unison may leave at its fundamental (Hz); caps the treble detune.",
-    ),
-    (
-        "DUPLEX_LEVEL",
-        &DUPLEX_LEVEL,
-        "Level of the duplex segments' ring at 2.015 and 4.03 times the pitch.",
-    ),
-    (
-        "FELT_TREBLE_GAIN",
-        &FELT_TREBLE_GAIN,
-        "Multiplier on the felt stiffness at C8, fading to one at C4.",
+        "FELT_TABLE_FLOOR",
+        &FELT_TABLE_FLOOR,
+        "Position (0 = A0, 1 = C8) below which the felt tables are held at C2's values.",
+        0.172,
     ),
     (
         "FELT_BASS_GAIN",
         &FELT_BASS_GAIN,
         "Multiplier on the felt stiffness at A0, fading to one at C2.",
+        4.0,
     ),
     (
-        "FELT_TABLE_FLOOR",
-        &FELT_TABLE_FLOOR,
-        "Position (0 = A0, 1 = C8) below which the felt tables are held at C2's values.",
+        "FELT_TREBLE_GAIN",
+        &FELT_TREBLE_GAIN,
+        "Multiplier on the felt stiffness at C8, fading to one at C4.",
+        1.0,
     ),
-    ("FELT_K_DECADES", &FELT_K_DECADES, ""),
+    (
+        "DUPLEX_LEVEL",
+        &DUPLEX_LEVEL,
+        "Level of the duplex segments' ring at 2.015 and 4.03 times the pitch.",
+        0.018,
+    ),
+    (
+        "UNISON_BEAT_CAP_HZ",
+        &UNISON_BEAT_CAP_HZ,
+        "The fastest beat a unison may leave at its fundamental (Hz); caps the treble detune.",
+        2.0,
+    ),
+    (
+        "UNISON_JITTER_SPREAD",
+        &UNISON_JITTER_SPREAD,
+        "Geometric spread of the per-partial detune jitter (6 = x0.4..x2.4; 1 = one detune per string).",
+        6.0,
+    ),
+    (
+        "SIM_TOP_HZ",
+        &SIM_TOP_HZ,
+        "How far up the strike simulation owns the partials (Hz).",
+        8_000.0,
+    ),
     (
         "HAMMER_V_FF",
         &HAMMER_V_FF,
         "Hammer speed at full velocity, m/s. Measured fortissimo hammers arrive at",
+        6.0,
     ),
     (
         "CONTACT_STRETCH",
         &CONTACT_STRETCH,
         "How much longer the integration runs than the nominal contact time. The",
+        1.0,
     ),
     (
         "RECIPE_FLOOR",
         &RECIPE_FLOOR,
         "How much of the recipe's amplitude survives inside the simulated range.",
+        0.0,
     ),
 ];
 
@@ -420,8 +533,8 @@ pub fn apply_tuning(text: &str) -> (usize, Vec<(usize, f32)>, Vec<String>) {
             }
             continue;
         }
-        match TUNABLES.iter().find(|(n, _, _)| *n == name) {
-            Some((_, knob, _)) => {
+        match TUNABLES.iter().find(|(n, _, _, _)| *n == name) {
+            Some((_, knob, _, _)) => {
                 knob.set(value);
                 set += 1;
             }
@@ -438,7 +551,7 @@ pub fn dump_tuning() -> String {
     let mut out = String::from(
         "# Concert Grand tuning: every constant of the model, live.\n# Edit and save; the lab reloads it. Lines: NAME = value, fader.<index> = 0..1\n\n",
     );
-    for (name, knob, doc) in TUNABLES {
+    for (name, knob, doc, _) in TUNABLES {
         if !doc.is_empty() {
             out.push_str(&format!("# {doc}\n"));
         }
@@ -805,7 +918,7 @@ const PARAM_CLANG_PLAIN: u32 = 39;
 /// instrument: until this existed, `Upright 132`, `Upright 114` and
 /// `Player Upright` all answered CC67 with a mechanism they do not have.
 const PARAM_ACTION: u32 = 40;
-const PARAM_COUNT: usize = 6 + LAB_COUNT + 18;
+const PARAM_COUNT: usize = 6 + LAB_COUNT + 18 + KNOB_COUNT;
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
 /// entries are pre-scaled by the per-sample decay factor `g`, so magnitude
@@ -2067,6 +2180,8 @@ impl Voice {
 /// The performer-facing controls, all normalised 0..=1.
 #[derive(Clone, Copy)]
 struct Controls {
+    /// A knob moved through a parameter: the prepare-time state is re-derived at the next block.
+    knobs_dirty: bool,
     brightness: f32,
     dynamics: f32,
     unison: f32,
@@ -2118,6 +2233,7 @@ impl Default for Controls {
         // intimate close-miked piano -- small damped room, the pair at the
         // rim, the pattern leaning ribbon-ward for its proximity warmth.
         Self {
+            knobs_dirty: false,
             brightness: 0.44,
             dynamics: 0.45,
             unison: 0.65,
@@ -2374,7 +2490,11 @@ impl Controls {
             PARAM_CLANG_FALLOFF => self.clang_falloff,
             PARAM_CLANG_PLAIN => self.clang_plain,
             PARAM_ACTION => self.action,
-            _ => return None,
+            _ => {
+                let slot = knob_slot(index)?;
+                let (_, knob, _, default) = TUNABLES[slot];
+                return Some(fader_from_knob(default, knob.get()) as f64);
+            }
         };
         Some(value as f64)
     }
@@ -2410,9 +2530,14 @@ impl Controls {
             PARAM_CLANG_FALLOFF => self.clang_falloff = value,
             PARAM_CLANG_PLAIN => self.clang_plain = value,
             PARAM_ACTION => self.action = value,
-            // (the engine watches the room and the board through their
-            // dirty flags -- both are rebuilds, not per-sample reads)
-            _ => return false,
+            _ => {
+                let Some(slot) = knob_slot(index) else {
+                    return false;
+                };
+                let (_, knob, _, default) = TUNABLES[slot];
+                knob.set(knob_from_fader(default, value));
+                self.knobs_dirty = true;
+            }
         }
         true
     }
@@ -2754,6 +2879,8 @@ pub static DUPLEX_LEVEL: Knob = Knob::new(0.018);
 /// The fastest beat a unison may leave at its fundamental, in hertz; caps the
 /// detune in the treble the way a tuner does.
 pub static UNISON_BEAT_CAP_HZ: Knob = Knob::new(2.0);
+/// Geometric spread of the per-partial detune jitter (6 = x0.4..x2.4; 1 = one detune per string).
+pub static UNISON_JITTER_SPREAD: Knob = Knob::new(6.0);
 /// How far up the strike simulation owns the partials, in Hz. It was 8 kHz,
 /// which left a C7 with three simulated partials and everything above them
 /// to the analytic recipe, whose felt cutoff is floored at 1.5 f0 and so
@@ -4484,7 +4611,11 @@ impl ConcertGrand {
             // their nulls shallow). A factor-6 geometric spread scatters the
             // null times; the geometric mean keeps the average width the
             // ear already approved.
-            let jitter = 0.95 * powf(6.0, hash01((note as u32) << 10 | (n as u32) << 2 | 1) - 0.5);
+            let jitter = 0.95
+                * powf(
+                    UNISON_JITTER_SPREAD.get(),
+                    hash01((note as u32) << 10 | (n as u32) << 2 | 1) - 0.5,
+                );
             let cents = detune_cents * jitter;
             // The strings of the unison, struck together and equal: their
             // subsequent life -- fast coherent decay, dephasing, the long
@@ -5679,6 +5810,11 @@ impl Processor for ConcertGrand {
 
     fn set_parameter(&mut self, index: u32, value: f64) -> bool {
         let accepted = self.controls.set(index, value);
+        if accepted && index >= KNOB_PARAM_BASE {
+            self.board_dirty = true;
+            self.room_dirty = true;
+            self.scale_dirty = true;
+        }
         if accepted && (PARAM_ROOM_SIZE..=PARAM_MIC_PATTERN).contains(&index) {
             // The room is a handful of float derivations; retuning at the
             // next block is cheap and keeps every acoustic quantity honest
@@ -6080,6 +6216,9 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 15] = self.controls.clang_falloff;
         values[6 + LAB_COUNT + 16] = self.controls.clang_plain;
         values[6 + LAB_COUNT + 17] = self.controls.action;
+        for (slot, (_, knob, _, default)) in TUNABLES.iter().enumerate() {
+            values[KNOB_PARAM_BASE as usize + slot] = fader_from_knob(*default, knob.get());
+        }
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -6141,6 +6280,9 @@ impl Processor for ConcertGrand {
         values[6 + LAB_COUNT + 15] = defaults.clang_falloff;
         values[6 + LAB_COUNT + 16] = defaults.clang_plain;
         values[6 + LAB_COUNT + 17] = defaults.action;
+        for (slot, (_, _, _, default)) in TUNABLES.iter().enumerate() {
+            values[KNOB_PARAM_BASE as usize + slot] = fader_from_knob(*default, *default);
+        }
         // A 37-float state is from the era of the "in bass" tilt twins: its
         // tail is tilt values, not room values, and reading it into the room
         // controls would set the hall from leftovers. Take its head only.
@@ -6164,6 +6306,7 @@ impl Processor for ConcertGrand {
         let mut lab = [0.5f32; LAB_COUNT];
         lab.copy_from_slice(&values[6..6 + LAB_COUNT]);
         self.controls = Controls {
+            knobs_dirty: true,
             brightness: values[0],
             dynamics: values[1],
             unison: values[2],
@@ -6190,6 +6333,12 @@ impl Processor for ConcertGrand {
             clang_plain: values[6 + LAB_COUNT + 16],
             action: values[6 + LAB_COUNT + 17],
         };
+        for (slot, (_, knob, _, default)) in TUNABLES.iter().enumerate() {
+            knob.set(knob_from_fader(
+                *default,
+                values[KNOB_PARAM_BASE as usize + slot],
+            ));
+        }
         self.room_dirty = true;
         self.board_dirty = true;
         true
@@ -6228,6 +6377,10 @@ impl Processor for ConcertGrand {
         _input_channels: u32,
         output_channels: u32,
     ) {
+        if self.controls.knobs_dirty {
+            self.controls.knobs_dirty = false;
+            self.retune();
+        }
         // Knobs read once per call, not per sample.
         let knob_air_highpass = AIR_HIGHPASS.get();
         let knob_board_mix = BOARD_MIX.get();
@@ -10050,6 +10203,41 @@ mod tests {
     /// summed left output out, in third-octave bands: what the radiator does
     /// to whatever the strings hand it. `cargo test board_curve -- --ignored
     /// --nocapture`.
+    /// The knobs are process-global, and the tests run in parallel: this
+    /// test therefore never leaves a knob anywhere but its compiled value.
+    /// The mapping is checked on its own, and the parameter path with a
+    /// write that is a no-op by construction.
+    #[test]
+    fn every_knob_is_a_parameter_and_round_trips() {
+        assert_eq!(TUNABLES.len(), KNOB_COUNT);
+        for (name, _, _, default) in TUNABLES.iter() {
+            for fader in [0.0f32, 0.25, 0.5, 0.625, 1.0] {
+                let value = knob_from_fader(*default, fader);
+                let back = fader_from_knob(*default, value);
+                assert!(
+                    (back - fader).abs() < 1e-4,
+                    "{name}: {fader} -> {value} -> {back}"
+                );
+            }
+            let rest = fader_from_knob(*default, *default);
+            assert_eq!(knob_from_fader(*default, rest), *default, "{name} at rest");
+        }
+        let mut piano = prepared();
+        for (slot, (name, knob, _, default)) in TUNABLES.iter().enumerate() {
+            let index = KNOB_PARAM_BASE + slot as u32;
+            let rest = fader_from_knob(*default, *default);
+            assert!(piano.set_parameter(index, rest as f64), "{name}");
+            assert_eq!(knob.get(), *default, "{name} moved");
+            let read = piano.get_parameter(index).unwrap();
+            assert!((read - rest as f64).abs() < 1e-6, "{name} reads {read}");
+        }
+        assert!(
+            piano
+                .get_parameter(KNOB_PARAM_BASE + KNOB_COUNT as u32)
+                .is_none()
+        );
+    }
+
     #[test]
     #[ignore]
     fn board_curve() {

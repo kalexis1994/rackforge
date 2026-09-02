@@ -227,6 +227,10 @@ const LONGITUDINAL_MIX: f32 = 4.0;
 /// bass strike sharpens a few cents and settles as it decays, which is what
 /// measured piano glides do.
 const TENSION_GAIN: f32 = 0.052;
+/// The largest relative frequency shift the tension modulation may apply.
+const TENSION_MAX_SHIFT: f32 = 0.01;
+/// One-pole smoothing of the tension offset per tension step: ~25 ms.
+const TENSION_SMOOTHING: f32 = 0.02861;
 /// A component whose squared magnitude falls below this is inaudible even
 /// summed eighty times: kill it and spend the arithmetic elsewhere.
 const DEAD_MAGNITUDE_SQUARED: f32 = 3e-8;
@@ -1211,6 +1215,8 @@ struct Voice {
     tension_gain: f32,
     tension_rest: f32,
     tension_applied: f32,
+    /// The low-passed tension offset the glide follows.
+    tension_smoothed: f32,
     tension_in: u32,
     /// The string's longitudinal modes, driven by its own tension.
     longitudinal: [BodyMode; LONGITUDINAL_MODES],
@@ -1266,6 +1272,7 @@ impl Default for Voice {
             tension_gain: 0.0,
             tension_rest: 0.0,
             tension_applied: 0.0,
+            tension_smoothed: 0.0,
             tension_in: TENSION_INTERVAL,
             longitudinal: [BodyMode::default(); LONGITUDINAL_MODES],
             longitudinal_gain: 0.0,
@@ -1406,9 +1413,26 @@ impl Voice {
         // oscillator's own matrix -- so asking for the full offset every step
         // would accumulate it, and the note would sail upward for as long as
         // it kept moving. Measured, that was 46 cents per second on A0.
-        let desired = self.tension_gain * (stretch - self.tension_rest);
-        let rate = desired - self.tension_applied;
-        self.tension_applied = desired;
+        // Bounded by the string itself: Kirchhoff's tension rise at any
+        // amplitude a wire survives is a percent or so, ten-odd cents of
+        // pitch. Unbounded, the modulation and the longitudinal bank it
+        // feeds pump each other -- measured on A0 fortissimo, the note grew
+        // 40 dB over three seconds and saturated -- which a real string's
+        // losses forbid and this clamp forbids in its place.
+        let desired = (self.tension_gain * (stretch - self.tension_rest))
+            .clamp(-TENSION_MAX_SHIFT, TENSION_MAX_SHIFT);
+        // Only the SLOW part of the stretch moves the pitch. The part that
+        // oscillates at twice each mode's frequency is real too, but applied
+        // as a frequency nudge it is parametric pumping -- a mode modulated
+        // at twice its own rate is a Mathieu oscillator, and with three
+        // beating strings the phase wanders into gain. A real string pays
+        // for that motion out of its own energy; this model does not, so it
+        // keeps the settling glide and leaves the sidebands to the
+        // longitudinal bank, which is driven by the same y^2 and produces
+        // them honestly.
+        self.tension_smoothed += (desired - self.tension_smoothed) * TENSION_SMOOTHING;
+        let rate = self.tension_smoothed - self.tension_applied;
+        self.tension_applied = self.tension_smoothed;
         if rate == 0.0 {
             return;
         }
@@ -4481,6 +4505,7 @@ impl ConcertGrand {
         // everything above it is the note sharpening itself.
         voice.tension_rest = 0.0;
         voice.tension_applied = 0.0;
+        voice.tension_smoothed = 0.0;
         // The longitudinal modes sit at k*c_L/(2L), and the speaking length
         // follows from the pitch and the transverse speed: L = c/(2*f0) with
         // c = 2*L*f0. So f_L,k = k * f0 * c_L / c, and the ratio c_L/c is what

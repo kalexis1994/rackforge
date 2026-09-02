@@ -2731,7 +2731,13 @@ pub static STRING_TENSION_N: Knob = Knob::new(850.0);
 /// shortens the fortissimo contact toward Askenfelt's times while moving
 /// the attack centroid under 6% -- the two constants are one decision.
 pub static FELT_K_A0: Knob = Knob::new(5.6e7);
-pub static FELT_K_DECADES: Knob = Knob::new(4.93);
+/// 4.93 would run the table's log-linear line through the published C7
+/// value; 4.0 lands C7 a decade softer (1.6e11 N/m^p). Measured 2026-09-02
+/// against both references: with 4.93 a C5's tenth partial sat at -27 dB
+/// at fortissimo where both recordings have -53, and the user heard it as
+/// broken and detuned; at 4.0 it is -41 with the tenor's bands still on
+/// the references and A0's contact at 4.1 ms.
+pub static FELT_K_DECADES: Knob = Knob::new(4.0);
 /// Position (0 = A0, 1 = C8) below which the felt tables are held at C2's values.
 pub static FELT_TABLE_FLOOR: Knob = Knob::new(0.172);
 /// Multiplier on the felt stiffness at A0, fading to one at C2.
@@ -2746,7 +2752,16 @@ pub static DUPLEX_LEVEL: Knob = Knob::new(0.018);
 /// does not move with velocity: the treble was velocity-blind by
 /// construction. The simulated string is capped at SIM_MODES partials
 /// regardless, so the bass is unaffected.
-pub static SIM_TOP_HZ: Knob = Knob::new(20_000.0);
+///
+/// Tried at 20 kHz on 2026-09-02 and pulled back: with the felt tables the
+/// simulation puts a C5's tenth partial at -29 dB where both references
+/// have -53, and an ideal-string control with the same parameters agrees
+/// with the simulation (-21) -- the table's fifth-octave felt is harder
+/// than the recorded pianos'. Until the treble felt is measured rather than
+/// interpolated, the recipe above 8 kHz, whose cutoff does follow
+/// velocity, is the closer description. The user heard the 20 kHz version
+/// as broken and detuned; the tenth partial of C5 is why.
+pub static SIM_TOP_HZ: Knob = Knob::new(8_000.0);
 /// Hammer speed at full velocity, m/s. Measured fortissimo hammers arrive at
 /// 5-7 m/s; pianissimo under 1.
 pub static HAMMER_V_FF: Knob = Knob::new(6.0);

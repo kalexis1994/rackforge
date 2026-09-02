@@ -349,6 +349,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "How far up the strike simulation owns the partials (Hz).",
     ),
     (
+        "UNISON_BEAT_CAP_HZ",
+        &UNISON_BEAT_CAP_HZ,
+        "The fastest beat a unison may leave at its fundamental (Hz); caps the treble detune.",
+    ),
+    (
         "DUPLEX_LEVEL",
         &DUPLEX_LEVEL,
         "Level of the duplex segments' ring at 2.015 and 4.03 times the pitch.",
@@ -2746,6 +2751,9 @@ pub static FELT_BASS_GAIN: Knob = Knob::new(4.0);
 pub static FELT_TREBLE_GAIN: Knob = Knob::new(1.0);
 /// Level of the duplex segments' ring at 2.015 and 4.03 times the pitch (notes above the middle).
 pub static DUPLEX_LEVEL: Knob = Knob::new(0.018);
+/// The fastest beat a unison may leave at its fundamental, in hertz; caps the
+/// detune in the treble the way a tuner does.
+pub static UNISON_BEAT_CAP_HZ: Knob = Knob::new(2.0);
 /// How far up the strike simulation owns the partials, in Hz. It was 8 kHz,
 /// which left a C7 with three simulated partials and everything above them
 /// to the analytic recipe, whose felt cutoff is floored at 1.5 f0 and so
@@ -3979,6 +3987,15 @@ impl ConcertGrand {
             * (self.controls.unison * 2.86)
             * self.controls.lab(13)
             * unison_precision;
+        // A tuner hears beats, not cents: the same three cents that pass
+        // unnoticed on a C2 beat twenty times a second on a C7's second
+        // partial, and that is the chirp the user heard on the high notes
+        // ("como si la cuerda trasteara"). The unison is therefore capped by
+        // the beat rate it may leave at the fundamental, which a tuner in
+        // the treble brings down to a couple of hertz; in the tenor and the
+        // bass the cap is above the law and changes nothing.
+        let beat_cap_cents = UNISON_BEAT_CAP_HZ.get() * 1731.0 / f0.max(1.0);
+        let detune_cents = detune_cents.min(beat_cap_cents);
 
         // First pass: partial frequencies and unnormalised amplitudes. The
         // comb keeps the sign of sin(n·π·x0): a struck string's partials

@@ -95,7 +95,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 101;
+pub const KNOB_COUNT: usize = 106;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -122,6 +122,11 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "INCOHERENT_RADIATION",
         &INCOHERENT_RADIATION,
         "The share of the radiation channel that survives dephasing.",
+    ),
+    (
+        "SLOW_WIRE_SHARE",
+        &SLOW_WIRE_SHARE,
+        "The share of the wire's high-frequency loss the dephased, slow stage carries.",
     ),
     ("STRING_KNEE_HZ", &STRING_KNEE_HZ, ""),
     ("STRING_TILT", &STRING_TILT, ""),
@@ -204,6 +209,26 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "BRIDGE_REFERENCE_GAUGE_M",
         &BRIDGE_REFERENCE_GAUGE_M,
         "The gauge of the tenor wire the bridge loss is calibrated at, in metres.",
+    ),
+    (
+        "BRIDGE_LENGTH_POWER",
+        &BRIDGE_LENGTH_POWER,
+        "Power on the reflections per second (reference length over length) in the bridge loss.",
+    ),
+    (
+        "BRIDGE_REFERENCE_LENGTH_M",
+        &BRIDGE_REFERENCE_LENGTH_M,
+        "The tenor string length the bridge loss is calibrated at, in metres (a C4).",
+    ),
+    (
+        "BRIDGE_FACTOR_CAP",
+        &BRIDGE_FACTOR_CAP,
+        "The most the bridge loss may be scaled up by string, at the top of the compass.",
+    ),
+    (
+        "SLOW_FACTOR_CAP",
+        &SLOW_FACTOR_CAP,
+        "The same cap for the dephased, slow stage.",
     ),
     (
         "RADIATION_RATE",
@@ -614,6 +639,8 @@ pub static STRING_T60_S: Knob = Knob::new(40.0);
 pub static SLOW_STAGE_RATIO: Knob = Knob::new(1.5);
 /// The share of the radiation channel that survives dephasing.
 pub static INCOHERENT_RADIATION: Knob = Knob::new(0.25);
+/// The share of the wire's high-frequency loss the dephased, slow stage carries.
+pub static SLOW_WIRE_SHARE: Knob = Knob::new(0.1);
 pub static STRING_KNEE_HZ: Knob = Knob::new(20.0);
 pub static STRING_TILT: Knob = Knob::new(0.05);
 /// Below this the soundboard has too few modes to be ragged, so the synthetic
@@ -634,7 +661,7 @@ pub static HORIZONTAL_BRIDGE: Knob = Knob::new(0.12);
 /// polarisation. A hammer strikes vertically; the horizontal picks up only
 /// the blow's small sideways component and what the bridge's anisotropy
 /// leaks across, a modest fraction of the vertical motion.
-pub static HORIZONTAL_SHARE: Knob = Knob::new(0.3);
+pub static HORIZONTAL_SHARE: Knob = Knob::new(0.1);
 /// How far apart the three strings of a unison sit under the hammer face.
 ///
 /// The strike line is never exactly perpendicular, the hammer face is flat only
@@ -802,11 +829,19 @@ pub static BRIDGE_REFERENCE_SPEED: Knob = Knob::new(320.0);
 /// Power on the string's wave impedance in the bridge and wire losses. One is
 /// admittance over impedance; three is what the references measure (2026-09-02):
 /// with the tenor at one, a bass string keeps its 2-3 kHz aftersound 9 s.
-pub static BRIDGE_IMPEDANCE_POWER: Knob = Knob::new(3.0);
+pub static BRIDGE_IMPEDANCE_POWER: Knob = Knob::new(2.0);
 /// The gauge of the tenor wire the bridge loss is calibrated at, in metres.
 pub static BRIDGE_REFERENCE_GAUGE_M: Knob = Knob::new(1.23e-3);
 /// Plain wire at the top of the scale, in metres (a no. 13 wire).
 pub static GAUGE_TOP_M: Knob = Knob::new(0.8e-3);
+/// Power on the reflections per second (reference length over length) in the bridge loss.
+pub static BRIDGE_LENGTH_POWER: Knob = Knob::new(1.0);
+/// The tenor string length the bridge loss is calibrated at, in metres (a C4).
+pub static BRIDGE_REFERENCE_LENGTH_M: Knob = Knob::new(0.62);
+/// The most the bridge loss may be scaled up by string, at the top of the compass.
+pub static BRIDGE_FACTOR_CAP: Knob = Knob::new(4.0);
+/// The same cap for the dephased, slow stage.
+pub static SLOW_FACTOR_CAP: Knob = Knob::new(1.5);
 /// The loss rate a fully radiating partial carries, in nepers per second.
 /// Fitted to the same measurement, less what the string's own losses already
 /// account for.
@@ -3605,8 +3640,10 @@ impl ConcertGrand {
             + INCOHERENT_RADIATION.get()
                 * RADIATION_RATE.get()
                 * Self::radiation_efficiency(radiating)
-                * self.bridge_speed_factor(f0)
-            + 0.5 * Self::viscoelastic_loss(radiating) * self.bridge_speed_factor(f0);
+                * self.slow_bridge_factor(f0)
+            + SLOW_WIRE_SHARE.get()
+                * Self::viscoelastic_loss(radiating)
+                * self.slow_bridge_factor(f0);
         (LN_1000 / rate) * (0.5 + 1.5 * self.controls.decay) * self.hf_life(frequency)
     }
 
@@ -3775,9 +3812,36 @@ impl ConcertGrand {
         // Hz ring 10 s early where a tenor's ring 4, and the aftersound of
         // its 2-3 kHz partials 8-9 s. The wave speed alone (bottom octave
         // foreshortened, the rest near 320 m/s) gives a fifth of that spread.
+        // And the reflections per second: a wave meets the bridge c / 2L
+        // times a second, so for a given tension what the bridge takes per
+        // second goes as 1 / L -- the physical law is rate = 2 T Re(Y) / L.
+        let length = self.string_length(position);
+        let reflections = powf(
+            BRIDGE_REFERENCE_LENGTH_M.get() / length.max(0.01),
+            BRIDGE_LENGTH_POWER.get(),
+        );
+        (reflections * self.string_impedance_factor(position, speed))
+            .clamp(0.05, BRIDGE_FACTOR_CAP.get())
+    }
+
+    /// The bridge's admittance over the string's impedance, relative to the
+    /// tenor, to the measured power.
+    fn string_impedance_factor(&self, position: f32, speed: f32) -> f32 {
         let gauge = self.string_gauge(position) / BRIDGE_REFERENCE_GAUGE_M.get();
         let impedance = gauge * gauge * speed / BRIDGE_REFERENCE_SPEED.get();
-        powf(1.0 / impedance.max(1e-3), BRIDGE_IMPEDANCE_POWER.get()).clamp(0.08, 1.5)
+        powf(1.0 / impedance.max(1e-3), BRIDGE_IMPEDANCE_POWER.get())
+    }
+
+    /// What the bridge takes from the DEPHASED configurations, by string:
+    /// the impedance law alone. Measured (2026-09-02), the treble's
+    /// aftersound holds four to five seconds whatever its string's length;
+    /// scaling it with the reflections as the coherent stage is cut it to
+    /// a second and a half.
+    fn slow_bridge_factor(&self, f0: f32) -> f32 {
+        let position = (12.0 * log2f(f0.max(1.0) / 27.5) / 87.0).clamp(0.0, 1.0);
+        let speed = 2.0 * self.string_length(position) * f0;
+        self.string_impedance_factor(position, speed)
+            .clamp(0.05, SLOW_FACTOR_CAP.get())
     }
 
     /// The wire's own high-frequency loss, growing with the square of the

@@ -18,11 +18,16 @@
 //! its classes to it; from then on the generated bindings in `midi2_sdk` are
 //! ordinary WinRT calls.
 //!
-//! An endpoint becomes a source named `UMP: <endpoint name>`, so a saved
-//! selection tells this transport from the byte ones by its name alone.
-//! Groups are folded: a UMP endpoint carries sixteen groups of sixteen
-//! channels, and until the router knows about groups every group lands on
-//! the same source. Message timestamps are ignored, as `midir`'s are; the
+//! A UMP endpoint carries sixteen groups, and the service builds an
+//! endpoint out of every MIDI 1.0 port a device has -- the KeyLab's
+//! keyboard, its DAW port, its DIN thru -- one group each. Those ports are
+//! what the desktop's controller drivers recognise by name, so each group
+//! that the service associates with a MIDI 1.0 input port becomes its own
+//! source, named `UMP: <that port's name>`: a saved selection tells this
+//! transport from the byte ones by the prefix, and the driver that matched
+//! `KL Essential 61 mk3 MIDI` over `midir` matches it here. An endpoint
+//! without associated ports (a native MIDI 2.0 device) is one source for
+//! all its groups. Message timestamps are ignored, as `midir`'s are; the
 //! audio thread stamps packets into its block on arrival.
 
 // The initializer's methods carry the names of the SDK's vtable.
@@ -37,8 +42,9 @@ use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 use windows_core::{GUID, HRESULT, HSTRING, IUnknown, IUnknown_Vtbl, Ref, interface};
 
 use crate::midi2_sdk::Microsoft::Windows::Devices::Midi2::{
-    IMidiMessageReceivedEventSource, MidiEndpointConnection, MidiEndpointDeviceInformation,
-    MidiEndpointDevicePurpose, MidiMessageReceivedEventArgs, MidiSession,
+    IMidiMessageReceivedEventSource, Midi1PortFlow, MidiEndpointConnection,
+    MidiEndpointDeviceInformation, MidiEndpointDevicePurpose, MidiMessageReceivedEventArgs,
+    MidiSession,
 };
 
 /// What a Windows MIDI Services endpoint is called as a RackForge source.
@@ -134,11 +140,34 @@ fn runtime() -> Result<&'static Runtime> {
 /// One endpoint the service exposes for ordinary messages.
 #[derive(Clone, Debug)]
 pub struct Endpoint {
-    /// The service's display name, unique among the endpoints returned
-    /// together (a repeated name is numbered).
+    /// The service's display name.
     pub name: String,
     /// The endpoint device id, which is what a connection is opened on.
     pub id: HSTRING,
+    /// The sources this endpoint offers: one per group the service
+    /// associates with a MIDI 1.0 input port, or one for the whole
+    /// endpoint when it has none. Port names are unique across every
+    /// endpoint returned together (a repeated one is numbered).
+    pub sources: Vec<GroupSource>,
+}
+
+/// A source inside an endpoint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupSource {
+    /// The group whose messages this source is, or `None` for every group.
+    pub group: Option<u8>,
+    /// The MIDI 1.0 port name the service associates with the group, or
+    /// the endpoint's name when there is none. Never prefixed.
+    pub port_name: String,
+}
+
+impl Endpoint {
+    /// The source names this endpoint is selected under.
+    pub fn source_names(&self) -> impl Iterator<Item = String> + '_ {
+        self.sources
+            .iter()
+            .map(|source| source_name(&source.port_name))
+    }
 }
 
 /// The source name an endpoint is selected and saved under.
@@ -162,18 +191,41 @@ pub fn endpoints() -> Result<Vec<Endpoint>> {
         if info.EndpointPurpose()? != MidiEndpointDevicePurpose::NormalMessageEndpoint {
             continue;
         }
+        let name = info.Name()?.to_string_lossy().trim().to_owned();
+        let mut sources = Vec::new();
+        let ports = info
+            .FindAllAssociatedMidi1PortsForThisEndpoint(Midi1PortFlow::MidiMessageSource)
+            .context("reading a UMP endpoint's MIDI 1.0 ports")?;
+        for index in 0..ports.Size()? {
+            let port = ports.GetAt(index)?;
+            sources.push(GroupSource {
+                group: Some(port.Group()?.Index()?),
+                port_name: port.PortName()?.to_string_lossy().trim().to_owned(),
+            });
+        }
+        sources.sort_by_key(|source| source.group);
+        if sources.is_empty() {
+            sources.push(GroupSource {
+                group: None,
+                port_name: name.clone(),
+            });
+        }
         endpoints.push(Endpoint {
-            name: info.Name()?.to_string_lossy().trim().to_owned(),
+            name,
             id: info.EndpointDeviceId()?,
+            sources,
         });
     }
     endpoints.sort_by(|left, right| left.name.cmp(&right.name));
     let mut seen = std::collections::BTreeMap::<String, usize>::new();
-    for endpoint in &mut endpoints {
-        let count = seen.entry(endpoint.name.clone()).or_insert(0);
+    for source in endpoints
+        .iter_mut()
+        .flat_map(|endpoint| &mut endpoint.sources)
+    {
+        let count = seen.entry(source.port_name.clone()).or_insert(0);
         *count += 1;
         if *count > 1 {
-            endpoint.name = format!("{} ({})", endpoint.name, count);
+            source.port_name = format!("{} ({})", source.port_name, count);
         }
     }
     Ok(endpoints)
@@ -185,10 +237,7 @@ pub fn endpoints() -> Result<Vec<Endpoint>> {
 pub fn discover() -> Vec<String> {
     static ANNOUNCED: OnceLock<()> = OnceLock::new();
     match endpoints() {
-        Ok(endpoints) => endpoints
-            .iter()
-            .map(|endpoint| source_name(&endpoint.name))
-            .collect(),
+        Ok(endpoints) => endpoints.iter().flat_map(Endpoint::source_names).collect(),
         Err(error) => {
             ANNOUNCED.get_or_init(|| eprintln!("DESKTOP_UMP_UNAVAILABLE reason={error:#}"));
             Vec::new()
@@ -310,6 +359,16 @@ mod tests {
             .iter()
             .find(|endpoint| endpoint.name.contains("Loopback (B)"))
             .expect("Default App Loopback (B)");
+        eprintln!(
+            "step: sources={:?}",
+            endpoints
+                .iter()
+                .flat_map(|endpoint| endpoint
+                    .sources
+                    .iter()
+                    .map(|s| (s.group, s.port_name.clone())))
+                .collect::<Vec<_>>()
+        );
         let (sender, receiver) = mpsc::channel();
         let _receiving = transport
             .connect(b, move |words| {

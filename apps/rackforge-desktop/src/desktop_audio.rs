@@ -2671,7 +2671,10 @@ impl MidiSupervisor {
         // for the driver. Note endpoints (ALV and friends) stay captured.
         let selected = selected
             .into_iter()
-            .filter(|name| !(yield_keylab && keylab_controller::little_driver(name).is_some()))
+            .filter(|name| {
+                let port = crate::ump_input::endpoint_name(name).unwrap_or(name);
+                !(yield_keylab && keylab_controller::little_driver(port).is_some())
+            })
             .collect::<BTreeSet<_>>();
         let (stop_sender, stop_receiver) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
@@ -2795,7 +2798,9 @@ impl Drop for MidiSupervisor {
 struct UmpInputs {
     transport: Option<crate::ump_input::Transport>,
     endpoints: Vec<crate::ump_input::Endpoint>,
-    connections: BTreeMap<String, crate::ump_input::Connection>,
+    /// Open endpoints by endpoint name, with the source names they serve.
+    connections: BTreeMap<String, (crate::ump_input::Connection, BTreeSet<String>)>,
+    listing: Vec<String>,
 }
 
 impl UmpInputs {
@@ -2817,10 +2822,12 @@ impl UmpInputs {
             transport,
             endpoints: Vec::new(),
             connections: BTreeMap::new(),
+            listing: Vec::new(),
         }
     }
 
-    /// The source names present right now.
+    /// The source names present right now; the endpoint list is logged
+    /// whenever it changes.
     fn refresh(&mut self) -> BTreeSet<String> {
         if self.transport.is_none() {
             return BTreeSet::new();
@@ -2829,10 +2836,79 @@ impl UmpInputs {
             Ok(endpoints) => self.endpoints = endpoints,
             Err(error) => eprintln!("DESKTOP_UMP_SCAN_FAILED error={error:#}"),
         }
+        let listing: Vec<String> = self
+            .endpoints
+            .iter()
+            .map(|endpoint| {
+                let sources: Vec<String> = endpoint
+                    .sources
+                    .iter()
+                    .map(|source| match source.group {
+                        Some(group) => format!("G{}={:?}", group + 1, source.port_name),
+                        None => format!("all={:?}", source.port_name),
+                    })
+                    .collect();
+                format!("{:?} [{}]", endpoint.name, sources.join(", "))
+            })
+            .collect();
+        if listing != self.listing {
+            for line in &listing {
+                println!("DESKTOP_UMP_ENDPOINT {line}");
+            }
+            self.listing = listing;
+        }
         self.endpoints
             .iter()
-            .map(|endpoint| crate::ump_input::source_name(&endpoint.name))
+            .flat_map(crate::ump_input::Endpoint::source_names)
             .collect()
+    }
+}
+
+/// Where a group's messages go: a source and whether the KeyLab's parsers
+/// read it first. One entry per group, plus the whole-endpoint entry for
+/// an endpoint without associated ports.
+#[derive(Clone, Copy, Debug, Default)]
+struct GroupRoutes {
+    by_group: [Option<(MidiSourceKey, bool)>; 16],
+    every_group: Option<(MidiSourceKey, bool)>,
+}
+
+impl GroupRoutes {
+    /// The routes the selected sources ask for on `endpoint`; `None` when
+    /// none of its sources is selected.
+    fn for_endpoint(
+        endpoint: &crate::ump_input::Endpoint,
+        selected: &BTreeSet<String>,
+    ) -> Option<(Self, BTreeSet<String>)> {
+        let mut routes = Self::default();
+        let mut names = BTreeSet::new();
+        for source in &endpoint.sources {
+            let name = crate::ump_input::source_name(&source.port_name);
+            if !selected.contains(&name) {
+                continue;
+            }
+            let route = Some((
+                stable_midi_source_key(&name),
+                keylab_controller::is_keylab_endpoint(&source.port_name),
+            ));
+            match source.group {
+                Some(group) => routes.by_group[usize::from(group & 0xf)] = route,
+                None => routes.every_group = route,
+            }
+            names.insert(name);
+        }
+        (!names.is_empty()).then_some((routes, names))
+    }
+
+    fn route(&self, group: u8) -> Option<(MidiSourceKey, bool)> {
+        self.every_group.or(self.by_group[usize::from(group & 0xf)])
+    }
+
+    fn serves_keylab(&self) -> bool {
+        self.every_group
+            .into_iter()
+            .chain(self.by_group.iter().flatten().copied())
+            .any(|(_, keylab)| keylab)
     }
 }
 
@@ -2846,46 +2922,63 @@ fn reconcile_ump_inputs(
     let present = ump.refresh();
     let lost = ump
         .connections
-        .keys()
-        .filter(|name| !present.contains(*name))
-        .cloned()
+        .iter()
+        .filter(|(_, (_, names))| names.iter().any(|name| !present.contains(name)))
+        .map(|(endpoint, _)| endpoint.clone())
         .collect::<Vec<_>>();
-    for name in lost {
-        ump.connections.remove(&name);
-        eprintln!("DESKTOP_MIDI_SOURCE_LOST name={name:?}");
-        release_held_notes(sender, telemetry);
+    for endpoint in lost {
+        if let Some((_, names)) = ump.connections.remove(&endpoint) {
+            for name in names {
+                eprintln!("DESKTOP_MIDI_SOURCE_LOST name={name:?}");
+                if keylab_controller::little_driver(
+                    crate::ump_input::endpoint_name(&name).unwrap_or(&name),
+                )
+                .is_some()
+                {
+                    let _ = controller_sender.try_send(DesktopControllerEvent::Disconnected);
+                }
+            }
+            release_held_notes(sender, telemetry);
+        }
     }
-    for name in selected {
-        let Some(device) = crate::ump_input::endpoint_name(name) else {
-            continue;
-        };
-        if !present.contains(name) || ump.connections.contains_key(name) {
-            continue;
-        }
-        // The KeyLab's surface speaks SysEx, which the packet path does not
-        // reassemble yet, and its display is driven back over the byte port;
-        // the byte port keeps the whole instrument so nothing is heard twice.
-        if keylab_controller::is_keylab_endpoint(device) {
-            eprintln!("DESKTOP_UMP_SKIPPED name={name:?} reason=\"KeyLab stays on its byte port\"");
-            continue;
-        }
-        match connect_ump_input(name, ump, sender, telemetry, controller_sender) {
+    let wanted: Vec<(crate::ump_input::Endpoint, GroupRoutes, BTreeSet<String>)> = ump
+        .endpoints
+        .iter()
+        .filter(|endpoint| !ump.connections.contains_key(&endpoint.name))
+        .filter_map(|endpoint| {
+            GroupRoutes::for_endpoint(endpoint, selected)
+                .map(|(routes, names)| (endpoint.clone(), routes, names))
+        })
+        .collect();
+    for (endpoint, routes, names) in wanted {
+        match connect_ump_input(&endpoint, routes, ump, sender, telemetry, controller_sender) {
             Ok(connection) => {
-                ump.connections.insert(name.clone(), connection);
-                println!("DESKTOP_MIDI_SOURCE_CONNECTED name={name:?}");
+                for name in &names {
+                    println!("DESKTOP_MIDI_SOURCE_CONNECTED name={name:?}");
+                }
+                if routes.serves_keylab() {
+                    let _ = controller_sender.try_send(DesktopControllerEvent::Connected);
+                }
+                ump.connections
+                    .insert(endpoint.name.clone(), (connection, names));
             }
             Err(error) => {
-                eprintln!("DESKTOP_MIDI_CONNECT_FAILED name={name:?} error={error:#}");
+                eprintln!(
+                    "DESKTOP_MIDI_CONNECT_FAILED name={:?} error={error:#}",
+                    endpoint.name
+                );
             }
         }
     }
 }
 
-/// Opens one UMP endpoint and turns each packet it receives into the same
-/// wrapper the byte ports send the audio thread, width included; system
-/// bytes (clock and friends) ride the same channel as they always have.
+/// Opens one UMP endpoint. Each packet is read by a reader that keeps the
+/// state a system-exclusive message needs, and every message -- channel
+/// voice with its width, system bytes, a reassembled SysEx -- is delivered
+/// exactly as a byte port's would be, to the source its group routes to.
 fn connect_ump_input(
-    name: &str,
+    endpoint: &crate::ump_input::Endpoint,
+    routes: GroupRoutes,
     ump: &UmpInputs,
     sender: &SyncSender<MidiPacket>,
     telemetry: &Arc<AudioTelemetry>,
@@ -2895,42 +2988,39 @@ fn connect_ump_input(
         .transport
         .as_ref()
         .context("Windows MIDI Services is not available")?;
-    let endpoint = ump
-        .endpoints
-        .iter()
-        .find(|endpoint| crate::ump_input::source_name(&endpoint.name) == name)
-        .with_context(|| format!("UMP endpoint {name:?} disappeared before connection"))?;
-    let source = stable_midi_source_key(name);
     let sender = sender.clone();
     let telemetry = Arc::clone(telemetry);
     let controller_sender = controller_sender.clone();
+    let reader = Mutex::new(rackforge_core::ump::UmpReader::default());
     transport.connect(endpoint, move |words| {
-        let deliver = |length: u8, data: [u8; 3], wide: Option<u32>| {
-            let _ = controller_sender.try_send(DesktopControllerEvent::MidiObserved {
-                source,
-                length,
-                data,
-                observed_at: Instant::now(),
-            });
-            if sender
-                .try_send(MidiPacket {
-                    source,
-                    length,
-                    data,
+        let deliver = |group: u8, message: &[u8], wide: Option<u32>| {
+            if let Some((source, keylab)) = routes.route(group) {
+                deliver_midi_message(
+                    message,
                     wide,
-                })
-                .is_err()
-            {
-                telemetry
-                    .midi_dropped_events
-                    .fetch_add(1, Ordering::Relaxed);
+                    keylab,
+                    source,
+                    &sender,
+                    &telemetry,
+                    &controller_sender,
+                );
             }
         };
-        let _ = rackforge_core::ump::read_stream(
+        let mut reader = reader
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ = reader.read(
             words,
             0,
-            &mut |_group, packet| deliver(packet.length, packet.data, packet.wide),
-            &mut |_group, event| deliver(event.length, event.data, None),
+            &mut |group, packet| {
+                deliver(
+                    group,
+                    &packet.data[..usize::from(packet.length)],
+                    packet.wide,
+                )
+            },
+            &mut |group, event| deliver(group, &event.data[..usize::from(event.length)], None),
+            &mut |group, message| deliver(group, message, None),
             &mut |_unread| {},
         );
     })
@@ -3007,7 +3097,86 @@ fn desired_midi_inputs(
                 .cloned(),
         );
     }
+    // A port whose packet twin is selected is heard through the packets:
+    // the same device on both transports would play every note twice.
+    let packet_twins: BTreeSet<&str> = selected
+        .iter()
+        .filter_map(|name| crate::ump_input::endpoint_name(name))
+        .collect();
+    desired.retain(|name| !packet_twins.contains(name.as_str()));
     desired
+}
+
+/// What happens to one message from any input transport: the UI sees it,
+/// the KeyLab's surface and semantic parsers get first refusal on their
+/// port, and a channel message goes to the audio thread as a packet --
+/// with `wide` when the transport had more than a byte to give. `midir`
+/// calls this with bytes and no width; the packet transport with each
+/// packet's projection and width, its system bytes, and each system-
+/// exclusive message it reassembled.
+fn deliver_midi_message(
+    message: &[u8],
+    wide: Option<u32>,
+    keylab: bool,
+    source: MidiSourceKey,
+    sender: &SyncSender<MidiPacket>,
+    telemetry: &AudioTelemetry,
+    controller_sender: &SyncSender<DesktopControllerEvent>,
+) {
+    if !message.is_empty() && message.len() <= 3 {
+        let mut data = [0; 3];
+        data[..message.len()].copy_from_slice(message);
+        let _ = controller_sender.try_send(DesktopControllerEvent::MidiObserved {
+            source,
+            length: message.len() as u8,
+            data,
+            observed_at: Instant::now(),
+        });
+    }
+    if keylab && let Some(event) = keylab_protocol::parse_input(message) {
+        let event = match event {
+            keylab_protocol::ControllerEvent::Surface { input, phase } => {
+                DesktopControllerEvent::Surface { input, phase }
+            }
+        };
+        let _ = controller_sender.try_send(event);
+        return;
+    }
+    if keylab
+        && let Some(input) = keylab_controller::package_profile()
+            .semantic_profile
+            .as_ref()
+            .and_then(|profile| rackforge_parameter_input(profile, message))
+    {
+        let _ = controller_sender.try_send(DesktopControllerEvent::RackForgeParameter(input));
+        return;
+    }
+    if keylab
+        && let Some(input) = keylab_controller::package_profile()
+            .semantic_profile
+            .as_ref()
+            .and_then(|profile| semantic_control_input(profile, message))
+    {
+        let _ = controller_sender.try_send(DesktopControllerEvent::SemanticControl(input));
+    }
+    if message.is_empty() || message.len() > 3 {
+        return;
+    }
+    let mut data = [0; 3];
+    data[..message.len()].copy_from_slice(message);
+    if sender
+        .try_send(MidiPacket {
+            source,
+            length: message.len() as u8,
+            data,
+            wide,
+        })
+        .is_err()
+    {
+        telemetry
+            .midi_dropped_events
+            .fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 fn connect_midi_input(
@@ -3030,61 +3199,15 @@ fn connect_midi_input(
         &port,
         "rackforge-desktop-input",
         move |_timestamp, message, _| {
-            if !message.is_empty() && message.len() <= 3 {
-                let mut data = [0; 3];
-                data[..message.len()].copy_from_slice(message);
-                let _ = controller_sender.try_send(DesktopControllerEvent::MidiObserved {
-                    source,
-                    length: message.len() as u8,
-                    data,
-                    observed_at: Instant::now(),
-                });
-            }
-            if keylab && let Some(event) = keylab_protocol::parse_input(message) {
-                let event = match event {
-                    keylab_protocol::ControllerEvent::Surface { input, phase } => {
-                        DesktopControllerEvent::Surface { input, phase }
-                    }
-                };
-                let _ = controller_sender.try_send(event);
-                return;
-            }
-            if keylab
-                && let Some(input) = keylab_controller::package_profile()
-                    .semantic_profile
-                    .as_ref()
-                    .and_then(|profile| rackforge_parameter_input(profile, message))
-            {
-                let _ =
-                    controller_sender.try_send(DesktopControllerEvent::RackForgeParameter(input));
-                return;
-            }
-            if keylab
-                && let Some(input) = keylab_controller::package_profile()
-                    .semantic_profile
-                    .as_ref()
-                    .and_then(|profile| semantic_control_input(profile, message))
-            {
-                let _ = controller_sender.try_send(DesktopControllerEvent::SemanticControl(input));
-            }
-            if message.is_empty() || message.len() > 3 {
-                return;
-            }
-            let mut data = [0; 3];
-            data[..message.len()].copy_from_slice(message);
-            if sender
-                .try_send(MidiPacket {
-                    source,
-                    length: message.len() as u8,
-                    data,
-                    wide: None,
-                })
-                .is_err()
-            {
-                telemetry
-                    .midi_dropped_events
-                    .fetch_add(1, Ordering::Relaxed);
-            }
+            deliver_midi_message(
+                message,
+                None,
+                keylab,
+                source,
+                &sender,
+                &telemetry,
+                &controller_sender,
+            );
         },
         (),
     )
@@ -3326,6 +3449,73 @@ fn publish_error(slot: &Mutex<Option<String>>, error: impl ToString) {
 
 #[cfg(test)]
 mod tests {
+    /// A byte port steps aside when its packet twin is selected, even the
+    /// KeyLab's force-captured one; without a twin it is captured as before.
+    #[test]
+    fn a_byte_port_yields_to_its_packet_twin() {
+        let present: BTreeSet<String> = ["KL Essential 61 mk3 MIDI".to_owned()].into();
+        let selected: BTreeSet<String> = ["UMP: KL Essential 61 mk3 MIDI".to_owned()].into();
+        let desired = super::desired_midi_inputs(&selected, &present, false);
+        assert!(!desired.contains("KL Essential 61 mk3 MIDI"));
+        assert!(desired.contains("UMP: KL Essential 61 mk3 MIDI"));
+        let desired = super::desired_midi_inputs(&BTreeSet::new(), &present, false);
+        assert!(desired.contains("KL Essential 61 mk3 MIDI"));
+    }
+
+    /// One delivery for every transport: a surface press on the KeyLab's
+    /// port becomes a surface event and no packet; a note becomes a packet
+    /// carrying whatever width the transport gave it.
+    #[test]
+    fn delivery_reads_the_message_the_same_way_for_every_transport() {
+        let (sender, packets) = mpsc::sync_channel(8);
+        let (controller_sender, events) = mpsc::sync_channel(8);
+        let telemetry = AudioTelemetry::default();
+        let source = super::stable_midi_source_key("UMP: KL Essential 61 mk3 MIDI");
+        super::deliver_midi_message(
+            &[0xb0, 44, 127],
+            None,
+            true,
+            source,
+            &sender,
+            &telemetry,
+            &controller_sender,
+        );
+        assert!(matches!(
+            events.try_recv(),
+            Ok(DesktopControllerEvent::MidiObserved { .. })
+        ));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(DesktopControllerEvent::Surface { .. })
+        ));
+        assert!(packets.try_recv().is_err());
+        super::deliver_midi_message(
+            &[0x90, 60, 127],
+            Some(0xffff),
+            true,
+            source,
+            &sender,
+            &telemetry,
+            &controller_sender,
+        );
+        let packet = packets.try_recv().unwrap();
+        assert_eq!(
+            (packet.length, packet.data, packet.wide),
+            (3, [0x90, 60, 127], Some(0xffff))
+        );
+        // A system-exclusive message reaches the parsers and is not a packet.
+        super::deliver_midi_message(
+            &[0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7],
+            None,
+            true,
+            source,
+            &sender,
+            &telemetry,
+            &controller_sender,
+        );
+        assert!(packets.try_recv().is_err());
+    }
+
     use super::*;
 
     #[test]

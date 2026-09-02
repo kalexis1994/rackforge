@@ -58,6 +58,9 @@ pub enum Unread {
     FlexOrStream,
     /// A message type the specification reserves.
     Reserved(u8),
+    /// A SysEx7 continuation or end with no start before it, or a message
+    /// longer than [`SYSEX7_MAX_BYTES`]; whatever was gathered is dropped.
+    SysExOutOfOrder,
     /// A MIDI 2.0 channel-voice opcode with no MIDI 1.0 form: per-note
     /// controllers (0x0, 0x1), relative parameters (0x4, 0x5), per-note
     /// pitch bend (0x6) and per-note management (0xF).
@@ -242,12 +245,184 @@ pub fn read_packet(
     }
 }
 
+/// The longest system-exclusive message the assembler will gather. Real
+/// dumps are kilobytes; a stream that keeps continuing past this is a
+/// stream that lost its end, and the memory is given back.
+pub const SYSEX7_MAX_BYTES: usize = 64 * 1024;
+
+const SYSEX7_COMPLETE: u32 = 0;
+const SYSEX7_START: u32 = 1;
+const SYSEX7_CONTINUE: u32 = 2;
+const SYSEX7_END: u32 = 3;
+
+/// Gathers system-exclusive messages out of SysEx7 packets (type 3).
+///
+/// A type-3 packet carries up to six data bytes and a status: the whole
+/// message in this one packet, or its start, a continuation, or its end.
+/// The packets leave out the `F0` and `F7` that frame the message on a
+/// byte transport; the assembler puts them back, so what it hands over is
+/// exactly what `midir` hands over for the same message, and the same
+/// parsers read both. One assembler per connection: a message's packets
+/// arrive in order on one endpoint, and other groups' messages between
+/// them are not this assembler's business.
+#[derive(Debug, Default)]
+pub struct SysEx7Assembler {
+    buffer: Vec<u8>,
+    open: bool,
+}
+
+impl SysEx7Assembler {
+    /// Feeds one type-3 packet. `Ok(Some(message))` when a message is
+    /// complete, `F0` to `F7` inclusive; `Ok(None)` while one is still
+    /// being gathered; `Err` for a packet that cannot belong to one, after
+    /// which the assembler is empty again.
+    pub fn push(&mut self, first: u32, second: u32) -> Result<Option<&[u8]>, Unread> {
+        let status = (first >> 20) & 0xf;
+        let count = ((first >> 16) & 0xf) as usize;
+        if count > 6 || status > SYSEX7_END {
+            self.reset();
+            return Err(Unread::Malformed);
+        }
+        let bytes = [
+            (first >> 8) as u8 & 0x7f,
+            first as u8 & 0x7f,
+            (second >> 24) as u8 & 0x7f,
+            (second >> 16) as u8 & 0x7f,
+            (second >> 8) as u8 & 0x7f,
+            second as u8 & 0x7f,
+        ];
+        if matches!(status, SYSEX7_COMPLETE | SYSEX7_START) {
+            self.reset();
+            self.buffer.push(0xf0);
+            self.open = true;
+        } else if !self.open {
+            self.reset();
+            return Err(Unread::SysExOutOfOrder);
+        }
+        if self.buffer.len() + count > SYSEX7_MAX_BYTES {
+            self.reset();
+            return Err(Unread::SysExOutOfOrder);
+        }
+        self.buffer.extend_from_slice(&bytes[..count]);
+        if matches!(status, SYSEX7_COMPLETE | SYSEX7_END) {
+            self.buffer.push(0xf7);
+            self.open = false;
+            return Ok(Some(&self.buffer));
+        }
+        Ok(None)
+    }
+
+    fn reset(&mut self) {
+        self.buffer.clear();
+        self.open = false;
+    }
+}
+
+/// Writes a system-exclusive message as SysEx7 packets, six bytes per
+/// packet, appending two words per packet to `out`. `message` may carry
+/// its `F0`/`F7` framing or not; the packets never do.
+pub fn write_sysex7(group: u8, message: &[u8], out: &mut Vec<u32>) {
+    let payload = message
+        .strip_prefix(&[0xf0])
+        .unwrap_or(message)
+        .strip_suffix(&[0xf7])
+        .unwrap_or_else(|| message.strip_prefix(&[0xf0]).unwrap_or(message));
+    let head = (u32::from(MT_SYSEX7) << 28) | (u32::from(group & 0xf) << 24);
+    let chunks: Vec<&[u8]> = if payload.is_empty() {
+        vec![&[][..]]
+    } else {
+        payload.chunks(6).collect()
+    };
+    let last = chunks.len() - 1;
+    for (index, chunk) in chunks.iter().enumerate() {
+        let status = match (index == 0, index == last) {
+            (true, true) => SYSEX7_COMPLETE,
+            (true, false) => SYSEX7_START,
+            (false, false) => SYSEX7_CONTINUE,
+            (false, true) => SYSEX7_END,
+        };
+        let mut bytes = [0u8; 6];
+        bytes[..chunk.len()].copy_from_slice(chunk);
+        out.push(
+            head | (status << 20)
+                | ((chunk.len() as u32) << 16)
+                | (u32::from(bytes[0] & 0x7f) << 8)
+                | u32::from(bytes[1] & 0x7f),
+        );
+        out.push(
+            (u32::from(bytes[2] & 0x7f) << 24)
+                | (u32::from(bytes[3] & 0x7f) << 16)
+                | (u32::from(bytes[4] & 0x7f) << 8)
+                | u32::from(bytes[5] & 0x7f),
+        );
+    }
+}
+
+/// A transport's reader: [`read_stream`] plus the state a system-exclusive
+/// message needs to be gathered across packets, and across calls.
+#[derive(Debug, Default)]
+pub struct UmpReader {
+    sysex: SysEx7Assembler,
+}
+
+impl UmpReader {
+    /// Reads a buffer of packets: channel-voice messages out as host
+    /// packets with their group and width, system messages as bytes, and
+    /// each complete system-exclusive message as its bytes, `F0` to `F7`.
+    /// Everything that produced no event is reported to `unread`.
+    pub fn read(
+        &mut self,
+        words: &[u32],
+        frame: u32,
+        packets: &mut impl FnMut(u8, rackforge_midi_api::MidiPacket),
+        system: &mut impl FnMut(u8, MidiEventV1),
+        sysex: &mut impl FnMut(u8, &[u8]),
+        unread: &mut impl FnMut(Unread),
+    ) -> Result<(), UmpError> {
+        let mut at = 0;
+        while at < words.len() {
+            let first = words[at];
+            if (first >> 28) as u8 == MT_SYSEX7 {
+                if words.len() < at + 2 {
+                    return Err(UmpError::Truncated {
+                        needed: 2,
+                        available: words.len() - at,
+                    });
+                }
+                let group = ((first >> 24) & 0xf) as u8;
+                match self.sysex.push(first, words[at + 1]) {
+                    Ok(Some(message)) => sysex(group, message),
+                    Ok(None) => {}
+                    Err(why) => unread(why),
+                }
+                at += 2;
+                continue;
+            }
+            let read = read_packet(
+                &words[at..],
+                frame,
+                &mut |group, event| match event.to_packet() {
+                    Some(packet) => packets(group, packet),
+                    None => system(group, event.to_midi1()),
+                },
+            )?;
+            if let Some(why) = read.unread {
+                unread(why);
+            }
+            at += read.consumed;
+        }
+        Ok(())
+    }
+}
+
 /// Reads a whole buffer of packets, the way a transport receives them:
 /// channel-voice messages become host packets with their width and go to
 /// `packets` with their group; system messages (clock, start, stop, song
 /// position) go to `system` as their bytes; whatever produced no event is
 /// reported to `unread`. Every event lands at `frame`. Stops at the first
 /// truncated packet, which a transport should treat as a framing fault.
+/// Stateless: system-exclusive packets are reported as [`Unread::Data`];
+/// a transport that wants those messages keeps an [`UmpReader`].
 pub fn read_stream(
     words: &[u32],
     frame: u32,
@@ -528,6 +703,170 @@ mod tests {
         );
         assert_eq!(
             read_stream(&words[..3], 0, &mut |_, _| {}, &mut |_, _| {}, &mut |_| {}),
+            Err(UmpError::Truncated {
+                needed: 2,
+                available: 1
+            })
+        );
+    }
+
+    /// Every message length from empty to several packets goes into SysEx7
+    /// packets and comes back with its framing; the KeyLab's real messages
+    /// among them, which is the transport the display speaks.
+    #[test]
+    fn system_exclusive_messages_survive_being_packetised() {
+        let mut reader = UmpReader::default();
+        let mut cases = 0;
+        for length in 0..=20usize {
+            let payload: Vec<u8> = (0..length).map(|i| (i * 37 % 128) as u8).collect();
+            let mut framed = vec![0xf0];
+            framed.extend_from_slice(&payload);
+            framed.push(0xf7);
+            for message in [&payload[..], &framed[..]] {
+                let mut words = Vec::new();
+                write_sysex7(4, message, &mut words);
+                assert_eq!(words.len(), 2 * length.div_ceil(6).max(1));
+                let mut received = Vec::new();
+                let mut leftovers = Vec::new();
+                reader
+                    .read(
+                        &words,
+                        0,
+                        &mut |_, _| panic!("no packets"),
+                        &mut |_, _| panic!("no system messages"),
+                        &mut |group, bytes| received.push((group, bytes.to_vec())),
+                        &mut |why| leftovers.push(why),
+                    )
+                    .unwrap();
+                assert_eq!(received, [(4, framed.clone())]);
+                assert!(leftovers.is_empty());
+                cases += 1;
+            }
+        }
+        assert_eq!(cases, 42);
+
+        // A KeyLab display command: 12 bytes, two packets, byte-exact.
+        let keylab = [
+            0xf0, 0x00, 0x20, 0x6b, 0x7f, 0x42, 0x02, 0x0f, 0x40, 0x5a, 0x01, 0xf7,
+        ];
+        let mut words = Vec::new();
+        write_sysex7(0, &keylab, &mut words);
+        assert_eq!(words.len(), 4);
+        assert_eq!(words[0] >> 20, 0x301);
+        assert_eq!(words[2] >> 20, 0x303);
+        let mut received = Vec::new();
+        reader
+            .read(
+                &words,
+                0,
+                &mut |_, _| {},
+                &mut |_, _| {},
+                &mut |_, b| received.push(b.to_vec()),
+                &mut |_| {},
+            )
+            .unwrap();
+        assert_eq!(received, [keylab.to_vec()]);
+    }
+
+    /// A message gathered across two deliveries is still one message; a
+    /// continuation with nothing before it is named and dropped; a new
+    /// start abandons the message in progress; a note between the packets
+    /// of a message is still a note.
+    #[test]
+    fn the_assembler_keeps_state_across_calls_and_names_what_it_drops() {
+        let mut reader = UmpReader::default();
+        let mut words = Vec::new();
+        write_sysex7(1, &(0..10u8).collect::<Vec<_>>(), &mut words);
+        assert_eq!(words.len(), 4);
+        let mut received = Vec::new();
+        let mut packets = Vec::new();
+        let mut leftovers = Vec::new();
+        fn feed(
+            reader: &mut UmpReader,
+            chunk: &[u32],
+            packets: &mut Vec<[u8; 3]>,
+            received: &mut Vec<Vec<u8>>,
+            leftovers: &mut Vec<Unread>,
+        ) {
+            reader
+                .read(
+                    chunk,
+                    0,
+                    &mut |_, packet| packets.push(packet.data),
+                    &mut |_, _| {},
+                    &mut |_, bytes| received.push(bytes.to_vec()),
+                    &mut |why| leftovers.push(why),
+                )
+                .unwrap();
+        }
+        feed(
+            &mut reader,
+            &words[..2],
+            &mut packets,
+            &mut received,
+            &mut leftovers,
+        );
+        feed(
+            &mut reader,
+            &[0x2190_3c64],
+            &mut packets,
+            &mut received,
+            &mut leftovers,
+        );
+        feed(
+            &mut reader,
+            &words[2..],
+            &mut packets,
+            &mut received,
+            &mut leftovers,
+        );
+        assert_eq!(packets, [[0x90, 60, 100]]);
+        let mut expected = vec![0xf0];
+        expected.extend(0..10u8);
+        expected.push(0xf7);
+        assert_eq!(received, [expected]);
+        assert!(leftovers.is_empty());
+
+        // An end with no start.
+        feed(
+            &mut reader,
+            &words[2..],
+            &mut packets,
+            &mut received,
+            &mut leftovers,
+        );
+        assert_eq!(leftovers, [Unread::SysExOutOfOrder]);
+        assert_eq!(received.len(), 1);
+
+        // Start, then a fresh start: only the second completes.
+        let mut second = Vec::new();
+        write_sysex7(1, &[0x11, 0x22], &mut second);
+        feed(
+            &mut reader,
+            &words[..2],
+            &mut packets,
+            &mut received,
+            &mut leftovers,
+        );
+        feed(
+            &mut reader,
+            &second,
+            &mut packets,
+            &mut received,
+            &mut leftovers,
+        );
+        assert_eq!(received.last().unwrap(), &vec![0xf0, 0x11, 0x22, 0xf7]);
+
+        // A lone type-3 word is a truncated packet.
+        assert_eq!(
+            reader.read(
+                &[0x3001_0000],
+                0,
+                &mut |_, _| {},
+                &mut |_, _| {},
+                &mut |_, _| {},
+                &mut |_| {}
+            ),
             Err(UmpError::Truncated {
                 needed: 2,
                 available: 1

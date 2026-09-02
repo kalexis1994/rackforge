@@ -27,6 +27,9 @@ fn main() {
         "Microsoft.Windows.Devices.Midi2.MidiEndpointDevicePurpose",
         "Microsoft.Windows.Devices.Midi2.MidiEndpointDeviceInformationFilters",
         "Microsoft.Windows.Devices.Midi2.MidiEndpointDeviceInformationSortOrder",
+        "Microsoft.Windows.Devices.Midi2.MidiEndpointAssociatedPortDeviceInformation",
+        "Microsoft.Windows.Devices.Midi2.Midi1PortFlow",
+        "Microsoft.Windows.Devices.Midi2.MidiGroup",
         "--reference", "windows,skip-root,Windows",
     ]);
     let generated = std::fs::read_to_string(OUT).expect("generated bindings");

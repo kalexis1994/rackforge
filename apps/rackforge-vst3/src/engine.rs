@@ -54,6 +54,7 @@ static BUNDLED_MODELS_INIT: Mutex<()> = Mutex::new(());
 /// two parties -- the loader that registers it and `ExitDll` that retires it
 /// -- both on host threads and both under the registry's lock. That is the
 /// whole extent of the sharing this wrapper vouches for.
+#[cfg_attr(not(windows), allow(dead_code))]
 struct Registered(Box<LoadedPlugin>);
 // SAFETY: see `Registered`; access is serialised by `RUNTIMES`' mutex and no
 // reference escapes except the `&'static` handed out by `register_runtime`,
@@ -83,6 +84,7 @@ fn register_runtime(runtime: LoadedPlugin) -> &'static LoadedPlugin {
 /// handlers if nothing still borrows a runtime, or leave everything in place
 /// and say why. Returns what happened so the exit hook can log it and a test
 /// can see it.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn unload_runtimes() -> UnloadOutcome {
     let live = LIVE_INSTANCES.load(Ordering::SeqCst);
     if live != 0 {
@@ -110,6 +112,7 @@ pub fn unload_runtimes() -> UnloadOutcome {
     }
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Debug, PartialEq, Eq)]
 pub enum UnloadOutcome {
     Unloaded { runtimes: usize },

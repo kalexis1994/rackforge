@@ -8,11 +8,11 @@
 //!         [--tuning <file>] [--render <score.txt> <out.wav>]
 //!         [--foreground] [--no-edit] [--stop]
 //!
-//! By default the lab detaches: it relaunches itself in the background (log
-//! in `%LOCALAPPDATA%\RackForge\lab.log`, pid in `lab.pid`), opens the tuning
-//! file in the default editor, and gives the terminal back. `--stop` ends the
-//! running lab; starting a new one replaces it. `--foreground` keeps it in
-//! the terminal, `--no-edit` leaves the editor closed.
+//! By default the lab opens as a program of its own: it relaunches itself in
+//! a new console window (its pid in `%LOCALAPPDATA%\RackForge\lab.pid`) and
+//! gives the terminal back; closing that window ends it, so does `--stop`,
+//! and starting a new one replaces it. `--foreground` keeps it in the
+//! terminal, `--edit` also opens the tuning file in the default editor.
 //!
 //! The tuning file is created with every knob at its shipped value and its
 //! documentation the first time; lines read `NAME = value`, and a line
@@ -47,7 +47,7 @@ fn options() -> Options {
     let mut options = Options {
         list: false,
         foreground: false,
-        edit: true,
+        edit: false,
         stop: false,
         out: None,
         midi: None,
@@ -58,7 +58,7 @@ fn options() -> Options {
         match arg.as_str() {
             "--list" => options.list = true,
             "--foreground" => options.foreground = true,
-            "--no-edit" => options.edit = false,
+            "--edit" => options.edit = true,
             "--stop" => options.stop = true,
             "--out" => options.out = args.next(),
             "--midi" => options.midi = args.next(),
@@ -109,32 +109,23 @@ fn stop_running_lab() -> bool {
     killed
 }
 
-/// Relaunches this executable detached from the terminal, with the same
-/// arguments plus `--foreground`, its output in the log file.
+/// Relaunches this executable as a program of its own, in a new console
+/// window, with the same arguments plus `--foreground`.
 #[allow(clippy::zombie_processes)]
 fn detach() {
     use std::os::windows::process::CommandExt;
     let exe = std::env::current_exe().expect("own path");
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let log = app_dir().join("lab.log");
-    let _ = std::fs::create_dir_all(app_dir());
-    let file = std::fs::File::create(&log).expect("cannot create the log");
-    let err = file.try_clone().expect("log");
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
     let child = std::process::Command::new(exe)
         .args(&args)
         .arg("--foreground")
-        .stdin(std::process::Stdio::null())
-        .stdout(file)
-        .stderr(err)
-        .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+        .creation_flags(CREATE_NEW_CONSOLE)
         .spawn()
-        .expect("cannot relaunch detached");
+        .expect("cannot relaunch in its own window");
     println!(
-        "lab: running detached as pid {} (log {}); stop it with --stop",
-        child.id(),
-        log.display()
+        "lab: running in its own window as pid {}; close it or use --stop",
+        child.id()
     );
 }
 

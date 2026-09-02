@@ -561,6 +561,7 @@ fn release_injected_midi(state: &WebState) {
                 length: 3,
                 data: [0xb0 | channel, controller, value],
                 wide: None,
+                timestamp: None,
             });
         }
     }
@@ -2279,6 +2280,7 @@ fn response_for(request: ControlRequest, state: &WebState) -> Value {
                     length: 3,
                     data: message.bytes(),
                     wide: None,
+                    timestamp: None,
                 };
                 match try_injected_midi(state, packet) {
                     Ok(true) => {
@@ -2574,6 +2576,7 @@ mod tests {
             length: 3,
             data: [0x90, 60, 100],
             wide: None,
+            timestamp: None,
         };
 
         let (retired_sender, retired_receiver) = mpsc::sync_channel(1);

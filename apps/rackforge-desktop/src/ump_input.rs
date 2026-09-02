@@ -27,8 +27,10 @@
 //! transport from the byte ones by the prefix, and the driver that matched
 //! `KL Essential 61 mk3 MIDI` over `midir` matches it here. An endpoint
 //! without associated ports (a native MIDI 2.0 device) is one source for
-//! all its groups. Message timestamps are ignored, as `midir`'s are; the
-//! audio thread stamps packets into its block on arrival.
+//! all its groups. Each message carries the service's timestamp -- the
+//! performance counter, the same clock the audio thread can read -- so the
+//! audio thread places it at its sample inside the block instead of at the
+//! block's first sample.
 
 // The initializer's methods carry the names of the SDK's vtable.
 #![allow(non_snake_case, clippy::too_many_arguments)]
@@ -42,7 +44,7 @@ use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 use windows_core::{GUID, HRESULT, HSTRING, IUnknown, IUnknown_Vtbl, Ref, interface};
 
 use crate::midi2_sdk::Microsoft::Windows::Devices::Midi2::{
-    IMidiMessageReceivedEventSource, Midi1PortFlow, MidiEndpointConnection,
+    IMidiMessageReceivedEventSource, Midi1PortFlow, MidiClock, MidiEndpointConnection,
     MidiEndpointDeviceInformation, MidiEndpointDevicePurpose, MidiMessageReceivedEventArgs,
     MidiSession,
 };
@@ -94,6 +96,21 @@ static RUNTIME: OnceLock<Result<Runtime, String>> = OnceLock::new();
 /// The installed SDK's version, once the runtime is up.
 pub fn version() -> Result<String> {
     runtime().map(|runtime| runtime.version.clone())
+}
+
+/// Ticks per second of the clock that stamps every message: the system's
+/// performance counter, which is what [`clock_now`] reads.
+#[allow(dead_code)]
+pub fn clock_frequency() -> Result<u64> {
+    runtime()?;
+    MidiClock::TimestampFrequency().context("reading the MIDI clock frequency")
+}
+
+/// The clock's reading now, in the same ticks the messages carry.
+#[allow(dead_code)]
+pub fn clock_now() -> Result<u64> {
+    runtime()?;
+    MidiClock::Now().context("reading the MIDI clock")
 }
 
 /// The SDK runtime, bootstrapped once per process. `Err` names, in one
@@ -260,12 +277,12 @@ impl Transport {
     }
 
     /// Opens `endpoint` and hands every packet it receives -- one to four
-    /// words -- to `on_words`, on the service's thread. Dropping the
-    /// connection closes it.
+    /// words, and the service's timestamp for it -- to `on_words`, on the
+    /// service's thread. Dropping the connection closes it.
     pub fn connect(
         &self,
         endpoint: &Endpoint,
-        on_words: impl Fn(&[u32]) + Send + Sync + 'static,
+        on_words: impl Fn(&[u32], u64) + Send + Sync + 'static,
     ) -> Result<Connection> {
         let connection = self
             .session
@@ -279,7 +296,8 @@ impl Transport {
                 let mut words = [0u32; 4];
                 let [first, second, third, fourth] = &mut words;
                 let count = args.FillWords(first, second, third, fourth)?;
-                on_words(&words[..usize::from(count).min(words.len())]);
+                let timestamp = args.Timestamp()?;
+                on_words(&words[..usize::from(count).min(words.len())], timestamp);
             }
             Ok(())
         });
@@ -310,11 +328,12 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Sends one two-word packet now; for the loopback proof below.
+    /// Sends one two-word packet, now (`timestamp` 0) or at a clock reading
+    /// the service schedules it for; for the loopback proofs below.
     #[cfg(test)]
-    fn send_two_words(&self, first: u32, second: u32) -> Result<()> {
+    fn send_two_words(&self, timestamp: u64, first: u32, second: u32) -> Result<()> {
         self.connection
-            .SendSingleMessageWords2(0, first, second)
+            .SendSingleMessageWords2(timestamp, first, second)
             .context("sending a UMP message")?;
         Ok(())
     }
@@ -371,19 +390,26 @@ mod tests {
         );
         let (sender, receiver) = mpsc::channel();
         let _receiving = transport
-            .connect(b, move |words| {
-                let _ = sender.send(words.to_vec());
+            .connect(b, move |words, timestamp| {
+                let _ = sender.send((words.to_vec(), timestamp));
             })
             .unwrap();
         eprintln!("step: connected B");
-        let sending = transport.connect(a, |_| {}).unwrap();
+        let sending = transport.connect(a, |_, _| {}).unwrap();
         eprintln!("step: connected A");
-        sending.send_two_words(0x4090_3c00, 0xffff_0000).unwrap();
+        let before = clock_now().unwrap();
+        sending.send_two_words(0, 0x4090_3c00, 0xffff_0000).unwrap();
         eprintln!("step: sent");
-        let words = receiver
+        let (words, timestamp) = receiver
             .recv_timeout(Duration::from_secs(5))
             .expect("a packet out of loopback B");
         assert_eq!(words, [0x4090_3c00, 0xffff_0000]);
+        // Stamped by the same clock we read, and no earlier than the send.
+        let after = clock_now().unwrap();
+        assert!(
+            before <= timestamp && timestamp <= after,
+            "{before} <= {timestamp} <= {after}"
+        );
         let mut packets = Vec::new();
         rackforge_core::ump::read_stream(
             &words,
@@ -396,6 +422,56 @@ mod tests {
         assert_eq!(packets.len(), 1);
         assert_eq!(packets[0].data, [0x90, 60, 127]);
         assert_eq!(packets[0].wide, Some(0xffff));
+    }
+
+    /// Two notes sent five milliseconds apart -- sent NOW, as a keyboard
+    /// sends them, not scheduled -- come out of the loopback five
+    /// milliseconds apart by their timestamps, which is the spacing the
+    /// audio thread turns into a frame offset, whatever the delivery jitter.
+    /// (A future timestamp on send engages the service's scheduler, whose
+    /// first release is coarse; that is a different feature, not this proof.)
+    #[test]
+    #[ignore]
+    fn timestamps_keep_the_spacing_between_notes() {
+        let transport = Transport::open().unwrap();
+        let endpoints = endpoints().unwrap();
+        let a = endpoints
+            .iter()
+            .find(|endpoint| endpoint.name.contains("Loopback (A)"))
+            .expect("Default App Loopback (A)");
+        let b = endpoints
+            .iter()
+            .find(|endpoint| endpoint.name.contains("Loopback (B)"))
+            .expect("Default App Loopback (B)");
+        let (sender, receiver) = mpsc::channel();
+        let _receiving = transport
+            .connect(b, move |_, timestamp| {
+                let _ = sender.send(timestamp);
+            })
+            .unwrap();
+        let sending = transport.connect(a, |_, _| {}).unwrap();
+        let frequency = clock_frequency().unwrap();
+        let millisecond = frequency / 1000;
+        let first_sent = clock_now().unwrap();
+        sending.send_two_words(0, 0x4090_3c00, 0x8000_0000).unwrap();
+        while clock_now().unwrap() < first_sent + 5 * millisecond {
+            std::hint::spin_loop();
+        }
+        let second_sent = clock_now().unwrap();
+        sending.send_two_words(0, 0x4090_3e00, 0x8000_0000).unwrap();
+        let first = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        let second = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        let ms = |ticks: f64| ticks * 1000.0 / frequency as f64;
+        let sent_spacing = ms(second_sent as f64 - first_sent as f64);
+        let stamped_spacing = ms(second as f64 - first as f64);
+        eprintln!(
+            "step: sent {sent_spacing:.3} ms apart, stamped {stamped_spacing:.3} ms apart, first stamped {:.3} ms after send",
+            ms(first as f64 - first_sent as f64)
+        );
+        assert!(
+            (stamped_spacing - sent_spacing).abs() < 1.0,
+            "stamped {stamped_spacing} ms vs sent {sent_spacing} ms"
+        );
     }
 
     #[test]

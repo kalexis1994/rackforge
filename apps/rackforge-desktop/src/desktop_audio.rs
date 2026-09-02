@@ -876,6 +876,9 @@ impl DesktopAudio {
             events: Vec::with_capacity(
                 MAX_MIDI_EVENTS_PER_BLOCK * (1 + rackforge_core::sequencer::MAX_SEQUENCER_LANES),
             ),
+            sequencer_scratch: Vec::with_capacity(
+                MAX_MIDI_EVENTS_PER_BLOCK * rackforge_core::sequencer::MAX_SEQUENCER_LANES,
+            ),
             parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
             parameter_links: Vec::new(),
             output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
@@ -901,6 +904,8 @@ impl DesktopAudio {
             render_telemetry: RenderTelemetry::new(0),
             clock_sender,
             clock_scratch: Vec::with_capacity(64),
+            clock_frequency: performance_frequency(),
+            previous_block_clock: 0,
             sequencer: rackforge_core::SequencerEngine::new(f64::from(config.sample_rate.0))
                 .or_else(|| rackforge_core::SequencerEngine::new(48_000.0))
                 .expect("48 kHz is inside the transport bounds"),
@@ -1248,6 +1253,7 @@ impl DesktopAudio {
             length: 3,
             data: [0x90, 60, 100],
             wide: None,
+            timestamp: None,
         }))?;
         let sender = self.command_sender.clone();
         thread::Builder::new()
@@ -1259,6 +1265,7 @@ impl DesktopAudio {
                     length: 3,
                     data: [0x80, 60, 0],
                     wide: None,
+                    timestamp: None,
                 }));
             })?;
         Ok(())
@@ -1290,6 +1297,7 @@ impl DesktopAudio {
                     length: 3,
                     data,
                     wide: None,
+                    timestamp: None,
                 })
                 .map_err(|error| {
                     anyhow::anyhow!("MIDI queue rejected an injected note: {error}")
@@ -1434,20 +1442,72 @@ pub(crate) struct MidiPacket {
     pub(crate) data: [u8; 3],
     /// The value at MIDI 2.0 width, from a transport that has one.
     pub(crate) wide: Option<u32>,
+    /// When the message happened, on the performance counter, from a
+    /// transport that stamps its messages. `None` lands at the block's
+    /// first sample, as every message did before.
+    pub(crate) timestamp: Option<u64>,
 }
 
 impl MidiPacket {
-    fn ingress(self) -> IngressMidiEvent {
+    fn ingress_at(self, frame: u32) -> IngressMidiEvent {
         IngressMidiEvent {
             source: self.source,
             packet: RoutedMidiPacket {
-                frame: 0,
+                frame,
                 length: self.length,
                 data: self.data,
                 wide: self.wide,
             },
         }
     }
+}
+
+/// The performance counter, in the ticks the MIDI service stamps with.
+fn performance_counter() -> u64 {
+    let mut ticks = 0i64;
+    // SAFETY: a valid out-pointer; the call cannot fail on Windows XP and later.
+    let _ = unsafe { windows::Win32::System::Performance::QueryPerformanceCounter(&mut ticks) };
+    ticks.max(0) as u64
+}
+
+fn performance_frequency() -> u64 {
+    let mut frequency = 0i64;
+    // SAFETY: as above.
+    let _ =
+        unsafe { windows::Win32::System::Performance::QueryPerformanceFrequency(&mut frequency) };
+    frequency.max(1) as u64
+}
+
+/// Where in the block a message stamped `timestamp` belongs.
+///
+/// The messages this render dequeues arrived between the previous callback
+/// and this one, so a timestamp inside that interval maps to the sample at
+/// the same fraction of the block: every message plays exactly one block
+/// after it happened, and the spacing between messages is kept to the
+/// sample. A message stamped before the interval is late and plays at the
+/// first sample; one stamped after it (or one without a timestamp) plays at
+/// the last, or the first, respectively.
+fn block_frame(
+    timestamp: Option<u64>,
+    block_start: u64,
+    block_now: u64,
+    frequency: u64,
+    sample_rate: u32,
+    frames: usize,
+) -> u32 {
+    let last = frames.saturating_sub(1) as u32;
+    let Some(timestamp) = timestamp else {
+        return 0;
+    };
+    if block_start == 0 || timestamp <= block_start {
+        return 0;
+    }
+    if timestamp >= block_now {
+        return last;
+    }
+    let elapsed = u128::from(timestamp - block_start);
+    let frame = elapsed * u128::from(sample_rate) / u128::from(frequency.max(1));
+    (frame.min(u128::from(last))) as u32
 }
 
 struct AudioVoice {
@@ -1462,7 +1522,10 @@ struct AudioVoice {
     live_parameter_target: usize,
     input: Vec<f32>,
     output: Vec<f32>,
-    events: Vec<MidiEventV1>,
+    events: Vec<rackforge_core::midi2::Midi2Event>,
+    /// The same events as bytes, for `parallel_render_v1`, whose block
+    /// entry takes MIDI 1.0 events.
+    events_v1: Vec<MidiEventV1>,
     parameter_events: Vec<ParameterEventV1>,
     process_faulted: bool,
 }
@@ -1503,7 +1566,7 @@ unsafe impl ScheduledSlot for AudioVoice {
         let input_samples = frames as usize * self.input_channels;
         self.instance
             .0
-            .process_interleaved(
+            .process_wide(
                 &self.input[..input_samples],
                 &mut self.output[..samples],
                 frames,
@@ -1522,6 +1585,9 @@ unsafe impl ScheduledSlot for AudioVoice {
             return Some(0);
         }
         let input_samples = frames as usize * self.input_channels;
+        self.events_v1.clear();
+        self.events_v1
+            .extend(self.events.iter().map(|event| event.to_midi1()));
         let parallel = self.parallel.as_mut()?;
         parallel
             .0
@@ -1529,7 +1595,7 @@ unsafe impl ScheduledSlot for AudioVoice {
                 &mut self.instance.0,
                 &self.input[..input_samples],
                 frames,
-                &self.events,
+                &self.events_v1,
                 &self.parameter_events,
             )
             .ok()
@@ -1676,7 +1742,10 @@ struct AudioProcessor {
     active_voice: usize,
     midi_receiver: Receiver<MidiPacket>,
     command_receiver: Receiver<AudioCommand>,
-    events: Vec<MidiEventV1>,
+    /// The block's events in the host's vocabulary, width and all.
+    events: Vec<rackforge_core::midi2::Midi2Event>,
+    /// The sequencer's output for the block, before it is lifted.
+    sequencer_scratch: Vec<MidiEventV1>,
     parameter_events: Vec<ParameterEventV1>,
     parameter_links: Vec<CompiledParameterLink>,
     output: Vec<f32>,
@@ -1705,6 +1774,11 @@ struct AudioProcessor {
     /// dedicated thread owns the MIDI output ports and writes them.
     clock_sender: SyncSender<u8>,
     clock_scratch: Vec<MidiEventV1>,
+    /// Ticks per second of the performance counter.
+    clock_frequency: u64,
+    /// The counter at the start of the previous render: the messages this
+    /// render dequeues happened after it.
+    previous_block_clock: u64,
 }
 
 impl AudioProcessor {
@@ -1715,11 +1789,21 @@ impl AudioProcessor {
         self.events.clear();
         self.parameter_events.clear();
         self.apply_commands()?;
+        let block_now = performance_counter();
+        let block_start = std::mem::replace(&mut self.previous_block_clock, block_now);
         while self.events.len() < MAX_MIDI_EVENTS_PER_BLOCK {
             let Ok(packet) = self.midi_receiver.try_recv() else {
                 break;
             };
-            let ingress = packet.ingress();
+            let frame = block_frame(
+                packet.timestamp,
+                block_start,
+                block_now,
+                self.clock_frequency,
+                self.sample_rate,
+                frames,
+            );
+            let ingress = packet.ingress_at(frame);
             let active_instance_id = self.voices[self.active_voice].instance_id.as_str();
             let mut consume = false;
             for link in self
@@ -1745,7 +1829,7 @@ impl AudioProcessor {
                 let conducted = self.conducting
                     && feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
                 if !conducted {
-                    push_midi_event(&mut self.events, packet);
+                    push_midi_event(&mut self.events, &ingress.packet);
                 }
             }
         }
@@ -1757,12 +1841,30 @@ impl AudioProcessor {
             let mut sequenced_params = std::mem::take(&mut self.parameter_events);
             let mut clock = std::mem::take(&mut self.clock_scratch);
             clock.clear();
+            self.sequencer_scratch.clear();
             self.sequencer.render_block(
                 frames as u32,
-                &mut self.events,
+                &mut self.sequencer_scratch,
                 &mut sequenced_params,
                 &mut clock,
             );
+            for event in &self.sequencer_scratch {
+                if self.events.len() < self.events.capacity() {
+                    self.events
+                        .push(rackforge_core::midi2::Midi2Event::from_packet(
+                            &RoutedMidiPacket {
+                                frame: event.frame,
+                                length: event.length,
+                                data: event.data,
+                                wide: None,
+                            },
+                        ));
+                }
+            }
+            // Live input placed by timestamp and the sequencer's output are
+            // one stream once sorted; stable, so offs stay before ons on a
+            // tie as the sequencer emitted them.
+            self.events.sort_by_key(|event| event.frame);
             // Sub-block clock timing is bounded by the buffer size; the
             // writer thread sends the bytes the moment they arrive. A full
             // queue drops pulses rather than stalling the callback — a
@@ -2161,7 +2263,7 @@ impl AudioProcessor {
                     let conducted = self.conducting
                         && feed_sequencer_input(&mut self.sequencer, packet.data, packet.length);
                     if !conducted {
-                        push_midi_event(&mut self.events, packet);
+                        push_midi_event(&mut self.events, &packet.ingress_at(0).packet);
                     }
                 }
                 AudioCommand::Sequencer { command, reply } => {
@@ -2326,6 +2428,7 @@ fn prepare_audio_voice(
         input: vec![0.0; MAX_AUDIO_FRAMES * input_channels.max(1)],
         output: vec![0.0; MAX_AUDIO_FRAMES * PLUGIN_OUTPUT_CHANNELS],
         events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
+        events_v1: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
         parameter_events: Vec::with_capacity(MAX_MIDI_EVENTS_PER_BLOCK),
         process_faulted: false,
     })
@@ -2401,13 +2504,9 @@ fn feed_sequencer_input(
     }
 }
 
-fn push_midi_event(events: &mut Vec<MidiEventV1>, packet: MidiPacket) {
+fn push_midi_event(events: &mut Vec<rackforge_core::midi2::Midi2Event>, packet: &RoutedMidiPacket) {
     if events.len() < MAX_MIDI_EVENTS_PER_BLOCK {
-        events.push(MidiEventV1 {
-            frame: 0,
-            length: packet.length,
-            data: packet.data,
-        });
+        events.push(rackforge_core::midi2::Midi2Event::from_packet(packet));
     }
 }
 
@@ -2998,12 +3097,13 @@ fn connect_ump_input(
     let telemetry = Arc::clone(telemetry);
     let controller_sender = controller_sender.clone();
     let reader = Mutex::new(rackforge_core::ump::UmpReader::default());
-    transport.connect(endpoint, move |words| {
+    transport.connect(endpoint, move |words, timestamp| {
         let deliver = |group: u8, message: &[u8], wide: Option<u32>| {
             if let Some((source, keylab)) = routes.route(group) {
                 deliver_midi_message(
                     message,
                     wide,
+                    Some(timestamp),
                     keylab,
                     source,
                     &sender,
@@ -3120,9 +3220,11 @@ fn desired_midi_inputs(
 /// calls this with bytes and no width; the packet transport with each
 /// packet's projection and width, its system bytes, and each system-
 /// exclusive message it reassembled.
+#[allow(clippy::too_many_arguments)]
 fn deliver_midi_message(
     message: &[u8],
     wide: Option<u32>,
+    timestamp: Option<u64>,
     keylab: bool,
     source: MidiSourceKey,
     sender: &SyncSender<MidiPacket>,
@@ -3176,6 +3278,7 @@ fn deliver_midi_message(
             length: message.len() as u8,
             data,
             wide,
+            timestamp,
         })
         .is_err()
     {
@@ -3207,6 +3310,7 @@ fn connect_midi_input(
         move |_timestamp, message, _| {
             deliver_midi_message(
                 message,
+                None,
                 None,
                 keylab,
                 source,
@@ -3397,6 +3501,7 @@ fn release_held_notes(sender: &SyncSender<MidiPacket>, telemetry: &AudioTelemetr
                 length: packet.length,
                 data: packet.data,
                 wide: None,
+                timestamp: None,
             })
             .is_err()
         {
@@ -3455,6 +3560,29 @@ fn publish_error(slot: &Mutex<Option<String>>, error: impl ToString) {
 
 #[cfg(test)]
 mod tests {
+    /// A message stamped inside the previous block's interval lands at the
+    /// same fraction of this block; late ones at the first sample, early
+    /// ones at the last, unstamped ones at the first.
+    #[test]
+    fn a_timestamp_becomes_the_sample_it_happened_at() {
+        let frequency = 10_000_000;
+        let (start, now) = (frequency, frequency + frequency / 100); // a 10 ms block
+        let frame = |timestamp| super::block_frame(timestamp, start, now, frequency, 48_000, 480);
+        assert_eq!(frame(None), 0);
+        assert_eq!(frame(Some(start - 1)), 0);
+        assert_eq!(frame(Some(start)), 0);
+        assert_eq!(frame(Some(start + frequency / 200)), 240);
+        assert_eq!(frame(Some(start + frequency / 1000)), 48);
+        assert_eq!(frame(Some(now - 1)), 479);
+        assert_eq!(frame(Some(now)), 479);
+        assert_eq!(frame(Some(now + frequency)), 479);
+        // Before the first render there is no interval: everything at 0.
+        assert_eq!(
+            super::block_frame(Some(5), 0, now, frequency, 48_000, 480),
+            0
+        );
+    }
+
     /// A byte port steps aside when its packet twin is selected, even the
     /// KeyLab's force-captured one; without a twin it is captured as before.
     #[test]
@@ -3480,6 +3608,7 @@ mod tests {
         super::deliver_midi_message(
             &[0xb0, 44, 127],
             None,
+            None,
             true,
             source,
             &sender,
@@ -3498,6 +3627,7 @@ mod tests {
         super::deliver_midi_message(
             &[0x90, 60, 127],
             Some(0xffff),
+            None,
             true,
             source,
             &sender,
@@ -3512,6 +3642,7 @@ mod tests {
         // A system-exclusive message reaches the parsers and is not a packet.
         super::deliver_midi_message(
             &[0xf0, 0x7e, 0x7f, 0x06, 0x01, 0xf7],
+            None,
             None,
             true,
             source,

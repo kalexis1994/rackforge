@@ -188,8 +188,10 @@
         return grid;
       }
 
-      // The tab the player left open survives preset changes and reloads.
+      // The tab the player left open survives preset changes and reloads;
+      // so does the sector open inside the Model tab.
       let activeTab = null;
+      let activeModelTab = null;
 
       /**
        * The panel as tabbed pages of one instrument: the main pages each get
@@ -212,11 +214,14 @@
 
         const tabs = [];
         const labGroups = [];
+        const modelGroups = [];
         for (const page of pages.length ? pages : [{ id: null, name: "Voice" }]) {
           const mine = forPage(page.id);
           if (!mine.length) continue;
           if (page.id && page.id.startsWith("lab")) {
             labGroups.push({ page, mine });
+          } else if (page.id && page.id.startsWith("model")) {
+            modelGroups.push({ page, mine });
           } else {
             const body = document.createElement("div");
             // Every page gets the same screwed-down plate the lab groups get;
@@ -227,6 +232,45 @@
             body.append(plate);
             tabs.push({ id: page.id ?? "voice", name: page.name, body });
           }
+        }
+        // The model's own constants, one tab with a sector strip inside it:
+        // Strings, Hammer, Board, Air & Mics, Misc. Ninety-odd faders would
+        // bury the voicing pages if they sat on the rail one sector each.
+        if (modelGroups.length) {
+          const body = document.createElement("div");
+          const strip = document.createElement("nav");
+          strip.className = "subtabs";
+          strip.setAttribute("role", "tablist");
+          const holder = document.createElement("div");
+          const sectors = modelGroups.map(({ page, mine }) => {
+            const plate = document.createElement("div");
+            plate.className = "labgroup";
+            plate.append(faderGrid(mine, current));
+            return { id: page.id, name: page.name.replace(/^Model\s*·\s*/, ""), plate };
+          });
+          if (!sectors.some((sector) => sector.id === activeModelTab)) {
+            activeModelTab = sectors[0].id;
+          }
+          const choose = (id) => {
+            activeModelTab = id;
+            for (const sector of sectors) {
+              sector.button.setAttribute("aria-selected", String(sector.id === id));
+            }
+            const chosen = sectors.find((sector) => sector.id === id);
+            holder.replaceChildren(chosen ? chosen.plate : document.createElement("div"));
+          };
+          for (const sector of sectors) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.setAttribute("role", "tab");
+            button.textContent = sector.name;
+            button.addEventListener("click", () => choose(sector.id));
+            sector.button = button;
+            strip.append(button);
+          }
+          body.append(strip, holder);
+          choose(activeModelTab);
+          tabs.push({ id: "model", name: "Model", body });
         }
         if (labGroups.length) {
           const body = document.createElement("div");

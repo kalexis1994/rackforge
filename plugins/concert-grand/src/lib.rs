@@ -95,7 +95,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 106;
+pub const KNOB_COUNT: usize = 115;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -361,6 +361,51 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     ("HALO_RT60_S", &HALO_RT60_S, ""),
     ("HALO_HP_HZ", &HALO_HP_HZ, ""),
     ("HALO_MIX", &HALO_MIX, ""),
+    (
+        "LID_HALF_WIDTH_M",
+        &LID_HALF_WIDTH_M,
+        "The lid's hinge, along the far side of the rim, this far from the board's centre (m).",
+    ),
+    (
+        "LID_HALF_LENGTH_M",
+        &LID_HALF_LENGTH_M,
+        "Half the lid's length along the hinge, from the board's centre (m).",
+    ),
+    (
+        "MIC_AZIMUTH_RAD",
+        &MIC_AZIMUTH_RAD,
+        "The pair stands this far round from the tail toward the open side of the lid (rad).",
+    ),
+    (
+        "LID_CLOSED_RAD",
+        &LID_CLOSED_RAD,
+        "The lid's angle when the control is at zero: resting on the rim.",
+    ),
+    (
+        "LID_OPEN_RAD",
+        &LID_OPEN_RAD,
+        "The lid's angle when the control is at one: the long stick.",
+    ),
+    (
+        "LID_REFLECT",
+        &LID_REFLECT,
+        "What the lid gives back: varnished spruce and maple, nearly everything.",
+    ),
+    (
+        "LID_CLOSED_LEAK",
+        &LID_CLOSED_LEAK,
+        "What leaks past the rim of a closed lid.",
+    ),
+    (
+        "LID_CLOSED_HZ",
+        &LID_CLOSED_HZ,
+        "The one-pole corner darkening a closed lid's leak.",
+    ),
+    (
+        "LID_OPEN_HZ",
+        &LID_OPEN_HZ,
+        "The same corner with the lid on the long stick.",
+    ),
     ("SOUND_SPEED", &SOUND_SPEED, "The speed of sound, m/s."),
     (
         "ROOM_VOLUME_MIN_M3",
@@ -1437,7 +1482,7 @@ pub static BOARD_RADIATION_ORDER: Knob = Knob::new(1.0);
 /// knee ("si toco un acorde medio-agudo saturan los auriculares"). Halved,
 /// the chord peaks at -2.8 dBFS, under the knee, and the single note at
 /// -12.8: a recording's headroom for chords, not a single note's.
-pub static HEADROOM: Knob = Knob::new(0.091);
+pub static HEADROOM: Knob = Knob::new(0.072);
 pub static BOARD_MIX: Knob = Knob::new(8.0);
 
 /// Where the board's modes stop. Above this a real board still radiates, but
@@ -1570,25 +1615,30 @@ pub static HALO_HP_HZ: Knob = Knob::new(1800.0);
 const HALO_BUFFER: usize = 2048;
 pub static HALO_MIX: Knob = Knob::new(0.05);
 
-/// Near-field reflections off the lid and rim: a handful of sparse early
-/// taps, different per side so the image widens, no tail — this is the air
-/// around an open grand, not a hall. A dry direct-injected tone is precisely
-/// what an electric piano is. (Delay in seconds, gain.)
-const LID_TAPS_LEFT: [(f32, f32); 4] = [
-    (0.0113, 0.17),
-    (0.0191, 0.12),
-    (0.0257, 0.09),
-    (0.0331, 0.06),
-];
-const LID_TAPS_RIGHT: [(f32, f32); 4] = [
-    (0.0097, 0.15),
-    (0.0179, 0.11),
-    (0.0243, 0.08),
-    (0.0311, 0.05),
-];
-/// Delay line length: covers the longest tap at rates up to 74 kHz
-/// (higher rates shorten the taps via the clamp in tune_lid).
-const LID_BUFFER: usize = 4096;
+/// The lid as a surface of the room rather than a drawn comb: it is hinged
+/// along the far side of the rim, `LID_HALF_WIDTH_M` from the board's
+/// centre, and the Lid control opens it from `LID_CLOSED_RAD` on the rim to
+/// `LID_OPEN_RAD` on the long stick. Each capsule hears the board's mirror
+/// image in that plane by its own path and polar angle, exactly as it hears
+/// the floor and the walls. The eight fixed taps this replaces sat 9-33 ms
+/// behind the direct sound, which is a surface three to five metres away;
+/// a lid a metre over the board is under three milliseconds.
+pub static LID_HALF_WIDTH_M: Knob = Knob::new(0.7);
+/// Half the lid's length along the hinge, from the board's centre (m).
+pub static LID_HALF_LENGTH_M: Knob = Knob::new(0.9);
+/// The pair stands this far round from the tail toward the open side of the
+/// lid, in radians: where an engineer puts it, and where the lid reflects.
+pub static MIC_AZIMUTH_RAD: Knob = Knob::new(0.6);
+pub static LID_CLOSED_RAD: Knob = Knob::new(0.05);
+pub static LID_OPEN_RAD: Knob = Knob::new(0.8);
+/// Varnished spruce and maple give back nearly everything.
+pub static LID_REFLECT: Knob = Knob::new(0.9);
+/// A closed lid sends the reflection back into the case: what leaks out
+/// past the rim, and how dark it is (one pole, from the closed corner to the
+/// open one as the lid rises).
+pub static LID_CLOSED_LEAK: Knob = Knob::new(0.3);
+pub static LID_CLOSED_HZ: Knob = Knob::new(1500.0);
+pub static LID_OPEN_HZ: Knob = Knob::new(12000.0);
 
 /// The chamber: a six-line feedback delay network with a Householder
 /// feedback matrix. Line lengths are mutually non-divisible so the tail is
@@ -2425,20 +2475,6 @@ impl Controls {
         STRING_TENSION_N.get() * powf(span, 2.0 * offset)
     }
 
-    /// How much of the near field the lid throws back, centred on the lid
-    /// angle the instrument was calibrated at: a third of it shut, three
-    /// times it on the long stick.
-    ///
-    /// Stated plainly, this is reflection STRENGTH and not lid geometry. A
-    /// real closed lid does not merely reflect less -- it reflects sooner,
-    /// darker, and back into the case rather than out at the room. Modelling
-    /// that wants the taps themselves to move, which is a bigger change than
-    /// this; what is here is the part that carries most of the audible
-    /// difference.
-    fn lid_reflection(&self) -> f32 {
-        powf(3.0, 2.0 * (self.lid - 0.5))
-    }
-
     /// How much of the damper's grip the felt actually delivers. Below centre
     /// the felt is worn and the note bleeds past the key; above it the set is
     /// hard and new and shuts the string dead.
@@ -2605,11 +2641,12 @@ pub struct ConcertGrand {
     /// Live count of active partials, the budget the callback answers to.
     active_partials: usize,
     /// Delay line feeding the lid/rim early reflections.
-    lid: [f32; LID_BUFFER],
-    lid_write: usize,
     /// Tap offsets in samples and gains, per side.
-    lid_left: [(usize, f32); LID_TAPS_LEFT.len()],
-    lid_right: [(usize, f32); LID_TAPS_RIGHT.len()],
+    /// The lid's image of the board, per capsule: delay, gain, and the
+    /// one-pole corner that darkens a closed lid.
+    lid_tap: [[(usize, f32); 4]; 2],
+    lid_damp: f32,
+    lid_lp: [f32; 2],
     /// Full hammer simulations left in this callback. The strike ODE is the
     /// most expensive thing the model does and it runs on the audio thread,
     /// so a dense chord or a fast run cannot be allowed to spend the whole
@@ -2774,10 +2811,9 @@ impl Default for ConcertGrand {
             halo_lp: 0.0,
             halo_hp_k: 0.2,
             halo_index: [0; 4],
-            lid: [0.0; LID_BUFFER],
-            lid_write: 0,
-            lid_left: [(0, 0.0); LID_TAPS_LEFT.len()],
-            lid_right: [(0, 0.0); LID_TAPS_RIGHT.len()],
+            lid_tap: [[(1, 0.0); 4]; 2],
+            lid_damp: 1.0,
+            lid_lp: [0.0; 2],
             room: [[0.0; ROOM_BUFFER]; ROOM_LINES],
             room_len: [1; ROOM_LINES],
             air_dc: [0.0; 2],
@@ -2814,7 +2850,6 @@ impl Default for ConcertGrand {
         piano.tune_open_strings();
         piano.tune_undamped();
         piano.tune_halo();
-        piano.tune_lid();
         piano.tune_room();
         piano
     }
@@ -3297,22 +3332,6 @@ impl ConcertGrand {
         }
     }
 
-    /// Converts the lid tap times to sample offsets at the current rate.
-    fn tune_lid(&mut self) {
-        let convert = |taps: [(f32, f32); 4]| {
-            let mut out = [(0usize, 0.0f32); 4];
-            for (slot, (seconds, gain)) in out.iter_mut().zip(taps) {
-                *slot = (
-                    ((seconds * self.sample_rate) as usize).clamp(1, LID_BUFFER - 1),
-                    gain,
-                );
-            }
-            out
-        };
-        self.lid_left = convert(LID_TAPS_LEFT);
-        self.lid_right = convert(LID_TAPS_RIGHT);
-    }
-
     /// Lays out the soundboard: walk up from 50 Hz taking the measured modal
     /// spacing at each step, give every mode the loss factor of spruce, and
     /// jitter frequency, strength and pan so the bank is ragged rather than
@@ -3539,9 +3558,11 @@ impl ConcertGrand {
         // soundboard at 1 m; the pair faces it from `distance` away, ears at
         // 1.4 m.
         let piano = (0.33 * length, 0.5 * width, 1.0_f32);
+        let (az_sin, az_cos) = sincosf(MIC_AZIMUTH_RAD.get());
+        let reach = distance.min(0.6 * length);
         let centre = (
-            0.33 * length + distance.min(0.6 * length),
-            0.5 * width,
+            0.33 * length + reach * az_cos,
+            (0.5 * width - reach * az_sin).max(0.3),
             1.4_f32,
         );
         // Both capsules look back at the instrument, splayed either side of
@@ -3563,6 +3584,8 @@ impl ConcertGrand {
             (2.0 * length - piano.0, piano.1, piano.2), // front wall
         ];
         let reflect = 1.0 - alpha_mid;
+        let lid_angle =
+            LID_CLOSED_RAD.get() + (LID_OPEN_RAD.get() - LID_CLOSED_RAD.get()) * self.controls.lid;
         for side in 0..2 {
             let turn = if side == 0 { 1.0 } else { -1.0 };
             // The capsule, offset across the pair's line and turned outward.
@@ -3604,7 +3627,83 @@ impl ConcertGrand {
                 let gain = reflect * (direct_path / path) * response * near;
                 *slot = (samples, gain);
             }
+            // The lid: hinged along the far side of the rim, raised by the
+            // control, and the board's image in it heard like any other
+            // surface -- from four points of the board, bass to treble and
+            // hinge to far rim, so the reflection is a smear rather than one
+            // comb. A finite
+            // lid: the point where the path meets the plane must lie on it,
+            // and the reflection fades as it runs off the edge. Closed, most
+            // of it goes back into the case, and what leaks past the rim is
+            // dark.
+            let (lid_sin, lid_cos) = sincosf(lid_angle);
+            let half_width = LID_HALF_WIDTH_M.get();
+            let hinge_y = piano.1 + half_width;
+            let leak = powf(LID_CLOSED_LEAK.get(), 1.0 - self.controls.lid);
+            for ((along_hinge, across), tap) in
+                [(-0.6f32, -0.45f32), (0.6, -0.45), (-0.6, 0.45), (0.6, 0.45)]
+                    .into_iter()
+                    .zip(self.lid_tap[side].iter_mut())
+            {
+                // Four points of the board: two along the hinge, two across
+                // it, because the lid's height above the board -- and so the
+                // reflection's detour -- grows from nothing at the hinge to its
+                // most at the far rim.
+                let source = (
+                    piano.0 + along_hinge * LID_HALF_LENGTH_M.get(),
+                    piano.1 + across * half_width,
+                    piano.2,
+                );
+                let image = (
+                    source.0,
+                    source.1 + 2.0 * half_width * lid_sin * lid_sin,
+                    source.2 + 2.0 * half_width * lid_sin * lid_cos,
+                );
+                // Against the direct path from the same end of the board, not
+                // from its centre: the reflection's delay is its own detour.
+                let (source_path, _) = heard(source);
+                let (path, response) = heard(image);
+                let path = path.max(source_path + 0.02);
+                // Where the mic-to-image line crosses the lid's plane, in the
+                // lid's own coordinates: along the hinge, and up the lid from
+                // the hinge.
+                let normal = (0.0f32, lid_sin, lid_cos);
+                let to_image = (image.0 - mic.0, image.1 - mic.1, image.2 - mic.2);
+                let mic_height = (mic.1 - hinge_y) * normal.1 + (mic.2 - piano.2) * normal.2;
+                let image_height = (image.1 - hinge_y) * normal.1 + (image.2 - piano.2) * normal.2;
+                let t = (mic_height / (mic_height - image_height).max(1e-3)).clamp(0.0, 1.0);
+                let hit = (
+                    mic.0 + t * to_image.0,
+                    mic.1 + t * to_image.1,
+                    mic.2 + t * to_image.2,
+                );
+                let along = hit.0 - piano.0;
+                let up = -(hit.1 - hinge_y) * lid_cos + (hit.2 - piano.2) * lid_sin;
+                let edge = 0.3;
+                let on_lid = (1.0 - ((along.abs() - LID_HALF_LENGTH_M.get()) / edge).max(0.0))
+                    .clamp(0.0, 1.0)
+                    * (1.0 - ((up - 2.0 * half_width) / edge).max(0.0)).clamp(0.0, 1.0)
+                    * (1.0 + (up / edge).min(0.0)).clamp(0.0, 1.0);
+                let delay_s = (path - source_path) / SOUND_SPEED.get();
+                let samples = ((delay_s * self.sample_rate) as usize).clamp(1, ROOM_BUFFER - 1);
+                *tap = (
+                    samples,
+                    0.25 * LID_REFLECT.get()
+                        * leak
+                        * on_lid
+                        * (direct_path / path)
+                        * response
+                        * near,
+                );
+            }
         }
+        let lid_corner =
+            LID_CLOSED_HZ.get() * powf(LID_OPEN_HZ.get() / LID_CLOSED_HZ.get(), self.controls.lid);
+        self.lid_damp = 1.0
+            - expf(
+                -core::f32::consts::TAU * lid_corner.min(0.45 * self.sample_rate)
+                    / self.sample_rate,
+            );
         self.early_gain = 0.55 * self.reverb_gain;
         self.room_dirty = false;
     }
@@ -5896,7 +5995,6 @@ impl ConcertGrand {
         self.tune_undamped();
         self.tune_halo();
         self.tune_room();
-        self.tune_lid();
     }
 }
 
@@ -5916,7 +6014,6 @@ impl Processor for ConcertGrand {
         self.tune_open_strings();
         self.tune_undamped();
         self.tune_halo();
-        self.tune_lid();
         self.tune_room();
         self.reset();
         true
@@ -5941,8 +6038,7 @@ impl Processor for ConcertGrand {
         self.halo = [[0.0; HALO_BUFFER]; 4];
         self.halo_lp = 0.0;
         self.halo_index = [0; 4];
-        self.lid = [0.0; LID_BUFFER];
-        self.lid_write = 0;
+        self.lid_lp = [0.0; 2];
         self.room = [[0.0; ROOM_BUFFER]; ROOM_LINES];
         self.room_lp = [0.0; ROOM_LINES];
         self.room_index = [0; ROOM_LINES];
@@ -5955,7 +6051,9 @@ impl Processor for ConcertGrand {
             self.room_dirty = true;
             self.scale_dirty = true;
         }
-        if accepted && (PARAM_ROOM_SIZE..=PARAM_MIC_PATTERN).contains(&index) {
+        if accepted
+            && ((PARAM_ROOM_SIZE..=PARAM_MIC_PATTERN).contains(&index) || index == PARAM_LID)
+        {
             // The room is a handful of float derivations; retuning at the
             // next block is cheap and keeps every acoustic quantity honest
             // while the slider moves.
@@ -6743,7 +6841,6 @@ impl Processor for ConcertGrand {
             let once = staged - self.air_dc[0];
             self.air_dc[1] += knob_air_highpass * (once - self.air_dc[1]);
             let staged = once - self.air_dc[1];
-            self.lid[self.lid_write] = staged;
             // The early reflections: what the board radiates, mirrored in
             // the six surfaces, three images read by each side of the pair.
             self.early[self.early_write] = staged;
@@ -6761,18 +6858,20 @@ impl Processor for ConcertGrand {
             }
             let (early_left, early_right) = (early[0], early[1]);
             self.early_write = (self.early_write + 1) % ROOM_BUFFER;
-            let lid_open = self.controls.lid_reflection();
-            let mut lid_left = 0.0;
-            for (offset, gain) in self.lid_left {
-                lid_left += self.lid[(self.lid_write + LID_BUFFER - offset) % LID_BUFFER] * gain;
+            // The lid's image, read from the same buffer (the write pointer
+            // has already moved on by one), through its own darkening pole.
+            let mut lid = [0.0f32; 2];
+            for side in 0..2 {
+                let mut heard = 0.0;
+                for (offset, gain) in self.lid_tap[side] {
+                    heard += self.early
+                        [(self.early_write + ROOM_BUFFER - 1 - offset) % ROOM_BUFFER]
+                        * gain;
+                }
+                self.lid_lp[side] += self.lid_damp * (heard - self.lid_lp[side]);
+                lid[side] = self.lid_lp[side] * self.early_gain;
             }
-            lid_left *= lid_open;
-            let mut lid_right = 0.0;
-            for (offset, gain) in self.lid_right {
-                lid_right += self.lid[(self.lid_write + LID_BUFFER - offset) % LID_BUFFER] * gain;
-            }
-            lid_right *= lid_open;
-            self.lid_write = (self.lid_write + 1) % LID_BUFFER;
+            let (lid_left, lid_right) = (lid[0], lid[1]);
 
             // The chamber: read every line, mix through the Householder
             // matrix, damp the highs in the feedback, write back with the
@@ -6838,12 +6937,12 @@ impl Processor for ConcertGrand {
                 + undamped_left * undamped_gain * knob_headroom * near_left
                 + open_left * knob_open_mix * sympathy * knob_headroom
                 + halo_left * knob_headroom
-                + lid_left * air * knob_headroom * near_left;
+                + lid_left * air * knob_headroom;
             let mut direct_right = board_right * board_mix * near_right
                 + undamped_right * undamped_gain * knob_headroom * near_right
                 + open_right * knob_open_mix * sympathy * knob_headroom
                 + halo_right * knob_headroom
-                + lid_right * air * knob_headroom * near_right;
+                + lid_right * air * knob_headroom;
             if self.pedal_noise_amp > 1e-6 {
                 self.pedal_noise_seed = self
                     .pedal_noise_seed
@@ -10446,6 +10545,41 @@ mod tests {
             }
             println!("{line}");
         }
+    }
+
+    /// Prints the lid's image per capsule as the control moves.
+    #[test]
+    #[ignore]
+    fn lid_geometry() {
+        let mut piano = prepared();
+        for lid in [0.0f64, 0.25, 0.5, 0.75, 1.0] {
+            piano.set_parameter(PARAM_LID, lid);
+            piano.tune_room();
+            let rate = piano.sample_rate;
+            let ms = |tap: (usize, f32)| {
+                (
+                    (tap.0 as f32 / rate * 1000.0 * 100.0).round() / 100.0,
+                    (tap.1 * 1000.0).round() / 1000.0,
+                )
+            };
+            println!(
+                "lid {lid:.2}: L {:?} {:?} | R {:?} {:?} | damp corner {:.0} Hz | early L {:?}",
+                ms(piano.lid_tap[0][0]),
+                ms(piano.lid_tap[0][1]),
+                ms(piano.lid_tap[1][0]),
+                ms(piano.lid_tap[1][1]),
+                -log2f(1.0 - piano.lid_damp) * core::f32::consts::LN_2 * rate
+                    / core::f32::consts::TAU,
+                piano.early_taps[0]
+                    .iter()
+                    .map(|(d, g)| (
+                        (*d as f32 / rate * 1000.0 * 10.0).round() / 10.0,
+                        (g * 1000.0).round() / 1000.0
+                    ))
+                    .collect::<Vec<_>>()
+            );
+        }
+        piano.set_parameter(PARAM_LID, 0.5);
     }
 
     #[test]

@@ -579,9 +579,25 @@ fully formed at t=0 is the signature sound of a synthesizer switching on.
 
 ### The lid, the near field, and the chamber (tested)
 
-The output carries a handful of sparse early reflections (9–33 ms, different
-delays per side): the lid and rim of an open grand reflecting the near
-field. Behind them sits a small chamber — a six-line feedback delay network
+The lid is a surface of the room (0.148). It is hinged along the far side of
+the rim, `LID_HALF_WIDTH_M` from the board's centre, and the Lid control
+raises it from `LID_CLOSED_RAD` on the rim to `LID_OPEN_RAD` on the long
+stick. Each capsule hears the board's mirror image in that plane by its own
+path and polar angle, exactly as it hears the floor and the walls — from
+four points of the board (bass to treble, hinge to far rim), because the
+lid's height above the board grows from nothing at the hinge to its most at
+the far rim and the reflection is a smear rather than one comb. The lid is
+finite: the reflection fades as the path's crossing runs off its edge. A
+closed lid sends most of it back into the case; what leaks past the rim
+(`LID_CLOSED_LEAK`) is dark (one pole from `LID_CLOSED_HZ` to `LID_OPEN_HZ`).
+The pair stands `MIC_AZIMUTH_RAD` round from the tail toward the open side,
+where an engineer puts it and where the lid reflects. The eight fixed taps
+this replaces sat 9–33 ms behind the direct sound, which is a surface three
+to five metres away; a lid a metre over the board is under two milliseconds,
+and what it does is not "air" but the lid's comb: measured on the chromatic
+at ff, 2–4 kHz falls 2–3 dB in the tenor (−19.1 rel 100–1000 Hz; Salamander
+−16.4, Pianoteq −12.5) and the treble centroid moves toward the references.
+Behind it sits a small chamber — a six-line feedback delay network
 with a Householder feedback matrix, mutually non-divisible line lengths for
 a dense colourless tail, one-pole damping in each feedback path so highs die
 faster than lows, RT60 ≈ 1.4 s at the bottom. A stage around a piano, not a

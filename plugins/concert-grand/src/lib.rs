@@ -1353,7 +1353,13 @@ pub static BOARD_RADIATION_ORDER: Knob = Knob::new(1.0);
 /// reference, not by taste.
 /// Divides everything on its way to the output saturator, so that the
 /// loudest chord the instrument can play still has shape.
-pub static HEADROOM: Knob = Knob::new(0.182);
+/// Measured 2026-09-02 after the board's level was set by single notes
+/// against the references: a single fortissimo C4 peaked at -6.8 dBFS and a
+/// ten-note fortissimo chord at -0.1, saturating in `soften` above its 0.9
+/// knee ("si toco un acorde medio-agudo saturan los auriculares"). Halved,
+/// the chord peaks at -2.8 dBFS, under the knee, and the single note at
+/// -12.8: a recording's headroom for chords, not a single note's.
+pub static HEADROOM: Knob = Knob::new(0.091);
 pub static BOARD_MIX: Knob = Knob::new(8.0);
 
 /// Where the board's modes stop. Above this a real board still radiates, but

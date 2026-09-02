@@ -2450,8 +2450,8 @@
   },
   {
    "index": 129,
-   "id": "knob_sim_top_hz",
-   "name": "SIM_TOP_HZ",
+   "id": "knob_stulov_epsilon",
+   "name": "STULOV_EPSILON",
    "page": "model_hammer",
    "order": 29,
    "kind": {
@@ -2470,8 +2470,8 @@
   },
   {
    "index": 130,
-   "id": "knob_hammer_v_ff",
-   "name": "HAMMER_V_FF",
+   "id": "knob_stulov_tau_s",
+   "name": "STULOV_TAU_S",
    "page": "model_hammer",
    "order": 30,
    "kind": {
@@ -2490,8 +2490,8 @@
   },
   {
    "index": 131,
-   "id": "knob_contact_stretch",
-   "name": "CONTACT_STRETCH",
+   "id": "knob_sim_top_hz",
+   "name": "SIM_TOP_HZ",
    "page": "model_hammer",
    "order": 31,
    "kind": {
@@ -2510,28 +2510,8 @@
   },
   {
    "index": 132,
-   "id": "knob_recipe_floor",
-   "name": "RECIPE_FLOOR",
-   "page": "model_misc",
-   "order": 0,
-   "kind": {
-    "type": "float",
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "step": 0.001,
-    "default": 0.0
-   },
-   "flags": {
-    "automatable": true,
-    "modulatable": false,
-    "read_only": false,
-    "advanced": true
-   }
-  },
-  {
-   "index": 133,
-   "id": "knob_stulov_epsilon",
-   "name": "STULOV_EPSILON",
+   "id": "knob_hammer_v_ff",
+   "name": "HAMMER_V_FF",
    "page": "model_hammer",
    "order": 32,
    "kind": {
@@ -2549,9 +2529,9 @@
    }
   },
   {
-   "index": 134,
-   "id": "knob_stulov_tau_s",
-   "name": "STULOV_TAU_S",
+   "index": 133,
+   "id": "knob_contact_stretch",
+   "name": "CONTACT_STRETCH",
    "page": "model_hammer",
    "order": 33,
    "kind": {
@@ -2560,6 +2540,26 @@
     "maximum": 1.0,
     "step": 0.001,
     "default": 0.5
+   },
+   "flags": {
+    "automatable": true,
+    "modulatable": false,
+    "read_only": false,
+    "advanced": true
+   }
+  },
+  {
+   "index": 134,
+   "id": "knob_recipe_floor",
+   "name": "RECIPE_FLOOR",
+   "page": "model_misc",
+   "order": 0,
+   "kind": {
+    "type": "float",
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "step": 0.001,
+    "default": 0.0
    },
    "flags": {
     "automatable": true,

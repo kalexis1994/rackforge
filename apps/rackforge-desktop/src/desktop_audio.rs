@@ -2673,7 +2673,13 @@ impl MidiSupervisor {
             .into_iter()
             .filter(|name| {
                 let port = crate::ump_input::endpoint_name(name).unwrap_or(name);
-                !(yield_keylab && keylab_controller::little_driver(port).is_some())
+                let yielded = yield_keylab && keylab_controller::little_driver(port).is_some();
+                if yielded {
+                    println!(
+                        "DESKTOP_MIDI_SOURCE_YIELDED name={name:?} reason=\"an installed controller package owns this port\""
+                    );
+                }
+                !yielded
             })
             .collect::<BTreeSet<_>>();
         let (stop_sender, stop_receiver) = mpsc::channel();

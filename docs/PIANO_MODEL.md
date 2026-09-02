@@ -534,6 +534,32 @@ partials are 15 dB too strong (the strike, not the board -- the side banks
 were ablated and did nothing), and pianissimo is bright in the bass and the
 treble (the hammer).
 
+### The felt as measured, per note (tested by measurement)
+
+The felt's stiffness and exponent follow the published measurements (Hall
+and Askenfelt; Chaigne and Askenfelt 1994): C2 4e8 N/m^p and 2.3, C4 4.5e9
+and 2.5, C7 1e12 and 3.0, log-linear in position between them, held at C2's
+values below C2 with a gain reaching x4 at A0 (`FELT_BASS_GAIN`: the plain
+extrapolation kept the A0 hammer on the string for eight milliseconds where
+Askenfelt's bass hammers leave in about four; x4 lands 3.9). The three house
+factors that multiplied into the exponent and the stiffness are gone; the
+faders are multipliers that are exactly one at the house voicing. The strike
+simulation owns the partials up to 20 kHz (`SIM_TOP_HZ`), not 8: a C7 used
+to have three simulated partials and the rest from the analytic recipe, whose
+cutoff is floored at 1.5 f0 and cannot move with velocity.
+
+Measured on the chromatic grid at fortissimo, contact times are A0 3.7 ms,
+C2 2.9, C3 2.3, C4 1.5, and the tenor's centroid and 2-8 kHz bands sit on the
+references. Two defects are recorded rather than hidden: a C4's brightness
+rises only 18% from velocity 20 to 120 where the references rise 50-100% and
+an ideal-string control with the same felt rises 49% (the test
+`harder_blows_are_brighter_not_just_louder` is ignored, not loosened); and
+the top octave's second partial is 15 dB too strong at both dynamics --
+x0.03 on the top felt moves it 2 dB, the side banks, the hysteresis and the
+duplex move it nothing, and the horizontal polarisation lane is the one
+lever that does (-6 dB at n2, -12 at n4), which points at the bridge
+coupling.
+
 ### Blooming (tested)
 
 A struck tone does not switch on: each partial swells in over a few of its

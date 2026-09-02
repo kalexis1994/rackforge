@@ -95,7 +95,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 95;
+pub const KNOB_COUNT: usize = 97;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -432,6 +432,16 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "STRING_HF_LOSS",
         &STRING_HF_LOSS,
         "The wire's viscoelastic loss rate at 4.4 kHz (1/s); grows with f^2.",
+    ),
+    (
+        "BOARD_LOW_LOSS",
+        &BOARD_LOW_LOSS,
+        "The board's loss factor at 50 Hz; log-linear to BOARD_LOSS_FACTOR at 300 Hz.",
+    ),
+    (
+        "BOARD_MEAN_CAP",
+        &BOARD_MEAN_CAP,
+        "Cap on the Skudrzyk boost of a sparse region's peaks.",
     ),
     (
         "SIM_TOP_HZ",
@@ -1373,7 +1383,7 @@ pub static BOARD_TOP_HZ: Knob = Knob::new(8500.0);
 /// The lowest board mode. A grand's first soundboard mode sits near 60-70 Hz;
 /// the bank starts just below so the region around it is covered rather than
 /// bounded.
-pub static BOARD_BOTTOM_HZ: Knob = Knob::new(62.0);
+pub static BOARD_BOTTOM_HZ: Knob = Knob::new(45.0);
 
 /// Modal spacing, in hertz, at a given frequency — the measured density law.
 ///
@@ -2845,6 +2855,10 @@ pub static STULOV_EPSILON: Knob = Knob::new(0.5);
 pub static STULOV_TAU_S: Knob = Knob::new(2.0e-4);
 /// The wire's viscoelastic loss rate at 4.4 kHz, in 1/s; grows with f^2.
 pub static STRING_HF_LOSS: Knob = Knob::new(5.0);
+/// The board's loss factor at 50 Hz; log-linear to BOARD_LOSS_FACTOR at 300 Hz.
+pub static BOARD_LOW_LOSS: Knob = Knob::new(0.05);
+/// Cap on the Skudrzyk boost of a sparse region's peaks: the lowest, sparsest modes must not tower over the mean.
+pub static BOARD_MEAN_CAP: Knob = Knob::new(1.5);
 /// How far up the strike simulation owns the partials, in Hz. It was 8 kHz,
 /// which left a C7 with three simulated partials and everything above them
 /// to the analytic recipe, whose felt cutoff is floored at 1.5 f0 and so
@@ -3255,15 +3269,24 @@ impl ConcertGrand {
             let jitter = 1.0 + 0.06 * (hash01(0xB0A2D ^ seed << 3) - 0.5);
             let placed = frequency * jitter;
             let pan = 0.35 + 0.30 * hash01(0x5EA1 ^ seed << 5);
-            let mut mode = BodyMode::tune(placed, board_t60(placed, loss), pan, self.sample_rate);
+            // The lowest modes of a real board are the most damped -- three
+            // to five percent against two above the ribs' transition -- and
+            // wide enough that no bass fundamental falls into a hole between
+            // two neighbours of opposite sign. The loss rises toward the
+            // bottom, log-linear from 300 Hz down to BOARD_LOW_LOSS at 50 Hz.
+            let low = (log2f(300.0 / placed.max(20.0)) / log2f(6.0)).clamp(0.0, 1.0);
+            let loss_here = loss * powf(BOARD_LOW_LOSS.get() / BOARD_LOSS_FACTOR.get(), low);
+            let mut mode =
+                BodyMode::tune(placed, board_t60(placed, loss_here), pan, self.sample_rate);
             // Skudrzyk: a plate's MEAN mobility is flat with frequency,
             // whatever its modal density and damping. A bank of unit-gain
             // peaks is not -- where the modes overlap more the mean rises --
             // so each peak is scaled by the square root of its spacing over
             // its bandwidth, and the mean comes out level.
             let spacing_here = board_spacing(frequency, density);
-            let bandwidth = (loss * placed).max(1e-3);
-            mode.drive *= sqrtf(spacing_here / bandwidth) * BOARD_MEAN_MOBILITY.get();
+            let bandwidth = (loss_here * placed).max(1e-3);
+            mode.drive *= sqrtf(spacing_here / bandwidth).min(BOARD_MEAN_CAP.get())
+                * BOARD_MEAN_MOBILITY.get();
             // A real plate's mobility is ragged: per-mode strength swings
             // ~±8 dB — a bank of equal modes is only a volume knob.
             mode.drive *= 0.65 + 0.8 * hash01(0xF00D ^ seed << 7);

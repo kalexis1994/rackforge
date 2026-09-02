@@ -2510,6 +2510,46 @@
   },
   {
    "index": 132,
+   "id": "knob_board_low_loss",
+   "name": "BOARD_LOW_LOSS",
+   "page": "model_board",
+   "order": 13,
+   "kind": {
+    "type": "float",
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "step": 0.001,
+    "default": 0.5
+   },
+   "flags": {
+    "automatable": true,
+    "modulatable": false,
+    "read_only": false,
+    "advanced": true
+   }
+  },
+  {
+   "index": 133,
+   "id": "knob_board_mean_cap",
+   "name": "BOARD_MEAN_CAP",
+   "page": "model_board",
+   "order": 14,
+   "kind": {
+    "type": "float",
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "step": 0.001,
+    "default": 0.5
+   },
+   "flags": {
+    "automatable": true,
+    "modulatable": false,
+    "read_only": false,
+    "advanced": true
+   }
+  },
+  {
+   "index": 134,
    "id": "knob_sim_top_hz",
    "name": "SIM_TOP_HZ",
    "page": "model_hammer",
@@ -2529,7 +2569,7 @@
    }
   },
   {
-   "index": 133,
+   "index": 135,
    "id": "knob_hammer_v_ff",
    "name": "HAMMER_V_FF",
    "page": "model_hammer",
@@ -2549,7 +2589,7 @@
    }
   },
   {
-   "index": 134,
+   "index": 136,
    "id": "knob_contact_stretch",
    "name": "CONTACT_STRETCH",
    "page": "model_hammer",
@@ -2569,7 +2609,7 @@
    }
   },
   {
-   "index": 135,
+   "index": 137,
    "id": "knob_recipe_floor",
    "name": "RECIPE_FLOOR",
    "page": "model_misc",

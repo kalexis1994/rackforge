@@ -6989,15 +6989,20 @@ impl Processor for ConcertGrand {
             // The lid's image, read from the same buffer (the write pointer
             // has already moved on by one), through its own darkening pole.
             let mut lid = [0.0f32; 2];
-            for side in 0..2 {
+            for ((taps, pole), out) in self
+                .lid_tap
+                .iter()
+                .zip(self.lid_lp.iter_mut())
+                .zip(lid.iter_mut())
+            {
                 let mut heard = 0.0;
-                for (offset, gain) in self.lid_tap[side] {
+                for (offset, gain) in taps {
                     heard += self.early
                         [(self.early_write + ROOM_BUFFER - 1 - offset) % ROOM_BUFFER]
                         * gain;
                 }
-                self.lid_lp[side] += self.lid_damp * (heard - self.lid_lp[side]);
-                lid[side] = self.lid_lp[side] * self.early_gain;
+                *pole += self.lid_damp * (heard - *pole);
+                *out = *pole * self.early_gain;
             }
             let (lid_left, lid_right) = (lid[0], lid[1]);
 

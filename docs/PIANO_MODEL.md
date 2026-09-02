@@ -730,6 +730,32 @@ synthetic. With the sustain pedal down (MIDI CC 64), release does nothing and
 the natural decay continues; lifting the pedal damps every released note.
 CC 120/123 damp everything at once.
 
+## The laboratory: every constant, live
+
+Every scalar constant of the model (82 of them, from the felt's stiffness to
+the microphone's spacing) is a `Knob`: it ships with the value the constant
+had, the code reads it with one relaxed atomic load, and the wasm build never
+writes it, so the packaged plugin is unchanged. Natively, a text file can set
+any of them while the instrument runs, which is how the model is voiced by
+ear without rebuilding anything:
+
+    cargo run --release -p rackforge-concert-grand --example lab -- [--list]
+        [--out <device substring>] [--midi <port substring>]
+        [--tuning <file>] [--render <score.txt> <out.wav>]
+
+The lab opens the audio device and the MIDI keyboard straight into the
+instrument. On first run it writes every knob, with its documentation, to
+`%LOCALAPPDATA%\RackForge\concert-grand.tuning` (or the `--tuning` file);
+save the file and the next note uses the new values. A line
+`fader.<index> = 0..1` sets one of the instrument's own parameters by the
+index in `metadata/parameters.json`. `--render` plays a score (one note per
+line, `onset_ms duration_ms note velocity`) through the same tuning into a
+stereo 24-bit WAV, so a voicing found by ear can be measured with
+`tools/reanalyze-piano.py` against the references. Knobs read inside the
+per-sample loops are copied into locals once per block (`process_wide`,
+`cull`, `tension_step`); measured with `bench_blocks`, the conversion costs
+nothing and the renders are bit-identical at the shipped values.
+
 ## How it is rendered
 
 Modal synthesis: each partial is a damped quadrature oscillator — a 2×2

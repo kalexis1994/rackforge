@@ -608,6 +608,32 @@ bone-dry direct-injected tone is precisely what an electric piano is, the
 comparison samples are recordings made in a room, and direct A/B listening
 named the missing tail as the single largest audible difference.
 
+### The preamplifier (tested by measurement)
+
+A console channel's input stage after the capsules and before Level: a
+**Preamp** fader on the Room page spanning 0 to `PREAMP_RANGE_DB` (30 dB,
+default +6), exactly linear up to `PREAMP_KNEE` (0.75 of full scale) and
+above it a transformer's bend toward a ceiling of one, y/(1+y), whose slope
+is one where it joins; the negative half bends `PREAMP_ASYMMETRY` later,
+which is where a transformer's second harmonic comes from. `soften` stays
+behind it as the safety net. Measured at Level 1 (the position the player
+uses) with +6 dB: a ten-note fortissimo chord peaks at −0.5 dBFS with its
+bands within 0.7 dB of the linear expectation, and a phrase is untouched.
+The preamp lives at parameter index 200 and in the state after the knobs,
+so adding a knob never moves it.
+
+### The state carries a fingerprint of the knob registry
+
+The knobs are stored in the state by position, and a build that inserts a
+knob in the middle of the registry moves every knob after it: loaded by
+position, a saved session hands each of those knobs its neighbour's value.
+Measured on 0.151 against a 0.150 session: the recipe floor, compiled at
+zero, landed on a neighbour at a sixteenth of its value and the instrument
+sounded broken — the player heard it as "the reverted version is back". The
+state now ends with an FNV-1a fingerprint of the registry's names in order;
+a state whose fingerprint is not this build's keeps its voicing and drops
+its knobs to their compiled values.
+
 ### The recording chain, derived rather than drawn (tested)
 
 Four panel controls describe a physical situation — **Room Size**, **Wall

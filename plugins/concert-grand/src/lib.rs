@@ -95,7 +95,7 @@ fn fader_from_knob(default: f32, value: f32) -> f32 {
         (0.5_f32 + log2f(value / default) / 8.0).clamp(0.0, 1.0)
     }
 }
-pub const KNOB_COUNT: usize = 115;
+pub const KNOB_COUNT: usize = 118;
 /// Every knob by name, with the first line of its documentation.
 pub static TUNABLES: &[(&str, &Knob, &str)] = &[
     (
@@ -336,6 +336,21 @@ pub static TUNABLES: &[(&str, &Knob, &str)] = &[
         "HEADROOM",
         &HEADROOM,
         "Level of the board against the string sum that drives it. There is one",
+    ),
+    (
+        "PREAMP_RANGE_DB",
+        &PREAMP_RANGE_DB,
+        "The preamplifier fader's span in decibels: 0 at the bottom, this at the top.",
+    ),
+    (
+        "PREAMP_KNEE",
+        &PREAMP_KNEE,
+        "Where the input stage stops being linear, as a fraction of full scale.",
+    ),
+    (
+        "PREAMP_ASYMMETRY",
+        &PREAMP_ASYMMETRY,
+        "How much later the negative half bends than the positive: the second harmonic.",
     ),
     ("BOARD_MIX", &BOARD_MIX, ""),
     (
@@ -823,6 +838,9 @@ const PARAM_UNISON: u32 = 2;
 const PARAM_DECAY: u32 = 3;
 const PARAM_WIDTH: u32 = 4;
 const PARAM_LEVEL: u32 = 5;
+/// The preamplifier sits past the knobs in the state, at a fixed index of its
+/// own, so adding a knob never moves it and an older state simply lacks it.
+const PARAM_PREAMP: u32 = 200;
 /// Lab parameters 6..=22: raw multipliers the player sweeps by ear while we
 /// hunt the piano. Each 0..1 value maps to a x0.25..x4 multiplier.
 ///
@@ -988,6 +1006,30 @@ const PARAM_CLANG_PLAIN: u32 = 39;
 /// `Player Upright` all answered CC67 with a mechanism they do not have.
 const PARAM_ACTION: u32 = 40;
 const PARAM_COUNT: usize = 6 + LAB_COUNT + 18 + KNOB_COUNT;
+/// The state carries every parameter, then the preamplifier, then a
+/// fingerprint of the knob registry. The knobs are stored by position, and
+/// a build that adds a knob in the middle of the registry moves every knob
+/// after it: loaded by position, a saved session then hands each of those
+/// knobs its neighbour's value (measured on 0.151 against a 0.150 session:
+/// the recipe floor, compiled at zero, landed on a neighbour at a sixteenth
+/// of its value and the instrument sounded broken). A state whose
+/// fingerprint is not this build's keeps its voicing and drops its knobs.
+const STATE_COUNT: usize = PARAM_COUNT + 2;
+
+/// FNV-1a over the registry's names, in order: the same names in the same
+/// order is the same layout.
+fn knob_registry_fingerprint() -> u32 {
+    let mut hash: u32 = 0x811C_9DC5;
+    for (name, _, _) in TUNABLES {
+        for byte in name.bytes() {
+            hash ^= byte as u32;
+            hash = hash.wrapping_mul(0x0100_0193);
+        }
+        hash ^= 0x7C;
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    hash
+}
 
 /// One damped quadrature pair: state (s, c) advanced by a rotation whose
 /// entries are pre-scaled by the per-sample decay factor `g`, so magnitude
@@ -1483,6 +1525,12 @@ pub static BOARD_RADIATION_ORDER: Knob = Knob::new(1.0);
 /// the chord peaks at -2.8 dBFS, under the knee, and the single note at
 /// -12.8: a recording's headroom for chords, not a single note's.
 pub static HEADROOM: Knob = Knob::new(0.072);
+/// The preamplifier fader's span in decibels: 0 at the bottom, this at the top.
+pub static PREAMP_RANGE_DB: Knob = Knob::new(30.0);
+/// Where the input stage stops being linear, as a fraction of full scale.
+pub static PREAMP_KNEE: Knob = Knob::new(0.75);
+/// How much later the negative half bends than the positive: the second harmonic.
+pub static PREAMP_ASYMMETRY: Knob = Knob::new(0.15);
 pub static BOARD_MIX: Knob = Knob::new(8.0);
 
 /// Where the board's modes stop. Above this a real board still radiates, but
@@ -2268,6 +2316,8 @@ struct Controls {
     decay: f32,
     width: f32,
     level: f32,
+    /// The microphone preamplifier's gain, 0..1 over PREAMP_RANGE_DB.
+    preamp: f32,
     lab: [f32; LAB_COUNT],
     /// The space and the microphones, physically: size, surface hardness,
     /// pair distance, and the omni-to-figure-8 pattern axis.
@@ -2320,6 +2370,7 @@ impl Default for Controls {
             decay: 0.35,
             width: 0.35,
             level: 0.72,
+            preamp: 0.2,
             // The user's lab refinements, by ear: felt corner a touch up, the
             // hammer a shade softer and heavier, bloom up, both decay stages
             // a little longer, the board eased.
@@ -2537,6 +2588,7 @@ impl Controls {
             PARAM_DECAY => self.decay,
             PARAM_WIDTH => self.width,
             PARAM_LEVEL => self.level,
+            PARAM_PREAMP => self.preamp,
             6..=22 => self.lab[index as usize - 6],
             PARAM_ROOM_SIZE => self.room_size,
             PARAM_ROOM_HARDNESS => self.room_hardness,
@@ -2577,6 +2629,7 @@ impl Controls {
             PARAM_DECAY => self.decay = value,
             PARAM_WIDTH => self.width = value,
             PARAM_LEVEL => self.level = value,
+            PARAM_PREAMP => self.preamp = value,
             6..=22 => self.lab[index as usize - 6] = value,
             PARAM_ROOM_SIZE => self.room_size = value,
             PARAM_ROOM_HARDNESS => self.room_hardness = value,
@@ -5967,6 +6020,33 @@ impl ConcertGrand {
     /// So: exactly the identity below the knee, and a bend only above it. The
     /// ceiling is unchanged at 1.0, and normal playing no longer touches the
     /// curve at all.
+    /// The microphone preamplifier's gain, as a factor: the fader spans
+    /// PREAMP_RANGE_DB.
+    fn preamp_gain(&self) -> f32 {
+        powf(10.0, PREAMP_RANGE_DB.get() * self.controls.preamp / 20.0)
+    }
+
+    /// A console channel's input stage: exactly linear up to the knee, and
+    /// above it a transformer's gentle bend toward a ceiling of one --
+    /// y/(1+y), whose slope is one where it joins, so there is no corner.
+    /// The negative half bends a little later than the positive: a core
+    /// saturates asymmetrically, which is where a transformer's second
+    /// harmonic comes from, and a plain soft clip has none.
+    fn transformer(sample: f32, knee_positive: f32, knee_negative: f32) -> f32 {
+        let knee = if sample < 0.0 {
+            knee_negative
+        } else {
+            knee_positive
+        };
+        let magnitude = sample.abs();
+        if magnitude <= knee {
+            return sample;
+        }
+        let over = (magnitude - knee) / (1.0 - knee);
+        let shaped = knee + (1.0 - knee) * (over / (1.0 + over));
+        if sample < 0.0 { -shaped } else { shaped }
+    }
+
     fn soften(sample: f32) -> f32 {
         const KNEE: f32 = 0.9;
         let magnitude = sample.abs();
@@ -6426,7 +6506,7 @@ impl Processor for ConcertGrand {
     }
 
     fn save_state(&self, destination: &mut [u8]) -> Option<usize> {
-        let mut values = [0.0f32; PARAM_COUNT];
+        let mut values = [0.0f32; STATE_COUNT];
         values[..6].copy_from_slice(&[
             self.controls.brightness,
             self.controls.dynamics,
@@ -6457,6 +6537,8 @@ impl Processor for ConcertGrand {
         for (slot, (_, knob, _)) in TUNABLES.iter().enumerate() {
             values[KNOB_PARAM_BASE as usize + slot] = fader_from_knob(knob.compiled(), knob.get());
         }
+        values[PARAM_COUNT] = self.controls.preamp;
+        values[PARAM_COUNT + 1] = f32::from_bits(knob_registry_fingerprint());
         let target = destination.get_mut(..values.len() * 4)?;
         for (chunk, value) in target.as_chunks_mut::<4>().0.iter_mut().zip(values) {
             chunk.copy_from_slice(&value.to_le_bytes());
@@ -6481,8 +6563,8 @@ impl Processor for ConcertGrand {
         // one alone, which quietly became a cap on the CURRENT state the day
         // the instrument's own controls outgrew 37 -- every save would have
         // been rejected on load.
-        let longest = if PARAM_COUNT > LEGACY_PARAM_COUNT {
-            PARAM_COUNT
+        let longest = if STATE_COUNT > LEGACY_PARAM_COUNT {
+            STATE_COUNT
         } else {
             LEGACY_PARAM_COUNT
         };
@@ -6493,7 +6575,8 @@ impl Processor for ConcertGrand {
         // the controls it does not know about where a fresh instrument puts
         // them, not at an arbitrary 0.5.
         let defaults = Controls::default();
-        let mut values = [0.5_f32; PARAM_COUNT];
+        let mut values = [0.5_f32; STATE_COUNT];
+        values[PARAM_COUNT] = defaults.preamp;
         values[0] = defaults.brightness;
         values[1] = defaults.dynamics;
         values[2] = defaults.unison;
@@ -6531,14 +6614,18 @@ impl Processor for ConcertGrand {
         } else {
             state.len() / 4
         };
-        for (value, chunk) in values
+        for (index, (value, chunk)) in values
             .iter_mut()
             .zip(state.as_chunks::<4>().0)
+            .enumerate()
             .take(readable)
         {
             let decoded = f32::from_le_bytes(*chunk);
             if !decoded.is_finite() || !(0.0..=1.0).contains(&decoded) {
-                return false;
+                // The fingerprint slot is a hash, not a control.
+                if index != PARAM_COUNT + 1 {
+                    return false;
+                }
             }
             *value = decoded;
         }
@@ -6571,12 +6658,22 @@ impl Processor for ConcertGrand {
             clang_falloff: values[6 + LAB_COUNT + 15],
             clang_plain: values[6 + LAB_COUNT + 16],
             action: values[6 + LAB_COUNT + 17],
+            preamp: values[PARAM_COUNT],
         };
+        // The knobs, only from a state this build wrote: by position, any
+        // other layout hands them their neighbours' values.
+        let same_layout = state.len() == STATE_COUNT * 4
+            && values[PARAM_COUNT + 1].to_bits() == knob_registry_fingerprint();
         for (slot, (_, knob, _)) in TUNABLES.iter().enumerate() {
-            knob.set(knob_from_fader(
-                knob.compiled(),
-                values[KNOB_PARAM_BASE as usize + slot],
-            ));
+            let fader = if same_layout {
+                values[KNOB_PARAM_BASE as usize + slot]
+            } else {
+                fader_from_knob(knob.compiled(), knob.compiled())
+            };
+            knob.set(knob_from_fader(knob.compiled(), fader));
+        }
+        if !same_layout {
+            self.controls.preamp = Controls::default().preamp;
         }
         self.room_dirty = true;
         self.board_dirty = true;
@@ -6664,6 +6761,11 @@ impl Processor for ConcertGrand {
             self.tune();
         }
         let level = self.controls.level * self.controls.level;
+        let preamp_gain = self.preamp_gain();
+        let knee_positive = PREAMP_KNEE.get().clamp(0.1, 0.95);
+        // The asymmetry: the negative half bends a little later.
+        let knee_negative =
+            (knee_positive * (1.0 + PREAMP_ASYMMETRY.get())).clamp(knee_positive, 0.99);
         // The sympathetic feed: the bridge's total string signal from the
         // PREVIOUS sample, handed to every free string this sample. One
         // sample of latency around the loop keeps the order of voices
@@ -6981,6 +7083,15 @@ impl Processor for ConcertGrand {
             // here should compress until the output itself would clip.
             let scaled_left = (direct_left + room_left * knob_headroom) * level;
             let scaled_right = (direct_right + room_right * knob_headroom) * level;
+            // The preamplifier: the gain an engineer adds after the capsules,
+            // with the input stage's own bend above its knee -- a chord
+            // driven past it compresses a couple of decibels and warms; a
+            // single note never reaches it. `soften` stays behind it as the
+            // safety net it was.
+            let (scaled_left, scaled_right) = (
+                Self::transformer(scaled_left * preamp_gain, knee_positive, knee_negative),
+                Self::transformer(scaled_right * preamp_gain, knee_positive, knee_negative),
+            );
             let left = Self::soften(scaled_left);
             let right = Self::soften(scaled_right);
             match channels {
@@ -7799,12 +7910,40 @@ mod tests {
     fn presets_and_state_round_trip() {
         let mut piano = Box::new(ConcertGrand::default());
         assert!(piano.load_preset("mellow"));
-        let mut state = [0u8; PARAM_COUNT * 4];
-        assert_eq!(piano.save_state(&mut state), Some(PARAM_COUNT * 4));
+        let mut state = [0u8; STATE_COUNT * 4];
+        assert_eq!(piano.save_state(&mut state), Some(STATE_COUNT * 4));
         assert!(piano.load_preset("bright"));
         assert!(piano.load_state(&state));
         assert_eq!(piano.get_parameter(PARAM_BRIGHTNESS), Some(0.28_f32 as f64));
         assert!(!piano.load_preset("unknown"));
+    }
+
+    #[test]
+    fn a_state_from_another_knob_layout_keeps_its_voicing_and_drops_its_knobs() {
+        let mut piano = prepared();
+        assert!(piano.set_parameter(PARAM_BRIGHTNESS, 0.31));
+        let slot = KNOB_PARAM_BASE + 3;
+        assert!(piano.set_parameter(slot, 0.625));
+        let mut state = [0u8; STATE_COUNT * 4];
+        assert_eq!(piano.save_state(&mut state), Some(STATE_COUNT * 4));
+        // The same bytes with another registry's fingerprint: a build that
+        // inserted a knob in the middle.
+        let at = (PARAM_COUNT + 1) * 4;
+        state[at..at + 4].copy_from_slice(&0xDEAD_BEEF_u32.to_le_bytes());
+        assert!(piano.set_parameter(PARAM_BRIGHTNESS, 0.9));
+        assert!(piano.load_state(&state));
+        assert!((piano.get_parameter(PARAM_BRIGHTNESS).unwrap() - 0.31).abs() < 1e-6);
+        assert!(
+            (piano.get_parameter(slot).unwrap() - 0.5).abs() < 1e-6,
+            "a knob from another layout must come back compiled"
+        );
+        // And the same state as this build wrote it keeps the knob.
+        assert!(piano.set_parameter(slot, 0.625));
+        assert_eq!(piano.save_state(&mut state), Some(STATE_COUNT * 4));
+        assert!(piano.set_parameter(slot, 0.5));
+        assert!(piano.load_state(&state));
+        assert!((piano.get_parameter(slot).unwrap() - 0.625).abs() < 1e-6);
+        assert!(piano.set_parameter(slot, 0.5));
     }
 
     #[test]
@@ -7813,7 +7952,7 @@ mod tests {
         // Rejecting it would throw away every setting the user had dialled in.
         let mut piano = Box::new(ConcertGrand::default());
         piano.set_parameter(PARAM_BRIGHTNESS, 0.9);
-        let mut state = [0u8; PARAM_COUNT * 4];
+        let mut state = [0u8; STATE_COUNT * 4];
         piano.save_state(&mut state).unwrap();
 
         let mut older = Box::new(ConcertGrand::default());
@@ -7843,7 +7982,7 @@ mod tests {
         );
 
         // Longer than any layout of ours is not a state of ours.
-        assert!(!older.load_state(&[0u8; (PARAM_COUNT + 1) * 4]));
+        assert!(!older.load_state(&[0u8; (STATE_COUNT + 1) * 4]));
     }
 
     /// Which parameters actually change the sound, and by how much. Not a
@@ -9393,7 +9532,7 @@ mod tests {
             );
             checked += 1;
         }
-        assert_eq!(checked, PARAM_COUNT, "every parameter must be declared");
+        assert_eq!(checked, PARAM_COUNT + 1, "every parameter must be declared");
     }
 
     #[test]

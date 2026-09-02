@@ -837,7 +837,15 @@ save the file and the next note uses the new values. A line
 index in `metadata/parameters.json`. `--render` plays a score (one note per
 line, `onset_ms duration_ms note velocity`) through the same tuning into a
 stereo 24-bit WAV, so a voicing found by ear can be measured with
-`tools/reanalyze-piano.py` against the references. Knobs read inside the
+`tools/reanalyze-piano.py` against the references. The same knobs are also the instrument's own
+parameters, indices 41 to 132 on the pages Model · Strings, Hammer, Board,
+Air & Mics and Misc: fader 0.5 is the compiled value and each eighth of
+travel doubles or halves it (a sixteenth to sixteen times over the range;
+a knob compiled at zero takes the fader as it is), so they can be moved
+while playing, saved in a preset and automated from any host. A knob moved
+this way re-derives the prepare-time state (board, room, halo, undamped
+strings, lid) at the next block. The lab's file and the faders write the
+same knobs; whichever moved last wins. Knobs read inside the
 per-sample loops are copied into locals once per block (`process_wide`,
 `cull`, `tension_step`); measured with `bench_blocks`, the conversion costs
 nothing and the renders are bit-identical at the shipped values.

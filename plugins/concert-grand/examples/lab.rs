@@ -8,6 +8,12 @@
 //!         [--tuning <file>] [--render <score.txt> <out.wav>]
 //!         [--foreground] [--no-edit] [--stop]
 //!
+//! MIDI comes from Windows MIDI Services (every UMP source the service
+//! exposes, which is where a keyboard owned by its controller package lives)
+//! or from a classic `midir` port; `--list` shows both, `--midi` picks by
+//! substring across both, and with no choice the first source that is not a
+//! loopback is taken.
+//!
 //! By default the lab opens as a program of its own: it relaunches itself in
 //! a new console window (its pid in `%LOCALAPPDATA%\RackForge\lab.pid`) and
 //! gives the terminal back; closing that window ends it, so does `--stop`,
@@ -310,12 +316,27 @@ fn main() {
 
     let host = cpal::default_host();
     let midi_in = midir::MidiInput::new("rackforge-lab").expect("midi");
+    let ump_sources: Vec<(rackforge_ump::Endpoint, String)> = rackforge_ump::endpoints()
+        .map(|endpoints| {
+            endpoints
+                .into_iter()
+                .flat_map(|endpoint| {
+                    let names: Vec<String> = endpoint.source_names().collect();
+                    names.into_iter().map(move |name| (endpoint.clone(), name))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     if options.list {
         println!("audio outputs:");
         for device in host.output_devices().expect("devices") {
             println!("  {}", device.name().unwrap_or_default());
         }
-        println!("midi inputs:");
+        println!("midi inputs (Windows MIDI Services):");
+        for (_, name) in &ump_sources {
+            println!("  {name}");
+        }
+        println!("midi inputs (midir):");
         for port in midi_in.ports() {
             println!("  {}", midi_in.port_name(&port).unwrap_or_default());
         }
@@ -346,18 +367,77 @@ fn main() {
 
     let (midi_tx, midi_rx) = mpsc::channel::<[u8; 3]>();
     let (fader_tx, fader_rx) = mpsc::channel::<(usize, f32)>();
-    let ports = midi_in.ports();
-    let port = match &options.midi {
-        Some(wanted) => ports
+    let wanted_lower = options.midi.as_ref().map(|w| w.to_lowercase());
+    let ump_pick = match &wanted_lower {
+        Some(wanted) => ump_sources
             .iter()
-            .find(|p| {
-                midi_in
-                    .port_name(p)
-                    .map(|n| n.to_lowercase().contains(&wanted.to_lowercase()))
-                    .unwrap_or(false)
-            })
-            .cloned(),
-        None => ports.first().cloned(),
+            .find(|(_, name)| name.to_lowercase().contains(wanted)),
+        None => ump_sources
+            .iter()
+            .find(|(_, name)| !name.to_lowercase().contains("loopback")),
+    };
+    let mut _ump_transport = None;
+    let mut _ump_connection = None;
+    if let Some((endpoint, name)) = ump_pick {
+        match rackforge_ump::Transport::open() {
+            Ok(transport) => {
+                let tx = midi_tx.clone();
+                let reader = std::sync::Mutex::new(rackforge_core::ump::UmpReader::default());
+                match transport.connect(endpoint, move |words, _timestamp| {
+                    let mut reader = reader.lock().unwrap_or_else(|p| p.into_inner());
+                    let deliver = |bytes: &[u8]| {
+                        if bytes.len() >= 2 {
+                            let mut data = [0u8; 3];
+                            let n = bytes.len().min(3);
+                            data[..n].copy_from_slice(&bytes[..n]);
+                            let _ = tx.send(data);
+                        }
+                    };
+                    let _ = reader.read(
+                        words,
+                        0,
+                        &mut |_group, packet| deliver(&packet.data[..usize::from(packet.length)]),
+                        &mut |_group, event| deliver(&event.data[..usize::from(event.length)]),
+                        &mut |_group, _sysex| {},
+                        &mut |_unread| {},
+                    );
+                }) {
+                    Ok(connection) => {
+                        println!("midi: {name} (Windows MIDI Services)");
+                        _ump_connection = Some(connection);
+                    }
+                    Err(error) => println!("midi: cannot open {name}: {error:#}"),
+                }
+                _ump_transport = Some(transport);
+            }
+            Err(error) => println!("midi: Windows MIDI Services unavailable: {error:#}"),
+        }
+    }
+    let ports = midi_in.ports();
+    let port = if _ump_connection.is_some() {
+        None
+    } else {
+        match &wanted_lower {
+            Some(wanted) => ports
+                .iter()
+                .find(|p| {
+                    midi_in
+                        .port_name(p)
+                        .map(|n| n.to_lowercase().contains(wanted))
+                        .unwrap_or(false)
+                })
+                .cloned(),
+            None => ports
+                .iter()
+                .find(|p| {
+                    midi_in
+                        .port_name(p)
+                        .map(|n| !n.to_lowercase().contains("loopback"))
+                        .unwrap_or(false)
+                })
+                .or(ports.first())
+                .cloned(),
+        }
     };
     let _midi_connection = match port {
         Some(port) => {
@@ -382,7 +462,9 @@ fn main() {
             )
         }
         None => {
-            println!("midi: no input port (use --list, --midi)");
+            if _ump_connection.is_none() {
+                println!("midi: no input port (use --list, --midi)");
+            }
             None
         }
     };

@@ -6,7 +6,6 @@ mod desktop_audio;
 mod desktop_webview;
 #[cfg(windows)]
 #[rustfmt::skip]
-mod midi2_sdk;
 mod paths;
 mod setup;
 mod shutdown;
@@ -14,7 +13,7 @@ mod shutdown;
 mod single_instance;
 mod startup;
 #[cfg(windows)]
-mod ump_input;
+use rackforge_ump as ump_input;
 mod web;
 
 use anyhow::{Context, Result, bail};

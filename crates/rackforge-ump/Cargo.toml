@@ -1,0 +1,17 @@
+[package]
+name = "rackforge-ump"
+description = "Windows MIDI Services (UMP) input for RackForge's hosts and the Concert Grand lab"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Foundation", "Foundation_Collections", "Devices_Enumeration", "Win32_System_Com", "Win32_System_Performance", "Win32_System_WinRT"] }
+windows-core = "0.62"
+windows-collections = "0.3"
+
+[dev-dependencies]
+rackforge-core = { path = "../rackforge-core" }

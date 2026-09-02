@@ -558,11 +558,11 @@ pub mod Microsoft {
                     ) -> windows_core::Result<i64>
                     where
                         P0: windows_core::Param<
-                            windows::Foundation::TypedEventHandler<
-                                IMidiEndpointConnectionSource,
-                                windows_core::IInspectable,
+                                windows::Foundation::TypedEventHandler<
+                                    IMidiEndpointConnectionSource,
+                                    windows_core::IInspectable,
+                                >,
                             >,
-                        >,
                     {
                         let this = self;
                         unsafe {
@@ -590,11 +590,11 @@ pub mod Microsoft {
                     ) -> windows_core::Result<i64>
                     where
                         P0: windows_core::Param<
-                            windows::Foundation::TypedEventHandler<
-                                IMidiEndpointConnectionSource,
-                                windows_core::IInspectable,
+                                windows::Foundation::TypedEventHandler<
+                                    IMidiEndpointConnectionSource,
+                                    windows_core::IInspectable,
+                                >,
                             >,
-                        >,
                     {
                         let this = self;
                         unsafe {
@@ -2075,11 +2075,11 @@ pub mod Microsoft {
                     pub fn MessageReceived<P0>(&self, handler: P0) -> windows_core::Result<i64>
                     where
                         P0: windows_core::Param<
-                            windows::Foundation::TypedEventHandler<
-                                IMidiMessageReceivedEventSource,
-                                MidiMessageReceivedEventArgs,
+                                windows::Foundation::TypedEventHandler<
+                                    IMidiMessageReceivedEventSource,
+                                    MidiMessageReceivedEventArgs,
+                                >,
                             >,
-                        >,
                     {
                         let this = self;
                         unsafe {
@@ -2469,8 +2469,8 @@ pub mod Microsoft {
                     ) -> windows_core::Result<u8>;
                 }
                 impl IMidiUniversalPacket_Vtbl {
-                    pub const fn new<Identity: IMidiUniversalPacket_Impl, const OFFSET: isize>(
-                    ) -> Self {
+                    pub const fn new<Identity: IMidiUniversalPacket_Impl, const OFFSET: isize>()
+                    -> Self {
                         unsafe extern "system" fn Timestamp<
                             Identity: IMidiUniversalPacket_Impl,
                             const OFFSET: isize,
@@ -2752,8 +2752,8 @@ pub mod Microsoft {
                             ( windows_core::Interface::vtable ( this ) . TimestampConstantSendImmediately ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
                         })
                     }
-                    pub fn TimestampConstantMessageQueueMaximumFutureTicks(
-                    ) -> windows_core::Result<u64> {
+                    pub fn TimestampConstantMessageQueueMaximumFutureTicks()
+                    -> windows_core::Result<u64> {
                         Self::IMidiClockStatics(|this| unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this)
@@ -2889,8 +2889,8 @@ pub mod Microsoft {
                             .map(|| result__)
                         })
                     }
-                    pub fn GetCurrentSystemTimerInfo(
-                    ) -> windows_core::Result<MidiSystemTimerSettings> {
+                    pub fn GetCurrentSystemTimerInfo()
+                    -> windows_core::Result<MidiSystemTimerSettings> {
                         Self::IMidiClockStatics(|this| unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).GetCurrentSystemTimerInfo)(
@@ -3077,7 +3077,7 @@ pub mod Microsoft {
                     const IID :windows_core::GUID = < IMidiEndpointAssociatedPortDeviceInformation as windows_core::Interface >::IID ;
                 }
                 impl windows_core::RuntimeName for MidiEndpointAssociatedPortDeviceInformation {
-                    const NAME : & 'static str = "Microsoft.Windows.Devices.Midi2.MidiEndpointAssociatedPortDeviceInformation" ;
+                    const NAME: &'static str = "Microsoft.Windows.Devices.Midi2.MidiEndpointAssociatedPortDeviceInformation";
                 }
                 unsafe impl Send for MidiEndpointAssociatedPortDeviceInformation {}
                 unsafe impl Sync for MidiEndpointAssociatedPortDeviceInformation {}
@@ -3390,8 +3390,8 @@ pub mod Microsoft {
                     ) -> windows_core::Result<MidiSendMessageResults>
                     where
                         P0: windows_core::Param<
-                            windows_collections::IIterable<IMidiUniversalPacket>,
-                        >,
+                                windows_collections::IIterable<IMidiUniversalPacket>,
+                            >,
                     {
                         let this = self;
                         unsafe {
@@ -3490,11 +3490,11 @@ pub mod Microsoft {
                     ) -> windows_core::Result<i64>
                     where
                         P0: windows_core::Param<
-                            windows::Foundation::TypedEventHandler<
-                                IMidiEndpointConnectionSource,
-                                windows_core::IInspectable,
+                                windows::Foundation::TypedEventHandler<
+                                    IMidiEndpointConnectionSource,
+                                    windows_core::IInspectable,
+                                >,
                             >,
-                        >,
                     {
                         let this =
                             &windows_core::Interface::cast::<IMidiEndpointConnectionSource>(self)?;
@@ -3524,11 +3524,11 @@ pub mod Microsoft {
                     ) -> windows_core::Result<i64>
                     where
                         P0: windows_core::Param<
-                            windows::Foundation::TypedEventHandler<
-                                IMidiEndpointConnectionSource,
-                                windows_core::IInspectable,
+                                windows::Foundation::TypedEventHandler<
+                                    IMidiEndpointConnectionSource,
+                                    windows_core::IInspectable,
+                                >,
                             >,
-                        >,
                     {
                         let this =
                             &windows_core::Interface::cast::<IMidiEndpointConnectionSource>(self)?;
@@ -3673,11 +3673,11 @@ pub mod Microsoft {
                     pub fn MessageReceived<P0>(&self, handler: P0) -> windows_core::Result<i64>
                     where
                         P0: windows_core::Param<
-                            windows::Foundation::TypedEventHandler<
-                                IMidiMessageReceivedEventSource,
-                                MidiMessageReceivedEventArgs,
+                                windows::Foundation::TypedEventHandler<
+                                    IMidiMessageReceivedEventSource,
+                                    MidiMessageReceivedEventArgs,
+                                >,
                             >,
-                        >,
                     {
                         let this = &windows_core::Interface::cast::<IMidiMessageReceivedEventSource>(
                             self,
@@ -4312,8 +4312,8 @@ pub mod Microsoft {
                             .map(|| result__)
                         })
                     }
-                    pub fn GetAdditionalPropertiesList(
-                    ) -> windows_core::Result<windows_collections::IVectorView<windows_core::HSTRING>>
+                    pub fn GetAdditionalPropertiesList()
+                    -> windows_core::Result<windows_collections::IVectorView<windows_core::HSTRING>>
                     {
                         Self::IMidiEndpointDeviceInformationStatics(|this| unsafe {
                             let mut result__ = core::mem::zeroed();
@@ -4569,11 +4569,11 @@ pub mod Microsoft {
                     pub fn EnumerationCompleted<P0>(&self, handler: P0) -> windows_core::Result<i64>
                     where
                         P0: windows_core::Param<
-                            windows::Foundation::TypedEventHandler<
-                                MidiEndpointDeviceWatcher,
-                                windows_core::IInspectable,
+                                windows::Foundation::TypedEventHandler<
+                                    MidiEndpointDeviceWatcher,
+                                    windows_core::IInspectable,
+                                >,
                             >,
-                        >,
                     {
                         let this = self;
                         unsafe {
@@ -4602,11 +4602,11 @@ pub mod Microsoft {
                     pub fn Stopped<P0>(&self, handler: P0) -> windows_core::Result<i64>
                     where
                         P0: windows_core::Param<
-                            windows::Foundation::TypedEventHandler<
-                                MidiEndpointDeviceWatcher,
-                                windows_core::IInspectable,
+                                windows::Foundation::TypedEventHandler<
+                                    MidiEndpointDeviceWatcher,
+                                    windows_core::IInspectable,
+                                >,
                             >,
-                        >,
                     {
                         let this = self;
                         unsafe {

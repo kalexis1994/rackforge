@@ -14,3 +14,7 @@ rackforge-plugin-sdk = { path = "../../crates/rackforge-plugin-sdk" }
 [dev-dependencies]
 cpal = "0.16.0"
 midir = "0.11"
+rackforge-core = { path = "../../crates/rackforge-core" }
+
+[target.'cfg(windows)'.dev-dependencies]
+rackforge-ump = { path = "../../crates/rackforge-ump" }

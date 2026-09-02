@@ -745,7 +745,11 @@ ear without rebuilding anything:
         [--foreground] [--edit] [--stop]
 
 The lab opens the audio device and the MIDI keyboard straight into the
-instrument. By default it opens as a program of its own -- relaunching
+instrument. MIDI comes from Windows MIDI Services (crate `rackforge-ump`,
+shared with the desktop: every UMP source, which is where a keyboard owned
+by its controller package lives) or from a classic `midir` port; `--list`
+shows both, `--midi <substring>` picks across both, and with no choice the
+first source that is not a loopback is taken. By default it opens as a program of its own -- relaunching
 itself in a new console window, its pid in `%LOCALAPPDATA%\RackForge\lab.pid`,
 and giving the terminal back; closing that window ends it, so does
 `--stop`, a new launch replaces it, `--foreground` keeps it in the terminal

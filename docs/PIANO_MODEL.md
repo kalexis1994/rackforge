@@ -850,6 +850,32 @@ per-sample loops are copied into locals once per block (`process_wide`,
 `cull`, `tension_step`); measured with `bench_blocks`, the conversion costs
 nothing and the renders are bit-identical at the shipped values.
 
+## The values against the literature (2026-09-02)
+
+A pass over the model's constants against published measurements, made at
+the user's request after every knob had been tried by ear. Where the
+literature disagreed with the model and a measurement on the chromatic grid
+confirmed the literature, the value moved; where the literature was
+ambiguous or the measurement said no, it did not, and the reason is here.
+
+| Quantity | Model | Published | Source | Outcome |
+|---|---|---|---|---|
+| Hammer speed pp .. ff | 0.9 .. 6.0 m/s (span 14) | 0.11 .. 6.83 m/s (span ~60) | Boutillon, via Euphonics 12.2 | **Moved**: HAMMER_V_FF 6.8, ACTION_SPAN 15 + 66·dynamics. Pianissimo centroids land on the references (bass 197 Hz vs 166-172, tenor 385 vs 393-394), fortissimo untouched. |
+| Felt stiffness and exponent | C2 4e8 / 2.3, C4 4.5e9 / 2.5, C7 1e12 / 3.0 log-linear | Same figures | Hall & Askenfelt; Chaigne & Askenfelt 1994; Euphonics 12.2 | Kept at C2 and C4; C7 a decade softer (FELT_K_DECADES 4.0): at the table's value a C5's tenth partial sat 26 dB above both references. |
+| Stulov hysteresis | epsilon 0.5, tau 0.2 ms | epsilon 0.992, tau 2 us | Stulov 1995, SMAC 03 | Now knobs (STULOV_EPSILON, STULOV_TAU_S). Tried at his values with the stiffness rescaled: fortissimo darker, treble unchanged; shipped unchanged. |
+| Hammer head mass | 11 g (A0) .. 3.5 g (C8) | ~11 g bass, ~3.5 g treble; effective point masses 1-3 g per string | Conklin Part I; Euphonics | Matches. |
+| Strike point | 1/8 flat in the bass, 1/(8+8u²) to 1/16 at C8 | a little under 1/8 in the bass, decreasing to A4; 1/12 .. 1/17 at C8 | Conklin, KTH lectures | Matches. |
+| Contact time | A0 4.1 ms, C4 2.0 ms at ff | ~4 ms bass to <1 ms top; C4 at 2.5 m/s "of order 3 ms"; +-20% p-ff | Askenfelt & Jansson; Euphonics | Matches within the spread. |
+| String tension | 850 N all notes | ~650 N plain strings, higher wound | Euphonics (Broadwood) | Kept: the model derives density from tension and a constant wave speed, and the bridge loss is calibrated on it; a change is a re-calibration, not a value. |
+| Unison detune | 0.9 .. 1.8 cents, capped to 2 Hz of beat | 1-2 cents maximum preferred | Kirk 1959 | The cap (UNISON_BEAT_CAP_HZ) removed the treble chirp; the per-partial jitter remains an open non-physical item. |
+| Soundboard loss factor | 2.3 % | 1-3 %, mean ~2 % | Ege & Boutillon | Matches (was 1.1 %). |
+| Soundboard modal density | 0.06 /Hz below 1477 Hz, thinning above | 0.05 -> 0.01 /Hz, ribs confine above 1.1 kHz | Ege & Boutillon | Matches. |
+| Radiation transition | first-order drive fall below 60 Hz; loss channel bell 200 Hz .. 5 kHz | efficiency smooth, transition 1-1.6 kHz, no sharp coincidence | Suzuki 1986 | Consistent: no sharp coincidence is modelled. |
+| Microphones | ORTF 17 cm, +-55 deg, ~1.7 m | ORTF 17 cm, 110 deg; in the curve, a couple of feet away | DPA, ORTF | Matches. |
+| Air absorption | 0.0022 /m amplitude at 4 kHz | ~5 dB/km at 1 kHz, 160 at 10 kHz (20 C, 50 % RH) | ISO 9613-1 | Within a factor of two; kept. |
+| Longitudinal ratio | 17.5 x pitch | c_L/c_T = ~5000 / (2 L f0): 16 at C4 on this scale, 30-50 on real bass strings | steel wave speed | Consistent with the model's constant-speed scale; a real bass string would place it higher. |
+| Prompt decay | bell: 20-30 s <100 Hz, 3 s at 1 kHz, 2 s at 2-5 kHz | up to 20 s low notes, <1 s top; prompt ~8 dB/s, aftersound <2 dB/s | Fletcher; Weinreich | Fitted to the two reference pianos partial by partial (step 1). |
+
 ## How it is rendered
 
 Modal synthesis: each partial is a damped quadrature oscillator — a 2×2

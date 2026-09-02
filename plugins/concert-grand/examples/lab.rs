@@ -6,6 +6,13 @@
 //!     cargo run --release -p rackforge-concert-grand --example lab -- [--list]
 //!         [--out <device substring>] [--midi <port substring>]
 //!         [--tuning <file>] [--render <score.txt> <out.wav>]
+//!         [--foreground] [--no-edit] [--stop]
+//!
+//! By default the lab detaches: it relaunches itself in the background (log
+//! in `%LOCALAPPDATA%\RackForge\lab.log`, pid in `lab.pid`), opens the tuning
+//! file in the default editor, and gives the terminal back. `--stop` ends the
+//! running lab; starting a new one replaces it. `--foreground` keeps it in
+//! the terminal, `--no-edit` leaves the editor closed.
 //!
 //! The tuning file is created with every knob at its shipped value and its
 //! documentation the first time; lines read `NAME = value`, and a line
@@ -26,6 +33,9 @@ const BLOCK: usize = 512;
 
 struct Options {
     list: bool,
+    foreground: bool,
+    edit: bool,
+    stop: bool,
     out: Option<String>,
     midi: Option<String>,
     tuning: PathBuf,
@@ -36,6 +46,9 @@ fn options() -> Options {
     let mut args = std::env::args().skip(1);
     let mut options = Options {
         list: false,
+        foreground: false,
+        edit: true,
+        stop: false,
         out: None,
         midi: None,
         tuning: default_tuning_path(),
@@ -44,6 +57,9 @@ fn options() -> Options {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--list" => options.list = true,
+            "--foreground" => options.foreground = true,
+            "--no-edit" => options.edit = false,
+            "--stop" => options.stop = true,
             "--out" => options.out = args.next(),
             "--midi" => options.midi = args.next(),
             "--tuning" => options.tuning = PathBuf::from(args.next().expect("--tuning <file>")),
@@ -61,11 +77,70 @@ fn options() -> Options {
     options
 }
 
-fn default_tuning_path() -> PathBuf {
+fn app_dir() -> PathBuf {
     let base = std::env::var("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."));
-    base.join("RackForge").join("concert-grand.tuning")
+    base.join("RackForge")
+}
+
+fn default_tuning_path() -> PathBuf {
+    app_dir().join("concert-grand.tuning")
+}
+
+/// Ends a lab left running by an earlier launch, by the pid it wrote.
+fn stop_running_lab() -> bool {
+    let pid_file = app_dir().join("lab.pid");
+    let Ok(text) = std::fs::read_to_string(&pid_file) else {
+        return false;
+    };
+    let Ok(pid) = text.trim().parse::<u32>() else {
+        return false;
+    };
+    if pid == std::process::id() {
+        return false;
+    }
+    let killed = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    let _ = std::fs::remove_file(&pid_file);
+    killed
+}
+
+/// Relaunches this executable detached from the terminal, with the same
+/// arguments plus `--foreground`, its output in the log file.
+fn detach() {
+    use std::os::windows::process::CommandExt;
+    let exe = std::env::current_exe().expect("own path");
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let log = app_dir().join("lab.log");
+    let _ = std::fs::create_dir_all(app_dir());
+    let file = std::fs::File::create(&log).expect("cannot create the log");
+    let err = file.try_clone().expect("log");
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    let child = std::process::Command::new(exe)
+        .args(&args)
+        .arg("--foreground")
+        .stdin(std::process::Stdio::null())
+        .stdout(file)
+        .stderr(err)
+        .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+        .spawn()
+        .expect("cannot relaunch detached");
+    println!(
+        "lab: running detached as pid {} (log {}); stop it with --stop",
+        child.id(),
+        log.display()
+    );
+}
+
+fn open_in_editor(path: &Path) {
+    let _ = std::process::Command::new("cmd")
+        .args(["/C", "start", "", &path.to_string_lossy()])
+        .spawn();
 }
 
 /// Reads the tuning file into the knobs; returns the fader lines to apply.
@@ -210,10 +285,34 @@ fn render(score: &Path, wav: &Path, tuning: &Path) {
 
 fn main() {
     let options = options();
+    if options.stop {
+        println!(
+            "lab: {}",
+            if stop_running_lab() {
+                "stopped"
+            } else {
+                "nothing was running"
+            }
+        );
+        return;
+    }
     ensure_tuning_file(&options.tuning);
     if let Some((score, wav)) = &options.render {
         render(score, wav, &options.tuning);
         return;
+    }
+    if !options.list && !options.foreground {
+        stop_running_lab();
+        detach();
+        if options.edit {
+            open_in_editor(&options.tuning);
+        }
+        return;
+    }
+    if !options.list {
+        stop_running_lab();
+        let _ = std::fs::create_dir_all(app_dir());
+        let _ = std::fs::write(app_dir().join("lab.pid"), std::process::id().to_string());
     }
 
     let host = cpal::default_host();

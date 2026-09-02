@@ -739,12 +739,17 @@ writes it, so the packaged plugin is unchanged. Natively, a text file can set
 any of them while the instrument runs, which is how the model is voiced by
 ear without rebuilding anything:
 
-    cargo run --release -p rackforge-concert-grand --example lab -- [--list]
+    cargo +1.98.0-x86_64-pc-windows-msvc run --release -p rackforge-concert-grand --example lab -- [--list]
         [--out <device substring>] [--midi <port substring>]
         [--tuning <file>] [--render <score.txt> <out.wav>]
+        [--foreground] [--no-edit] [--stop]
 
 The lab opens the audio device and the MIDI keyboard straight into the
-instrument. On first run it writes every knob, with its documentation, to
+instrument. By default it detaches -- relaunching itself in the background
+with its log in `%LOCALAPPDATA%\RackForge\lab.log` and its pid in `lab.pid`,
+opening the tuning file in the default editor, and giving the terminal
+back; `--stop` ends it, a new launch replaces it, `--foreground` keeps it in
+the terminal. On first run it writes every knob, with its documentation, to
 `%LOCALAPPDATA%\RackForge\concert-grand.tuning` (or the `--tuning` file);
 save the file and the next note uses the new values. A line
 `fader.<index> = 0..1` sets one of the instrument's own parameters by the

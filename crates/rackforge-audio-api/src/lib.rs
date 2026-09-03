@@ -420,7 +420,13 @@ impl AudioInputDocument {
 #[serde(deny_unknown_fields)]
 pub struct AudioOutputState {
     pub schema_version: u32,
-    pub active_device: AudioDeviceDescriptor,
+    /// The device carrying the engine, or nothing while it runs with no output
+    /// at all -- the state a host boots into when the interface it was
+    /// configured for is not plugged in. `active_profile` still says what the
+    /// engine renders for, so a device that appears later is adopted without
+    /// disturbing a plugin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_device: Option<AudioDeviceDescriptor>,
     pub active_profile: AudioOutputProfile,
     pub devices: Vec<AudioDeviceDescriptor>,
 }
@@ -432,15 +438,21 @@ impl AudioOutputState {
                 self.schema_version,
             ));
         }
-        self.active_device.validate()?;
-        self.active_profile.validate_against(&self.active_device)?;
-        if self.devices.is_empty()
-            || !self
-                .devices
-                .iter()
-                .any(|device| device.id == self.active_device.id)
-        {
-            return Err(AudioError::ActiveDeviceMissing);
+        // With no active device there is nothing to hold the profile against
+        // and nothing to look for in the inventory, and an empty inventory is
+        // usually the very machine that put the engine in this state. The
+        // profile is still checked on its own: it is what the plugins were
+        // activated at, and what a device adopted later has to match.
+        if let Some(active_device) = &self.active_device {
+            active_device.validate()?;
+            self.active_profile.validate_against(active_device)?;
+            if self.devices.is_empty()
+                || !self.devices.iter().any(|device| device.id == active_device.id)
+            {
+                return Err(AudioError::ActiveDeviceMissing);
+            }
+        } else {
+            self.active_profile.validate()?;
         }
         for device in &self.devices {
             device.validate()?;
@@ -799,7 +811,7 @@ mod tests {
         let active = device();
         let state = AudioOutputState {
             schema_version: AUDIO_OUTPUT_STATE_SCHEMA_VERSION,
-            active_device: active.clone(),
+            active_device: Some(active.clone()),
             active_profile: profile(),
             devices: vec![active],
         };
@@ -807,6 +819,53 @@ mod tests {
         let mut missing = state;
         missing.devices.clear();
         assert_eq!(missing.validate(), Err(AudioError::ActiveDeviceMissing));
+    }
+
+    #[test]
+    fn output_state_without_a_device_is_the_silent_engine() {
+        // The state a host boots into with nothing plugged in: no active
+        // device, an empty inventory, and a profile that is still the shape
+        // the plugins were activated at. Rejecting this is what used to make
+        // a missing interface fatal.
+        let silent = AudioOutputState {
+            schema_version: AUDIO_OUTPUT_STATE_SCHEMA_VERSION,
+            active_device: None,
+            active_profile: profile(),
+            devices: Vec::new(),
+        };
+        silent.validate().unwrap();
+
+        // An inventory that lists devices none of which fit is the same state:
+        // the player has something to choose from, and the engine is carrying
+        // none of it.
+        let mut offered = silent.clone();
+        offered.devices = vec![device()];
+        offered.validate().unwrap();
+
+        // The profile is still held to the rules on its own -- it is what a
+        // device adopted later has to match.
+        let mut broken = silent;
+        broken.active_profile.buffer_frames = broken.active_profile.period_frames;
+        assert!(broken.validate().is_err());
+    }
+
+    #[test]
+    fn output_state_omits_the_device_it_does_not_have() {
+        // `active_device` is skipped when absent rather than serialised as
+        // null, so a reader that predates the silent engine sees a document it
+        // still parses under deny_unknown_fields.
+        let silent = AudioOutputState {
+            schema_version: AUDIO_OUTPUT_STATE_SCHEMA_VERSION,
+            active_device: None,
+            active_profile: profile(),
+            devices: Vec::new(),
+        };
+        let text = serde_json::to_string(&silent).unwrap();
+        assert!(!text.contains("active_device"), "{text}");
+        assert_eq!(
+            serde_json::from_str::<AudioOutputState>(&text).unwrap(),
+            silent
+        );
     }
 
     #[test]

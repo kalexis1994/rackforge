@@ -1877,7 +1877,12 @@ impl Menu {
     pub fn audio_device_name(&self) -> Option<String> {
         self.audio_state
             .as_ref()
-            .map(|state| normalized_display_text(&state.active_device.name, "AUDIO OUTPUT"))
+            .map(|state| match &state.active_device {
+                Some(device) => normalized_display_text(&device.name, "AUDIO OUTPUT"),
+                // Not "AUDIO OUTPUT" with nothing after it: on a screen this
+                // small an empty value reads as a value still loading.
+                None => "NO OUTPUT".to_owned(),
+            })
     }
 
     pub fn complete_wifi_scan(&mut self, networks: Vec<DiscoveredWifiNetwork>) {
@@ -5094,7 +5099,10 @@ impl Menu {
 
     fn render_audio(&self) -> Screen {
         let detail = match (&self.audio_state, self.audio_index) {
-            (Some(state), 0) => normalized_display_text(&state.active_device.name, "OUTPUT"),
+            (Some(state), 0) => match &state.active_device {
+                Some(device) => normalized_display_text(&device.name, "OUTPUT"),
+                None => "NO OUTPUT".to_owned(),
+            },
             (Some(state), 1) => format!("{} HZ", state.active_profile.sample_rate_hz),
             (Some(state), _) => format!(
                 "{:.1} MS {}/{}",
@@ -5430,7 +5438,8 @@ impl Menu {
     fn audio_rates(&self) -> Vec<u32> {
         self.audio_state
             .as_ref()
-            .and_then(|state| state.active_device.playback.as_ref())
+            .and_then(|state| state.active_device.as_ref())
+            .and_then(|device| device.playback.as_ref())
             .map(|playback| playback.sample_rates_hz.clone())
             .unwrap_or_default()
     }
@@ -5439,7 +5448,8 @@ impl Menu {
         let Some(playback) = self
             .audio_state
             .as_ref()
-            .and_then(|state| state.active_device.playback.as_ref())
+            .and_then(|state| state.active_device.as_ref())
+            .and_then(|device| device.playback.as_ref())
         else {
             return Vec::new();
         };
@@ -5459,7 +5469,12 @@ impl Menu {
             0 => self
                 .compatible_audio_devices()
                 .iter()
-                .position(|device| device.id == state.active_device.id)
+                .position(|device| {
+                    state
+                        .active_device
+                        .as_ref()
+                        .is_some_and(|active| device.id == active.id)
+                })
                 .unwrap_or(0),
             1 => self
                 .audio_rates()
@@ -8876,7 +8891,7 @@ mod tests {
         };
         AudioOutputState {
             schema_version: AUDIO_OUTPUT_STATE_SCHEMA_VERSION,
-            active_device: scarlett.clone(),
+            active_device: Some(scarlett.clone()),
             active_profile: AudioOutputProfile {
                 device: AudioDeviceSelector::Id {
                     id: scarlett.id.clone(),

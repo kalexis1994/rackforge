@@ -57,6 +57,11 @@ use std::{env, fs, thread};
 
 const MIDI_QUEUE_CAPACITY: usize = 2_048;
 const AUDIO_CONTROL_QUEUE_CAPACITY: usize = 64;
+/// How often an engine running with no output looks for one. A second is slow
+/// enough that the scan -- which opens every ALSA card in turn -- costs
+/// nothing measurable, and fast enough that plugging an interface in feels
+/// like plugging an interface in.
+const OUTPUT_RESCAN_INTERVAL: Duration = Duration::from_secs(1);
 const MASTER_LEVEL_SMOOTHING_FRAMES: u32 = 480;
 pub(crate) const VIRTUAL_MIDI_SOURCE_ID: &str = "rackforge.virtual.touch";
 
@@ -1320,25 +1325,53 @@ pub fn run(config: LiveConfig) -> Result<()> {
         DEFAULT_INPUT_BUS_ID
     );
     let audio_devices = discover_audio_devices()?;
-    let output = open_audio_output_from_inventory(&config.audio_output, &audio_devices)?;
-    let input = config
-        .audio_input
-        .as_ref()
-        .map(|profile| open_audio_input_from_inventory(profile, &audio_devices))
-        .transpose()?;
-    println!(
-        "AUDIO_READY id={} name={:?} backend={} rate={} channels={} format={:?} \
-         period={} buffer={} nominal_buffer_ms={:.2}",
-        output.device.id,
-        output.device.name,
-        output.device.backend_address,
-        output.profile.sample_rate_hz,
-        output.profile.channels,
-        output.profile.sample_format,
-        output.profile.period_frames,
-        output.profile.buffer_frames,
-        output.profile.nominal_buffer_latency_ms(),
-    );
+    // A missing output device is a state, not a failure. The engine owns the
+    // session, the plugins and the keyboard, and the player needs all three
+    // running to choose the device that is missing: refusing to start takes
+    // away the very screen they would have chosen it from. It runs silently
+    // instead, and adopts a device the moment one appears.
+    let output = match open_audio_output_from_inventory(&config.audio_output, &audio_devices) {
+        Ok(output) => Some(output),
+        Err(error) => {
+            println!(
+                "AUDIO_OUTPUT_ABSENT reason={:?} playback_devices={:?}",
+                error.to_string(),
+                audio_devices
+                    .iter()
+                    .filter(|device| device.playback.is_some())
+                    .map(|device| device.id.as_str())
+                    .collect::<Vec<_>>()
+            );
+            None
+        }
+    };
+    // The same for capture: a guitar that is not plugged in must not cost the
+    // player the instrument that is.
+    let input = match config.audio_input.as_ref() {
+        Some(profile) => match open_audio_input_from_inventory(profile, &audio_devices) {
+            Ok(input) => Some(input),
+            Err(error) => {
+                println!("AUDIO_INPUT_ABSENT reason={:?}", error.to_string());
+                None
+            }
+        },
+        None => None,
+    };
+    if let Some(output) = &output {
+        println!(
+            "AUDIO_READY id={} name={:?} backend={} rate={} channels={} format={:?} \
+             period={} buffer={} nominal_buffer_ms={:.2}",
+            output.device.id,
+            output.device.name,
+            output.device.backend_address,
+            output.profile.sample_rate_hz,
+            output.profile.channels,
+            output.profile.sample_format,
+            output.profile.period_frames,
+            output.profile.buffer_frames,
+            output.profile.nominal_buffer_latency_ms(),
+        );
+    }
     if let Some(input) = &input {
         println!(
             "AUDIO_INPUT_READY id={} name={:?} backend={} rate={} channels={:?} format={:?} \
@@ -1392,8 +1425,11 @@ pub fn run(config: LiveConfig) -> Result<()> {
     let session_store = SessionStore::shared(session)?;
     let audio_state = Arc::new(Mutex::new(AudioOutputState {
         schema_version: AUDIO_OUTPUT_STATE_SCHEMA_VERSION,
-        active_device: output.device.clone(),
-        active_profile: output.profile.clone(),
+        active_device: output.as_ref().map(|output| output.device.clone()),
+        active_profile: output.as_ref().map_or_else(
+            || config.audio_output.clone(),
+            |output| output.profile.clone(),
+        ),
         devices: audio_devices,
     }));
     let output_meter = Arc::new(OutputMeter::default());
@@ -1438,6 +1474,7 @@ pub fn run(config: LiveConfig) -> Result<()> {
     println!("CONTROL_READY socket={}", control_path.display());
     audio_loop(AudioLoopContext {
         initial_output: output,
+        requested_output: config.audio_output.clone(),
         initial_input: input,
         receiver: &receiver,
         control_receiver: &control_receiver,
@@ -1717,7 +1754,11 @@ fn apply_parameter_links(
 }
 
 struct AudioLoopContext<'a> {
-    initial_output: OpenedAudioOutput,
+    initial_output: Option<OpenedAudioOutput>,
+    /// What the engine renders for. With a device this is that device's
+    /// profile; with none it is the configured one, so the buffers, the
+    /// plugins and a device adopted later all agree on one shape.
+    requested_output: AudioOutputProfile,
     initial_input: Option<OpenedAudioInput>,
     receiver: &'a Receiver<IngressMidiEvent>,
     control_receiver: &'a Receiver<AudioControlCommand>,
@@ -1742,6 +1783,7 @@ struct AudioLoopContext<'a> {
 fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     let AudioLoopContext {
         initial_output,
+        requested_output,
         initial_input,
         receiver,
         control_receiver,
@@ -1762,11 +1804,17 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         live_parameter_writer,
         startup,
     } = context;
-    let mut output = Some(initial_output);
+    let mut output = initial_output;
     let mut input = initial_input;
-    let mut period_frames = output.as_ref().unwrap().profile.period_frames as usize;
-    let mut channels = output.as_ref().unwrap().profile.channels as usize;
-    let mut output_rate = output.as_ref().unwrap().profile.sample_rate_hz as usize;
+    // Taken from the open device when there is one and from the configured
+    // profile when there is not. `open_audio_output_from_inventory` only
+    // returns a device the profile validated against, so the two agree.
+    let mut active_profile = output
+        .as_ref()
+        .map_or_else(|| requested_output.clone(), |output| output.profile.clone());
+    let mut period_frames = active_profile.period_frames as usize;
+    let mut channels = active_profile.channels as usize;
+    let mut output_rate = active_profile.sample_rate_hz as usize;
     let capture_channels = input
         .as_ref()
         .map_or(0, |capture| capture.profile.channels.len());
@@ -1835,6 +1883,10 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         })?;
     let mut deferred_retire = Vec::with_capacity(16);
     let mut startup_ready = false;
+    // The wall clock that stands in for the device while there is none, and
+    // the moment the next rescan for one is due.
+    let mut silent_deadline: Option<Instant> = None;
+    let mut next_output_scan = Instant::now() + OUTPUT_RESCAN_INTERVAL;
 
     // Engaged here, not during setup: `SCHED_FIFO` is a per-thread property and
     // this is the thread that runs the audio loop. Setup work stays on the
@@ -1857,6 +1909,52 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
     let mut input_xruns = XrunMonitor::new(output_rate as u32, period_frames);
 
     loop {
+        // An engine with no output looks for one. The plugins were activated
+        // at `active_profile` before any device was opened, and the inventory
+        // only yields a device that profile validated against, so adopting one
+        // is a swap: nothing is deactivated, no voice is rebuilt, and whatever
+        // the player was holding keeps its state. A device that does not match
+        // is not adopted here -- that is a decision, and it belongs to the
+        // player through ApplyAudioOutput.
+        if output.is_none() && Instant::now() >= next_output_scan {
+            next_output_scan = Instant::now() + OUTPUT_RESCAN_INTERVAL;
+            match discover_audio_devices() {
+                Ok(devices) => {
+                    match open_audio_output_from_inventory(&active_profile, &devices) {
+                        Ok(opened) => {
+                            println!(
+                                "AUDIO_OUTPUT_ADOPTED id={} name={:?} backend={} rate={} \
+                                 channels={} period={} buffer={}",
+                                opened.device.id,
+                                opened.device.name,
+                                opened.device.backend_address,
+                                opened.profile.sample_rate_hz,
+                                opened.profile.channels,
+                                opened.profile.period_frames,
+                                opened.profile.buffer_frames,
+                            );
+                            if let Ok(mut state) = audio_state.lock() {
+                                state.active_device = Some(opened.device.clone());
+                                state.active_profile = opened.profile.clone();
+                                state.devices = devices;
+                            }
+                            output = Some(opened);
+                        }
+                        Err(_) => {
+                            // Still nothing that fits. The inventory is still
+                            // worth publishing: it is what the player picks
+                            // from on the settings screen.
+                            if let Ok(mut state) = audio_state.lock()
+                                && state.devices != devices
+                            {
+                                state.devices = devices;
+                            }
+                        }
+                    }
+                }
+                Err(error) => eprintln!("AUDIO_RESCAN_FAILED error={error}"),
+            }
+        }
         while let Some(instance) = deferred_retire.pop() {
             match retired_sender.try_send(instance) {
                 Ok(()) => {}
@@ -1898,10 +1996,12 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             standalone_voices,
                             &mut rack_voices,
                             profile,
+                            &active_profile,
                             &audio_state,
                         )
                     };
                     if let Ok(snapshot) = &result {
+                        active_profile = snapshot.active_profile.clone();
                         period_frames = snapshot.active_profile.period_frames as usize;
                         channels = snapshot.active_profile.channels as usize;
                         output_rate = snapshot.active_profile.sample_rate_hz as usize;
@@ -2953,25 +3053,86 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
         }
         output_meter.observe_stereo(block_left_peak, block_right_peak);
         meter_frames += period_frames;
-        let current_output = output
-            .as_ref()
-            .context("audio output disappeared after reconfiguration")?;
-        let io = current_output.pcm.io_i32()?;
-        write_period(
-            &current_output.pcm,
-            &io,
-            &device_output,
-            period_frames,
-            channels,
-            &mut xruns,
-        )?;
+        match output.as_ref() {
+            Some(current_output) => {
+                let written = current_output
+                    .pcm
+                    .io_i32()
+                    .map_err(anyhow::Error::from)
+                    .and_then(|io| {
+                        write_period(
+                            &current_output.pcm,
+                            &io,
+                            &device_output,
+                            period_frames,
+                            channels,
+                            &mut xruns,
+                        )
+                    });
+                match written {
+                    Ok(()) => {
+                        // The device is the clock again; the next silent block
+                        // starts counting from now rather than from a deadline
+                        // that went stale while a device was carrying it.
+                        silent_deadline = None;
+                    }
+                    // An interface pulled out mid-performance is the same
+                    // state as one that was never plugged in, and it deserves
+                    // the same answer. `write_period` has already absorbed the
+                    // underruns; anything reaching here is the device itself
+                    // going away, and exiting on it would take the session,
+                    // the keyboard and the screen down with the cable.
+                    Err(error) => {
+                        eprintln!("AUDIO_OUTPUT_LOST id={} error={error}", current_output.device.id);
+                        output = None;
+                        silent_deadline = None;
+                        next_output_scan = Instant::now() + OUTPUT_RESCAN_INTERVAL;
+                        if let Ok(mut state) = audio_state.lock() {
+                            state.active_device = None;
+                        }
+                    }
+                }
+            }
+            // Without a device there is nothing to block on, and a loop that
+            // blocks on nothing is a spin at 100% of a core. The period itself
+            // becomes the clock: one period of wall time per period of frames,
+            // measured against a deadline that accumulates rather than
+            // restarting, so the sequencer does not drift by the cost of a
+            // block on every pass.
+            None => {
+                let period = Duration::from_nanos(
+                    (period_frames as u64 * 1_000_000_000) / output_rate.max(1) as u64,
+                );
+                let deadline = silent_deadline.get_or_insert_with(Instant::now) ;
+                *deadline += period;
+                let now = Instant::now();
+                if *deadline > now {
+                    std::thread::sleep(*deadline - now);
+                } else if now.duration_since(*deadline) > period * 8 {
+                    // Something held the thread far longer than a block --
+                    // a device rescan on a cold USB bus, or the scheduler.
+                    // Catching up by racing through blocks would burn the
+                    // deficit as fast rendering; the clock restarts instead.
+                    *deadline = now;
+                }
+            }
+        }
+        // Readiness is the engine having completed a block, not a device
+        // having accepted one. The unit is Type=notify with a 20 s start
+        // timeout: gating this on a written period means a host with no
+        // interface plugged in is killed as a failed start, taking the control
+        // socket, the session and the little screen with it -- which is the
+        // one moment the player most needs them to reach for a device.
         if !startup_ready {
             startup_ready = true;
             startup.advance(crate::startup::StartupPhase::AudioReady)?;
             println!("READY_TO_PLAY");
-            if let Err(error) = crate::startup::notify_service_ready(
-                "RackForge audio rendered its first device period",
-            ) {
+            let readiness = if output.is_some() {
+                "RackForge audio rendered its first device period"
+            } else {
+                "RackForge audio is running with no output device"
+            };
+            if let Err(error) = crate::startup::notify_service_ready(readiness) {
                 eprintln!("SYSTEMD_READY_FAILED error={error}");
             }
         }
@@ -3191,15 +3352,22 @@ fn reconfigure_audio_output(
     standalone_voices: &mut [StandaloneVoice<'_>],
     rack_voices: &mut [RackSlotVoice<'_>],
     requested: AudioOutputProfile,
+    engine_profile: &AudioOutputProfile,
     shared_state: &Arc<Mutex<AudioOutputState>>,
 ) -> Result<AudioOutputState> {
     ensure_supported_engine_profile(&requested)?;
+    // What the plugins are currently activated at: the open device's profile,
+    // or -- with no device -- the one the engine has been rendering silently
+    // for. Rolling back has to return them to it either way.
     let previous_profile = output
         .as_ref()
-        .context("audio output is unavailable")?
-        .profile
-        .clone();
-    if requested == previous_profile {
+        .map_or_else(|| engine_profile.clone(), |output| output.profile.clone());
+    let had_output = output.is_some();
+    // An unchanged profile is only a no-op while a device is carrying it. With
+    // none, asking for the same profile is the player asking to try again --
+    // which is exactly what pressing Apply after plugging an interface in
+    // means -- so it falls through and opens.
+    if had_output && requested == previous_profile {
         return shared_state
             .lock()
             .map(|state| state.clone())
@@ -3274,7 +3442,7 @@ fn reconfigure_audio_output(
         Ok((opened, devices)) => {
             let state = AudioOutputState {
                 schema_version: AUDIO_OUTPUT_STATE_SCHEMA_VERSION,
-                active_device: opened.device.clone(),
+                active_device: Some(opened.device.clone()),
                 active_profile: opened.profile.clone(),
                 devices,
             };
@@ -3284,8 +3452,8 @@ fn reconfigure_audio_output(
                 .lock()
                 .map_err(|_| anyhow::anyhow!("audio state lock is poisoned"))? = state.clone();
             println!(
-                "AUDIO_RECONFIGURED id={} rate={} period={} buffer={} nominal_buffer_ms={:.2}",
-                state.active_device.id,
+                "AUDIO_RECONFIGURED id={:?} rate={} period={} buffer={} nominal_buffer_ms={:.2}",
+                state.active_device.as_ref().map(|device| device.id.as_str()),
                 state.active_profile.sample_rate_hz,
                 state.active_profile.period_frames,
                 state.active_profile.buffer_frames,
@@ -3294,9 +3462,16 @@ fn reconfigure_audio_output(
             Ok(state)
         }
         Err(apply_error) => {
-            let rollback = (|| -> Result<OpenedAudioOutput> {
-                let devices = discover_audio_devices()?;
-                let opened = open_audio_output_from_inventory(&previous_profile, &devices)?;
+            let rollback = (|| -> Result<Option<OpenedAudioOutput>> {
+                // With no device before the attempt there is none to go back
+                // to: the voices are returned to the profile they were running
+                // silently at, and the engine keeps running silently.
+                let opened = if had_output {
+                    let devices = discover_audio_devices()?;
+                    Some(open_audio_output_from_inventory(&previous_profile, &devices)?)
+                } else {
+                    None
+                };
                 for voice in standalone_voices.iter_mut() {
                     voice.instance.activate(
                         f64::from(previous_profile.sample_rate_hz),
@@ -3333,8 +3508,12 @@ fn reconfigure_audio_output(
             })();
             match rollback {
                 Ok(opened) => {
-                    *output = Some(opened);
-                    bail!("audio change rejected: {apply_error:#}; previous output restored")
+                    let restored = opened.is_some();
+                    *output = opened;
+                    if restored {
+                        bail!("audio change rejected: {apply_error:#}; previous output restored")
+                    }
+                    bail!("audio change rejected: {apply_error:#}; the engine has no audio output")
                 }
                 Err(rollback_error) => bail!(
                     "audio change failed: {apply_error:#}; rollback failed: {rollback_error:#}"

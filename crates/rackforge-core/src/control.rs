@@ -4998,7 +4998,7 @@ mod tests {
                 audio_sender: sender,
                 audio_state: Arc::new(Mutex::new(AudioOutputState {
                     schema_version: AUDIO_OUTPUT_STATE_SCHEMA_VERSION,
-                    active_device: device.clone(),
+                    active_device: Some(device.clone()),
                     active_profile: profile,
                     devices: vec![device],
                 })),

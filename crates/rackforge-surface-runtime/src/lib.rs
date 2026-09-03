@@ -917,6 +917,9 @@ pub struct Menu {
     midi_velocity_point_index: usize,
     /// The point being turned, on the MIDI scale, before it is committed.
     midi_velocity_value: u8,
+    /// The target's reading as the player found it, so RESET can put it back.
+    /// `None` means the device had no reading of its own when they walked in.
+    midi_velocity_restore: Option<VelocityCurve>,
     pending_command: Option<MenuCommand>,
 }
 
@@ -1090,6 +1093,7 @@ impl Default for Menu {
             midi_velocity_target_index: 0,
             midi_velocity_point_index: 0,
             midi_velocity_value: 0,
+            midi_velocity_restore: None,
             system_web_index: 0,
             web_settings: WebSystemSettings::default(),
             web_edit_candidate: WebSystemSettings::default(),
@@ -1689,25 +1693,83 @@ impl Menu {
             self.toggle_midi_device();
             return;
         }
-        if self.page == Page::MidiVelocityPoints
-            && action == Action::Select
-            && self.midi_velocity_point_index == VELOCITY_POINT_ITEMS.len()
-        {
-            self.forget_velocity_curve();
-            self.page = Page::MidiVelocityTarget;
-            return;
+        if self.page == Page::MidiVelocityPoints && action == Action::Select {
+            match self.velocity_entries().get(self.midi_velocity_point_index) {
+                Some(VelocityEntry::Reset) => {
+                    self.reset_velocity_reading();
+                    return;
+                }
+                Some(VelocityEntry::UseShared) => {
+                    self.forget_velocity_curve();
+                    self.page = Page::MidiVelocityTarget;
+                    return;
+                }
+                _ => {}
+            }
         }
         self.apply(action);
     }
 
-    /// How many entries the points list has: the four points, plus a way back
-    /// to the shared reading for a device that has one of its own.
-    fn velocity_point_count(&self) -> usize {
-        VELOCITY_POINT_ITEMS.len()
-            + usize::from(
-                self.velocity_target()
-                    .is_some_and(|device| device.curve.is_some()),
-            )
+    /// What the points list holds.
+    ///
+    /// The four numbers, always. Then a way back to where the reading was
+    /// found, once it has been moved -- this screen has no Apply, because
+    /// every OK is the apply, so RESET is the undo that a draft would have
+    /// given. And last, for a device that has been given a reading of its
+    /// own, a way to hand it back to the shared one.
+    fn velocity_entries(&self) -> Vec<VelocityEntry> {
+        let mut entries = (0..VELOCITY_POINT_ITEMS.len())
+            .map(VelocityEntry::Point)
+            .collect::<Vec<_>>();
+        if self.velocity_reading_moved() {
+            entries.push(VelocityEntry::Reset);
+        }
+        if self
+            .velocity_target()
+            .is_some_and(|device| device.curve.is_some())
+        {
+            entries.push(VelocityEntry::UseShared);
+        }
+        entries
+    }
+
+    /// Whether the reading has moved since the player opened it.
+    fn velocity_reading_moved(&self) -> bool {
+        match self.velocity_target() {
+            Some(device) => device.curve != self.midi_velocity_restore,
+            None => self
+                .midi_velocity_restore
+                .is_some_and(|curve| curve != self.shared_velocity_curve),
+        }
+    }
+
+    /// Put the reading back where it was found.
+    fn reset_velocity_reading(&mut self) {
+        let restore = self.midi_velocity_restore;
+        match self.midi_velocity_target_index.checked_sub(1) {
+            Some(index) => {
+                let Some(device) = self.midi_inputs.get_mut(index) else {
+                    return;
+                };
+                device.curve = restore;
+                let name = device.name.clone();
+                self.pending_command = Some(MenuCommand::SetVelocityCurve {
+                    device: Some(name),
+                    curve: restore,
+                });
+            }
+            None => {
+                let Some(curve) = restore else {
+                    return;
+                };
+                self.shared_velocity_curve = curve;
+                self.pending_command = Some(MenuCommand::SetVelocityCurve {
+                    device: None,
+                    curve: Some(curve),
+                });
+            }
+        }
+        self.midi_velocity_point_index = 0;
     }
 
     fn render_midi_devices(&self) -> Screen {
@@ -1756,16 +1818,21 @@ impl Menu {
     }
 
     fn render_velocity_points(&self) -> Screen {
-        let point = self.midi_velocity_point_index;
-        let count = self.velocity_point_count();
-        let (item, detail) = match VELOCITY_POINT_ITEMS.get(point) {
-            Some(item) => (
-                (*item).to_owned(),
-                velocity_hundredths(velocity_point(self.velocity_target_curve(), point)),
+        let entries = self.velocity_entries();
+        let index = self.midi_velocity_point_index;
+        let (item, detail) = match entries.get(index) {
+            Some(VelocityEntry::Point(point)) => (
+                VELOCITY_POINT_ITEMS[*point].to_owned(),
+                velocity_hundredths(velocity_point(self.velocity_target_curve(), *point)),
             ),
-            None => ("USE SHARED".to_owned(), "Forget own reading".to_owned()),
+            Some(VelocityEntry::Reset) => ("RESET".to_owned(), "Back as opened".to_owned()),
+            _ => ("USE SHARED".to_owned(), "Forget own reading".to_owned()),
         };
-        Screen::with_header(indexed_title("VELOCITY", point, count), item, detail)
+        Screen::with_header(
+            indexed_title("VELOCITY", index, entries.len()),
+            item,
+            detail,
+        )
     }
 
     fn render_velocity_value(&self) -> Screen {
@@ -3952,6 +4019,12 @@ impl Menu {
                     }
                     Page::MidiVelocityTarget => {
                         self.midi_velocity_point_index = 0;
+                        // Where this reading stood when the player walked in,
+                        // which is where RESET puts it back.
+                        self.midi_velocity_restore = match self.velocity_target() {
+                            Some(device) => device.curve,
+                            None => Some(self.shared_velocity_curve),
+                        };
                         Page::MidiVelocityPoints
                     }
                     Page::MidiVelocityPoints => {
@@ -5794,7 +5867,7 @@ impl Menu {
                 (&mut self.midi_velocity_target_index, len)
             }
             Page::MidiVelocityPoints => {
-                let len = self.velocity_point_count();
+                let len = self.velocity_entries().len();
                 (&mut self.midi_velocity_point_index, len)
             }
             Page::PluginLibrary => {
@@ -7567,6 +7640,17 @@ fn carousel_label(name: &str, loaded: bool) -> String {
     format!("|{}|", truncated(&name, inside))
 }
 
+/// An entry of the velocity points list.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VelocityEntry {
+    /// One of the four numbers of the reading.
+    Point(usize),
+    /// Put the reading back where it was found.
+    Reset,
+    /// Hand this device back to the shared reading.
+    UseShared,
+}
+
 /// One point of a reading, on the MIDI scale.
 fn velocity_point(curve: VelocityCurve, index: usize) -> u8 {
     match index {
@@ -8265,6 +8349,49 @@ mod tests {
         assert_eq!(curve.map(|curve| curve.mid_output), Some(76));
         // And the list shows what was committed, not what it started at.
         assert_eq!(menu.render().line_2, "0.60");
+    }
+
+    /// There is no Apply on this screen -- every OK is the apply -- so RESET
+    /// is what a draft would have given: back to the reading as the player
+    /// found it when they walked into this target.
+    #[test]
+    fn reset_puts_the_reading_back_where_the_player_found_it() {
+        let mut menu = Menu::default();
+        open_midi(&mut menu, 1);
+        menu.apply_input(Input::Button1);
+        // Nothing moved yet: the list is the four numbers and nothing else.
+        assert_eq!(menu.velocity_entries().len(), 4);
+
+        // Move the floor well away from where it was.
+        menu.apply_input(Input::Button1);
+        for _ in 0..20 {
+            menu.apply_input(Input::Button3);
+        }
+        menu.apply_input(Input::Button1);
+        let _ = menu.take_command();
+        assert_eq!(menu.render().line_2, "0.20");
+
+        // RESET is now the fifth entry.
+        assert_eq!(menu.velocity_entries().len(), 5);
+        for _ in 0..4 {
+            menu.apply_input(Input::Button3);
+        }
+        let screen = menu.render();
+        assert_eq!(screen.line_1, "RESET");
+        assert_eq!(screen.line_2, "Back as opened");
+
+        menu.apply_input(Input::Button1);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SetVelocityCurve {
+                device: None,
+                curve: Some(VelocityCurve::default()),
+            })
+        );
+        // And it is gone again, because there is nothing left to undo.
+        assert_eq!(menu.velocity_entries().len(), 4);
+        assert_eq!(menu.render().line_1, "FLOOR");
+        assert_eq!(menu.render().line_2, "0.00");
     }
 
     #[test]

@@ -5743,10 +5743,22 @@
    ========================================================================== */
 
 @media (max-width: 760px) {
-  .app-shell.live-surface-active,
-  .live-surface-active .workspace,
-  .live-surface-active .page.live-host-page,
-  .live-surface-active .live-shell {
+  /* The shell is the one thing here that must not be `visible`. It is
+     `position: fixed` to the safe-area inset, so its height is the screen
+     whatever `height: auto` says, and a visible overflow spills the column
+     past the bottom edge with nothing able to reach it -- html and body are
+     both clipped. It is the scroller; everything inside it is a block. */
+  .app-shell.live-surface-active:not(.graph-workspace-active) {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+  }
+
+  .live-surface-active:not(.graph-workspace-active) .workspace,
+  .live-surface-active:not(.graph-workspace-active) .page.live-host-page,
+  .live-surface-active:not(.graph-workspace-active) .live-shell {
     height: auto !important;
     min-height: 0 !important;
     overflow: visible !important;
@@ -5756,13 +5768,13 @@
      divided between. The page was `flex: 1 1 0`, and a basis of zero inside a
      container that now sizes to its content collapses the whole column to
      nothing — height alone does not undo that. */
-  .live-surface-active .page.live-host-page,
-  .live-surface-active .live-zone,
-  .live-surface-active .sequencer-shell {
+  .live-surface-active:not(.graph-workspace-active) .page.live-host-page,
+  .live-surface-active:not(.graph-workspace-active) .live-zone,
+  .live-surface-active:not(.graph-workspace-active) .sequencer-shell {
     flex: 0 0 auto !important;
   }
 
-  .live-surface-active .live-zone {
+  .live-surface-active:not(.graph-workspace-active) .live-zone {
     overflow: visible !important;
   }
 
@@ -5771,8 +5783,8 @@
      height. Against a block that sizes to its content, 100% resolves to
      whatever the zone happened to measure and the rest of the list is simply
      cut off. That is the PERFORMANCE zone spilling past its own border. */
-  .live-surface-active .live-perform-surface .live-content,
-  .live-surface-active .live-zone .live-content {
+  .live-surface-active:not(.graph-workspace-active) .live-perform-surface .live-content,
+  .live-surface-active:not(.graph-workspace-active) .live-zone .live-content {
     height: auto !important;
     overflow: visible !important;
   }
@@ -5784,24 +5796,24 @@
      targets, so PERFORMANCE showed its tabs and a sliver. Nothing here is a
      pane to be divided; the card and the list take the height their content
      asks for and the page scrolls, which is what every other page does. */
-  .live-surface-active .live-perform-surface .live-browser,
-  .live-surface-active .live-zone .live-browser {
+  .live-surface-active:not(.graph-workspace-active) .live-perform-surface .live-browser,
+  .live-surface-active:not(.graph-workspace-active) .live-zone .live-browser {
     height: auto !important;
     min-height: 0 !important;
     overflow: visible !important;
   }
 
-  .live-surface-active .live-perform-surface .live-target-list,
-  .live-surface-active .live-zone .live-target-list {
+  .live-surface-active:not(.graph-workspace-active) .live-perform-surface .live-target-list,
+  .live-surface-active:not(.graph-workspace-active) .live-zone .live-target-list {
     height: auto !important;
     max-height: none !important;
     overflow: visible !important;
     flex: 0 0 auto !important;
   }
 
-  .live-surface-active .live-perform-surface .live-content,
-  .live-surface-active .live-zone .live-content,
-  .live-surface-active .live-zone .live-browser {
+  .live-surface-active:not(.graph-workspace-active) .live-perform-surface .live-content,
+  .live-surface-active:not(.graph-workspace-active) .live-zone .live-content,
+  .live-surface-active:not(.graph-workspace-active) .live-zone .live-browser {
     flex: 0 0 auto !important;
   }
 

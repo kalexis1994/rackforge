@@ -5739,16 +5739,21 @@ type SettingsTab = (typeof SETTINGS_TABS)[number][0];
 
 /** The sections this host actually has.
  *
- * The browser demo is its own host: the page is the instrument, and there is
- * no HTTP server to publish, no port to choose and no PIN to guard it with.
- * Offering the section would be offering settings that answer to nothing.
+ * Network is the local HTTP server and the PIN that guards it, and two hosts
+ * have no such server. The browser demo is its own host: the page is the
+ * instrument, with no port to choose and no PIN to guard it with. The Android
+ * app runs its engine in-process behind a JNI bridge, with nothing listening
+ * on a port and no endpoint that would answer the section's questions.
+ *
+ * Windows, the Linux desktop and the Raspberry Pi all publish a server, and
+ * all keep it.
  */
-function settingsTabsFor(browserHost: boolean): ReadonlyArray<readonly [SettingsTab, string]> {
-  return browserHost ? SETTINGS_TABS.filter(([id]) => id !== "network") : SETTINGS_TABS;
+function settingsTabsFor(serverless: boolean): ReadonlyArray<readonly [SettingsTab, string]> {
+  return serverless ? SETTINGS_TABS.filter(([id]) => id !== "network") : SETTINGS_TABS;
 }
 
-function isSettingsTab(value: string | null, browserHost: boolean): value is SettingsTab {
-  return settingsTabsFor(browserHost).some(([id]) => id === value);
+function isSettingsTab(value: string | null, serverless: boolean): value is SettingsTab {
+  return settingsTabsFor(serverless).some(([id]) => id === value);
 }
 
 function SettingsPage({
@@ -5774,13 +5779,14 @@ function SettingsPage({
   // The tab lives in the URL so a section stays linkable. `replace` keeps
   // tab-hopping out of the back button.
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabs = settingsTabsFor(IS_BROWSER_HOST);
+  const serverless = IS_BROWSER_HOST || isNativeHost();
+  const tabs = settingsTabsFor(serverless);
   // `security` was its own section until the PIN moved in beside the server it
   // protects. A link someone kept still lands where the passcode now lives.
   const requestedTab = searchParams.get("tab") === "security"
     ? "network"
     : searchParams.get("tab");
-  const settingsTab: SettingsTab = isSettingsTab(requestedTab, IS_BROWSER_HOST)
+  const settingsTab: SettingsTab = isSettingsTab(requestedTab, serverless)
     ? requestedTab
     : "audio";
   const setSettingsTab = (tab: SettingsTab) => {

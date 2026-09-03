@@ -5996,9 +5996,20 @@
   /* The menu key floats over the top-left corner. The information bar leaves
      58px for it; the sequencer's legend did not, so the key landed on the
      word SEQ. Fixed rather than absolute, because a menu that scrolls away
-     is not a menu on a surface a player works from standing up. */
+     is not a menu on a surface a player works from standing up.
+
+     Going fixed costs it the shell's frame. `.app-shell` is inset by the
+     safe areas, so an absolutely placed child is already clear of the status
+     bar; a fixed one is measured from the viewport and is not. Its inline
+     top and left carry only the float inset, which put a 44px key 34px up
+     inside a 48px status bar -- it read as hanging off the top of the screen.
+     Margins add the inset here rather than in the anchor arithmetic, because
+     this is the one rule that takes the key out of the inset frame, and
+     wherever it stays absolute the shell has already paid for it. */
   .live-surface-active .performance-menu-button {
     position: fixed !important;
+    margin-top: var(--rackforge-safe-top);
+    margin-left: var(--rackforge-safe-left);
   }
 
   /* Only the first row sits under the key, so only the first item steps

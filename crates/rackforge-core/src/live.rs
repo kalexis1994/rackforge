@@ -3083,7 +3083,10 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                     // going away, and exiting on it would take the session,
                     // the keyboard and the screen down with the cable.
                     Err(error) => {
-                        eprintln!("AUDIO_OUTPUT_LOST id={} error={error}", current_output.device.id);
+                        eprintln!(
+                            "AUDIO_OUTPUT_LOST id={} error={error}",
+                            current_output.device.id
+                        );
                         output = None;
                         silent_deadline = None;
                         next_output_scan = Instant::now() + OUTPUT_RESCAN_INTERVAL;
@@ -3103,7 +3106,7 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                 let period = Duration::from_nanos(
                     (period_frames as u64 * 1_000_000_000) / output_rate.max(1) as u64,
                 );
-                let deadline = silent_deadline.get_or_insert_with(Instant::now) ;
+                let deadline = silent_deadline.get_or_insert_with(Instant::now);
                 *deadline += period;
                 let now = Instant::now();
                 if *deadline > now {
@@ -3453,7 +3456,10 @@ fn reconfigure_audio_output(
                 .map_err(|_| anyhow::anyhow!("audio state lock is poisoned"))? = state.clone();
             println!(
                 "AUDIO_RECONFIGURED id={:?} rate={} period={} buffer={} nominal_buffer_ms={:.2}",
-                state.active_device.as_ref().map(|device| device.id.as_str()),
+                state
+                    .active_device
+                    .as_ref()
+                    .map(|device| device.id.as_str()),
                 state.active_profile.sample_rate_hz,
                 state.active_profile.period_frames,
                 state.active_profile.buffer_frames,
@@ -3468,7 +3474,10 @@ fn reconfigure_audio_output(
                 // silently at, and the engine keeps running silently.
                 let opened = if had_output {
                     let devices = discover_audio_devices()?;
-                    Some(open_audio_output_from_inventory(&previous_profile, &devices)?)
+                    Some(open_audio_output_from_inventory(
+                        &previous_profile,
+                        &devices,
+                    )?)
                 } else {
                     None
                 };

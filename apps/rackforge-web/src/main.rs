@@ -801,7 +801,9 @@ fn start_system_control(
                                     Some(pin) => match auth.set_pin_locally(pin) {
                                         // The PIN is never echoed back, not
                                         // even to the socket that just set it.
-                                        Ok(()) => json!({"status": "ok", "pin_state": auth.pin_state()}),
+                                        Ok(()) => {
+                                            json!({"status": "ok", "pin_state": auth.pin_state()})
+                                        }
                                         Err(error) => json!({
                                             "status": "error",
                                             "message": error.to_string()

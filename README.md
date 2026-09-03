@@ -64,7 +64,7 @@ each screen has a clear job.
 | **LIVE** | Perform with Racks, Songs, Song Parts, and Setlists. |
 | **Touch Controller** | Play a keyboard or pad grid from a mouse or touchscreen. |
 | **Plugin Manager** | Install, activate, configure, or remove instruments. |
-| **Audio & MIDI** | Select interfaces and decide which MIDI inputs RackForge may use. |
+| **Audio & MIDI** | Select interfaces, decide which MIDI inputs RackForge may use, and correct each keyboard's velocity. |
 | **Settings** | Configure the features available on the current device. |
 
 The interface adapts to the screen instead of changing the workflow. On a
@@ -110,16 +110,48 @@ limit features or plugin compatibility.
 
 Standard installations include:
 
-- **RackForge Concert Grand**, a physically modelled piano developed in this
-  repository. It uses no samples and has a [documented model](docs/PIANO_MODEL.md).
+- **RF - Concert Grand**, a physically modelled piano developed in this
+  repository — see below.
 - **RF-106**, a portable virtual-analog synthesizer with its own PLAY interface
   and RackForge parameter mapping.
+- **RF-5**, a five-voice programmable polyphonic synthesizer.
 
 Other open-source instruments include:
 
 - [RF-106 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-106)
+- [RF-5 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-5)
 - [RF-Soundfonts](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts),
   a SoundFont instrument that includes the sampled YDP Grand Piano
+
+### RF - Concert Grand
+
+The piano that ships with RackForge is not a sample library. There are no
+recordings in the package: every note is computed as it is played, from a
+string that is stiff and lossy, a hammer with felt that hardens under the blow,
+a soundboard that radiates, and a room with a lid and a pair of microphones in
+it. The whole model is written down, measured against real instruments and the
+published literature, in [docs/PIANO_MODEL.md](docs/PIANO_MODEL.md).
+
+What that buys you is an instrument that changes as a piano changes rather than
+as a preset changes:
+
+- **Sixteen instruments, not sixteen tone settings.** Concert Grand, Mellow,
+  Bright and Intimate, then the scales of real pianos — Concert 308 down through
+  Salon 211, Parlour 185, Baby 150, two uprights, a player upright and a
+  fortepiano. The size is a dimension of the model, so a shorter piano is
+  shorter everywhere: tension, inharmonicity, decay and the bass break all move
+  with it.
+- **A room you can move around in.** Lid position, microphone distance and the
+  pair's spacing are geometry, not reverb: each capsule hears the soundboard and
+  its image in a hinged, finite lid.
+- **The action, audibly.** Hammer speed spans the published range, the felt is
+  measured per note, the dampers land, and the una corda pedal is read.
+- **162 parameters, all of them the model's own** — the sound, the room and its
+  microphones, the action and its noises — plus a Model page that exposes the
+  physical constants themselves and a button that puts them back.
+
+It reads 16-bit velocity where the host can supply it, and the per-keyboard
+velocity reading below applies before it ever sees a note.
 
 A portable `.rfplugin` can carry its engine, Web interface, programs, artwork,
 and resources in one package. Install it from **Plugin Manager** and RackForge
@@ -249,6 +281,10 @@ The Arturia KeyLab Essential mk3 is the first reference controller. Its package
 provides:
 
 - the LITTLE display and navigation;
+- `SETTINGS > MIDI`, to choose which keyboards are listened to and to correct
+  each one's velocity from the hardware itself;
+- `SETTINGS > WEB INTERFACE > ACCESS PIN`, so a machine with no PIN can be
+  claimed at the instrument rather than only from a browser;
 - dimmed button and pad lighting;
 - standard instrument parameter controls;
 - master volume and pan;
@@ -279,6 +315,10 @@ Already available:
 - embedded PLAY and CONFIG interfaces;
 - portable presets and plugin-private resource storage;
 - MIDI hotplug recovery and session restoration;
+- a velocity reading per keyboard, drawn as a curve, auditioned while it is
+  drawn and applied where MIDI arrives;
+- an engine that starts with no audio device and no MIDI attached, and adopts
+  an interface when one appears;
 - Touch Controller keyboard and pads;
 - controller displays, LEDs, encoders, and standard parameter mappings;
 - protection against concurrent native audio engines.

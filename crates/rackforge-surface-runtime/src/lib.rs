@@ -5575,7 +5575,11 @@ impl Menu {
         if let Some((mut digits, mut cursor)) = self.web_pin_entry {
             match input {
                 Input::Button2 | Input::EncoderLeft => {
-                    digits[cursor] = if digits[cursor] == 0 { 9 } else { digits[cursor] - 1 };
+                    digits[cursor] = if digits[cursor] == 0 {
+                        9
+                    } else {
+                        digits[cursor] - 1
+                    };
                     self.web_pin_entry = Some((digits, cursor));
                 }
                 Input::Button3 | Input::EncoderRight => {
@@ -5592,9 +5596,7 @@ impl Menu {
                         // never outlives the moment it was typed.
                         let pin = digits
                             .iter()
-                            .map(|digit| {
-                                char::from_digit(u32::from(*digit), 10).unwrap_or('0')
-                            })
+                            .map(|digit| char::from_digit(u32::from(*digit), 10).unwrap_or('0'))
                             .collect::<String>();
                         self.web_pin_entry = None;
                         self.system_web_editing = false;
@@ -10732,13 +10734,25 @@ mod tests {
 
         // Entering 2 0 3 9, one digit at a time.
         menu.apply_input(Input::Button1);
-        assert_eq!(menu.render().line_2, "[0___]", "the first digit is the one being turned");
-        assert_eq!(menu.take_command(), None, "nothing is sent until the last digit");
+        assert_eq!(
+            menu.render().line_2,
+            "[0___]",
+            "the first digit is the one being turned"
+        );
+        assert_eq!(
+            menu.take_command(),
+            None,
+            "nothing is sent until the last digit"
+        );
         menu.apply_input(Input::Button3);
         menu.apply_input(Input::Button3);
         assert_eq!(menu.render().line_2, "[2___]");
         menu.apply_input(Input::Button1);
-        assert_eq!(menu.render().line_2, "[*0__]", "a chosen digit is masked behind the cursor");
+        assert_eq!(
+            menu.render().line_2,
+            "[*0__]",
+            "a chosen digit is masked behind the cursor"
+        );
         menu.apply_input(Input::Button1);
         menu.apply_input(Input::Button3);
         menu.apply_input(Input::Button3);
@@ -10756,7 +10770,11 @@ mod tests {
                 pin: "2039".to_owned()
             })
         );
-        assert_eq!(menu.render().line_2, "SET", "the row goes back to reporting");
+        assert_eq!(
+            menu.render().line_2,
+            "SET",
+            "the row goes back to reporting"
+        );
 
         // BACK walks out a digit at a time and abandons the entry off the
         // front, leaving nothing half-typed behind.
@@ -10765,7 +10783,11 @@ mod tests {
         menu.apply_input(Input::Button1);
         assert_eq!(menu.render().line_2, "[*0__]");
         menu.apply_input(Input::Button4);
-        assert_eq!(menu.render().line_2, "[0___]", "the digit walked out of is cleared");
+        assert_eq!(
+            menu.render().line_2,
+            "[0___]",
+            "the digit walked out of is cleared"
+        );
         menu.apply_input(Input::Button4);
         assert_eq!(menu.render().line_2, "SET");
         assert_eq!(menu.take_command(), None, "leaving sends no PIN");

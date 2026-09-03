@@ -447,7 +447,10 @@ impl AudioOutputState {
             active_device.validate()?;
             self.active_profile.validate_against(active_device)?;
             if self.devices.is_empty()
-                || !self.devices.iter().any(|device| device.id == active_device.id)
+                || !self
+                    .devices
+                    .iter()
+                    .any(|device| device.id == active_device.id)
             {
                 return Err(AudioError::ActiveDeviceMissing);
             }

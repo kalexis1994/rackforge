@@ -4734,6 +4734,33 @@
     0 6px 18px rgba(0, 0, 0, 0.45) !important;
 }
 
+/* The key that floats on a MIDI connection and opens its settings. Nothing
+   here ever named it, so it kept the pre-faceplate palette -- a cyan ring
+   glowing on near-black -- while the nodes it sits between were re-dressed.
+   It reads as a control borrowed from another instrument. Squared like every
+   other key on the faceplate, and it presses in rather than lighting up. */
+.rack-edge-control {
+  color: var(--fp-rail-label) !important;
+  background: linear-gradient(180deg, var(--glass), var(--paper)) !important;
+  border: var(--fp-seam) !important;
+  border-radius: var(--fp-radius-key) !important;
+  box-shadow: var(--fp-lip), var(--fp-drop) !important;
+}
+
+.rack-edge-control > span {
+  background: currentColor !important;
+  box-shadow: none !important;
+}
+
+.rack-edge-control:hover,
+.rack-edge-control:focus-visible,
+.rack-edge-control.selected {
+  color: var(--ink) !important;
+  border-color: var(--line) !important;
+  background: var(--panel-inset) !important;
+  box-shadow: var(--fp-well) !important;
+}
+
 /* Chrome over the screen: the label toolbar, context menus, previews. */
 .rack-graph-label-tools {
   background: var(--fp-panel) !important;
@@ -5815,6 +5842,17 @@
   .live-surface-active:not(.graph-workspace-active) .live-zone .live-content,
   .live-surface-active:not(.graph-workspace-active) .live-zone .live-browser {
     flex: 0 0 auto !important;
+  }
+
+  /* The Rack editor is the whole screen on a phone, and the sequencer is not
+     part of it. Measured at 375x812: the strip held 179px -- 22% of the
+     display -- while the graph it was sitting above had 577. Folding it away
+     is a per-browser preference about the PERFORM surface, not an instruction
+     about the editor, so the editor hides it for as long as it is open and
+     gives the state back on the way out. The graph measures 768px with it
+     gone, a third more room for the thing being edited. */
+  .graph-workspace-active .sequencer-shell {
+    display: none !important;
   }
 
   /* The menu key floats over the top-left corner. The information bar leaves

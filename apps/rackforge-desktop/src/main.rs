@@ -489,6 +489,12 @@ struct DesktopApp {
     audio_config_path: PathBuf,
     #[cfg(windows)]
     audio_recovery_at: Option<Instant>,
+    /// Whether a reading is being heard that has not been applied.
+    #[cfg(windows)]
+    velocity_audition: bool,
+    /// The interface's own pulse while it is listening to one.
+    #[cfg(windows)]
+    velocity_preview_heartbeat: Arc<std::sync::atomic::AtomicU64>,
     #[cfg(windows)]
     audio_recovery_attempts: u32,
     /// Stall watchdog: the last callback count seen and when it last moved.
@@ -776,6 +782,8 @@ impl DesktopApp {
         };
 
         let web_url = web_servers.local_url().to_owned();
+        #[cfg(windows)]
+        let velocity_preview_heartbeat = web_servers.velocity_preview_heartbeat();
         // Point surface notes at the engine that just started, and hand over
         // the cell it writes each strike into. Both, and in the same breath:
         // handing over only the first meant the velocity square saw nothing
@@ -835,6 +843,10 @@ impl DesktopApp {
             audio_config_path,
             #[cfg(windows)]
             audio_recovery_at,
+            #[cfg(windows)]
+            velocity_audition: false,
+            #[cfg(windows)]
+            velocity_preview_heartbeat,
             #[cfg(windows)]
             audio_recovery_attempts: 0,
             #[cfg(windows)]
@@ -1256,6 +1268,87 @@ impl DesktopApp {
     }
 
     #[cfg(windows)]
+    /// Hear a velocity reading without writing it down.
+    ///
+    /// Only the readings are taken from the body -- everything else about the
+    /// audio settings is the applied document's business, and a screen that is
+    /// auditioning a curve has no business changing a driver.
+    #[cfg(windows)]
+    fn audition_velocity(&mut self, readings: serde_json::Value) -> Result<serde_json::Value, String> {
+        #[derive(serde::Deserialize)]
+        struct Readings {
+            #[serde(default)]
+            velocity_curve: rackforge_core::velocity_curve::VelocityCurve,
+            #[serde(default)]
+            velocity_curves:
+                std::collections::BTreeMap<String, rackforge_core::velocity_curve::VelocityCurve>,
+        }
+        let readings: Readings = serde_json::from_value(readings)
+            .map_err(|error| format!("Invalid velocity readings: {error}"))?;
+        let Some(audio) = self.audio.as_ref() else {
+            return Err("Desktop audio is unavailable".to_owned());
+        };
+        audio
+            .set_velocity_curves(readings.velocity_curve, &readings.velocity_curves)
+            .map_err(|error| format!("{error:#}"))?;
+        self.velocity_audition = true;
+        Ok(serde_json::json!({"status": "ok"}))
+    }
+
+    /// Put back the reading that is applied.
+    #[cfg(windows)]
+    fn restore_velocity(&mut self) -> Result<serde_json::Value, String> {
+        if !self.velocity_audition {
+            return Ok(serde_json::json!({"status": "ok"}));
+        }
+        self.velocity_audition = false;
+        let Some(audio) = self.audio.as_ref() else {
+            return Ok(serde_json::json!({"status": "ok"}));
+        };
+        let applied = self
+            .audio_preferences
+            .clone()
+            .unwrap_or_else(|| desktop_audio::AudioPreferences {
+                schema_version: 0,
+                driver: String::new(),
+                output_device: String::new(),
+                sample_rate_hz: 0,
+                buffer_frames: None,
+                output_gain_db: 0,
+                input_device: None,
+                input_channels: Vec::new(),
+                input_gain_db: 0,
+                midi_inputs: Vec::new(),
+                velocity_curve: Default::default(),
+                velocity_curves: Default::default(),
+            });
+        audio
+            .set_velocity_curves(applied.velocity_curve, &applied.velocity_curves)
+            .map_err(|error| format!("{error:#}"))?;
+        Ok(serde_json::json!({"status": "ok"}))
+    }
+
+    /// An audition the interface has stopped asking after is over.
+    ///
+    /// A settings screen closed mid-edit -- a browser tab shut, a laptop lid
+    /// -- must not leave a curve nobody chose in the signal path, so the
+    /// engine listens for the screen rather than trusting it to say goodbye.
+    #[cfg(windows)]
+    fn poll_velocity_audition(&mut self) {
+        if !self.velocity_audition {
+            return;
+        }
+        let heard = self.velocity_preview_heartbeat
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_millis() as u64);
+        if heard != 0 && now.saturating_sub(heard) < 3_000 {
+            return;
+        }
+        let _ = self.restore_velocity();
+    }
+
     fn apply_audio_preferences(
         &mut self,
         preferences: desktop_audio::AudioPreferences,
@@ -2075,6 +2168,15 @@ impl DesktopApp {
                         persist,
                         preview,
                     ));
+                }
+                // A reading heard before it is applied: the engine takes it,
+                // nothing is written down, and `poll_velocity_audition` puts
+                // back what is applied when the interface stops asking.
+                web::DesktopControlCall::AuditionVelocity { readings, response } => {
+                    let _ = response.send(self.audition_velocity(readings));
+                }
+                web::DesktopControlCall::RestoreVelocity { response } => {
+                    let _ = response.send(self.restore_velocity());
                 }
                 web::DesktopControlCall::ClearResource {
                     plugin_id,
@@ -5880,6 +5982,8 @@ impl eframe::App for DesktopApp {
         }
         #[cfg(windows)]
         self.poll_audio_error();
+        #[cfg(windows)]
+        self.poll_velocity_audition();
         #[cfg(windows)]
         self.poll_controller();
         let _ = self.poll_plugin_install(context);

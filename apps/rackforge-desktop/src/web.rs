@@ -92,6 +92,11 @@ struct WebState {
     /// with. A cell rather than a message: the interface asks while the
     /// square is on screen and nobody pays for it when it is not.
     last_strike: Arc<Mutex<Option<Arc<AtomicU64>>>>,
+    /// When the interface was last heard from while auditioning a reading it
+    /// has not applied. The engine restores what is applied if this goes
+    /// quiet, so a browser closed mid-edit cannot leave a curve nobody chose
+    /// in the signal path. Milliseconds since the epoch; zero is silence.
+    velocity_preview_heartbeat: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -145,6 +150,15 @@ struct UninstallPluginRequest {
 }
 
 pub enum DesktopControlCall {
+    /// Hear a velocity reading without writing it down.
+    AuditionVelocity {
+        readings: Value,
+        response: Sender<Result<Value, String>>,
+    },
+    /// Put back the reading that is applied.
+    RestoreVelocity {
+        response: Sender<Result<Value, String>>,
+    },
     Session {
         request: ControlRequest,
         response: Sender<ControlResponse>,
@@ -336,6 +350,11 @@ impl DesktopWebServers {
         }
     }
 
+    /// The cell the audition's heartbeat lands in, for the app loop to watch.
+    pub fn velocity_preview_heartbeat(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.state.velocity_preview_heartbeat)
+    }
+
     pub fn set_last_strike(&self, cell: Option<Arc<AtomicU64>>) {
         if let Ok(mut slot) = self.state.last_strike.lock() {
             *slot = cell;
@@ -435,9 +454,11 @@ pub fn start(
     let shared_preferences = Arc::new(RwLock::new(preferences.clone()));
     let injected_midi = Arc::new(Mutex::new(None));
     let last_strike = Arc::new(Mutex::new(None));
+    let velocity_preview_heartbeat = Arc::new(AtomicU64::new(0));
     let state = WebState {
         injected_midi: Arc::clone(&injected_midi),
         last_strike: Arc::clone(&last_strike),
+        velocity_preview_heartbeat: Arc::clone(&velocity_preview_heartbeat),
         session,
         performance_revision,
         plugin_catalog_revision: Arc::new(AtomicU64::new(0)),
@@ -666,6 +687,10 @@ fn router(state: WebState, allow_native_resources: bool) -> Router {
         )
         .route("/api/v1/host/audio/test", post(test_audio))
         .route("/api/v1/host/midi/last-strike", get(last_strike))
+        .route(
+            "/api/v1/host/midi/velocity-preview",
+            post(audition_velocity).delete(restore_velocity),
+        )
         .route("/api/v1/plugins", get(plugin_catalog))
         .route(
             "/api/v1/plugins/{plugin_id}",
@@ -817,11 +842,55 @@ async fn apply_audio_settings(
     })
 }
 
+/// Milliseconds since the epoch, for the audition's heartbeat.
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_millis() as u64)
+}
+
+/// Hear a reading before applying it.
+///
+/// The engine takes it for as long as the interface keeps asking after it;
+/// nothing is written down. Applying is a different button, and leaving the
+/// screen -- or closing it -- puts back what was applied.
+async fn audition_velocity(
+    State(state): State<WebState>,
+    Json(readings): Json<Value>,
+) -> Response {
+    state
+        .velocity_preview_heartbeat
+        .store(now_millis(), Ordering::Relaxed);
+    desktop_settings_response(&state, |response| DesktopControlCall::AuditionVelocity {
+        readings,
+        response,
+    })
+}
+
+/// And put back what is applied, now.
+async fn restore_velocity(State(state): State<WebState>) -> Response {
+    state.velocity_preview_heartbeat.store(0, Ordering::Relaxed);
+    desktop_settings_response(&state, |response| DesktopControlCall::RestoreVelocity {
+        response,
+    })
+}
+
 /// What the keyboard last sent, and what the reading made of it.
 ///
 /// Zero for the count means nothing has been played since the engine started,
 /// which is what a square with no crosshair on it means.
 async fn last_strike(State(state): State<WebState>) -> Response {
+    // The square asks for this while it is on screen, which is exactly when an
+    // audition is being listened to: the same request keeps it alive.
+    if state
+        .velocity_preview_heartbeat
+        .load(Ordering::Relaxed)
+        != 0
+    {
+        state
+            .velocity_preview_heartbeat
+            .store(now_millis(), Ordering::Relaxed);
+    }
     let packed = state
         .last_strike
         .lock()
@@ -2605,6 +2674,7 @@ mod tests {
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
             last_strike: Arc::new(Mutex::new(None)),
+            velocity_preview_heartbeat: Arc::new(AtomicU64::new(0)),
         };
         let packet = crate::desktop_audio::MidiPacket {
             source: crate::desktop_audio::VIRTUAL_MIDI_SOURCE_KEY,
@@ -2650,6 +2720,7 @@ mod tests {
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(Some(audio_sender))),
             last_strike: Arc::new(Mutex::new(None)),
+            velocity_preview_heartbeat: Arc::new(AtomicU64::new(0)),
         };
         let client_id = ClientId::new("controller.test.forwarder").unwrap();
         let request = ControlRequest::VirtualMidi {
@@ -2710,6 +2781,7 @@ mod tests {
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
             last_strike: Arc::new(Mutex::new(None)),
+            velocity_preview_heartbeat: Arc::new(AtomicU64::new(0)),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
         let request = ControlRequest::Dispatch {
@@ -2774,6 +2846,7 @@ mod tests {
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
             last_strike: Arc::new(Mutex::new(None)),
+            velocity_preview_heartbeat: Arc::new(AtomicU64::new(0)),
         };
         let request = ControlRequest::Dispatch {
             envelope: CommandEnvelope::new(
@@ -2838,6 +2911,7 @@ mod tests {
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
             last_strike: Arc::new(Mutex::new(None)),
+            velocity_preview_heartbeat: Arc::new(AtomicU64::new(0)),
         };
         let request = ControlRequest::Dispatch {
             envelope: CommandEnvelope::new(
@@ -2902,6 +2976,7 @@ mod tests {
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
             last_strike: Arc::new(Mutex::new(None)),
+            velocity_preview_heartbeat: Arc::new(AtomicU64::new(0)),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
         let responder = std::thread::spawn(move || {
@@ -2957,6 +3032,7 @@ mod tests {
             controllers_root: PathBuf::new(),
             injected_midi: Arc::new(Mutex::new(None)),
             last_strike: Arc::new(Mutex::new(None)),
+            velocity_preview_heartbeat: Arc::new(AtomicU64::new(0)),
         };
         let instance_id = InstanceId::new(DEFAULT_LIVE_INSTANCE_ID).unwrap();
         let responder = std::thread::spawn(move || {

@@ -5877,6 +5877,82 @@ function SettingsPage({
         : undefined,
     });
   };
+  // A reading is heard while it is being drawn: a curve you cannot play is a
+  // curve you cannot judge. The host takes it without writing it down and
+  // puts back what is applied when this screen stops asking -- when the tab
+  // is left, when Reset is pressed, or when the screen simply goes away.
+  const auditionedRef = useRef(false);
+  useEffect(() => {
+    const restore = () => {
+      if (!auditionedRef.current) return;
+      auditionedRef.current = false;
+      void hostJson("/api/v1/host/midi/velocity-preview", { method: "DELETE" }).catch(
+        () => undefined,
+      );
+    };
+    if (settingsTab !== "midi" || !audioDraft || !audioSettings) {
+      restore();
+      return;
+    }
+    const applied = audioSettings.preferences;
+    const same =
+      JSON.stringify(audioDraft.velocity_curve ?? null) ===
+        JSON.stringify(applied.velocity_curve ?? null) &&
+      JSON.stringify(audioDraft.velocity_curves ?? {}) ===
+        JSON.stringify(applied.velocity_curves ?? {});
+    if (same) {
+      restore();
+      return;
+    }
+    // Debounced: a drag is a hundred readings, and the engine only needs the
+    // one the hand came to rest on.
+    const timer = window.setTimeout(() => {
+      auditionedRef.current = true;
+      void hostJson("/api/v1/host/midi/velocity-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          velocity_curve: audioDraft.velocity_curve,
+          velocity_curves: audioDraft.velocity_curves ?? {},
+        }),
+      }).catch(() => undefined);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [settingsTab, audioDraft, audioSettings]);
+
+  // And when this screen is closed altogether.
+  useEffect(
+    () => () => {
+      if (!auditionedRef.current) return;
+      auditionedRef.current = false;
+      void hostJson("/api/v1/host/midi/velocity-preview", { method: "DELETE" }).catch(
+        () => undefined,
+      );
+    },
+    [],
+  );
+
+  const resetAudioSettings = () => {
+    if (!audioSettings || !audioDraft) return;
+    const applied = audioSettings.preferences;
+    setAudioMessage(null);
+    setAudioDraft(
+      settingsTab === "midi"
+        ? {
+            ...audioDraft,
+            midi_inputs: applied.midi_inputs,
+            velocity_curve: applied.velocity_curve,
+            velocity_curves: applied.velocity_curves,
+          }
+        : {
+            ...applied,
+            midi_inputs: audioDraft.midi_inputs,
+            velocity_curve: audioDraft.velocity_curve,
+            velocity_curves: audioDraft.velocity_curves,
+          },
+    );
+  };
+
   const saveAudioSettings = async () => {
     if (!audioDraft || !audioSettings) return;
     setAudioOperation("save");
@@ -5931,6 +6007,22 @@ function SettingsPage({
       setAudioOperation(null);
     }
   };
+  // Whether this tab has anything to apply or to reset.
+  const audioTabDirty = (() => {
+    if (!audioDraft || !audioSettings) return false;
+    const applied = audioSettings.preferences;
+    const midiPart = (settings: HostAudioPreferences) =>
+      JSON.stringify([
+        settings.midi_inputs,
+        settings.velocity_curve ?? null,
+        settings.velocity_curves ?? {},
+      ]);
+    if (settingsTab === "midi") return midiPart(audioDraft) !== midiPart(applied);
+    const audioPart = (settings: HostAudioPreferences) =>
+      JSON.stringify({ ...settings, midi_inputs: [], velocity_curve: null, velocity_curves: {} });
+    return audioPart(audioDraft) !== audioPart(applied);
+  })();
+
   const testAudio = async () => {
     setAudioOperation("test");
     setAudioMessage(null);
@@ -6236,6 +6328,16 @@ function SettingsPage({
                   <AsyncActionLabel active={audioOperation === "test"} activeLabel="Playing…">
                     Test note
                   </AsyncActionLabel>
+                </button>
+                {/* Back to what is applied, for this tab. It is the way out of
+                    an audition as much as an undo: the reading the engine is
+                    hearing goes back with the draft. */}
+                <button
+                  className="secondary-button"
+                  disabled={audioBusy || !audioTabDirty}
+                  onClick={resetAudioSettings}
+                >
+                  Reset
                 </button>
                 <button className="primary-button" disabled={audioBusy} onClick={() => void saveAudioSettings()}>
                   <AsyncActionLabel active={audioOperation === "save"} activeLabel="Applying…">Apply</AsyncActionLabel>

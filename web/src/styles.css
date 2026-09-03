@@ -3280,16 +3280,38 @@ body {
 
 .host-audio-settings-card {
   grid-column: 1 / -1;
+  /* Wide enough for the two columns below and their padding, and no wider: a
+     card the width of the panel with its content in the left half is a large
+     empty card. */
+  max-width: calc(780px + 2 * clamp(24px, 4vw, 40px));
   min-height: 0;
 }
 
-/* The audio card spans every column, so its fields have to hold their own
-   width — two tracks across a wide panel would be a pair of enormous inputs. */
+/* The card spans the panel because its form wants two columns, but what is
+   inside it is a column of content with a limit. Left as it was, a monitor
+   two thousand pixels wide got a driver picker a thousand pixels long and
+   rows with a hand's width of nothing between each label and its value —
+   readable in the sense that a spreadsheet is readable. Everything the card
+   carries is measured against the same column now, so these two tabs look
+   like the others rather than like a stretched panel. */
+.host-audio-settings-card > .settings-copy,
+.host-audio-settings-card > .host-audio-form,
+.host-audio-settings-card > .host-runtime-health,
+.host-audio-settings-card > .host-audio-actions,
+.host-audio-settings-card > p {
+  width: 100%;
+  max-width: 780px;
+}
+
+/* Two comfortable columns inside that, one on a narrow screen: the floor is
+   what a labelled control needs in order to read, and `1fr` shares what is
+   left between the tracks instead of pouring it all into the last one. */
 .host-audio-form {
   margin-top: 24px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 14px 18px;
+  align-items: start;
 }
 
 .host-audio-form > label,
@@ -3332,6 +3354,11 @@ body {
 .host-audio-form fieldset.midi-ports,
 .host-audio-form fieldset.velocity-curve-fieldset {
   grid-column: auto;
+  /* And the same height as each other, whichever is taller: two plates of
+     different lengths beside one another read as one of them being unfinished.
+     The shorter one keeps empty space at the bottom, which is the honest
+     arrangement -- the ports list grows as ports are plugged in. */
+  align-self: stretch;
 }
 
 .host-audio-check {
